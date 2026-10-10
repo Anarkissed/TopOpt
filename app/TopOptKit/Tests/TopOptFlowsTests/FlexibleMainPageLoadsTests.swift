@@ -31,8 +31,7 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
 
     @MainActor
     func testHisTopGroupPressesTopAAndTheBottomRests() throws {
-        // ★ ROUND 6 (item 4): his project as SAVED (before the restore's link, which puts top B in a group of its own hand)
-        let r = try FlexibleHisProject.restoreUnlinked()
+        let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         let pm = r.project
         let top = try XCTUnwrap(pm.selection.groups.first { $0.name == "Top" })
@@ -113,8 +112,7 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
     /// ★ A TAP ONLY SELECTS (img 8: tapping around pressed seven faces at 10 kg each).
     @MainActor
     func testATapOnlySelects() async throws {
-        // ★ ROUND 6 (item 4): as SAVED — linked at restore, face 3's own main-page hand would press it back at the open
-        let r = try FlexibleHisProject.restoreUnlinked()
+        let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         // face 3 not marked yet (his project pressed it by tapping; here it is fresh)
         var s = try XCTUnwrap(r.project.lattice.flexible)
@@ -149,8 +147,7 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         XCTAssertEqual(m.settings.face(small)?.weightKg ?? 0, 8 / 0.6 * 0.4, accuracy: 1e-6, "the split re-synced")
         // ★ RE-PINNED (verification of round 3): "his own weight" is a face in NO group (top B);
         // a face a Load group presses is ALWAYS linked — one source of truth, the group
-        // ★ ROUND 6 (item 4): on his project as SAVED (the restore's link would give top B a hand of its own)
-        let r = try FlexibleHisProject.restoreUnlinked()
+        let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         var s = try XCTUnwrap(r.project.lattice.flexible)
         var a7 = try XCTUnwrap(s.face(FlexibleHisProject.topA)), b7 = try XCTUnwrap(s.face(FlexibleHisProject.topB))
@@ -181,8 +178,7 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
     /// changes the Top group (one source of truth).
     @MainActor
     func testHisTopAReadsFromTopAndATypedWeightChangesTheGroup() async throws {
-        // ★ ROUND 6 (item 4): his project as SAVED — the subject is the open's own link of an unlinked top A
-        let r = try FlexibleHisProject.restoreUnlinked()
+        let r = try FlexibleHisProject.restore()
         defer { r.cleanup() }
         let raw = try XCTUnwrap(r.project.lattice.flexible?.face(FlexibleHisProject.topA))
         XCTAssertNil(raw.weightFrom, "premise: saved before round 3, unlinked")
@@ -210,9 +206,7 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
     }
 
     /// ★ [Rests] ON A FACE A GROUP PRESSES IS HIS CHOICE: it survives a write-back on another
-    /// face of the group and a re-open. ★ RE-PINNED (round 6 item 4 — his answer: one set of groups, "Anchor = Rests"):
-    /// it no longer leaves the main page pressing the face (round 3's "Top presses it on the main page" line) — [Rests]
-    /// takes it off the Load group and rests it with an Anchor ("Rests", made for it), on both pages.
+    /// face of the group and a re-open, and the panel says the main page still presses it.
     @MainActor
     func testRestsSurvivesAWriteBackAndAReopen() async throws {
         let (pm, ids, g) = try Self.split60()
@@ -220,21 +214,16 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         m.adoptMainPageLoads()
         m.rest(ids[0])
         XCTAssertEqual(m.settings.face(ids[0])?.role, "resting")
-        let rests = try XCTUnwrap(pm.selection.groups.first { pm.force.kind(for: $0.id).isAnchor }, "★ an Anchor holds it on the main page")
-        XCTAssertEqual(rests.name, "Rests")
-        XCTAssertEqual(m.settings.face(ids[0])?.weightFrom, rests.id, "★ linked to its Anchor")
-        XCTAssertFalse(pm.selection.groups.first { $0.id == g }?.regionIDs.contains(ids[0] - FlexibleRegions.sectorBase) ?? true,
-                       "★ the Load group no longer holds it")
+        XCTAssertNil(m.settings.face(ids[0])?.weightFrom, "his choice: unlinked")
         m.setWeight(ids[1], kg: 3)                      // a write-back on the OTHER face
         XCTAssertNotEqual(pm.force.kind(for: g).weightKg ?? 0, 10, "premise: the group was written")
         XCTAssertEqual(m.settings.face(ids[0])?.role, "resting", "Rests survives a write-back")
         let again = try await FlexibleHisProject.openedModel(pm, test: self)
         XCTAssertEqual(again.settings.face(ids[0])?.role, "resting", "…and a re-open")
-        XCTAssertEqual(again.mainPageLoads.entry(ids[0])?.role, .rests, "★ the main page rests it too (one set of groups)")
-        // [Pressed] asks once (an Anchor holds it), then links it to its side's hand again
+        XCTAssertEqual(again.mainPageLoads.entry(ids[0])?.role, .pressed, "the main page still presses it")
+        XCTAssertEqual(FlexibleRowCopy.pressedOnMainPage(group: "Top"), "Top presses it on the main page")
+        // [Pressed] links it again
         XCTAssertTrue(again.press(ids[0]))
-        XCTAssertEqual(again.restsAsk?.anchorName, "Rests", "★ asked once")
-        XCTAssertTrue(again.squeezeAnchored())
         XCTAssertEqual(again.settings.face(ids[0])?.weightFrom, g)
         // ★ RED CONTROL: Rests that kept the link (the round-3 build) was pressed again by the
         // next re-sync
@@ -260,31 +249,15 @@ final class FlexibleMainPageLoadsTests: XCTestCase {
         XCTAssertNil(m.settings.face(FlexibleHisProject.topA))
         XCTAssertFalse(m.mainPageLoads.canRemove(0), "premise: the bottom anchor holds face 0")
         XCTAssertTrue(m.removeFace(0))
-        XCTAssertTrue(m.removeFace(FlexibleHisProject.topB), "top B: removed")
+        XCTAssertTrue(m.removeFace(FlexibleHisProject.topB), "top B is in no group: removed")
         XCTAssertNil(m.settings.face(FlexibleHisProject.topB))
         m.adoptMainPageLoads()
         XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "the re-sync leaves it deleted")
         XCTAssertNil(m.settings.face(0))
-        // ★ RE-PINNED (round 6 item 4 — his answer: "deleting a face in Settings also removes it from its main-page
-        // group"): the main page lets it go too, so nothing is left to bring it back — no remembered deletion
-        let p = r.project
-        XCTAssertFalse(p.selection.groups.contains { $0.regionIDs.contains(103) }, "★ Top no longer holds top A")
-        XCTAssertFalse(p.selection.groups.contains { $0.faces.contains(0) }, "★ bottom no longer holds face 0")
-        XCTAssertNil(m.settings.removedRegions, "★ nothing to remember")
-        let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" }, "Top stays (it carries a lattice role) …")
-        XCTAssertTrue(p.force.kind(for: top.id).isPending, "… pending")
-        // ★ RED CONTROL (round 5 S6's rule — the main page's group untouched): only the remembered deletion keeps it
-        // out; without it, the re-sync brings top A straight back
-        FlexibleGroupLinks.controlKeepMainGroup = true
-        defer { FlexibleGroupLinks.controlKeepMainGroup = false }
-        let r5 = try FlexibleHisProject.restore()
-        defer { r5.cleanup() }
-        let m5 = try await FlexibleHisProject.openedModel(r5.project, test: self)
-        XCTAssertTrue(m5.removeFace(FlexibleHisProject.topA))
-        XCTAssertEqual(m5.settings.removedRegions, [FlexibleHisProject.topA], "control: S6 remembered it")
-        var s = m5.settings
+        // ★ RED CONTROL: without the remembered deletion, the re-sync brings top A straight back
+        var s = m.settings
         s.removedRegions = nil
-        m5.mainPageLoads.adopt(into: &s)
+        m.mainPageLoads.adopt(into: &s)
         XCTAssertEqual(s.face(FlexibleHisProject.topA)?.role, "loaded", "control: the group re-adds it")
         // the panel's trash is on every face (source pin)
         let panel = try String(contentsOf: FlexibleHisProject.repoRoot

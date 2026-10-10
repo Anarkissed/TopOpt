@@ -101,10 +101,6 @@ extension FlexibleStageModel {
     /// ★ S4: switch every weight box's unit. Display only — nothing is re-designed, the lattice
     /// stays current (`designInputs` leaves it out), the stored kgf are untouched.
     public func setWeightUnit(_ u: FlexibleWeightUnit) {
-        // ★ ROUND 6 (item 4 verification — "the force is ONE number"): kg / lb switch the main page's kg / lbs too, so a
-        // linked group reads in one unit on both pages (N and kN are Settings' own; FlexibleGroupWatch does the reverse)
-        let main: WeightUnit? = u == .kg ? .kg : u == .lb ? .lbs : nil
-        if let main, project.force.unit != main { project.force.unit = main }
         edit({ s in s.weightUnit = u == .kg ? nil : u.rawValue }, recompute: false)
     }
 

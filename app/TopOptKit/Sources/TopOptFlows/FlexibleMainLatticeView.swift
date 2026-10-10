@@ -59,30 +59,22 @@ public enum FlexibleLatticeView {
 /// The one-line note under the view row (his "notification … when it is ready").
 @MainActor
 public final class FlexibleMainNote: ObservableObject {
-    /// ★ ROUND 6 (item 4): `linked` — the one-time line of what the restore linked ("Groups 2 and 3 are on the main
-    /// page now"), shown on the project's first Flexible open.
-    public enum Kind: Equatable, Sendable { case ready, building, linked(String) }
+    public enum Kind: Equatable, Sendable { case ready, building }
     @Published public private(set) var kind: Kind?
     /// How many notes were posted (tests).
     var posts = 0
     /// How long a note stays (tests shorten or lengthen it).
     var seconds: Double = 4
-    /// RED CONTROL (item 4 verification): any note replaces the link's line (it was gone before he looked).
-    nonisolated(unsafe) static var controlReplaceLinked = false
     private var serial = 0
 
     public init() {}
 
     public func post(_ k: Kind) {
-        // ★ ROUND 6 (item 4 verification): the one-time line of the link is never replaced by "Still building" (it was gone
-        // before he looked), and it stays three times as long — a tap on it, or "Lattice ready", ends it
-        if case .linked = kind, k == .building, !Self.controlReplaceLinked { return }
         posts += 1
         serial &+= 1
         kind = k
         let s = serial
-        let stay: Double = { if case .linked = k { return seconds * 3 } else { return seconds } }()
-        DispatchQueue.main.asyncAfter(deadline: .now() + stay) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
             guard let self, self.serial == s else { return }   // a newer note keeps its own time
             self.kind = nil
         }
@@ -97,7 +89,6 @@ public final class FlexibleMainNote: ObservableObject {
         switch k {
         case .ready: return "Lattice ready"
         case .building: return "Still building \u{2014} it shows here when ready"
-        case .linked(let s): return s
         }
     }
     /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is
@@ -190,11 +181,6 @@ struct FlexibleMainNoteView: View {
                     Button { main.showFromNote() } label: { capsule(k, showable: true) }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("flexible-main-note-show")
-                } else if case .linked = k {
-                    // ★ ROUND 6 (item 4 verification): the link's line goes when he taps it
-                    Button { note.clear() } label: { capsule(k, showable: false) }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("flexible-main-note-linked")
                 } else {
                     capsule(k, showable: false)
                 }
@@ -207,7 +193,7 @@ struct FlexibleMainNoteView: View {
 
     private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: k == .ready ? "checkmark.circle.fill" : (k == .building ? "hourglass" : "link"))
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
             Text(FlexibleMainNote.line(k))

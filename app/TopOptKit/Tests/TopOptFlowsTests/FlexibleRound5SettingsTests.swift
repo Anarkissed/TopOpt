@@ -204,14 +204,11 @@ final class FlexibleRound5SettingsTests: XCTestCase {
 
     // MARK: - S6 / S7 deleting a face
 
-    /// ★ RE-PINNED (round 6 item 4 — his answer: "deleting a face in Settings also removes it from its main-page group";
-    /// it supersedes round 5's "Flexible only", D-R5-C5-5): every face is still deletable and stays deleted, now because
-    /// the main page lets it go too — no remembered deletion; an emptied group carrying a lattice role or Protect stays
-    /// (pending), one carrying nothing goes.
     @MainActor
     func testEveryFaceIsDeletableAndStaysDeleted() async throws {
         let (r, m) = try await his()
         let a = FlexibleHisProject.topA, b = FlexibleHisProject.topB
+        let groupsBefore = r.project.selection.groups, forceBefore = r.project.force
         // ★ RED CONTROL: round 4 refused the trash for top A (the main page's Top) and face 0 (bottom)
         XCTAssertFalse(m.mainPageLoads.canRemove(a), "control: round 4 had no trash for top A")
         XCTAssertFalse(m.mainPageLoads.canRemove(0), "control: …nor for face 0 (the bottom anchor)")
@@ -219,21 +216,15 @@ final class FlexibleRound5SettingsTests: XCTestCase {
             XCTAssertTrue(m.removeFace(f), "\(m.faceName(f)) is deletable")
             XCTAssertNil(m.settings.face(f), "\(m.faceName(f)) left the Flexible setup")
         }
-        XCTAssertNil(m.settings.removedRegions, "★ nothing to remember: the main page let them go too")
-        let held = r.project.selection.groups.filter { g in
-            g.faces.contains { [0, 3].contains(Int($0)) } || g.regionIDs.contains { [103, 104].contains($0) }
-        }
-        XCTAssertTrue(held.isEmpty, "★ no main-page group holds a deleted face: \(held.map(\.name))")
-        for name in ["Top", "Top B", "bottom"] {   // a lattice role / Protect: kept, pending
-            let g = try XCTUnwrap(r.project.selection.groups.first { $0.name == name }, "\(name) stays (it carries a lattice role or Protect)")
-            XCTAssertTrue(r.project.force.kind(for: g.id).isPending, "\(name): pending")
-        }
-        XCTAssertNil(r.project.selection.groups.first { $0.name.hasPrefix("Group 1 · Face 3") }, "face 3's own hand (nothing else on it) went")
+        XCTAssertEqual(Set(m.settings.removedRegions ?? []), [a, 0], "the main-page faces are remembered as deleted")
         // the re-sync (the page re-opening over the main page) does not bring them back
         m.adoptMainPageLoads()
         m.openScene()
         try await settle(m)
         for f in [a, b, 0, 3] { XCTAssertNil(m.settings.face(f), "\(m.faceName(f)) stays deleted after the re-sync") }
+        // the main page's groups are untouched
+        XCTAssertEqual(r.project.selection.groups, groupsBefore, "the main page's groups are his to change there")
+        XCTAssertEqual(r.project.force, forceBefore)
         // the pop-up's fixes offer [Remove] for a main-page face too
         XCTAssertTrue(m.readinessInputs.removable(0), "the bottom anchor's face can be removed from a pop-up")
     }
@@ -304,39 +295,18 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         // constructor `freshSettings` itself uses
         let fresh = try FlexibleHisProject.restore()
         addTeardownBlock { fresh.cleanup() }
-        // ★ ROUND 6 (item 4): "this part" as its main page stands NOW — one set of groups: the session's trash took top A
-        // off Top, and + New renamed face 3's hand
-        fresh.project.selection = r.project.selection
-        fresh.project.force = r.project.force
         fresh.project.lattice.flexible = FlexibleStageSettings()
         let n = try await FlexibleHisProject.openedModel(fresh.project, test: self)
         n.pickMaterial(try XCTUnwrap(n.defaultMaterialID))
         n.setWeightUnit(.lb)
         await n.waitForIdle()
         print("FLEX-R5 reset: \(reset.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · material \(reset.materialID ?? "-") · fresh \(n.settings.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" })")
-        // ★ ROUND 6 (item 4 VERIFICATION, finding m7 — "Reset all splits his group"): the main page shows which hands are
-        // squeezed TOGETHER ("Squeezed with …"), so a reset keeps them one group; a brand-new setup cannot know it. The
-        // link's bookkeeping (groupLink, madeHands) is kept too. Everything else is the brand-new setup.
-        func anew(_ s: FlexibleStageSettings) -> FlexibleStageSettings {
-            var c = s
-            c.groupLink = nil; c.madeHands = nil
-            c.faces = c.faces.map { f in var f = f; f.squeezeGroup = nil; return f }
-            return c
-        }
-        XCTAssertEqual(anew(reset), anew(n.settings), "Reset all == a brand-new setup of this part (but which hands squeeze together)")
+        XCTAssertEqual(reset, n.settings, "Reset all == a brand-new setup of this part")
         XCTAssertEqual(reset.materialID, "varioshore_tpu", "the filament with squish data")
         XCTAssertEqual(reset.feel, "springy"); XCTAssertEqual(reset.finishMode, .covered); XCTAssertEqual(reset.topology, "auto")
-        // ★ RE-PINNED (round 6 item 4 — his answers: "a main-page Load group = a squeeze group"; the trash takes a face off
-        // its main-page group): a fresh setup is one squeeze group per main-page hand (Top B's, face 3's, face 5's), and the
-        // face he deleted is not on the main page any more, so it does not come back
-        let before = Dictionary(edited.loadedFaces.compactMap { f in f.weightFrom.map { ($0, FlexibleSqueezeGroups.id(f)) } }, uniquingKeysWith: { a, _ in a })
-        let after = Dictionary(reset.loadedFaces.compactMap { f in f.weightFrom.map { ($0, FlexibleSqueezeGroups.id(f)) } }, uniquingKeysWith: { a, _ in a })
-        for (h, g) in after { for (k, gk) in after where k != h {
-            XCTAssertEqual(g == gk, before[h] == before[k], "★ two hands share a squeeze group after the reset exactly when they did before")
-        } }
-        XCTAssertEqual(n.squeezeGroups.count, after.count, "a brand-new setup: one squeeze group per main-page Load group (it cannot know the pairing)")
+        XCTAssertEqual(m.squeezeGroups.count, 1, "one group")
         XCTAssertNil(reset.groupColours); XCTAssertNil(reset.removedRegions)
-        XCTAssertNil(reset.face(FlexibleHisProject.topA), "★ the deleted face stays deleted (it left the main page too)")
+        XCTAssertNotNil(reset.face(FlexibleHisProject.topA), "the deleted main-page face is back")
         XCTAssertEqual(reset.weightUnit, "lb", "the unit is how he reads — kept")
         // ★ RED CONTROL: the session's settings are not a fresh setup
         XCTAssertNotEqual(edited, n.settings, "control: before the reset they differed")

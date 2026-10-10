@@ -313,7 +313,7 @@ extension FlexibleMainStage {
             let scale = fe.retained.contains(i) ? scaleMM : (nextScaleMM ?? scaleMM)
             out[fe.fields[i].versionKey] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
                                                                         depthScaleMM: scale, mapValues: feMapValues(fe.fields[i], m),
-                                                                        groupColours: false, roleMarks: controlRoleMarks).tints   // ★ R6: no group tint (item 4 verification: nor a role mark)
+                                                                        groupColours: false).tints   // ★ R6: no group tint
         }
         return out
     }

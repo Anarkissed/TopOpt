@@ -456,7 +456,7 @@ final class FlexibleFEFieldTests: XCTestCase {
 
     func testFiveFacePinchMovesEveryFace() async throws {
         // the U6 case: his bottom pressed too — {0, Top A, Top B, 3, 5} in one group
-        let (_, m) = try await FlexibleSquishFixture.his(self, "his five faces") { m in FlexibleHisProject.pressAnswering(m, 0) }   // ★ round 6 item 4: the bottom is anchored — answered [Squeeze it]
+        let (_, m) = try await FlexibleSquishFixture.his(self, "his five faces") { m in _ = m.press(0) }
         let g = try XCTUnwrap(m.lattice)
         FlexibleSquishFixture.log(m, "his five faces")
         let f = try XCTUnwrap(m.squish["group-1"]?.field)

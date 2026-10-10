@@ -64,10 +64,6 @@ enum FlexibleHisProject {
 
     /// His folder under a store of our own, opened through `AppModel.open` (`source`: another copy).
     /// ★ BATCH E: with the [Lattice under it] taps above unless `asSaved`.
-    /// ★ ROUND 6 (item 4): the app's restore links his Settings groups to the main page's (H18,
-    /// FlexibleGroupMigration). The taps are the page's offer on his project AS SAVED before that link, so they are
-    /// replayed on it first — his project as if he had tapped them, then opened it in this build — and the migration
-    /// runs after them, inside the undo baseline exactly as at a restore. `asSaved` restores it as the app does.
     static func restore(_ source: URL? = nil, asSaved: Bool = false) throws -> Restored {
         let src = source ?? dir
         let snap = try JSONDecoder().decode(ProjectSnapshot.self, from: Data(contentsOf: src.appendingPathComponent("project.json")))
@@ -83,38 +79,11 @@ enum FlexibleHisProject {
                            store: ProjectStore(rootDir: root))
         app.loadMaterials()
         let recent = try XCTUnwrap(app.recentProjects.first { $0.id == snap.id })
-        let taps = asSaved ? [] : latticeUnderTaps(src)
-        let skip = FlexibleGroupMigration.controlSkip
-        if !taps.isEmpty { FlexibleGroupMigration.controlSkip = true }
         app.open(recent)
-        FlexibleGroupMigration.controlSkip = skip
         let pm = try XCTUnwrap(app.project)
         XCTAssertNotNil(pm.viewerMesh, "his part must restore")
-        if !taps.isEmpty {
-            for tap in taps { pm.flexibleLatticeUnder(tap) }
-            FlexibleGroupMigration.migrate(pm)   // (unless a test's control skips it)
-            pm.seedUndoBaseline()
-        }
+        if !asSaved { for tap in latticeUnderTaps(src) { pm.flexibleLatticeUnder(tap) } }
         return Restored(app: app, project: pm, root: root)
-    }
-
-    /// ★ ROUND 6 (item 4): his project as he SAVED it, before the restore's link (H18 skipped — the red control's door):
-    /// for the round-3 / batch-E suites whose subject is the adopt or the lattice of a project saved unlinked.
-    static func restoreUnlinked(_ source: URL? = nil, asSaved: Bool = false) throws -> Restored {
-        let skip = FlexibleGroupMigration.controlSkip
-        FlexibleGroupMigration.controlSkip = true
-        defer { FlexibleGroupMigration.controlSkip = skip }
-        return try restore(source, asSaved: asSaved)
-    }
-
-    /// ★ ROUND 6 (item 4 — his answer: Anchor = Rests, one set of groups): [Press it] on a face a main-page Anchor holds
-    /// asks once ("Face 0 rests (main page: Bottom)"); the suites that press his bottom or his sides answer [Squeeze it],
-    /// as he would (the face then leaves its Anchor for a hand of its own — before, the main page kept anchoring it).
-    @discardableResult
-    static func pressAnswering(_ m: FlexibleStageModel, _ region: Int) -> Bool {
-        let ok = m.press(region)
-        if m.restsAsk?.region == region { return m.squeezeAnchored() }
-        return ok
     }
 
     static var materialsPath: String { repoRoot.appendingPathComponent("core/src/materials/flexible_materials.json").path }

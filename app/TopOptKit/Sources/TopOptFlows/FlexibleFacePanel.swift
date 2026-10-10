@@ -197,20 +197,8 @@ struct FlexibleFaceRows: View {
             .accessibilityIdentifier("flexible-face-remove")
         }
         .background(askAnchor(r))
-        // ★ ROUND 6 (item 4): [Press it] on a face a main-page Anchor holds asks once, here
-        // ★ (item 4 verification) …and a face the two pages disagree on as saved asks here too, until he settles it
-        let ask = model.ask(for: r)
-        if let a = ask { FlexibleRestsAskRows(model: model, ask: a, padTarget: $padTarget) }
-        // ★ (item 4 verification) a pressed face on no main-page group says so (the restore left it as saved, or a region
-        // that can't split holds it — never in two groups)
-        if let line = model.notOnMainPageLine(r) {
-            Text(line)
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
-                .lineLimit(1)
-                .accessibilityIdentifier("flexible-row-not-on-main")
-        }
-        // [Rests] chosen here on a face the main page presses: one line, never hidden (the ask's own line says it)
-        if ask?.pressedOnMain != true, !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
+        // [Rests] chosen here on a face the main page presses: one line, never hidden
+        if !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
             Text(FlexibleRowCopy.pressedOnMainPage(group: e.groupName))
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1)
@@ -360,33 +348,6 @@ struct FlexibleFaceRows: View {
                                     config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
                                     seed: nil) { v in model.press(r, kg: model.weightUnit.toKg(v), into: joinGroup) })
             .allowsHitTesting(false)
-    }
-}
-
-/// ★ ROUND 6 (item 4, one set of groups): "Face 0 rests (main page: Bottom)" [Squeeze it] [Keep it resting] — asked once,
-/// in the face's card, when it is pressed while a main-page Anchor holds it. [Squeeze it] takes it off the Anchor and
-/// presses it (the pad asks a weight when its group has none, and its answer presses without asking again).
-struct FlexibleRestsAskRows: View {
-    @ObservedObject var model: FlexibleStageModel
-    let ask: FlexibleRestsAsk
-    @Binding var padTarget: String?
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(ask.line)
-                .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).minimumScaleFactor(0.85)
-                .accessibilityIdentifier("flexible-rests-ask")
-            HStack(spacing: DS.Space.s) {
-                Button { if !model.squeezeAnchored(ask) { padTarget = "press-\(ask.region)" } } label: { FlexiblePendingTab.chip(FlexibleRowCopy.squeezeIt) }
-                    .buttonStyle(.plain).background(FlexiblePendingTab.frame("restsAskSqueeze"))
-                    .accessibilityIdentifier("flexible-rests-ask-squeeze")
-                Button { model.keepResting(ask) } label: { FlexiblePendingTab.chip(ask.pressedOnMain ? FlexibleRowCopy.itRests : FlexibleRowCopy.keepResting) }
-                    .buttonStyle(.plain).background(FlexiblePendingTab.frame("restsAskKeep"))
-                    .accessibilityIdentifier("flexible-rests-ask-keep")
-            }
-        }
-        .padding(.vertical, 6)
-        .background(FlexiblePendingTab.frame("restsAsk"))
     }
 }
 

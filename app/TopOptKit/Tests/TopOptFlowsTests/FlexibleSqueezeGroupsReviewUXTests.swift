@@ -152,7 +152,7 @@ final class FlexibleSqueezeGroupsReviewUXTests: XCTestCase {
     @MainActor
     func testFivePressedFacesSquishEveryPinchWholeOnHisPad() async throws {
         let (_, m) = try await his()
-        XCTAssertTrue(FlexibleHisProject.pressAnswering(m, 0), "the bottom joins group 1 at its force")   // ★ round 6 item 4: anchored — [Squeeze it]
+        XCTAssertTrue(m.press(0), "the bottom joins group 1 at its force")
         try await settle(m)
         XCTAssertEqual(m.settings.loadedFaces.count, 5)
         print("FLEX-REVIEW five faces: pinches \(m.pinches.map { "\($0.a)|\($0.b)" }) · line '\(m.readiness.oneLine)'")
@@ -185,7 +185,7 @@ final class FlexibleSqueezeGroupsReviewUXTests: XCTestCase {
     @MainActor
     func testATopAndBottomPinchNeverCrossesInTheMiddle() async throws {
         let (_, m) = try await his()
-        XCTAssertTrue(FlexibleHisProject.pressAnswering(m, 0))   // ★ round 6 item 4: anchored — [Squeeze it]
+        XCTAssertTrue(m.press(0))
         try await settle(m)
         let kA = FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0), k0 = FlexFaceKey(region: 0, rotation: 0)
         let pA = try XCTUnwrap(m.pinchedColumns(FlexibleHisProject.topA), "top A is pinched with the bottom")
@@ -226,8 +226,7 @@ final class FlexibleSqueezeGroupsReviewUXTests: XCTestCase {
         XCTAssertNil(FlexibleFaceRows.weightLine(model: m, region: FlexibleHisProject.topA))
         // ★ RED CONTROL: D2's card row said "10 kg" with a pencil that set the whole group
         let f3 = try XCTUnwrap(m.settings.face(3))
-        // ★ ROUND 6 (item 4): H18 links face 3 to its own main-page hand, so D2's line now names it ("10 kg from Group 1 · …")
-        XCTAssertTrue(FlexibleRowCopy.weight(face: f3, entry: m.mainPageLoads.entry(3)).hasPrefix("10 kg"), "control: D2's card line")
+        XCTAssertEqual(FlexibleRowCopy.weight(face: f3, entry: m.mainPageLoads.entry(3)), "10 kg", "control: D2's card line")
         let panel = try FlexibleSource.code("FlexibleFacePanel.swift")
         XCTAssertFalse(panel.contains("FlexEditPill(key: \"weight-"), "no second force control on the card")
         sidesApart(m)

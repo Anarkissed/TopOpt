@@ -82,9 +82,7 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         let app = try XCTUnwrap(r.app.makeLatticeSimContext(), "his project describes a solve")
         let flexible = FlexibleStressContext.reached(app)
         print("FLEX-STRESS his regions: sent by the app \(app.faceRegions.map(\.id)) · reached \(flexible.faceRegions.map(\.id)) · anchors \(app.anchorFaceIDs) · loads \(app.loadGroups.map { "\($0.faceIDs)/\($0.regionIDs)" })")
-        // ★ ROUND 6 (item 4): H18 makes top B (its own protected + Lattice group in this fixture) a main-page hand, so its
-        // sector is reached too
-        XCTAssertEqual(Set(flexible.faceRegions.map(\.id)), [102, 103, 104], "the loaded sectors and their parent — nothing else")
+        XCTAssertEqual(Set(flexible.faceRegions.map(\.id)), [102, 103], "the loaded sector and its parent — nothing else")
         XCTAssertEqual(flexible.anchorFaceIDs, app.anchorFaceIDs)
         XCTAssertEqual(flexible.loadGroups, app.loadGroups, "the faces and forces are unchanged")
         XCTAssertNil(FlexibleStressContext.blocker(flexible))
@@ -287,9 +285,7 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         // ★ RED CONTROL: his pad's own triangles (every vertex read 0.000 MPa)
         XCTAssertGreaterThan(before.p99, 0.4, "control: the unsubdivided overlay paints another number than a tap reads")
         XCTAssertGreaterThan(before.mean, 0.05, "control")
-        // ★ RE-PINNED (round 6 item 4): with H18 his pad's sides rest (an Anchor) and faces 3 / 5 push on the main page, so
-        // its corners are no longer all ~0 MPa (batch C's "one flat blue"); the unsubdivided corners still miss the peak
-        XCTAssertLessThan(before.maxVertexMPa, after.maxVertexMPa - 1e-3, "control: the unsubdivided overlay's corners miss the peak")
+        XCTAssertEqual(before.maxVertexMPa, 0, accuracy: 1e-3, "control: every corner of his pad reads ~0 MPa — one flat blue")
         // the colour under 99 % of the part is within a tenth of the ramp of the number a tap
         // reads there (the worst points are the anchored corners' singularity, sharper than any
         // vertex spacing — the handoff says so)
@@ -461,17 +457,13 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         XCTAssertNil(stage.tints(octet, on: .lattice, roles: roles(), stress: field))
         XCTAssertNil(stage.stressField, "nothing noted for an octet page")
         XCTAssertEqual(evaluated, 0, "…and its roles never evaluated")
-        // ★ RED CONTROL: the Flexible stage notes the field. ★ ROUND 6 (item 4 — his answer of 2026-10-09: no role colour on
-        // the main page's model): it no longer evaluates the roles either; the control's door (round 5's compose) does
+        // ★ RED CONTROL: the Flexible stage notes the field and composes the roles in
         let flex = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
         _ = stage.model(for: flex, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
         stage.refresh()
         XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
         XCTAssertNotNil(stage.stressField, "control: the Flexible stage notes it")
-        XCTAssertEqual(evaluated, 0, "★ the roles are never evaluated on the main page's model")
-        stage.controlRoleTints = true
-        XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
-        XCTAssertEqual(evaluated, 1, "control: round 5's compose evaluated them")
+        XCTAssertEqual(evaluated, 1)
         XCTAssertNil(stage.tints(flex, on: .topology, roles: roles(), stress: field), "another stage of the same project: inert")
         XCTAssertEqual(evaluated, 1)
     }

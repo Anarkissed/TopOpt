@@ -85,8 +85,6 @@ final class FlexibleReadinessTests: XCTestCase {
         let (_, saved) = try await his(asSaved: true)
         print("FLEX-READY his project as saved (no taps): \(saved.readiness.blocking.count) blocking — \(saved.readiness.oneLine)")
         XCTAssertTrue(saved.readiness.isReady)
-        // ★ ROUND 6 (item 4 VERIFICATION, finding M5): the restore no longer joins Top B to Top (Top's 4 mm lattice would run
-        // under it before his ruling) — Top B stays as saved, so batch E's line is back: "No lattice under Top B"
         XCTAssertEqual(saved.readiness.oneLine, "Ready · No lattice under Top B")
         XCTAssertEqual(FlexibleExitDecision.decide(saved.readiness), .exit, "Exit still builds")
     }
