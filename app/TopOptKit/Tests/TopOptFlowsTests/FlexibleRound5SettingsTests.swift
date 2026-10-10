@@ -314,14 +314,27 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         n.setWeightUnit(.lb)
         await n.waitForIdle()
         print("FLEX-R5 reset: \(reset.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · material \(reset.materialID ?? "-") · fresh \(n.settings.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" })")
-        XCTAssertEqual(reset, n.settings, "Reset all == a brand-new setup of this part")
+        // ★ ROUND 6 (item 4 VERIFICATION, finding m7 — "Reset all splits his group"): the main page shows which hands are
+        // squeezed TOGETHER ("Squeezed with …"), so a reset keeps them one group; a brand-new setup cannot know it. The
+        // link's bookkeeping (groupLink, madeHands) is kept too. Everything else is the brand-new setup.
+        func anew(_ s: FlexibleStageSettings) -> FlexibleStageSettings {
+            var c = s
+            c.groupLink = nil; c.madeHands = nil
+            c.faces = c.faces.map { f in var f = f; f.squeezeGroup = nil; return f }
+            return c
+        }
+        XCTAssertEqual(anew(reset), anew(n.settings), "Reset all == a brand-new setup of this part (but which hands squeeze together)")
         XCTAssertEqual(reset.materialID, "varioshore_tpu", "the filament with squish data")
         XCTAssertEqual(reset.feel, "springy"); XCTAssertEqual(reset.finishMode, .covered); XCTAssertEqual(reset.topology, "auto")
         // ★ RE-PINNED (round 6 item 4 — his answers: "a main-page Load group = a squeeze group"; the trash takes a face off
         // its main-page group): a fresh setup is one squeeze group per main-page hand (Top B's, face 3's, face 5's), and the
         // face he deleted is not on the main page any more, so it does not come back
-        XCTAssertEqual(m.squeezeGroups.count, 3, "one squeeze group per main-page Load group")
-        XCTAssertEqual(m.squeezeGroups.count, n.squeezeGroups.count)
+        let before = Dictionary(edited.loadedFaces.compactMap { f in f.weightFrom.map { ($0, FlexibleSqueezeGroups.id(f)) } }, uniquingKeysWith: { a, _ in a })
+        let after = Dictionary(reset.loadedFaces.compactMap { f in f.weightFrom.map { ($0, FlexibleSqueezeGroups.id(f)) } }, uniquingKeysWith: { a, _ in a })
+        for (h, g) in after { for (k, gk) in after where k != h {
+            XCTAssertEqual(g == gk, before[h] == before[k], "★ two hands share a squeeze group after the reset exactly when they did before")
+        } }
+        XCTAssertEqual(n.squeezeGroups.count, after.count, "a brand-new setup: one squeeze group per main-page Load group (it cannot know the pairing)")
         XCTAssertNil(reset.groupColours); XCTAssertNil(reset.removedRegions)
         XCTAssertNil(reset.face(FlexibleHisProject.topA), "★ the deleted face stays deleted (it left the main page too)")
         XCTAssertEqual(reset.weightUnit, "lb", "the unit is how he reads — kept")
