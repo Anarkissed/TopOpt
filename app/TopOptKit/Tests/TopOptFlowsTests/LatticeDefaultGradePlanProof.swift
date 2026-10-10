@@ -135,6 +135,28 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         let includeCount = b.regions.filter { $0.role == .include }.count
         print("DG-PLAN \(pm.lattice.algorithm): \(plan.count) cell(s) over \(includeCount) region(s) | \(Self.coreHistogram(plan))")
         print("DG-PLAN per region: \(perRegion.map { "r\($0.key)=\($0.value)" }.joined(separator: " "))")
+        // ★ WHICH OUTLINE THE CUT CELLS ARE CLIPPED AGAINST (the reviewer, 2026-10-10, item 4). The bake
+        // paints a cut cell's texels by the signed distance to the RAW face outline (`outlineLoops`),
+        // grown by the in-plane expand on every edge and continued across diverging seams; the wire's
+        // `outline_uv` is `wireOutlineLoops` (the expand as a mitred offset on true edges, the seam push
+        // as a constant). They are the same polygon exactly when the wire moved no vertex off the raw
+        // outline: expand 0 and no diverging seam.
+        var outlineRows: [String] = []
+        var rid = 0
+        for r in b.regions where r.role == .include {
+            rid += 1
+            guard r.kind == .face, !r.outlineLoops.isEmpty else { outlineRows.append("r\(rid) no outline (rectangle)"); continue }
+            let seamFlags = r.outlineSeams.flatMap { $0 }
+            let tilts = r.outlineSeamTilt.flatMap { $0 }
+            let diverging = zip(seamFlags, tilts).filter { $0.0 && $0.1 > 1e-9 }.count
+            var moved = 0.0
+            for loop in r.wireOutlineLoops { for q in loop {
+                moved = Swift.max(moved, abs(LatticeFaceOutline.signedDistance(q, loops: r.outlineLoops)))
+            }}
+            outlineRows.append(String(format: "r%d expand=%.3f seams=%d diverging=%d wireMovedOffRaw=%.4fmm",
+                                      rid, r.inPlaneOffsetMM, seamFlags.filter { $0 }.count, diverging, moved))
+        }
+        print("DG-OUTLINE " + outlineRows.joined(separator: " | "))
 
         // ── the stage job, with and without the plan, from ONE process (no hash-order drift)
         let request = try XCTUnwrap(model.makeLatticeRunRequest(), "no stage job")

@@ -28,7 +28,7 @@ esac
 anystep=0; [[ "$conv" == convert-stepped-aesthetic || "$conv" == stepped ]] && anystep=1
 ( cd "$REPO/app/TopOptKit" && DG_PROJECT_DIR="$work" DG_OUT="$out" DG_ANY_STEP=$anystep swift test --skip-build \
     --filter LatticeDefaultGradePlanProof > "$out/harness.log" 2>&1 )
-grep -E "DG-PROJECT|DG-PLAN|DG-JOBS|DG-WITHHELD|DG-SLOT|DG-K2|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
+grep -E "DG-PROJECT|DG-PLAN|DG-OUTLINE|DG-JOBS|DG-WITHHELD|DG-SLOT|DG-K2|error:|skipped" "$out/harness.log" | sed 's/^.*\] //'
 fi
 [[ "$phase" == harness ]] && exit 0
 # the third arm: the plan job asking core for what it ships, strut by strut (welded spans), so the
