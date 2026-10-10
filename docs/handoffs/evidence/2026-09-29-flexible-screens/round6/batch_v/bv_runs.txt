@@ -1,0 +1,279 @@
+# Round 6 batch V — the raw runs (this Mac, Xcode 27, Debug; 2026-10-10; load average 13-40 from other sessions).
+
+## (1) The batch V class, green at the final code (cb27ca27 + its tests): FLEX_BV_EVIDENCE_DIR set
+swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleBatchVHostedTests|FlexibleBatchVEvidenceProbe)/'
+	 Executed 1 test, with 0 failures (0 unexpected) in 27.692 (27.692) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 489.835 (489.836) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 517.527 (517.529) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 517.527 (517.530) seconds
+Test Case '-[TopOptFlowsTests.FlexibleBatchVEvidenceProbe testTheMainPageOnHisPadWithEachSettingOnAndOff]' passed (27.692 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend]' passed (330.904 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber]' passed (6.368 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack]' passed (39.240 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheClipIsEveryPieceOfTheChromeInTheStagesFrame]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheRedControlTheLayerOverTheChromeAgain]' passed (64.208 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject]' passed (22.650 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything]' passed (26.460 seconds).
+FLEX-BV-EVIDENCE
+  saved active group: Group C
+  BV_M_roles_ON_default_from_below.png: prisms [] · tags []
+  BV_M_roles_OFF_from_below.png: prisms [] · tags []
+  BV_M_prism_after_pick_ON_on_open.png: prisms [] · tags []
+  BV_M_prism_after_pick_OFF_on_open.png: prisms [3] · tags ["24.5 mm"]
+  BV_M_prism_after_pick_ON_after_picking_Top.png: prisms [1] · tags ["12.0 mm"]
+  BV_M_prism_after_pick_ON_after_picking_GroupC_pending.png: prisms [] · tags []
+FLEX-BV-2a (pixels of the page with the part's overlays vs without, inside each piece of chrome; 0 = nothing shows there)
+  A1_0003 13p · Rests: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 15884
+  A1_0003 13p · Group 2 · face 4: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 15787
+  A1_0003 13p · Group 3 · face 3: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 10774
+  A1_0003 13p · both views: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 68102
+  A1_0003 11l · Rests: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 8636
+  A1_0003 11l · Group 2 · face 4: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 13244
+  A1_0003 11l · Group 3 · face 3: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 0 · the whole page 8633
+  A1_0003 11l · both views: inside exitRow 0, legend 0, notice 0, panel 0, viewButtons 0 · noise  · player 4484 · the whole page 42187
+  r5 13p · curves · region 1000104: inside exitRow 0, legend 0, notice 0, panel 0, popup 0, viewButtons 0 · noise  · player 0 · the whole page 44794
+  r5 11l · curves · region 1000104: inside exitRow 0, legend 0, notice 0, panel 0, popup 0, viewButtons 0 · noise  · player 0 · the whole page 23792
+  states with an overlay inside the chrome: 0
+FLEX-BV-1b saved active group: Group C
+FLEX-BV-1b on open (Top active): ON [] · OFF [1] · after his pick: Top [1] · Group C [] · [Prisms] [1, 2, 3, 4, 5]
+FLEX-BV-1a
+  marks: ON 0 vertices · OFF 49152 (face 0 cyan)
+  roles, the model: ON 0 role-coloured vertices · OFF face 0 Anchor green
+  roles, the model, heat on: ON 0 role-coloured vertices · OFF face 0 Anchor green
+  roles, Lattice: ON 0 role-coloured vertices · OFF face 0 Anchor green
+FLEX-BV-2b clip 10 rects: [(24.0, 700.0, 400.0, 600.0), (760.0, 600.0, 260.0, 120.0), (920.0, 260.0, 88.0, 40.0), (500.0, 1230.0, 200.0, 30.0), (460.0, 1262.0, 280.0, 50.0), (160.0, 100.0, 420.0, 110.0), (280.0, 40.0, 380.0, 34.0), (360.0, 78.0, 220.0, 26.0), (24.0, 40.0, 226.0, 44.0), (808.0, 37.0, 211.0, 211.0)]
+FLEX-BV-2a control 13p [Rests]: clipped panel 0 legend 0 · no clip panel 3471 legend 1796 · Group 3 · face 3 outside the chrome: clip vs none 0 px (noise 0)
+FLEX-BV-1c kept under flexible.mainViewSettings.A1000001-0000-4000-8000-000000000003 · undo 0→0
+FLEX-BV-1d 11l Role colours off (656.0, 235.0, 150.0, 41.0) · 11l Prism after a pick (814.0, 235.0, 164.0, 41.0) · 11p Role colours off (488.0, 283.0, 150.0, 41.0) · 11p Prism after a pick (646.0, 283.0, 164.0, 41.0) · 13p Role colours off (686.0, 283.0, 150.0, 41.0) · 13p Prism after a pick (844.0, 283.0, 164.0, 41.0) · 13l Role colours off (838.0, 235.0, 150.0, 41.0) · 13l Prism after a pick (996.0, 235.0, 164.0, 41.0) · mini Role colours off (398.0, 331.0, 150.0, 41.0) · mini Prism after a pick (556.0, 331.0, 164.0, 41.0)
+
+## (2) Red controls proven red AFTER the code (mutations: one production line changed, rebuilt, the pinning test run, restored by file copy — cmp identical)
+M1  the chrome clip leaks 40 pt past the chrome (chromeClip rects inset by -40) → testTheRedControlTheLayerOverTheChromeAgain RED:
+    XCTAssertEqual failed: ("2206") is not equal to ("0") - ★ outside the chrome the clip changes no pixel (the chip's glass, the stamp, the outline)
+    FLEX-BV-2a control 13p [Rests]: clipped panel 0 legend 0 · no clip panel 3471 legend 1796 · Group 3 · face 3 outside the chrome: clip vs none 2206 px (noise 0)
+M2  the whole overlay layer masked (the first cut) → the same test stayed GREEN: both of its shots go through the mask, so the
+    outside comparison cannot see what a mask does to the chip's glass. Not a red control; recorded as a limit. The mask is gone.
+    FLEX-BV-2a control 13p [Rests]: clipped panel 0 legend 0 · no clip panel 3473 legend 1796 · Group 3 · face 3 outside the chrome: clip vs none 0 px (noise 0)
+In-test controls (every run): controlOverlaysOverChrome → 3471 px in the panel, 1796 in the legend ([Rests], 13p); 'Role colours
+off' OFF → the resting cyan (49 152 vertices) and #354's Anchor green on face 0; 'Prism after a pick' OFF → the active Top's prism on
+open, Group C's face 3.
+
+## (3) The layout regression the first suite run caught (FlexibleBatchMVerifyTests, settings one line under the buttons at every size)
+    XCTAssertEqualWithAccuracy failed: ("934.0") is not equal to ("1194.0") +/- ("0.5") - 11 landscape: on the very edge, like the octet's key
+    XCTAssertEqualWithAccuracy failed: ("934.0") is not equal to ("1194.0") +/- ("0.5") - 11 landscape: on the very edge, like the octet's key
+    → fixed: the two share the buttons' line in landscape (settingsOnRowLine); the class passes in the final suite (8 tests, 1 skipped, 0 failures).
+    Runs 1 and 2 of the suite were stopped by PID (my driver and its children, cwd checked) once a production change was due.
+
+## (4) The targeted suite at cb27ca27 (the final production code), unseeded (CI's mode), detached driver, 12 classes per run, 17:22 → 18:40
+# classes: every Flexible* class in both bundles, every class in a test file that names a touched file or symbol (grep -lF over Tests:
+# FlexibleMainStage(+Squish,+Views), FlexibleMainStatusPill, FlexibleMainViewSettings, FlexiblePageChannels, FlexibleRowCopy,
+# FlexibleStagePage, FlexibleCurveEditor, FlexibleFaceStamp, FlexibleStageViewTags, FlexibleMainLatticeView, FlexibleChromeClip,
+# FlexibleReadingCallout, and the core sync's job.cpp, run_job.cpp, stepped_plan, job.hpp, plan_base, slot_origin, CoreFingerprint), the
+# golden classes, LatticeStaleTypeTests ProjectStoreTests UndoHistoryTests LatticeSettingsPersistTests ViewerTests SmoothingPageRound2Tests
+# LatticeSimSolveTriggerTests. No xctest death.
+TOTAL: 144 classes · TopOptFlowsTests 138 classes, 939 tests, 46 skipped, 39 failures in 9 classes · TopOptKitTests 6 classes, 39 tests, 2 skipped, 0 failures
+  KNOWN (13): FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker x8 (Xcode 27 text metrics),
+              LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds x1, #354's LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses x4
+  NEW (26), each traced and re-pinned with attribution (f045795e), then green — see (5):
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 11l
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 11l
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 11p
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 11p
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 13p
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 13p
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 13l
+    FlexibleMainPageRound4HostedTests.swift:80 testTheRowAndTheNoteSitSideBySideInTheirFrames: XCTAssertEqual failed: ("3") is not equal to ("2") - the row and the note at 13l
+    FlexibleMainPageRound4Tests.swift:355 testTheNoteBandIsReservedBesideTheViewRow: XCTAssertEqualWithAccuracy failed: ("830.0") is not equal to ("1160.0") +/- ("0.5") - beside the row, left of it
+    FlexibleMainPageRound4Tests.swift:355 testTheNoteBandIsReservedBesideTheViewRow: XCTAssertEqualWithAccuracy failed: ("648.0") is not equal to ("978.0") +/- ("0.5") - beside the row, left of it
+    FlexibleRound6HostedTests.swift:736 testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce: XCTAssertEqual failed: ("[]") is not equal to ("[3]") - Group C: face 3's prism
+    FlexibleRound6HostedTests.swift:738 testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce: XCTAssertEqual failed: ("[]") is not equal to ("[3]") - Group C: face 3's mm tag, at once
+    FlexibleRound6HostedTests.swift:740 testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce: XCTAssertEqual failed: ("nil") is not equal to ("Optional("24.5 mm")") - Group C: his deepest, read-only
+    FlexibleRound6HostedTests.swift:221 testTheMainPageWearsNoGroupColourInAnyViewOrTurn: XCTAssertEqual failed: ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-2·s
+    FlexibleRound6HostedTests.swift:221 testTheMainPageWearsNoGroupColourInAnyViewOrTurn: XCTAssertEqual failed: ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-3·s
+    FlexibleRound6HostedTests.swift:221 testTheMainPageWearsNoGroupColourInAnyViewOrTurn: XCTAssertEqual failed: ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - group-1·s
+    FlexibleRound6HostedTests.swift:224 testTheMainPageWearsNoGroupColourInAnyViewOrTurn: XCTAssertEqual failed: ("[SIMD4<Float>(0.0, 0.0, 0.0, 0.0)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 0.35)]") - the refres
+    FlexibleS1bMainTagsTests.swift:188 testEveryMainPageTagIsJoinedToItsFace: XCTUnwrap failed: expected non-nil value of type "ClearanceRenderItem" - Group C: its prism
+    FlexibleS1bMainTagsTests.swift:319 testPickingAGroupUnderPrismsBrightensItsPrisms: XCTAssertEqual failed: ("[]") is not equal to ("[3]") - Group C: its faces' prisms brighter
+    FlexibleS1bMainTagsTests.swift:325 testPickingAGroupUnderPrismsBrightensItsPrisms: XCTAssertEqual failed: ("Optional(0.4)") is not equal to ("Optional(0.6)")
+    FlexibleS1bMainTagsTests.swift:326 testPickingAGroupUnderPrismsBrightensItsPrisms: XCTAssertTrue failed
+    FlexibleS1bMainTagsTests.swift:329 testPickingAGroupUnderPrismsBrightensItsPrisms: XCTAssertEqual failed: ("Optional(false)") is not equal to ("Optional(true)") - Group C: its tag placed first ([1, 2, 3, 4, 5])
+    FlexibleS1bMainTagsTests.swift:330 testPickingAGroupUnderPrismsBrightensItsPrisms: XCTAssertEqual failed: ("[]") is not equal to ("[3]") - Group C: its tags marked
+    FlexibleSettingsRound4Tests.swift:207 testNoStampHandleIsDrawnUnderThePanel: XCTAssertTrue failed - the outline is clipped out of the keep-outs
+    FlexibleSettingsRound4Tests.swift:210 testNoStampHandleIsDrawnUnderThePanel: XCTAssertTrue failed
+    FlexibleSettingsVerifyD1Tests.swift:435 testTheCurvesAreNeitherDrawnNorTouchedUnderThePanel: XCTAssertTrue failed - the curve editors get the page's keep-outs
+  Known load flakes did NOT fire: FlexibleBatchNRefineTests 4/4, FlexibleRound5SettingsHostedTests 4/4, FlexibleSqueezeGroupsUITests 4/4.
+  LatticeStaleTypeTests 6/6. FlexibleAngledGoldenTests 13/13. FlexibleBatchVHostedTests 7/7.
+Per class:
+PASSED TopOptFlowsTests.ComputeLocationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+PASSED TopOptFlowsTests.CoreBuildIdentityTests Executed 3 tests, with 0 failures (0 unexpected) in 1.969 (1.970) seconds
+PASSED TopOptFlowsTests.DeviceRunEntryGateTests Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.004) seconds
+PASSED TopOptFlowsTests.FlexibleAngledGoldenTests Executed 13 tests, with 0 failures (0 unexpected) in 14.721 (14.723) seconds
+PASSED TopOptFlowsTests.FlexibleBatchBReviewTests Executed 10 tests, with 0 failures (0 unexpected) in 188.951 (188.953) seconds
+PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests Executed 13 tests, with 0 failures (0 unexpected) in 0.631 (0.632) seconds
+PASSED TopOptFlowsTests.FlexibleBatchCHookTests Executed 4 tests, with 0 failures (0 unexpected) in 0.910 (0.911) seconds
+PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests Executed 14 tests, with 0 failures (0 unexpected) in 75.357 (75.360) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2Probe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.008 (0.009) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2Tests Executed 2 tests, with 0 failures (0 unexpected) in 145.227 (145.228) seconds
+PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 40.946 (40.947) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMDentTests Executed 2 tests, with 0 failures (0 unexpected) in 46.765 (46.765) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMGroupTests Executed 1 test, with 0 failures (0 unexpected) in 47.090 (47.090) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMLegendTests Executed 2 tests, with 0 failures (0 unexpected) in 198.763 (198.764) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMProbe Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.009 (0.009) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMStressTests Executed 4 tests, with 0 failures (0 unexpected) in 95.306 (95.309) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 698.613 (698.615) seconds
+PASSED TopOptFlowsTests.FlexibleBatchMXrayTests Executed 2 tests, with 0 failures (0 unexpected) in 159.360 (159.362) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.004 (0.005) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.FlexibleBatchNRefineTests Executed 4 tests, with 0 failures (0 unexpected) in 281.800 (281.801) seconds
+FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests Executed 4 tests, with 8 failures (0 unexpected) in 194.338 (194.339) seconds
+PASSED TopOptFlowsTests.FlexibleBatchVEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+PASSED TopOptFlowsTests.FlexibleBatchVHostedTests Executed 7 tests, with 0 failures (0 unexpected) in 377.844 (377.845) seconds
+PASSED TopOptFlowsTests.FlexibleCoreClaimTests Executed 4 tests, with 0 failures (0 unexpected) in 42.025 (42.026) seconds
+PASSED TopOptFlowsTests.FlexibleCurveEditTests Executed 7 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+PASSED TopOptFlowsTests.FlexibleDepthPrismTests Executed 11 tests, with 0 failures (0 unexpected) in 0.768 (0.769) seconds
+PASSED TopOptFlowsTests.FlexibleFEFieldTests Executed 12 tests, with 0 failures (0 unexpected) in 170.791 (170.793) seconds
+PASSED TopOptFlowsTests.FlexibleFEPassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.006 (0.006) seconds
+PASSED TopOptFlowsTests.FlexibleFEPassTests Executed 5 tests, with 0 failures (0 unexpected) in 18.501 (18.501) seconds
+PASSED TopOptFlowsTests.FlexibleFEVerifyGTests Executed 2 tests, with 0 failures (0 unexpected) in 35.048 (35.049) seconds
+PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests Executed 3 tests, with 0 failures (0 unexpected) in 0.223 (0.224) seconds
+PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 45.285 (45.285) seconds
+PASSED TopOptFlowsTests.FlexibleGroupPaletteTests Executed 7 tests, with 0 failures (0 unexpected) in 0.233 (0.234) seconds
+PASSED TopOptFlowsTests.FlexibleInPassCompositeTests Executed 10 tests, with 0 failures (0 unexpected) in 19.451 (19.452) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeFieldTests Executed 4 tests, with 0 failures (0 unexpected) in 2.927 (2.927) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeGradingTests Executed 2 tests, with 0 failures (0 unexpected) in 1.971 (1.972) seconds
+PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleLatticePassTests Executed 10 tests, with 0 failures (0 unexpected) in 13.691 (13.692) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests Executed 7 tests, with 0 failures (0 unexpected) in 10.650 (10.650) seconds
+PASSED TopOptFlowsTests.FlexibleLatticeUnderTests Executed 3 tests, with 0 failures (0 unexpected) in 2.632 (2.633) seconds
+PASSED TopOptFlowsTests.FlexibleLegendPlacementTests Executed 4 tests, with 0 failures (0 unexpected) in 0.010 (0.011) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageHookTests Executed 3 tests, with 0 failures (0 unexpected) in 0.240 (0.241) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests Executed 10 tests, with 0 failures (0 unexpected) in 2.779 (2.780) seconds
+FAILED TopOptFlowsTests.FlexibleMainPageRound4HostedTests Executed 2 tests, with 8 failures (0 unexpected) in 4.075 (4.075) seconds
+FAILED TopOptFlowsTests.FlexibleMainPageRound4Tests Executed 12 tests, with 2 failures (0 unexpected) in 37.139 (37.140) seconds
+PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 92.598 (92.599) seconds
+PASSED TopOptFlowsTests.FlexibleMainStageTests Executed 8 tests, with 0 failures (0 unexpected) in 19.779 (19.781) seconds
+PASSED TopOptFlowsTests.FlexibleMainViewsTests Executed 10 tests, with 0 failures (0 unexpected) in 24.718 (24.719) seconds
+PASSED TopOptFlowsTests.FlexibleMeetReviewTests Executed 9 tests, with 0 failures (0 unexpected) in 2.614 (2.615) seconds
+PASSED TopOptFlowsTests.FlexibleMeetTests Executed 10 tests, with 0 failures (0 unexpected) in 8.477 (8.478) seconds
+PASSED TopOptFlowsTests.FlexibleMergeR5SMTests Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleOverlayClipTests Executed 6 tests, with 0 failures (0 unexpected) in 0.719 (0.720) seconds
+PASSED TopOptFlowsTests.FlexibleOverlaySeamTests Executed 2 tests, with 0 failures (0 unexpected) in 0.728 (0.728) seconds
+PASSED TopOptFlowsTests.FlexiblePinchTests Executed 7 tests, with 0 failures (0 unexpected) in 6.014 (6.015) seconds
+PASSED TopOptFlowsTests.FlexiblePressAimReviewTests Executed 6 tests, with 0 failures (0 unexpected) in 4.498 (4.499) seconds
+PASSED TopOptFlowsTests.FlexiblePressAimTests Executed 13 tests, with 0 failures (0 unexpected) in 10.115 (10.117) seconds
+PASSED TopOptFlowsTests.FlexiblePressFixturesTests Executed 2 tests, with 0 failures (0 unexpected) in 0.283 (0.283) seconds
+PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests Executed 1 test, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+PASSED TopOptFlowsTests.FlexiblePressReframeTests Executed 2 tests, with 0 failures (0 unexpected) in 0.075 (0.075) seconds
+PASSED TopOptFlowsTests.FlexiblePressReviewTests Executed 12 tests, with 0 failures (0 unexpected) in 1.048 (1.049) seconds
+PASSED TopOptFlowsTests.FlexiblePressSaveTests Executed 8 tests, with 0 failures (0 unexpected) in 1.393 (1.394) seconds
+PASSED TopOptFlowsTests.FlexibleReadinessTests Executed 10 tests, with 0 failures (0 unexpected) in 3.683 (3.683) seconds
+PASSED TopOptFlowsTests.FlexibleRegionsTests Executed 3 tests, with 0 failures (0 unexpected) in 0.041 (0.041) seconds
+PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests Executed 4 tests, with 0 failures (0 unexpected) in 92.489 (92.490) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsTests Executed 11 tests, with 0 failures (0 unexpected) in 8.384 (8.385) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 3.370 (3.372) seconds
+PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests Executed 6 tests, with 0 failures (0 unexpected) in 68.273 (68.274) seconds
+PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+FAILED TopOptFlowsTests.FlexibleRound6HostedTests Executed 17 tests, with 7 failures (0 unexpected) in 276.528 (276.530) seconds
+PASSED TopOptFlowsTests.FlexibleRound6Tests Executed 11 tests, with 0 failures (0 unexpected) in 49.617 (49.620) seconds
+PASSED TopOptFlowsTests.FlexibleRowCopyTests Executed 4 tests, with 0 failures (0 unexpected) in 0.338 (0.338) seconds
+PASSED TopOptFlowsTests.FlexibleS1VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 2.347 (2.347) seconds
+FAILED TopOptFlowsTests.FlexibleS1bMainTagsTests Executed 5 tests, with 1 test skipped and 6 failures (0 unexpected) in 179.020 (179.020) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 92.162 (92.162) seconds
+FAILED TopOptFlowsTests.FlexibleSettingsRound4Tests Executed 14 tests, with 2 failures (0 unexpected) in 7.400 (7.402) seconds
+FAILED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests Executed 10 tests, with 1 failure (0 unexpected) in 2.002 (2.003) seconds
+PASSED TopOptFlowsTests.FlexibleShownValuesTests Executed 6 tests, with 0 failures (0 unexpected) in 1.264 (1.265) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests Executed 7 tests, with 0 failures (0 unexpected) in 21.319 (21.320) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests Executed 4 tests, with 0 failures (0 unexpected) in 0.909 (0.910) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests Executed 8 tests, with 0 failures (0 unexpected) in 8.227 (8.229) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests Executed 2 tests, with 0 failures (0 unexpected) in 62.670 (62.670) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests Executed 5 tests, with 0 failures (0 unexpected) in 9.454 (9.455) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests Executed 8 tests, with 0 failures (0 unexpected) in 0.012 (0.012) seconds
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests Executed 4 tests, with 0 failures (0 unexpected) in 36.071 (36.072) seconds
+PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests Executed 2 tests, with 0 failures (0 unexpected) in 0.488 (0.489) seconds
+PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPerfProbe Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests Executed 5 tests, with 0 failures (0 unexpected) in 1.150 (1.150) seconds
+PASSED TopOptFlowsTests.FlexibleSquishPlayerTests Executed 6 tests, with 0 failures (0 unexpected) in 0.710 (0.711) seconds
+PASSED TopOptFlowsTests.FlexibleSquishSolverTests Executed 5 tests, with 0 failures (0 unexpected) in 115.206 (115.207) seconds
+PASSED TopOptFlowsTests.FlexibleSquishTests Executed 11 tests, with 0 failures (0 unexpected) in 2.966 (2.967) seconds
+PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests Executed 5 tests, with 0 failures (0 unexpected) in 344.651 (344.652) seconds
+PASSED TopOptFlowsTests.FlexibleStageTests Executed 15 tests, with 0 failures (0 unexpected) in 1.655 (1.657) seconds
+PASSED TopOptFlowsTests.FlexibleSurfaceNavTests Executed 3 tests, with 0 failures (0 unexpected) in 0.095 (0.095) seconds
+PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests Executed 4 tests, with 0 failures (0 unexpected) in 0.050 (0.050) seconds
+PASSED TopOptFlowsTests.LatticeCellFitModeTests Executed 13 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+PASSED TopOptFlowsTests.LatticeCoreOwnerTests Executed 6 tests, with 0 failures (0 unexpected) in 29.869 (29.870) seconds
+PASSED TopOptFlowsTests.LatticeCorePlanRulesTests Executed 3 tests, with 0 failures (0 unexpected) in 1.782 (1.782) seconds
+PASSED TopOptFlowsTests.LatticeCoreProbeReportTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeOrganicSettingsTests Executed 7 tests, with 0 failures (0 unexpected) in 0.007 (0.007) seconds
+PASSED TopOptFlowsTests.LatticePageRound2Tests Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.063 (0.064) seconds
+PASSED TopOptFlowsTests.LatticePageTests Executed 25 tests, with 0 failures (0 unexpected) in 0.392 (0.393) seconds
+PASSED TopOptFlowsTests.LatticeRetentionControlTests Executed 45 tests, with 0 failures (0 unexpected) in 0.019 (0.022) seconds
+PASSED TopOptFlowsTests.LatticeSettingsPersistTests Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests Executed 2 tests, with 1 failure (0 unexpected) in 0.137 (0.137) seconds
+FAILED TopOptFlowsTests.LatticeSlotOriginTests Executed 5 tests, with 4 failures (0 unexpected) in 3.325 (3.326) seconds
+PASSED TopOptFlowsTests.LatticeStaleTypeTests Executed 6 tests, with 0 failures (0 unexpected) in 2.392 (2.393) seconds
+PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests Executed 3 tests, with 0 failures (0 unexpected) in 1.072 (1.072) seconds
+PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.LatticeVariantTests Executed 21 tests, with 0 failures (0 unexpected) in 2.342 (2.343) seconds
+PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests Executed 16 tests, with 0 failures (0 unexpected) in 0.584 (0.587) seconds
+PASSED TopOptFlowsTests.OrganicDeadWallParityTests Executed 7 tests, with 0 failures (0 unexpected) in 0.293 (0.294) seconds
+PASSED TopOptFlowsTests.OrganicForecastTests Executed 13 tests, with 0 failures (0 unexpected) in 0.164 (0.165) seconds
+PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests Executed 2 tests, with 0 failures (0 unexpected) in 1.571 (1.572) seconds
+PASSED TopOptFlowsTests.OrganicMainWiringTests Executed 10 tests, with 0 failures (0 unexpected) in 0.070 (0.071) seconds
+PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests Executed 3 tests, with 0 failures (0 unexpected) in 2.520 (2.520) seconds
+PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests Executed 5 tests, with 0 failures (0 unexpected) in 4.056 (4.057) seconds
+PASSED TopOptFlowsTests.OrganicShapeFitTests Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptFlowsTests.OrganicSizeCheckTests Executed 11 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds
+PASSED TopOptFlowsTests.OrganicSolidRimTests Executed 7 tests, with 0 failures (0 unexpected) in 0.037 (0.037) seconds
+PASSED TopOptFlowsTests.ProjectStoreTests Executed 5 tests, with 0 failures (0 unexpected) in 0.073 (0.073) seconds
+PASSED TopOptFlowsTests.RecommendThePrintedObjectTests Executed 8 tests, with 0 failures (0 unexpected) in 0.122 (0.122) seconds
+PASSED TopOptFlowsTests.RemoteRunnerE2ETests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+PASSED TopOptFlowsTests.SmoothingPageRound2Tests Executed 21 tests, with 0 failures (0 unexpected) in 0.318 (0.320) seconds
+PASSED TopOptFlowsTests.UndoHistoryTests Executed 10 tests, with 0 failures (0 unexpected) in 0.618 (0.619) seconds
+PASSED TopOptFlowsTests.VariantEntryGatingTests Executed 21 tests, with 0 failures (0 unexpected) in 0.244 (0.245) seconds
+PASSED TopOptFlowsTests.VariantRetentionTests Executed 15 tests, with 0 failures (0 unexpected) in 0.099 (0.100) seconds
+PASSED TopOptFlowsTests.ViewerTests Executed 33 tests, with 0 failures (0 unexpected) in 0.279 (0.281) seconds
+PASSED TopOptKitTests.FlexibleBridgeTests Executed 17 tests, with 0 failures (0 unexpected) in 0.740 (0.742) seconds
+PASSED TopOptKitTests.FlexibleSliceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+PASSED TopOptKitTests.FlexibleSquishFETests Executed 12 tests, with 0 failures (0 unexpected) in 37.204 (37.207) seconds
+PASSED TopOptKitTests.FlexibleSquishModulusTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.004) seconds
+PASSED TopOptKitTests.FlexibleSquishStepsTests Executed 6 tests, with 0 failures (0 unexpected) in 68.044 (68.045) seconds
+PASSED TopOptKitTests.FlexibleTimingProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+SUITE DONE 18:40:55
+
+## (5) The 6 re-pinned classes at f045795e
+Test Suite 'FlexibleMainPageRound4HostedTests' passed at 2026-10-10 18:41:53.783.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 4.018 (4.018) seconds
+Test Suite 'FlexibleMainPageRound4Tests' passed at 2026-10-10 18:42:26.723.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 32.939 (32.940) seconds
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-10 18:47:19.162.
+	 Executed 17 tests, with 0 failures (0 unexpected) in 292.435 (292.438) seconds
+Test Suite 'FlexibleS1bMainTagsTests' passed at 2026-10-10 18:51:03.551.
+	 Executed 5 tests, with 1 test skipped and 0 failures (0 unexpected) in 224.389 (224.389) seconds
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-10 18:51:09.210.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 5.657 (5.659) seconds
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-10 18:51:11.153.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 1.942 (1.943) seconds
+	 Executed 60 tests, with 1 test skipped and 0 failures (0 unexpected) in 561.380 (561.388) seconds
+	 Executed 60 tests, with 1 test skipped and 0 failures (0 unexpected) in 561.380 (561.389) seconds
+
+## (6) Goldens and stage-job hashes at the final code
+SWIFT_DETERMINISTIC_HASHING=1: 	 Executed 14 tests, with 0 failures (0 unexpected) in 14.753 (14.756) seconds — identical 38, DIFFERS 0
+unseeded:                       	 Executed 14 tests, with 0 failures (0 unexpected) in 14.806 (14.809) seconds — identical 32, DIFFERS 0, PART-SKIP 1
+FLEX-AP S1 tripwire · core 69b059611c26: control accepted · tilt accepted · edge accepted
+Stage-job hashes (stage_job_hashes.sh, inputs checked): angled_presses/stage_job_hashes_bv.txt — all 16 rows identical to S3's (and S2's, AP3's review).
+
+## (7) iOS
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath …/flexA1 build
+** BUILD SUCCEEDED **
+built at cb27ca27 (the final production code; the commits after it change tests and docs only). TopOpt.debug.dylib 76 865 808 B, 17:22:57.
+xcrun simctl install 147E56A1… (booted; NEVER launched): exit 0; the installed TopOpt.debug.dylib 17:22:57, 76 865 808 B, cmp-identical to the build;
+strings: 'Role colours off' 1, 'Prism after a pick' 1, 'flexible.mainViewSettings.' 1, 'FlexibleChromeClip' 1, core fingerprint '69b059611c26' 1.

@@ -1,6 +1,158 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · the last syncs, the side-branch merge, and what was pushed (2026-10-02) (read this first)
+## Round 6 · batch V — your two view settings on the main page, and nothing drawn on the part over the Settings panel (2026-10-10) (read this first)
+
+Item 4 (one set of groups) is reverted (7f710903): the main page's Selections and the Settings squeeze groups are two
+separate lists again. Your two answers of 2026-10-09 had been built inside item 4 and went with it; you asked for both back
+"as a view setting that can each be turned off at will". This batch does that, and fixes the item-4 verifier's m19 (the
+Settings page's dashed group outlines and curves read over its panel and legend). **The app was NOT launched**: it is
+installed on the iPad Pro 13 simulator (147E56A1), never opened. The pictures are offscreen (hosted pages, the shipping
+renderer), not device screenshots.
+
+**What you will see:**
+- **Two lines beside the main page's view buttons** (Dent heat · Stress · Lattice · Prisms) — on the buttons' own line,
+  left of them, in landscape; one line under them in portrait — side by side, each one tap (a check when on):
+  - **✓ Role colours off** — ON by default (your answer): no role colour on the main page's model — not #354's Selections
+    colours (your Bottom's Anchor green, a Load's colour, the Protect hatch), and not Flexible's own marks (the resting
+    bottom's cyan, a pressed face's green before its map, the selected face and its linked end). The Selections list keeps
+    its colours, and the Settings page keeps its marks. Tap it OFF and the model wears them again, as before.
+  - **✓ Prism after a pick** — ON by default (your answer): when the page opens, no group's prism and no mm number show,
+    even for the group that is active. Tap a group in Selections (tapping the active one again counts) and its prism and mm
+    show; a Pending group (no role yet — your "Group C") shows none. [Prisms] still shows every prism. Tap it OFF and the
+    active group's prism shows on open, as before.
+  - Each is kept **for that project, on this iPad**: reopen the project and they are as you left them; another project has
+    its own (both ON until you change them). They never change the project itself — no undo step, no "Save & Exit", never
+    the lattice.
+- **Settings page: nothing drawn on the part shows over the panel or the legend any more.** The lines — the dashed outline
+  of a face turned away (your [Rests] bottom, a group's far face, the Groups view), the X / Y curves and the stamp's
+  outline — now stop at the edge of the panel, the legend, the fix pop-up, the top line and its toast, the Exit row, the
+  view buttons, the player and the cube. The depth chip, the mm tags and the number discs hide under the panel, the legend,
+  the view buttons and the player, as they did; a reading is not drawn under any of it. The part itself (and its glass)
+  still shows faintly through the panel, as it always has — the panel is see-through by design.
+
+### Your answers this batch records
+| when | your words | what it means now |
+|---|---|---|
+| 2026-10-10 | "Please revert back to the way things were before, with the two separate groups." | reverted (7f710903), never merged again; tasks.md |
+| 2026-10-10 | "Bring both back as a view setting that can each be turned off at will." | the two lines above, both ON by default |
+
+### The sync first (S3, angled_presses/s3_sync.txt)
+- `69b05961` Sync: merge #358 `664f222c` (K1: a stepped plan's base cell travels on the wire; D5's two tolerances sized
+  from his plans). core/ and docs/ only, no conflict, no app/ file. #361 `ea325c44`, #354 `725dda46`, main `f932266f`:
+  nothing newer.
+- Core rebuilt (build_core.sh, exit 0): every slice carries `plan_base_cell_mm`; CoreFingerprint `69b059611c26`.
+- Goldens BEFORE any re-record: 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP
+  (unseeded); tripwire: control, tilt, edge accepted. **Every difference: none** (K1 is an optional key on a face lattice
+  region and a check on the stepped-plan path; no golden send has a lattice block, the app never writes the key).
+- The 16 stage-job hash rows identical to AP3's review and S2's (stage_job_hashes_s3.txt). Re-based only the labels
+  (MANIFEST.txt, probe_answers.json) — commit `202a39e1`.
+
+### Each item → where → pinned by (RED control; tests FIRST: 6 tests red, 58 failures — round6/batch_v/bv_red_runs.txt)
+| item | where | pinned by (red control) |
+|---|---|---|
+| "Role colours off", ON by default: no #354 role colour and no Flexible mark on the main page's model, in every view and Play-all turn; OFF brings both back; Settings keeps its marks | `FlexibleMainViewSettings` (new); `FlexibleMainStage+Views.tints` (roles dropped in Flexible code — H4's line unchanged); `FlexiblePageChannels.channels(roleMarks:)` from `refresh` and `playAllBaseTints` | `FlexibleBatchVHostedTests.testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack` (red on the stub: 49 152 cyan vertices, the Anchor green on face 0; positive controls: OFF → cyan, OFF → Anchor green) |
+| "Prism after a pick", ON by default: nothing on open; the picked group's prism and mm; re-tapping the active group counts; a Pending group none; [Prisms] every prism, the picked group's brighter; OFF: S1b's rule | `FlexibleMainViewSettings.prismGroup` / `selectionMoved` (project.$selection, from the stage's first look; not while Settings is up); `FlexibleMainStage.volumes` | `…testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber` (red on the stub: the active Top's [1] on open; positive control: OFF → [1] on open, Group C → [3]) |
+| kept per project on this device; never the project | `FlexibleMainViewSettingsStore` (UserDefaults, key `flexible.mainViewSettings.<project id>`), read in `ensure` | `…testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject` (red on the stub: a fresh stage reads both ON; the project's undoable state, undo history, Flexible settings, designInputs and action serial unmoved) |
+| one line each beside the view buttons (on their line in landscape, under them in portrait), clear of the buttons, the note, the left panel and the gizmo; the legends, the player and the prism tags keep out of them (they read `FlexibleMainViewToggles.frame`); a click flips each — 11" and 13" both ways and the iPad mini | `FlexibleMainViewToggles.settingsRow`, `settingsFrame`, `frame`; `FlexibleMainViewSettingChip` | `…testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything` (red on the stub: no chips at any size) |
+| m19: nothing drawn on the part shows inside the Settings panel, the legend, the pop-up, the top line, the Exit row or the view buttons | `FlexibleStagePage.chromeClip` handed to the overlays as `clip:`; the curves (FlexibleCurveEditor), the stamp's outline (FlexibleFaceStamp) and the dashed outlines (FlexibleStageViewTags, now a Canvas) cut through one helper, `FlexibleChromeClip` (overlapping holes stay holes); a reading under the chrome is not drawn; the toast's frame | `…testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend` (the page rendered with vs without the layer, pixel by pixel: red on today's code in the verifier's own states — 13p [Rests] 3471 px in the panel, 1796 in the legend; Group 2 2118 in the legend; Group 3 6221 in the panel; r5's curves 2599 in the fix pop-up at 11l; and the layer drew in every state: the measurement measures something); `…testTheRedControlTheLayerOverTheChromeAgain` (`controlOverlaysOverChrome`: 3471 / 1796 px again; and with the clip vs without it 0 px differ OUTSIDE the chrome — mutation M1, a clip leaking 40 pt: 2 206 px) |
+| the clip is every piece of chrome, moved into the stage's frame (which ignores the safe area) | `FlexibleStagePage.chromeClip` | `…testTheClipIsEveryPieceOfTheChromeInTheStagesFrame` (red on the stub: []) |
+
+### Hook lines in #354 / main files — NONE this batch
+`git diff 31b432d7..HEAD` on WorkspacePlaceholder, ProjectModel, MetalMeshView, LatticeSettings, SelectionModel, ForceModel,
+DesignSystem, ClearanceGeometry: empty. H4's line still hands #354's `roleTints` to `flexibleMain.tints`; the drop is in
+`FlexibleMainStage+Views.tints` (the autoclosure is not even evaluated while "Role colours off" is on). H5's line mounts
+FlexibleMainViewToggles, which now draws the two lines under its buttons. No LatticeStageMode case.
+
+Flexible track files: FlexibleMainViewSettings.swift (new: the two settings, their store, the pick rule); FlexibleMainStage
+(the stored settings, the selection's observation from `ensure`, `volumes` reads `prismGroup`, `refresh` passes
+`roleMarks`); FlexibleMainStage+Views (`tints` drops the roles); FlexibleMainStage+Squish (each Play-all turn's tints pass
+`roleMarks`); FlexiblePageChannels (`roleMarks:`, default true — the Settings page's call is unchanged); FlexibleMainStatusPill
+(the two chips, `settingsFrame`, `frame` holds them); FlexibleRowCopy (the two lines and their accessibility hints);
+FlexibleMainLatticeView (the note's band left of the settings when they share the row); FlexibleStagePage (`chromeClip`,
+`FlexibleChromeClip`, the overlays' `clip:`, the reading kept off the chrome, the toast's frame, the two test controls);
+FlexibleCurveEditor and FlexibleFaceStamp (their drawing clips through `FlexibleChromeClip`, `clip ?? keepOut`);
+FlexibleStageViewTags (the dashed outlines a Canvas, clipped).
+
+### Where the two settings are kept (a decision — say if you want it otherwise)
+In this iPad's own settings, under the project's id — not in the project file. The other view buttons on the main page
+(Dent heat, Stress, Lattice, Prisms) are not kept at all; these two are, because you asked for them per project. Kept
+outside the file, a tap is never an undo step, never makes Settings read "Save & Exit", never changes the lattice, and a
+copy of the project on another device opens with both ON.
+
+### What LOOKING at the evidence found (and changed)
+1. **The two lines under the buttons pushed your folded legend a column in at 11" landscape.** A first placement put them
+   one line under the four buttons at every size. FlexibleBatchMVerifyTests caught it in the first suite run: on 11"
+   landscape (834 pt tall) the folded card — on the very edge, as you tuned it in batch M — no longer fit beside the
+   chip column and moved 260 pt left. Now, in landscape, the two sit on the buttons' own line, left of them (the
+   "Lattice ready" note left of them, still ≥ 180 pt); in portrait (and the iPad mini) one line under the buttons, where a
+   portrait page has the height. V1d pins it: on the line iff landscape, the folded card on the very edge and the open
+   card in the trailing column at 11" and 13" both ways and the mini.
+2. **A mask over the whole overlay layer.** The first m19 fix masked everything drawn on the part. In its hosted evidence
+   the depth chip's purple glass rim read grey. Two captures of one build can also differ in that glass, so the mask is
+   not proven to be the cause — but nothing needs to touch the chip: now only the LINES are cut (the curves, the stamp's
+   outline, the dashed outlines), through one helper whose holes stay holes when they overlap; the chip, tags, discs and
+   handles keep out as views, as before. Pinned: with the clip vs without it, 0 pixels differ outside the chrome (red
+   control: a clip leaking 40 pt past the chrome — 2 206 px).
+3. **Role colours on your pad.** Every face of A1_0003 is tinted by Flexible itself (pressed maps, the resting bottom),
+   so #354's Selections colours have nowhere to show there; what you will see change is the bottom's faint cyan (seen
+   from below: main/BV_M_roles_*_from_below.png). The test proves #354's colours too, on face 0 taken out of Settings
+   (Bottom's Anchor green, OFF; none, ON).
+
+### Re-pinned (each traced to its cause, f045795e — 26 failures in 6 classes, then 60 tests, 1 skipped, 0 failures)
+| test | why it went red | re-pinned to |
+|---|---|---|
+| FlexibleRound6HostedTests R6-1a (×4) | "Role colours off" is ON by default: a map-less pressed face wears no mark on the main page | ON: none; OFF: round 6 item 1's plain pressed colour (both asserted) |
+| FlexibleRound6HostedTests R6-3l (×3) | "Prism after a pick" is ON by default: the Pending Group C shows no prism or number | the test pins S1b's rule, which is the setting OFF (set directly, never kept) |
+| FlexibleS1bMainTagsTests S1bV-1, S1bV-3 (×6) | the same, for Group C | the same |
+| FlexibleBatchCVerifyTests (×2, first suite run) | under the default the main page does not even evaluate #354's role colours | ON: not evaluated (asserted); the control runs with the setting OFF |
+| FlexibleMainPageRound4VerifyTests (a layout run before the final suite) | in portrait the settings' line sits under the row | the keep-out ends where the row — or the settings' line — ends; the note still costs the legends nothing |
+| FlexibleMainPageRound4Tests (×2) | in landscape the note sits left of the settings, not of the row | beside the settings on the row's line (landscape), beside the row (portrait) |
+| FlexibleMainPageRound4HostedTests (×8) | a third keep-out is drawn: the settings' line | that line is checked in its own frame; the row and the note as before |
+| FlexibleSettingsRound4Tests (×2), FlexibleSettingsVerifyD1Tests (×1) | source pins read the old even-odd clip and the old argument lists | the clip helper and the page's `clip:` argument (their pixel checks pass unchanged) |
+
+### Goldens, stage-job hashes, suite, iOS (raw: round6/batch_v/bv_runs.txt)
+- **Goldens at the final code:** 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded).
+  Every existing face press keeps its job bytes. **Stage-job hashes:** all 16 rows identical (stage_job_hashes_bv.txt).
+- **Targeted suite at cb27ca27** (144 classes by rule; no xctest death): TopOptFlowsTests 138 classes, 939 tests, 46 skipped,
+  39 failures in 9 classes — 13 known (FlexibleBatchNVerifyTests ×8, Xcode 27 text metrics; LatticeSimSolveTriggerTests ×1;
+  #354's LatticeSlotOriginTests ×4) and the 26 above, re-pinned and green; TopOptKitTests 6 classes, 39 tests, 2 skipped,
+  0 failures. LatticeStaleTypeTests 6/6. The load flakes (FlexibleBatchNRefineTests, FlexibleRound5SettingsHostedTests) did
+  not fire in this run (FlexibleBatchNRefineTests went red once in an earlier, stopped run at load ~40: noted, not loosened).
+- **iOS:** built at cb27ca27 and installed on 147E56A1 (booted, **never launched**): the installed TopOpt.debug.dylib is
+  cmp-identical to the build (17:22:57), carries "Role colours off", "Prism after a pick", the store key and core 69b059611c26.
+
+### Evidence (round6/batch_v/; offscreen — NOT device screenshots)
+- `BV_compare_*.png` — the Settings page hosted on your pad (13" portrait: [Rests], Group 2 · face 4, Group 3 · face 3) and
+  your r5's curves (11" landscape, with its fix pop-up), round 6 as pushed beside batch V. `before/` and `after/` hold every
+  state at 13" portrait and 11" landscape (the Groups and Prisms views too).
+- `main/BV_<size>_main_view_settings.png` — the main page's view row with the two lines: on the row in landscape, under it in
+  portrait and on the iPad mini.
+- `main/BV_M_*.png` — the main page's model by the shipping renderer: the resting bottom from below with "Role colours off"
+  ON and OFF; the prisms and mm tags on open (ON: none; OFF: Group C's 24.5 mm — your pad is saved with Group C active),
+  after picking Top (12.0 mm), after picking Group C (Pending: none).
+- Looked at: the dashed outlines and the curves stop at the panel's, the legend's and the pop-up's edges; the depth chip,
+  the stamp and its handle are unchanged; the two chips read whole at every size.
+
+### Not done / open
+- **Nothing seen on a device or the simulator.** Installed, never launched.
+- **The tags, the discs and the depth chip** keep out of the panel, the legend, the view buttons and the player (as
+  before), but not of the fix pop-up, the top line or the Exit row — only the lines are clipped there. None was seen there in
+  the measured states.
+- **The model itself shows through the 62 %-opaque panel** (it always has; the glass and the Metal outlines with it). Only
+  what is drawn ON TOP of the model was "over" the panel; that is what is cut now.
+- **The view settings are kept on this iPad only** (not in the project file) — see the decision above.
+- The player's own area was measured but not asserted (it animates between shots: 4 484 px once at 11" landscape with both
+  views on; nothing of the overlays was seen there).
+
+### Questions for you
+1. **Where they sit:** the two lines are on the view buttons' row in landscape and under the buttons in portrait. OK, or
+   would you rather have them in the legend card (they would then hide when the card is folded or empty)?
+2. **"Role colours off" also hides the Protect hatch** on the main page's model (it rides #354's role colours). Keep it so,
+   or should the hatch stay while the colours go?
+3. **Kept per iPad, not in the project** (no undo step, no "Save & Exit"). Should a copy of the project on another iPad
+   carry them?
+
+## Round 5 · the last syncs, the side-branch merge, and what was pushed (2026-10-02)
 
 **Synced, one way (merge `--no-ff`, never rebase), no conflicts:**
 
