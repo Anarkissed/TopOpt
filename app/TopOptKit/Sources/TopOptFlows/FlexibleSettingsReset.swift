@@ -31,8 +31,16 @@ extension FlexibleStageModel {
     /// ★ AP1: no presses — it is built new, so its `presses` is nil.
     public func freshSettings() -> FlexibleStageSettings {
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
-        s.weightUnit = settings.weightUnit
-        if let loads = deriveMainPageLoads() { _ = Self.adopt(loads, into: &s) }
+        let now = settings
+        s.weightUnit = now.weightUnit
+        // ★ ROUND 6 (item 4 verification): the link's bookkeeping is not an input — kept (the hands made here are still
+        // renamed with their group; the restore never links again); and each main-page hand comes back in ONE squeeze
+        // group with the hands it was squeezed with (his pad's Group C and "Group 3 · Face 5" stay one group)
+        s.groupLink = now.groupLink
+        s.madeHands = now.madeHands
+        var families: [UUID: Int] = [:]
+        for f in now.loadedFaces { if let h = f.weightFrom, families[h] == nil { families[h] = FlexibleSqueezeGroups.id(f) } }
+        if let loads = deriveMainPageLoads() { _ = Self.adopt(loads, into: &s, families: families) }
         return FlexibleSettingsMigration.migrated(s)
     }
 

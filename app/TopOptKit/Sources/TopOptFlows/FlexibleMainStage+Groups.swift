@@ -23,10 +23,12 @@ extension FlexibleMainStage {
         return m.groupColour(sq)
     }
 
-    /// H17: "Squeezed with Group 2 · Face 2" on a hand squeezed with another (nil: no line).
+    /// H17: "Squeezed with Group 2 · Face 2" on a hand squeezed with another (nil: no line). ★ ROUND 6 (item 4
+    /// verification): OFF the Flexible stage — Topology, Optimize, where his load cases changed at restore — a row the
+    /// restore's link made or changed says "Linked from Flexible Settings" until the one-time line has been shown.
     public func groupCaption(_ g: SelectionGroup, _ project: ProjectModel) -> String? {
-        guard visible, let m = current(project, .lattice), project.force.kind(for: g.id).isLoad,
-              let sq = m.squeezeGroup(ofHand: g.id) else { return nil }
+        guard visible, let m = current(project, .lattice) else { return FlexibleGroupMigration.caption(g, project) }
+        guard project.force.kind(for: g.id).isLoad, let sq = m.squeezeGroup(ofHand: g.id) else { return nil }
         let others = m.handIDs(sq).filter { $0 != g.id }.compactMap { id in project.selection.groups.first { $0.id == id }?.name }
         return others.isEmpty ? nil : FlexibleRowCopy.squeezedWith(others)
     }

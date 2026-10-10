@@ -159,6 +159,56 @@ final class FlexibleGroupSyncHostedTests: XCTestCase {
         snapshot(h, "I4_13p_settings_rests_ask.png")
     }
 
+    // MARK: - ★ ITEM 4 VERIFICATION: a disagreement as saved is asked on the Pending tab
+
+    /// ★ His pad saved by round 3's rules with the two pages DISAGREEING (Settings presses face 0 at his own 3 kg while
+    /// Bottom rests it; rests face 1 while Top presses it): the restore keeps both as saved (no group removed), and the
+    /// Pending tab asks each — "Face 0 rests (main page: Bottom)" [Squeeze it] [Keep it resting], "Face 1 is pressed (main
+    /// page: Top)" [Squeeze it] [It rests] — inside the panel at his 13" portrait. RED before the fix: the restore removed
+    /// Bottom and Top (FlexibleGroupSyncVerifyTests' control), and there was no Pending tab.
+    func testTheDisagreementsAreAskedOnThePendingTab() throws {
+        // FLEX_I4V_RED=1: the restore as round 6 first shipped (the tests-first run — it must go red)
+        FlexibleGroupLinks.controlEagerRestore = FlexibleGroupSyncVerifyTests.red
+        addTeardownBlock { @MainActor in FlexibleGroupLinks.controlEagerRestore = false }
+        FlexibleGroupMigration.controlSkip = true
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        FlexibleGroupMigration.controlSkip = false
+        let saved = r.project
+        var s = try XCTUnwrap(saved.lattice.flexible)
+        var f0 = try XCTUnwrap(s.face(0)); f0.role = "loaded"; f0.weightFrom = nil; f0.weightKg = 3; s.setFace(f0)
+        var f1 = try XCTUnwrap(s.face(1)); f1.role = "resting"; f1.weightFrom = nil; s.setFace(f1)
+        saved.lattice.flexible = s
+        let snap = try XCTUnwrap(saved.snapshot(savedAt: Date()))
+        let back = try JSONDecoder().decode(ProjectSnapshot.self, from: try JSONEncoder().encode(snap))
+        let p = ProjectModel(restoring: back, importedFile: try XCTUnwrap(saved.importedFile), importedMesh: try XCTUnwrap(saved.importedMesh))
+        let m = FlexibleStageModel(project: p, materialsPath: FlexibleHisProject.materialsPath,
+                                   stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        XCTAssertTrue(pumpUntil(180) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } }, "the scene and stacks")
+        pump(0.3)
+        m.refreshMainPageLoads()
+        XCTAssertEqual(Set(p.selection.groups.map(\.name)).isSuperset(of: ["Bottom", "Top"]), true, "★ the restore removed no group")
+        XCTAssertEqual(m.disagreements.map(\.line).sorted(), ["Face 0 rests (main page: Bottom)", "Face 1 is pressed (main page: Top)"])
+        XCTAssertTrue(FlexibleSettingsRailView.tabs(model: m).contains { $0.tab == .pending && $0.detail == "2 faces" }, "★ the Pending tab")
+        m.rail = .pending
+        let h = host(FlexibleStagePage(project: p, model: m, onExit: {}), size: Self.sizes[0].1)
+        pump(2.0)
+        let panel = try XCTUnwrap(local(h, "panel"), "the panel")
+        for name in ["restsAsk", "restsAskSqueeze", "restsAskKeep"] {
+            let f = try XCTUnwrap(local(h, name), "★ \(name) on the Pending tab")
+            XCTAssertTrue(panel.insetBy(dx: -1, dy: -1).contains(f), "\(name) inside the panel (\(f) vs \(panel))")
+            if name != "restsAsk" { XCTAssertGreaterThanOrEqual(f.height, 44, "\(name): a real target") }
+        }
+        snapshot(h, "I4V_13p_settings_pending_disagreements.png")
+        // face 0's card asks too
+        m.select(0)
+        m.rail = m.railTab(for: 0)
+        pump(1.0)
+        XCTAssertNotNil(local(h, "restsAskKeep"), "★ face 0's card asks")
+        snapshot(h, "I4V_13p_settings_face0_card_asks.png")
+    }
+
     // MARK: - EVIDENCE (opt-in): both pages on his pad, beside his img4
 
     /// ★ EVIDENCE (FLEX_I4_EVIDENCE_DIR=<dir>): his pad at his 13" portrait.

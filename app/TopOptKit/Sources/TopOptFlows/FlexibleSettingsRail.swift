@@ -69,7 +69,7 @@ extension FlexibleStageModel {
 
     /// ★ ROUND 6 (item 4): the Pending tab with nothing left on it (both fixes used, an undo) falls back to the first group.
     func leaveAnEmptyPendingTab() {
-        guard rail == .pending, pendingGroups.isEmpty else { return }
+        guard rail == .pending, pendingGroups.isEmpty, disagreements.isEmpty else { return }
         rail = .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
     }
 
@@ -208,8 +208,11 @@ struct FlexibleSettingsRailView: View {
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
         // ★ ROUND 6 (item 4, his answer): the main page's Pending groups, each with [Squeeze it] [It rests]
-        let pending = model.pendingGroups.count
-        if pending > 0 { out.append(Tab(tab: .pending, title: FlexibleRowCopy.railPending, detail: FlexibleRowCopy.groupCount(pending))) }
+        // ★ (item 4 verification) …and the faces the two pages disagree on as saved, each with its two fixes
+        let pending = model.pendingGroups.count, disagree = model.disagreements.count
+        if pending + disagree > 0 {
+            out.append(Tab(tab: .pending, title: FlexibleRowCopy.railPending, detail: FlexibleRowCopy.pendingCount(groups: pending, faces: disagree)))
+        }
         if !model.settings.loadedFaces.isEmpty { out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil)) }
         return out
     }
@@ -518,6 +521,15 @@ struct FlexiblePendingTab: View {
                                         seed: nil) { v in model.squeezePending(g.id, kg: model.weightUnit.toKg(v)) })
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("flexible-pending-\(i)")
+            }
+            // ★ (item 4 verification) a face the two pages disagree on as saved: its line and its two fixes (the card's)
+            ForEach(Array(model.disagreements.enumerated()), id: \.element.region) { i, a in
+                FlexibleRestsAskRows(model: model, ask: a, padTarget: $padTarget)
+                    .padding(.horizontal, DS.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSubtle.color))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("flexible-pending-conflict-\(i)")
             }
         }
     }

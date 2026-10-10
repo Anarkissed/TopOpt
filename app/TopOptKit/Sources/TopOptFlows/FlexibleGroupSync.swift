@@ -26,6 +26,7 @@
 
 import Foundation
 import simd
+import TopOptDesign
 import TopOptKit
 
 /// A main-page group with no role yet ("Pending…" on the main page), listed on Settings' Pending tab.
@@ -38,13 +39,22 @@ public struct FlexiblePendingGroup: Equatable, Identifiable, Sendable {
 }
 
 /// [Press it] on a face a main-page Anchor holds: asked once — "Face 0 rests (main page: Bottom)".
+/// ★ (item 4 verification) the same ask settles a face the two pages DISAGREE on, as an older project was saved (round 3
+/// let Settings press a face an Anchor holds, or rest one a Load presses): `conflict`, and `pressedOnMain` for the second
+/// ("Face 1 is pressed (main page: Top)" [Squeeze it] [It rests]). Never settled at restore — nobody is there to ask.
 public struct FlexibleRestsAsk: Equatable, Sendable {
     public let region: Int
     public let anchorName: String
     public let faceName: String
     public let kg: Double?
     public let into: Int?
-    public var line: String { FlexibleRowCopy.restsAsk(face: faceName, anchor: anchorName) }
+    /// The two pages disagree as saved (listed on the Pending tab until he settles it).
+    public var conflict = false
+    /// The main page PRESSES it (a Load group) while Settings rests it.
+    public var pressedOnMain = false
+    public var line: String {
+        pressedOnMain ? FlexibleRowCopy.pressedAsk(face: faceName, group: anchorName) : FlexibleRowCopy.restsAsk(face: faceName, anchor: anchorName)
+    }
 }
 
 /// The links' red controls (tests only).
@@ -57,6 +67,22 @@ enum FlexibleGroupLinks {
     nonisolated(unsafe) static var controlKeepMainGroup = false
     /// RED CONTROL: a fresh adopt ignores the hands' names (every new Load group its own squeeze group).
     nonisolated(unsafe) static var controlNoFamilies = false
+    /// RED CONTROL (item 4 verification): round 3's adopt — a face whose main-page group no longer presses or anchors it
+    /// stays pressed in Settings as his own (the pages disagree; the next restore linked it again).
+    nonisolated(unsafe) static var controlKeepOrphans = false
+    /// RED CONTROL (item 4 verification): the restore links as round 6 first shipped — taking faces out of groups that hold
+    /// them with the other role, joining hands that carry a lattice role, removing emptied groups, on EVERY restore.
+    nonisolated(unsafe) static var controlEagerRestore = false
+    /// RED CONTROL (item 4 verification): a main-page weight on ONE hand of a squeeze group stays on that hand alone.
+    nonisolated(unsafe) static var controlNoEqualise = false
+    /// RED CONTROL (item 4 verification): a hand made from a face leaving a Protect / keep-clear group carries nothing.
+    nonisolated(unsafe) static var controlDropAffixes = false
+    /// RED CONTROL (item 4 verification): hands renamed by the look of their name (any "Group N …").
+    nonisolated(unsafe) static var controlRenameByName = false
+    /// RED CONTROL (item 4 verification): a face a region that can't split holds is linked anyway (two groups hold it).
+    nonisolated(unsafe) static var controlTwoGroups = false
+    /// RED CONTROL (item 4 verification): a new hand takes #354's next colour and goes to the end of the list.
+    nonisolated(unsafe) static var controlPlainHands = false
 
     /// A name THIS code gives a hand ("Group 2", "Group 2 · Face 4") — renamed when its group's number or hands change.
     static func madeHere(_ name: String) -> Bool {
@@ -73,6 +99,18 @@ enum FlexibleGroupLinks {
 extension FlexibleRowCopy {
     /// "Face 0 rests (main page: Bottom)".
     public static func restsAsk(face: String, anchor: String) -> String { "\(face) rests (main page: \(fit(anchor, 16)))" }
+    /// "Face 1 is pressed (main page: Top)" — Settings rests a face a main-page Load presses (an older project).
+    public static func pressedAsk(face: String, group: String) -> String { "\(face) is pressed (main page: \(fit(group, 16)))" }
+    /// A pressed face on no main-page group (the restore left it as saved — his call), or one a group holds through a
+    /// region that cannot be split (a filter region): never in two groups.
+    public static let notOnMainPage = "Not on the main page yet"
+    public static func heldBy(_ group: String) -> String { fit("\(fit(group, 16)) holds it (a region that can't split)") }
+    /// H17 off the Flexible stage: a row the restore's link made or changed (until its one-time line was shown).
+    public static let linkedFromSettings = "Linked from Flexible Settings"
+    /// The Pending tab's detail: "1 group", "1 face", "1 group · 1 face".
+    public static func pendingCount(groups: Int, faces: Int) -> String {
+        [groups > 0 ? groupCount(groups) : nil, faces > 0 ? faceCount(faces) : nil].compactMap { $0 }.joined(separator: " · ")
+    }
     /// A hand's name among several: "Group 2 · Face 4", "Group 1 · Top A + Top B".
     public static func handName(number: Int, faces: [String]) -> String { fit("\(groupName(number)) · " + faces.joined(separator: " + "), 30) }
     /// H17's caption: "Squeezed with Group 2 · Face 2".
@@ -101,12 +139,25 @@ struct FlexibleGroupWorld {
     let latticeRoles: Set<UUID>
     /// Core's into-the-face direction when a stack exists (the model's), nil at restore.
     let load: (Int) -> SIMD3<Double>?
+    /// ★ (item 4 verification) AT RESTORE — the migration, with nobody there to ask: nothing he set is taken apart. No
+    /// face leaves a group that holds it with the other role, a keep-clear role, a lattice role, hand-placed primitives
+    /// or a region that cannot be split; no face joins a group carrying an affix or a lattice role; no group is
+    /// removed. Such a face stays exactly as it was saved, unlinked, and is listed in `held` (a disagreement is settled
+    /// in Settings' Pending tab — `FlexibleStageModel.disagreements`).
+    var atRestore = false
+    /// What the restore left as saved: region → why (the report's lines, the handoff's table).
+    var held: [Int: String] = [:]
 
     init(selection: SelectionModel, force: ForceModel, flexible: FlexibleStageSettings, x: FlexibleMainPageLoads.Expander,
          latticeRoles: Set<UUID>, load: @escaping (Int) -> SIMD3<Double>? = { _ in nil }) {
         self.selection = selection; self.force = force; self.flexible = flexible; self.x = x
         self.latticeRoles = latticeRoles; self.load = load
     }
+
+    /// The restore's rules are on (its red control restores the eager link).
+    var guarded: Bool { atRestore && !FlexibleGroupLinks.controlEagerRestore }
+
+    mutating func hold(_ r: Int, _ why: String) { held[r] = why }
 
     // MARK: reading
 
@@ -197,18 +248,63 @@ struct FlexibleGroupWorld {
     }
 
     /// Write `groups` back as ONE replay. A group THIS edit emptied is removed — unless it carries an affix, when it
-    /// stays, pending, its affixes kept.
+    /// stays, pending, its affixes kept. ★ (item 4 verification) at restore no group is ever removed.
     mutating func commit(_ groups: [SelectionGroup]) {
         let wasEmpty = Dictionary(uniqueKeysWithValues: selection.groups.map { ($0.id, Self.isEmpty($0)) })
         var keep: [SelectionGroup] = []
         for g in groups {
-            if Self.isEmpty(g), wasEmpty[g.id] == false {
+            if Self.isEmpty(g), wasEmpty[g.id] == false, !guarded {
                 if hasAffix(g.id) { makePending(g.id) } else { force.clearKind(g.id); continue }
             }
             keep.append(g)
         }
         selection.restore(groups: keep, active: selection.activeGroupID)
     }
+
+    /// Can every group holding `r` (but `keep`) let it go? (A filter region, a whole-face region: no.)
+    func canDetach(_ r: Int, keep: UUID? = nil) -> Bool {
+        guard !FlexibleGroupLinks.controlTwoGroups else { return true }
+        return selection.groups.allSatisfy { g in g.id == keep || !members(g).contains(r) || taking(r, outOf: g) != nil }
+    }
+
+    /// ★ (item 4 verification) at restore: why a group holding `r` (but `keep`) must keep it — a keep-clear role, a
+    /// lattice role, hand-placed primitives, a Load or an Anchor, a region that cannot be split; nil: only a group with
+    /// no role (its Protect / keep-clear affix goes with the face — `carried`).
+    func restoreBlock(_ r: Int, keep: UUID? = nil) -> String? {
+        for g in holders(r) where g.id != keep {
+            let k = force.kind(for: g.id)
+            if case .clearance = k { return "\u{201C}\(g.name)\u{201D} keeps it clear on the main page" }
+            if latticeRoles.contains(g.id) { return "\u{201C}\(g.name)\u{201D} puts a lattice under it on the main page" }
+            if !force.manualPrimitives(for: g.id).isEmpty { return "\u{201C}\(g.name)\u{201D} carries placed shapes" }
+            if k.isLoad || k.isAnchor { return "\u{201C}\(g.name)\u{201D} holds it as a \(k.isLoad ? "Load" : "Anchor")" }
+            if taking(r, outOf: g) == nil { return "\u{201C}\(g.name)\u{201D} holds it in a region that can't split" }
+        }
+        return nil
+    }
+
+    /// The affixes of the groups `r` would leave (Protect, keep-clear) — a hand made from it carries them, so the main
+    /// page protects exactly what it protected (the M2 stand's face 2 kept Group C's Protect).
+    struct Carried: Equatable {
+        var protect = false
+        var keepClear: KeepClearAffix?
+        var isEmpty: Bool { !protect && keepClear == nil }
+    }
+    func carried(_ r: Int, keep: UUID? = nil) -> Carried {
+        var c = Carried()
+        guard !FlexibleGroupLinks.controlDropAffixes else { return c }
+        for g in holders(r) where g.id != keep {
+            if force.isProtected(g.id) { c.protect = true }
+            if let k = force.keepClearAffix(for: g.id), k == .on { c.keepClear = k }
+        }
+        return c
+    }
+    mutating func give(_ c: Carried, to id: UUID) {
+        if c.protect { force.setProtected(id, true) }
+        if let k = c.keepClear { force.setKeepClearAffix(id, k) }
+    }
+
+    /// The main-page group holding `r` (the first), its name.
+    func holderName(_ r: Int) -> String? { holders(r).first?.name }
 
     /// No role, its affixes kept (ForceModel's public setters: clearKind clears everything, so they are put back).
     mutating func makePending(_ id: UUID) {
@@ -235,8 +331,11 @@ struct FlexibleGroupWorld {
         return ok
     }
 
-    /// `r` into group `id` — out of every other group first (a face belongs to one group).
-    mutating func attach(_ r: Int, to id: UUID) {
+    /// `r` into group `id` — out of every other group first (a face belongs to one group). ★ (item 4 verification) false,
+    /// and nothing moved, when a group holding it cannot let it go (a filter region): never in two groups.
+    @discardableResult
+    mutating func attach(_ r: Int, to id: UUID) -> Bool {
+        guard canDetach(r, keep: id) else { return false }
         var groups = selection.groups
         for i in groups.indices where groups[i].id != id && members(groups[i]).contains(r) {
             if let t = taking(r, outOf: groups[i]) { groups[i] = t }
@@ -248,6 +347,7 @@ struct FlexibleGroupWorld {
                 : SelectionGroup(id: g.id, name: g.name, colorIndex: g.colorIndex, faces: g.faces + [FaceID(r)], regionIDs: g.regionIDs)
         }
         commit(groups)
+        return true
     }
 
     /// A new main-page group (#354's addGroup: its colour cursor), named; the ACTIVE group stays his.
@@ -259,6 +359,47 @@ struct FlexibleGroupWorld {
         return id
     }
 
+    /// ★ (item 4 verification) a new HAND of squeeze group `gid`: recorded as made here (`madeHands` — the only names
+    /// renamed), in its squeeze group's colour on every page (a sibling hand's #354 colour, else the palette's nearest
+    /// to the squeeze colour — a pinch's two rows one colour on Topology too), and listed right after its group's other
+    /// hands (one group's rows together).
+    mutating func newHand(_ name: String, squeeze gid: Int) -> UUID {
+        let siblings = FlexibleGroupLinks.controlPlainHands ? [] : hands(ofSqueeze: gid).compactMap { group($0) }
+        let id = newGroup(name)
+        flexible.madeHands = (flexible.madeHands ?? []) + [id]
+        if FlexibleGroupLinks.controlPlainHands { return id }
+        var groups = selection.groups
+        if let i = groups.firstIndex(where: { $0.id == id }) {
+            let g = groups.remove(at: i)
+            let number = FlexibleSqueezeGroups.groups(flexible).first { $0.id == gid }?.number ?? (FlexibleSqueezeGroups.groups(flexible).count + 1)
+            let colour = siblings.last?.colorIndex ?? Self.nearestPaletteIndex(FlexibleSqueezeGroups.colour(number: number, in: flexible))
+            let at = siblings.last.flatMap { s in groups.firstIndex { $0.id == s.id } }.map { $0 + 1 } ?? groups.count
+            groups.insert(SelectionGroup(id: g.id, name: g.name, colorIndex: colour, faces: g.faces, regionIDs: g.regionIDs), at: at)
+            selection.restore(groups: groups, active: selection.activeGroupID)
+        }
+        return id
+    }
+
+    /// The #354 palette entry nearest a colour.
+    static func nearestPaletteIndex(_ c: RGBA) -> Int {
+        let p = DS.Color.groupPalette
+        func d(_ a: RGBA) -> Double { let dr = a.r - c.r, dg = a.g - c.g, db = a.b - c.b; return dr * dr + dg * dg + db * db }
+        return p.indices.min { d(p[$0]) < d(p[$1]) } ?? 0
+    }
+
+    /// Was hand `id` made here (renamed with its group)? Its id is on the list and its name is still one this code gives.
+    func madeHere(_ id: UUID) -> Bool {
+        guard let n = group(id)?.name, FlexibleGroupLinks.madeHere(n) else { return false }
+        return FlexibleGroupLinks.controlRenameByName || (flexible.madeHands ?? []).contains(id)
+    }
+
+    /// ★ (item 4 verification) a parked face pressed or rested again from Settings comes back with its squish detail.
+    mutating func unparkFace(_ r: Int) {
+        guard flexible.face(r) == nil, var parked = flexible.parkedFaces, let i = parked.firstIndex(where: { $0.faceRegionID == r }) else { return }
+        flexible.setFace(parked.remove(at: i))
+        flexible.parkedFaces = parked.isEmpty ? nil : parked
+    }
+
     mutating func setWeightFrom(_ r: Int, _ id: UUID?) {
         guard var f = flexible.face(r), f.weightFrom != id else { return }
         f.weightFrom = id
@@ -268,13 +409,19 @@ struct FlexibleGroupWorld {
     // MARK: linking
 
     /// Link pressed Flexible face `r` (squeeze group `gid`, stored) to its hand — found, taken or made (the order is in
-    /// the file comment). nil: a main-page Load group holds it without pressing it (a pull, a shear — his to settle there).
+    /// the file comment). nil: a main-page Load group holds it without pressing it (a pull, a shear — his to settle
+    /// there); ★ (item 4 verification) or it stays as saved — at restore (`held`), or held by a region that can't split.
     @discardableResult
     mutating func linkPressed(_ r: Int, squeeze gid: Int, kg: Double) -> UUID? {
         let l = loads()
         if let e = l.entry(r) {
             if e.role == .pressed { setWeightFrom(r, e.groupID); return e.groupID }
             if force.kind(for: e.groupID).isLoad { return nil }
+            // at restore a face an Anchor holds stays as saved — the pages disagree; he settles it in Settings
+            if guarded, e.role == .rests {
+                hold(r, "Settings presses it, \u{201C}\(e.groupName)\u{201D} rests it on the main page (Settings' Pending tab)")
+                return nil
+            }
         }
         for g in holders(r) where force.kind(for: g.id).isPending {
             let ms = members(g)
@@ -283,21 +430,44 @@ struct FlexibleGroupWorld {
             for m in ms { setWeightFrom(m, g.id) }
             return g.id
         }
-        if let h = hands(ofSqueeze: gid).first(where: { sameSide(r, $0) }) {
-            attach(r, to: h); setWeightFrom(r, h)
-            return h
+        if guarded, let why = restoreBlock(r) { hold(r, why); return nil }
+        guard canDetach(r) else {
+            hold(r, "\u{201C}\(holderName(r) ?? "a group")\u{201D} holds it in a region that can't split")
+            return nil
         }
-        let id = newGroup(FlexibleRowCopy.groupName(gid))
+        let c = carried(r)
+        // a hand of its squeeze group on its side: joined (their weight shared by area) — never with an affix to carry
+        // (it would spread to the hand's other faces), and at restore never a hand that carries one or a lattice role
+        if c.isEmpty, let h = hands(ofSqueeze: gid).first(where: { sameSide(r, $0) }) {
+            if guarded, hasAffix(h) {
+                hold(r, "joining \u{201C}\(group(h)?.name ?? "its hand")\u{201D} would put "
+                     + (latticeRoles.contains(h) ? "its lattice under it" : "its Protect / keep-clear on it") + " (his call)")
+                return nil
+            }
+            if attach(r, to: h) { setWeightFrom(r, h); return h }
+            return nil
+        }
+        let id = newHand(FlexibleRowCopy.groupName(gid), squeeze: gid)
         force.makeLoad(id); force.setDirection(id, .push); force.setWeight(id, kg: kg)
+        give(c, to: id)
         attach(r, to: id); setWeightFrom(r, id)
         return id
     }
 
     /// Link resting Flexible face `r` to an Anchor: the one that holds it; a role-less group holding only faces that rest
-    /// (it becomes the Anchor); else the first Anchor group; else a new "Rests".
+    /// (it becomes the Anchor); else the first Anchor group; else a new "Rests". ★ (item 4 verification) nil: it stays as
+    /// saved (at restore, or held by a region that can't split); a group's Protect / keep-clear goes with it.
     @discardableResult
-    mutating func linkResting(_ r: Int) -> UUID {
-        if let e = loads().entry(r), e.role == .rests { setWeightFrom(r, e.groupID); return e.groupID }
+    mutating func linkResting(_ r: Int) -> UUID? {
+        if let e = loads().entry(r) {
+            if e.role == .rests { setWeightFrom(r, e.groupID); return e.groupID }
+            if guarded {
+                hold(r, e.role == .pressed
+                     ? "Settings rests it, \u{201C}\(e.groupName)\u{201D} presses it on the main page (Settings' Pending tab)"
+                     : "\u{201C}\(e.groupName)\u{201D} holds it as a Load")
+                return nil
+            }
+        }
         for g in holders(r) where force.kind(for: g.id).isPending {
             let ms = members(g)
             guard ms.allSatisfy({ flexible.face($0).map { !$0.isLoaded } ?? false }) else { continue }
@@ -305,9 +475,18 @@ struct FlexibleGroupWorld {
             for m in ms { setWeightFrom(m, g.id) }
             return g.id
         }
+        if guarded, let why = restoreBlock(r) { hold(r, why); return nil }
+        guard canDetach(r) else {
+            hold(r, "\u{201C}\(holderName(r) ?? "a group")\u{201D} holds it in a region that can't split")
+            return nil
+        }
+        let c = carried(r)
         let anchor: UUID
-        if let a = selection.groups.first(where: { force.kind(for: $0.id).isAnchor })?.id { anchor = a }
-        else { anchor = newGroup("Rests"); force.makeAnchor(anchor) }
+        if c.isEmpty, let a = selection.groups.first(where: { force.kind(for: $0.id).isAnchor && !(guarded && hasAffix($0.id)) })?.id {
+            anchor = a
+        } else {
+            anchor = newGroup("Rests"); force.makeAnchor(anchor); give(c, to: anchor)
+        }
         attach(r, to: anchor); setWeightFrom(r, anchor)
         return anchor
     }
@@ -323,7 +502,7 @@ struct FlexibleGroupWorld {
                 if let a = direction(hs[i]), let b = direction(hs[j]), simd_length(a) > 1e-9, simd_length(b) > 1e-9,
                    simd_dot(simd_normalize(a), simd_normalize(b)) >= FlexibleMainPageLoads.straightCos {
                     for f in flexible.loadedFaces where f.weightFrom == hs[j] && FlexibleSqueezeGroups.id(f) == gid {
-                        attach(f.faceRegionID, to: hs[i]); setWeightFrom(f.faceRegionID, hs[i])
+                        if attach(f.faceRegionID, to: hs[i]) { setWeightFrom(f.faceRegionID, hs[i]) }
                     }
                     hs.remove(at: j)
                 } else { j += 1 }
@@ -332,21 +511,102 @@ struct FlexibleGroupWorld {
         }
     }
 
+    // MARK: following the main page (item 4 verification)
+
+    /// ★ HIS FORCE ANSWER, ON THE MAIN PAGE: a squeeze group's force is ONE number — a weight set on one of its hands (a
+    /// pinch side's row, the scrub or the pad) is every hand's, in the same undo step. `changed`: the hands whose weight
+    /// moved since the last look; when those of one squeeze group agree on a weight, its other hands take it. true:
+    /// something was written.
+    @discardableResult
+    mutating func equaliseHands(changed: Set<UUID>) -> Bool {
+        guard !FlexibleGroupLinks.controlNoEqualise, !changed.isEmpty else { return false }
+        var wrote = false
+        for g in FlexibleSqueezeGroups.groups(flexible) {
+            let hs = hands(ofSqueeze: g.id)
+            guard hs.count > 1 else { continue }
+            let moved = hs.filter { changed.contains($0) }
+            let kgs = moved.compactMap { force.kind(for: $0).weightKg }
+            guard let kg = kgs.first, kgs.allSatisfy({ abs($0 - kg) < 1e-9 }) else { continue }
+            for h in hs where !moved.contains(h) {
+                if let w = force.kind(for: h).weightKg, abs(w - kg) > 1e-9 { force.setWeight(h, kg: kg); wrote = true }
+            }
+        }
+        return wrote
+    }
+
+    /// The hands whose weight is not the one Settings' faces record (a weight set on the main page since the last
+    /// adopt): each linked face's weight is its share of its hand's.
+    func handsMovedSinceRecorded() -> Set<UUID> {
+        let l = loads()
+        var out = Set<UUID>()
+        for f in flexible.loadedFaces {
+            guard let h = f.weightFrom, let now = force.kind(for: h).weightKg, l.entry(f.faceRegionID)?.groupID == h,
+                  let was = l.groupKg(forRegion: f.faceRegionID, kg: f.weightKg) else { continue }
+            if abs(was - now) > 1e-6 * max(1, now) { out.insert(h) }
+        }
+        return out
+    }
+
     /// The Flexible faces re-read from the groups (the adopt every open runs — its own squeeze tag for a new Load group).
     @discardableResult
     mutating func readopt() -> [Int: Double] { FlexibleStageModel.adopt(loads(), into: &flexible) }
 
     /// Each hand named here follows its group: "Group N" alone, "Group N · Face X" among several.
     mutating func renameHands() {
+        // (a hand deleted since is no longer one made here)
+        if let made = flexible.madeHands {
+            let alive = made.filter { group($0) != nil }
+            if alive != made { flexible.madeHands = alive.isEmpty ? nil : alive }
+        }
         for g in FlexibleSqueezeGroups.groups(flexible) {
             let hs = hands(ofSqueeze: g.id)
             for h in hs {
-                guard let sg = group(h), FlexibleGroupLinks.madeHere(sg.name) else { continue }
+                // ★ (item 4 verification) a hand THIS code made, by id — a "Group 7" he typed is his name
+                guard let sg = group(h), madeHere(h) else { continue }
                 let faces = flexible.loadedFaces.filter { $0.weightFrom == h }.map { name($0.faceRegionID) }
                 let want = hs.count == 1 ? FlexibleRowCopy.groupName(g.number) : FlexibleRowCopy.handName(number: g.number, faces: faces)
                 if sg.name != want { selection.rename(h, to: want) }
             }
         }
+    }
+}
+
+// MARK: - main → Settings: a face its main-page group let go of (item 4 verification)
+
+extension FlexibleStageModel {
+    /// ★ HIS DELETE ANSWER, MIRRORED (main page → Settings): a face LINKED to a main-page group that no longer presses or
+    /// rests it — the group deleted, its role cleared, the face moved into a group with no role, a pull — is un-pressed:
+    /// it leaves Settings (the job, the rail), parked with its squish detail, and the main page's Pending group (if any)
+    /// shows on the Pending tab. Round 3 kept it pressed as his own: the pages disagreed until the next restore linked it
+    /// back (the verifier's P1, P2, P9). A face of his own (no link) is never parked.
+    nonisolated static func parkOrphans(_ s: inout FlexibleStageSettings, loads: FlexibleMainPageLoads, skip: Set<Int>) {
+        guard !FlexibleGroupLinks.controlKeepOrphans else { return }
+        var parked = s.parkedFaces ?? []
+        for f in s.faces where f.weightFrom != nil && !skip.contains(f.faceRegionID) {
+            if let e = loads.entry(f.faceRegionID), e.role != .ask { continue }
+            var p = f
+            p.weightFrom = nil
+            parked.removeAll { $0.faceRegionID == f.faceRegionID }
+            parked.append(p)
+            s.removeFace(f.faceRegionID)
+        }
+        s.parkedFaces = parked.isEmpty ? nil : parked
+    }
+
+    /// A parked face a main-page group presses or rests again comes back WITH its squish detail (curves, stamp, shape,
+    /// deepest) — its role, weight and link from the group (the adopt that follows).
+    nonisolated static func unpark(_ s: inout FlexibleStageSettings, loads: FlexibleMainPageLoads, skip: Set<Int>) {
+        guard var parked = s.parkedFaces, !parked.isEmpty else { return }
+        for p in parked where s.face(p.faceRegionID) == nil && !skip.contains(p.faceRegionID) {
+            guard let e = loads.entry(p.faceRegionID), e.role != .ask else { continue }
+            var f = p
+            f.role = e.role == .pressed ? "loaded" : "resting"
+            f.weightFrom = e.groupID
+            if e.role == .pressed { f.weightKg = e.weightKg }
+            s.setFace(f)
+            parked.removeAll { $0.faceRegionID == p.faceRegionID }
+        }
+        s.parkedFaces = parked.isEmpty ? nil : parked
     }
 }
 
@@ -420,6 +680,7 @@ extension FlexibleStageModel {
                 w.flexible.removedRegions?.removeAll { $0 == region }
                 if w.flexible.removedRegions?.isEmpty == true { w.flexible.removedRegions = nil }
             }
+            w.unparkFace(region)
             var f = w.flexible.face(region) ?? FlexibleFaceSettings(faceRegionID: region)
             f.role = "loaded"
             f.squeezeGroup = gid == FlexibleSqueezeGroups.first ? nil : gid
@@ -450,6 +711,7 @@ extension FlexibleStageModel {
                 w.flexible.removedRegions?.removeAll { $0 == region }
                 if w.flexible.removedRegions?.isEmpty == true { w.flexible.removedRegions = nil }
             }
+            w.unparkFace(region)
             var f = w.flexible.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
             f.role = "resting"
             f.weightFrom = nil
@@ -467,6 +729,9 @@ extension FlexibleStageModel {
         actionSerial += 1
         syncGroups { w in
             w.flexible.removeFace(region)
+            // (a face he deletes here never comes back from the parked list either — S7: reset values)
+            w.flexible.parkedFaces?.removeAll { $0.faceRegionID == region }
+            if w.flexible.parkedFaces?.isEmpty == true { w.flexible.parkedFaces = nil }
             let held = !w.holders(region).isEmpty
             let off = !FlexibleGroupLinks.controlKeepMainGroup && w.detach(region)
             if held, !off, !w.flexible.isRemoved(region) { w.flexible.removedRegions = (w.flexible.removedRegions ?? []) + [region] }
@@ -507,6 +772,7 @@ extension FlexibleStageModel {
                         w.flexible.removedRegions?.removeAll { $0 == r }
                         if w.flexible.removedRegions?.isEmpty == true { w.flexible.removedRegions = nil }
                     }
+                    w.unparkFace(r)
                     var f = w.flexible.face(r) ?? FlexibleFaceSettings(faceRegionID: r)
                     f.role = "loaded"; f.weightKg = kg; f.weightFrom = i == 0 ? id : nil
                     f.squeezeGroup = gid == FlexibleSqueezeGroups.first ? nil : gid
@@ -530,6 +796,7 @@ extension FlexibleStageModel {
                     w.flexible.removedRegions?.removeAll { $0 == r }
                     if w.flexible.removedRegions?.isEmpty == true { w.flexible.removedRegions = nil }
                 }
+                w.unparkFace(r)
                 var f = w.flexible.face(r) ?? FlexibleFaceSettings(faceRegionID: r, role: "resting")
                 f.role = "resting"; f.weightFrom = id
                 w.flexible.setFace(f)
@@ -539,20 +806,58 @@ extension FlexibleStageModel {
         if let r = p.regions.first { selectedRegion = r }
     }
 
-    // MARK: the anchored face's ask
+    // MARK: the anchored face's ask — and a face the two pages disagree on (item 4 verification)
 
     /// [Squeeze it] on the ask: the face leaves its Anchor and is pressed (one undo step). false: no force to press
-    /// with — the pad asks, and its answer presses without asking again.
+    /// with — the pad asks, and its answer presses without asking again. ★ On a disagreement (`a.conflict`): a face the
+    /// main page RESTS but Settings presses is pressed through its hand at its own weight; one the main page PRESSES but
+    /// Settings rests takes the main page's group.
     @discardableResult
-    public func squeezeAnchored() -> Bool {
-        guard let a = restsAsk else { return false }
-        restsAsk = nil
+    public func squeezeAnchored(_ ask: FlexibleRestsAsk? = nil) -> Bool {
+        guard let a = ask ?? restsAsk else { return false }
+        if restsAsk?.region == a.region { restsAsk = nil }
+        if a.pressedOnMain { return pressLinked(a.region, kg: nil, into: nil) }
         restsConfirmed = a.region
         return pressLinked(a.region, kg: a.kg, into: a.into)
     }
 
-    /// [Keep it resting].
-    public func keepResting() { restsAsk = nil; restsConfirmed = nil }
+    /// [Keep it resting] — ★ on a disagreement it rests in Settings too, with the main page's Anchor; [It rests] on a
+    /// face the main page presses takes it off that group to an Anchor (his choice, one undo step).
+    public func keepResting(_ ask: FlexibleRestsAsk? = nil) {
+        let a = ask ?? restsAsk
+        restsAsk = nil; restsConfirmed = nil
+        if let a, a.conflict || a.pressedOnMain { restLinked(a.region) }
+    }
+
+    /// ★ (item 4 verification) the faces the two pages disagree on, as an older project was saved — never settled at
+    /// restore (nobody is there to ask): Settings presses a face a main-page Anchor rests, or rests one a Load group
+    /// presses. Each is listed on the Pending tab and asked in its face's card until he settles it.
+    public var disagreements: [FlexibleRestsAsk] {
+        let s = settings
+        return s.faces.compactMap { f in
+            guard f.weightFrom == nil, let e = mainPageLoads.entry(f.faceRegionID), e.role != .ask,
+                  (e.role == .pressed) != f.isLoaded else { return nil }
+            return FlexibleRestsAsk(region: f.faceRegionID, anchorName: e.groupName, faceName: displayName(f.faceRegionID),
+                                    kg: f.isLoaded ? f.weightKg : nil,
+                                    into: f.isLoaded ? squeezeGroup(of: f.faceRegionID)?.id : nil,
+                                    conflict: true, pressedOnMain: e.role == .pressed)
+        }
+    }
+
+    /// The ask a face's card shows: the one he raised by pressing, else the disagreement it is in.
+    public func ask(for region: Int) -> FlexibleRestsAsk? {
+        if let a = restsAsk, a.region == region { return a }
+        return disagreements.first { $0.region == region }
+    }
+
+    /// The line under a pressed face on no main-page group: the restore left it as saved, or a region that can't split
+    /// holds it in a group (it is never in two). nil: it is on the main page.
+    public func notOnMainPageLine(_ region: Int) -> String? {
+        guard let f = settings.face(region), f.isLoaded, f.weightFrom == nil, mainPageLoads.entry(region) == nil,
+              let w = groupWorld() else { return nil }
+        if !w.canDetach(region), let n = w.holderName(region) { return FlexibleRowCopy.heldBy(n) }
+        return FlexibleRowCopy.notOnMainPage
+    }
 
     // MARK: what the pages show
 

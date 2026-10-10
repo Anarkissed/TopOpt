@@ -198,9 +198,19 @@ struct FlexibleFaceRows: View {
         }
         .background(askAnchor(r))
         // ★ ROUND 6 (item 4): [Press it] on a face a main-page Anchor holds asks once, here
-        if let a = model.restsAsk, a.region == r { FlexibleRestsAskRows(model: model, ask: a, padTarget: $padTarget) }
-        // [Rests] chosen here on a face the main page presses: one line, never hidden
-        if !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
+        // ★ (item 4 verification) …and a face the two pages disagree on as saved asks here too, until he settles it
+        let ask = model.ask(for: r)
+        if let a = ask { FlexibleRestsAskRows(model: model, ask: a, padTarget: $padTarget) }
+        // ★ (item 4 verification) a pressed face on no main-page group says so (the restore left it as saved, or a region
+        // that can't split holds it — never in two groups)
+        if let line = model.notOnMainPageLine(r) {
+            Text(line)
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1)
+                .accessibilityIdentifier("flexible-row-not-on-main")
+        }
+        // [Rests] chosen here on a face the main page presses: one line, never hidden (the ask's own line says it)
+        if ask?.pressedOnMain != true, !f.isLoaded, let e = model.mainPageLoads.entry(r), e.role == .pressed {
             Text(FlexibleRowCopy.pressedOnMainPage(group: e.groupName))
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1)
@@ -367,10 +377,10 @@ struct FlexibleRestsAskRows: View {
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .accessibilityIdentifier("flexible-rests-ask")
             HStack(spacing: DS.Space.s) {
-                Button { if !model.squeezeAnchored() { padTarget = "press-\(ask.region)" } } label: { FlexiblePendingTab.chip(FlexibleRowCopy.squeezeIt) }
+                Button { if !model.squeezeAnchored(ask) { padTarget = "press-\(ask.region)" } } label: { FlexiblePendingTab.chip(FlexibleRowCopy.squeezeIt) }
                     .buttonStyle(.plain).background(FlexiblePendingTab.frame("restsAskSqueeze"))
                     .accessibilityIdentifier("flexible-rests-ask-squeeze")
-                Button { model.keepResting() } label: { FlexiblePendingTab.chip(FlexibleRowCopy.keepResting) }
+                Button { model.keepResting(ask) } label: { FlexiblePendingTab.chip(ask.pressedOnMain ? FlexibleRowCopy.itRests : FlexibleRowCopy.keepResting) }
                     .buttonStyle(.plain).background(FlexiblePendingTab.frame("restsAskKeep"))
                     .accessibilityIdentifier("flexible-rests-ask-keep")
             }

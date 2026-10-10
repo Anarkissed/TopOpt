@@ -122,11 +122,13 @@ final class FlexibleGroupSyncTests: XCTestCase {
         let p = r.project
         print("FLEX-I4 A1_0003 with H18: main page \(Self.rows(p)) · Settings \(Self.faces(p))")
         print("FLEX-I4 A1_0003 report:\n  " + FlexibleGroupMigration.report(for: p.id).joined(separator: "\n  "))
+        // (item 4 verification: a new hand is listed right after its squeeze group's other hands — Group C's partner
+        // "Group 3 · Face 5" beside it, not below Group 2's two rows)
         XCTAssertEqual(Self.rows(p), [
             Row("Bottom", "anchor", [0]), Row("Top", "gravity 10.0000", [1]), Row("Group C", "push 2.0000", [3]),
-            Row("Group 2 · Face 4", "push 4.5359", [4]), Row("Group 2 · Face 2", "push 4.5359", [2]),
             Row("Group 3 · Face 5", "push 2.0000", [5]),
-        ], "★ every group on the main page; a pinch is one row per side")
+            Row("Group 2 · Face 4", "push 4.5359", [4]), Row("Group 2 · Face 2", "push 4.5359", [2]),
+        ], "★ every group on the main page; a pinch is one row per side; one group's rows together")
         XCTAssertEqual(Self.faces(p), [
             "1 loaded 10.0000 Top sq1", "0 resting 10.0000 Bottom sq0",
             "4 loaded 4.5359 Group 2 · Face 4 sq2", "2 loaded 4.5359 Group 2 · Face 2 sq2",
@@ -212,8 +214,8 @@ final class FlexibleGroupSyncTests: XCTestCase {
         let snap = p.editSnapshot
         p.performUndo()
         XCTAssertEqual(p.editSnapshot, snap, "Undo never re-migrates (nor un-migrates)")
-        XCTAssertEqual(FlexibleGroupMigration.takeNote(for: p.id), "Groups 2 and 3 are on the main page now", "the one-time line")
-        XCTAssertNil(FlexibleGroupMigration.takeNote(for: p.id), "…once")
+        XCTAssertEqual(FlexibleGroupMigration.takeNote(p), "Groups 2 and 3 are on the main page now", "the one-time line")
+        XCTAssertNil(FlexibleGroupMigration.takeNote(p), "…once")
         // idempotent
         let rows = Self.rows(p), faces = Self.faces(p)
         FlexibleGroupMigration.migrate(p)
@@ -249,34 +251,47 @@ final class FlexibleGroupSyncTests: XCTestCase {
             print("FLEX-I4 ===== \(label)\n  before: main \(Self.rows(pb))\n          Settings \(Self.faces(pb))"
                   + "\n  after:  main \(Self.rows(p))\n          Settings \(Self.faces(p))\n  report:\n    "
                   + FlexibleGroupMigration.report(for: p.id).joined(separator: "\n    "))
-            // idempotent everywhere
+            let report = FlexibleGroupMigration.report(for: p.id)
+            // idempotent everywhere: a second restore never links again (★ item 4 verification: once per project), and
+            // the link itself, run again on linked values, changes nothing
             let rows = Self.rows(p), faces = Self.faces(p)
             FlexibleGroupMigration.migrate(p)
             XCTAssertEqual(Self.rows(p), rows, "\(label): idempotent (main page)")
             XCTAssertEqual(Self.faces(p), faces, "\(label): idempotent (Settings)")
+            if let st = p.lattice.flexible, let mesh = p.viewerMesh {
+                let x = FlexibleMainPageLoads.Expander(faceRegions: p.faceRegions, mesh: mesh, regions: FlexibleRegions(model: p.faceRegions, mesh: mesh))
+                let again = FlexibleGroupMigration.linked(selection: p.selection, force: p.force, flexible: st, x: x,
+                                                          latticeRoles: Set(p.lattice.groupRoles.keys))
+                XCTAssertEqual(again.selection, p.selection, "\(label): the link is pure and idempotent (main page)")
+                XCTAssertEqual(again.force, p.force, "\(label): … (roles)")
+                XCTAssertEqual(again.flexible.faces, st.faces, "\(label): … (Settings)")
+            }
             let sb = pb.lattice.flexible.map(FlexibleSettingsMigration.migrated), sa = p.lattice.flexible.map(FlexibleSettingsMigration.migrated)
             switch label {
             case "A1_0003":
                 XCTAssertEqual(sa?.faces.map(\.weightKg), sb?.faces.map(\.weightKg), "A1_0003: no weight moved")
             case "his_0004":
+                // ★ ITEM 4 VERIFICATION (re-pinned): Top B is NOT joined to Top at restore — Top carries a lattice role, and
+                // joining would put Top's 4 mm lattice under Top B (the lattice-stage job's grading moved 5 → 1.17) before
+                // his ruling. Top B stays as saved (pressed in Settings at its own 10 kg, on no main-page group), said in
+                // the report; pressing it into group 1 in Settings joins it (his force answer: 5 + 5 — testTheForceIsOne…)
                 XCTAssertEqual(Self.rows(p), [
-                    Row("bottom", "anchor+protect", [0]), Row("Top", "gravity 10.0000", [1_000_103, 1_000_104]),
-                    Row("sides", "anchor+protect", [4, 2]), Row("Group 1 · Face 3", "push 10.0000", [3]),
-                    Row("Group 1 · Face 5", "push 10.0000", [5]),
-                ], "his 0004: Top B joins Top (its side); faces 3 and 5 their own hands; sides rest (it held exactly 2 + 4)")
+                    Row("bottom", "anchor+protect", [0]), Row("Top", "gravity 10.0000", [1_000_103]),
+                    Row("Group 1 · Face 3", "push 10.0000", [3]), Row("Group 1 · Face 5", "push 10.0000", [5]),
+                    Row("sides", "anchor+protect", [4, 2]),
+                ], "his 0004: Top A linked to Top, Top B kept as saved; faces 3 and 5 their own hands; sides rest (it held exactly 2 + 4)")
                 let s = try XCTUnwrap(sa)
-                let topA = try XCTUnwrap(s.face(FlexibleHisProject.topA)), topB = try XCTUnwrap(s.face(FlexibleHisProject.topB))
-                XCTAssertEqual(topA.weightKg + topB.weightKg, 10, accuracy: 1e-9, "★ his answer: 10 kg on Top A + Top B")
-                XCTAssertEqual(topA.weightKg, 5, accuracy: 0.01, "★ 5 + 5 (by area)")
-                XCTAssertEqual(s.face(3)?.weightKg, 10); XCTAssertEqual(s.face(5)?.weightKg, 10)
-                let rep = FlexibleGroupMigration.report(for: p.id).joined(separator: "\n")
-                XCTAssertTrue(rep.contains("Top B") && rep.contains("10 kg → 5 kg"), "the report says Top B's weight moved: \(rep)")
+                XCTAssertEqual(s.faces.map(\.weightKg), sb?.faces.map(\.weightKg), "★ his 0004: no weight moved")
+                XCTAssertNil(s.face(FlexibleHisProject.topB)?.weightFrom, "Top B: on no main-page group (kept as saved)")
+                let rep = report.joined(separator: "\n")
+                XCTAssertTrue(rep.contains("Top B (pressed 10 kg): KEPT AS SAVED: joining \u{201C}Top\u{201D} would put its lattice under it"),
+                              "the report says why Top B is kept: \(rep)")
             case "his_r5":
                 XCTAssertEqual(Self.rows(p), [
                     Row("bottom", "anchor+protect", [0]), Row("Top", "gravity 10.0000", [1_000_103, 1_000_105]),
-                    Row("sides", "pending+protect", [4, 2]), Row("Group 1 · Face 5", "push 10.0000", [5]),
+                    Row("Group 1 · Face 5", "push 10.0000", [5]), Row("sides", "pending+protect", [4, 2]),
                     Row("Group 2", "push 3.0000", [3]),
-                ], "r5: face 5 its own hand in group 1; face 3 group 2's one hand; sides untouched")
+                ], "r5: face 5 its own hand in group 1 (listed after Top, its group's other hand); face 3 group 2's one hand; sides untouched")
                 XCTAssertEqual(sa?.faces.map(\.weightKg), sb?.faces.map(\.weightKg), "r5: no weight moved")
             case "A1_0004":
                 XCTAssertEqual(Self.rows(p), [
@@ -290,7 +305,9 @@ final class FlexibleGroupSyncTests: XCTestCase {
                 XCTAssertEqual(c.faces, [15], "M2: face 2 left Group C …")
                 XCTAssertTrue(p.force.isProtected(c.id), "… which keeps its Protect")
                 let h = try group(p, "Group 1")
-                XCTAssertEqual(h.faces, [2]); XCTAssertEqual(Self.kind(p, h.id), "push 10.0000", "face 2's own hand at his 10 kg")
+                // ★ ITEM 4 VERIFICATION (re-pinned): the hand carries Group C's Protect — the main page protects exactly
+                // what it protected (face_protections unchanged in the lattice-stage job)
+                XCTAssertEqual(h.faces, [2]); XCTAssertEqual(Self.kind(p, h.id), "push 10.0000+protect", "face 2's own hand at his 10 kg, its Protect kept")
                 let s = try XCTUnwrap(sa), gB = try group(p, "Group B")
                 let fromB = s.loadedFaces.filter { $0.weightFrom == gB.id }
                 XCTAssertFalse(fromB.isEmpty, "Group B's faces are in Settings")
@@ -299,7 +316,7 @@ final class FlexibleGroupSyncTests: XCTestCase {
             case "102117B9":
                 XCTAssertNil(p.lattice.flexible, "no Flexible stage")
                 XCTAssertEqual(Self.rows(p), Self.rows(pb), "102117B9: nothing changes")
-                XCTAssertTrue(FlexibleGroupMigration.report(for: p.id).isEmpty)
+                XCTAssertTrue(report.isEmpty)
             default: break
             }
         }
@@ -415,11 +432,17 @@ final class FlexibleGroupSyncTests: XCTestCase {
         XCTAssertEqual(Self.kind(p, try group(p, "Group 2 · Face 2").id), "push 6.0000")
         XCTAssertEqual(m.settings.face(4)?.weightKg, 6); XCTAssertEqual(m.settings.face(2)?.weightKg, 6)
         XCTAssertEqual(m.groupForce(try XCTUnwrap(m.squeezeGroup(of: 4))), 6...6, "one number in Settings")
-        // one side: shared by area
+        // one side: shared by area (★ item 4 verification: Top B is kept as saved at restore — pressed into group 1 here,
+        // it joins Top, his own action: 10 kg on Top A + Top B = 5 + 5)
         let h = try his("his_0004").project
         let mh = model(h)
         mh.refreshMainPageLoads()
         let g1 = try XCTUnwrap(mh.squeezeGroup(of: FlexibleHisProject.topA))
+        XCTAssertTrue(mh.press(FlexibleHisProject.topB, into: g1.id), "Top B pressed into group 1 on its tab")
+        XCTAssertEqual(try group(h, "Top").regionIDs.map { FlexibleRegions.sectorBase + $0 }.sorted(), [FlexibleHisProject.topA, FlexibleHisProject.topB].sorted(),
+                       "★ it joins Top (its side)")
+        XCTAssertEqual((mh.settings.face(FlexibleHisProject.topA)?.weightKg ?? 0) + (mh.settings.face(FlexibleHisProject.topB)?.weightKg ?? 0), 10,
+                       accuracy: 1e-9, "★ his answer: 10 kg on Top A + Top B")
         XCTAssertEqual(mh.groupForce(g1), 10...10, "his 0004's group 1: one number")
         mh.setGroupForce(g1.id, kg: 12)
         let s = mh.settings

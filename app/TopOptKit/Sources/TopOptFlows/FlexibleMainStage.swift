@@ -246,6 +246,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ ROUND 6 (item 4 — his answer of 2026-10-09: "no group or role colour on the main page model"), test control
     /// only: #354's Selections role colours composed onto the model as before (the positive control of R6-1a's widening).
     var controlRoleTints = false
+    /// ★ ROUND 6 (item 4 verification), test control only: Flexible's own pressed-green / resting-cyan marks on the main
+    /// page's model as before (the bottom face cyan for good — the verifier's 49 152 cyan vertices on his pad).
+    var controlRoleMarks = false
     /// ★ ROUND 6 (item 4 — his answer of 2026-10-09: the prism and its mm "ONLY AFTER he picks a group in this session"),
     /// test control only: the active group's prism shows on open (S1b's rule).
     var controlPrismOnOpen = false
@@ -254,6 +257,9 @@ public final class FlexibleMainStage: ObservableObject {
     public internal(set) var sessionPicked = false
     var lastSelection: SelectionModel?
     var selectionObservation: AnyCancellable?
+    /// ★ ROUND 6 (item 4 verification): the main page's group edits followed into Settings live, on every stage
+    /// (FlexibleGroupWatch — made by `apply`, which H3's call reaches on every stage).
+    var groupWatch: FlexibleGroupWatch?
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).
@@ -651,13 +657,14 @@ public final class FlexibleMainStage: ObservableObject {
     func apply(_ project: ProjectModel, owned: Bool, pageUp: Bool) {
         frozen = pageUp
         visible = owned && !pageUp
+        watch(project)   // ★ ROUND 6 (item 4 verification): on EVERY stage — a pinch side's weight typed on Topology too
         guard owned else { return }
         let isNew = model == nil || projectID != project.id
         let m = ensure(project)
         if isNew { attached &+= 1 }
         guard visible else { return }
         // ★ ROUND 6 (item 4): the one-time line of what the restore linked (FlexibleGroupMigration), on the first open
-        if let n = FlexibleGroupMigration.takeNote(for: project.id) { note.post(.linked(n)) }
+        if let n = FlexibleGroupMigration.takeNote(project) { note.post(.linked(n)) }
         noteLoads()
         m.openScene()
         refresh()
@@ -768,7 +775,8 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
-                                              controlColumnColours: controlColumnHeat, groupColours: false)
+                                              controlColumnColours: controlColumnHeat, groupColours: false,
+                                              roleMarks: controlRoleMarks)   // ★ item 4 verification: no pressed / rest marks
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN

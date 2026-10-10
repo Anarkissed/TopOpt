@@ -67,16 +67,22 @@ public final class FlexibleMainNote: ObservableObject {
     var posts = 0
     /// How long a note stays (tests shorten or lengthen it).
     var seconds: Double = 4
+    /// RED CONTROL (item 4 verification): any note replaces the link's line (it was gone before he looked).
+    nonisolated(unsafe) static var controlReplaceLinked = false
     private var serial = 0
 
     public init() {}
 
     public func post(_ k: Kind) {
+        // ★ ROUND 6 (item 4 verification): the one-time line of the link is never replaced by "Still building" (it was gone
+        // before he looked), and it stays three times as long — a tap on it, or "Lattice ready", ends it
+        if case .linked = kind, k == .building, !Self.controlReplaceLinked { return }
         posts += 1
         serial &+= 1
         kind = k
         let s = serial
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+        let stay: Double = { if case .linked = k { return seconds * 3 } else { return seconds } }()
+        DispatchQueue.main.asyncAfter(deadline: .now() + stay) { [weak self] in
             guard let self, self.serial == s else { return }   // a newer note keeps its own time
             self.kind = nil
         }
@@ -184,6 +190,11 @@ struct FlexibleMainNoteView: View {
                     Button { main.showFromNote() } label: { capsule(k, showable: true) }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("flexible-main-note-show")
+                } else if case .linked = k {
+                    // ★ ROUND 6 (item 4 verification): the link's line goes when he taps it
+                    Button { note.clear() } label: { capsule(k, showable: false) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-main-note-linked")
                 } else {
                     capsule(k, showable: false)
                 }

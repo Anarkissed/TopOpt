@@ -189,6 +189,18 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// nil — never [] — when there are none (`setPresses`), so a project without presses encodes
     /// byte-identical. OPTIONAL so old projects decode.
     public var presses: [FlexiblePress]?
+    /// ★ ROUND 6 (item 4 verification): the restore's LINK of these groups to the main page's (FlexibleGroupMigration)
+    /// runs ONCE per project — this is its record (its version, its one-time line, the main-page groups it made or
+    /// changed). nil until it ran; a later restore never links again (a main-page edit is never undone by it). Not an
+    /// input of the designs (`designInputs` leaves it out). OPTIONAL so old projects decode.
+    public var groupLink: FlexibleGroupLinkRecord?
+    /// ★ ROUND 6 (item 4 verification): the main-page groups (hands) THIS code made — the only ones it renames, by id,
+    /// never by the look of a name (a "Group 7" he typed is his). OPTIONAL so old projects decode.
+    public var madeHands: [UUID]?
+    /// ★ ROUND 6 (item 4 verification): faces the MAIN page un-pressed (their group deleted, its role cleared, the face
+    /// moved into a group with no role) — their squish detail kept here, so the face comes back with it when a main-page
+    /// group presses or rests it again. Not in the job, not an input of the designs. OPTIONAL so old projects decode.
+    public var parkedFaces: [FlexibleFaceSettings]?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -216,6 +228,10 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         if !FlexibleGroupLinks.controlKeepWeightFrom {
             c.faces = c.faces.map { f in var f = f; f.weightFrom = nil; return f }
         }
+        // ★ (item 4 verification): the link's record, the hands made here and the parked faces are bookkeeping
+        c.groupLink = nil
+        c.madeHands = nil
+        c.parkedFaces = nil
         return c
     }
 

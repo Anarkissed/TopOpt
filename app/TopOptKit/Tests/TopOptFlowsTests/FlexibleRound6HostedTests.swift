@@ -223,9 +223,19 @@ final class FlexibleRound6HostedTests: XCTestCase {
             lines.append("\(name): inked vertices per turn — " + turns.joined(separator: " · ") + " · composed \(composed)")
         }
         s.stress = false; s.heat = true
-        // ── a pressed face with no map yet: the plain pressed colour, in the refresh AND in a Play-all turn
+        // ── ★ ROUND 6 ITEM 4 VERIFICATION (his answer of 2026-10-09: "no group or role colour on the main page model"; the
+        // verifier saw face 0 — his resting bottom — cyan for good, 49 152 vertices): Flexible's own role marks (resting
+        // cyan, pressed green) are off the main page's model too. Re-pinned: a map-less face is PLAIN (no tint).
+        let none = SIMD4<Float>(0, 0, 0, 0)
         XCTAssertNil(m.stacks[FlexFaceKey(region: 0, rotation: 0)], "premise: face 0 (resting) has no stack")
         m.selectedRegion = nil   // (a selected face would tint face 0 as its linked other end)
+        let tris0 = o.keptFace.indices.filter { o.keptFace[$0] == 0 }
+        func face0rest(_ t: [Float]) -> Set<SIMD4<Float>> { Set(tris0.flatMap { tri in (0..<3).map { Self.rgba(t, 3 * tri + $0) } }) }
+        s.controlRoleMarks = true; s.refresh()
+        XCTAssertEqual(face0rest(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.restingFace], "positive control: the resting face cyan (as before)")
+        s.controlRoleMarks = false; s.refresh()
+        XCTAssertEqual(face0rest(try XCTUnwrap(s.channels?.tints)), [none], "★ his resting bottom: no role mark on the main page")
+        // ── a pressed face with no map yet: no mark either, in the refresh AND in a Play-all turn
         m.edit { st in
             guard var f = st.face(0) else { return }
             f.role = "loaded"; f.squeezeGroup = 2
@@ -236,15 +246,18 @@ final class FlexibleRound6HostedTests: XCTestCase {
         func face0(_ t: [Float]) -> Set<SIMD4<Float>> { Set(tris.flatMap { tri in (0..<3).map { Self.rgba(t, 3 * tri + $0) } }) }
         let turns = s.playAllBaseTints(m, scaleMM: 1)   // (fe is still the landed sims': no refresh since the edit)
         XCTAssertFalse(turns.isEmpty, "the Play-all turns' tints")
-        for (id, t) in turns { XCTAssertEqual(face0(t), [FlexibleColours.loadedFace], "\(id)'s turn: face 0 pressed, no map — the plain pressed colour") }
+        for (id, t) in turns { XCTAssertEqual(face0(t), [none], "★ \(id)'s turn: face 0 pressed, no map — no mark") }
         s.refresh()
         XCTAssertNil(m.stacks[FlexFaceKey(region: 0, rotation: 0)], "still no map for face 0")
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "the refresh: the plain pressed colour")
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "★ the refresh: no mark")
+        s.controlRoleMarks = true; s.refresh()
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "positive control: the plain pressed colour (round 6 item 1)")
+        s.controlRoleMarks = false; s.refresh()
         // ★ RED CONTROL: the channels with the group colours (round 4–5) — face 0 wears Group 2's pink
         let red = FlexiblePageChannels.channels(model: m, overlay: o, xray: false, drawnLattice: nil, groupColours: true)
         let pink = FlexibleColours.token(m.groupColour(number: 2), FlexibleColours.loadedFace.w)
         XCTAssertEqual(face0(try XCTUnwrap(red.tints)), [pink], "control: groupColours true tints the map-less face pink")
-        lines.append("no map: face 0 \(face0(try XCTUnwrap(s.channels?.tints)) == [FlexibleColours.loadedFace] ? "plain" : "TINTED") (control: pink)")
+        lines.append("no map: face 0 \(face0(try XCTUnwrap(s.channels?.tints)) == [none] ? "no mark" : "TINTED") (controls: pink, pressed green)")
         // ── ★ ROUND 6 ITEM 4: the ROLE colours, where they would show — a face Flexible does not tint (face 0 out of
         // Settings while Bottom still anchors it on the main page), on the solid model (no X-ray ghost over it)
         m.edit({ st in st.removeFace(0) }, recompute: false)
