@@ -1,0 +1,51 @@
+# Round 6 batch V (task 2026-09-29-flexible-screens), S3 — the sync before batch V: merge-only (git merge --no-ff), never
+# rebased, never forced, never pushed. Base 31b432d7 (the item-4 revert 7f710903 + AP2/AP3 merged; core 4c7bb64c9cf1).
+# This Mac, Xcode 27, Debug. 2026-10-10.
+#
+# (1) THE MERGE (git fetch origin first; heads re-checked with git ls-remote before this file — unchanged):
+#   69b05961  #358 origin/claude/raster-receipt-fields 664f222c — the one commit past the merged e8a01f7d:
+#             664f222c K1: an any-step plan's BASE cell travels on the wire (lattice.regions[].geometry.plan_base_cell_mm,
+#                      required on every region a plan places cells in; a planned region without it is refused by name);
+#                      D5's two tolerances sized from his real plans (the bead check at 1 um, the cap at 1e-6 relative).
+#             core/ and docs/ only (13 files: job.hpp, job.cpp, run_job.cpp, stepped_plan.cpp, six organic plan fixtures,
+#             test_slot_origin.cpp, the pr358 removed-symbols doc). No conflict: job.hpp, job.cpp and run_job.cpp
+#             auto-merged. No app/ file (git diff --stat 31b432d7 69b05961 -- app: empty), no Flexible hook line.
+#   origin/claude/flexible-squish-maths ea325c44 (#361), origin/claude/topopt-holes-quilting-298212 725dda46 (#354),
+#   origin/main f932266f — nothing newer: all three already contained, no merge commit.
+#
+# (2) CORE: app/scripts/build_core.sh at 69b05961, exit 0, 15:12:27 -> 15:16:39.
+#   TopOptCore.xcframework  macos-arm64 15:13 (6 991 968 B) · ios-arm64-simulator 15:15 (7 086 080 B) · ios-arm64 15:16
+#   (7 000 760 B) — the slices were 2026-10-09 17:29-17:31 (4c7bb64c) before.
+#   Markers, strings per slice (every slice): "plan_base_cell_mm" 4; "must be finite and > 0 (got" 1 (K1's parse refusal).
+#     Control for the absence: the source the old slices were built from has no such key
+#     (git show 31b432d7:core/src/cli/job.cpp | grep -c plan_base_cell_mm → 0).
+#   CoreFingerprint.generated.swift regenerated 15:16, value "69b059611c26" (was "4c7bb64c9cf1"; git-ignored).
+#   swift build --build-tests: Build complete! (136.14 secs.) — TopOptFlowsTests 15:23 carries "69b059611c26" (1),
+#   not "4c7bb64c9cf1" (0), and "plan_base_cell_mm" (4).
+#
+# (3) THE AP0/S1 GOLDENS AT THE MERGED HEAD, BEFORE ANY RE-RECORD
+#   SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleAngledGoldenTests|FlexiblePressProbeTripwireTests)/'
+#     Executed 14 tests, with 0 failures (0 unexpected) in 18.607 (18.609) seconds — 38 "GOLDEN … identical", 0 DIFFERS
+#   the same unseeded (CI's mode):
+#     Executed 14 tests, with 0 failures (0 unexpected) in 17.831 (17.833) seconds — 32 identical, 0 DIFFERS, 1 PART-SKIP
+#     (the subtrees' RAW bytes need deterministic hashing; canonical subtrees and flexible blocks compared)
+#   FLEX-AP S1 tripwire · core 69b059611c26: control accepted · tilt accepted · edge accepted
+#   FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+#   EVERY DIFFERENCE: NONE. Why none could move, read in the code: K1 adds an OPTIONAL key to a face lattice region's
+#   geometry (parse_job) and a check inside run_job.cpp's stepped-plan path; the tolerances live in stepped_validate_plan.
+#   None of the 14 golden sends carries a "lattice" block or "stepped_cells", the app never writes plan_base_cell_mm
+#   (grep over app/TopOptKit/Sources: 0) and never calls stepped_validate_plan, so nothing the goldens reach is touched.
+#
+# (4) THE STAGE-JOB HASHES (stage_job_hashes.sh, unchanged; inputs checked against s0_frozen/SHA256SUMS — none moved;
+#   SWIFT_DETERMINISTIC_HASHING=1, TOPOPT_JOB_REPEAT=3): stage_job_hashes_s3.txt — ALL 16 ROWS IDENTICAL to AP3's review
+#   (and to S2's): diff of the non-comment lines empty, the source sums identical, every row "repeats 3: identical",
+#   control+ moves (ff25ee7e926931d6), control- does not (8daeed3065787165). None of the 16 dumped jobs carries
+#   "stepped_cells" (0 of 16), so K1 cannot apply when core runs them either.
+#
+# (5) RE-BASED (after (3) was reported above): RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=69b05961 swift test
+#   --skip-build --filter 'TopOptFlowsTests\.FlexibleAngledGoldenRecorder/'
+#     Executed 10 tests, with 0 failures (0 unexpected) in 13.421 (13.423) seconds
+#   git diff afterwards: MANIFEST.txt (base 4c7bb64c -> 69b05961, core 4c7bb64c9cf1 -> 69b059611c26) and probe_answers.json
+#   (base / core labels; control, tilt, edge still null = accepted); every other golden re-written byte-identical.
+#   FlexibleAngledGoldenTests' header names the S3 base (3 comment lines). The goldens run again in batch V's targeted
+#   suite (its raw runs: round6/batch_v/bv_suite.txt).

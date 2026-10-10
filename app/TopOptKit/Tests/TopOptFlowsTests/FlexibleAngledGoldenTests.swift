@@ -4,8 +4,9 @@
 // S1 re-based them after the #361 sync, at the final merge 11b264e8 (every difference attributed in
 // docs/handoffs/evidence/2026-09-29-flexible-screens/angled_presses/s1_goldens.txt); S1b re-based them at
 // 907df081 with no difference (angled_presses/s1b_sync.txt); S2 re-based them at 4c7bb64c (the #358 e8a01f7d
-// sync) with no difference (angled_presses/s2_sync.txt; MANIFEST.txt names the base), and every later
-// batch must equal that base.
+// sync) with no difference (angled_presses/s2_sync.txt); batch V re-based them at 69b05961 (the #358 664f222c
+// sync) with no difference (angled_presses/s3_sync.txt; MANIFEST.txt names the base), and every later batch
+// must equal that base.
 //
 // Each comparison has its RED control beside it — a pin that can actually SEE the change it guards:
 //   * run-job bytes: one face at +0.001 kg changes exactly ONE line (weight_n), and a one-byte edit
