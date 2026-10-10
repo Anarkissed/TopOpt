@@ -2161,6 +2161,37 @@ public enum TopOptKit {
         return CoreRegionOwners(includes: raw[0], owners: Array(raw.dropFirst()))
     }
 
+    /// ★★ ONE OUTLINE AS SIMPLE LOOPS (reviewer, 2026-10-10, ruling P4): a face region's offset rings
+    /// unioned into simple, non-overlapping loops (Clipper2, vendored in the bridge), because core reads
+    /// `outline_uv` even-odd and two overlapping rings would read their overlap as a hole. `isHole[k]`
+    /// marks ring k a hole (subtracted). Coordinates rounded to 1/`scale` mm. An empty result means
+    /// every ring shrank away. nil when the bridge refuses (`lastCoreRefusal` says why).
+    public static func outlineUnion(_ rings: [[SIMD2<Double>]], isHole: [Bool], scale: Double = 1e6) -> [[SIMD2<Double>]]? {
+        var flat: [Double] = [], sizes: [Int32] = [], holes: [Int32] = []
+        for (i, r) in rings.enumerated() {
+            sizes.append(Int32(r.count)); holes.append(i < isHole.count && isHole[i] ? 1 : 0)
+            for q in r { flat += [q.x, q.y] }
+        }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            sizes.withUnsafeBufferPointer { sp in
+                holes.withUnsafeBufferPointer { hp in
+                    Array(topoptbridge.outline_union(fp.baseAddress, flat.count / 2, sp.baseAddress, hp.baseAddress,
+                                                     sizes.count, scale)).map { Double($0) }
+                }
+            }
+        }
+        guard let n = raw.first, n >= 0 else { return nil }
+        var out: [[SIMD2<Double>]] = [], k = 1
+        for _ in 0..<Int(n) {
+            guard k < raw.count else { return nil }
+            let m = Int(raw[k]); k += 1
+            guard m >= 0, k + 2 * m <= raw.count else { return nil }
+            out.append((0..<m).map { SIMD2(raw[k + 2 * $0], raw[k + 2 * $0 + 1]) })
+            k += 2 * m
+        }
+        return out
+    }
+
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.

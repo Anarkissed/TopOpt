@@ -421,6 +421,30 @@ public enum LatticeFaceOutline {
         return (nearestIsSeam && nearest <= bound) ? -sd : sd
     }
 
+    /// ★ Which loops are HOLES (P4, 2026-10-10): a loop whose interior point lies inside an odd number of
+    /// the other loops. The interior point is the midpoint of the loop's longest edge, a hair toward its own
+    /// interior, so loops that only touch (fragments sharing an edge or a vertex) stay outers.
+    public static func holeLoops(_ loops: [Loop]) -> [Bool] {
+        loops.indices.map { i in
+            let loop = loops[i]
+            guard loop.count >= 3 else { return false }
+            var area2 = 0.0, best = -1.0, bi = 0
+            for k in loop.indices {
+                let a = loop[k], b = loop[(k + 1) % loop.count]
+                area2 += a.x * b.y - b.x * a.y
+                let l = simd_length(b - a)
+                if l > best { best = l; bi = k }
+            }
+            guard abs(area2) > 1e-12, best > 0 else { return false }
+            let a = loop[bi], b = loop[(bi + 1) % loop.count]
+            let left = SIMD2<Double>(-(b - a).y, (b - a).x) / best
+            let p = 0.5 * (a + b) + (area2 > 0 ? left : -left) * Swift.min(1e-3, 0.01 * best)
+            var depth = 0
+            for j in loops.indices where j != i && contains(p, loops: [loops[j]]) { depth += 1 }
+            return depth % 2 == 1
+        }
+    }
+
     public static func halfExtents(_ loops: [Loop]) -> (halfU: Double, halfW: Double)? {
         var lo = SIMD2<Double>(.greatestFiniteMagnitude, .greatestFiniteMagnitude)
         var hi = SIMD2<Double>(-.greatestFiniteMagnitude, -.greatestFiniteMagnitude)

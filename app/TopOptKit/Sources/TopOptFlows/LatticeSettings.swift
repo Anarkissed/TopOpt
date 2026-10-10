@@ -278,7 +278,18 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // expand key, so the outline itself is offset by it (outward for a grow, inward
         // for a shrink) on every edge that is not a seam
         let e = inPlaneOffsetMM
-        return outlineLoops.enumerated().map { (l, loop) in
+        // ★★ P4 (the reviewer, 2026-10-10, approved by the maintainer): the sent loops are SIMPLE. Core reads
+        // outline_uv even-odd, so rings offset one by one could overlap (63 of 110 multi-loop regions on
+        // 102117B9) and core read the overlap as a hole; an expand GREW a hole (offsetRing offsets each loop
+        // about its own interior); and a shrink that ate a loop came back unshrunk. Now: a loop is a hole by
+        // its nesting (an interior point inside an odd number of the other loops), a hole's offset is
+        // reversed so an expand shrinks it, a ring the offset ate is gone, and the rings are unioned through
+        // the guarded bridge (Clipper2) into simple loops — outers' union minus holes'. Nothing to offset ⇒
+        // the raw loops, byte for byte (core and the preview read them even-odd alike).
+        let hole = LatticeFaceOutline.holeLoops(outlineLoops)
+        var rings: [[SIMD2<Double>]] = [], isHole: [Bool] = []
+        var moved = false
+        for (l, loop) in outlineLoops.enumerated() {
             let sm = l < outlineSeams.count ? outlineSeams[l] : []
             let tl = l < outlineSeamTilt.count ? outlineSeamTilt[l] : []
             let cl = l < outlineSeamDepthMM.count ? outlineSeamDepthMM[l] : []
@@ -289,9 +300,24 @@ public struct LatticeRegionSpec: Equatable, Sendable {
                 let cap = i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM
                 return -(cap * tl[i])
             }
-            guard grow.contains(where: { abs($0) > 1e-9 }) else { return loop }
-            return LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [], edgeOffset: grow)
+            guard grow.contains(where: { abs($0) > 1e-9 }) else {
+                rings.append(loop); isHole.append(hole[l]); continue
+            }
+            moved = true
+            // a hole's interior is the loop's own: growing the region moves its edges INTO the hole
+            let ring = LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [],
+                                                       edgeOffset: hole[l] ? grow.map { -$0 } : grow)
+            // `offsetRing` hands back the input loop when the offset eats every edge: that ring is gone
+            if ring == loop { continue }
+            rings.append(ring); isHole.append(hole[l])
         }
+        guard moved else { return outlineLoops }
+        guard let simple = TopOptKit.outlineUnion(rings, isHole: isHole) else {
+            NSLog("DIAG wireOutlineLoops: the outline union was refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — "
+                  + "sending the offset rings un-unioned")
+            return rings
+        }
+        return simple
     }
 
     public func wireDictionary(frameAxes: Bool) -> [String: Any] {

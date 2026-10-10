@@ -1483,6 +1483,18 @@ std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
 std::vector<int32_t> stepped_region_owners(const std::string& job_json, const double* xyz,
                                            std::size_t point_count);
 
+// ★★ ONE OUTLINE AS SIMPLE LOOPS (reviewer, 2026-10-10, ruling P4, approved by the maintainer): a face
+// region's offset rings, unioned into simple, non-overlapping loops through Clipper2 (vendored, Boost
+// licence), because core reads `outline_uv` even-odd, so two overlapping rings read their overlap as
+// a HOLE. `uv` holds `point_count` [u, w] points; the k-th of `loop_count` rings takes the next
+// `loop_sizes[k]` of them and is a HOLE when `loop_is_hole[k]` is non-zero. Each ring is oriented
+// positive; the solid is the union of the outer rings' POSITIVE-winding area (a swallowtail's reversed
+// lobe drops out) minus the union of the holes'. Coordinates are rounded to 1/`scale` mm. Returns
+// [loop count, then per loop: point count, u0, w0, u1, w1, …]; [0] when nothing is left (every ring
+// shrunk away). Empty, with the reason in `bridge_last_refusal`, on a bad argument. Never throws.
+std::vector<double> outline_union(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                  const int32_t* loop_is_hole, std::size_t loop_count, double scale);
+
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number
 // `grading.subfloor_stress_fraction` overrides). Forwarded so the app can SHOW

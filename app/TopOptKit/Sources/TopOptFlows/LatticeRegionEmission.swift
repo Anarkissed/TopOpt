@@ -469,7 +469,22 @@ public enum LatticeRegionEmission {
         // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
         LatticeSectorOutline.meetAtTJunctions(&out, pieces: sectorPieces)   // ★ batch E: pieces only
         finishSeams(&out, runFaceID: runFaceID, solidAt: solidAt)
+        // ★ P4: a region the in-plane shrink ate goes, by name (after the seams: they decide what is offset)
+        for key in dropShrunkAway(&out) where !droppedNames.contains(key) { droppedNames.append(key) }
         return Result(regions: out, skippedFaces: skipped, skippedRegionNames: droppedNames)
+    }
+
+    /// ★ P4 (2026-10-10): a face region whose in-plane shrink ate its whole outline is DROPPED, by name —
+    /// never sent with an empty `outline_uv`, which core reads as the region's whole bounding box. The
+    /// preview reads the same list, so the include ids stay the job's. Returns the dropped regions' keys.
+    public static func dropShrunkAway(_ out: inout [LatticeRegionSpec]) -> [String] {
+        var dropped: [String] = []
+        out.removeAll { r in
+            guard r.kind == .face, !r.outlineLoops.isEmpty, r.wireOutlineLoops.isEmpty else { return false }
+            dropped.append(r.selectableKey ?? r.faceID.map { "face \($0)" } ?? "a face region")
+            return true
+        }
+        return dropped
     }
 
     static func finishSeams(_ out: inout [LatticeRegionSpec], runFaceID: (FaceID) -> Int,

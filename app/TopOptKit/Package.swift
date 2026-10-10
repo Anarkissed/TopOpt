@@ -109,8 +109,11 @@ var packageTargets: [Target] = [
         // product (below); the bridge itself references OCCT only through the
         // core, so it needs no binary dependency — just the compile define.
         dependencies: ["TopOptCore"],
+        // Clipper2 2.0.1, vendored (Boost licence) for the lattice outline's union (P4, 2026-10-10)
+        exclude: ["clipper2/LICENSE", "clipper2/README.md"],
         cxxSettings: [
             .headerSearchPath("../../vendor/include"),
+            .headerSearchPath("clipper2/include"),
             .define("TOPOPT_BRIDGE_HAS_OCCT", .when(platforms: occtPlatforms)),
             // -stdlib=libc++ so the C++ standard-library include path reaches
             // the module build under Xcode's explicit-modules scanner, where
