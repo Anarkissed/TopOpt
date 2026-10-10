@@ -1378,6 +1378,13 @@ std::string run_info_json(const RunInfo& info) {
                 info.stepped_plan_rho_fallback_by_region + "\"";
           gr += ", \"clip_outside_region_mm3\": \"" +
                 info.stepped_clip_outside_region_mm3 + "\"";
+          // ★ K5: the plan's density reach over the generator's own radius queries.
+          gr += ", \"plan_rho_queries_plan\": " +
+                fmt_ll(info.stepped_plan_rho_queries_plan);
+          gr += ", \"plan_rho_queries_posture\": " +
+                fmt_ll(info.stepped_plan_rho_queries_posture);
+          gr += ", \"plan_rho_queries_floor\": " +
+                fmt_ll(info.stepped_plan_rho_queries_floor);
         }
       }
       // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.

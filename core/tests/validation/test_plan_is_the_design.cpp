@@ -172,6 +172,42 @@ int main() {
         "every cell in these fixtures sends a rho, so no region may fall back to core's "
         "own grading for a single voxel");
 
+  // ── K5: THE PLAN'S RHO MUST REACH EVERY STRUT **AND EVERY NODE** ────────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position
+  // (lattice_gen.cpp), and `node_pos` is `origin + g * 0.5 * cell` -- so a node with an
+  // even index on an axis lies exactly ON a cell plane. A cell corner is shared by eight
+  // cells, an edge node by four, a face node by two, and the octet's face-diagonal
+  // struts lie IN the cell faces. Exact-boundary queries are the NORM, not an edge case.
+  //
+  // A half-open `floor` test attributed all of them to the cell on the + side, and at
+  // the plan's outer face that cell is not in the plan -- so the lookup found nothing
+  // and fell through to core's BAND FLOOR, the thinnest density the law allows, exactly
+  // at the joints where the load leaves the lattice. Measured at 91abe169:
+  //
+  //                        from the plan   from the posture   AT THE BAND FLOOR
+  //   plan_partial_depth   112             24                 30   (of 166)
+  //   plan_full_depth      224             24                 55   (of 303)
+  //
+  // and on a 6 mm cell the band floor's 0.050470 builds a 0.547514 mm strut where the
+  // plan's 0.18 asks for 1.067340 -- 1.949x too thin in diameter, 3.800x in area. The
+  // emitted lattice volume rose 329.006 -> 368.093 mm3 (+11.9%) and 619.129 -> 699.275
+  // (+12.9%) once the plan's density reached them.
+  //
+  // The bar is therefore not "most queries" but ALL of them, which is what these two
+  // checks say. Re-run the measurement with TOPOPT_CLI_OVERRIDE at 91abe169.
+  double q_plan = 0.0, q_post = 0.0, q_floor = 0.0;
+  CHECK(num_after(part.run_info, "plan_rho_queries_plan", &q_plan) &&
+            num_after(part.run_info, "plan_rho_queries_posture", &q_post) &&
+            num_after(part.run_info, "plan_rho_queries_floor", &q_floor),
+        "run_info must state where every strut and node radius query got its density");
+  CHECK(q_plan > 0.0, "premise: the generator did ask for radii");
+  CHECK(q_floor == 0.0,
+        "NO strut or node may be sized at the band floor on a plan that sent a rho with "
+        "every cell -- that is a notch where the load leaves the lattice");
+  CHECK(q_post == 0.0,
+        "and none may fall back to core's own field either: every query is answered by "
+        "the plan's own cells");
+
   // ── (3) THE RECEIPT STATES THE SOLID REMAINDER PER REGION ───────────────────
   std::string part_rem_s, full_rem_s;
   CHECK(str_after(part.run_info, "plan_solid_remainder_mm3", &part_rem_s),

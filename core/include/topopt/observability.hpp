@@ -1302,6 +1302,17 @@ struct RunInfo {
   // carried struts AND were certified SOLID by the mask, which is the disagreement bar
   // B7 exists to stop. "r1=5097.656" in mm3; 0 on a region whose cells all sit inside it.
   std::string stepped_clip_outside_region_mm3;
+  // ── ★ K5 (2026-10-10): WHERE EVERY STRUT AND NODE GOT ITS DENSITY ───────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position,
+  // and for the octet both sit ON cell planes -- a corner node is shared by eight cells,
+  // a face-diagonal strut's midpoint lies in a shared face. These three say whether the
+  // plan's own per-cell density reached them. `_floor` must be 0 on a plan that sent a
+  // rho with every cell: a boundary joint sized at the thinnest density the law allows,
+  // where the plan asked for something else, is a notch where the load leaves the
+  // lattice.
+  long long stepped_plan_rho_queries_plan = 0;
+  long long stepped_plan_rho_queries_posture = 0;
+  long long stepped_plan_rho_queries_floor = 0;
   // The outline beam as APPLIED (ruling B): the width core derived from bead and
   // voxel, the bleed the band asked for, and how far in the solid actually reaches.
   // 0 when the shape grade is off, which is when there is no beam.

@@ -4272,6 +4272,9 @@ struct LatticeVariantOutcome {
   // ★ ruling 2: per region, the volume its own plan cells cover that the region does
   // not reach -- the set the outline clip stops struts from filling. "r1=5097.656".
   std::string clip_outside_region_mm3;
+  // ★ K5: where the generator's strut and node radius queries got their density.
+  long long plan_rho_queries_plan = 0, plan_rho_queries_posture = 0,
+            plan_rho_queries_floor = 0;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -6498,17 +6501,52 @@ LatticeVariantOutcome lattice_one_variant(
   // in its OWN group's grid, so a strut reaching past its cell into a cell of another
   // group was sized from the voxel fallback while the posture credited that other cell's
   // rho. Same point, two densities. The density now belongs to the point.
+  // ── ★ K5: AND THE CLOSED BOX, BECAUSE EVERY OCTET NODE SITS ON A BOUNDARY ────
+  // `node_pos` is `origin + g * 0.5 * cell` (lattice_gen.cpp), so a node with an EVEN
+  // index on an axis lies exactly ON a cell plane: a cell corner is shared by eight
+  // cells, an edge node by four, a face node by two. The octet's face-diagonal struts
+  // lie IN the cell faces, so their midpoints -- which is where the generator samples
+  // the radius -- are on a shared plane too. Exact-boundary queries are the NORM here,
+  // not an edge case.
+  //
+  // A half-open `floor` test therefore attributed every one of them to the cell on the
+  // + side, and where that cell is outside the plan -- which is exactly the plan's outer
+  // face, and every pass and group boundary -- the lookup found nothing and fell through
+  // to core's own field. That is K5's defect: the boundary joints, the ones that carry
+  // the load into the solid, were the ones the app's density did not reach.
+  //
+  // So the test is the CLOSED box, and where several of the plan's cells share the
+  // point the density is the LARGEST of theirs. Not an ownership rule and deliberately
+  // not one: a node ball thinner than a strut meeting it is a notch at the joint, so the
+  // shared geometry has to satisfy every incident cell, and `max` is the only answer that
+  // does and is independent of which cell is asked first.
   auto plan_cell_rho_at = [&plan_groups, &plan_occ, &plan_cell_rho](const Vec3& p) {
+    double best = 0.0;
     for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
       const SteppedCellGroup& g = plan_groups[gi];
-      const int ci = static_cast<int>(std::floor((p.x - g.origin.x) / g.size_mm));
-      const int cj = static_cast<int>(std::floor((p.y - g.origin.y) / g.size_mm));
-      const int ck = static_cast<int>(std::floor((p.z - g.origin.z) / g.size_mm));
-      if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz) continue;
-      const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
-      if (plan_occ[gi][at]) return plan_cell_rho[gi][at];
+      const double tol = 1e-9 * g.size_mm;   // the grid is built as origin + k*size
+      const double fx = (p.x - g.origin.x) / g.size_mm;
+      const double fy = (p.y - g.origin.y) / g.size_mm;
+      const double fz = (p.z - g.origin.z) / g.size_mm;
+      const int bx = static_cast<int>(std::floor(fx));
+      const int by = static_cast<int>(std::floor(fy));
+      const int bz = static_cast<int>(std::floor(fz));
+      // On a plane, the cell on the - side shares the point: test it too.
+      const bool ex = std::fabs(fx - std::round(fx)) <= tol;
+      const bool ey = std::fabs(fy - std::round(fy)) <= tol;
+      const bool ez = std::fabs(fz - std::round(fz)) <= tol;
+      for (int sx = 0; sx >= (ex ? -1 : 0); --sx)
+        for (int sy = 0; sy >= (ey ? -1 : 0); --sy)
+          for (int sz = 0; sz >= (ez ? -1 : 0); --sz) {
+            const int ci = bx + sx, cj = by + sy, ck = bz + sz;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+            if (plan_occ[gi][at] && plan_cell_rho[gi][at] > best)
+              best = plan_cell_rho[gi][at];
+          }
     }
-    return 0.0;
+    return best;
   };
   // ── ★ WHICH REGION'S PLAN CELL COVERS A POINT ────────────────────────────────
   // The same walk as `plan_cell_rho_at`, answering the other half: the region id the
@@ -6544,13 +6582,24 @@ LatticeVariantOutcome lattice_one_variant(
   // this function's answer at that voxel's centre -- so the fallback is self-consistent
   // rather than a second rule. Outside the mask it is the band floor, as before; those
   // voxels are not certified, so no posture value applies to them.
-  auto plan_strut_rho_at = [&plan_cell_rho_at, &plan_voxel_of, &mask, &gf](const Vec3& p) {
+  // ── ★ K5: AND THE REACH IS COUNTED, NOT CLAIMED ──────────────────────────────
+  // Every radius query the generator makes lands in one of three places. The third is
+  // the one that must not happen on a plan that sent a rho with every cell: a strut or a
+  // node sized at core's BAND FLOOR, which is the thinnest the law allows, where the
+  // plan asked for something else. The generator is single-threaded (no parallel
+  // construct in lattice_gen.cpp), so plain counters are sound here.
+  long long rho_q_plan = 0, rho_q_posture = 0, rho_q_floor = 0;
+  auto plan_strut_rho_at = [&plan_cell_rho_at, &plan_voxel_of, &mask, &gf, &rho_q_plan,
+                            &rho_q_posture, &rho_q_floor](const Vec3& p) {
     const double cell = plan_cell_rho_at(p);
-    if (cell > 0.0) return cell;
+    if (cell > 0.0) { ++rho_q_plan; return cell; }
     const std::size_t e = plan_voxel_of(p);
-    return (e < mask.size() && mask[e] && e < gf.posture.relative_density.size())
-               ? gf.posture.relative_density[e]
-               : gf.band_rho_min;
+    if (e < mask.size() && mask[e] && e < gf.posture.relative_density.size()) {
+      ++rho_q_posture;
+      return gf.posture.relative_density[e];
+    }
+    ++rho_q_floor;
+    return gf.band_rho_min;
   };
   // Where the plan left a voxel's density to core's own grading, per voxel -- so the
   // receipt can count the fallbacks PER REGION rather than leave them silent. A plan
@@ -7650,6 +7699,10 @@ LatticeVariantOutcome lattice_one_variant(
   }
 
   // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
+  // ★ K5: the counters so far are the census's own tripwire queries; the generator's
+  // start here.
+  const long long rho_q_plan0 = rho_q_plan, rho_q_posture0 = rho_q_posture,
+                  rho_q_floor0 = rho_q_floor;
   const double tg0 = wall_seconds();
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
@@ -7672,6 +7725,25 @@ LatticeVariantOutcome lattice_one_variant(
   R.oc.growth = organic.growth;
   R.oc.growth_ran = organic.growth_ran;
   R.gen_seconds = wall_seconds() - tg0;
+  // ── ★ K5: WHERE EVERY STRUT AND NODE GOT ITS DENSITY ─────────────────────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position
+  // (lattice_gen.cpp). Both of those sit on cell planes for the octet -- a corner node is
+  // shared by eight cells, a face-diagonal strut's midpoint lies in a shared face -- so
+  // this is the count that says whether the plan's density actually reached them.
+  // `at the band floor` is the one that must be 0 on a plan that sent a rho with every
+  // cell: a boundary joint sized at the thinnest density the law allows, where the plan
+  // asked for something else, is a notch exactly where the load leaves the lattice.
+  if (!plan_groups.empty()) {
+    R.plan_rho_queries_plan = rho_q_plan - rho_q_plan0;
+    R.plan_rho_queries_posture = rho_q_posture - rho_q_posture0;
+    R.plan_rho_queries_floor = rho_q_floor - rho_q_floor0;
+    std::fprintf(stderr,
+                 "[stepped] plan rho reach: %lld strut/node radius queries from the "
+                 "plan's own cells, %lld from the posture (off every plan cell), %lld at "
+                 "the band floor (outside the mask)\n",
+                 R.plan_rho_queries_plan, R.plan_rho_queries_posture,
+                 R.plan_rho_queries_floor);
+  }
 
   // ── ★ THE NO-PROTRUSION INVARIANT, ASSERTED (task 2026-08-08-strut-clip-
   // matches-shell, bar R3). Not eyeballed, not derived from the clip's
@@ -10743,6 +10815,9 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
       gi.stepped_plan_rho_fallback_by_region = R.plan_rho_fallback_by_region;
       gi.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
+      gi.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
+      gi.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
+      gi.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;

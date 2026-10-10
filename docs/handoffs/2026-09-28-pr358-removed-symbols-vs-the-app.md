@@ -867,3 +867,99 @@ line rather than leaving it to be found in a mesh.
 rulings 3 and 4 cannot be run on the app's own files. Ruling 4 additionally needs a
 `SPANS.txt`: core writes one only under `lattice.emit_organic_spans`, which is the ORGANIC
 span writer, and a Default Grade plan run emits no spans at all.
+
+## Addendum 14 — K5: the plan's rho reaches every strut AND every node (2026-10-10)
+
+> per-cell rho must reach every strut including legs and nodes at group and pass
+> boundaries; prove strut diameters on 570B38E2.
+
+### Where the radius is sampled, and why that is a boundary question
+
+The generator samples the radius at a strut's **midpoint** and at a **node's own
+position** (`checked_radius(G, mid)` and `checked_radius(G, np)`, lattice_gen.cpp), and
+
+    node_pos(R, gx, gy, gz) = R.origin + g * 0.5 * R.cell_mm
+
+so a node with an **even** index on an axis lies exactly ON a cell plane: a cell corner is
+shared by eight cells, an edge node by four, a face node by two. The octet's
+face-diagonal struts lie IN the cell faces, so their midpoints sit on a shared plane too.
+**Exact-boundary queries are the norm here, not an edge case.**
+
+A half-open `floor` test attributed every one of them to the cell on the **+** side. At
+the plan's outer face — and at every group and pass boundary — that cell is not in the
+plan, so the lookup found nothing and fell through to core's **band floor**, the thinnest
+density the law allows, precisely at the joints where the load leaves the lattice.
+
+### Measured, at 91abe169
+
+| fixture | from the plan | from the posture | **at the band floor** | total |
+|---|---|---|---|---|
+| `plan_partial_depth` | 112 | 24 | **30** | 166 |
+| `plan_full_depth` | 224 | 24 | **55** | 303 |
+| `outline_clip_quadrant` | 504 | 50 | **85** | 639 |
+
+**18% of the queries on `plan_partial_depth` were answered by the band floor**, and a
+third did not come from the plan at all. After the fix all three fixtures read
+`plan / 0 / 0`.
+
+What that cost, measured on the octet at the fixtures' own 6 mm cell:
+
+| | relative density | strut diameter |
+|---|---|---|
+| core's band floor | 0.050470 | **0.547514 mm** |
+| the plan's own rho | 0.180000 | **1.067340 mm** |
+
+**1.949× too thin in diameter, 3.800× in area** — a notch at the joint, which is the one
+place a lattice cannot afford one. The emitted lattice volume rose once the plan's density
+reached them:
+
+| fixture | before | after | |
+|---|---|---|---|
+| `plan_partial_depth` | 329.006 mm³ | **368.093 mm³** | +11.9% |
+| `plan_full_depth` | 619.129 mm³ | **699.275 mm³** | +12.9% |
+| `outline_clip_quadrant` | 427.838 mm³ | 427.838 mm³ | unchanged |
+
+The quadrant arm is unchanged because its 85 fallback queries were all on elements the
+outline clip then removed — which is worth knowing: the two fixes do not stack on the same
+elements. The STL md5 changes on the first two and not on the third, which says the same
+thing.
+
+`plan_full_depth`'s `clipped_struts` moved 72 → 80 and `landings` with it, so struts moved
+too, not only nodes: a thicker strut meets the eroded boundary sooner. The receipt's
+`min_strut_diameter_mm` / `max_strut_diameter_mm` did not move, but those are the run's
+aggregate across variants and `note_diameter` is never called for a node, so they are not
+the instrument for this.
+
+### The rule, and why it is `max` rather than an ownership
+
+The test is the **closed** box, and where several of the plan's cells share the point the
+density is the **largest** of theirs. Deliberately not an ownership rule: a node ball
+thinner than a strut meeting it is a notch at the joint, so the shared geometry has to
+satisfy every incident cell, and `max` is the only answer that does and is independent of
+which cell is asked first. The tolerance is `1e-9 * size`, relative, because the grid is
+built as `origin + k * size`.
+
+### The receipt
+
+`plan_rho_queries_plan` / `_posture` / `_floor` in `run_info`, counted over the
+**generator's** queries only (the census's own tripwire queries are snapshotted out
+first). `_floor` must be 0 on a plan that sends a rho with every cell;
+`test_plan_is_the_design` asserts both `_floor == 0` and `_posture == 0`, and both go red
+at 91abe169 through `TOPOPT_CLI_OVERRIDE`.
+
+### Two receipt gaps this turned up, for K4
+
+* the per-variant report's **`cell_mm` is the LAW's cell** — 14.5 mm on
+  `plan_partial_depth`, whose plan is entirely 6 mm cells. On a plan run that field
+  describes a grid the file does not contain.
+* `min_strut_diameter_mm` / `max_strut_diameter_mm` in `run_info` are the aggregate over
+  the run's variants and **exclude nodes entirely**, so neither bounds what a plan run
+  actually wrote.
+
+Both belong with K4's "report per-region cells and sizes", and neither is changed here.
+
+### Still blocked
+
+"Prove strut diameters on 570B38E2" needs #354's after-run job with `plan_base_cell_mm`.
+A run on a base supplied by hand would prove diameters against a ladder the app may never
+have used, which is the thing the reviewer's ruling 3 rules out.
