@@ -657,6 +657,44 @@ public struct LatticeSteppedCell: Equatable, Sendable {
     }
 }
 
+extension LatticeSteppedCell {
+    /// Two cells of ONE region sharing volume: their indices and the shared box's extent (mm).
+    public struct Overlap: Equatable, Sendable {
+        public let region: Int
+        public let a: Int
+        public let b: Int
+        public let extentMM: SIMD3<Double>
+    }
+    /// ★★ NO TWO CELLS OF ONE REGION OVERLAP (the reviewer, 2026-10-10 20:05: "make the bake assert
+    /// that no two cells of one region overlap"). Every pair whose boxes share volume more than 1e-6 mm
+    /// on all three axes; touching faces are not overlaps. Cells of two regions are core's straddler
+    /// rule (a pair is allowed where each centre is owned by its own region), not this check.
+    public static func sameRegionOverlaps(_ cells: [LatticeSteppedCell]) -> [Overlap] {
+        boxOverlaps(cells.map { (region: $0.region, lo: $0.originMM, size: $0.sizeMM) })
+    }
+    /// The sweep, on (region, minimum corner, edge) boxes — shared with the plan writer's wire cells.
+    static func boxOverlaps(_ boxes: [(region: Int, lo: SIMD3<Double>, size: Double)]) -> [Overlap] {
+        let tol = 1e-6
+        var out: [Overlap] = []
+        for (r, idx) in Dictionary(grouping: boxes.indices, by: { boxes[$0].region }) {
+            let sorted = idx.sorted { boxes[$0].lo.x < boxes[$1].lo.x }
+            for p in sorted.indices {
+                let a = boxes[sorted[p]]
+                for q in (p + 1)..<sorted.count {
+                    let b = boxes[sorted[q]]
+                    if b.lo.x >= a.lo.x + a.size - tol { break }
+                    let e = simd_min(a.lo + a.size, b.lo + b.size) - simd_max(a.lo, b.lo)
+                    if e.x > tol, e.y > tol, e.z > tol {
+                        out.append(Overlap(region: r, a: Swift.min(sorted[p], sorted[q]), b: Swift.max(sorted[p], sorted[q]),
+                                           extentMM: e))
+                    }
+                }
+            }
+        }
+        return out.sorted { ($0.region, $0.a, $0.b) < ($1.region, $1.a, $1.b) }
+    }
+}
+
 public struct LatticeCellField: Sendable {
     /// Per BASE cell: the demand (≥ 0) of the octree cell covering it, −1 where the
     /// run leaves the material SOLID.

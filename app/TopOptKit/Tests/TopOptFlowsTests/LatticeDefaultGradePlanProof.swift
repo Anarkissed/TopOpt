@@ -157,6 +157,68 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
                                       rid, r.inPlaneOffsetMM, seamFlags.filter { $0 }.count, diverging, moved))
         }
         print("DG-OUTLINE " + outlineRows.joined(separator: " | "))
+        // ★★ NO TWO CELLS OF ONE REGION OVERLAP, on his projects (the reviewer, 2026-10-10 20:05/20:20)
+        let overlaps = LatticeSteppedCell.sameRegionOverlaps(b.cells)
+        print("DG-OVERLAPS \(overlaps.count) same-region pair(s)"
+              + (overlaps.first.map { o in String(format: " | first: region %d, %.4g mm × %.4g mm, shared %.4f × %.4f × %.4f mm",
+                                                   o.region, b.cells[o.a].sizeMM, b.cells[o.b].sizeMM,
+                                                   o.extentMM.x, o.extentMM.y, o.extentMM.z) } ?? ""))
+        XCTAssertEqual(overlaps.count, 0, "★ no two cells of one region overlap")
+        // ★ PER REGION: the plan's sizes, and the UNCOVERED volume — the region's prism material that no plan
+        // cell covers (the reviewer, 2026-10-10 20:20, condition 2: a slot part no chain covers is treated as
+        // the back strip is; report it per region before and after the packer fix). Counted on the scene's
+        // prism-clipped occupancy at its own voxel; a voxel any region's cell covers is covered.
+        do {
+            let po = s1.prismOccupancy
+            let h = Double(Swift.max(po.spacing.x, Swift.max(po.spacing.y, po.spacing.z)))
+            let bucket = 8.0
+            struct K: Hashable { let x: Int; let y: Int; let z: Int }
+            func key(_ p: SIMD3<Double>) -> K { K(x: Int((p.x / bucket).rounded(.down)), y: Int((p.y / bucket).rounded(.down)), z: Int((p.z / bucket).rounded(.down))) }
+            var grid: [K: [Int]] = [:]
+            for (ci, c) in b.cells.enumerated() {
+                let k0 = key(c.originMM), k1 = key(c.originMM + c.sizeMM)
+                for x in k0.x...k1.x { for y in k0.y...k1.y { for z in k0.z...k1.z { grid[K(x: x, y: y, z: z), default: []].append(ci) } } }
+            }
+            var prismVox = [Int: Int](), bare = [Int: Int]()
+            for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
+                let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * po.spacing)
+                guard let ri = b.regions.indices.first(where: { b.regions[$0].role == .include && b.regions[$0].kind == .face
+                    && LatticeRegionMask.containsWholePrism(p, region: b.regions[$0]) }) else { continue }
+                prismVox[ri, default: 0] += 1
+                let covered = (grid[key(p)] ?? []).contains { ci in
+                    let c = b.cells[ci]
+                    return p.x >= c.originMM.x && p.x < c.originMM.x + c.sizeMM && p.y >= c.originMM.y && p.y < c.originMM.y + c.sizeMM
+                        && p.z >= c.originMM.z && p.z < c.originMM.z + c.sizeMM
+                }
+                if !covered { bare[ri, default: 0] += 1 }
+            }}}
+            var rows: [String] = []
+            var id = 0
+            for (ri, r) in b.regions.enumerated() where r.role == .include {
+                id += 1
+                let cells = b.cells.filter { $0.region == ri }
+                let hist = Dictionary(grouping: cells, by: { ($0.sizeMM * 100).rounded() / 100 }).mapValues(\.count)
+                    .sorted { $0.key > $1.key }.map { String(format: "%.2f=%d", $0.key, $0.value) }.joined(separator: " ")
+                let pv = prismVox[ri] ?? 0, bv = bare[ri] ?? 0
+                rows.append(String(format: "r%d cells=%d [%@] prism=%.0f mm3 uncovered=%.0f mm3 (%.2f%%)", id, cells.count, hist,
+                                   Double(pv) * h * h * h, Double(bv) * h * h * h, pv > 0 ? 100 * Double(bv) / Double(pv) : 0))
+            }
+            print(String(format: "DG-REGIONS voxel=%.3f mm | ", h) + rows.joined(separator: " | "))
+        }
+        // ★ THE PICTURE (condition 1): the same views, before and after, through the app's own renderer
+        if let dir = env["DG_RENDER_DIR"] {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            for body in [Float(1), 0] {
+                mr.setBodyAlpha(body)
+                for (name, az, el) in [("front", Float(0.6), Float(0.35)), ("back", Float(3.74), Float(0.35)), ("top", Float(0.6), Float(1.2))] {
+                    LatticeQuiltFrameProbe.aim(mr, mesh.bounds, azimuth: az, elevation: el, zoom: 0.9, height: 0.5)
+                    guard let px = mr.renderOffscreen(size: 1200, clear: MTLClearColor(red: 0.05, green: 0.06, blue: 0.1, alpha: 1)) else { continue }
+                    let path = dir + "/\(body > 0 ? "part" : "lattice")_\(name).png"
+                    LatticeQuiltFrameProbe.writePNG(px, size: 1200, to: path)
+                    print("DG-RENDER \(path)")
+                }
+            }
+        }
 
         // ── the stage job, with and without the plan, from ONE process (no hash-order drift)
         let request = try XCTUnwrap(model.makeLatticeRunRequest(), "no stage job")

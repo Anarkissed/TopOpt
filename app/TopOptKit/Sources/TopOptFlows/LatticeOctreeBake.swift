@@ -32,6 +32,9 @@ extension LatticePreviewOccupancy {
     public struct OctreeBakeStats {
         public var slotsKept: [Double: Int] = [:]   // cell size → whole cells kept
         public var slotsCut = 0                    // finest slots the outline cuts (attached to the band)
+        /// ★ Pairs of cells of ONE region sharing volume (`LatticeSteppedCell.sameRegionOverlaps`) — must
+        /// be 0; the plan writer withholds a plan that has any (the reviewer, 2026-10-10 20:05).
+        public var sameRegionOverlaps = 0
         public var texelsPainted = 0
         public var pitchMM: Double = 0
         public var seconds: Double = 0
@@ -1239,28 +1242,17 @@ extension LatticePreviewOccupancy {
             /// cells of different families share no nodes — that is Stepped, and core
             /// counts those ends; Default Grade never comes here.
             ///
-            /// ★ NOTHING IS LEFT UNOWNED: after the packing a fill pass walks the finest
-            /// tile's nested grid and paints only the texels no cell claimed (paint
-            /// skips owned texels), cut by the outline where it is, so a sliver the
-            /// outline leaves between two families is drawn rather than left as a
-            /// hole — the same edge treatment the finest rung always had.
+            /// ★ NOTHING IS LEFT UNOWNED: after the packing a fill pass walks the slot's
+            /// chain's finest tile on its own grid and lays it in every WHOLLY free
+            /// position, cut by the outline where it is — the same edge treatment the
+            /// finest rung always had. (It used to paint a sliver between two families as
+            /// part of a whole finest cell that overlapped its neighbour in the plan; one
+            /// nesting chain per slot leaves no such sliver — see below.)
             func packSlot(_ lo0: SIMD3<Double>, _ S0: Double) {
                 let menu = Array(ladder.sizes.dropFirst())
                 let nG = Self.steppedPackGrid
                 let g = S0 / Double(nG)
-                var taken = [Bool](repeating: false, count: nG * nG * nG)
                 func cellIndex(_ i: SIMD3<Int>) -> Int { (i.z * nG + i.y) * nG + i.x }
-                func isFree(_ i0: SIMD3<Int>, _ span: Int) -> Bool {
-                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
-                        if taken[cellIndex(SIMD3<Int>(x, y, z))] { return false }
-                    }}}
-                    return true
-                }
-                func take(_ i0: SIMD3<Int>, _ span: Int) {
-                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
-                        taken[cellIndex(SIMD3<Int>(x, y, z))] = true
-                    }}}
-                }
                 let ax1 = (axis + 1) % 3, ax2 = (axis + 2) % 3
                 /// Candidate starts for a cell of `span` grid steps whose family tile is
                 /// `step` grid steps: multiples of `step`, depth from the face first.
@@ -1295,45 +1287,99 @@ extension LatticePreviewOccupancy {
                     }
                     return 1
                 }
-                for S in menu {
-                    let span = Int((S / g).rounded())
-                    guard span >= 1, span <= nG else { continue }
-                    let isF = abs(S - f) < 1e-9
-                    for i in candidates(span: span, step: familyStep(S)) {
-                        guard isFree(i, span) else { continue }
-                        let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
-                        let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * S))
-                        if dc < -0.87 * S { continue }
-                        let (ok, nearest, _) = fits(lo, S, fast: true)
-                        let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
-                            || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
-                        guard ok && centreOK, !hasYielded(ladder.region, lo, S) else { continue }
-                        paint(lo, S, finest: isF, edge: false, nearest: nearest)
-                        take(i, span)
-                    }
+                // ★★ ONE NESTING CHAIN PER SLOT (the reviewer, 2026-10-10 20:05, from #358 on 3418E167:
+                // "cell 10 (3.5 mm) overlaps cell 3 (4.667 mm) in the SAME region … fix it red-first").
+                // A slot that mixed families whose tiles do not nest on the base/12 grid — halves start
+                // every 6 steps, thirds every 4, quarters every 3 — left slivers no admitted tile fills (a
+                // third at 0–4 leaves 4–6 to quarters that start at 3 or 6), and the fill pass then laid a
+                // WHOLE finest cell over a position only PART free: the preview drew the free sliver, the
+                // plan sent the whole cell over its neighbour (141 pairs on 3418E167, 329 on 68BF7B74,
+                // every one the region's finest tile). So a slot packs from ONE chain: a finest tile and
+                // every menu size that is a whole number of it, each started on a multiple of it — then
+                // every position the fill pass meets is wholly free or wholly taken. Each slot tries every
+                // maximal chain and keeps the one covering most of the slot, then the one with fewest cells
+                // (his rule: fewest cells, the largest that fit, the smallest only where nothing larger
+                // goes). Core accepts any start that is a whole number of a family tile dividing the size
+                // (stepped_plan.cpp, `aligned_on_some_family`), which every chain start is.
+                var tiles: [Int] = []   // the admitted families' tiles, in base/12 steps
+                for nn in 2...steppedMenuMaxDivisor where nG % nn == 0 {
+                    let t = nG / nn
+                    if menu.contains(where: { abs($0 / g - Double(t)) < 1e-6 }) { tiles.append(t) }
                 }
-                // The fill pass: the finest tile on its nested grid, into unowned texels.
-                let span = Int((f / g).rounded())
-                for i in candidates(span: span, step: span) {
-                    if isFree(i, span) == false {
-                        // wholly taken? then nothing to fill here
-                        var anyFree = false
-                        for z in i.z..<(i.z + span) where !anyFree { for y in i.y..<(i.y + span) where !anyFree { for x in i.x..<(i.x + span) {
-                            if !taken[cellIndex(SIMD3<Int>(x, y, z))] { anyFree = true; break }
+                // a chain is maximal when no finer admitted tile divides its finest tile
+                var chainTiles = tiles.filter { tf in !tiles.contains { $0 < tf && tf % $0 == 0 } }
+                if chainTiles.isEmpty { chainTiles = [Swift.max(1, Int((f / g).rounded()))] }
+                struct Placement { let i: SIMD3<Int>; let S: Double; let finest: Bool; let edge: Bool; let nearest: Double }
+                func packChain(_ tf: Int) -> (placements: [Placement], covered: Int) {
+                    var taken = [Bool](repeating: false, count: nG * nG * nG)
+                    func isFree(_ i0: SIMD3<Int>, _ span: Int) -> Bool {
+                        for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                            if taken[cellIndex(SIMD3<Int>(x, y, z))] { return false }
                         }}}
-                        if !anyFree { continue }
+                        return true
                     }
-                    let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
-                    let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
-                    if dc < -0.87 * f { continue }
-                    let (ok, nearest, farthest) = fits(lo, f)
-                    if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
-                    if hasYielded(ladder.region, lo, f) { continue }   // R7: the finest rung yielded
-                    if ok || !outlineFailed {
-                        paint(lo, f, finest: true, edge: false, nearest: nearest)
-                    } else if farthest > 0 {
-                        paint(lo, f, finest: true, edge: true, nearest: nearest)
+                    func take(_ i0: SIMD3<Int>, _ span: Int) {
+                        for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                            taken[cellIndex(SIMD3<Int>(x, y, z))] = true
+                        }}}
                     }
+                    var out: [Placement] = []
+                    var covered = 0
+                    for S in menu {
+                        let span = Int((S / g).rounded())
+                        guard span >= 1, span <= nG, span % tf == 0 else { continue }
+                        let isF = abs(S - f) < 1e-9
+                        let fs = familyStep(S)
+                        for i in candidates(span: span, step: fs % tf == 0 ? fs : tf) {
+                            guard isFree(i, span) else { continue }
+                            let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                            let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * S))
+                            if dc < -0.87 * S { continue }
+                            let (ok, nearest, _) = fits(lo, S, fast: true)
+                            let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
+                                || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
+                            guard ok && centreOK, !hasYielded(ladder.region, lo, S) else { continue }
+                            out.append(Placement(i: i, S: S, finest: isF, edge: false, nearest: nearest))
+                            take(i, span)
+                            covered += span * span * span
+                        }
+                    }
+                    // The fill pass: the chain's finest tile on its own grid, into WHOLLY free positions —
+                    // within one chain no position is part taken, so a sliver can no longer be painted as
+                    // a whole cell. Cut by the outline where it is, as the finest rung always was.
+                    let fillS = Double(tf) * g
+                    let fillIsFinest = abs(fillS - f) < 1e-9
+                    for i in candidates(span: tf, step: tf) {
+                        guard isFree(i, tf) else { continue }
+                        let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                        let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * fillS))
+                        if dc < -0.87 * fillS { continue }
+                        // a coarser chain's fill keeps the shape band's rule: only the finest rung at the outline
+                        if !fillIsFinest, shapeFit, shapeFitBandMM > 0, sBase > f + 1e-9,
+                           dc < shapeFitBandMM * (fillS - f) / (sBase - f) - 1e-9 { continue }
+                        let (ok, nearest, farthest) = fits(lo, fillS)
+                        if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
+                        if hasYielded(ladder.region, lo, fillS) { continue }   // R7: the finest rung yielded
+                        if ok || !outlineFailed {
+                            out.append(Placement(i: i, S: fillS, finest: fillIsFinest, edge: false, nearest: nearest))
+                        } else if farthest > 0 {
+                            out.append(Placement(i: i, S: fillS, finest: fillIsFinest, edge: true, nearest: nearest))
+                        } else { continue }
+                        covered += tf * tf * tf
+                    }
+                    return (out, covered)
+                }
+                var best: (placements: [Placement], covered: Int)? = nil
+                for tf in chainTiles {
+                    let p = packChain(tf)
+                    if let b = best, !(p.covered > b.covered || (p.covered == b.covered && p.placements.count < b.placements.count)) {
+                        continue
+                    }
+                    best = p
+                }
+                for p in best?.placements ?? [] {
+                    paint(lo0 + SIMD3<Double>(Double(p.i.x), Double(p.i.y), Double(p.i.z)) * g, p.S,
+                          finest: p.finest, edge: p.edge, nearest: p.nearest)
                 }
             }
             // Level-0 slots covering the region's box.
@@ -1609,6 +1655,15 @@ extension LatticePreviewOccupancy {
         out.values = activation
         stats.seconds = Date().timeIntervalSince(t0)
         stats.cellsPlaced = cells.count
+        // ★ THE BAKE'S OWN CHECK: no two cells of one region overlap. Counted and named in the DIAG; the
+        // writer refuses such a plan in words (`PlanWithheld.cellsOverlap`), never sends it.
+        let overlaps = LatticeSteppedCell.sameRegionOverlaps(cells)
+        stats.sameRegionOverlaps = overlaps.count
+        if let o = overlaps.first {
+            NSLog("DIAG octree OVERLAP: \(overlaps.count) same-region cell pair(s); first region \(o.region): "
+                  + "cell \(o.a) (\(cells[o.a].sizeMM) mm) and cell \(o.b) (\(cells[o.b].sizeMM) mm) share "
+                  + String(format: "%.4f x %.4f x %.4f mm", o.extentMM.x, o.extentMM.y, o.extentMM.z))
+        }
         var field = LatticeCellField(field: out, level: outlineMM,
                                 steppedCellMM: size, steppedPhase: phase,
                                 steppedOrigin: origin,
