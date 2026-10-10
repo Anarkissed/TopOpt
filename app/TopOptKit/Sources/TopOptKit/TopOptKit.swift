@@ -2192,6 +2192,40 @@ public enum TopOptKit {
         return out
     }
 
+    /// ★★ THE ONE OUTLINE (reviewer, 2026-10-10, P1/P6): a face region's generated polygon — the raw loops
+    /// even-odd, the seam strips joined, and the round capsule of radius |`expandMM`| about every true edge
+    /// added (grow) or taken away (shrink). Arcs are chords within `arcToleranceMM`, vertices on the arc.
+    /// Simple, non-overlapping loops; empty when nothing is left. nil when the bridge refuses.
+    public static func outlinePolygon(raw: [[SIMD2<Double>]], trueSegments: [(SIMD2<Double>, SIMD2<Double>)],
+                                      strips: [[SIMD2<Double>]], expandMM: Double,
+                                      arcToleranceMM: Double = 0.005, scale: Double = 1e6) -> [[SIMD2<Double>]]? {
+        var flat: [Double] = [], sizes: [Int32] = [], segs: [Double] = [], quads: [Double] = []
+        for r in raw { sizes.append(Int32(r.count)); for q in r { flat += [q.x, q.y] } }
+        for (a, b) in trueSegments { segs += [a.x, a.y, b.x, b.y] }
+        for s in strips where s.count == 4 { for q in s { quads += [q.x, q.y] } }
+        let rawOut: [Double] = flat.withUnsafeBufferPointer { fp in
+            sizes.withUnsafeBufferPointer { sp in
+                segs.withUnsafeBufferPointer { gp in
+                    quads.withUnsafeBufferPointer { qp in
+                        Array(topoptbridge.outline_polygon(fp.baseAddress, flat.count / 2, sp.baseAddress, sizes.count,
+                                                           gp.baseAddress, segs.count / 4, qp.baseAddress, quads.count / 8,
+                                                           expandMM, arcToleranceMM, scale)).map { Double($0) }
+                    }
+                }
+            }
+        }
+        guard let n = rawOut.first, n >= 0 else { return nil }
+        var out: [[SIMD2<Double>]] = [], k = 1
+        for _ in 0..<Int(n) {
+            guard k < rawOut.count else { return nil }
+            let m = Int(rawOut[k]); k += 1
+            guard m >= 0, k + 2 * m <= rawOut.count else { return nil }
+            out.append((0..<m).map { SIMD2(rawOut[k + 2 * $0], rawOut[k + 2 * $0 + 1]) })
+            k += 2 * m
+        }
+        return out
+    }
+
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.

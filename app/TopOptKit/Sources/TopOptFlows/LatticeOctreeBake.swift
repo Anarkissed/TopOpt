@@ -242,7 +242,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// ★ WHERE place()'S GATE CAN PASS, in the face's (u, v): a level-0 slot does nothing unless
-    /// its centre reads −(signedDistanceAcrossSeams − offset) ≥ −0.87·S — so the window is
+    /// its centre reads the one-outline distance `inPlaneDistance` (P1/P6; it was −(signedDistanceAcrossSeams − offset)) ≥ −0.87·S — so the window is
     /// `outlineWindow` with an inner reach of 0.87·S. With no outline loops the read is
     /// `contains`, i.e. the rectangle ±halfU/±halfW. nil (and why) when a cell is so large that
     /// −1e3 passes, or wherever `outlineWindow` cannot bound the read. `shrinkMM` is a test's RED.
@@ -259,7 +259,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// ★ WHERE THE ANCHOR SEARCH'S RASTER CAN READ ANYTHING ABOVE 0, in the face's (u, v). The
-    /// raster's nodes hold −(signedDistanceAcrossSeams − offset) and a read is their bilinear
+    /// raster's nodes hold the one-outline distance `inPlaneDistance` (P1/P6; it was −(signedDistanceAcrossSeams − offset)) and a read is their bilinear
     /// blend. A node further than r = max(max(0, offset), the largest seam cap·tilt) outside the
     /// outline's bounding box holds a NEGATIVE value (the reasons are `outlineWindow`'s), and a
     /// blend of non-positive values with non-negative weights is non-positive in IEEE
@@ -276,7 +276,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// The outline's bounding box ± (max(inner + max(0, offset), the largest seam cap·tilt) + pad)
-    /// in (u, v): outside it −(signedDistanceAcrossSeams(uv) − offset) < −inner. There the
+    /// in (u, v): outside it `inPlaneDistance(uv)` < −inner. There the
     /// crossing count is even (so the sign is outside), the distance to every true edge exceeds
     /// the reach, and a seam flip needs the nearest edge within its cap·tilt. nil (and why)
     /// wherever that cannot be bounded: a seam without a positive cap and a tilt (the flip is
@@ -614,7 +614,7 @@ extension LatticePreviewOccupancy {
             var vals = [Double](repeating: -1e3, count: nu * nv)
             for j in 0..<nv { for i in 0..<nu {
                 let uv = lo + SIMD2(Double(i), Double(j)) * h
-                vals[j * nu + i] = -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: region.outlineLoops, seams: region.outlineSeams, tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
+                vals[j * nu + i] = region.inPlaneDistance(uv)   // ★ the one outline (P1/P6)
             }}
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
@@ -917,10 +917,8 @@ extension LatticePreviewOccupancy {
                     return LatticeRegionMask.contains(p, region: region) ? 1e3 : -1e3
                 }
                 let rel = p - region.origin
-                return -(LatticeFaceOutline.signedDistanceAcrossSeams(
-                    SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                    loops: region.outlineLoops, seams: region.outlineSeams,
-                    tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
+                // ★★ THE ONE OUTLINE (P1/P6, 2026-10-10): the generated polygon's sign, the true outline's distance
+                return region.inPlaneDistance(SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)))
             }
             // The slot's box [lo, lo + S) per axis, for slot index (i, j, k) at size S.
             // In-plane slots are anchored at the lattice origin; along the normal at

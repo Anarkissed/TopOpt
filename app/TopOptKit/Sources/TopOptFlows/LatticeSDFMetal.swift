@@ -694,8 +694,9 @@ public struct LatticeSDFScene {
         // the organic candidates, the octree, the cap wall — reads `regions`, so the
         // thickness maps are attached before any of them run. `field` is the solve's
         // von Mises, the sim rule's input.
+        // ★ THE ONE OUTLINE (P1/P6): every region carries its generated polygon before any reader runs
         let regions = LatticeWallThicknessBuilder.attach(
-            regions, field: wallStressField ?? field,
+            regions.map { $0.withGeneratedOutline() }, field: wallStressField ?? field,
             floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
                 : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)),
             depthStepsFor: { r in r.selectableKey.flatMap { wallDepthSteps[$0] } })

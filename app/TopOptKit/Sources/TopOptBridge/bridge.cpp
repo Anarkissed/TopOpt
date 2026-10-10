@@ -3512,6 +3512,72 @@ std::vector<double> outline_union(const double* uv, std::size_t point_count, con
   });
 }
 
+std::vector<double> outline_polygon(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                    std::size_t loop_count, const double* seg, std::size_t seg_count,
+                                    const double* strip, std::size_t strip_count, double expand_mm,
+                                    double arc_tolerance_mm, double scale) {
+  return guarded_empty("outline_polygon", [&]() -> std::vector<double> {
+    using namespace Clipper2Lib;
+    if (!(std::isfinite(scale) && scale > 0.0))
+      throw std::invalid_argument("outline_polygon: scale must be finite and > 0");
+    if (!(std::isfinite(expand_mm) && std::isfinite(arc_tolerance_mm) && arc_tolerance_mm > 0.0))
+      throw std::invalid_argument("outline_polygon: expand and arc tolerance must be finite, the tolerance > 0");
+    if ((loop_count > 0 && loop_sizes == nullptr) || (point_count > 0 && uv == nullptr) ||
+        (seg_count > 0 && seg == nullptr) || (strip_count > 0 && strip == nullptr))
+      throw std::invalid_argument("outline_polygon: an array was not passed");
+    auto pt = [&](double u, double w) {
+      if (!(std::isfinite(u) && std::isfinite(w)))
+        throw std::invalid_argument("outline_polygon: a point is not finite");
+      return Point64(static_cast<int64_t>(std::llround(u * scale)), static_cast<int64_t>(std::llround(w * scale)));
+    };
+    Paths64 raw;
+    std::size_t k = 0;
+    for (std::size_t l = 0; l < loop_count; ++l) {
+      const int32_t n = loop_sizes[l];
+      if (n < 0 || k + static_cast<std::size_t>(n) > point_count)
+        throw std::invalid_argument("outline_polygon: the loop sizes run past the points");
+      Path64 p;
+      for (int32_t i = 0; i < n; ++i, ++k) p.push_back(pt(uv[2 * k], uv[2 * k + 1]));
+      if (p.size() >= 3) raw.push_back(std::move(p));
+    }
+    // the raw outline, EVEN-ODD — holes, and the preview's own sign
+    Paths64 solid = Union(raw, FillRule::EvenOdd);
+    // the seam strips, each ring positive, joined to it
+    if (strip_count > 0) {
+      Paths64 strips;
+      for (std::size_t s = 0; s < strip_count; ++s) {
+        Path64 q;
+        for (int c = 0; c < 4; ++c) q.push_back(pt(strip[8 * s + 2 * c], strip[8 * s + 2 * c + 1]));
+        if (Area(q) < 0.0) std::reverse(q.begin(), q.end());
+        if (Area(q) != 0.0) strips.push_back(std::move(q));
+      }
+      solid = Union(solid, strips, FillRule::NonZero);
+    }
+    // the expand: the round capsule about every true edge, added (grow) or taken away (shrink)
+    if (seg_count > 0 && std::abs(expand_mm) > 0.0) {
+      Paths64 segs;
+      for (std::size_t s = 0; s < seg_count; ++s) {
+        Path64 q{pt(seg[4 * s], seg[4 * s + 1]), pt(seg[4 * s + 2], seg[4 * s + 3])};
+        if (q[0] != q[1]) segs.push_back(std::move(q));
+      }
+      Paths64 caps = Union(InflatePaths(segs, std::abs(expand_mm) * scale, JoinType::Round, EndType::Round, 2.0,
+                                        arc_tolerance_mm * scale),
+                           FillRule::NonZero);
+      solid = expand_mm > 0.0 ? Union(solid, caps, FillRule::NonZero) : Difference(solid, caps, FillRule::NonZero);
+    }
+    std::vector<double> out;
+    out.push_back(static_cast<double>(solid.size()));
+    for (const Path64& path : solid) {
+      out.push_back(static_cast<double>(path.size()));
+      for (const Point64& q : path) {
+        out.push_back(static_cast<double>(q.x) / scale);
+        out.push_back(static_cast<double>(q.y) / scale);
+      }
+    }
+    return out;
+  });
+}
+
 bool grading_schema_accepts(const std::string& key) {
   return guarded("grading_schema_accepts", [&]() -> bool {
     if (key.empty()) return false;

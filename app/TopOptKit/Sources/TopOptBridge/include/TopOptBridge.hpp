@@ -1495,6 +1495,21 @@ std::vector<int32_t> stepped_region_owners(const std::string& job_json, const do
 std::vector<double> outline_union(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
                                   const int32_t* loop_is_hole, std::size_t loop_count, double scale);
 
+// ★★ THE ONE OUTLINE (reviewer, 2026-10-10, P1/P6, approved by the maintainer): a face region's generated
+// polygon, the ONLY outline every reader uses — the wire, the bake, the shader's prism, the side rims and
+// the owner query. `uv`/`loop_sizes`/`loop_count`: the raw outline loops, read EVEN-ODD (holes and all, as
+// the preview's own sign reads them). `seg`: `seg_count` true-outline edges, 4 doubles each (a.u a.w b.u
+// b.w). `strip`: `strip_count` seam strips, 8 doubles each (four corners). `expand_mm` > 0 adds the
+// capsule of that radius round every true edge (round joins and ends: the Minkowski sum the preview's
+// distance draws); < 0 removes it (a shrink, measured to the true edges only). Arcs are chords within
+// `arc_tolerance_mm`, with their vertices ON the arc (inside chords). Coordinates rounded to 1/`scale` mm.
+// Returns [loop count, then per loop: point count, u0, w0, …] — simple, non-overlapping loops (outers
+// positive, holes negative); [0] when nothing is left. Empty, with `bridge_last_refusal`, on a bad argument.
+std::vector<double> outline_polygon(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                    std::size_t loop_count, const double* seg, std::size_t seg_count,
+                                    const double* strip, std::size_t strip_count, double expand_mm,
+                                    double arc_tolerance_mm, double scale);
+
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number
 // `grading.subfloor_stress_fraction` overrides). Forwarded so the app can SHOW

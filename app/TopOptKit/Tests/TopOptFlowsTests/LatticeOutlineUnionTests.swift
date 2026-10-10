@@ -44,9 +44,7 @@ final class LatticeOutlineUnionTests: XCTestCase {
 
     /// The preview's verdict: the bake's own outline distance, positive inside.
     private func previewInside(_ r: LatticeRegionSpec, _ uv: SIMD2<Double>) -> Bool {
-        -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: r.outlineLoops, seams: r.outlineSeams,
-                                                       tilts: r.outlineSeamTilt, caps: r.outlineSeamDepthMM)
-          - r.inPlaneOffsetMM) > 0
+        r.inPlaneDistance(uv) > 0   // ★ the bake's one-outline distance (P1/P6)
     }
 
     /// ★ RED on today's wire: two fragments of one region sharing an edge, grown 1 mm. Each grown ring
