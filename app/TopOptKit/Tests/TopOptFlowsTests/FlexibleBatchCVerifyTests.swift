@@ -461,6 +461,13 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         let flex = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
         _ = stage.model(for: flex, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
         stage.refresh()
+        // ★ RE-PINNED (round 6 batch V, his view setting "Role colours off" — ON by default: #354's role colours are never on
+        // the main page's model, so on the Flexible stage too they are not even evaluated); the control composes them with
+        // the setting OFF (set directly — never kept for the project)
+        XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
+        XCTAssertEqual(evaluated, 0, "Role colours off (the default): not evaluated on the Flexible stage either")
+        stage.viewSettings.roleColoursOff = false
+        stage.refresh()
         XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
         XCTAssertNotNil(stage.stressField, "control: the Flexible stage notes it")
         XCTAssertEqual(evaluated, 1)

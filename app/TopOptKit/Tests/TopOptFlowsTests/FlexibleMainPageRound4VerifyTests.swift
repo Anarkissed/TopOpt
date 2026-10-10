@@ -368,12 +368,19 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(note.width, 180, "room for 'Lattice ready · Show' at \(name)")
             XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)), "clear of the left panel at \(name)")
             XCTAssertTrue(frame.contains(note))
-            XCTAssertEqual(frame.maxY, row.maxY, accuracy: 0.5, "the keep-out ends where the row ends at \(name)")
+            // ★ RE-PINNED (round 6 batch V): his two view settings share the row's line in landscape and sit one line under
+            // it in portrait (FlexibleMainViewToggles.settingsOnRowLine — their own cost to the card is pinned by
+            // FlexibleBatchVHostedTests V1d: the card stays in the trailing column, folded on the very edge). The NOTE still
+            // costs the legends nothing: the keep-out ends where the row — or, in portrait, the settings' line — ends, and the
+            // legends are compared with the row and that line held out without the note.
+            let settings = FlexibleMainViewToggles.settingsOnRowLine(viewport: v) ? CGRect.null : FlexibleMainViewToggles.settingsFrame(viewport: v)
+            let held = row.union(settings)
+            XCTAssertEqual(frame.maxY, held.maxY, accuracy: 0.5, "the keep-out ends where the row (or the settings' line) ends at \(name)")
             for chip: CGFloat in [0, 222] {
                 let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: chip)
                 let placed = FlexibleMainLegendLayout.place(kinds, minimized: [], viewport: v, keepOut: keep)
                 let rowOnly = FlexibleMainLegendLayout.place(kinds, minimized: [], viewport: v,
-                                                              keepOut: keep.map { $0 == frame ? row : $0 })
+                                                              keepOut: keep.map { $0 == frame ? held : $0 })
                 // the note never pushes a legend out of the trailing column; where batch C's row-only
                 // keep-out held them all there, nothing moves at all (at 11" landscape with the chip
                 // column batch C already needed a second column — its top legend sits lower, as in C2)

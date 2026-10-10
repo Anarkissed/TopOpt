@@ -64,7 +64,8 @@ public enum FlexiblePageChannels {
     public static func channels(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, xray: Bool,
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
                                 depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
-                                controlColumnColours: Bool = false, groupColours: Bool = true) -> Channels {
+                                controlColumnColours: Bool = false, groupColours: Bool = true,
+                                roleMarks: Bool = true) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
@@ -76,14 +77,17 @@ public enum FlexiblePageChannels {
         let regions = model.regions
         let groups = model.squeezeGroups
         var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
-        for f in model.settings.faces {
+        // ★ BATCH V ("Role colours off" on the MAIN page — his answer of 2026-10-09, now a view setting): `roleMarks` false —
+        // no pressed green, no resting cyan, no selected face or linked end on the part; only the dent heat on the maps. The
+        // Settings page keeps them.
+        for f in model.settings.faces where roleMarks {
             var c = f.isLoaded ? FlexibleColours.loadedFace : FlexibleColours.restingFace
             if groupColours, f.isLoaded, groups.count > 1, let g = groups.first(where: { $0.regions.contains(f.faceRegionID) }) {
                 c = FlexibleColours.token(model.groupColour(g), FlexibleColours.loadedFace.w)   // ★ S1: his chosen colour
             }
             regionTint.append((f.faceRegionID, c))
         }
-        if let r = model.selectedRegion {
+        if roleMarks, let r = model.selectedRegion {
             if let st = model.stack(r) { for l in st.exitRegions { regionTint.append((l.id, FlexibleColours.linkedEnd)) } }
             regionTint.append((r, FlexibleColours.selectedFace))
         }

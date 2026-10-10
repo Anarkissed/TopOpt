@@ -117,7 +117,9 @@ extension FlexibleMainStage {
                       stress field: LatticeDemandField?) -> [Float]? {
         guard current(project, stage) != nil, let c = channels else { return nil }
         noteStressField(field)
-        let roles = roles()
+        // ★ BATCH V ("Role colours off", ON by default — his answer of 2026-10-09, now a view setting): #354's Selections
+        // role colours stay in the Selections list, never on this page's model (H4 still hands them over; not evaluated)
+        let roles = viewSettings.roleColoursOff ? [:] : roles()
         var h = Hasher()
         for k in roles.keys.sorted() { h.combine(k); h.combine(roles[k]!) }
         let showStress = stress && stressDrawable

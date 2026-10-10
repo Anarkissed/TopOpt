@@ -374,6 +374,27 @@ final class FlexibleBatchVHostedTests: XCTestCase {
                 XCTAssertEqual(flip(), was, "\(tag): …and back")
                 lines.append("\(tag) \(label) \(chip.integral)")
             }
+            // ★ landscape: on the buttons' line (the right edge keeps its height for the legend card); portrait: under them
+            let landscape = size.width > size.height
+            XCTAssertEqual(FlexibleMainViewToggles.settingsOnRowLine(viewport: size), landscape, "\(tag): on the buttons' line iff landscape")
+            if landscape {
+                XCTAssertEqual(frame.midY, row.midY, accuracy: 0.5, "\(tag): on the buttons' line")
+                XCTAssertLessThanOrEqual(frame.maxX, row.minX, "\(tag): left of the buttons")
+                XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "\(tag): the note keeps its room left of them")
+                XCTAssertEqual(FlexibleMainViewToggles.frame(viewport: size).maxY, row.maxY, accuracy: 0.5, "\(tag): no taller than the buttons")
+            } else {
+                XCTAssertGreaterThanOrEqual(frame.minY, row.maxY, "\(tag): under the buttons")
+            }
+            // the folded legend card stays on the very edge (his tuning — batch M verification), the open one in the
+            // trailing column
+            let keep = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 94, chipColumnWidth: 222)
+            for rows in 1...2 {
+                let folded = FlexibleMainLegendLayout.placeCard(rows: rows, minimized: true, viewport: size, keepOut: keep,
+                                                                edge: FlexibleMainLegendLayout.foldedEdge)
+                XCTAssertEqual(folded?.frame.maxX ?? 0, size.width, accuracy: 0.5, "\(tag): the folded card (\(rows) rows) on the very edge")
+                let open = FlexibleMainLegendLayout.placeCard(rows: rows, minimized: false, viewport: size, keepOut: keep)
+                XCTAssertEqual(open?.frame.maxX ?? 0, size.width - PageChrome.edge, accuracy: 0.5, "\(tag): the open card (\(rows) rows) in the trailing column")
+            }
             // the legends, the player and the prism tags keep out of them (they read the toggles' frame)
             XCTAssertTrue(FlexibleMainViewToggles.frame(viewport: size).contains(frame), "\(tag): the toggles' frame holds them")
             let legends = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 120, chipColumnWidth: 180)
@@ -491,6 +512,27 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         for (tag, size) in [Self.his13p, Self.his11l] { try run(tag, size, r5.project, m5, r5States, prefix: "r5") }
         print("FLEX-BV-2a (pixels of the page with the part's overlays vs without, inside each piece of chrome; 0 = nothing shows there)\n  "
               + lines.joined(separator: "\n  ") + "\n  states with an overlay inside the chrome: \(failures)")
+    }
+
+    /// ★ RED CONTROL of V2a: the same page, the layer drawn over the chrome again (`controlOverlaysOverChrome` — the clip
+    /// left out): the verifier's [Rests] on his pad at 13" portrait shows through the panel and the legend once more.
+    func testTheRedControlTheLayerOverTheChromeAgain() throws {
+        addTeardownBlock { @MainActor in FlexibleStagePage.controlNoOverlays = false; FlexibleStagePage.controlOverlaysOverChrome = false }
+        let (r, m) = try his()
+        let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.his13p.1)
+        pump(2.5)
+        m.views = []; m.selectedRegion = nil; m.rail = .rests
+        pump(1.0)
+        let clipped = try measure(h, m)
+        FlexibleStagePage.controlOverlaysOverChrome = true
+        let over = try measure(h, m)
+        FlexibleStagePage.controlOverlaysOverChrome = false
+        XCTAssertEqual(clipped.inside["panel"], 0, "the clip: nothing inside the panel")
+        XCTAssertEqual(clipped.inside["legend"], 0, "…nor the legend")
+        XCTAssertGreaterThan(over.inside["panel"] ?? 0, 0, "★ control (no clip): the bottom's dashed outline inside the panel again")
+        XCTAssertGreaterThan(over.inside["legend"] ?? 0, 0, "★ control (no clip): …and inside the legend")
+        print("FLEX-BV-2a control 13p [Rests]: clipped panel \(clipped.inside["panel"] ?? -1) legend \(clipped.inside["legend"] ?? -1) · "
+              + "no clip panel \(over.inside["panel"] ?? -1) legend \(over.inside["legend"] ?? -1)")
     }
 
     // MARK: - V2b: the clip

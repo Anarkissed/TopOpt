@@ -277,9 +277,14 @@ public struct FlexibleStagePage: View {
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
                 flexibleLattice: nil)
+            // ★ BATCH V (m19): everything drawn on the part — the curves, the dashed outlines, the stamp, the chips, the tags,
+            // a reading — is cut out of the chrome (the 62 %-opaque panel and legend let it read as drawn OVER them)
             if !Self.controlNoOverlays {
-                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
-                FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
+                ZStack {
+                    FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut)
+                    FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil)
+                }
+                .mask { FlexibleChromeMask(holes: Self.controlOverlaysOverChrome ? [] : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)) }
             }
         }
         .coordinateSpace(name: FlexibleStageSpace.name)
@@ -316,8 +321,17 @@ public struct FlexibleStagePage: View {
     @MainActor static var controlNoOverlays = false
     @MainActor static var controlOverlaysOverChrome = false
 
-    /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame. ★ STUB.
-    static func chromeClip(_ frames: [String: CGRect], viewport: CGSize) -> [CGRect] { [] }
+    /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame — every keep-out (the panel,
+    /// the legend, the view buttons, the player), the player whole, the fix pop-up, the top line and its toast, the Exit row,
+    /// and the gizmo (laid out in the page's frame; the stage ignores the safe area, so it is moved by their difference).
+    static func chromeClip(_ frames: [String: CGRect], viewport: CGSize) -> [CGRect] {
+        guard let st = frames["stage"] else { return [] }
+        var out = stageKeepOut(frames)
+        out += ["player", "popup", "notice", "toast", "exitRow"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        let page = frames["page"] ?? st
+        out.append(FlexibleLegendPlacement.gizmoFrame(viewport: viewport).offsetBy(dx: page.minX - st.minX, dy: page.minY - st.minY))
+        return out
+    }
 
     /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
     /// ★ ROUND 6 (his img1 and answer): no group colour on the body — no frame, no digit, no tinted map-less
@@ -619,6 +633,9 @@ public struct FlexibleStagePage: View {
                     .lineLimit(1)
                     .padding(.horizontal, DS.Space.m).padding(.vertical, 6)
                     .background(Capsule().fill(DS.Color.chipSolid.color))
+                    .background(GeometryReader { g in   // ★ BATCH V: the toast is chrome too (chromeClip)
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                     .accessibilityIdentifier("flexible-toast")
             }
         }
@@ -664,6 +681,20 @@ public struct FlexibleStagePage: View {
     }
 
     // (the panel: FlexibleSettingsPanel — round 4)
+}
+
+/// ★ BATCH V (m19): the layer of everything drawn on the part, cut out of the chrome — opaque everywhere but the holes
+/// (overlapping holes stay holes: each is cleared, never toggled).
+struct FlexibleChromeMask: View {
+    let holes: [CGRect]
+    var body: some View {
+        Canvas { ctx, size in
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
+            ctx.blendMode = .destinationOut
+            for h in holes where !h.isNull && !h.isEmpty { ctx.fill(Path(h), with: .color(.white)) }
+        }
+        .allowsHitTesting(false)
+    }
 }
 
 /// The frames the depth chips keep out of (the panel, the legend) and the stage's own.

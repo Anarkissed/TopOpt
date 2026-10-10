@@ -331,6 +331,8 @@ public final class FlexibleMainStage: ObservableObject {
         fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
         feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
+        // ★ BATCH V: his two view settings for this project, and a fresh session of picks (FlexibleMainViewSettings)
+        openViewSettings(project)
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.projectChanged() }
@@ -450,7 +452,9 @@ public final class FlexibleMainStage: ObservableObject {
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
         let k = prismK   // ★ S1b: the page's ONE k (the tags and the legend's ×k read it too)
-        let active = project.selection.activeGroup
+        // ★ BATCH V ("Prism after a pick", ON by default): the active group only once he has picked in this session, and
+        // never a Pending group's; OFF: the active group, as S1b drew it (FlexibleMainViewSettings.prismGroup)
+        let active = prismGroup(project)
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
             + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
         if let c = volumesCache, c.key == key { return c.items }
@@ -756,7 +760,8 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
-                                              controlColumnColours: controlColumnHeat, groupColours: false)
+                                              controlColumnColours: controlColumnHeat, groupColours: false,
+                                              roleMarks: !viewSettings.roleColoursOff)   // ★ BATCH V: "Role colours off"
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN

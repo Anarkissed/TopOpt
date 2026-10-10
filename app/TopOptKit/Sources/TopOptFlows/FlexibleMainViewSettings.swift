@@ -3,14 +3,20 @@
 // 2026-10-09 were built inside item 4 and went with it — "Bring both back as a view setting that can each be turned
 // off at will."
 //   ★ "Role colours off" (ON by default): no role colour on the main page's MODEL — #354's Selections colours (H4 hands
-//     them over as `roles`) and Flexible's own role marks (the pressed green, the resting cyan, the selected face and
-//     its linked end). The Selections list keeps its colours, and the Settings page keeps its marks (his answer:
-//     "colours show in the Selections list and on the Settings page only"). Off: the model as #354 and round 6 paint it.
+//     them over as `roles`; they are dropped HERE, in the Flexible code — H4's line is unchanged) and Flexible's own role
+//     marks (the pressed green, the resting cyan, the selected face and its linked end). The Selections list keeps its
+//     colours, and the Settings page keeps its marks (his answer: "colours show in the Selections list and on the
+//     Settings page only"). OFF: the model as #354 and round 6 paint it.
 //   ★ "Prism after a pick" (ON by default): the main page shows a group's prism and its mm number only once he has
-//     picked a group in this session — nothing on open — and a Pending group (no role) shows none. Off: the active
-//     Selections group's prism on open, as S1b built it.
-// ★ STUB (batch V, tests first): the store keeps nothing yet and the settings change nothing on the page.
+//     picked a group in this session — nothing on open — and a Pending group (no role) shows none. A pick is the active
+//     Selections group changing, or the active group tapped again (#354's row re-sets it: an equal write), from the
+//     stage's first look at the project on, while no Settings page is up. OFF: the active Selections group's prism on
+//     open, as S1b built it.
+// ★ PER PROJECT, ON THIS DEVICE: kept in the app's defaults under the project's id — never in the project file, never an
+//   undo step, never a Flexible setting or the lattice's key, never an action (the other view toggles — Dent heat,
+//   Stress, Lattice, Prisms — are this session's only). Read when the stage makes the project's model (`ensure`).
 
+import Combine
 import Foundation
 
 /// His two view settings on the main Flexible page (both ON by default).
@@ -38,21 +44,69 @@ public struct FlexibleMainViewSettingsStore {
     /// The key a project's settings are kept under.
     static func key(_ project: UUID) -> String { "flexible.mainViewSettings." + project.uuidString }
 
-    /// The project's settings (both ON when none are kept).
-    public func load(_ project: UUID) -> FlexibleMainViewSettings { FlexibleMainViewSettings() }   // ★ STUB
+    /// The project's settings (both ON when none are kept, or what is kept cannot be read).
+    public func load(_ project: UUID) -> FlexibleMainViewSettings {
+        guard let data = defaults.data(forKey: Self.key(project)),
+              let s = try? JSONDecoder().decode(FlexibleMainViewSettings.self, from: data) else { return FlexibleMainViewSettings() }
+        return s
+    }
 
     /// Keep the project's settings.
-    public func save(_ s: FlexibleMainViewSettings, for project: UUID) {}   // ★ STUB
+    public func save(_ s: FlexibleMainViewSettings, for project: UUID) {
+        guard let data = try? JSONEncoder().encode(s) else { return }
+        defaults.set(data, forKey: Self.key(project))
+    }
 }
 
 extension FlexibleMainStage {
-    /// "Role colours off", on ⇄ off (his tap).
+    /// "Role colours off", on ⇄ off (his tap): kept for his project, and the model's colours composed again at once.
     public func setRoleColoursOff(_ on: Bool) {
-        viewSettings.roleColoursOff = on   // ★ STUB: kept nowhere, changes nothing on the page
+        guard viewSettings.roleColoursOff != on else { return }
+        objectWillChange.send()
+        viewSettings.roleColoursOff = on
+        keepViewSettings()
+        composedKey = nil
+        refresh()
     }
 
-    /// "Prism after a pick", on ⇄ off (his tap).
+    /// "Prism after a pick", on ⇄ off (his tap): kept for his project; the prisms and their numbers follow at once.
     public func setPrismAfterPick(_ on: Bool) {
-        viewSettings.prismAfterPick = on   // ★ STUB: kept nowhere, changes nothing on the page
+        guard viewSettings.prismAfterPick != on else { return }
+        objectWillChange.send()
+        viewSettings.prismAfterPick = on
+        keepViewSettings()
+        volumesCache = nil
+    }
+
+    private func keepViewSettings() {
+        guard let id = model?.project.id else { return }
+        viewStore.save(viewSettings, for: id)
+    }
+
+    /// The project's view settings, and a fresh session of picks (nothing picked as the stage first looks at it). Called by
+    /// `ensure` when the stage makes the project's model — from a view's init: it publishes nothing.
+    func openViewSettings(_ project: ProjectModel) {
+        viewSettings = viewStore.load(project.id)
+        sessionPicked = false
+        lastSelection = project.selection
+        selectionObservation = project.$selection.dropFirst()
+            .sink { [weak self] s in self?.selectionMoved(s) }
+    }
+
+    /// The selection as #354 wrote it: a pick (the active group changed, or the same one re-set), unless a Settings page is
+    /// up (its writes are never his pick).
+    func selectionMoved(_ new: SelectionModel) {
+        defer { lastSelection = new }
+        guard !frozen, let a = new.activeGroupID else { return }
+        if a != lastSelection?.activeGroupID || new == lastSelection { sessionPicked = true }
+    }
+
+    /// The group whose prism and number the main page may draw: the active Selections group — under "Prism after a pick"
+    /// only once he has picked in this session, and never a Pending group.
+    func prismGroup(_ project: ProjectModel) -> SelectionGroup? {
+        guard let g = project.selection.activeGroup else { return nil }
+        guard viewSettings.prismAfterPick else { return g }
+        guard sessionPicked, !project.force.kind(for: g.id).isPending else { return nil }
+        return g
     }
 }

@@ -156,11 +156,13 @@ extension FlexibleMainViewToggles {
     /// The note's band: ★ C2 VERIFICATION — on the row's own line, left of the three buttons, clear
     /// of the left panel (inside `frame`, which every legend and the player keep out of — and
     /// which now ends where the row ends, so the note costs the legends nothing).
+    /// ★ BATCH V: left of his two view settings when they share the buttons' line (`settingsOnRowLine`).
     public static func noteFrame(viewport: CGSize) -> CGRect {
         let row = rowFrame(viewport: viewport)
-        let room = row.minX - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        let right = settingsOnRowLine(viewport: viewport) ? settingsFrame(viewport: viewport).minX : row.minX
+        let room = right - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
         let w = max(0, min(FlexibleMainNote.width, room))
-        return CGRect(x: row.minX - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
+        return CGRect(x: right - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
                       width: w, height: FlexibleMainNote.height)
     }
 }

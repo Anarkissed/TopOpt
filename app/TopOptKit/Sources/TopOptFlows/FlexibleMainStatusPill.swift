@@ -170,21 +170,28 @@ public struct FlexibleMainViewToggles: View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
         GeometryReader { g in
-            HStack(spacing: DS.Space.s) {
-                // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
-                FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
-                // ★ S1b: one line of four — or, on a pad too narrow for the note beside four (the iPad mini), two over two
-                Group {
-                    if Self.columns(viewport: g.size) >= Self.buttons {
-                        HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton }
-                    } else {
-                        VStack(alignment: .trailing, spacing: DS.Space.s) {
-                            HStack(spacing: DS.Space.s) { heatButton; stressButton }
-                            HStack(spacing: DS.Space.s) { latticeButton; prismsButton }
+            VStack(alignment: .trailing, spacing: DS.Space.s) {
+                HStack(spacing: DS.Space.s) {
+                    // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
+                    FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
+                    // ★ BATCH V: his two view settings on the buttons' line where it holds them (landscape)
+                    if Self.settingsOnRowLine(viewport: g.size) { settingsRow }
+                    // ★ S1b: one line of four — or, on a pad too narrow for the note beside four (the iPad mini), two over two
+                    Group {
+                        if Self.columns(viewport: g.size) >= Self.buttons {
+                            HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton }
+                        } else {
+                            VStack(alignment: .trailing, spacing: DS.Space.s) {
+                                HStack(spacing: DS.Space.s) { heatButton; stressButton }
+                                HStack(spacing: DS.Space.s) { latticeButton; prismsButton }
+                            }
                         }
                     }
+                    .latticeBandChipKeepOut()
                 }
-                .latticeBandChipKeepOut()
+                // ★ BATCH V (his two view settings, 2026-10-10): else one line under the buttons, trailing — each one
+                // visible line, a tap flips it (FlexibleMainViewSettings)
+                if !Self.settingsOnRowLine(viewport: g.size) { settingsRow }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(.top, PageChrome.belowGizmo)
@@ -192,15 +199,52 @@ public struct FlexibleMainViewToggles: View {
         }
     }
 
+    /// ★ BATCH V: "Role colours off" and "Prism after a pick", side by side at their fixed widths (`settingsFrame`).
+    private var settingsRow: some View {
+        HStack(spacing: DS.Space.s) {
+            FlexibleMainViewSettingChip(label: FlexibleRowCopy.mainRoleColoursOff, hint: FlexibleRowCopy.mainRoleColoursOffHint,
+                                        on: main.viewSettings.roleColoursOff, width: Self.settingWidths[0], id: "mainSetting-roleColoursOff") {
+                main.setRoleColoursOff(!main.viewSettings.roleColoursOff)
+            }
+            FlexibleMainViewSettingChip(label: FlexibleRowCopy.mainPrismAfterPick, hint: FlexibleRowCopy.mainPrismAfterPickHint,
+                                        on: main.viewSettings.prismAfterPick, width: Self.settingWidths[1], id: "mainSetting-prismAfterPick") {
+                main.setPrismAfterPick(!main.viewSettings.prismAfterPick)
+            }
+        }
+        .latticeBandChipKeepOut()
+    }
+
     /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ S1b: four 40 pt
     /// buttons, `s` apart — two over two on a narrow pad) AND the note's band beside it (★ C2: reserved, so a note coming and
     /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
     /// ends and costs the legends nothing).
+    /// ★ BATCH V: …and his two view settings' line under them (`settingsFrame`), so nothing is placed over them either.
     static func frame(viewport: CGSize) -> CGRect {
-        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
+        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport)).union(settingsFrame(viewport: viewport))
     }
-    /// ★ BATCH V (his two view settings): where they sit, one line under the buttons, trailing. ★ STUB.
-    static func settingsFrame(viewport: CGSize) -> CGRect { .null }
+    /// ★ BATCH V (his two view settings): two chips at fixed widths (the words at 12 pt with room to spare: "Prism after a
+    /// pick" is ≈ 112 pt), a finger's 40 pt tall — the buttons' own height.
+    static let settingHeight: CGFloat = 40
+    static let settingWidths: [CGFloat] = [150, 164]
+    static var settingsWidth: CGFloat { settingWidths.reduce(0, +) + CGFloat(settingWidths.count - 1) * DS.Space.s }
+    /// ★ BATCH V: the two share the buttons' line — left of them, the note left of the two — where that line holds them and
+    /// the note's least room (11" and 13" landscape): the right edge keeps its height for the legend card (folded, on the
+    /// very edge at 11" landscape — his tuning; one line more under the buttons pushed it a column in). Else (portrait, the
+    /// iPad mini, the buttons two over two) one line under the buttons, where a portrait page has the height.
+    static func settingsOnRowLine(viewport: CGSize) -> Bool {
+        let row = rowFrame(viewport: viewport)
+        let room = row.minX - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        return row.height <= settingHeight && room >= settingsWidth + DS.Space.s + FlexibleMainNote.minWidth
+    }
+    /// ★ BATCH V: where the two sit (`settingsOnRowLine`: on the buttons' line, else `s` under them, trailing on `edge`).
+    static func settingsFrame(viewport: CGSize) -> CGRect {
+        let row = rowFrame(viewport: viewport)
+        let w = settingsWidth
+        if settingsOnRowLine(viewport: viewport) {
+            return CGRect(x: row.minX - DS.Space.s - w, y: row.midY - settingHeight / 2, width: w, height: settingHeight)
+        }
+        return CGRect(x: viewport.width - PageChrome.edge - w, y: row.maxY + DS.Space.s, width: w, height: settingHeight)
+    }
     /// The buttons alone (★ S1b: one line of four, or two over two — `columns`).
     static func rowFrame(viewport: CGSize) -> CGRect {
         let c = columns(viewport: viewport), r = (buttons + c - 1) / c
@@ -292,5 +336,46 @@ public struct FlexibleMainPlayerSlot: View {
                     .position(x: r.midX, y: r.midY)
             }
         }
+    }
+}
+
+/// ★ BATCH V: one of his two view settings — one line: a check (on) or an empty circle (off), and its words; the view
+/// buttons' fills (on: the accent's deep tone; off: the bar's).
+struct FlexibleMainViewSettingChip: View {
+    let label: String
+    let hint: String
+    let on: Bool
+    let width: CGFloat
+    let id: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle((on ? DS.Color.accent : DS.Color.textTertiary).color)
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: [id + "-label": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+            }
+            .padding(.horizontal, 12)
+            .frame(width: width, height: FlexibleMainViewToggles.settingHeight)
+            .background(Capsule().fill(on ? DS.Color.accentDeep.opacity(0.55).color : DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [id: g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityHint(hint)
+        .accessibilityIdentifier("flexible-main-\(id)")
     }
 }
