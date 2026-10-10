@@ -368,6 +368,29 @@ static void test_shared_footprints() {
     ok = false;
   }
   CHECK(ok, "A3: complementary sectors (x >= 40 | x < 40) and other faces: accepted");
+  // FOLLOW-UP (2026-10-10): the same finding as VALUES, for the run's refusal code.
+  const std::vector<SharedFootprint> sh =
+      find_shared_footprints(m.mesh, {P(101, {101}), P(301, {301, 303}), P(321, {321}), P(311, {311})});
+  auto has = [&](int pa, int pb, int ra, int rb, double mm2) {
+    for (const SharedFootprint& x : sh)
+      if (x.press_a == pa && x.press_b == pb && x.face_region_a == ra && x.face_region_b == rb &&
+          std::fabs(x.shared_mm2 - mm2) < 1e-6)
+        return true;
+    return false;
+  };
+  std::printf("  shared footprints: %zu pairs\n", sh.size());
+  // top 60 x 60: 301 = x, y >= 40 (400); 321 = x >= 30 (1800); 311 = x < 40 (2400);
+  // 301 | 311 meet on a line only; 321 | 311 share 30 <= x < 40 (600).
+  CHECK(sh.size() == 5 && has(101, 301, 101, 301, 400) && has(101, 321, 101, 321, 1800) &&
+            has(101, 311, 101, 311, 2400) && has(301, 321, 301, 321, 400) && has(321, 311, 321, 311, 600),
+        "A3: find_shared_footprints lists every sharing pair with its mm2");
+  const std::vector<SharedFootprint> s2 = find_shared_footprints(m.mesh, {P(321, {321}), P(311, {311})});
+  CHECK(s2.size() == 1 && std::fabs(s2[0].shared_mm2 - 600) < 1e-6 &&
+            shared_footprint_sentence(s2[0]).find("presses 321 and 311") != std::string::npos &&
+            shared_footprint_sentence(s2[0]).find("600 mm2") != std::string::npos,
+        "A3: two overlapping sectors (x >= 30 | x < 40): 600 mm2, one sentence naming both");
+  CHECK(find_shared_footprints(m.mesh, {P(301, {301, 303}), P(311, {311}), P(100, {100})}).empty(),
+        "A3: complementary sectors: no pair");
 }
 
 // A10: ONE normaliser. The stack's direction, the frame's load and the receipt are all
@@ -386,7 +409,7 @@ static void test_one_normaliser(const Cube& c) {
 }
 
 // A7 / A12: the press API's version, and the three functions the app calls stay public.
-static_assert(kPressApiVersion == 1, "A7: the press API version");
+static_assert(kPressApiVersion == 2, "A7: the press API version (2: the A3 refusal is a coded refusal)");
 static void test_public_surface() {
   FaceFrame (*ffc)(const TriangleMesh&, const std::vector<int>&, const std::vector<RegionCut>&, int,
                    const Vec3&, const Vec3*) = &face_frame_cut;
