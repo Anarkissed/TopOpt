@@ -204,10 +204,13 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         XCTAssertTrue(FlexibleDepthChipLayout.shows(CGPoint(x: 700, y: 740), dragging: false, keepOut: [panel], viewport: vp))
         let src = try FlexibleSource.code("FlexibleFaceStamp.swift")
         XCTAssertTrue(src.contains("FlexibleDepthChipLayout.shows(q, dragging: dragging != nil, keepOut: keepOut, viewport: vp)"))
-        XCTAssertTrue(src.contains("FillStyle(eoFill: true)"), "the outline is clipped out of the keep-outs")
+        // ★ RE-PINNED (round 6 batch V, m19): the outline is clipped out of the WHOLE chrome (`clip`, else the keep-outs) through
+        // the one helper whose overlapping holes stay holes — no longer the even-odd fill
+        XCTAssertTrue(src.contains("FlexibleChromeClip.apply(&ctx, size: size, holes: clip ?? keepOut)"), "the outline is clipped out of the keep-outs")
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         // ★ RE-PINNED (D1 verification): the handle also reads the page's k — it keeps clear of the depth chip
-        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration)"))
+        // ★ RE-PINNED (round 6 batch V, m19): …and the page's chrome clip
+        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip)"))
     }
 
     /// The Stamp shape's job: flat curves + its one stamp, at the face's weight. Read back

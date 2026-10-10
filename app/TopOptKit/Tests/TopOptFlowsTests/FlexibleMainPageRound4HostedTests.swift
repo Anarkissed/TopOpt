@@ -75,8 +75,13 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 let h = host(FlexibleMainViewToggles(main: stage), size: size)
                 pump(0.3)
                 let row = FlexibleMainViewToggles.rowFrame(viewport: size), band = FlexibleMainViewToggles.noteFrame(viewport: size)
-                let got = h.frames.all.filter { $0.width > 1 }
-                print("FLEX-HOSTED \(name) \(kind): drawn \(got.map(\.integral)) · row slot \(row.integral) · note band \(band.integral)")
+                // ★ RE-PINNED (round 6 batch V): a third keep-out is drawn — his two view settings' line (on the row's line in
+                // landscape, left of the buttons and right of the note; under the row in portrait), inside its own frame
+                let settings = FlexibleMainViewToggles.settingsFrame(viewport: size)
+                let all = h.frames.all.filter { $0.width > 1 }
+                let got = all.filter { !settings.insetBy(dx: -1, dy: -1).contains($0) }
+                print("FLEX-HOSTED \(name) \(kind): drawn \(all.map(\.integral)) · row slot \(row.integral) · note band \(band.integral) · settings \(settings.integral)")
+                XCTAssertEqual(all.count - got.count, 1, "his two settings' line, in its frame, at \(name)")
                 XCTAssertEqual(got.count, 2, "the row and the note at \(name)")
                 let drawnRow = got.max { $0.minX < $1.minX } ?? .zero, note = got.min { $0.minX < $1.minX } ?? .zero
                 XCTAssertTrue(row.insetBy(dx: -1, dy: -1).contains(drawnRow), "the three buttons fill their slot at \(name): \(drawnRow) in \(row)")

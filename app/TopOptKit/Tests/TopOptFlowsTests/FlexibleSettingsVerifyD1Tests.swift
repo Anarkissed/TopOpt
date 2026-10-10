@@ -431,8 +431,9 @@ final class FlexibleSettingsVerifyD1Tests: XCTestCase {
         XCTAssertFalse(FlexibleCurveEditor.reachable(CGPoint(x: 100, y: 200), keepOut: [panel]))
         XCTAssertTrue(FlexibleCurveEditor.reachable(CGPoint(x: 300, y: 200), keepOut: [panel]))
         // the page hands the editors its keep-outs (the panel, the legend, the player)
+        // ★ RE-PINNED (round 6 batch V, m19): …and its chrome clip (the drawing is cut out of the whole chrome)
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains("keepOut: keepOut)\n                }"), "the curve editors get the page's keep-outs")
+        XCTAssertTrue(page.contains("keepOut: keepOut, clip: clip)\n                }"), "the curve editors get the page's keep-outs")
     }
     #endif
 }

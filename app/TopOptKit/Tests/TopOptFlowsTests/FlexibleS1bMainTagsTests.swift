@@ -179,6 +179,9 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         let m = settled(r.project, stage)
+        // ★ RE-PINNED (round 6 batch V): S1b's rule — the active group's prism and number, a Pending group's (Group C) too —
+        // is his view setting "Prism after a pick" OFF (ON by default: FlexibleBatchVHostedTests V1b). Set directly — never kept.
+        stage.viewSettings.prismAfterPick = false
         let cam = try Camera(stage, r.project)
         let proj = cam.projection()
         var lines: [String] = []
@@ -306,6 +309,9 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         let m = settled(r.project, stage)
+        // ★ RE-PINNED (round 6 batch V): S1b's rule — the active group's prism and number, a Pending group's (Group C) too —
+        // is his view setting "Prism after a pick" OFF (ON by default: FlexibleBatchVHostedTests V1b). Set directly — never kept.
+        stage.viewSettings.prismAfterPick = false
         let cam = try Camera(stage, r.project)
         m.views = [.prisms]
         var lines: [String] = []

@@ -216,17 +216,30 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let tris = o.keptFace.indices.filter { o.keptFace[$0] == 0 }
         XCTAssertFalse(tris.isEmpty, "face 0's part triangles are in the overlay")
         func face0(_ t: [Float]) -> Set<SIMD4<Float>> { Set(tris.flatMap { tri in (0..<3).map { Self.rgba(t, 3 * tri + $0) } }) }
+        // ★ RE-PINNED (round 6 batch V, his view setting "Role colours off" — ON by default: no role mark on the main page's
+        // model, his answer of 2026-10-09): ON, the map-less pressed face wears nothing; OFF, round 6 item 1's plain pressed
+        // colour (what this test pinned before batch V). Set directly — never kept for his project.
+        let none = SIMD4<Float>(0, 0, 0, 0)
+        XCTAssertTrue(s.viewSettings.roleColoursOff, "premise: the default")
         let turns = s.playAllBaseTints(m, scaleMM: 1)   // (fe is still the landed sims': no refresh since the edit)
         XCTAssertFalse(turns.isEmpty, "the Play-all turns' tints")
-        for (id, t) in turns { XCTAssertEqual(face0(t), [FlexibleColours.loadedFace], "\(id)'s turn: face 0 pressed, no map — the plain pressed colour") }
+        for (id, t) in turns { XCTAssertEqual(face0(t), [none], "\(id)'s turn: face 0 pressed, no map — no mark (Role colours off)") }
+        s.viewSettings.roleColoursOff = false
+        for (id, t) in s.playAllBaseTints(m, scaleMM: 1) { XCTAssertEqual(face0(t), [FlexibleColours.loadedFace], "\(id)'s turn, OFF: the plain pressed colour") }
+        s.viewSettings.roleColoursOff = true
         s.refresh()
         XCTAssertNil(m.stacks[FlexFaceKey(region: 0, rotation: 0)], "still no map for face 0")
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "the refresh: the plain pressed colour")
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "the refresh: no mark (Role colours off)")
+        s.viewSettings.roleColoursOff = false
+        s.refresh()
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "the refresh, OFF: the plain pressed colour")
+        s.viewSettings.roleColoursOff = true
+        s.refresh()
         // ★ RED CONTROL: the channels with the group colours (round 4–5) — face 0 wears Group 2's pink
         let red = FlexiblePageChannels.channels(model: m, overlay: o, xray: false, drawnLattice: nil, groupColours: true)
         let pink = FlexibleColours.token(m.groupColour(number: 2), FlexibleColours.loadedFace.w)
         XCTAssertEqual(face0(try XCTUnwrap(red.tints)), [pink], "control: groupColours true tints the map-less face pink")
-        lines.append("no map: face 0 \(face0(try XCTUnwrap(s.channels?.tints)) == [FlexibleColours.loadedFace] ? "plain" : "TINTED") (control: pink)")
+        lines.append("no map: face 0 \(face0(try XCTUnwrap(s.channels?.tints)) == [none] ? "no mark (OFF: plain)" : "TINTED") (control: pink)")
         print("FLEX-R6-1a\n  " + lines.joined(separator: "\n  "))
     }
 
@@ -721,6 +734,9 @@ final class FlexibleRound6HostedTests: XCTestCase {
     func testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce() throws {
         let stage = FlexibleMainStage()
         let (r, m) = try his(stage)
+        // ★ RE-PINNED (round 6 batch V): S1b's rule — the active group's prism and number, a Pending group's too — is his view
+        // setting "Prism after a pick" OFF (ON by default: FlexibleBatchVHostedTests V1b). Set directly — never kept.
+        stage.viewSettings.prismAfterPick = false
         let size = CGSize(width: 900, height: 900)
         let proj = try projection(r.project)
         func tags(_ drilledIn: Bool = false, on s: WorkspaceStage = .lattice, keepOut: [CGRect] = []) -> [FlexibleStageViewTags.Tag] {

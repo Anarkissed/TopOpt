@@ -352,7 +352,11 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         for (name, v) in viewports {
             let f = FlexibleMainViewToggles.frame(viewport: v), n = FlexibleMainViewToggles.noteFrame(viewport: v)
             XCTAssertTrue(f.contains(n), "the note band is inside the reserved frame at \(name)")
-            XCTAssertEqual(n.maxX, FlexibleMainViewToggles.rowFrame(viewport: v).minX - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
+            // ★ RE-PINNED (round 6 batch V): in landscape his two view settings share the row's line — the note is beside THEM,
+            // left of them (FlexibleMainViewToggles.settingsOnRowLine); in portrait beside the row, as before
+            let right = FlexibleMainViewToggles.settingsOnRowLine(viewport: v) ? FlexibleMainViewToggles.settingsFrame(viewport: v).minX
+                : FlexibleMainViewToggles.rowFrame(viewport: v).minX
+            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row (or his settings on its line), left of it")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }
