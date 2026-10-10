@@ -36,6 +36,8 @@ public struct HomeView: View {
                                           onRename: { renameDraft = proj.name; renameTarget = proj },
                                           onDelete: { deleteTarget = proj })
                     }
+                    // ★ round 3 ruling (c): never dropped silently — no open, no rename, no delete
+                    ForEach(model.unreadableProjects) { UnreadableProjectCard(entry: $0) }
                 }
                 .padding(.horizontal, DS.Space.page)
                 .padding(.top, DS.Space.xl5)
@@ -227,6 +229,71 @@ private struct RecentProjectCard: View {
                     colors: [DS.Color.textPrimary.opacity(0.06).color, .clear],
                     center: .center, startRadius: 4, endRadius: 150))
         }
+    }
+}
+
+/// ★★ ROUND 3 RULING (c) (maintainer, 2026-10-01): a project on disk the app cannot read, said as
+/// "Can’t open" with the reason — the recent card's own frame and tokens, and NOTHING to tap: no
+/// open (that would start an empty project with the same id, and a save would overwrite his file),
+/// no rename, no delete. The file is never modified or deleted.
+struct UnreadableProjectCard: View {
+    let entry: UnreadableProject
+    static let title = "Can’t open"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(DS.Color.warning.color)
+                Text(entry.reason)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(4)
+            }
+            .padding(DS.Space.xl)
+            .frame(minHeight: 160)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: DS.Space.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name ?? "Project \(entry.id.uuidString.prefix(8))")
+                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text(entry.id.uuidString.prefix(8))
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: DS.Space.s)
+                Text(Self.title)
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+                    .background(Capsule().fill(DS.Color.warning.opacity(0.14).color))
+            }
+            .padding(.horizontal, DS.Space.xl)
+            .padding(.vertical, DS.Space.ml)
+            .overlay(alignment: .top) {
+                Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1)
+            }
+        }
+        .frame(minHeight: 252)
+        .background {
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .fill(DS.Color.textPrimary.opacity(0.045).color))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                .strokeBorder(DS.Color.textPrimary.opacity(0.09).color, lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+        .foregroundStyle(DS.Color.textPrimary.color)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.name ?? "Project"): \(Self.title). \(entry.reason)")
+        .accessibilityIdentifier("unreadable-project-\(entry.id.uuidString)")
     }
 }
 

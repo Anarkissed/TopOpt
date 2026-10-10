@@ -1,0 +1,85 @@
+{
+ "_comment": "R6d (any-step): core derives a 14.5 mm base, so slots are 14.5 mm apart. One 8.7 mm cell (3 x 14.5/5) at the START of the second slot along z (offset 14.5): the packer's most ordinary placement. Accepted. Grouping lays it at slot + round(14.5/8.7)*8.7 = z 25.4 (+2.9 mm). Region and part both contain the sent and the laid cube.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "stepped",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet",
+  "intent": "aesthetic"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "geometry": {
+     "depth_mm": 12.0,
+     "half_u_mm": 30.0,
+     "half_w_mm": 30.0,
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "origin": [
+      18.0,
+      0.0,
+      8.0
+     ]
+    },
+    "kind": "face",
+    "role": "include"
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     22.5
+    ],
+    "region_id": 1,
+    "size_mm": 8.7
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "dp",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

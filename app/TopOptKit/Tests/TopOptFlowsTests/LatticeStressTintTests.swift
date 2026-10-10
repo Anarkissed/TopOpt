@@ -206,7 +206,9 @@ final class LatticeSimSolveTriggerTests: XCTestCase {
             .appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"),
             encoding: .utf8)
         let r = try XCTUnwrap(src.range(of: "LatticeSetupWizard(project: project)"))
-        let head = String(src[r.lowerBound...].prefix(700))
+        // the exit closure grew (the gizmo reset and save-bakes of 2026-09-21); the pin is
+        // that the solve trigger is INSIDE it, so the window covers the whole closure
+        let head = String(src[r.lowerBound...].prefix(1800))
         XCTAssertTrue(head.contains("startStressSolveIfNeeded()"),
                       "★ the wizard's exit is the call site")
     }

@@ -83,6 +83,10 @@ public enum SettingsChipID: Int, CaseIterable, Hashable, Sendable {
     /// surface back where the B-rep says it is", and an STL/3MF import has no
     /// B-rep to put it back to, so the chip would be a control over nothing.
     case cadFaces
+    /// ★ HIDE / SHOW THE BAND CHIPS (his 2026-09-28: "add a button at the bottom right corner
+    /// (ordered in length of the button words) to hide or show all the chips"). A VIEW toggle
+    /// over the lattice-only band chips, shown only while there are band chips to hide.
+    case bandChips
 }
 
 public enum BottomChipOrder {

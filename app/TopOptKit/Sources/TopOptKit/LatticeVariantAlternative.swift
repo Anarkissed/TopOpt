@@ -131,10 +131,15 @@ public struct LatticeVariantAlternative: Equatable, Sendable {
     /// The raw per-variant certification receipt, for the strut/region readouts the
     /// results screen already knows how to render.
     public let receiptJSON: Data?
+    /// ★ THE RUN'S EMITTED SPANS, verbatim (2026-09-02) — the text of the `_SPANS.txt`
+    /// core writes under `lattice.emit_organic_spans`, fetched beside the mesh when the
+    /// receipt names one. nil when the job did not ask for it. The preview builds its
+    /// organic field from this, so it draws the object that was certified.
+    public let spanText: String?
 
     public init(requestedVolumeFraction: Double, meshName: String, massGrams: Double,
                 accepted: Bool, margin: Double, triangleCount: Int,
-                meshBytes: Int, receiptJSON: Data?) {
+                meshBytes: Int, receiptJSON: Data?, spanText: String? = nil) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.meshName = meshName
         self.massGrams = massGrams
@@ -143,6 +148,7 @@ public struct LatticeVariantAlternative: Equatable, Sendable {
         self.triangleCount = triangleCount
         self.meshBytes = meshBytes
         self.receiptJSON = receiptJSON
+        self.spanText = spanText
     }
 
     /// WHERE THE MASS CAME FROM, in the words the screen uses. The solid variant's
