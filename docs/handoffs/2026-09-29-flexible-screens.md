@@ -1,6 +1,228 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 5 · the last syncs, the side-branch merge, and what was pushed (2026-10-02) (read this first)
+## Round 6 · item 4 — ONE SET OF GROUPS (2026-10-09) (read this first)
+
+Your img4: "All set groups should be visible on the main Flexibles screen … any groups already created should already be
+set in the flexible settings when the user starts up. These two boxes should be synced". Your answer: "Yes, one set of
+groups". Built as the approved design (spec §4; the reviewer's 19:41 ruling: hooks H16–H18 only, #354's public selection /
+force APIs only), with your answers of 2026-10-08/09. **The app was NOT launched: nothing here has been seen on a device or
+simulator.** The pictures are offscreen (the Settings page hosted in a window; the main page drawn by the shipping
+renderer — its Selections list is a replica, see Evidence).
+
+**What you will see:**
+- **The main page lists every group.** On your pad (A1_0003, img4): Bottom (Anchor), Top (10 kg, gravity), **Group C is now
+  face 3's push (2 kg)** instead of "Pending…", and three new rows — **"Group 2 · Face 4" and "Group 2 · Face 2"** (your
+  pinch, one row per side, 4.5 kg each, each pushing into its own wall) and **"Group 3 · Face 5"** (2 kg, squeezed with
+  Group C).
+- **Each row's swatch is its Settings group's colour** (Top green, the two Group 2 rows pink, Group C and Group 3 · Face 5
+  teal — your pick), **Bottom in Rests cyan.** A pinch side, or a hand squeezed with another, carries ONE caption line:
+  "Squeezed with Group 2 · Face 2". A Pending group keeps its own colour.
+- **The model on the main page wears no group or role colour** (your answer of 2026-10-09): the role colours #354 hands
+  the Flexible page are dropped there (the Selections list keeps them).
+- **On open, no prism and no number** (your pad opens with Group C active). **Pick a group** (or tap the active one again)
+  and its prism and mm number show. A Pending group shows none.
+- **One line, once, on the first Flexible open:** "Groups 2 and 3 are on the main page now".
+- **Settings shows the same groups.** The rail: Model · **Top** · Group 2 · Group 3 · Rests · New — a group with ONE hand
+  is named by it ("Top"); several: "Group N". The Rests rows name their Anchor ("Face 0 · Bottom").
+- **A Pending tab** appears when the main page has a group with no role: "Group D · Face 5", the main page's own words
+  "Give this face a role first", and **[Squeeze it]** (the pad asks the weight; a Load in a new squeeze group — on two
+  opposite walls, one push per wall) **[It rests]** (an Anchor). One tap, one undo step.
+- **Pressing a face the main page anchors asks once, in its card:** "Face 0 rests (main page: Bottom)" [Squeeze it]
+  [Keep it resting].
+- **Every Settings action changes both pages in ONE undo step:** press, rest, the trash, the force, a move, + New, remove
+  a group (its hands renamed with the renumber), the Pending fixes.
+- **The trash also takes the face off its main-page group** (your answer). A group it empties is removed — unless it
+  carries keep-clear, protect, a lattice role or hand-placed primitives: then it stays, pending, keeping them.
+- **The force is ONE number.** Typed in Settings it is written to every hand on the main page: each pinch side pushes
+  with it; faces on ONE side share it by area ("10 kg on Top A + Top B = 5 + 5").
+
+**Your answers, recorded:**
+
+| your answer | what it means now |
+|---|---|
+| "Yes, one set of groups" (item 4) | the Selections groups ARE the groups; Settings' squeeze group = its main-page Load groups (hands) |
+| deleting a face in Settings also removes it from its main-page group; an emptied group goes unless it carries keep-clear / protect | as built (it SUPERSEDES your round-5 "Flexible only", D-R5-C5-5) |
+| a pinch is TWO main-page rows, one per side, same colour; still one group in Settings | as built ("Group 2 · Face 4", "Group 2 · Face 2") |
+| the group's number is the TOTAL force, shared between same-facing faces by area; pinch sides each push with it | as built — and on your 0004 it MOVES two weights (below) |
+| a main-page Load group = a squeeze group; Anchor = Rests; Pending in Settings with [Squeeze it] [It rests]; groups made on either page appear on both | as built — a NEW main-page Load group arrives as its OWN squeeze group (round 3 put it in group 1) |
+| (2026-10-09) no role colour on the main page's model | as built (R6-1a widened to see it) |
+| (2026-10-09) prism and mm only after a pick in this session; a Pending group shows no number | as built |
+
+**Per project (restored by the app, H18 inside — FlexibleGroupSyncTests' table, i4_suite.txt):**
+- **Your pad A1_0003 (img4):** Top unchanged; Group C (Pending, face 3) → face 3's hand, push 2 kg; new "Group 2 · Face 4",
+  "Group 2 · Face 2" (push 4.536 kg) and "Group 3 · Face 5" (push 2 kg); face 0 linked to Bottom; teal kept. **No Flexible
+  weight moved; every run job is S2's golden, byte for byte.**
+- **Your 0004 as saved:** Top A linked to Top; **Top B joins Top (same side): Top A 10 → 5 kg, Top B 10 → 5 kg** — your
+  "10 kg on Top A + Top B = 5 + 5"; faces 3 and 5 their own hands ("Group 1 · Face 3", "Group 1 · Face 5", push 10 kg);
+  0 → bottom; "sides" (Protect, faces 4 + 2 — exactly the faces Settings rests) becomes an Anchor, Protect kept. **Top's
+  lattice role now covers Top B** (4 mm, Top's depth), where as saved it had none: the "[Lattice under it]" line no
+  longer shows.
+- **0004_r5:** face 5 → "Group 1 · Face 5" (push 10 kg); face 3 → "Group 2" (push 3 kg); 0 → bottom; sides (Protect, not
+  in Settings) untouched. No weight moved.
+- **A1_0004:** faces 3 and 5 → "Group 2 · Face 3", "Group 2 · Face 5" (push 3 kg, a pinch); 0 → bottom. No weight moved.
+- **The M2 stand (A1_0002):** face 2 leaves Group C (Protect — it keeps face 15 and region 101 and its Protect) for its
+  own hand "Group 1" (push 10 kg); Group B's faces (which every open pressed into Settings' group 1 beside face 2) arrive
+  as their own squeeze group 2, so the Export step now offers "Send Group 1 only" / "Send Group 2 only".
+- **102117B9:** no Flexible stage — untouched.
+
+### Hook lines in #354 / main files (H16, H17, H18 — the ruling's three; H15 already in)
+
+| # | file | content anchor (re-grepped before the edit) | +/− | the line | why |
+|---|---|---|---|---|---|
+| H16 | `Sources/TopOptFlows/WorkspacePlaceholder.swift` | `private func groupRow(_ g: SelectionGroup)` → `let tint = force.tint(for: g)` | +1 −1 | `let tint = flexibleMain.groupTint(g, project) ?? force.tint(for: g)   // Flexible (PR #362) H16: …` | on the Flexible stage the row's swatch (and its active bar) is the squeeze group's colour, an Anchor Rests cyan; nil elsewhere ⇒ #354's own tint, byte for byte |
+| H17 | `Sources/TopOptFlows/WorkspacePlaceholder.swift` | groupRow, right after the `HStack` holding `Text(force.panelKindLabel(for: g.id))` … `protectAffixToggle(g)` | +1 | `if let c = flexibleMain.groupCaption(g, project) { FlexibleGroupCaption(text: c) }   // Flexible (PR #362) H17: …` | one caption line under a hand squeezed with another (a pinch's two rows); nil off the Flexible stage |
+| H18 | `Sources/TopOptFlows/ProjectModel.swift` | `init(restoring:)`, after `refreshFaceRegionDrift()`, before `seedUndoBaseline()` | +1 | `FlexibleGroupMigration.migrate(self)   // Flexible (PR #362) H18: …` | link at restore: Topology / Optimize see the hands without a Flexible visit; part of the undo baseline (never an undo step); a project with no Flexible stage returns at once |
+
+Nothing else in a #354 / main file: SelectionModel, ForceModel, LatticeSettings, MetalMeshView, ClearanceGeometry and core are
+untouched; no LatticeStageMode case. The role colours are dropped INSIDE `FlexibleMainStage.tints` (H4 still hands them over).
+
+**#354's PUBLIC APIs the links use** (FlexibleGroupWorld, on values): `SelectionModel.addGroup()`, `rename(_:to:)`,
+`restore(groups:active:)`; `ForceModel.makeLoad`, `makeAnchor`, `setDirection`, `setWeight`, `clearKind`,
+`setKeepClearAffix`, `setProtected`, `loadManualPrimitives`, `setClearanceMargin/Axial/Slab`, and the readers.
+★ One change from the approved list: membership edits are ONE `restore(groups:active:)` replay of the group list, not
+`addFaces(_:to:)` / `addRegions(_:to:)` / `removeRegions(_:)`, because those sweep EVERY empty non-active group — an
+emptied keep-clear / protect group your answer keeps would be swept. `restore` is public and replays the list as given
+(SelectionGroup's public init builds each edited group). #354 may prefer a non-sweeping add; that is its call.
+
+**Upstream report (already with #354 — the reviewer's 19:41 ruling; not fixed here):** one Push group on opposite faces
+becomes (0, 0, −F) in `ProjectModel.loadCase` (the member normals cancel, `groupNormalModel` falls back to +Z) while the
+pre-flight `loadGroupDiagnoses` says .ok with a (0, 1, 0) fallback. FlexibleGroupSyncTests.testAPinchIsTwoOppositePushes
+pins it as its red control; the pinch is two groups, so the links never build that group.
+
+### Each item → where → pinned by (RED control beside it; tests FIRST — d9072a2e, red against the API stubs: 16 tests, 69 failures, round6/item4/i4_red_runs.txt)
+
+| item | where | pinned by (RED control) |
+|---|---|---|
+| His img4 reproduced, then one set of groups on his pad: Group C = face 3's hand, a pinch = a row per side, Rests = Bottom, the rail names group 1 by its hand, every run job S2's golden | FlexibleGroupMigration (H18), FlexibleGroupWorld | `FlexibleGroupSyncTests.testOneSetOfGroupsOnHisPad` (positive control: without H18, Bottom / Top / Group C pending, 4 Settings faces linked to nothing) |
+| A pinch pushes into both walls | one Load group per side | `…testAPinchIsTwoOppositePushes` (control: one Push group on 4 + 2 → (0, 0, −F) exactly, #354's loadCase) |
+| At restore, before the undo baseline; idempotent; Exit reads "Exit"; designInputs unchanged; the one-time line once | H18; FlexibleGroupMigration.takeNote | `…testMigrationRunsAtRestoreBeforeTheUndoBaseline` |
+| Every one of his projects, per face (the table above), idempotent | FlexibleGroupMigration.linked / report | `…testMigrationOnEveryOneOfHisProjects` |
+| A group made on either page appears on the other; a main-page Load group is its own squeeze group; + New renames its hand | adopt's `ownSqueezeTags`; pressLinked; syncGroups | `…testAGroupMadeOnEitherPageAppearsOnTheOther` (control: round 3's adopt — group 1) |
+| Pending in Settings, [Squeeze it] / [It rests], one undo step each, opposite walls → two hands | pendingGroups, squeezePending, restPending; FlexiblePendingTab | `…testPendingShowsInSettingsWithTwoFixes`; hosted `FlexibleGroupSyncHostedTests.testThePendingTabCarriesItsTwoFixes` (13p, 11l, 11p: line and buttons inside the panel, one line, 44 pt targets) |
+| The force: one number on both pages; one side shares it by area | setGroupForce → every hand | `…testTheForceIsOneNumberOnBothPages` (his 0004: 12 kg on Top A + Top B) |
+| An anchored face asks once | pressLinked → restsAsk; FlexibleRestsAskRows | `…testAnAnchoredFacePressedInSettingsAsksOnce`; hosted `…testAnAnchoredFaceAsksInItsCard` |
+| One action = one undo step on both pages, a renumber renames the hands | syncGroups (seal before and after) | `…testOneActionIsOneUndoStepOnBothPages` (force, Rests, trash, remove a group) |
+| The trash leaves the main page too; an emptied group with affixes stays, pending | removeLinked; FlexibleGroupWorld.commit / makePending | `…testDeletingAFaceTakesItOffItsMainPageGroup` (control: round 5 S6 — the group keeps it, `removedRegions`); `…testAnEmptiedGroupWithAffixesStays` (control: Bottom, no affix, removed) |
+| A link alone never stales the lattice | `designInputs` strips weightFrom | `…testALinkAloneNeverStalesTheLattice` (control: weightFrom kept → the key moves) |
+| The main page: the prism and its mm only after a pick in this session; never a Pending group's | FlexibleMainStage+Groups (pickedGroup, selectionMoved) | `…testThePrismAndItsNumberShowOnlyAfterAPickThisSession` (control: S1b's rule — Group C's prism on open) |
+| No role colour on the main page's model | FlexibleMainStage.tints (`roles` ignored) | R6-1a WIDENED (`FlexibleRound6HostedTests.testTheMainPageWearsNoGroupColourInAnyViewOrTurn`): the workspace's role tints passed in every view and turn; positive control: face 0 out of Settings (Bottom still anchors it) wears the Anchor green as before — red before the fix in every view (49152 vertices) |
+| Reset all keeps a pinch whole (a fresh adopt keeps the hands named here for one group together) | `FlexibleStageModel.ownSqueezeTags` (name families), resetAll through `syncGroups` | `…testResetAllKeepsAPinchWhole` (control: names ignored → the two sides are two groups) |
+
+**Tests re-pinned where your answers moved their premise** (each attributed in place; one control is weaker by necessity — BatchCVerify's "every corner of the pad reads ~0 MPa" became "the unsubdivided corners miss the peak", because H18 changed the pad's load case):
+`FlexibleMainPageLoadsTests` (your Rests now rests with an Anchor and leaves the Load group; the trash leaves the main page
+too, round 5 S6 kept as the control; the round-3 adopt tests run on your project as saved before the link —
+`FlexibleHisProject.restoreUnlinked`), `FlexibleSqueezeGroupsModelTests` (a move writes the hand's weight — one force),
+`FlexibleSqueezeGroupsReviewTests` (a re-pressed main-page Load group is its own squeeze group; the stale-cache control
+reads 12 kg for every hand), `FlexibleLatticeUnderTests` / `FlexibleLatticeUnderReviewTests` / `FlexibleReadinessTests`
+(batch E's "[Lattice under it]" on your pads as saved before the link), `FlexibleRound5SettingsTests` (every face
+deletable — nothing left to remember; Reset all: one squeeze group per main-page hand, a deleted face stays deleted),
+`FlexibleRound5SettingsHostedTests` (the same; the reset's "groups compete" pop-up is closed before the rail is clicked),
+`FlexibleBatchCVerifyTests` (his 0004's loads now reach Top B's sector; the pad's corners are no longer all ~0 MPa; the
+role colours are never evaluated on the Flexible stage), `FlexibleSqueezeGroupsReviewUXTests` (D2's card-line control
+now names face 3's hand). Suites that press your anchored bottom or sides answer the new ask with [Squeeze it]
+(`FlexibleHisProject.pressAnswering`: FlexibleFEFieldTests, FlexibleGroupPaletteHostedTests, FlexibleRound5SettingsHosted,
+FlexibleSqueezeGroupsReviewUX). The fixture's batch-E taps (`FlexibleHisProject.restore`) are replayed on your project as
+SAVED, then H18 runs inside the undo baseline — your project as if you had tapped them in the old build and opened it in
+this one.
+
+### Goldens and stage-job hashes (every difference reported first: round6/item4/i4_goldens.txt, angled_presses/stage_job_hashes_i4.txt, i4_stage_job_diffs.txt)
+- **Run jobs:** your pad A1_0003 (img4), A1_0004 and r5 — every send byte-identical. **His 0004 as saved:** Top A and Top B
+  weight_n 98.07 → 49.03 N each (10 kg → 5 kg: Top's 10 kg shared by area) and a second lattice region (Top's include role
+  now covers Top B); its scene job gains that region; its frames' latticeVoxels 26624 → 32768 (no frame moved) and its
+  fields follow. **M2 (A1_0002):** the Export step offers "Send Group 1 only" / "Send Group 2 only" (Group B is its own
+  squeeze group); send 2's bytes identical.
+- **Lattice subtrees:** identical (the golden decodes the saved file; H18 lives in the restore). The file itself changes
+  only at the project's next save.
+- **Stage-job hashes:** the 8 non-Flexible rows identical; the 5 Flexible rows carry the hands as loads (each pinch
+  side anti-parallel), his 0004's anchors + faces 4, 2 ("sides" rests) and Top B's lattice region (the lattice stage's
+  grading cell_min_mm 5 → 1.17 there); control+ (a depth) moves, control− (a Flexible face weight) does not.
+
+### Evidence (`docs/handoffs/evidence/2026-09-29-flexible-screens/round6/item4/`; offscreen, NOT device screenshots)
+- `I4_13p_main_before_his_img4_open_lattice.png` / `I4_13p_main_after_open_lattice.png` — your pad at your 13" portrait
+  without H18 (Bottom, Top, Group C pending; face 3's prism on open, S1b's rule) and with it (six rows, two pinch rows,
+  captions, squeeze colours, nothing on open). The Selections list is a **REPLICA** of #354's rows fed by H16's and H17's
+  exact expressions and `force.panelKindLabel` — #354's groupRow cannot be hosted offscreen (WorkspacePlaceholder keeps its
+  stage in its own `@State`, `.topology`). The model, its lattice, the Flexible buttons, legend and player are real (the
+  shipping renderer's frame of what FlexibleMainStage hands the viewer). The "before" swatches are H16's (only H18 is off).
+- `I4_13p_main_after_pick_Group2Face4_lattice.png` — after picking "Group 2 · Face 4": its faint prism and "22.5 mm".
+- `I4_13p_main_after_model_no_role_colour.png` — the solid model: plain.
+- `I4_13p_settings_group2.png`, `…_rests.png`, `…_pending.png` (Group D · Face 5, [Squeeze it] [It rests]),
+  `…_rests_ask.png` ("Face 0 rests (main page: Bottom)"), `I4_{13p,11l,11p}_settings_pending_tab.png` — the real Settings
+  page, hosted. `I4_evidence_log.txt` — each state's rows, colours, captions, prisms.
+- **Looking at them found three things, fixed before the commit of the pictures:** the rail named group 3 "Group C" after
+  face 5 had left for a Pending group; an empty Pending tab stayed open after its last fix / an undo; [Press it] on an
+  anchored face from another tab asked in a card that was not on screen.
+
+**Deviations (each with its reason):**
+1. **Membership edits are one `SelectionModel.restore(groups:active:)` replay**, not `addFaces` / `addRegions` /
+   `removeRegions` (the approved list): those sweep every empty non-active group, and your answer keeps an emptied group
+   that carries keep-clear / protect. `restore` is public #354 API.
+2. **The Pending tab lists the main page's "Pending…" groups** (no role, no keep-clear, no protect, no lattice role). The
+   spec listed r5's "sides" (Protect, faces 4 + 2) there; the main page shows it as "Protect", so it is not on the tab.
+   It can still become an Anchor or a Load: Settings' [It rests here] / [Press it] on its faces.
+3. **A role-less group holding exactly faces a squeeze group presses takes the role BEFORE a same-side hand is joined**
+   (the spec's order). On your saved projects it never meets a same-side hand; on the suites' fixture (your 0004 with
+   batch E's "Top B" protected + Lattice group) Top B becomes its own hand beside Top — two hands on the top, 10 kg each,
+   not "5 + 5". See your call 1.
+4. **`FlexibleMainPageLoads` gained one shared expansion (`Expander`)** — the links and the loads read groups the same way
+   — instead of "pending entries"; the Pending groups come from the links.
+5. **A pick** (your 2026-10-09 answer) is #354's own write of the selection from the stage's first look at the project on
+   (any page), never while Settings is up; tapping the active group again counts (#354 re-writes the same selection). An
+   Undo on the main page that rewrites an equal selection also counts — the one false "pick" left.
+6. **Reset all** goes through the links: a fresh setup is one squeeze group per main-page hand — your round-5 "start fully
+   fresh" with your item-4 rule — and the hands THIS code named for one group ("Group 2 · Face 4 / Face 2") stay one
+   group, so a reset never splits a pinch. A pairing with a group of YOUR naming (Group C + "Group 3 · Face 5") is not
+   recorded on the main page: a reset makes those two groups.
+7. **Test support in Flexible files:** red-control flags (`FlexibleGroupMigration.controlSkip`, `FlexibleGroupLinks.control…`,
+   `FlexibleMainStage.controlRoleTints` / `controlPrismOnOpen`) and the fix pop-up's close button frame key.
+
+**Not done (and why):**
+- **Nothing has been seen on a device or simulator.** Built and installed on 147E56A1; never launched.
+- **#354's real Selections rows were not rendered** (not hostable offscreen); the evidence list is a replica fed by the
+  hooks' expressions (H16/H17's own unit tests read the stage's answers directly).
+- **Before the page's first refresh, the role colours can show for a frame**: H4 also hands `faceTints: roleTints` to the
+  viewer, and the Flexible tint array (which replaces them) exists only after the first refresh. Removing that needs a
+  change on WorkspacePlaceholder's line — not one of H16–H18, so not done.
+- **A face held through a region that cannot be split** (a filter region such as "Face 23 & like it") cannot leave its
+  group: the trash falls back to round 5's remembered deletion, and a press gives it a hand while the region keeps it.
+  None of your projects has one.
+- The interim sim, AP2/AP3 and item 2 are other batches; nothing here touches presses beyond keeping their hands linked.
+
+**Your call:**
+1. **Order of the hand rules** (deviation 3): when a squeeze group already has a hand on a face's side, should a role-less
+   group holding just that face join it (its weight then shared by area, and the face leaves that group — and its
+   Protect / Lattice role) or take the role itself (two hands, each the full force)? Today: take the role (the spec).
+2. **Your r5, linked:** "[Lattice under both]" is now each hand's own Lattice chip (batch E's rule for a face in a group),
+   at the page's 4 mm depth — before H18 it made two new protected groups 50 mm deep. Keep, or take the stack's depth?
+3. **Your 0004:** Top B now lies under Top's lattice at Top's 4 mm (as saved it had none; batch E's tap gave 20 mm). OK?
+4. **The M2 stand:** face 2 leaves Group C's Protect for its own Load. OK, or keep Protect and leave face 2 unlinked?
+5. **Pending tab for a Protect-only group** (r5's "sides"): list it there too?
+
+### Build and suite (raw lines: round6/item4/i4_red_runs.txt, i4_suite.txt; classes i4_suite_classes.txt)
+- **Tests first** (d9072a2e, API stubs): 16 tests red, 69 failures; R6-1a's widening red in every view (face 0 in the
+  Anchor's green, 49 152 vertices).
+- **Targeted suite, run 1** (the implementation + goldens, 230 classes — every Flexible* class, every class pinning a
+  touched file, the goldens, LatticeStaleTypeTests, ProjectStoreTests, UndoHistoryTests, LatticeSettingsPersistTests,
+  ViewerTests, SmoothingPageRound2Tests, LatticeSimSolveTriggerTests, S1b's list): 1508 tests, 62 failures in 11 classes,
+  no xctest death — the 3 known classes and 9 traced to this item (above), fixed in 85add243.
+- **Targeted suite, run 2 — FINAL, at 50a274df:** 230 classes, **1509 tests, 54 skipped, 13 failures, all known**:
+  `FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker` ×8 (Xcode 27 text metrics),
+  `LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds` ×1, #354's
+  `LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses` ×4 (S2's K2). **LatticeStaleTypeTests 6/6.** Every
+  Flexible class passed — FlexibleBatchNRefineTests and FlexibleRound5SettingsHostedTests too, with the side worktree's
+  own suite running beside this one.
+- **Goldens:** FlexibleAngledGoldenTests 13/13 at the re-based goldens (twice: run 1 and run 2).
+- **iOS:** `xcodebuild … -destination id=147E56A1-… -derivedDataPath …/flexA1 build` at 50a274df: ** BUILD SUCCEEDED **
+  (21:35:38 → 21:36:14); `xcrun simctl install 147E56A1` exit 0 (booted; NEVER launched). Installed `TopOpt.debug.dylib`
+  76 337 984 B, mtime 2026-10-09 21:36:14, cmp-identical to the build; strings "Squeezed with " 1, "Give this face a role
+  first" 1.
+
+### Commits (`claude/flexible-screens`; nothing pushed)
+`d9072a2e` tests first (stubs + H16 / H17 / H18) · `972022d9` the implementation · `6f76d104` goldens re-based, stage
+hashes re-run, every difference attributed · `85add243` the suite's 9 traced failures re-pinned + two refinements ·
+`50a274df` the evidence and the three fixes looking at it found · (this handoff).
+
+## Round 5 · the last syncs, the side-branch merge, and what was pushed (2026-10-02)
 
 **Synced, one way (merge `--no-ff`, never rebase), no conflicts:**
 
