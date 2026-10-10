@@ -40,7 +40,7 @@
         "mode" : "both",
         "role" : "loaded",
         "skin_on" : true,
-        "weight_n" : 49.033249999999995
+        "weight_n" : 98.066499999999991
       },
       {
         "curve_x" : [
@@ -80,7 +80,7 @@
         "mode" : "both",
         "role" : "loaded",
         "skin_on" : true,
-        "weight_n" : 49.033249999999995
+        "weight_n" : 98.066499999999991
       },
       {
         "face_region_id" : 3,
@@ -186,55 +186,6 @@
               [
                 50,
                 0
-              ]
-            ]
-          ]
-        },
-        "kind" : "face",
-        "role" : "include"
-      },
-      {
-        "geometry" : {
-          "depth_mm" : 4,
-          "frame_u" : [
-            -0,
-            1,
-            0
-          ],
-          "frame_w" : [
-            1,
-            0,
-            0
-          ],
-          "half_u_mm" : 50,
-          "half_w_mm" : 50,
-          "normal" : [
-            0,
-            0,
-            -1
-          ],
-          "origin" : [
-            50,
-            50,
-            20
-          ],
-          "outline_uv" : [
-            [
-              [
-                -50,
-                -50
-              ],
-              [
-                -50,
-                0
-              ],
-              [
-                50,
-                0
-              ],
-              [
-                50,
-                -50
               ]
             ]
           ]
