@@ -40,9 +40,12 @@ public struct FlexibleSqueezeGroup: Equatable, Identifiable, Sendable {
     /// only presses and still be a tab; the job and core's hold count only groups with something SENT
     /// (`FlexibleSqueezeGroups.groups(_:sent:)`).
     public let presses: [UUID]
+    /// ★ ROUND 6 ITEM 2 (his answer: a group is EITHER faces OR edges/corners, never mixed): `.edges` when it holds an
+    /// edge or corner press (2+ regions), else `.faces` (FlexibleSqueezeGroups+Kind).
+    public let kind: FlexibleGroupKind
 
-    public init(id: Int, number: Int, regions: [Int], presses: [UUID] = []) {
-        self.id = id; self.number = number; self.regions = regions; self.presses = presses
+    public init(id: Int, number: Int, regions: [Int], presses: [UUID] = [], kind: FlexibleGroupKind = .faces) {
+        self.id = id; self.number = number; self.regions = regions; self.presses = presses; self.kind = kind
     }
 }
 
@@ -86,8 +89,10 @@ public enum FlexibleSqueezeGroups {
         var pressed: [Int: [UUID]] = [:]
         for f in s.loadedFaces { members[id(f), default: []].append(f.faceRegionID) }
         for p in s.presses ?? [] { pressed[id(p), default: []].append(p.id) }
+        let edges = Set((s.presses ?? []).filter { $0.regions.count >= 2 }.map { id($0) })   // ★ ROUND 6 ITEM 2
         return Set(members.keys).union(pressed.keys).sorted().enumerated().map { i, g in
-            FlexibleSqueezeGroup(id: g, number: i + 1, regions: members[g] ?? [], presses: pressed[g] ?? [])
+            FlexibleSqueezeGroup(id: g, number: i + 1, regions: members[g] ?? [], presses: pressed[g] ?? [],
+                                 kind: edges.contains(g) ? .edges : .faces)
         }
     }
 
@@ -111,6 +116,7 @@ public enum FlexibleSqueezeGroups {
     /// Renumber to 1…N in order (group 1 stored as nil); a resting face holds no group.
     /// ★ AP1: presses are renumbered with the faces (a press is always pressed).
     public static func normalise(_ s: inout FlexibleStageSettings) {
+        splitMixed(&s)   // ★ ROUND 6 ITEM 2: a group holds faces OR edges/corners
         let order = groups(s).map(\.id)
         var rank: [Int: Int] = [:]
         for (i, g) in order.enumerated() { rank[g] = i + 1 }

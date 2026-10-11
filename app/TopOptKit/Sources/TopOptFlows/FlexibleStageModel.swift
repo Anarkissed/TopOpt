@@ -153,6 +153,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
     /// ★ ANGLED PRESSES (AP1): the press whose card is open (FlexiblePress id); nil ⇒ none.
     @Published public var selectedPress: UUID?
+    /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
+    /// stored in the project until [Done].
+    @Published public var edgePick: FlexibleEdgePick?
     /// ★ ROUND 5 (S8): the folder tab open on the Settings modal's left rail (FlexibleSettingsRail).
     @Published public var rail: FlexibleRailTab = .group(FlexibleSqueezeGroups.first) { didSet { if oldValue != rail { railChanged() } } }
     /// ★ ROUND 5 (S9): the page's Exit left with nothing changed — the main page does nothing.

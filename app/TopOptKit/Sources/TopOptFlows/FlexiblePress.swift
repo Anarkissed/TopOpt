@@ -71,9 +71,14 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// (clamped), so tilt + straighten leave `faces` — its order is the run job's face order and part of
     /// the lattice's key — as they were. nil: not a tilted face. OPTIONAL, omitted when nil.
     public var faceIndex: Int?
+    /// ★ ROUND 6 ITEM 2: an EDGE or CORNER pick's AREA (FlexibleEdgeStrips) — what it was picked as, its width, and
+    /// where its strip or patch lies on each member face — so a width change or a removal re-cuts it. nil: a press
+    /// made another way (a tilt, AP1's own). OPTIONAL, omitted when nil.
+    public var strip: FlexibleStrip?
 
     public init(id: UUID = UUID(), regions: [Int], direction: SIMD3<Double>, snap: String? = nil,
-                settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil, faceIndex: Int? = nil) {
+                settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil, faceIndex: Int? = nil,
+                strip: FlexibleStrip? = nil) {
         self.id = id
         self.regions = regions
         self.direction = direction
@@ -85,6 +90,7 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
         self.settings = f
         self.drawnIn = drawnIn
         self.faceIndex = faceIndex
+        self.strip = strip
     }
 
     /// ★ Can this be stored as a press direction? Finite, with a length (core refuses a zero
