@@ -140,9 +140,66 @@ public enum LatticeRegionCells {
                 NSLog("DIAG quiltStep r\(ri) p90 %.3f ceiling %.3f allowQuilt %@ → n %.0f cell %.3f",
                       s.regionDrawnDensityP90[ri], s.drawnCeilingRho, s.allowQuilt ? "yes" : "no", n, effDepth / n)
             }
-            return RegionCell(measuredWidthMM: w, cellMM: Self.wholeCellsAcross(depthMM: effDepth, derivedCellMM: d.cellMM,
-                                                                                tileFloorMM: tileFloor, extraCells: extra))
+            var cell = Self.wholeCellsAcross(depthMM: effDepth, derivedCellMM: d.cellMM, tileFloorMM: tileFloor, extraCells: extra)
+            // ★★ DEFAULT GRADE: A BASE WHOSE HALVES END AT THE FLOOR (the reviewer's ruling (b), 2026-10-11 00:35,
+            // approved by the maintainer). His 68BF7B74 face 23 middle facet: a one-voxel move of its measured
+            // wall took the cell 10.31 → 9.45, whose half 2.36 is over the floor but does not print open, so
+            // the ladder ended at 4.73 — 342 cells and a see-through slit where 1,524 had been. Under Default
+            // Grade the per-region bake's cell (quiltStep) takes the first whole-number fit whose halving
+            // ladder ends at the floor, not at prints-open. Stepped's any-step menu has no such stop.
+            if quiltStep, project.lattice.gradeStepsAreHalves, cell > 0 {
+                let voxel = scene.map { Double(Swift.max($0.prismOccupancy.spacing.x,
+                                                         Swift.max($0.prismOccupancy.spacing.y, $0.prismOccupancy.spacing.z))) } ?? 0
+                let topology = project.lattice.topologyID
+                let moved = Self.cellWhoseHalvesEndAtTheFloor(
+                    depthMM: effDepth, cellMM: cell, tileFloorMM: tileFloor,
+                    bakeFloorMM: LatticePreviewOccupancy.bakeFloorMM(realFloorMM: tileFloor, voxelMM: voxel), beadMM: bead,
+                    printsOpen: { LatticePreviewOccupancy.printsOpen(cellMM: $0, lineWidthMM: bead, latticeID: topology) })
+                if moved != cell {
+                    NSLog("DIAG regionCell r\(ri) Default Grade: %.4f mm's halves end at prints-open → %.4f mm (%.0f → %.0f across %.3f mm)",
+                          cell, moved, (effDepth / cell).rounded(), (effDepth / moved).rounded(), effDepth)
+                }
+                cell = moved
+            }
+            return RegionCell(measuredWidthMM: w, cellMM: cell)
         }
+    }
+
+    /// ★★ DEFAULT GRADE'S BASE RULE (the reviewer's ruling (b), 2026-10-11): the candidates are the wall's
+    /// whole-number fits `depthMM / n` for n = n₀ + 1, n₀ + 2, … while the fit stays at or above the tile
+    /// floor (n₀ = `cellMM`'s own count), each of which must itself print open. A base REACHES when its
+    /// halving ladder ends because the next half is under the bake's floor (or no wider than the bead),
+    /// and NOT because that half is at or above the floor but fails `printsOpen` (core's
+    /// `lattice_prints_open`; open from 2.370917 mm at a 0.45 mm bead). `cellMM` stands when it reaches;
+    /// otherwise the first candidate that reaches wins — the smallest n, so the coarsest; none ⇒ `cellMM`.
+    /// At a 2.25 mm floor and a 0.45 mm bead a ladder fails to reach exactly when its finest rung is in
+    /// [4.50, 4.74) mm. Over every wall, the finest rung's largest jump on a small change of the wall is
+    /// 1.5× at n₀ = 2 and 3, 1.6× at 4, 1.67× at 5 (today's is 2× at every n₀); a one-cell wall of
+    /// 4.50–4.74 mm keeps today's 2× (its only smaller fit does not print open). It does not make the
+    /// finest rung uniform — ruling (a), its own round.
+    nonisolated public static func cellWhoseHalvesEndAtTheFloor(depthMM: Double, cellMM: Double, tileFloorMM: Double,
+                                                                bakeFloorMM: Double, beadMM: Double,
+                                                                printsOpen: (Double) -> Bool) -> Double {
+        guard depthMM > 0, cellMM > 0 else { return cellMM }
+        func reaches(_ base: Double) -> Bool {
+            var rung = base
+            for _ in 0..<8 {   // core's kSteppedMaxHalvings
+                let half = rung / 2
+                if half < bakeFloorMM - 1e-9 || half <= beadMM { return true }   // ends at the floor
+                if !printsOpen(half) { return false }                            // ends at prints-open
+                rung = half
+            }
+            return true
+        }
+        if reaches(cellMM) { return cellMM }
+        let n0 = Swift.max(1, (depthMM / cellMM).rounded())
+        var n = n0 + 1
+        while n <= n0 + 64, depthMM / n >= tileFloorMM - 1e-9 {
+            let base = depthMM / n
+            if printsOpen(base), reaches(base) { return base }   // never a quilt base for a quilt rung
+            n += 1
+        }
+        return cellMM
     }
 
     /// The whole-number fit of a region's cell across its wall: the nearest whole number of the cell core
@@ -212,17 +269,18 @@ public enum LatticeRegionCells {
         guard let law = LatticeType.named(project.lattice.topologyID),   // no law: no octet rule (item a)
               law.hasAestheticCeiling, s.drawnCeilingRho < s.drawnBand.hi else { return false }
         return quiltTrips(p90: s.regionDrawnDensityP90[region], lo: s.drawnBand.lo, ceiling: s.drawnCeilingRho,
-                          smallerCellFloor: law.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM))
+                          smallerCellPrintsOpen: LatticePreviewOccupancy.printsOpen(
+                            cellMM: cellMM, lineWidthMM: bead, latticeID: project.lattice.topologyID))   // ★ core's one rule
     }
 
     /// ★ THE RULE ITSELF, pure: a wall whose p90 drawn density is in the top fifth of
     /// [floor, ceiling] steps, provided the smaller cell's bead-wide strut still prints open
-    /// (`finestRungMaxDensity`). His face 2: p90 0.219 at a 0.219 ceiling → steps; face 15:
-    /// 0.080 → stays.
-    public nonisolated static func quiltTrips(p90: Double, lo: Double, ceiling: Double, smallerCellFloor: Double) -> Bool {
+    /// (core's `lattice_prints_open`, `LatticePreviewOccupancy.printsOpen`). His face 2: p90 0.219 at a
+    /// 0.219 ceiling → steps; face 15: 0.080 → stays.
+    public nonisolated static func quiltTrips(p90: Double, lo: Double, ceiling: Double, smallerCellPrintsOpen: Bool) -> Bool {
         guard ceiling > lo else { return false }
         let trip = lo + quiltTripFraction * (ceiling - lo)
-        return p90 >= trip && smallerCellFloor <= LatticePreviewOccupancy.finestRungMaxDensity + 1e-9
+        return p90 >= trip && smallerCellPrintsOpen
     }
 
     /// faceID → the user's own cell (mm), from the per-selectable store ("f:<group>:<face>").

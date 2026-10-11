@@ -3799,6 +3799,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var steppedShapeFit = true
         var steppedDyadicSteps = false
         var steppedCellStated: [Bool] = []
+        var uncoveredPrintsSolidOverride: Bool? = nil
     }
     private var latticeDesired = LatticeDesired()
     /// Forwarded from the view's inputs; the lattice layer calls it after each bake.
@@ -3828,6 +3829,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.fitCellMM = latticeDesired.fitCellMM
                 fresh.steppedShapeFit = latticeDesired.steppedShapeFit
                 fresh.steppedDyadicSteps = latticeDesired.steppedDyadicSteps
+                fresh.uncoveredPrintsSolidOverride = latticeDesired.uncoveredPrintsSolidOverride
                 fresh.steppedCellStated = latticeDesired.steppedCellStated
                 // ★ organic draws as capsules whenever this device built the pipeline
                 fresh.drawOrganicCapsules = organicCapsulePipeline != nil
@@ -3963,6 +3965,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var latticeSteppedDyadicSteps: Bool {
         get { latticeLayer?.steppedDyadicSteps ?? latticeDesired.steppedDyadicSteps }
         set { latticeDesired.steppedDyadicSteps = newValue; latticeLayer?.steppedDyadicSteps = newValue }
+    }
+    /// ★ K3's preview seam (`LatticeSDFRenderer.uncoveredPrintsSolidOverride`): nil = production's answer.
+    var latticeUncoveredPrintsSolid: Bool? {
+        get { latticeLayer?.uncoveredPrintsSolidOverride ?? latticeDesired.uncoveredPrintsSolidOverride }
+        set { latticeDesired.uncoveredPrintsSolidOverride = newValue; latticeLayer?.uncoveredPrintsSolidOverride = newValue }
     }
     var latticeSteppedCellStated: [Bool] {
         get { latticeLayer?.steppedCellStated ?? latticeDesired.steppedCellStated }

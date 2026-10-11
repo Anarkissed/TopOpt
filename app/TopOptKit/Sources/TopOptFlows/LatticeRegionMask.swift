@@ -96,21 +96,10 @@ public enum LatticeRegionMask {
             // the face on his two lattice walls, and the rest was solid material
             // the struts were drawn into. See `LatticeFaceOutline`.
             if !region.outlineLoops.isEmpty {
-                if !region.outlineSeamTilt.isEmpty,
-                   LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
-                                                      tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: s) {
-                    // ★ a NEGATIVE expand still shrinks the outline (2026-09-23): the flare
-                    // answered "inside" for every point of the polygon, so a shrunk region
-                    // with seams never shrank. The shrink is measured to the non-seam edges.
-                    let shrink = region.inPlaneOffsetMM + reach
-                    if shrink < 0 {
-                        let sd = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
-                        return sd <= shrink || abs(sd) >= -shrink
-                    }
-                    return true
-                }
-                return LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
-                    <= region.inPlaneOffsetMM + reach
+                // ★★ THE ONE OUTLINE (P1/P6, 2026-10-10): inside the generated polygon — the same vertical prism
+                // core builds, the seam strip through the full depth (the depth flare is retired) — or, for an
+                // owner's reach, within `reach` of the true outline offset by the expand
+                return region.inPlaneDistance(uv) >= -reach
             }
             // ★★★ THE RECTANGLE IS A MANUAL PRIMITIVE'S OWN SHAPE, AND NOTHING ELSE'S.
             // A primitive the user placed and dragged IS a box — measuring it as one is
@@ -172,8 +161,7 @@ public enum LatticeRegionMask {
             guard along <= slabMarginMM else { continue }
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
-            let inside = -(LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
-                           - region.inPlaneOffsetMM)
+            let inside = region.inPlaneDistance(uv)   // ★ the one outline (P1/P6)
             // ★ THE UNION (2026-09-22): the regions overlap at every seam (facets, corners),
             // and `min` made a point deep inside one prism read as OUTSIDE its neighbour's
             // outline — the band, the bleed and the strut clip then walled every seam. A
@@ -213,7 +201,7 @@ public enum LatticeRegionMask {
             // distance to the GROWN outline: inside the raw polygon it is raw + offset,
             // in the expand ring it is offset − raw; beyond the grown outline, outside
             // (negative beyond the grown outline, so the sampled field is continuous across it)
-            let grown = near.inside ? near.dist + region.inPlaneOffsetMM : region.inPlaneOffsetMM - near.dist
+            let grown = region.inPlaneDistance(uv)   // ★ the one outline (P1/P6): its sign, the true outline's distance
             let edgeUV = near.point + near.outward * region.inPlaneOffsetMM
             let probeUV = edgeUV + near.outward * stepMM
             let probe = region.origin + u * probeUV.x + v * probeUV.y + n * s
@@ -264,14 +252,8 @@ public enum LatticeRegionMask {
             if along > reachMM { return along }
             let inPlane: Double
             if !region.outlineLoops.isEmpty {
-                var sd = LatticeFaceOutline.signedDistance(uv, loops: region.outlineLoops, seams: region.outlineSeams)
-                // ★ the flared seams (2026-09-22): the sign follows the bisector planes
-                if !region.outlineSeamTilt.isEmpty {
-                    let inside = LatticeFaceOutline.insideWithFlare(uv, loops: region.outlineLoops, seams: region.outlineSeams,
-                                                                    tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM, depth: Swift.max(0, s))
-                    sd = inside ? -abs(sd) : abs(sd)
-                }
-                inPlane = sd - region.inPlaneOffsetMM
+                // ★★ THE ONE OUTLINE (P1/P6, 2026-10-10): the generated polygon's sign, the true outline's distance
+                inPlane = -region.inPlaneDistance(uv)
             } else if region.faceID == nil {
                 // A manual primitive's own box — see `contains` for why a FACE never
                 // gets this fallback.

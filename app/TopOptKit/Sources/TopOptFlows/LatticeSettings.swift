@@ -175,17 +175,17 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var normal: SIMD3<Double> = .zero
     public var halfUMM: Double = 0
     public var halfWMM: Double = 0
-    public var depthMM: Double = 0
+    public var depthMM: Double = 0 { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★★ THE FACE'S REAL OUTLINE, in the plane's (u, v) mm relative to `origin`
     /// — see `LatticeFaceOutline` for the measurement that made this necessary.
     /// EMPTY means "no outline was available", and then the region is the
     /// rectangle `halfUMM`×`halfWMM` exactly as it always was, which is what a
     /// bolt, a hand-placed primitive and every pre-outline project get.
-    public var outlineLoops: [[SIMD2<Double>]] = []
+    public var outlineLoops: [[SIMD2<Double>]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★ per loop, per edge (loop[i] → loop[i+1]): a SEAM — shared with another latticed
     /// prism (the next facet of a curved wall, a neighbouring latticed face). No rim, no
     /// band, no expand there. Empty ⇒ every edge is a true outline. Preview only.
-    public var outlineSeams: [[Bool]] = []
+    public var outlineSeams: [[Bool]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// per loop, per edge: the run face id across a seam (nil where the edge is a true
     /// outline) — a corner between two latticed faces gets the stability plate
     public var outlineSeamFaces: [[Int?]] = []
@@ -193,10 +193,10 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// positive where the two prisms DIVERGE with depth (a concave wall's facets, an inside
     /// corner), negative where they converge. The prism flares to the bisector plane by
     /// depth × tilt, so adjacent prisms meet with no wedge of material and no overlap.
-    public var outlineSeamTilt: [[Double]] = []
+    public var outlineSeamTilt: [[Double]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// per loop, per edge: the depth of the prism across a seam (0 = none) — the bisector
     /// flare applies only as deep as the neighbour's prism goes
-    public var outlineSeamDepthMM: [[Double]] = []
+    public var outlineSeamDepthMM: [[Double]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// the mesh face id this region came from (the wire carries the RUN id in `faceID`)
     public var rawFaceID: FaceID? = nil
     /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
@@ -204,7 +204,7 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what
     /// `FaceOffsetShell.dilated` does to the primitive on screen. Folding it into
     /// halfU/halfW could only ever grow a rectangle.
-    public var inPlaneOffsetMM: Double = 0
+    public var inPlaneOffsetMM: Double = 0 { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★ The B-rep face this region was spawned from (task 2026-08-12 §0a), or
     /// nil for a hand-placed primitive. Emitted as the job's `face_id` so CORE
     /// can check the depth tie: a face that is both protected and latticed must
@@ -231,6 +231,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     // for, and the answer the scene built. Neither reaches `wireDictionary`.
     public var thickness: LatticeWallThickness? = nil
     public var thicknessMap: LatticeWallThicknessMap? = nil
+    /// ★ The generated outline polygon (P1/P6), cached by the emission and the scene — `withGeneratedOutline`.
+    /// Not on the wire as such: the wire sends it as `outline_uv`.
+    public var generatedOutline: [[SIMD2<Double>]]? = nil
 
     /// Where the lattice lives along the normal at `uv`: the whole prism unless a slab
     /// was built for this face.
@@ -260,64 +263,74 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// The job's region, with the face frame axes only when the linked core takes them.
     public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
 
-    /// ★★★ THE SELECTION CORE CAN READ (his 2026-09-22 15:50: "if all it's doing is
-    /// SELECTING the area to lattice, you literally just counted the voxels to select").
-    /// Core lattices a curved face as flat slabs, one per facet, each straight along its
-    /// own normal; on a diverging seam a wedge of the model between two slabs falls in
-    /// neither and is never selected (core note 7). The preview's facet prisms meet at
-    /// the bisector. So the outline that goes ON THE WIRE is the facet's outline pushed
-    /// OUTWARD across every diverging seam by `min(depth, neighbour depth) × tan(half
-    /// the dihedral)` — the wedge's full width at the bottom — so the flat slabs' union
-    /// covers the bisector pocket. Converging seams overlap already and are left alone.
-    /// The over-selection this causes is a sliver ~d·θ²/2 deep at the seam's far end
-    /// (0.26 mm at 12 mm and 12°), inside the neighbour's slab. Preview-only readers keep
-    /// `outlineLoops` and the flare; this is the job's copy.
+    /// ★★★ THE ONE OUTLINE (the reviewer, 2026-10-10 21:27, P1-P6 as one set, approved by the maintainer): the
+    /// generated polygon is the ONLY outline, for every reader — the wire (`outline_uv`, and so core's
+    /// containment and, by #358's ruling, its strut clip), the owner query, the bake's outline distance, the
+    /// shader's prism and the side rims. It is the raw loops read EVEN-ODD (the preview's own sign), joined by
+    /// each diverging seam's STRIP — `min(depth, neighbour depth) × tilt` straight out from the seam edge, the
+    /// same through the full depth (P1: the depth-dependent flare is retired, because the preview must draw the
+    /// vertical prism core builds), no wedge past a seam's ends (P2) — with the ROUND capsule of radius |expand|
+    /// about every TRUE edge added for a grow and taken away for a shrink (P1: the Minkowski set the preview's
+    /// distance always drew; arcs as chords within 0.005 mm with their vertices on the arc — P3, inside chords),
+    /// unioned into simple, non-overlapping loops (P4; Clipper2 through the guarded bridge). Nothing to generate
+    /// (no expand, no diverging seam) ⇒ the raw loops, byte for byte.
+    /// The emission and the scene cache it (`generatedOutline`); `outlinePolygon` computes it when absent.
     public var wireOutlineLoops: [[SIMD2<Double>]] {
         guard kind == .face, depthMM > 0 else { return outlineLoops }
-        // ★ the in-plane expand goes on the wire as GEOMETRY (2026-09-23): core rejects an
-        // expand key, so the outline itself is offset by it (outward for a grow, inward
-        // for a shrink) on every edge that is not a seam
+        return outlinePolygon
+    }
+
+    /// The generated polygon, cached (`withGeneratedOutline`) or computed now.
+    public var outlinePolygon: [[SIMD2<Double>]] { generatedOutline ?? generatedOutlineLoops() }
+
+    /// A copy carrying its generated polygon, for the hot readers (the scene, the bake).
+    public func withGeneratedOutline() -> LatticeRegionSpec {
+        guard generatedOutline == nil, kind == .face, !outlineLoops.isEmpty else { return self }
+        var r = self
+        r.generatedOutline = generatedOutlineLoops()
+        return r
+    }
+
+    /// The generated polygon — see `wireOutlineLoops`.
+    public func generatedOutlineLoops() -> [[SIMD2<Double>]] {
+        guard kind == .face, !outlineLoops.isEmpty, depthMM > 0 else { return outlineLoops }
         let e = inPlaneOffsetMM
-        // ★★ P4 (the reviewer, 2026-10-10, approved by the maintainer): the sent loops are SIMPLE. Core reads
-        // outline_uv even-odd, so rings offset one by one could overlap (63 of 110 multi-loop regions on
-        // 102117B9) and core read the overlap as a hole; an expand GREW a hole (offsetRing offsets each loop
-        // about its own interior); and a shrink that ate a loop came back unshrunk. Now: a loop is a hole by
-        // its nesting (an interior point inside an odd number of the other loops), a hole's offset is
-        // reversed so an expand shrinks it, a ring the offset ate is gone, and the rings are unioned through
-        // the guarded bridge (Clipper2) into simple loops — outers' union minus holes'. Nothing to offset ⇒
-        // the raw loops, byte for byte (core and the preview read them even-odd alike).
-        let hole = LatticeFaceOutline.holeLoops(outlineLoops)
-        var rings: [[SIMD2<Double>]] = [], isHole: [Bool] = []
-        var moved = false
+        var segs: [(SIMD2<Double>, SIMD2<Double>)] = []
+        var strips: [[SIMD2<Double>]] = []
         for (l, loop) in outlineLoops.enumerated() {
             let sm = l < outlineSeams.count ? outlineSeams[l] : []
             let tl = l < outlineSeamTilt.count ? outlineSeamTilt[l] : []
             let cl = l < outlineSeamDepthMM.count ? outlineSeamDepthMM[l] : []
-            let grow: [Double] = loop.indices.map { i in
-                let seam = i < sm.count && sm[i]
-                guard seam else { return -e }                     // negative = outward in `offsetRing`
-                guard i < tl.count, tl[i] > 1e-9 else { return 0 }
-                let cap = i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM
-                return -(cap * tl[i])
+            let m = loop.count
+            for i in 0..<m {
+                let a = loop[i], b = loop[(i + 1) % m]
+                guard i < sm.count, sm[i] else { segs.append((a, b)); continue }        // a true edge
+                guard i < tl.count, tl[i] > 1e-9 else { continue }                       // a seam that does not diverge
+                let push = (i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM) * tl[i]
+                let d = b - a, len = simd_length(d)
+                guard len > 1e-9, push > 0 else { continue }
+                // OUTWARD: the side of the edge outside the raw outline (even-odd), whatever the loop's winding
+                var out = SIMD2<Double>(d.y, -d.x) / len
+                if LatticeFaceOutline.contains(0.5 * (a + b) + out * Swift.min(1e-3, 0.01 * len), loops: outlineLoops) { out = -out }
+                strips.append([a, b, b + out * push, a + out * push])
             }
-            guard grow.contains(where: { abs($0) > 1e-9 }) else {
-                rings.append(loop); isHole.append(hole[l]); continue
-            }
-            moved = true
-            // a hole's interior is the loop's own: growing the region moves its edges INTO the hole
-            let ring = LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [],
-                                                       edgeOffset: hole[l] ? grow.map { -$0 } : grow)
-            // `offsetRing` hands back the input loop when the offset eats every edge: that ring is gone
-            if ring == loop { continue }
-            rings.append(ring); isHole.append(hole[l])
         }
-        guard moved else { return outlineLoops }
-        guard let simple = TopOptKit.outlineUnion(rings, isHole: isHole) else {
-            NSLog("DIAG wireOutlineLoops: the outline union was refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — "
-                  + "sending the offset rings un-unioned")
-            return rings
+        if abs(e) < 1e-9, strips.isEmpty { return outlineLoops }
+        guard let g = TopOptKit.outlinePolygon(raw: outlineLoops, trueSegments: abs(e) < 1e-9 ? [] : segs,
+                                               strips: strips, expandMM: e) else {
+            NSLog("DIAG generatedOutlineLoops: the bridge refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — the raw outline stands")
+            return outlineLoops
         }
-        return simple
+        return g
+    }
+
+    /// ★ THE IN-PLANE DISTANCE every preview reader uses, positive INSIDE: its sign is the generated polygon's
+    /// (`outlinePolygon`, even-odd), its size the distance to the TRUE outline offset by the expand (a seam is
+    /// no outline: no rim, no band there). With no expand and no diverging seam it is exactly the old
+    /// −(signedDistance − expand).
+    public func inPlaneDistance(_ uv: SIMD2<Double>) -> Double {
+        let mag = abs(LatticeFaceOutline.signedDistance(uv, loops: outlineLoops, seams: outlineSeams) - inPlaneOffsetMM)
+        return LatticeFaceOutline.contains(uv, loops: outlinePolygon) ? mag : -mag
     }
 
     public func wireDictionary(frameAxes: Bool) -> [String: Any] {
@@ -338,7 +351,10 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // ★ the grown outline (see `wireOutlineLoops`) and a bounding box that holds it —
         // core uses the half-extents as the cheap reject before the polygon test
         let loops = wireOutlineLoops
-        var hu = halfUMM, hw = halfWMM
+        // ★ P5 (the reviewer, 2026-10-10): the bounding box is the generated polygon's OWN extent — core reads
+        // half_u/half_w as dimensions (thinnest extent, Fit cells, cell_may_overlap), so a mitre spike or the
+        // face's own rectangle must not inflate them. No outline ⇒ the region's own half-extents.
+        var hu = loops.isEmpty ? halfUMM : 0, hw = loops.isEmpty ? halfWMM : 0
         for loop in loops { for q in loop { hu = Swift.max(hu, abs(q.x)); hw = Swift.max(hw, abs(q.y)) } }
         var faceGeometry: [String: Any] = [
             "origin": [origin.x, origin.y, origin.z],
@@ -874,6 +890,16 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// ★ ROUND 5's TEST SWITCH (reviewer, 2026-10-08: "The same proof for Aesthetic Stepped (any-step
     /// plans)", production OFF): the proof lets a Stepped plan ride its job. Production never sets it.
     nonisolated(unsafe) public static var anyStepPlansForTests = false
+
+    /// ★★ K3 IN THE PREVIEW (the reviewer's ruling, 2026-10-11 00:35, item 2: "The preview should draw prism
+    /// space that no cell covers as SOLID, behind the K3 probe … because the build prints it solid … so a slit
+    /// can never again look like a hole the print doesn't have"). Core prints that space solid only on a job that
+    /// CARRIES the plan (K3 is "on a plan job the PLAN is the design"); without one core lattices it by its own
+    /// law. So: the job of this algorithm sends the preview's plan, and the linked core carries K3.
+    public static func uncoveredPrintsSolid(algorithm: String, wired: Bool, k3: Bool,
+                                            enabled: Bool = defaultGradePlansEnabled) -> Bool {
+        k3 && sendsPlan(algorithm: algorithm, wired: wired, enabled: enabled)
+    }
 
     /// ★★ RULING 6 (maintainer, 2026-10-03): "Default Grade and Stepped previews carry one
     /// plain line saying the run currently builds core's own (coarser) layout. Show it only

@@ -323,14 +323,8 @@ public enum LatticeBandFields {
                 if ir.rg.outlineLoops.isEmpty {
                     inside = Swift.min(ir.rg.halfUMM - abs(uv.x), ir.rg.halfWMM - abs(uv.y)) + ir.rg.inPlaneOffsetMM
                 } else {
-                    var sd = LatticeFaceOutline.signedDistance(uv, loops: ir.rg.outlineLoops, seams: ir.rg.outlineSeams)
-                    if !ir.rg.outlineSeamTilt.isEmpty {
-                        let flare = LatticeFaceOutline.insideWithFlare(uv, loops: ir.rg.outlineLoops, seams: ir.rg.outlineSeams,
-                                                                       tilts: ir.rg.outlineSeamTilt, caps: ir.rg.outlineSeamDepthMM,
-                                                                       depth: Swift.max(0, simd_dot(d, ir.n)))
-                        sd = flare ? -abs(sd) : abs(sd)
-                    }
-                    inside = ir.rg.inPlaneOffsetMM - sd
+                    // ★ THE ONE OUTLINE (P1/P6, 2026-10-10): the generated polygon's sign, the true outline's distance
+                    inside = ir.rg.inPlaneDistance(uv)
                 }
                 best = Swift.max(best ?? -Double.greatestFiniteMagnitude, Swift.min(inside, simd_dot(d, ir.n)))
             }
@@ -854,18 +848,23 @@ public enum LatticeBandFields {
                 let (u, v) = LatticeRegionMask.basis(n)
                 func to3(_ q: SIMD2<Double>, _ d: Double) -> SIMD3<Double> { rg.origin + u * q.x + v * q.y + n * d }
                 let nDepth = Swift.max(1, Int((rg.depthMM / 3).rounded(.up)))
-                for (li, loop) in rg.outlineLoops.enumerated() {
-                    let seams = li < rg.outlineSeams.count ? rg.outlineSeams[li] : []
-                    let grown = LatticeOutlineRibbon.offsetRing(loop, by: -rg.inPlaneOffsetMM, seams: seams)
-                    let inN = LatticeOutlineRibbon.edgeInwardNormals(grown)
+                // ★★ THE ONE OUTLINE (P1/P6, 2026-10-10): the side rim lies on the generated polygon — its TRUE
+                // outline edges (on the true outline offset by the expand, within the chords' 0.005 mm; a seam
+                // strip's or a seam's edge is no outline) — never on a second, mitred ring
+                let polygon = rg.outlinePolygon
+                for grown in polygon {
                     let m = grown.count
                     guard m >= 3 else { continue }
-                    for i in 0..<m where !(i < seams.count && seams[i]) {
+                    for i in 0..<m {
                         let p0 = grown[i], p1 = grown[(i + 1) % m]
                         let L = simd_distance(p0, p1)
                         guard L > 1e-6 else { continue }
+                        let mid0 = 0.5 * (p0 + p1)
+                        guard abs(rg.inPlaneDistance(mid0)) < 0.02 else { continue }   // not on the true outline
                         let nSpan = Swift.max(1, Int((L / 2).rounded(.up)))
-                        let out = -inN[i]
+                        // OUTWARD: the side that leaves the polygon, whatever the loop's winding (a hole's rim faces the hole)
+                        var out = SIMD2<Double>((p1 - p0).y, -(p1 - p0).x) / L
+                        if LatticeFaceOutline.contains(mid0 + out * Swift.min(1e-3, 0.01 * L), loops: polygon) { out = -out }
                         for db in 0..<nDepth {
                             let d0 = rg.depthMM * Double(db) / Double(nDepth), d1 = rg.depthMM * Double(db + 1) / Double(nDepth)
                             var ok = [Bool](repeating: false, count: nSpan)
@@ -895,17 +894,16 @@ public enum LatticeBandFields {
                     capAcc[capKey]!.normal += -n
                     if let fidR = rg.faceID ?? rg.rawFaceID.map({ Int($0) }) { capAcc[capKey]!.faceIDs.append(fidR) }
                     // the depth cap: 2 mm tiles over the grown polygon at the prism's full depth
-                    let pts = rg.outlineLoops.flatMap { $0 }
+                    // ★ over the generated polygon (P1/P6): its own extent holds the expand and the seam strips
+                    let pts = rg.outlinePolygon.flatMap { $0 }
                     var lo2 = SIMD2<Double>(repeating: 1e9), hi2 = SIMD2<Double>(repeating: -1e9)
                     for q in pts { lo2 = simd_min(lo2, q); hi2 = simd_max(hi2, q) }
-                    lo2 -= SIMD2(repeating: Swift.max(0, rg.inPlaneOffsetMM)); hi2 += SIMD2(repeating: Swift.max(0, rg.inPlaneOffsetMM))
                     let D = rg.depthMM
                     var y = lo2.y
                     while y < hi2.y { var x = lo2.x
                         while x < hi2.x {
                             let mid = SIMD2(x + 1, y + 1)
-                            let sd = LatticeFaceOutline.signedDistance(mid, loops: rg.outlineLoops, seams: rg.outlineSeams)
-                            if sd <= rg.inPlaneOffsetMM, backed(to3(mid, D + 1.5 * h)) {
+                            if rg.inPlaneDistance(mid) >= 0, backed(to3(mid, D + 1.5 * h)) {
                                 let a0 = to3(SIMD2(x, y), D), b0 = to3(SIMD2(x + 2, y), D), b1 = to3(SIMD2(x + 2, y + 2), D), a1 = to3(SIMD2(x, y + 2), D)
                                 for (p, q, w) in [(a0, b0, b1), (a0, b1, a1)] {
                                     capAcc[capKey]!.tiles.append(Piece(a: p, b: q, c: w, planes: [], width: rO, isAlongside: false,

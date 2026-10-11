@@ -694,8 +694,9 @@ public struct LatticeSDFScene {
         // the organic candidates, the octree, the cap wall — reads `regions`, so the
         // thickness maps are attached before any of them run. `field` is the solve's
         // von Mises, the sim rule's input.
+        // ★ THE ONE OUTLINE (P1/P6): every region carries its generated polygon before any reader runs
         let regions = LatticeWallThicknessBuilder.attach(
-            regions, field: wallStressField ?? field,
+            regions.map { $0.withGeneratedOutline() }, field: wallStressField ?? field,
             floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
                 : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)),
             depthStepsFor: { r in r.selectableKey.flatMap { wallDepthSteps[$0] } })
@@ -2480,6 +2481,17 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var steppedShapeFit: Bool = true {
         didSet { if steppedShapeFit != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★ K3 IN THE PREVIEW (the reviewer's ruling, 2026-10-11 00:35, item 2): the prism space no plan cell covers
+    /// is drawn SOLID when the job sends the plan and the linked core carries K3
+    /// (`LatticeSteppedCellWire.uncoveredPrintsSolid`). nil ⇒ that production answer; the plan proof sets it to draw
+    /// a forced plan the way core builds it. A uniform only — no rebake.
+    public var uncoveredPrintsSolidOverride: Bool? = nil
+    var uncoveredPrintsSolid: Bool {
+        if let o = uncoveredPrintsSolidOverride { return o }
+        return LatticeSteppedCellWire.uncoveredPrintsSolid(algorithm: steppedDyadicSteps ? "doubled" : "stepped",
+                                                           wired: TopOptKit.steppedCellsWired,
+                                                           k3: TopOptKit.corePrintsWhatThePlanLeavesSolid)
+    }
     var steppedDyadicSteps: Bool = false {
         didSet { if steppedDyadicSteps != oldValue, scene != nil { rebakeCellField() } }
     }
@@ -2907,7 +2919,6 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     /// See `rebakeCellField` — TRUE only when the doubled ladder baked with
     /// declared regions, so the march may render its decided-solid cells as solid.
-    private var doubledSolidCellsArmed = false
 
     private var steppedSolidRimMM: Double {
         // ★ NOT GATED ON `steppedDrawn` — that flag is only set at the END of a bake,
@@ -3182,17 +3193,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         }
         steppedDrawn = baked != nil
         defer { bakedSerial = sceneSerial }
-        // ★ Whether the DOUBLED path's inactive cells should render solid — armed
-        // only when the ladder baked against declared regions, so a whole-part
-        // lattice (and every stepped/organic bake) is byte-identical. See the
-        // march's rimParams.z branch.
-        doubledSolidCellsArmed = false
         if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
-            if baked != nil,
-               LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
-                doubledSolidCellsArmed = true
-            }
         }
         // ★★ CAN ANYTHING PRINT AT THIS CELL AT ALL? The band floor has already
         // risen to the printability floor, so the usual answer is yes and every
@@ -4105,7 +4107,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // the octree's outline strip and stripped the finish dressing beside it. The rim
             // is the region field's now (skin + rim under unselected faces, rim along the
             // solid-backed outline) and the lattice layer draws it.
-            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction), 0, 0),
+            // z: ★ K3 — uncovered prism space is solid (a stepped bake on a plan job, core carrying K3)
+            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
+                             steppedDrawn && uncoveredPrintsSolid ? 1 : 0, 0),
             organicRadius: {
                 let reach = Float(scene?.organicBandMM ?? 0)
                 // never past 90 % of the reach: beyond it the clamp would lie

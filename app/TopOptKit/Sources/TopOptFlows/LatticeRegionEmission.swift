@@ -469,6 +469,8 @@ public enum LatticeRegionEmission {
         // flare each prism to the bisector plane and adjacent prisms meet without a wedge.
         LatticeSectorOutline.meetAtTJunctions(&out, pieces: sectorPieces)   // ★ batch E: pieces only
         finishSeams(&out, runFaceID: runFaceID, solidAt: solidAt)
+        // ★ THE ONE OUTLINE (P1/P6): each region's generated polygon, once, after the seams that shape it
+        out = out.map { $0.withGeneratedOutline() }
         // ★ P4: a region the in-plane shrink ate goes, by name (after the seams: they decide what is offset)
         for key in dropShrunkAway(&out) where !droppedNames.contains(key) { droppedNames.append(key) }
         return Result(regions: out, skippedFaces: skipped, skippedRegionNames: droppedNames)

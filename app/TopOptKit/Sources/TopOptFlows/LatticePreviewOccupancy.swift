@@ -1092,7 +1092,7 @@ extension LatticePreviewOccupancy {
                         let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
                         let inPlane = b.outlineLoops.isEmpty
                             ? (abs(uv.x) <= b.halfUMM && abs(uv.y) <= b.halfWMM)
-                            : LatticeFaceOutline.signedDistance(uv, loops: b.outlineLoops, seams: b.outlineSeams) <= b.inPlaneOffsetMM
+                            : b.inPlaneDistance(uv) >= 0   // ★ the one outline (P1/P6)
                         if inPlane { return true }
                     }
                     return false
@@ -1677,9 +1677,7 @@ extension LatticePreviewOccupancy {
                                     let rel = p - region.origin
                                     // `signedDistance` is negative INSIDE, so negate to
                                     // get "how far in from the outline this centre sits".
-                                    dOutlineExact = -(LatticeFaceOutline.signedDistance(
-                                        SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                                        loops: region.outlineLoops, seams: region.outlineSeams) - region.inPlaneOffsetMM)
+                                    dOutlineExact = region.inPlaneDistance(SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)))   // ★ P1/P6
                                 }
                                 let dCentreOut = dOutlineExact.isNaN ? d : dOutlineExact   // mm in from the outline (< 0 outside)
                                 let dNear = Swift.max(0, dCentreOut - 0.5 * s)              // the texel's nearest edge
