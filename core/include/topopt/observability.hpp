@@ -1282,6 +1282,75 @@ struct RunInfo {
   // core derived. Either way the app can check a size at a time rather than by eye.
   // Shape: "9.000=0.2189/0.9852, 3.000=0.1740/0.2611" (size=rho/radius_mm).
   std::string stepped_anystep_rho_by_size;
+  // ── ★ K3 (3): WHAT THE PLAN LEFT SOLID, PER REGION ──────────────────────────
+  // Printed voxels each include region owns that NO plan cell covers, in mm3
+  // ("r1=1234.567, r2=0.000"), beside the volume the plan latticed. On a plan job this
+  // is the solid companion's own set: the partial-depth strip -- cells that stop short
+  // of the region's depth -- is exactly this number, so a run that latticed it anyway
+  // or left it as air is visible in the receipt rather than only in the mesh.
+  std::string stepped_plan_solid_remainder_mm3;
+  double stepped_plan_latticed_mm3 = 0.0;
+  // ★ ruling 1's condition (2026-10-10): latticed voxels per region whose relative
+  // density came from core's own grading because the covering cell sent none, e.g.
+  // "r1=0, r2=0". A plan that sends a rho with every cell must show 0 everywhere; a
+  // non-zero entry says core is sizing and certifying that many of the plan's struts
+  // from its own field.
+  std::string stepped_plan_rho_fallback_by_region;
+  // ★ ruling 2 (2026-10-10): per region, the volume its OWN plan cells cover that the
+  // region does not reach -- outside its `outline_uv`, or overhanging its prism. That is
+  // the set the outline clip stops struts from filling. Before the clip those voxels
+  // carried struts AND were certified SOLID by the mask, which is the disagreement bar
+  // B7 exists to stop. "r1=5097.656" in mm3; 0 on a region whose cells all sit inside it.
+  std::string stepped_clip_outside_region_mm3;
+  // ── ★ K5 (2026-10-10): WHERE EVERY STRUT AND NODE GOT ITS DENSITY ───────────
+  // The generator samples the radius at a strut's MIDPOINT and at a node's own position,
+  // and for the octet both sit ON cell planes -- a corner node is shared by eight cells,
+  // a face-diagonal strut's midpoint lies in a shared face. These three say whether the
+  // plan's own per-cell density reached them. `_floor` must be 0 on a plan that sent a
+  // rho with every cell: a boundary joint sized at the thinnest density the law allows,
+  // where the plan asked for something else, is a notch where the load leaves the
+  // lattice.
+  long long stepped_plan_rho_queries_plan = 0;
+  long long stepped_plan_rho_queries_posture = 0;
+  long long stepped_plan_rho_queries_floor = 0;
+
+  // ── ★ K4 (2026-10-10): THE PLAN AS LAID, PER REGION AND PER GROUP ───────────
+  // The summary above says how many cells over how many regions in how many passes.
+  // This says WHICH: each region's base, the grid it was packed on, and every group the
+  // run laid -- its own size, its own grid origin, the PHASE of that origin against the
+  // region's slot grid (which is what the pass bucketing keys on), and what the
+  // generator actually put there.
+  //
+  // `cell_mm` elsewhere in this receipt is the LAW's cell, which on a plan run names a
+  // grid the file does not contain. These are the file's own numbers; nothing here is
+  // derived a second time.
+  struct PlanGroup {
+    double size_mm = 0.0;
+    double origin_mm[3] = {0.0, 0.0, 0.0};
+    // origin - slot_origin reduced into [0, size): the grid phase, per axis.
+    double phase_mm[3] = {0.0, 0.0, 0.0};
+    int nx = 0, ny = 0, nz = 0;
+    long long cells = 0;
+    long long struts_laid = 0;     // what the GENERATOR emitted in these cells
+    long long nodes_laid = 0;
+    long long cells_with_no_strut = 0;
+  };
+  struct PlanRegion {
+    int region_id = 0;
+    double base_cell_mm = 0.0;
+    double slot_origin_mm[3] = {0.0, 0.0, 0.0};
+    bool slot_origin_stated = false;
+    double plane_origin_mm[3] = {0.0, 0.0, 0.0};
+    double normal[3] = {0.0, 0.0, 0.0};
+    double depth_mm = 0.0;
+    long long cells = 0;
+    std::string sizes;             // "6.00=4, 3.00=12", descending by size
+    std::vector<PlanGroup> groups;
+  };
+  std::vector<PlanRegion> stepped_plan_by_region;
+  // Elements the generator emitted that no plan cell shares. 0 is the expected value;
+  // a non-zero count means geometry was written outside every cell of the plan.
+  long long stepped_plan_laid_unattributed = 0;
   // The outline beam as APPLIED (ruling B): the width core derived from bead and
   // voxel, the bleed the band asked for, and how far in the solid actually reaches.
   // 0 when the shape grade is off, which is when there is no beam.
