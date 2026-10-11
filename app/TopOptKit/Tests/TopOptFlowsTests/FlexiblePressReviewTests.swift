@@ -148,12 +148,23 @@ final class FlexiblePressReviewTests: XCTestCase {
         let faceGroup = FlexibleSqueezeGroups.group(of: 1, in: s)
         print("FLEX-AP1 review unite: the group's face in \(faceGroup?.id ?? -1) · the linked press in \(FlexibleSqueezeGroups.group(ofPress: linked, in: s)?.id ?? -1) · his own press in \(FlexibleSqueezeGroups.group(ofPress: own, in: s)?.id ?? -1)")
         XCTAssertEqual(faceGroup?.id, 2, "premise: the group's face sits in group 2")
-        XCTAssertEqual(FlexibleSqueezeGroups.group(ofPress: linked, in: s)?.id, 2, "★ the linked press joined its hand's group")
-        XCTAssertEqual(FlexibleSqueezeGroups.group(ofPress: own, in: s)?.id, 1, "his own press stays")
-        let hands = FlexibleSqueezeGroups.hands(try XCTUnwrap(faceGroup), settings: s, loads: loads)
-        XCTAssertEqual(hands.count, 1, "one hand: the group's face and the press")
+        // ★ ROUND 6 ITEM 2 RE-PIN (his answer of 2026-10-08: a group is EITHER faces OR edges/corners, never mixed):
+        // an EDGE press no longer joins its hand's FACES group, and the two edge presses made in group 1 beside face 5
+        // are split out of it together, into an edges group (was: the linked one in group 2, his own in group 1)
+        let edges = try XCTUnwrap(FlexibleSqueezeGroups.group(ofPress: linked, in: s))
+        XCTAssertEqual(edges.kind, .edges, "★ the linked EDGE press sits in an edges group, never its hand's faces group")
+        XCTAssertEqual(FlexibleSqueezeGroups.group(ofPress: own, in: s)?.id, edges.id, "his own edge press with it")
+        XCTAssertEqual(faceGroup?.presses, [], "the faces group holds no edge press")
+        // AP1's rule still holds for a TILTED press (one face): a linked one joins its hand's group, one hand
+        let tilted = UUID(uuidString: "AE000004-0000-4000-8000-000000000003")!
+        s.setPress(FlexiblePress(id: tilted, regions: [2], direction: SIMD3(0, 0.2, -0.98), settings: FlexibleFaceSettings(faceRegionID: 2, weightKg: 2, weightFrom: g)))
+        FlexibleSqueezeGroups.uniteHands(&s, loads: loads)
+        let faces = try XCTUnwrap(FlexibleSqueezeGroups.group(of: 1, in: s))
+        XCTAssertEqual(FlexibleSqueezeGroups.group(ofPress: tilted, in: s)?.id, faces.id, "★ the linked tilted press joined its hand's group")
+        let hands = FlexibleSqueezeGroups.hands(faces, settings: s, loads: loads)
+        XCTAssertEqual(hands.count, 1, "one hand: the group's face and the tilted press")
         XCTAssertEqual(hands.first?.mainGroup, g)
-        XCTAssertEqual(hands.first?.presses, [linked])
+        XCTAssertEqual(hands.first?.presses, [tilted])
     }
 
     /// ★ A linked press whose main-page group no longer holds any of its members keeps its weight as his

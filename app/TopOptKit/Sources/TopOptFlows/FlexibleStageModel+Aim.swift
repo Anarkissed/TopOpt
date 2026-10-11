@@ -92,42 +92,90 @@ public struct FlexiblePressAimSet: Equatable, Sendable {
     }
 }
 
+/// ★ ROUND 6 ITEM 2: where an aim's numbers come from — the page's OPEN scene (`FlexibleStageModel.pressAim`), or a scene
+/// opened on regions that are not cut yet (item 2's [Done]: the strips' own halfway, asked of core before the cut is
+/// committed, so the cut and its presses are ONE edit). The same engine (`FlexibleStageModel.aimSet`) reads either: one
+/// route for the rule, never two.
+struct FlexibleAimSource {
+    /// Core's frame of a declared region (or of its member face), no direction.
+    let frame: (Int, Int?) async throws -> FlexRegionFrame
+    /// Core's verdict on a press over a footprint along a direction (nil: none stated).
+    let verdict: ([Int], SIMD3<Double>?) async throws -> FlexPressVerdict
+    /// Core's inward normal of each asked triangle.
+    let triangleLoads: ([Int]) async throws -> FlexTriangleLoads
+    /// The faces a region covers.
+    let faces: (Int) -> [Int]
+    let mesh: ViewerMesh?
+    /// Core's build direction (the scene's); nil while the part opens.
+    let buildDir: SIMD3<Double>?
+    /// Core's id → the app's name ("face 1000103" → "face 1 · A"), and the panel's name ("Top A").
+    let name: (Int) -> String
+    let displayName: (Int) -> String
+    /// Core's sentence with the app's names.
+    let text: (String) -> String
+}
+
 extension FlexibleStageModel {
 
     /// ★ Core's answers for aiming a press over `regions` (pick order), and the targets core builds (A4/A8).
     public func pressAim(_ regions: [Int]) async throws -> FlexiblePressAimSet {
+        try await Self.aimSet(regions, source: openSceneAimSource)
+    }
+
+    /// The open scene, as an aim's source (FlexibleStageModel+Meet's caches).
+    var openSceneAimSource: FlexibleAimSource {
+        FlexibleAimSource(
+            frame: { [weak self] r, f in
+                guard let self else { throw TopOptError(message: "The page closed.") }
+                return try await self.regionFrame(r, face: f)
+            },
+            verdict: { [weak self] fp, d in
+                guard let self else { throw TopOptError(message: "The page closed.") }
+                return try await self.pressVerdict(fp, direction: d)
+            },
+            triangleLoads: { [frameWorker] tris in try await frameWorker.withScene { try $0.triangleLoads(tris) } },
+            faces: { [weak self] r in self.map { $0.regions.faces(of: r, mesh: $0.project.viewerMesh) } ?? [r] },
+            mesh: project.viewerMesh, buildDir: sceneInfo?.buildDir,
+            name: { [weak self] r in self?.name(r) ?? "face \(r)" },
+            displayName: { [weak self] r in self?.displayName(r) ?? "Face \(r)" },
+            text: { [weak self] s in self?.text(s) ?? s })
+    }
+
+    /// ★ THE ENGINE: core's inward normal of every member (face_frame_cut per region, or per member face of a one-region
+    /// press over 2+ faces, clipped by its cuts), core's frame axes, core's build direction, the targets
+    /// FlexiblePressAim.candidates names (A4/A8) and CORE'S VERDICT on each — from `source`.
+    static func aimSet(_ regions: [Int], source: FlexibleAimSource) async throws -> FlexiblePressAimSet {
         guard let first = regions.first else { throw TopOptError(message: "A press needs a face.") }
-        let mesh = project.viewerMesh
         let single = regions.count == 1
         var memberLoads: [SIMD3<Double>] = []
         var ownLoad: SIMD3<Double>? = nil
         var why: String? = nil, whyDetail: String? = nil
         var axes: (x: SIMD3<Double>, y: SIMD3<Double>)? = nil
         if single {
-            let own = try await regionFrame(first)
+            let own = try await source.frame(first, nil)
             if own.valid {
                 ownLoad = own.load
                 axes = (own.xAxis, own.yAxis)
-                let faces = self.regions.faces(of: first, mesh: mesh)
+                let faces = source.faces(first)
                 if faces.count >= 2 {
                     for f in faces {
-                        let ff = try await regionFrame(first, face: f)
+                        let ff = try await source.frame(first, f)
                         if ff.valid { memberLoads.append(ff.load) }
                     }
                 } else {
                     memberLoads = [own.load]
                 }
             } else {
-                why = FlexiblePressAim.plainFrameLine(own.reason, name: displayName(first))
-                whyDetail = name(first) + ": " + text(own.reason)
+                why = FlexiblePressAim.plainFrameLine(own.reason, name: source.displayName(first))
+                whyDetail = source.name(first) + ": " + source.text(own.reason)
             }
         } else {
             for r in regions {
-                let f = try await regionFrame(r)
+                let f = try await source.frame(r, nil)
                 guard f.valid else {
                     if why == nil {
-                        why = FlexiblePressAim.plainFrameLine(f.reason, name: displayName(r))
-                        whyDetail = name(r) + ": " + text(f.reason)
+                        why = FlexiblePressAim.plainFrameLine(f.reason, name: source.displayName(r))
+                        whyDetail = source.name(r) + ": " + source.text(f.reason)
                     }
                     continue
                 }
@@ -136,7 +184,7 @@ extension FlexibleStageModel {
             }
             if why != nil { memberLoads = [] }
         }
-        guard let build = sceneInfo?.buildDir else { throw TopOptError(message: "The part is still opening.") }
+        guard let build = source.buildDir else { throw TopOptError(message: "The part is still opening.") }
         let candidates = FlexiblePressAim.candidates(memberLoads: why == nil ? memberLoads : [],
                                                      ownLoad: ownLoad, buildDir: build)
         let halfway = memberLoads.count >= 2 ? FlexiblePressAim.halfway(memberLoads) : nil
@@ -145,6 +193,11 @@ extension FlexibleStageModel {
             whyDetail = "Their inward normals cancel out, or their sum does not push into every one of them: "
                 + "no one direction presses them all."
         }
+        func line(_ reason: String) -> String {
+            var names: [Int: String] = [:]
+            for id in FlexiblePressAim.regionIDs(reason) { names[id] = source.displayName(id) }
+            return FlexiblePressAim.plainLine(reason) { names[$0] ?? "Face \($0)" }
+        }
         var asked: [FlexiblePressAimSet.Asked] = []
         for t in candidates {
             // ★ AP3 REVIEW: straighten is asked as the plain face press it turns back into (no direction) AND as
@@ -152,16 +205,16 @@ extension FlexibleStageModel {
             // other target is asked as the press it would be, along its direction.
             let v: FlexPressVerdict
             if t.kind == .straighten {
-                let asFace = try await pressVerdict([first], direction: nil)
-                v = asFace.accepted ? try await pressVerdict([first], direction: t.direction) : asFace
+                let asFace = try await source.verdict([first], nil)
+                v = asFace.accepted ? try await source.verdict([first], t.direction) : asFace
             } else {
-                v = try await pressVerdict(regions, direction: t.direction)
+                v = try await source.verdict(regions, t.direction)
             }
-            asked.append(.init(target: t, accepted: v.accepted, reason: v.accepted ? "" : text(v.reason),
-                               line: v.accepted ? "" : plainLine(v.reason)))
+            asked.append(.init(target: t, accepted: v.accepted, reason: v.accepted ? "" : source.text(v.reason),
+                               line: v.accepted ? "" : line(v.reason)))
         }
         let fallbacks = FlexiblePressAim.fallbacks(memberLoads: memberLoads, single: single, coreX: axes?.x, coreY: axes?.y)
-        let normals = try await footprintNormals(regions) ?? memberLoads
+        let normals = try await footprintNormals(regions, source: source) ?? memberLoads
         return FlexiblePressAimSet(regions: regions, memberLoads: memberLoads, ownLoad: ownLoad, halfway: halfway,
                                    buildDir: build, asked: asked, fallbacks: fallbacks, why: why,
                                    footprintNormals: normals, whyDetail: whyDetail)
@@ -172,13 +225,17 @@ extension FlexibleStageModel {
     /// applied there) — deduplicated bit for bit (flexible_scene_triangle_loads: core's face_frame of each). nil when
     /// core's part is not the page's mesh triangle for triangle (meetFacts' check): nothing is decided on it then.
     func footprintNormals(_ regions: [Int]) async throws -> [SIMD3<Double>]? {
-        guard let mesh = project.viewerMesh else { return nil }
+        try await Self.footprintNormals(regions, source: openSceneAimSource)
+    }
+
+    static func footprintNormals(_ regions: [Int], source: FlexibleAimSource) async throws -> [SIMD3<Double>]? {
+        guard let mesh = source.mesh else { return nil }
         var faces = Set<Int>()
-        for r in regions { faces.formUnion(self.regions.faces(of: r, mesh: mesh)) }
+        for r in regions { faces.formUnion(source.faces(r)) }
         let n = Swift.min(mesh.triangleCount, mesh.faceIDs.count)
         let tris = (0..<n).filter { faces.contains(Int(mesh.faceIDs[$0])) }
         guard !tris.isEmpty else { return nil }
-        let got = try await frameWorker.withScene { try $0.triangleLoads(tris) }
+        let got = try await source.triangleLoads(tris)
         guard got.triangleCount == mesh.triangleCount, got.faces.count == tris.count, got.loads.count == tris.count
         else { return nil }
         var seen = Set<[UInt64]>()

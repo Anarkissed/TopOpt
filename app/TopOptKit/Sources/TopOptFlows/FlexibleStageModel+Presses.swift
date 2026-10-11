@@ -123,6 +123,8 @@ extension FlexibleStageModel {
     /// brings it back as a new face (`press`). A member no group holds leaves no trace.
     public func removePress(_ id: UUID) {
         guard let p = settings.press(id) else { return }
+        // ★ ROUND 6 ITEM 2: an edge / corner pick's press gives its strips back to their faces (one undo step)
+        if p.strip != nil { track(Task { @MainActor [weak self] in _ = await self?.removeStripPresses([id]) }); return }
         project.sealUndoStep()   // ★ AP1 review: the edit before it is its own step
         actionSerial += 1
         let loads = mainPageLoads

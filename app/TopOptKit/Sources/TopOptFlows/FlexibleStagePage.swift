@@ -250,6 +250,12 @@ public struct FlexibleStagePage: View {
                 // a split face: the tap's point picks the sector (FlexibleRegions)
                 onPickPoint: { fid, pt in
                     if legendDrilled { readDent(at: pt); return true }   // reading, never selecting
+                    // ★ ROUND 6 ITEM 2: pick mode — the nearest corner, then edge, on screen (never a face)
+                    if model.edgePick != nil {
+                        if let p = pt, let q = proj.projection, let sp = q.project(p),
+                           let line = model.edgePickTap(at: sp, projection: q) { model.toast = line }
+                        return true
+                    }
                     model.tapFace(Int(fid), point: pt.map { SIMD3<Double>($0) })
                     return true
                 },
@@ -520,6 +526,8 @@ public struct FlexibleStagePage: View {
         model.refreshMainPageLoads()
         model.historyRestored()   // ★ AP1 review: a press card follows the history
         model.recomputeAll()
+        // ★ ROUND 6 ITEM 2: an undone / redone strip cut moved the regions — the part re-opens on them
+        if model.sceneState == .ready, model.openedKey != model.currentSceneKey { model.openScene() }
     }
 
     /// The toast line's height under the top line (the pop-up goes below it).
@@ -723,7 +731,7 @@ struct FlexibleStageOverlays: View {
         ZStack {
             // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
-            if model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
+            if model.edgePick == nil, model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
                let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
                 // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
                 ForEach(Self.curveAxes(f), id: \.self) { axis in
@@ -744,6 +752,8 @@ struct FlexibleStageOverlays: View {
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
                 FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip)
             }
+            // ★ ROUND 6 ITEM 2: pick mode — every edge and corner, coloured and numbered as the list
+            if model.edgePick != nil { FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip) }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
             FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
                                        clip: clip)

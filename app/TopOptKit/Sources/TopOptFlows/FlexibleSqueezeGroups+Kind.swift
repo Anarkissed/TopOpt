@@ -24,7 +24,18 @@ extension FlexibleSqueezeGroups {
     /// keeps its faces; its edge and corner presses move to a new group, numbered after the last (one new group per
     /// mixed group, in stored order). Called first by `normalise`.
     static func splitMixed(_ s: inout FlexibleStageSettings) {
-        _ = controlNoSplit   // I2 RED STUB: a mixed group is left mixed
+        guard !controlNoSplit, var ps = s.presses, !ps.isEmpty else { return }
+        let faceGroups = Set(s.loadedFaces.map { id($0) }).union(ps.filter { $0.regions.count < 2 }.map { id($0) })
+        var next = (Set(s.loadedFaces.map { id($0) }).union(ps.map { id($0) }).max() ?? first) + 1
+        var moved: [Int: Int] = [:]
+        for i in ps.indices where ps[i].regions.count >= 2 {
+            let g = id(ps[i])
+            guard faceGroups.contains(g) else { continue }
+            let to: Int
+            if let m = moved[g] { to = m } else { to = next; next += 1; moved[g] = to }
+            ps[i].settings.squeezeGroup = to
+        }
+        if !moved.isEmpty { s.presses = ps }
     }
 
     /// The group a NEW edges/corners group is stored as: after every group there is.

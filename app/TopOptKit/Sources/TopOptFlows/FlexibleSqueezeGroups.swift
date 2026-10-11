@@ -142,6 +142,7 @@ public enum FlexibleSqueezeGroups {
     /// squeeze groups, or one group's force would rewrite another's through the main page).
     public static func move(_ region: Int, to groupID: Int, hand: [Int]? = nil, in s: inout FlexibleStageSettings) {
         guard s.face(region)?.isLoaded == true else { return }
+        guard groups(s).first(where: { $0.id == groupID })?.kind != .edges else { return }   // ★ ROUND 6 ITEM 2: never into an edges group
         for r in Set((hand ?? []) + [region]) {
             guard var g = s.face(r), g.isLoaded else { continue }
             g.squeezeGroup = groupID
@@ -167,8 +168,10 @@ public enum FlexibleSqueezeGroups {
     /// the first OTHER group. No-op for the only group.
     public static func remove(group groupID: Int, into target: Int? = nil, in s: inout FlexibleStageSettings) {
         let gs = groups(s)
-        guard gs.count > 1, gs.contains(where: { $0.id == groupID }),
-              let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
+        // ★ ROUND 6 ITEM 2: a group's members join a group of THEIR kind (faces never into an edges group, nor back)
+        guard gs.count > 1, let from = gs.first(where: { $0.id == groupID }),
+              let into = gs.first(where: { $0.id != groupID && $0.kind == from.kind && (target == nil || $0.id == target) })
+        else { return }
         for i in s.faces.indices where s.faces[i].isLoaded && id(s.faces[i]) == groupID {
             s.faces[i].squeezeGroup = into.id
         }
@@ -209,8 +212,10 @@ public enum FlexibleSqueezeGroups {
         }
         // ★ AP1: a press LINKED to a main-page Load group is part of that group's hand — it sits in the
         // group of the hand's first pressed face (one force per hand; a press alone in its hand stays put)
+        // ★ ROUND 6 ITEM 2: an EDGE or CORNER press never joins a faces group (his answer: a group is faces OR
+        // edges/corners) — only a tilted face press (one region) follows its hand
         if var ps = s.presses {
-            for i in ps.indices {
+            for i in ps.indices where ps[i].regions.count < 2 {
                 guard let from = ps[i].settings.weightFrom,
                       let f = s.loadedFaces.first(where: { g in
                           g.weightFrom == from && loads.entry(g.faceRegionID).map { $0.groupID == from && $0.role == .pressed } == true

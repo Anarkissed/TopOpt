@@ -84,6 +84,7 @@ extension FlexibleStageModel {
     func railChanged() {
         let t: Tab = rail == .model ? .more : .face
         if tab != t { tab = t }
+        if rail != .newGroup, edgePick != nil { edgePick = nil }   // ★ ROUND 6 ITEM 2: leaving [+ New] ends pick mode
         switch rail {
         case .group(let id):
             // the group's tab: its face is the one selected (its curves on the part, its squish)
@@ -192,12 +193,18 @@ struct FlexibleSettingsRailView: View {
     static func tabs(model: FlexibleStageModel) -> [Tab] {
         var out = [Tab(tab: .model, title: FlexibleRowCopy.railModel, detail: nil)]
         for g in model.squeezeGroups {
-            out.append(Tab(tab: .group(g.id), title: FlexibleRowCopy.groupName(g.number),
-                           detail: FlexibleRowCopy.faceCount(g.regions.count)))
+            // ★ ROUND 6 ITEM 2: an edges/corners group counts its edges and corners
+            let detail = g.kind == .edges
+                ? FlexibleRowCopy.edgesDetail(edges: g.presses.filter { model.press($0)?.kind == .edge }.count,
+                                              corners: g.presses.filter { model.press($0)?.kind == .corner }.count)
+                : FlexibleRowCopy.faceCount(g.regions.count)
+            out.append(Tab(tab: .group(g.id), title: FlexibleRowCopy.groupName(g.number), detail: detail))
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
-        if !model.settings.loadedFaces.isEmpty { out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil)) }
+        if !model.settings.loadedFaces.isEmpty || !model.presses.isEmpty {
+            out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil))
+        }
         return out
     }
 
@@ -296,7 +303,7 @@ struct FlexibleRailContent: View {
             case .rests:
                 FlexibleRestsTab(model: model, padTarget: $padTarget)
             case .newGroup:
-                FlexibleNewGroupTab(model: model)
+                FlexibleNewGroupTab(model: model, padTarget: $padTarget)
             }
         }
         .onAppear {
@@ -330,7 +337,11 @@ struct FlexibleGroupTab: View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             FlexibleGroupTabHeader(model: model, group: group, row: row, padTarget: $padTarget)
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xxs)
-            FlexibleFaceList(model: model, padTarget: $padTarget, only: group.regions, joinGroup: group.id)
+            if group.kind == .edges {
+                FlexibleEdgeGroupRows(model: model, group: group, padTarget: $padTarget)   // ★ ROUND 6 ITEM 2
+            } else {
+                FlexibleFaceList(model: model, padTarget: $padTarget, only: group.regions, joinGroup: group.id)
+            }
         }
     }
 }
@@ -456,13 +467,25 @@ struct FlexibleRestsTab: View {
     }
 }
 
-/// [+]: pick the face that starts the new group.
+/// [+]: pick the face that starts the new group — ★ ROUND 6 ITEM 2: or [Edges/corners] (FlexibleEdgePickCard).
 struct FlexibleNewGroupTab: View {
     @ObservedObject var model: FlexibleStageModel
+    @Binding var padTarget: String?
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlexibleNewGroupKindLine(model: model)
+            if model.edgePick != nil {
+                FlexibleEdgePickCard(model: model, padTarget: $padTarget)
+            } else {
+                faces
+            }
+        }
+    }
+
+    private var faces: some View {
         let next = model.squeezeGroups.count + 1
         let candidates = model.newGroupHands
-        VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 6) {
             Text(FlexibleRowCopy.newGroupTitle(next))
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(minHeight: 36)

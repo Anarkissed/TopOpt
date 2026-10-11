@@ -92,7 +92,9 @@ final class FlexibleSqueezeGroupsPressTests: XCTestCase {
         var f3 = FlexibleFaceSettings(faceRegionID: 3, weightKg: 4, squeezeGroup: 5)
         s.setFace(f3)
         f3.faceRegionID = 2
-        s.setPresses([FlexiblePress(id: Self.pressID, regions: [2, 4], direction: SIMD3(0, 0, -1), settings: f3)])
+        // ★ ROUND 6 ITEM 2 RE-PIN: a TILTED press (one face) — an edge press [2, 4] can no longer share a faces group (his
+        // answer: a group is faces OR edges/corners; normalise splits it out — FlexibleEdgeGroupsTests); was regions [2, 4]
+        s.setPresses([FlexiblePress(id: Self.pressID, regions: [2], direction: SIMD3(0, 0, -1), settings: f3)])
         FlexibleSqueezeGroups.normalise(&s)
         XCTAssertEqual(s.face(3)?.squeezeGroup, 2, "group 5 renumbered to 2")
         XCTAssertEqual(s.press(Self.pressID)?.settings.squeezeGroup, 2, "its press with it")
@@ -120,7 +122,9 @@ final class FlexibleSqueezeGroupsPressTests: XCTestCase {
     func testTheGroupPillSetsAPressOfHisOwn() throws {
         let (_, m, top, x, y) = try FlexiblePressSaveTests.pad()
         XCTAssertTrue(m.press(top, kg: 12))
-        let id = try XCTUnwrap(m.addPress(regions: [x, y], direction: simd_normalize(SIMD3(-1, 1, 0)), snap: "halfway"))
+        // ★ ROUND 6 ITEM 2 RE-PIN: a TILTED press on face x (one face) joins group 1 beside the top — an edge press over
+        // x and y would be split into an edges group of its own (his answer); was regions [x, y]
+        let id = try XCTUnwrap(m.addPress(regions: [x], direction: simd_normalize(SIMD3(-1, 0.2, 0)), snap: nil))
         XCTAssertEqual(m.press(id)?.settings.weightKg, 12, "it joined group 1 at its force")
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: id))
         XCTAssertEqual(g.id, m.squeezeGroup(of: top)?.id)

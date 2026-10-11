@@ -230,10 +230,13 @@ enum FlexibleGroupWalls {
         }
         let every = views.contains(.groups) || controlEveryGroup
         var out: [Shown] = []
-        for g in m.squeezeGroups where !g.regions.isEmpty {
+        for g in m.squeezeGroups {
+            // ★ ROUND 6 ITEM 2: an edges/corners group's glass is on its presses' strips and patches
+            let regions = g.kind == .edges ? g.presses.flatMap { m.press($0)?.regions ?? [] } : g.regions
+            guard !regions.isEmpty else { continue }
             let key = "group-\(g.id)"
             guard every || key == open else { continue }
-            out.append(Shown(key: key, colour: m.groupColour(g), regions: g.regions, open: key == open))
+            out.append(Shown(key: key, colour: m.groupColour(g), regions: regions, open: key == open))
         }
         if !rests.isEmpty, every || open == "rests" {
             out.append(Shown(key: "rests", colour: DS.Color.accentCyan, regions: rests, open: open == "rests"))

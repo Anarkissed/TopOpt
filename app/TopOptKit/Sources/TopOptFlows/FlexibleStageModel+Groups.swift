@@ -222,6 +222,11 @@ extension FlexibleStageModel {
     /// ★ D2 REVIEW: like a move, they take THAT group's one force — the merged group had kept
     /// both forces ("Squeeze 6–10 kg"), and the next press asked for the pad.
     public func removeGroup(_ groupID: Int) {
+        // ★ ROUND 6 ITEM 2: an edges/corners group goes with its presses — each strip goes back to its face
+        if let g = squeezeGroups.first(where: { $0.id == groupID }), g.kind == .edges {
+            track(Task { @MainActor [weak self] in _ = await self?.removeStripPresses(g.presses) })
+            return
+        }
         mergeGroup(groupID, into: nil)
     }
 
@@ -230,7 +235,8 @@ extension FlexibleStageModel {
     public func mergeGroup(_ groupID: Int, into target: Int?) {
         let gs = squeezeGroups
         guard gs.count > 1, let from = gs.first(where: { $0.id == groupID }),
-              let into = gs.first(where: { $0.id != groupID && (target == nil || $0.id == target) }) else { return }
+              let into = gs.first(where: { $0.id != groupID && $0.kind == from.kind && (target == nil || $0.id == target) })
+        else { return }   // ★ ROUND 6 ITEM 2: into a group of its own kind
         let force = groupForce(into)
         actionSerial += 1
         edit { s in

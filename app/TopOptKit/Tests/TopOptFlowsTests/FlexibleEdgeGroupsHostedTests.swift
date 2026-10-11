@@ -203,15 +203,16 @@ final class FlexibleEdgeGroupsHostedTests: XCTestCase {
     /// The model and the panel side by side, the panel at the left as on the page.
     func write(_ name: String, model: CGImage, panel: CGImage?) throws {
         guard let dir = Self.dir else { return }
-        let ph = panel.map { CGFloat($0.height) } ?? 0, pw = panel.map { CGFloat($0.width) } ?? 0
-        let scale = panel.map { _ in CGFloat(model.height) / max(1, ph) } ?? 1
-        let w = Int(pw * scale) + model.width, h = model.height
+        // the panel at its own size (its words readable), the model scaled to the panel's height
+        let ph = panel.map { CGFloat($0.height) } ?? CGFloat(model.height), pw = panel.map { CGFloat($0.width) } ?? 0
+        let ms = ph / CGFloat(model.height)
+        let w = Int(pw + CGFloat(model.width) * ms), h = Int(ph)
         let ctx = try XCTUnwrap(CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
         ctx.setFillColor(CGColor(red: DS.Color.background.r, green: DS.Color.background.g, blue: DS.Color.background.b, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        if let panel { ctx.draw(panel, in: CGRect(x: 0, y: 0, width: pw * scale, height: CGFloat(h))) }
-        ctx.draw(model, in: CGRect(x: pw * scale, y: 0, width: CGFloat(model.width), height: CGFloat(h)))
+        if let panel { ctx.draw(panel, in: CGRect(x: 0, y: 0, width: pw, height: ph)) }
+        ctx.draw(model, in: CGRect(x: pw, y: 0, width: CGFloat(model.width) * ms, height: ph))
         let img = try XCTUnwrap(ctx.makeImage())
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)

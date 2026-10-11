@@ -143,7 +143,8 @@ struct FlexibleFaceGroupRow: View {
         let gs = model.squeezeGroups
         let mine = model.squeezeGroup(of: region)
         let hand = Set(model.hand(of: region))
-        var out = gs.map { (id: "\($0.id)", label: "\($0.number)") }
+        // ★ ROUND 6 ITEM 2: a face moves only between FACES groups (an edges/corners group holds no face)
+        var out = gs.filter { $0.kind == .faces }.map { (id: "\($0.id)", label: "\($0.number)") }
         if mine?.regions.contains(where: { !hand.contains($0) }) == true {
             out.append((id: "new", label: FlexibleRowCopy.newGroupChip))
         }

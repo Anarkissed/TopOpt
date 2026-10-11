@@ -95,7 +95,9 @@ public enum FlexibleEdgeStrips {
     /// capped at half of each member face's extent across the edge, so a face group always keeps a rest. A member core
     /// gives no lattice depth for (no stack, or none) does not lower it; nothing at all: the cap.
     public static func defaultWidth(capMM: Double, latticeMM: [Double?]) -> Double {
-        capMM   // I2 RED STUB
+        let depths = latticeMM.compactMap { $0 }.filter { $0.isFinite && $0 > 0 }
+        let w = depths.min().map { Swift.min($0, capMM) } ?? capMM
+        return Swift.max(Swift.min(minWidthMM, capMM), w)
     }
 
     /// ★ A PICK'S AREA from its candidate (`label`: "Edge 3"): for each member piece, its face, the chain's root, the
@@ -106,7 +108,60 @@ public enum FlexibleEdgeStrips {
     public static func strip(for c: FlexibleEdgeCandidates.Candidate, label: String, order: Int, meet: FlexibleMeet,
                              facts: FlexibleMeetFacts, faceRegions: FaceRegionModel, existing: [FlexibleStrip],
                              latticeMM: [Double?] = [], name: (Int) -> String) -> Result<FlexibleStrip, Refusal> {
-        .failure(Refusal(line: "I2 RED STUB"))
+        guard c.kind != .blend else { return .failure(Refusal(line: FlexibleRowCopy.stripFillet)) }
+        var members: [FlexibleStrip.Member] = []
+        for p in c.members {
+            guard let piece = meet.piece(p), piece.faces.count == 1, let face = piece.faces.first else {
+                return .failure(Refusal(line: FlexibleRowCopy.fit("\(name(p)) spans two faces")))
+            }
+            guard let fr = facts.frames[p], fr.valid, fr.normalSpreadDeg <= flatDeg, let n = FlexiblePressAim.unit(fr.load) else {
+                return .failure(Refusal(line: FlexibleRowCopy.fit("\(name(p)) is curved · no straight strip")))
+            }
+            let poly = clippedPolygons(meet, p)
+            let root = rootOf(p, face: face, faceRegions: faceRegions, existing: existing)
+            switch c.kind {
+            case .edge:
+                let others = c.members.filter { $0 != p }
+                let pts = others.flatMap { meet.sharedEdge(p, $0) }.flatMap { $0 }
+                guard let line = straightLine(pts) else { return .failure(Refusal(line: FlexibleRowCopy.stripCurvedEdge)) }
+                guard var u = FlexiblePressAim.unit(simd_cross(n, line.dir)) else {
+                    return .failure(Refusal(line: FlexibleRowCopy.stripCurvedEdge))
+                }
+                if simd_dot(fr.centroid - line.start, u) < 0 { u = -u }
+                let extent = poly.flatMap { $0 }.map { simd_dot($0 - line.start, u) }.max() ?? 0
+                members.append(.init(face: face, root: root, origin: line.start, away: [u], along: line.dir,
+                                     span: [0, line.length], capMM: extent / 2))
+            case .corner:
+                let others = c.members.filter { $0 != p }
+                var dirs: [SIMD3<Double>] = []
+                for q in others {
+                    for pl in meet.sharedEdge(p, q) {
+                        guard let e = awayFromCorner(pl, corner: c.point) else { continue }
+                        if !dirs.contains(where: { simd_length(simd_cross($0, e)) < 1e-6 && simd_dot($0, e) > 0 }) { dirs.append(e) }
+                    }
+                }
+                guard dirs.count == 2, simd_length(simd_cross(dirs[0], dirs[1])) > 1e-6 else {
+                    return .failure(Refusal(line: FlexibleRowCopy.fit("\(name(p)) meets \(dirs.count) edges here")))
+                }
+                var aw: [SIMD3<Double>] = []
+                for (i, e) in dirs.enumerated() {
+                    guard var u = FlexiblePressAim.unit(simd_cross(n, e)) else {
+                        return .failure(Refusal(line: FlexibleRowCopy.stripCurvedEdge))
+                    }
+                    if simd_dot(u, dirs[1 - i]) < 0 { u = -u }
+                    aw.append(u)
+                }
+                let vs = poly.flatMap { $0 }
+                let caps = aw.map { u in (vs.map { simd_dot($0 - c.point, u) }.max() ?? 0) / 2 }
+                members.append(.init(face: face, root: root, origin: c.point, away: aw, capMM: caps.min() ?? 0))
+            case .blend:
+                break
+            }
+        }
+        var s = FlexibleStrip(kind: c.kind == .corner ? .corner : .edge, label: label, widthMM: 0, order: order, members: members)
+        s.widthMM = defaultWidth(capMM: s.capMM, latticeMM: latticeMM)
+        guard s.capMM >= minWidthMM else { return .failure(Refusal(line: FlexibleRowCopy.fit("\(label) · the face is too narrow"))) }
+        return .success(s)
     }
 
     /// One line why a pick cannot be cut.
@@ -210,7 +265,14 @@ public enum FlexibleEdgeStrips {
     @discardableResult
     public static func surfaceCut(_ m: inout FaceRegionModel, face: Int, target: Int? = nil, point: SIMD3<Double>,
                                   normal: SIMD3<Double>, mesh: ViewerMesh) -> [RegionID] {
-        []   // I2 RED STUB
+        let t = target ?? m.union(faces: [FaceID(face)], named: "Face \(face)")
+        let kids = m.splitManual(t, point: point, normal: normal)
+        var leaves: [RegionID] = []
+        for k in kids {
+            let detached = m.splitDetached(k, in: mesh)
+            leaves += detached.isEmpty ? [k] : detached
+        }
+        return leaves
     }
 
     // MARK: - the plan (every chain re-cut from its root, in one order)
@@ -248,8 +310,108 @@ public enum FlexibleEdgeStrips {
     /// ones kept, changed and new). `keep`: identity regions the main page refers to (never dissolved).
     public static func plan(_ entries: [Entry], replay: Set<Int>, faceRegions: FaceRegionModel, mesh: ViewerMesh,
                             keep: Set<Int> = []) -> Plan {
-        var out = Plan(faceRegions: faceRegions)   // I2 RED STUB
-        for e in entries { out.refused[e.id] = "I2 RED STUB" }
+        var m = faceRegions
+        var all = entries
+        var made: [Int: Int] = [:]   // face → its identity root made here
+        var roots = replay
+        // ── the roots a new pick starts: the face's identity region (made once per face, as the Surface cut makes it)
+        for i in all.indices {
+            for k in all[i].strip.members.indices where all[i].strip.members[k].root < 0 {
+                let f = all[i].strip.members[k].face
+                let r: Int
+                if let id = made[f] ?? identity(of: f, in: m) { r = id } else {
+                    r = m.union(faces: [FaceID(f)], named: "Face \(f)")
+                }
+                made[f] = r
+                all[i].strip.members[k].root = r
+                roots.insert(r)
+            }
+        }
+        var out = Plan(faceRegions: m)
+        for e in all { out.strips[e.id] = e.strip }
+        var pieceOf: [UUID: [Int: Int]] = [:]   // press → member index → its FaceRegion id
+        for root in roots.sorted() {
+            guard let r = m.region(root) else { continue }
+            let face = all.flatMap { $0.strip.members }.first { $0.root == root }?.face
+                ?? FaceRegionGeometry.members(of: r, in: mesh).first.map { Int($0) } ?? -1
+            let base = r.isCut ? FlexibleRegions.wireID(r) : face
+            out.bases[root] = base
+            out.faces[root] = face
+            let oldLeaves = leaves(of: root, in: m)
+            out.before[root] = oldLeaves == [root] ? [base] : oldLeaves.compactMap { m.region($0).map(FlexibleRegions.wireID) }
+            m.revertSplit(root)
+            let tris = triangles(face: face, mesh: mesh)
+            let faceArea = area(tris, [])
+            let eps = Swift.max(1e-6, 1e-7 * faceArea)
+            // the picks on this chain, in the one order
+            var picks: [(id: UUID, k: Int, strip: FlexibleStrip)] = []
+            for e in all { for (k, mb) in e.strip.members.enumerated() where mb.root == root { picks.append((e.id, k, e.strip)) } }
+            picks.sort { a, b in
+                if (a.strip.kind == .corner) != (b.strip.kind == .corner) { return a.strip.kind == .corner }
+                return a.strip.order < b.strip.order
+            }
+            if picks.isEmpty {
+                // nothing presses this chain any more: the face is whole again (an identity region made for strips goes)
+                if !r.isCut, r.isIdentity, !keep.contains(root), m.children(of: root).isEmpty { _ = m.dissolve(root) }
+                out.rests[root] = [base]
+                continue
+            }
+            var free: [Int] = [root]
+            for p in picks {
+                let h = halfSpaces(p.strip.members[p.k], width: p.strip.widthMM)
+                // the free piece the pick's area lies in; where it reaches two (a strip wider than the corner patch
+                // beside it: the strip less the patch is an L, and a sector is one convex piece — core refuses two
+                // sectors of one face in a press), it takes the piece holding most of it and the sliver stays the rest
+                let hits = free.map { id in (id: id, a: area(tris, (m.region(id)?.cuts ?? []) + h)) }.filter { $0.a > eps }
+                guard var cur = hits.max(by: { ($0.a, -$0.id) < ($1.a, -$1.id) })?.id else {
+                    out.refused[p.id] = FlexibleRowCopy.fit("\(p.strip.label) · taken by an earlier pick")
+                    continue
+                }
+                free.removeAll { $0 == cur }
+                var ok = true
+                for cut in h {
+                    let have = m.region(cur)?.cuts ?? []
+                    let outside = area(tris, have + [RegionCut(point: cut.point, normal: -cut.normal)])
+                    guard outside > eps else { continue }   // the piece lies inside this plane already
+                    let kids = m.splitManual(cur, point: cut.point, normal: cut.normal)
+                    guard kids.count == 2 else { ok = false; break }
+                    // the Surface cut: a half that fell into separate patches becomes separate pieces
+                    var inside = [kids[0]], beyond = [kids[1]]
+                    let a = m.splitDetached(kids[0], in: mesh), b = m.splitDetached(kids[1], in: mesh)
+                    if !a.isEmpty { inside = a }
+                    if !b.isEmpty { beyond = b }
+                    let kept = inside.filter { area(tris, m.region($0)?.cuts ?? []) > eps }
+                    free += beyond.filter { area(tris, m.region($0)?.cuts ?? []) > eps }
+                    guard kept.count == 1 else { ok = false; break }   // two patches inside: two sectors of one face
+                    cur = kept[0]
+                }
+                guard ok else {
+                    out.refused[p.id] = FlexibleRowCopy.fit("\(p.strip.label) needs two parts of Face \(face)")
+                    continue
+                }
+                pieceOf[p.id, default: [:]][p.k] = cur
+            }
+            // names: the pick's piece names its pick and the face; the rest keeps the face's name
+            let baseName = r.name.isEmpty ? "Face \(face)" : r.name
+            for p in picks { if let id = pieceOf[p.id]?[p.k] { m.rename(id, to: "\(p.strip.label) · \(baseName)") } }
+            let rest = free.sorted()
+            for (i, id) in rest.enumerated() { m.rename(id, to: rest.count == 1 ? baseName : "\(baseName) · part \(i + 1)") }
+            out.rests[root] = rest.compactMap { m.region($0).map(FlexibleRegions.wireID) }
+        }
+        out.faceRegions = m
+        for e in all {
+            var regs: [Int] = []
+            for (k, mb) in e.strip.members.enumerated() {
+                if let id = pieceOf[e.id]?[k], let r = m.region(id) {
+                    regs.append(FlexibleRegions.wireID(r))
+                } else if !roots.contains(mb.root), let old = e.regions, k < old.count {
+                    regs.append(old[k])   // a chain not re-cut keeps its piece
+                } else if out.refused[e.id] == nil {
+                    out.refused[e.id] = FlexibleRowCopy.fit("\(e.strip.label) · nothing to press on Face \(mb.face)")
+                }
+            }
+            out.regions[e.id] = regs
+        }
         return out
     }
 

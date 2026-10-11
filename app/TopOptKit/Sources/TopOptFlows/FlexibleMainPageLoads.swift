@@ -132,14 +132,23 @@ public struct FlexibleMainPageLoads: Equatable {
         for s in regions.sectors {
             for f in FaceRegionGeometry.members(of: s, in: mesh) { sectorsOfFace[f, default: []].append(s) }
         }
+        // ★ ROUND 6 ITEM 2: a sector cut again (an edge strip taken out of it) stands for its LEAVES — FlexibleMeet's
+        // partition: the parent stays declared, its children cover it, and loading both loads that surface twice
+        let parents = Set(regions.sectors.map(\.parentID))
+        func leaves(_ s: FaceRegion) -> [FaceRegion] {
+            guard parents.contains(s.id) else { return [s] }
+            return regions.sectors.filter { $0.parentID == s.id }.flatMap(leaves)
+        }
         func expand(face f: FaceID) -> [(id: Int, specific: Bool)] {
-            let secs = sectorsOfFace[f] ?? []
+            let secs = (sectorsOfFace[f] ?? []).filter { !parents.contains($0.id) }
             return secs.isEmpty ? [(Int(f), false)] : secs.map { (FlexibleRegions.wireID($0), false) }
         }
         func expand(region r: RegionID, depth: Int = 0) -> [(id: Int, specific: Bool)] {
             guard depth < 16, let reg = faceRegions.region(r) else { return [] }
             if reg.isUnionOfParts { return reg.parts.flatMap { expand(region: $0, depth: depth + 1) } }
-            if reg.isCut, regions.sectors.contains(where: { $0.id == reg.id }) { return [(FlexibleRegions.wireID(reg), true)] }
+            if reg.isCut, let sec = regions.sectors.first(where: { $0.id == reg.id }) {
+                return leaves(sec).map { (FlexibleRegions.wireID($0), true) }
+            }
             return FaceRegionGeometry.members(of: reg, in: mesh).flatMap { expand(face: $0) }
         }
         func area(_ id: Int) -> Double {

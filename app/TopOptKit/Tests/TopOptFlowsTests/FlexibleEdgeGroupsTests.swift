@@ -528,6 +528,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         XCTAssertEqual(m.groupColour(g), colour.rgba, "the new group wears the pick's colour")
         XCTAssertEqual(m.rail, .group(g.id), "its tab opens")
         XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).first { $0.tab == .group(g.id) }?.detail, "1 edge")
+        XCTAssertEqual(m.stripTitle(press.id), "Edge \(c.number) \u{00B7} Face 1 + Face 2", "its row names the pick and the faces")
         // never sent
         XCTAssertTrue(m.sentPresses.isEmpty)
         XCTAssertFalse(m.sentSqueezeGroups.contains { $0.id == g.id })
@@ -541,11 +542,50 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             let ids = try FlexibleCore.parseJobBlock(job).faces.map(\.faceRegionID)
             XCTAssertTrue(Set(ids).isDisjoint(with: press.regions), "\(send.title): no strip in the job")
         }
-        // ★ RED CONTROL: the viewer mesh's own normals (Float), not core's
+        // the viewer mesh's own normals (Float): on his axis-aligned pad they are exact — the same bits (printed)
         let n1 = try XCTUnwrap(mesh.faceNormal(1)), n2 = try XCTUnwrap(mesh.faceNormal(2))
-        let standIn = try XCTUnwrap(FlexiblePressAim.halfway([-SIMD3<Double>(n1), -SIMD3<Double>(n2)]))
-        print("FLEX-I2-6 control (ViewerMesh normals): \(standIn) bits equal \(Self.bits(standIn) == Self.bits(press.direction))")
-        XCTAssertNotEqual(Self.bits(standIn), Self.bits(press.direction), "control: a ViewerMesh stand-in has other bits")
+        let padStandIn = try XCTUnwrap(FlexiblePressAim.halfway([-SIMD3<Double>(n1), -SIMD3<Double>(n2)]))
+        print("FLEX-I2-6 his pad, ViewerMesh normals: \(padStandIn) — bits equal core's \(Self.bits(padStandIn) == Self.bits(press.direction)) (axis-aligned faces)")
+        // ★ RED CONTROL, where it can bite: a wedge whose side is slanted — the edge between it and the top
+        let wedge = try await wedgeModel()
+        let wp = try await pickMode(wedge.m)
+        let slanted = try XCTUnwrap(wp.candidates.first { c in
+            c.kind == .edge && c.members.contains(wedge.top) && c.members.contains(wedge.slanted)
+        }, "the top–slanted edge")
+        wedge.m.toggleEdgePick(slanted.number)
+        let why6b = try await done(wedge.m)
+        XCTAssertNil(why6b)
+        let wpress = try XCTUnwrap(wedge.m.presses.first { $0.strip != nil })
+        let wset = try await wedge.m.pressAim(wpress.regions)
+        let wrel = try XCTUnwrap(wset.defaultRelease)
+        XCTAssertEqual(Self.bits(wpress.direction), Self.bits(wrel.direction), "the wedge: core's halfway on its strips, bit for bit")
+        let wm = try XCTUnwrap(wedge.m.project.viewerMesh)
+        var normals: [SIMD3<Double>] = []
+        for f in slanted.members {
+            let n = try XCTUnwrap(wm.faceNormal(Int32(f)))
+            normals.append(-SIMD3<Double>(n))
+        }
+        let standIn = try XCTUnwrap(FlexiblePressAim.halfway(normals))
+        print("FLEX-I2-6 control (wedge, ViewerMesh normals): \(standIn) vs core \(wpress.direction)")
+        XCTAssertNotEqual(Self.bits(standIn), Self.bits(wpress.direction), "control: a ViewerMesh stand-in has other bits")
+    }
+
+    /// A wedge (an extruded trapezoid, 60 × 20…40 × 30 mm): its side from (60, 20) to (0, 40) is slanted in plan.
+    func wedgeModel() async throws -> (m: FlexibleStageModel, top: Int, slanted: Int) {
+        let outline: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(60, 0), SIMD2(60, 20), SIMD2(0, 40)]
+        let path = try FlexiblePressFixtures.write("i2_wedge.stl",
+                                                   FlexiblePressFixtures.asciiSTL("wedge", FlexiblePressFixtures.extrudedTriangles(outline, height: 30)))
+        let pm = try FlexiblePressFixtures.project(path: path, name: "wedge")
+        let m = try await G.openModel(self, pm, "the wedge")
+        let mesh = try XCTUnwrap(pm.viewerMesh)
+        let top = FlexibleSquishFixture.face(mesh, axis: 2, value: 30)
+        var slanted = -1
+        for t in 0..<mesh.triangleCount {
+            let f = Int(mesh.faceIDs[t])
+            if let n = mesh.faceNormal(Int32(f)), abs(n.x) > 0.1, abs(n.y) > 0.1 { slanted = f; break }
+        }
+        XCTAssertGreaterThanOrEqual(top, 0); XCTAssertGreaterThanOrEqual(slanted, 0)
+        return (m, top, slanted)
     }
 
     // MARK: - (7) the width
@@ -564,6 +604,10 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         let w0 = press.strip!.widthMM
         let afterDone = r.project.faceRegions
         let settingsDone = m.settings
+        let regionsDone = m.regions
+        func groupOn(_ face: Int, _ s: FlexibleStageSettings, _ regs: FlexibleRegions) -> Int? {
+            s.faces.first { regs.faces(of: $0.faceRegionID, mesh: mesh) == [face] }?.squeezeGroup
+        }
         let w1 = w0 > 6 ? 6.0 : max(1, w0 / 2)
         let why6 = await m.setStripWidth(press.id, mm: w1)
         XCTAssertNil(why6)
@@ -577,7 +621,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             XCTAssertEqual(Self.area(m, reg, face: face), 100 * w1, accuracy: 1e-3 * 100 * w1, "face \(face): L × \(w1)")
             let rest = m.settings.faces.filter { m.regions.faces(of: $0.faceRegionID, mesh: mesh) == [face] }
             XCTAssertEqual(rest.count, 1, "face \(face): its rest, re-keyed")
-            XCTAssertEqual(rest.first?.squeezeGroup, settingsDone.faces.first { m.regions.faces(of: $0.faceRegionID, mesh: mesh) == [face] }?.squeezeGroup)
+            XCTAssertEqual(rest.first?.squeezeGroup, groupOn(face, settingsDone, regionsDone), "face \(face): its group keeps the new rest")
         }
         let aim = try await m.pressAim(re.regions)
         XCTAssertEqual(Self.bits(re.direction), Self.bits(try XCTUnwrap(aim.defaultRelease).direction), "core's halfway on the new strips")
@@ -637,6 +681,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
     /// (1, 2) are their rests now (stated, printed).
     func testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries() async throws {
         let (r, m) = try await hisPad()
+        try await G.settleAllowingRefusedStacks(m, "A1_0003")   // the sends as the Export step reads them, settled
         func entries() throws -> [String: [Int: String]] {
             var out: [String: [Int: String]] = [:]
             for send in G.sends(m) {
@@ -659,6 +704,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         m.toggleEdgePick(try XCTUnwrap(candidate(p, [1, 2])).number)
         let why9 = try await done(m)
         XCTAssertNil(why9)
+        try await G.settleAllowingRefusedStacks(m, "A1_0003 after the cut")
         let after = try entries()
         XCTAssertEqual(Set(before.keys), Set(after.keys), "the same sends (the edges group sends nothing)")
         var same = 0

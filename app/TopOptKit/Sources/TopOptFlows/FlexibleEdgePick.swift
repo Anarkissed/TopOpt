@@ -101,9 +101,18 @@ public enum FlexibleEdgePickRules {
     /// (a candidate whose neighbours wear all seven takes the one they wear least — named in the tests' prints).
     @MainActor
     public static func colours(_ cs: [FlexibleEdgeCandidates.Candidate], excluding own: FlexibleGroupColour) -> [Int: FlexibleGroupColour] {
-        let palette = FlexibleGroupColour.allCases.filter { $0 != own }   // I2 RED STUB: round the palette
+        let palette = FlexibleGroupColour.allCases.filter { $0 != own }
         var out: [Int: FlexibleGroupColour] = [:]
-        for c in cs { out[c.number] = palette[(c.number - 1) % palette.count] }
+        let sorted = cs.sorted { $0.number < $1.number }
+        if controlRoundRobin {
+            for c in sorted { out[c.number] = palette[(c.number - 1) % palette.count] }
+            return out
+        }
+        for c in sorted {
+            var used: [FlexibleGroupColour: Int] = [:]
+            for o in sorted where o.number != c.number { if let col = out[o.number], touching(c, o) { used[col, default: 0] += 1 } }
+            out[c.number] = palette.first { used[$0] == nil } ?? palette.min { (used[$0] ?? 0) < (used[$1] ?? 0) }!
+        }
         return out
     }
 
@@ -193,11 +202,19 @@ public enum FlexibleEdgePickRules {
     /// toggles the last step's candidate back and the NEXT one on, round and round.
     @MainActor
     public static func hit(_ ps: [Projected], at p: CGPoint, last: Cycle?) -> Hit {
-        // I2 RED STUB: the nearest of anything, no cycling
-        let near = ps.compactMap { c -> (c: Projected, d: CGFloat)? in
+        let near = ps.filter(\.front).compactMap { c -> (c: Projected, d: CGFloat)? in
             guard let d = distance(c, p), d <= tapRadiusPt else { return nil }
             return (c, d)
-        }.sorted { $0.d < $1.d }
-        return Hit(toggle: near.first?.c.number, untoggle: nil, cycle: nil)
+        }
+        let corners = near.filter { $0.c.kind == .corner }.sorted { ($0.d, $0.c.number) < ($1.d, $1.c.number) }
+        let edges = near.filter { $0.c.kind != .corner }.sorted { ($0.d, $0.c.number) < ($1.d, $1.c.number) }
+        let order = (controlEdgeFirst ? edges + corners : corners + edges).map(\.c.number)
+        guard let first = order.first else { return Hit(toggle: nil, untoggle: nil, cycle: nil) }
+        if !controlNoCycle, let l = last, order.count >= 2, Set(l.order) == Set(order),
+           (l.anchor.x - p.x) * (l.anchor.x - p.x) + (l.anchor.y - p.y) * (l.anchor.y - p.y) <= tapRadiusPt * tapRadiusPt {
+            let i = (l.index + 1) % l.order.count
+            return Hit(toggle: l.order[i], untoggle: l.order[l.index], cycle: Cycle(anchor: l.anchor, order: l.order, index: i))
+        }
+        return Hit(toggle: first, untoggle: nil, cycle: Cycle(anchor: p, order: order, index: 0))
     }
 }

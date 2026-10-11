@@ -37,6 +37,9 @@ actor FlexibleWorker {
     /// ★ BATCH G: the scene itself, fetched in one quick hop — the squish sims run OFF this actor
     /// (it serialises the design calls and must never wait seconds on a solve).
     func sceneRef() -> FlexibleScene? { scene }
+    /// ★ ROUND 6 ITEM 2: a scene already opened on the regions the stage is about to hold (the strips' [Done]: core
+    /// was asked about the strips on it before the cut was committed) — the next `open` with its key reuses it.
+    func install(_ s: FlexibleScene, key: String) { scene = s; sceneKey = key }
 }
 
 /// One control point of one face's X or Y curve (the × on the model, round 3 item 8).
@@ -387,14 +390,21 @@ public final class FlexibleStageModel: ObservableObject {
 
     struct SceneJob { let json: String; let dir: String }
 
-    func sceneJob() throws -> SceneJob? {
+    /// ★ ROUND 6 ITEM 2: `sectors` — the job over regions not committed yet (the strips' [Done]); nil: the project's.
+    func sceneJob(sectors: [[String: Any]]? = nil) throws -> SceneJob? {
         guard let file = project.importedFile else { return nil }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
+        var s = settings
+        if let sectors {
+            // the scene's one face entry must be a region of THOSE regions (a re-cut drops the old rest's id)
+            let declared = Set(sectors.compactMap { $0["id"] as? Int })
+            s.faces = s.faces.filter { !FlexibleRegions.isSector($0.faceRegionID) || declared.contains($0.faceRegionID) }
+        }
         var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
-            settings: settings, regions: project.latticeJobRegions().regions.map(\.wireDictionary))
-        inputs.sectorRegions = regions.wire
+            settings: s, regions: project.latticeJobRegions().regions.map(\.wireDictionary))
+        inputs.sectorRegions = sectors ?? regions.wire
         (inputs.buildDir, inputs.plateDir) = buildDirections
         let json = try FlexibleJob.sceneJobJSON(inputs, fallbackMaterial: catalogue.first?.id ?? "flexible")
         return SceneJob(json: json, dir: (file.path as NSString).deletingLastPathComponent)
@@ -404,13 +414,14 @@ public final class FlexibleStageModel: ObservableObject {
     /// NOT the faces, curves or filament (those re-run designs, never the scene).
     /// ★ BATCH B REVIEW: the bead width too — the scene job sends it (min_extrudable_width_mm)
     /// and the shared model now keeps its scene for the whole session.
-    private func sceneKey() -> String {
+    /// ★ ROUND 6 ITEM 2: `regionsKey` — the key over sectors not committed yet (the strips' [Done]); nil: the project's.
+    func sceneKey(regionsKey: String? = nil) -> String {
         guard let file = project.importedFile else { return "" }
         let regions = project.latticeJobRegions().regions.map(\.wireDictionary)
         let r = (try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? ""
         let (b, p) = buildDirections
-        return "\(file.path)|\(project.quality.resolution)|\(r)|\(self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
+        return "\(file.path)|\(project.quality.resolution)|\(r)|\(regionsKey ?? self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
             + "|\(project.printParams.strutLineWidthMM)"
     }
 
@@ -505,6 +516,8 @@ public final class FlexibleStageModel: ObservableObject {
         // a split face resolves to the sector holding the point (the Surface stage's rule)
         let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
         NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
+        // ★ ROUND 6 ITEM 2: in pick mode a tap never selects a face (the page hit-tests the edges and corners first)
+        if edgePick != nil { return }
         curvePoint = nil
         // ★ S VERIFICATION: on the [+ New] tab ("Tap the face that starts it") a tap on a face that
         // can start a group STARTS it (with its hand) — it had only selected the face and left the tab
@@ -522,6 +535,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// (a split sector as itself: never resolved through the part's face, which would pick the
     /// whole face), so the rows below edit it and the part shows it selected.
     public func select(_ region: Int) {
+        if edgePick != nil { return }   // ★ ROUND 6 ITEM 2: pick mode selects no face
         curvePoint = nil
         selectedRegion = region
         if tab == .more { tab = .face }
