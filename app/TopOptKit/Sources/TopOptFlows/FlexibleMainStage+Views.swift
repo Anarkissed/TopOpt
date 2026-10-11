@@ -127,7 +127,7 @@ extension FlexibleMainStage {
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
         let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
-            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)"
+            + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)|\(controlRolesUnderMarks)"
         if key != composedKey {
             composedKey = key
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
@@ -142,8 +142,12 @@ extension FlexibleMainStage {
                 return (s.field, controlStressScaleIsPeak ? onePeak : s.top)
             }
             let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
+            // ★ BATCH V REVIEW: unticked, #354's colours as Topology paints them — over Flexible's marks and on the maps the
+            // heat leaves uncoloured (FlexibleMainTints.compose); the red control: only where Flexible leaves clay
+            let over = false   // ★ BATCH V REVIEW, TESTS FIRST: batch V's rule (the fix lands next)
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
+                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil,
+                                                 rolesOverMarks: over)
             // ★ ROUND 6 (his img1): no group frame in any view — round 5's paint is the red control's only
             if controlRound5Frames, let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
@@ -151,14 +155,16 @@ extension FlexibleMainStage {
             var per: [String: [Float]] = [:]
             for (id, base) in feBaseTints {
                 per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil,
+                                                    rolesOverMarks: over)
             }
             // ★ BATCH M (M3): Stress under Play all with Heat off — each turn its own stress too
             if showStress, feRoute, per.isEmpty, fe.sequence.count > 1 || !fe.retained.isEmpty, let base = c.tints {
                 for i in fe.sequence + fe.retained where i < fe.fields.count {
                     let id = fe.fields[i].versionKey
                     per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil,
+                                                        rolesOverMarks: over)
                 }
             }
             // ★ ROUND 6 (his img1): no Play-all turn wears a group frame either (the renderer swaps a turn's own

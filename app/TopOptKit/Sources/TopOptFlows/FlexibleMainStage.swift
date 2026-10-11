@@ -252,6 +252,15 @@ public final class FlexibleMainStage: ObservableObject {
     public internal(set) var sessionPicked = false
     var lastSelection: SelectionModel?
     var selectionObservation: AnyCancellable?
+    /// ★ BATCH V REVIEW ("Prism after a pick"): an Undo or a Redo re-writes the selection (ProjectModel.applyEditSnapshot) —
+    /// never his pick. The history as last seen, its observation, and "the next selection write is a restore's".
+    var lastUndo: UndoHistory?
+    var undoObservation: AnyCancellable?
+    var restoreWritePending = false
+    /// Test controls only (batch V review): an Undo / Redo's selection write counted as a pick (as batch V built it), and
+    /// "Role colours" unticked painting #354's colours only where Flexible leaves the part clay (as batch V built it).
+    var controlUndoIsAPick = false
+    var controlRolesUnderMarks = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).

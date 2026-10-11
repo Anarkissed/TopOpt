@@ -404,9 +404,15 @@ public enum FlexibleProbe {
 /// opaque. (★ Batch C verification: the stage never asks for Heat AND Stress — they are the two
 /// colourings of the map, one at a time; `heat: true` with a stress field stays defined here.)
 public enum FlexibleMainTints {
+    /// ★ BATCH V REVIEW (his "Role colours" view setting, unticked: "as #354 paints them"): `rolesOverMarks` — #354's Selections
+    /// colours on EVERY face a group holds, as Topology paints them, wherever no data colour is drawn: over Flexible's own
+    /// marks on the part (the resting cyan, the pressed green), and on the pressed faces' map quads where neither the dent
+    /// heat nor Stress colours them (X-ray then ghosts them in their own colour). False (every other caller, the red
+    /// control): batch V as built — a role colour only where Flexible leaves the part clay, never on a map, which on his pad
+    /// (every face pressed or resting) was nowhere he could see.
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,
                                roles: [FaceID: SIMD4<Float>], stress: (field: LatticeDemandField, peak: Double)?,
-                               ghost: SIMD4<Float>?) -> [Float]? {
+                               ghost: SIMD4<Float>?, rolesOverMarks: Bool = false) -> [Float]? {
         guard let mesh = overlay?.mesh ?? part else { return nil }
         let n = mesh.flat.vertexCount
         guard n > 0 else { return nil }
@@ -428,7 +434,7 @@ public enum FlexibleMainTints {
         }
         for v in 0..<partVerts {
             if let c = stressColour(v) { put(v, c); continue }
-            if out[v * 8 + 3] <= 0, let r = roles[FaceID(truncatingIfNeeded: face(v / 3))] { put(v, r) }
+            if rolesOverMarks || out[v * 8 + 3] <= 0, let r = roles[FaceID(truncatingIfNeeded: face(v / 3))] { put(v, r) }
         }
         if !heat, stress != nil {
             for v in partVerts..<n {
@@ -437,6 +443,15 @@ public enum FlexibleMainTints {
                 // ★ BATCH C VERIFICATION: held OPAQUE, like the heat it replaces — the map reads
                 // the same (and hides the same) whichever colouring it carries
                 out[v * 8 + 5] = 1
+            }
+        }
+        // ★ BATCH V REVIEW: a pressed face's map quads wear its role colour where no heat or Stress is drawn on them (the map
+        // quad's face: the overlay mesh's own face id — its region's lowest face)
+        if rolesOverMarks, !roles.isEmpty {
+            for v in partVerts..<n where out[v * 8 + 3] <= 0 {
+                let t = v / 3
+                guard t < ids.count, let r = roles[FaceID(truncatingIfNeeded: Int(ids[t]))] else { continue }
+                put(v, r)
             }
         }
         if let g = ghost { FlexibleOverlayMesh.markGhost(&out, colour: g) }

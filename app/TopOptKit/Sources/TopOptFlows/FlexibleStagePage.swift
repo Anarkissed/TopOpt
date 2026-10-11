@@ -280,6 +280,8 @@ public struct FlexibleStagePage: View {
             // ★ BATCH V (m19): the lines drawn on the part — the curves, the dashed outlines, the stamp's outline — are cut out
             // of the whole chrome (`clip`; the 62 %-opaque panel and legend let them read as drawn OVER them); the chip, the tags,
             // the discs and a reading keep out of it as views (a mask over the layer took the depth chip's glass with it)
+            // ★ BATCH V REVIEW: …out of the WHOLE chrome too (the fix pop-up, the top line and its toast, the Exit row, the gizmo,
+            // the player whole) — they kept out of the panel, the legend, the view buttons and the player's parts only
             if !Self.controlNoOverlays {
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
                 FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut,
@@ -1003,16 +1005,51 @@ struct FlexibleReadingCallout: View {
     @ObservedObject var proj: FlexibleProjectionBox
     let reading: FlexibleReading?
     /// ★ BATCH V (m19): the chrome — a reading whose point lies under it is not drawn there.
+    /// ★ BATCH V REVIEW: …nor one whose TAG would reach into it (the tag runs right of the point: tapped just left of the
+    /// legend, its 94 %-opaque squircle covered the legend). The legend card still reads the value (TAP TO READ).
     var clip: [CGRect] = []
+    /// The tag's own size, measured for the reading it shows (by its words); unmeasured, it is not shown over any chrome.
+    @State private var fitted: FlexibleReadingFit?
+    /// Test control only (batch V review): the point alone tested against the chrome (as batch V built it).
+    @MainActor static var controlPointOnly = false
 
     var body: some View {
         if let r = reading, let s = proj.projection?.project(r.anchor), !clip.contains(where: { $0.contains(s) }) {
+            let shows = true ||   /* ★ BATCH V REVIEW, TESTS FIRST: batch V's rule */ Self.clear(anchor: s, size: fitted?.text == r.text ? fitted?.size : nil, clip: clip)
             // ★ the value in the accent blue, in its own squircle (FlexibleReadingTag)
             FlexibleReadingTag(reading: r)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleReadingFitKey.self, value: FlexibleReadingFit(text: r.text, size: g.size))
+                })
+                .onPreferenceChange(FlexibleReadingFitKey.self) { fitted = $0 }
+                .opacity(shows ? 1 : 0)
+                .accessibilityHidden(!shows)
                 .offset(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("flexible-reading-callout")
         }
     }
+
+    /// Where the tag sits for a point `s` (stage points): right of it, centred on it.
+    static func frame(anchor s: CGPoint, size: CGSize) -> CGRect {
+        CGRect(x: s.x + 2, y: s.y - FlexibleReadingTag.halfHeight, width: size.width, height: size.height)
+    }
+    /// Whether the tag is drawn: its whole frame clear of every piece of the chrome (unmeasured: only with no chrome).
+    static func clear(anchor s: CGPoint, size: CGSize?, clip: [CGRect]) -> Bool {
+        guard let size else { return clip.isEmpty }
+        let f = frame(anchor: s, size: size)
+        return !clip.contains { !$0.isNull && $0.intersects(f) }
+    }
+}
+
+/// ★ BATCH V REVIEW: the reading tag's measured size, by the words it shows.
+struct FlexibleReadingFit: Equatable {
+    let text: String
+    let size: CGSize
+}
+
+struct FlexibleReadingFitKey: PreferenceKey {
+    static var defaultValue: FlexibleReadingFit? = nil
+    static func reduce(value: inout FlexibleReadingFit?, nextValue: () -> FlexibleReadingFit?) { value = nextValue() ?? value }
 }

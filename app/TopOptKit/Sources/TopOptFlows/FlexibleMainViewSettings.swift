@@ -89,16 +89,46 @@ extension FlexibleMainStage {
         viewSettings = viewStore.load(project.id)
         sessionPicked = false
         lastSelection = project.selection
+        restoreWritePending = false
+        // ★ BATCH V REVIEW: the undo history first — an Undo / Redo moves it just BEFORE it re-writes the selection
+        // (ProjectModel.performUndo / performRedo → applyEditSnapshot: `selection = s.selection`, always)
+        lastUndo = project.undo
+        undoObservation = project.$undo.dropFirst()
+            .sink { [weak self] h in self?.undoMoved(h) }
         selectionObservation = project.$selection.dropFirst()
             .sink { [weak self] s in self?.selectionMoved(s) }
     }
 
     /// The selection as #354 wrote it: a pick (the active group changed, or the same one re-set), unless a Settings page is
-    /// up (its writes are never his pick).
+    /// up (its writes are never his pick), or an Undo / Redo restored it (★ batch V review: every restore re-writes the
+    /// selection, an equal write as often as not — he never touched Selections).
     func selectionMoved(_ new: SelectionModel) {
         defer { lastSelection = new }
+        if restoreWritePending {
+            restoreWritePending = false
+            if false { return }   // ★ BATCH V REVIEW, TESTS FIRST: batch V's rule (the fix lands next)
+        }
         guard !frozen, let a = new.activeGroupID else { return }
         if a != lastSelection?.activeGroupID || new == lastSelection { sessionPicked = true }
+    }
+
+    /// The undo history as ProjectModel moved it: an Undo or a Redo (never a commit, a reset or a no-op) marks the selection
+    /// write that follows it as a restore's. (Cleared on the next turn of the run loop if no write came — it always does.)
+    func undoMoved(_ new: UndoHistory) {
+        defer { lastUndo = new }
+        guard let old = lastUndo, Self.isUndoOrRedo(from: old, to: new) else { return }
+        restoreWritePending = true
+        DispatchQueue.main.async { [weak self] in self?.restoreWritePending = false }
+    }
+
+    /// An Undo moves one step from the past onto the future; a Redo one step back. A commit appends to the past and CLEARS
+    /// the future — with one step undone that looks like a Redo by the counts, and the baseline tells them apart: a Redo
+    /// restores exactly the state it had undone.
+    nonisolated static func isUndoOrRedo(from old: UndoHistory, to new: UndoHistory) -> Bool {
+        if new.future.count == old.future.count + 1, new.past.count + 1 == old.past.count { return true }
+        if new.future.count + 1 == old.future.count, new.past.count == old.past.count + 1, let undone = old.future.last,
+           new.baseline == undone { return true }
+        return false
     }
 
     /// The group whose prism and number the main page may draw: the active Selections group — under "Prism after a pick"
