@@ -284,7 +284,7 @@ public struct FlexibleStagePage: View {
             // the player whole) — they kept out of the panel, the legend, the view buttons and the player's parts only
             if !Self.controlNoOverlays {
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
-                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut,
+                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
                                       clip: clip)
                 FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
@@ -1015,7 +1015,7 @@ struct FlexibleReadingCallout: View {
 
     var body: some View {
         if let r = reading, let s = proj.projection?.project(r.anchor), !clip.contains(where: { $0.contains(s) }) {
-            let shows = true ||   /* ★ BATCH V REVIEW, TESTS FIRST: batch V's rule */ Self.clear(anchor: s, size: fitted?.text == r.text ? fitted?.size : nil, clip: clip)
+            let shows = Self.controlPointOnly || Self.clear(anchor: s, size: fitted?.text == r.text ? fitted?.size : nil, clip: clip)
             // ★ the value in the accent blue, in its own squircle (FlexibleReadingTag)
             FlexibleReadingTag(reading: r)
                 .background(GeometryReader { g in

@@ -106,7 +106,7 @@ extension FlexibleMainStage {
         defer { lastSelection = new }
         if restoreWritePending {
             restoreWritePending = false
-            if false { return }   // ★ BATCH V REVIEW, TESTS FIRST: batch V's rule (the fix lands next)
+            if !controlUndoIsAPick { return }
         }
         guard !frozen, let a = new.activeGroupID else { return }
         if a != lastSelection?.activeGroupID || new == lastSelection { sessionPicked = true }

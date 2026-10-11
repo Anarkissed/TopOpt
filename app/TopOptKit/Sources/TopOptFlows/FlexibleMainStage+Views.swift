@@ -144,7 +144,7 @@ extension FlexibleMainStage {
             let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
             // ★ BATCH V REVIEW: unticked, #354's colours as Topology paints them — over Flexible's marks and on the maps the
             // heat leaves uncoloured (FlexibleMainTints.compose); the red control: only where Flexible leaves clay
-            let over = false   // ★ BATCH V REVIEW, TESTS FIRST: batch V's rule (the fix lands next)
+            let over = !controlRolesUnderMarks
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
                                                  roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil,
                                                  rolesOverMarks: over)
