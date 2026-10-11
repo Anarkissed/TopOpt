@@ -1,6 +1,109 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 6 · batch V — your two view settings on the main page, and nothing drawn on the part over the Settings panel (2026-10-10) (read this first)
+## Round 6 · batch V review — "Role colours off" now does something you can see, an Undo is not a pick, and the last of m19 (2026-10-10) (read this first)
+
+The two group lists stay separate (your 2026-10-10 reversal, 7f710903): nothing here touches the main page's Selections or
+the Settings squeeze groups as lists. This pass takes the verifier's nine findings on batch V, confirms each, and fixes the
+major one and the cheap, safe minors. **The app was NOT launched**: installed on the iPad Pro 13 simulator (147E56A1), never
+opened. The pictures are offscreen (the shipping renderer), not device screenshots.
+
+**What changes for you:**
+- **Untick "Role colours off" and the model wears the Selections colours, as Topology paints them.** On your pad the Top
+  turns the Top's blue, Group C's face 3 its green and the Bottom the Anchor's green — wherever the dent heat or Stress is
+  not drawn. In the Lattice (X-ray) view they read as a faint tint of the glass. With the heat on, the heat keeps every
+  map; nothing you set is hidden under a role colour. Ticked (the default) is unchanged: no role colour at all.
+  Before this pass, unticking changed nothing you could see on your pad (every face carries Flexible's own tint or map, and
+  #354's colours were laid only on clay) — the verifier's screens, ticked and unticked, were the same frame. (This replaces
+  batch V's "Tap it OFF and the model wears them again, as before" below.)
+- **"Prism after a pick": an Undo or a Redo is never your pick.** Each one re-writes the selection, and batch V counted that
+  as a pick: change the Top's weight, tap Undo, and the Top's prism and 12.0 mm showed without a tap on Selections. Now only
+  a tap on a Selections row counts (re-tapping the active row still does).
+- **Settings page: a reading's tag never covers the legend.** Tapped just left of the legend, the tag (it sits right of the
+  point) covered the card; now it is not drawn there — the legend card reads the value.
+- **Settings page: the depth chip, the mm tags, the number discs, the stamp's handle and the curve's points hide under ALL
+  of the chrome** — the fix pop-up, the top line and its toast, the Exit row, the cube — not only the panel, the legend, the
+  view buttons and the player.
+
+### The verifier's findings — each confirmed here, and what was done
+| # | finding (lens, severity) | confirmed by | done |
+|---|---|---|---|
+| 1 | an Undo / Redo counted as a pick (correct, minor) | `ProjectModel.applyEditSnapshot` writes `selection` unconditionally; reproduced: Top active, a weight edit, Undo → `sessionPicked` true, prisms [1] | **fixed** — `FlexibleMainViewSettings.undoMoved`: an Undo or a Redo (by the history's counts; a Redo also by its baseline) marks the selection write that follows as a restore's, never a pick |
+| 2 | a reading's tag covers the legend (correct, minor) | hosted: a reading 40 pt left of the legend — 12 084 px of the tag inside it | **fixed** — `FlexibleReadingCallout.clear`: the tag's whole measured frame against the chrome (unmeasured: not over any chrome) |
+| 3 | chip, tags, discs, handle, curve × kept out of part of the chrome only (correct, minor) | the page handed them `stageKeepOut`, which has no pop-up, top line, toast, Exit row or cube | **fixed** — the page hands them `clip ?? keepOut` (the whole chrome; the red control `controlOverlaysOverChrome` hands the keep-outs as before) |
+| 4 | the two settings have no (i) (correct, minor) | true; their meaning is only in the accessibility hint | **asked, not built** — the four view buttons beside them have no (i) either, and an (i) on each adds ~50 pt to a row that must leave the note ≥ 180 pt in landscape; question 4 below |
+| 5 | "Role colours off" unticked changes nothing he sees (UX, **major**) | the verifier's screens; reproduced at his img1 camera: unticked as built = 2 366 Top-blue px (the bottom's cyan edge), 0 in the Lattice view | **fixed** — see VR1 below |
+| 6 | 0004's violet lattice slab stays under "Role colours off" (UX, minor) | the verifier's 0004 frame: #354's `latticeDepthPlaneItems` ride H15's `stageVolumeItems` | **asked** — dropping them needs a hook on H15's line, and they show where the lattice goes; question 5 below |
+| 7 | "✓ Role colours off" is a double negative, lit the other way to the buttons (UX, minor) | true | **asked** — the job named it "Role colours off", ON by default ("each can be turned off at will"); question 6 below |
+| 8 | the mini claim was checked on the view row alone (UX, minor) | the verifier's hosted workspace at 744 × 1133: the second chip cut off; the same overflow at 31b432d7 (before batch V) — the Flexible page is wider than the window, the cube and the 4th button clipped | **corrected** in batch V's section; the overflow reported below as its own item (pre-existing, not batch V's) |
+| 9 | the pop-up hides the curve's peak; a dashed outline crosses the depth chip (UX, minor) | the verifier's crops | **noted** below; not changed (both pre-existing or by design: the pop-up is chrome; the outline crossing the chip is round 6's) |
+
+### Each fix → where → pinned by (tests in `FlexibleBatchVReviewTests.swift`, part of `FlexibleBatchVHostedTests`)
+| fix | where | pinned by (red control) |
+|---|---|---|
+| VR1 "Role colours off" unticked: #354's colours as Topology paints them, wherever no heat or Stress is drawn — over Flexible's own marks on the part, and on the pressed faces' map quads (X-ray ghosts them in their own colour) | `FlexibleMainTints.compose(…, rolesOverMarks:)` (FlexibleProbe.swift); `FlexibleMainStage+Views.tints` passes it (every Play-all turn too) | `testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera` — his pad, his img1 camera, the shipping renderer: Model view heat off, Top-blue px ticked 0 · unticked 147 486 · control (batch V) 2 366 (the bottom's cyan edge, a neighbouring hue); Lattice view heat off ticked 0 · unticked 15 420 · control 0; heat on: 0 px change (the heat keeps every map); the Bottom's vertices = the Anchor's green (control: Flexible's cyan); his r5: 182 727 px change on the tap (control, batch V: 26 062). RED CONTROL `controlRolesUnderMarks` |
+| VR2 an Undo / Redo is never a pick | `FlexibleMainViewSettings.undoMoved`, `isUndoOrRedo`, `selectionMoved` (FlexibleMainStage holds `lastUndo`, `undoObservation`, `restoreWritePending`) | `testAnUndoOrRedoIsNeverAPick` — Undo and Redo after a weight edit: not a pick, no prism; RED CONTROL `controlUndoIsAPick`: picked, the Top's [1]; positive control: a re-tap right after still picks; the classifier: a commit that clears one undone step is not a Redo |
+| VR3 the reading's whole tag clear of the chrome | `FlexibleReadingCallout.clear`, `frame`, `FlexibleReadingFit` (FlexibleStagePage.swift) | `testAReadingsTagNeverReachesIntoTheChrome` — 0 px inside a legend 40 pt right of the point; RED CONTROL `controlPointOnly`: 12 084 px; positive controls: no chrome / a far legend → the tag draws (17 782 px) |
+| VR4 the views hide under the whole chrome | FlexibleStagePage: `FlexibleStageOverlays(… keepOut: clip ?? keepOut, …)` | `testTheOverlayViewsKeepOutOfTheWholeChrome` — a chip under the fix pop-up hidden; RED CONTROL: `stageKeepOut` showed it; a chip clear of the chrome shows; source pin on the page's line |
+
+**The red run (`bvr_red_run.txt`):** the four fixes switched back to batch V's behaviour in the source (each one line), built,
+the four tests run: **4 tests, 16 failures**, each for its stated reason (Top-blue px 2 366 and 0 where > 5 000 was asked;
+the Undo picked, prisms [1]; 12 084 px in the legend; the page's keep-out line). Restored, rebuilt, green.
+
+### Hook lines in #354 / main files — NONE
+`git diff 31b432d7..HEAD` on WorkspacePlaceholder, ProjectModel, MetalMeshView, LatticeSettings, SelectionModel, ForceModel,
+DesignSystem, ClearanceGeometry, LatticeStageMode: empty. H4's and H15's lines are unchanged. Flexible files edited:
+FlexibleProbe.swift (`FlexibleMainTints.compose`), FlexibleMainStage+Views, FlexibleMainStage (stored state and two test
+controls), FlexibleMainViewSettings, FlexibleStagePage.
+
+### Goldens, stage-job hashes, suite, iOS (raw: round6/batch_v_review/bvr_runs.txt)
+- **Goldens at 00f8d0c5:** 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded);
+  tripwire (core 69b059611c26): control, tilt, edge accepted. Every existing face press keeps its job bytes (this pass is
+  display only). **Stage-job hashes:** all 16 rows identical to batch V's (angled_presses/stage_job_hashes_bvr.txt).
+- **Targeted suite at 00f8d0c5** (batch V's 144 classes — every Flexible class, every class that pins a touched file, the
+  goldens, LatticeStaleTypeTests and the six named; one run, no xctest death): TopOptFlowsTests 138 classes, 943 tests,
+  46 skipped, 13 failures — all known (FlexibleBatchNVerifyTests ×8, Xcode 27 text metrics; LatticeSimSolveTriggerTests ×1;
+  #354's LatticeSlotOriginTests ×4); TopOptKitTests 6 classes, 39 tests, 2 skipped, 0 failures. FlexibleBatchVHostedTests
+  11/11, LatticeStaleTypeTests 6/6, FlexibleAngledGoldenTests 13/13; the load flakes did not fire (FlexibleBatchNRefineTests
+  4/4, FlexibleRound5SettingsHostedTests 4/4). **No existing test went red; nothing re-pinned.**
+- **iOS:** built at 00f8d0c5 and installed on 147E56A1 (booted, **never launched**): the installed TopOpt.debug.dylib
+  (76 975 136 B, 22:21) is cmp-identical to the build and carries this pass's `FlexibleReadingFit` and
+  `restoreWritePending` and core 69b059611c26.
+
+### Evidence (round6/batch_v_review/; offscreen — NOT device screenshots)
+- `BVR_A1_0003_roles_<view>_ticked_unticked_control.png` — your pad at your img1 camera, three frames each: ticked
+  (default), unticked (this pass), unticked as batch V built it. Model view heat off; Lattice view heat off; Lattice view
+  heat on.
+- `BVR_r5_roles_model_heatOff_ticked_unticked_control.png` — your r5, the same three.
+- Looked at: unticked, the Top is the Top's blue and Group C's face 3 (a side) its green in the Model view; in the
+  Lattice view both read as a faint tint of the glass; with the heat on the three frames are the same. On r5 the Top's
+  sectors take the Top's violet and the sides (Pending) their blue — their Selections swatches.
+
+### Not done / open
+- **Nothing seen on a device or the simulator.** Installed, never launched.
+- **The first frame of the page:** until the stage's first refresh (one turn of the run loop after the page appears) the
+  viewer draws #354's own face colours (H4's `faceTints: roleTints`), even with "Role colours off" ticked. Removing it needs
+  H4's line changed — not done (no hook this batch).
+- **The iPad mini (pre-existing, not batch V):** in the real workspace at 744 × 1133 the Flexible page is wider than the
+  window — the title wraps, the cube and the fourth view button are clipped, the four buttons sit in one line (they would go
+  two over two in a 744 pt page), and the second setting reads "Prism after a pic". Seen the same at 31b432d7, before batch V
+  (the verifier's base render). Batch V's mini check hosted the view row alone.
+- **m19 leftovers (by design / pre-existing):** with r5's fix pop-up up, the curve is cut under it, so the curve's peak is
+  hidden until the pop-up is answered; a turned-away member's dashed outline still crosses the depth chip's "↓ 3.0 mm"
+  (round 6's, before batch V). Neither is inside the panel or the legend.
+- `surfaceRestore` (leaving Surface without saving) also re-writes the selection; it counts as a pick only if it moves the
+  active group back — rare, and not changed.
+
+### Questions for you
+4. **An (i) on the two settings?** The four view buttons beside them have none; an (i) each costs ~50 pt on a row that must
+   leave the "Lattice ready" note its room in landscape. Say if you want them, or the meaning shown another way.
+5. **"Role colours off" and #354's lattice slabs:** on your 0004 the main page draws #354's violet lattice depth slab (and
+   the keep-out boxes) over the latticed half, ticked or not. Should "Role colours off" hide those too? (They show where
+   the lattice goes; hiding them needs a one-line hook on H15's line.)
+6. **The wording:** "✓ Role colours off" lit means the colours are hidden — the buttons beside it light when something is
+   shown. Keep it, or name it "Role colours" (lit = shown, off by default)? Same behaviour either way.
+(Batch V's questions 1–3 below still stand.)
+
+## Round 6 · batch V — your two view settings on the main page, and nothing drawn on the part over the Settings panel (2026-10-10)
 
 Item 4 (one set of groups) is reverted (7f710903): the main page's Selections and the Settings squeeze groups are two
 separate lists again. Your two answers of 2026-10-09 had been built inside item 4 and went with it; you asked for both back
@@ -53,7 +156,7 @@ renderer), not device screenshots.
 | "Role colours off", ON by default: no #354 role colour and no Flexible mark on the main page's model, in every view and Play-all turn; OFF brings both back; Settings keeps its marks | `FlexibleMainViewSettings` (new); `FlexibleMainStage+Views.tints` (roles dropped in Flexible code — H4's line unchanged); `FlexiblePageChannels.channels(roleMarks:)` from `refresh` and `playAllBaseTints` | `FlexibleBatchVHostedTests.testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack` (red on the stub: 49 152 cyan vertices, the Anchor green on face 0; positive controls: OFF → cyan, OFF → Anchor green) |
 | "Prism after a pick", ON by default: nothing on open; the picked group's prism and mm; re-tapping the active group counts; a Pending group none; [Prisms] every prism, the picked group's brighter; OFF: S1b's rule | `FlexibleMainViewSettings.prismGroup` / `selectionMoved` (project.$selection, from the stage's first look; not while Settings is up); `FlexibleMainStage.volumes` | `…testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber` (red on the stub: the active Top's [1] on open; positive control: OFF → [1] on open, Group C → [3]) |
 | kept per project on this device; never the project | `FlexibleMainViewSettingsStore` (UserDefaults, key `flexible.mainViewSettings.<project id>`), read in `ensure` | `…testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject` (red on the stub: a fresh stage reads both ON; the project's undoable state, undo history, Flexible settings, designInputs and action serial unmoved) |
-| one line each beside the view buttons (on their line in landscape, under them in portrait), clear of the buttons, the note, the left panel and the gizmo; the legends, the player and the prism tags keep out of them (they read `FlexibleMainViewToggles.frame`); a click flips each — 11" and 13" both ways and the iPad mini | `FlexibleMainViewToggles.settingsRow`, `settingsFrame`, `frame`; `FlexibleMainViewSettingChip` | `…testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything` (red on the stub: no chips at any size) |
+| one line each beside the view buttons (on their line in landscape, under them in portrait), clear of the buttons, the note, the left panel and the gizmo; the legends, the player and the prism tags keep out of them (they read `FlexibleMainViewToggles.frame`); a click flips each — 11" and 13" both ways and the iPad mini (★ review: checked on the view row HOSTED ALONE — in the real page at 744 pt the second line is cut off by a pre-existing overflow; see the review section above) | `FlexibleMainViewToggles.settingsRow`, `settingsFrame`, `frame`; `FlexibleMainViewSettingChip` | `…testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything` (red on the stub: no chips at any size) |
 | m19: nothing drawn on the part shows inside the Settings panel, the legend, the pop-up, the top line, the Exit row or the view buttons | `FlexibleStagePage.chromeClip` handed to the overlays as `clip:`; the curves (FlexibleCurveEditor), the stamp's outline (FlexibleFaceStamp) and the dashed outlines (FlexibleStageViewTags, now a Canvas) cut through one helper, `FlexibleChromeClip` (overlapping holes stay holes); a reading under the chrome is not drawn; the toast's frame | `…testNothingDrawnOnThePartShowsInsideThePanelOrTheLegend` (the page rendered with vs without the layer, pixel by pixel: red on today's code in the verifier's own states — 13p [Rests] 3471 px in the panel, 1796 in the legend; Group 2 2118 in the legend; Group 3 6221 in the panel; r5's curves 2599 in the fix pop-up at 11l; and the layer drew in every state: the measurement measures something); `…testTheRedControlTheLayerOverTheChromeAgain` (`controlOverlaysOverChrome`: 3471 / 1796 px again; and with the clip vs without it 0 px differ OUTSIDE the chrome — mutation M1, a clip leaking 40 pt: 2 206 px) |
 | the clip is every piece of chrome, moved into the stage's frame (which ignores the safe area) | `FlexibleStagePage.chromeClip` | `…testTheClipIsEveryPieceOfTheChromeInTheStagesFrame` (red on the stub: []) |
 
@@ -126,7 +229,7 @@ copy of the project on another device opens with both ON.
   your r5's curves (11" landscape, with its fix pop-up), round 6 as pushed beside batch V. `before/` and `after/` hold every
   state at 13" portrait and 11" landscape (the Groups and Prisms views too).
 - `main/BV_<size>_main_view_settings.png` — the main page's view row with the two lines: on the row in landscape, under it in
-  portrait and on the iPad mini.
+  portrait and on the iPad mini (the view row hosted alone, not the whole page — see the review section above).
 - `main/BV_M_*.png` — the main page's model by the shipping renderer: the resting bottom from below with "Role colours off"
   ON and OFF; the prisms and mm tags on open (ON: none; OFF: Group C's 24.5 mm — your pad is saved with Group C active),
   after picking Top (12.0 mm), after picking Group C (Pending: none).
