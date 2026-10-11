@@ -3295,6 +3295,16 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          std::to_string(oc.measured_vertices) + ",\n";
   }
   s += "  \"clipped_struts\": " + std::to_string(gs.clipped_struts) + ",\n";
+  // ★ K6 PART 2: WHAT THE STUB GUARD TOOK, never silently. Emitted only when the guard
+  // was raised (an owner-clipped plan pass), so a legacy receipt is byte-identical. A
+  // piece shorter than its own strut diameter prints as a bump and carries no load; the
+  // count and the length say how much of that the ownership clip created.
+  if (gs.stub_fragments_dropped > 0) {
+    s += "  \"stub_fragments_dropped\": " +
+         std::to_string(gs.stub_fragments_dropped) + ",\n";
+    s += "  \"stub_fragment_length_mm\": " +
+         json_num(gs.stub_fragment_length_mm) + ",\n";
+  }
   s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
   s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
   s += "  \"skin_struts\": " + std::to_string(gs.skin_struts) + ",\n";
@@ -7169,6 +7179,17 @@ LatticeVariantOutcome lattice_one_variant(
   // certification's cells-per-member guard reads it correctly, unlike organic where
   // that field is deliberately left empty (§3a).
   std::vector<LatticeSteppedPass> stepped_passes;
+  // ── ★ K6 PART 2: ONE BOUNDARY PER REGION, CLIPPED TO WHAT THAT REGION OWNS ───
+  // Where two include prisms overlap, both regions' passes used to lay a lattice through
+  // the shared volume and the file carried two. Each region now gets its own boundary,
+  // clipped by the owner rule (clip_to_owned_region), and its passes point at that.
+  //
+  // ★ A DEQUE, AND HOISTED TO THIS SCOPE ON PURPOSE. `stepped_passes` holds raw pointers
+  // into these objects and outlives the block that builds them; an earlier cut declared
+  // them inside that block and the generator read freed memory. A deque rather than a
+  // vector because the pointers must stay valid as regions are added.
+  std::deque<LatticeBoundary> owned_boundaries;
+  std::map<int, const LatticeBoundary*> owned_boundary_for;
   if (graded && R.algorithm == LatticeAlgorithm::Stepped) {
     R.stepped = run_stepped_step(solved_grid, dens, mask,
                                  gf.posture.relative_density, region_ids_for_stepped,
@@ -7649,7 +7670,25 @@ LatticeVariantOutcome lattice_one_variant(
       PR.origin = g.origin;                  // ★ the FAMILY's grid, not the solved grid's
       PR.nx = g.nx; PR.ny = g.ny; PR.nz = g.nz;
       PR.cell_mm = g.size_mm;
-      PR.boundary = &boundary;
+      // ★ K6 part 2: this pass lays only where its own region owns the space. Built on
+      // demand, once per region, and shared by that region's passes.
+      const LatticeBoundary* pb = &boundary;
+      if (g.region_id > 0) {
+        auto it = owned_boundary_for.find(g.region_id);
+        if (it == owned_boundary_for.end()) {
+          owned_boundaries.push_back(boundary);
+          owned_boundaries.back().clip_to_owned_region(g.region_id);
+          it = owned_boundary_for.emplace(g.region_id, &owned_boundaries.back()).first;
+        }
+        pb = it->second;
+        // ★ K6 part 2: and the stub guard, on exactly the passes the ownership clip
+        // applies to. A piece left on the far side of an ownership boundary, shorter
+        // than it is thick, prints as a bump and carries no load; dropped, and counted.
+        // Only here, so a pass that is not owner-clipped keeps the 1 um sliver guard and
+        // its file is byte-identical.
+        PR.min_fragment_diameters = 1.0;
+      }
+      PR.boundary = pb;
       std::vector<char>& act = anystep_active[gi];
       act.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, 0);
       for (const std::array<int, 3>& c : g.cells)

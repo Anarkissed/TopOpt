@@ -30,6 +30,8 @@
 //     let the stand's 1,367 real overlapping pairs through, and a rule that only refused
 //     would refuse every mitre.
 #include <cstdio>
+#include <cstring>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
@@ -54,11 +56,20 @@ static std::string read_file(const std::string& p) {
   return out;
 }
 
+// ★ THE CONTROL IS RE-RUNNABLE. TOPOPT_CLI_OVERRIDE points this test at a binary built
+// from an earlier commit, which is how the "176 triangles before, 42 now" figure below
+// was measured. Replacing the binary in the build tree does not work -- macOS kills a
+// signed executable whose bytes changed under it -- so the override takes a PATH.
+static const char* cli_exe() {
+  const char* over = std::getenv("TOPOPT_CLI_OVERRIDE");
+  return (over != nullptr && *over != '\0') ? over : TOPOPT_CLI_EXE;
+}
+
 static int run_job(const std::string& name, std::string& text, std::string& out_dir) {
   const std::string job = std::string(ORGANIC_FIXTURE_DIR) + "/" + name + ".json";
   out_dir = std::string(CLI_TMP_DIR) + "/" + name;
   const std::string so = out_dir + ".stdout", se = out_dir + ".stderr";
-  const std::string cmd = std::string("\"") + TOPOPT_CLI_EXE + "\" lattice-variant \"" +
+  const std::string cmd = std::string("\"") + cli_exe() + "\" lattice-variant \"" +
                           job + "\" --out \"" + out_dir + "\" > \"" + so + "\" 2> \"" +
                           se + "\"";
   const int rc = std::system(cmd.c_str());
@@ -120,6 +131,52 @@ int main() {
   CHECK(run_job("straddler_seam", s_text, s_dir) == 0,
         "a straddled seam is ACCEPTED: two regions' cells may share space where each "
         "centre is owned by its own region");
+
+  // ── ★ K6 PART 2: AND THE SHARED VOLUME IS NO LONGER DOUBLE-LATTICED ─────────
+  // The two cells overlap over 1.5 x 1.5 x 6 mm. Both regions' passes used to lay a
+  // lattice through all of it -- the clip never consulted ownership at all -- so the file
+  // carried two. Each region's passes are now clipped to the space that region OWNS
+  // (nearest face plane, exact tie to the lower declared id).
+  //
+  // MEASURED, counting triangles with at least one vertex in that box: 176 at 39db7c33,
+  // 42 now. The assertion is a BOUND rather than the number, so a future change that
+  // emits the same lattice with a different tessellation does not red this test while a
+  // change that puts the second lattice back does.
+  {
+    const std::string stl = s_dir + "/dp_073_lattice.stl";
+    const std::string bytes = read_file(stl);
+    CHECK(bytes.size() > 1000, "the straddler run wrote a real mesh");
+    // Binary STL: 80-byte header, 4-byte count, then 50 bytes per triangle.
+    long long touching = 0, total = 0;
+    if (bytes.size() > 84) {
+      std::uint32_t n = 0;
+      std::memcpy(&n, bytes.data() + 80, 4);
+      total = n;
+      const double lo[3] = {4.5, 4.5, 6.5}, hi[3] = {6.0, 6.0, 12.5};
+      for (std::uint32_t t = 0; t < n && 84 + 50ull * (t + 1) <= bytes.size(); ++t) {
+        const char* tri = bytes.data() + 84 + 50ull * t;
+        bool any_in = false;
+        for (int v = 0; v < 3 && !any_in; ++v) {
+          float xyz[3];
+          std::memcpy(xyz, tri + 12 + v * 12, 12);
+          bool in = true;
+          for (int a = 0; a < 3; ++a)
+            if (!(xyz[a] >= lo[a] - 1e-6 && xyz[a] <= hi[a] + 1e-6)) in = false;
+          any_in = in;
+        }
+        touching += any_in ? 1 : 0;
+      }
+    }
+    std::fprintf(stderr, "[k6] straddler: %lld triangles, %lld touching the shared box\n",
+                 total, touching);
+    CHECK(total > 1000, "premise: the run emitted a lattice at all");
+    CHECK(touching > 0,
+          "premise: the shared box is not empty -- the owning region still lattices it, "
+          "and a clip that emptied it would be the opposite defect");
+    CHECK(touching < 100,
+          "★ the shared volume carries ONE region's lattice, not two: 176 triangles "
+          "touched that box before the ownership clip and 42 do now");
+  }
 
   std::string c_text, c_dir;
   CHECK(run_job("straddler_collision", c_text, c_dir) != 0,

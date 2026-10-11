@@ -1068,3 +1068,110 @@ and not the file.
 `test_plan_is_the_design` is now 41 checks; 12 go red at the pre-K4/K5 binary through
 `TOPOPT_CLI_OVERRIDE` (the K4 ones partly because the key itself is refused there, which
 is the honest answer for a feature that did not exist).
+
+## Addendum 16 — K6 part 2: a pass lays only where its own region owns the space (2026-10-10)
+
+> clip by the owner function itself — bisect along each strut to ≤ 0.01 mm, keep only
+> pieces R owns, drop pieces shorter than a strut diameter and count them in the receipt.
+
+Where two include prisms overlap, both regions' passes laid a lattice through the shared
+volume and the file carried **two**. `stepped_region_owner` already answered who owns a
+point, but it is a **predicate**, and a strut clip needs a signed distance.
+
+### The term
+
+`LatticeBoundary::clip_to_owned_region(declared_id)`, 0 (the default) adding nothing:
+
+```
+own_R = min over S != R of  max( -sd_S ,  (d_S - d_R)/2 + bias )
+```
+
+with `sd_X` the include's own exact signed distance (outline and all, ruling 2) and `d_X`
+the distance to X's face plane. "S does not contest this point" is "S does not contain
+it" **or** "S's plane is farther", which is the max; "no S contests it" is the min. A max
+or min of 1-Lipschitz functions is 1-Lipschitz, and the **halved** difference is what
+keeps it so — `d_S - d_R` is 2-Lipschitz. Halving cannot change a sign, so the agreement
+with the owner function is exact; only the magnitude is conservative, by at most √2 near
+the boundary (for two perpendicular planes the exact distance to the bisector is
+`|d_S - d_R|/√2`, and `/2` is the universally safe choice). `bias` is ±1e-9 mm, the
+tie-break on the declared id, five orders under the clip's own tolerance.
+
+★ **It does not ask whether R contains the point.** That is ruling 2's union term, which
+is gated on the outline, and folding it in here made the term clip a **single-region** job
+for the first time — `plan_partial_depth` and `plan_full_depth`, no overlap at all, both
+changed their emitted bytes, which is exactly what the no-overlap bar forbids. Caught by
+measuring the md5s rather than by reasoning. With it removed the min starts empty, so with
+one include the term is inert and the file is byte-identical.
+
+★ **A region with no face plane does not contest a face region** — the same rule
+`stepped_region_owner` states by giving it `d = +infinity`. A bolt or mask-backed include
+never wins a shared point, so it never clips one away.
+
+### The bar, measured
+
+| | at 39db7c33 | now |
+|---|---|---|
+| triangles touching the 1.5 × 1.5 × 6 mm shared box | **176** | **42** |
+| total triangles | 16976 | 16568 |
+| `interior_volume_mm3` | 403.179 | 280.876 |
+| `clipped_struts` | 24 | 43 |
+
+The bar was "~38 triangles not 178"; the instrument reads 176 before and 42 after, through
+the same code path, with `TOPOPT_CLI_OVERRIDE` pointed at the old binary. The assertion in
+`test_region_ownership` is a **bound** (`> 0` and `< 100`), not the number, so a change
+that re-tessellates the same lattice does not red it while a change that puts the second
+lattice back does. `> 0` matters as much as `< 100`: a clip that **emptied** the shared box
+would be the opposite defect.
+
+**10,000 random points per shared volume** (`test_owner_clip`, a unit test — the agreement
+is a property of two pure functions, and measuring it through a run would sample it only
+where struts happen to lie):
+
+```
+[k6] 3441 of 10000 points lie in BOTH prisms: 1738 owned by region 1,
+     1703 by region 2, 0 disagreements with the clip
+```
+
+Both directions exercised, zero disagreements. The test also pins the no-face-plane case
+(every shared point kept) and that `clip_to_owned_region(0)` changes the distance at no
+point at all.
+
+**No-overlap jobs byte-identical**: `plan_partial_depth` `9475a816deba69ad260f06ee0fbda0c6`,
+`plan_full_depth` `edb4425d956e8f7fd7ab7957d24cd103`, `outline_clip_quadrant`
+`5827508ce78ad04ef9ef105cdee82217` — all three unchanged from K5. `straddler_collision`
+still refuses, with its own reason.
+
+### The bisection was already there, and tighter than the bar
+
+The bar asked for a bisection to ≤ 0.01 mm. `clip_segment` is already one —
+`certified_clip_spans` refines by midpoint and **proves** each kept span with a Lipschitz
+certificate rather than sampling it — and its tolerance is `kClipTolMm = 1e-4` mm, **100×
+tighter** than asked. So no bisection was written: the ownership answer was made into a
+1-Lipschitz signed distance and handed to the clip that already existed. That is also why
+the term's soundness argument is about Lipschitz constants and not about sample spacing.
+
+### Stubs: dropped by their own diameter, and counted
+
+`LatticeRegion::min_fragment_diameters` (0 = off) raises the sliver guard from the fixed
+1 µm to `diameters × 2r`, using the **piece's own** radius. Set to 1.0 on exactly the
+passes the ownership clip applies to, so a pass that is not owner-clipped keeps the 1 µm
+guard and its file is byte-identical — this could not be a global constant for that
+reason.
+
+A piece left on the far side of an ownership boundary, shorter than it is thick, prints as
+a bump and carries no load into anything. On `straddler_seam`:
+
+```
+"stub_fragments_dropped": 3,
+"stub_fragment_length_mm": 5.746429452
+```
+
+Emitted only when the guard was raised, so a legacy receipt is byte-identical. A guard that
+silently ate geometry is what the receipts exist to prevent.
+
+### What this does NOT do
+
+It does not clip a region's cells to that region's own prism — that is ruling 2's union
+term and is gated on `outline_uv`. A cell the app placed up to its region's prism edge is
+still laid in full. The two terms are separate on purpose: one answers "is this inside the
+pocket", the other "does another region own it".

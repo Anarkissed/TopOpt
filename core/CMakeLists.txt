@@ -2163,6 +2163,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_plan_is_the_design COMMAND test_plan_is_the_design)
 
+  # ★ K6 PART 2 (2026-10-10): the ownership clip and stepped_region_owner must agree at
+  # every point of a shared volume. The reviewer's "10,000 random points per shared
+  # volume" bar, as a unit test: the agreement is a property of two pure functions, and
+  # measuring it through a run would sample it only where struts happen to lie.
+  add_executable(test_owner_clip tests/unit/test_owner_clip.cpp)
+  target_link_libraries(test_owner_clip PRIVATE topopt)
+  add_test(NAME owner_clip COMMAND test_owner_clip)
+
   # ★ RULING 2 (2026-10-10): the outline is a CLIP, in every job that sends one.
   # clip_segment consulted the include region not at all, so a cell the outline cuts had
   # its struts drawn across the cut in voxels the mask certified SOLID. Measured as a

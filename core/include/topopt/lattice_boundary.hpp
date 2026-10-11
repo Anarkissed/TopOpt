@@ -173,6 +173,37 @@ class LatticeBoundary {
   // (lattice_certification_mask), which both consume this ONE object — the
   // generator's silhouette and the certified mask still cannot drift (bar H1b).
   // Invalid geometries are ignored (the rasterizer's safe no-op).
+  // ── ★ K6 PART 2: CLIP A PASS TO THE REGION THAT OWNS THE SPACE ───────────────
+  // Where two include prisms overlap, both regions' passes lay a lattice through the
+  // shared volume and the file carries two. `stepped_region_owner` already answers which
+  // region owns a point -- among the includes whose region CONTAINS it, the one whose
+  // FACE PLANE is nearest, with an exact tie to the lower DECLARED id -- but it is a
+  // predicate, and a strut clip needs a signed distance.
+  //
+  // Set to a declared region id, this adds that answer as a clip term, so a pass lays
+  // only in the space its own region owns. 0 (the default) adds nothing, so every job
+  // that does not ask is untouched.
+  //
+  // THE TERM, with sd_X the include's own exact signed distance (positive inside, outline
+  // and all) and d_X the distance from the point to X's face plane:
+  //
+  //     own_R = min( sd_R ,  min over S != R of  max( -sd_S , (d_S - d_R)/2 + bias ) )
+  //
+  // "S does not contest this point" is "S does not contain it" OR "S's plane is farther",
+  // which is the max; "no S contests it" is the min over S; and R must contain it, which
+  // is the outer min. A max or min of 1-Lipschitz functions is 1-Lipschitz, and the
+  // HALVED difference is what keeps it so -- d_S - d_R is 2-Lipschitz, and halving
+  // preserves the sign, which is all the clip reads. `bias` is +/-1e-9 mm, the tie-break
+  // on the declared id, four orders below the 0.01 mm the bisection resolves.
+  //
+  // ★ A REGION WITH NO FACE PLANE DOES NOT CONTEST A FACE REGION, which is the same rule
+  // stepped_region_owner states by giving it d = +infinity: a bolt or a mask-backed
+  // include never wins a shared point, so it never clips one away from a face region.
+  void clip_to_owned_region(int declared_region_id) {
+    own_region_ = declared_region_id;
+  }
+  int owned_region() const { return own_region_; }
+
   void add_include_region(const ClearanceGeometry& geom);
   void add_exclude_region(const ClearanceGeometry& geom);
   bool has_include_regions() const { return !includes_.empty(); }
@@ -312,6 +343,8 @@ class LatticeBoundary {
   // A MASK-BACKED include has no analytic distance and contributes nothing, so it never
   // clips -- conservative, and the run reports it rather than leaving it silent.
   bool clip_includes_ = false;
+  // ★ K6 part 2: the declared region id this boundary clips to, or 0 for none.
+  int own_region_ = 0;
   // One edge index per include (null where the include carries no outline): the exact
   // polygon distance is O(edges), and 102117B9's regions run to tens of thousands of
   // vertices. Built once, in add_include_region. shared_ptr keeps this type copyable,

@@ -67,6 +67,30 @@ double keep_out_signed_distance(const ClearanceGeometry& g, const Vec3& p) {
 
 }  // namespace
 
+namespace {
+
+// ── ★ K6 PART 2: THE DISTANCE TO AN INCLUDE'S FACE PLANE ──────────────────────
+// The SAME quantity stepped_region_owner ranks regions by: the absolute distance from the
+// point to the region's face plane. Infinite where the region has no plane, which is how
+// that function says "cannot win a shared point".
+double include_plane_distance(const ClearanceGeometry& g, const Vec3& p) {
+  const double ln = std::sqrt(g.normal.x * g.normal.x + g.normal.y * g.normal.y +
+                              g.normal.z * g.normal.z);
+  if (!(ln > 0.0)) return std::numeric_limits<double>::infinity();
+  return std::fabs(((p.x - g.origin.x) * g.normal.x +
+                    (p.y - g.origin.y) * g.normal.y +
+                    (p.z - g.origin.z) * g.normal.z) / ln);
+}
+
+// The declared id of an include at position `i`, exactly as stepped_region_owner reads
+// it: the declared number where the caller set one, else the position, because the built
+// vector is compacted by the invalid-include skip and a position is then not an id.
+int include_declared_id(const ClearanceGeometry& g, std::size_t i) {
+  return g.declared_region_id > 0 ? g.declared_region_id : static_cast<int>(i) + 1;
+}
+
+}  // namespace
+
 // ── ★ K3 / RULING 2: THE OUTLINE'S EDGE INDEX ─────────────────────────────────
 // The exact distance to a polygon is O(edges), and `clip_segment` evaluates the signed
 // distance tens of times per strut: 102117B9 carries 177 include regions whose outlines
@@ -492,6 +516,53 @@ double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
     }
     // Every include invalid, or every one mask-backed: no term, exactly as before.
     if (best > -1e29 && best < 1e29) d = std::min(d, best);
+  }
+  // ── ★ K6 PART 2: AND THE SPACE THIS PASS'S REGION OWNS ───────────────────────
+  // See clip_to_owned_region for the term and why each piece of it is 1-Lipschitz. This
+  // is strictly tighter than the union term above -- own_R <= sd_R <= max_S sd_S -- so
+  // where it applies the union term cannot bind, and both are evaluated only because
+  // skipping one would make the arming order observable in the geometry.
+  if (own_region_ != 0 && !includes_.empty()) {
+    constexpr double kIdTieBiasMm = 1e-9;   // the tie-break, four orders under 0.01 mm
+    double own = 1e30;
+    const ClearanceGeometry* R = nullptr;
+    std::size_t ri = 0;
+    for (std::size_t i = 0; i < includes_.size(); ++i)
+      if (includes_[i].valid &&
+          include_declared_id(includes_[i], i) == own_region_) { R = &includes_[i]; ri = i; break; }
+    if (R != nullptr) {
+      const LatticeOutlineIndex* ridx =
+          ri < include_outline_index_.size() ? include_outline_index_[ri].get() : nullptr;
+      // ★ IT DOES NOT ASK WHETHER R CONTAINS THE POINT. That is the UNION term above,
+      // which is gated on the outline, and folding it in here would make this term clip
+      // a job with ONE region -- where nothing contests anything -- for the first time.
+      // Measured: with sd_R folded in, plan_partial_depth and plan_full_depth (single
+      // region, no overlap at all) both changed their emitted bytes, which is exactly
+      // what the no-overlap bar forbids. This term answers one question only: does
+      // another region own this point.
+      //
+      // So the min starts empty. With one include it stays empty, the term is inert, and
+      // the file is byte-identical.
+      (void)ridx;
+      const double dR = include_plane_distance(*R, p);
+      for (std::size_t i = 0; i < includes_.size() && own > -1e29; ++i) {
+        if (i == ri || !includes_[i].valid) continue;
+        const ClearanceGeometry& S = includes_[i];
+        const double dS = include_plane_distance(S, p);
+        // A region with no face plane never wins a shared point, so it never contests.
+        if (!std::isfinite(dS)) continue;
+        const double bias =
+            include_declared_id(S, i) > own_region_ ? kIdTieBiasMm : -kIdTieBiasMm;
+        // R with no plane loses to any S that has one: the halved difference is then
+        // -infinity, so only "S does not contain the point" can save it.
+        const double nearer = std::isfinite(dR) ? 0.5 * (dS - dR) + bias : -1e30;
+        const LatticeOutlineIndex* sidx =
+            i < include_outline_index_.size() ? include_outline_index_[i].get() : nullptr;
+        const double outside_S = -include_signed_distance(S, p, sidx);
+        own = std::min(own, std::max(outside_S, nearer));
+      }
+      if (own > -1e29 && own < 1e29) d = std::min(d, own);
+    }
   }
   return d;
 }
