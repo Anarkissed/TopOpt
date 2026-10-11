@@ -1365,11 +1365,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
         var strut: LatticeReport.StrutStrength? = nil
+        // ★★ K4 (the reviewer, 2026-10-11 03:28, item 3): the job carried a plan ⇔ the bytes we POSTED carry
+        // `lattice.stepped_cells`; then the plan as laid (run_info `grading.plan_by_region`) is what the results read
+        let carriedPlan = submittedJobJSON.map(LatticeReport.PlanLaid.jobCarriesPlan) ?? false
+        var planLaid: LatticeReport.PlanLaid? = carriedPlan ? LatticeReport.PlanLaid(runInfo: nil) : nil
         if let id = jobID {
             let url = config.baseURL.appendingPathComponent("jobs")
                 .appendingPathComponent(id).appendingPathComponent("files")
                 .appendingPathComponent("run_info.json")
             let info = try? getJSON(url)
+            if carriedPlan { planLaid = LatticeReport.PlanLaid(runInfo: info) }
             if let le = info?["lattice_export"] as? [String: Any] {
                 func d(_ k: String) -> Double { (le[k] as? Double) ?? 0 }
                 func i(_ k: String) -> Int { (le[k] as? Int) ?? Int((le[k] as? Double) ?? 0) }
@@ -1416,7 +1421,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             maxRelativeDensity: lat.maxRelativeDensity,
             regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
             generated: generated, strut: strut,
-            regionCellsJSON: regionCellsJSON)
+            regionCellsJSON: regionCellsJSON, planLaid: planLaid)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff

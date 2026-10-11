@@ -167,6 +167,10 @@ enum OutcomeCodec {
         // V1's own key (2026-09-29): a result whose job carried placed shapes only. Read so the
         // result keeps its line; written back only for such a result, so no other outcome moves.
         var variantFaceWallsLeftOut: Int? = nil
+        // ★★ K4 (2026-10-11): the plan as laid — run_info's `grading.plan_by_region`, verbatim, written only when
+        // the job carried a plan; its presence IS "this job carried a plan", so a reopened plan run keeps reading
+        // the plan's figures instead of the law's. Optional, so every other blob is stored byte-for-byte as before.
+        var planByRegionJSON: Data? = nil
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -310,7 +314,8 @@ enum OutcomeCodec {
                     regionCellsJSON: r.regionCellsJSON,
                     variantFacesWithoutShape: r.variantFacesWithoutShape > 0 ? r.variantFacesWithoutShape : nil,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape.isEmpty ? nil : r.variantRegionsWithoutShape,
-                    variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil) },
+                    variantFaceWallsLeftOut: r.variantLegacyFaceWallsLeftOut > 0 ? r.variantLegacyFaceWallsLeftOut : nil,
+                    planByRegionJSON: r.planLaid?.rawJSON) },
             solvedBy: o.solvedBy)
     }
 
@@ -411,7 +416,8 @@ enum OutcomeCodec {
                     regionCellsJSON: r.regionCellsJSON,
                     variantFacesWithoutShape: r.variantFacesWithoutShape ?? 0,
                     variantRegionsWithoutShape: r.variantRegionsWithoutShape ?? [],
-                    variantLegacyFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0) },
+                    variantLegacyFaceWallsLeftOut: r.variantFaceWallsLeftOut ?? 0,
+                    planLaid: r.planByRegionJSON.map { LatticeReport.PlanLaid(planByRegionJSON: $0) }) },
             solvedBy: d.solvedBy,
             // nil on a pre-growth blob → false → reduction, which is what it is.
             growthLadder: d.growthLadder ?? false)

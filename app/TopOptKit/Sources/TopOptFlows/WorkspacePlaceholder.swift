@@ -3711,7 +3711,8 @@ public struct WorkspacePlaceholder: View {
                 // receipt that carries none parses to nil and shows nothing.
                 regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
                 variantFacesWithoutShape: withoutShape,
-                variantRegionsWithoutShape: regionsWithoutShape))
+                variantRegionsWithoutShape: regionsWithoutShape,
+                planLaid: result.planLaid))   // ★ K4: the plan as laid, when the job carried one
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()

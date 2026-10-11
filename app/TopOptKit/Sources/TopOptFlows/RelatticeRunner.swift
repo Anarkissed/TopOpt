@@ -249,6 +249,9 @@ public struct RelatticeResult {
     public var forecastJSON: Data?
     /// ★ `<out>/organic_probe.json` (final contract 2026-09-05), read mid-run.
     public var probeJSON: Data?
+    /// ★★ K4 (the reviewer, 2026-10-11 03:28, item 3): the plan as laid — non-nil exactly when the submitted job
+    /// carried a plan (`lattice.stepped_cells`), read from the run's `run_info.json` `grading.plan_by_region`.
+    public var planLaid: LatticeReport.PlanLaid?
 
     public init(outcome: OptimizeOutcome, receiptJSON: Data?,
                 provenanceJSON: Data?, forecastJSON: Data? = nil, spanText: String? = nil,
@@ -633,7 +636,12 @@ public enum RelatticeRun {
             gridNz: fields?.gridNz ?? 0,
             gridOrigin: fields?.gridOrigin ?? .zero, spacing: fields?.spacing ?? 0,
             computedRemotely: true)
-        return RelatticeResult(outcome: outcome, receiptJSON: receipt,
-                               provenanceJSON: provenance, spanText: spanText)
+        var result = RelatticeResult(outcome: outcome, receiptJSON: receipt,
+                                     provenanceJSON: provenance, spanText: spanText)
+        if LatticeReport.PlanLaid.jobCarriesPlan(jobToSubmit) {
+            result.planLaid = LatticeReport.PlanLaid(runInfo: file("run_info.json").flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] })
+        }
+        return result
     }
 }

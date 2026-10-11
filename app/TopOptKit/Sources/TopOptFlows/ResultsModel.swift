@@ -870,6 +870,15 @@ public final class ResultsModel: ObservableObject {
     public private(set) var latticeNotes: [String] = []
 
     /// Format a run's lattice report into honest lines.
+    /// Core's plan histogram ("6.000=32 3.000=8") as "32 × 6 mm, 8 × 3 mm".
+    static func planSizes(_ h: String) -> String {
+        h.split(separator: " ").compactMap { t -> String? in
+            let kv = t.split(separator: "=")
+            guard kv.count == 2, let mm = Double(kv[0]) else { return nil }
+            return "\(kv[1]) × \(String(format: "%g", (mm * 100).rounded() / 100)) mm"
+        }.joined(separator: ", ")
+    }
+
     public static func latticeNotes(_ report: LatticeReport?) -> [String] {
         guard let r = report else { return [] }
         // ★ ruling V1 (2026-09-29): a variant's re-lattice left a face wall out — say so
@@ -888,7 +897,22 @@ public final class ResultsModel: ObservableObject {
         // below is the "no lattice was produced" path, which is exactly the case
         // where knowing which region caught nothing matters most. Appending only at
         // the bottom would have hidden it on the one run that needed it.
+        // ★★ K4 (the reviewer's ruling, 2026-10-11 03:28, item 3): ON A RUN WHOSE JOB CARRIED A PLAN the request's
+        // cell, the export's strut radii and the receipt's per-region cell figures are core's grading LAW, not the
+        // plan the file was built from. Those lines read the plan as laid (run_info `grading.plan_by_region`).
+        let plan = r.planLaid
         let regionLines: [String] = {
+            if let plan {
+                guard !plan.regions.isEmpty else {
+                    return ["Per region — the worker did not report the plan as laid (a core before K4)."]
+                }
+                return ["Per region — your plan, as laid:"] + plan.regions.map { g in
+                    "Region \(g.region): \(g.cells) cell\(g.cells == 1 ? "" : "s") on a "
+                        + "\(String(format: "%g", (g.baseCellMM * 1000).rounded() / 1000)) mm base (\(Self.planSizes(g.sizes))), "
+                        + "\(g.strutsLaid) struts laid"
+                        + (g.cellsWithNoStrut > 0 ? ", \(g.cellsWithNoStrut) cell\(g.cellsWithNoStrut == 1 ? "" : "s") with no strut." : ".")
+                }
+            }
             guard let raw = r.regionCellsJSON,
                   let receipt = LatticeRegionCellReceipt.parse(raw) else { return [] }
             // Core's PERCOLATION floor, read at the run's own extrusion width, so a
@@ -944,24 +968,38 @@ public final class ResultsModel: ObservableObject {
         // the second layer, for records already on disk.
         let degenerate = (r.generated?.latticedCells ?? 0) == 0
                       || (r.generated.map { $0.strutRadiusMaxMM <= 0 } ?? false)
+        // what the run built: the plan's cells on a plan run, the law's cell otherwise
+        let cellPhrase = plan.map { p in
+            p.regions.isEmpty ? "your plan's cells"
+                : "your plan of \(p.cells) cell\(p.cells == 1 ? "" : "s") over \(p.regions.count) region\(p.regions.count == 1 ? "" : "s")"
+        } ?? "\(String(format: "%g", r.cellMM)) mm cell"
         if degenerate, r.generated != nil {
-            lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell — "
+            lines.append("Lattice: \(name), \(cellPhrase) — "
                 + "NO LATTICE WAS PRODUCED. Every voxel in the region stayed solid "
-                + "(the material is too thin to hold \(String(format: "%g", r.cellMM)) mm "
-                + "cells), so this file is the solid part. The density and strut "
+                + "(the material is too thin to hold "
+                + (plan == nil ? "\(String(format: "%g", r.cellMM)) mm cells" : "the plan's cells")
+                + "), so this file is the solid part. The density and strut "
                 + "figures below describe nothing and are withheld.")
             return lines + scopeLine + regionLines
         }
-        lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
+        lines.append("Lattice: \(name), \(cellPhrase), "
             + "filled at \(pct(r.generateRelativeDensity)) density "
             + "(previewed \(pct(r.minRelativeDensity))–\(pct(r.maxRelativeDensity))).\(scope)")
         if let g = r.generated {
             let fmts = [g.emitSTL ? "STL" : nil, g.emit3MF ? "3MF" : nil].compactMap { $0 }
-            lines.append("Generated: \(g.latticedCells) cells, \(g.triangles) triangles"
-                + (fmts.isEmpty ? "" : " (\(fmts.joined(separator: " + ")))")
-                + (g.strutRadiusMaxMM > 0
+            let tail: String
+            if let plan {
+                // ★ K4: the plan's own counts, never the run's cross-variant strut radii
+                tail = plan.regions.isEmpty ? "."
+                    : "; the plan laid \(plan.strutsLaid) struts and \(plan.nodesLaid) nodes"
+                      + (plan.cellsWithNoStrut > 0 ? ", and \(plan.cellsWithNoStrut) of its \(plan.cells) cells got no strut." : ".")
+            } else {
+                tail = g.strutRadiusMaxMM > 0
                     ? ", strut radius \(String(format: "%.2f", g.strutRadiusMinMM))–\(String(format: "%.2f", g.strutRadiusMaxMM)) mm."
-                    : "."))
+                    : "."
+            }
+            lines.append("Generated: \(g.latticedCells) cells, \(g.triangles) triangles"
+                + (fmts.isEmpty ? "" : " (\(fmts.joined(separator: " + ")))") + tail)
         } else {
             lines.append("Generated on the worker; the export record wasn't available to summarise here.")
         }

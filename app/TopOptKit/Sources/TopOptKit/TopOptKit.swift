@@ -896,6 +896,59 @@ public struct LatticeReport: Equatable, Sendable {
     /// job left out. Read from V1's stored key only; never written by a new run.
     public let variantLegacyFaceWallsLeftOut: Int
 
+    /// ★★ THE PLAN AS LAID (K4, #358 39db7c33; the reviewer's ruling, 2026-10-11 03:28, item 3) — present exactly
+    /// when the JOB carried a plan (`lattice.stepped_cells`). On such a run the request's `cellMM`, the export's
+    /// strut radii and the per-region receipt's cell figures describe core's grading LAW, not the plan the file was
+    /// built from (K4: "on a plan run the law's fields describe the law and not the file"), so the results read
+    /// these instead. `regions` is empty when the run_info carried no `grading.plan_by_region` (a core before K4).
+    public let planLaid: PlanLaid?
+
+    public struct PlanLaid: Equatable, Sendable {
+        public struct Region: Equatable, Sendable {
+            public let region: Int
+            public let baseCellMM: Double
+            public let cells: Int
+            /// Core's own histogram string, e.g. "6.000=32".
+            public let sizes: String
+            public let strutsLaid: Int
+            public let nodesLaid: Int
+            public let cellsWithNoStrut: Int
+        }
+        public let regions: [Region]
+        /// `grading.plan_by_region` verbatim ("[]" when absent), so a stored outcome restores the same figures.
+        public let rawJSON: Data
+        public var cells: Int { regions.reduce(0) { $0 + $1.cells } }
+        public var strutsLaid: Int { regions.reduce(0) { $0 + $1.strutsLaid } }
+        public var nodesLaid: Int { regions.reduce(0) { $0 + $1.nodesLaid } }
+        public var cellsWithNoStrut: Int { regions.reduce(0) { $0 + $1.cellsWithNoStrut } }
+
+        public init(planByRegionJSON raw: Data) {
+            rawJSON = raw
+            let arr = ((try? JSONSerialization.jsonObject(with: raw)) as? [[String: Any]]) ?? []
+            func i(_ o: [String: Any], _ k: String) -> Int { (o[k] as? Int) ?? Int((o[k] as? Double) ?? 0) }
+            regions = arr.map { o in
+                let groups = (o["groups"] as? [[String: Any]]) ?? []
+                return Region(region: i(o, "region"), baseCellMM: (o["base_cell_mm"] as? Double) ?? 0,
+                              cells: i(o, "cells"), sizes: (o["sizes"] as? String) ?? "",
+                              strutsLaid: groups.reduce(0) { $0 + i($1, "struts_laid") },
+                              nodesLaid: groups.reduce(0) { $0 + i($1, "nodes_laid") },
+                              cellsWithNoStrut: groups.reduce(0) { $0 + i($1, "cells_with_no_strut") })
+            }
+        }
+        /// From a run_info document: its `grading.plan_by_region` (an empty plan when it has none).
+        public init(runInfo: [String: Any]?) {
+            let arr = (runInfo?["grading"] as? [String: Any])?["plan_by_region"] as? [Any] ?? []
+            self.init(planByRegionJSON: (try? JSONSerialization.data(withJSONObject: arr, options: [.sortedKeys]))
+                      ?? Data("[]".utf8))
+        }
+        /// Did this job document carry a plan — a non-empty `lattice.stepped_cells`?
+        public static func jobCarriesPlan(_ jobJSON: Data) -> Bool {
+            guard let o = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
+                  let lat = o["lattice"] as? [String: Any], let cells = lat["stepped_cells"] as? [Any] else { return false }
+            return !cells.isEmpty
+        }
+    }
+
     public struct StrutStrength: Equatable, Sendable {
         public let marginInPlane: Double
         public let marginInterlayer: Double
@@ -958,7 +1011,9 @@ public struct LatticeReport: Equatable, Sendable {
                 regionCellsJSON: Data? = nil,
                 variantFacesWithoutShape: Int = 0,
                 variantRegionsWithoutShape: [String] = [],
-                variantLegacyFaceWallsLeftOut: Int = 0) {
+                variantLegacyFaceWallsLeftOut: Int = 0,
+                planLaid: PlanLaid? = nil) {
+        self.planLaid = planLaid
         self.regionCellsJSON = regionCellsJSON
         self.variantFacesWithoutShape = variantFacesWithoutShape
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
