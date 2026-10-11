@@ -51,3 +51,18 @@ A DEFECT THE AFTER RENDERS SHOW: 68BF7B74 face 23, job region 4 (the middle face
 68BF7B74: half-extents unchanged (to 6 decimals) on all 5 regions.
 
 Raw data: scratch/evidence-outline-{before,after,pinned,hist-before,hist-after,hist-after2}/ (not committed).
+
+EVERY FIT CELL THAT MOVES, ALL SIX PROOF ARMS (P4 56eadfd7 vs P1 96873413, harness only; tools/compare_fitcells.py,
+full output in fitcells_P4_vs_P1_all_arms.txt):
+  3418E167 Stepped (the regression bar)  2,827 -> 2,827 cells, stepped_cells byte-identical; no base moves
+  3418E167 Default Grade                 2,636 -> 2,636, byte-identical; no base moves
+  570B38E2 Default Grade                 4,198 -> 4,198, byte-identical; no base moves (P5: half_u 107.08 -> 97.00 on both)
+  102117B9 Default Grade                12,112 -> 12,113: the 12,112 are byte-identical; +1 cell, job region 135 (3.4374)
+  68BF7B74 Default Grade                11,120 -> 9,915: job region 4's base 10.3122 -> 9.4529 (r4 1,524 -> 342)
+  68BF7B74 Stepped                       9,951 -> 9,577: job region 4's base 10.3122 -> 9.4529 (r4 1,161 -> 718,
+                                         uncovered 4.87 -> 12.65 %); r3 587 -> 702, r5 725 -> 651, r2 +22, r1 +6
+  CONTROL, P1 with r4 pinned at 10.3122 (fitcells_68BF7B74_r4_pinned.txt):
+    Stepped        9,951 -> 9,951 (r1 +3, r2 -1, r3 -2, r4 +2, r5 -2)
+    Default Grade 11,120 -> 11,125 (r1 +3, r2 -1, r3 -1, r4 +2, r5 +2)
+  So everything beyond a few edge cells per region on 68BF7B74 is r4's base; the outline itself moves <= 3 cells
+  per region.
