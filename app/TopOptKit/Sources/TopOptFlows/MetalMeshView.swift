@@ -3799,6 +3799,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var steppedShapeFit = true
         var steppedDyadicSteps = false
         var steppedCellStated: [Bool] = []
+        var steppedCellBeforeBaseRuleMM: [Double] = []
         var uncoveredPrintsSolidOverride: Bool? = nil
     }
     private var latticeDesired = LatticeDesired()
@@ -3831,6 +3832,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.steppedDyadicSteps = latticeDesired.steppedDyadicSteps
                 fresh.uncoveredPrintsSolidOverride = latticeDesired.uncoveredPrintsSolidOverride
                 fresh.steppedCellStated = latticeDesired.steppedCellStated
+                fresh.steppedCellBeforeBaseRuleMM = latticeDesired.steppedCellBeforeBaseRuleMM
                 // ★ organic draws as capsules whenever this device built the pipeline
                 fresh.drawOrganicCapsules = organicCapsulePipeline != nil
                 fresh.onSteppedCellsBaked = { [weak self] cells, regions in
@@ -3974,6 +3976,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     var latticeSteppedCellStated: [Bool] {
         get { latticeLayer?.steppedCellStated ?? latticeDesired.steppedCellStated }
         set { latticeDesired.steppedCellStated = newValue; latticeLayer?.steppedCellStated = newValue }
+    }
+    /// ★ Default Grade's n₀ per region, for the bake's "do no harm" guard on base rule (b).
+    var latticeSteppedCellBeforeBaseRuleMM: [Double] {
+        get { latticeLayer?.steppedCellBeforeBaseRuleMM ?? latticeDesired.steppedCellBeforeBaseRuleMM }
+        set { latticeDesired.steppedCellBeforeBaseRuleMM = newValue; latticeLayer?.steppedCellBeforeBaseRuleMM = newValue }
     }
 
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
@@ -5658,6 +5665,8 @@ public struct LatticeLayerInputs: Equatable {
     public var steppedDyadicSteps: Bool = false
     /// Per region, TRUE where the stepped cell is the USER'S OWN number.
     public var steppedCellStated: [Bool] = []
+    /// ★ Per region, the cell before Default Grade's base rule (b) (empty ⇒ no guard).
+    public var steppedCellBeforeBaseRuleMM: [Double] = []
     /// ★ TRUE while a NEW scene is being baked (his request, 2026-08-24 evening:
     /// "The quilt pops up before the lattice shows. I'd like this to be hidden
     /// while the calculations happen"). The renderer keeps its volumes — tearing
@@ -5679,6 +5688,7 @@ public struct LatticeLayerInputs: Equatable {
                 steppedShapeFit: Bool = true,
                 steppedDyadicSteps: Bool = false,
                 steppedCellStated: [Bool] = [],
+                steppedCellBeforeBaseRuleMM: [Double] = [],
                 hidden: Bool = false) {
         self.scene = scene
         self.params = params
@@ -5697,6 +5707,7 @@ public struct LatticeLayerInputs: Equatable {
         self.steppedShapeFit = steppedShapeFit
         self.steppedDyadicSteps = steppedDyadicSteps
         self.steppedCellStated = steppedCellStated
+        self.steppedCellBeforeBaseRuleMM = steppedCellBeforeBaseRuleMM
         self.hidden = hidden
     }
 
@@ -5713,6 +5724,7 @@ public struct LatticeLayerInputs: Equatable {
             && a.steppedShapeFit == b.steppedShapeFit
             && a.steppedDyadicSteps == b.steppedDyadicSteps
             && a.steppedCellStated == b.steppedCellStated
+            && a.steppedCellBeforeBaseRuleMM == b.steppedCellBeforeBaseRuleMM
             && a.dressingLevel == b.dressingLevel
             && a.organicRadiusMM == b.organicRadiusMM
             && a.hidden == b.hidden
@@ -6589,6 +6601,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeSteppedCellStated != lat.steppedCellStated {
                     renderer.latticeSteppedCellStated = lat.steppedCellStated
+                    dirty = true
+                }
+                if renderer.latticeSteppedCellBeforeBaseRuleMM != lat.steppedCellBeforeBaseRuleMM {
+                    renderer.latticeSteppedCellBeforeBaseRuleMM = lat.steppedCellBeforeBaseRuleMM
                     dirty = true
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {

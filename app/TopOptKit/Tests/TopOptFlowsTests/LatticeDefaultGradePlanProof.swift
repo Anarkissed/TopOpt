@@ -108,7 +108,8 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         }
         let s0 = scene(LatticeRegionCells.steppedCellsMM(project: pm, scene: nil))
         let s1 = scene(LatticeRegionCells.steppedCellsMM(project: pm, scene: s0))
-        let cells = LatticeRegionCells.steppedCellsMM(project: pm, scene: s1)
+        let choices = LatticeRegionCells.steppedCellChoices(project: pm, scene: s1)
+        let cells = choices.cells
         let statedByFace = LatticeRegionCells.statedCellByFace(lat)
 
         // ── the renderer, the app's order; the plan arrives through the same callback
@@ -124,6 +125,7 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         mr.latticeBuildDirection = SIMD3<Double>(pm.buildOrientation.resolved(gravity: pm.force.gravity))
         mr.latticeLayerHeightMM = pm.printParams.layerHeightMM
         mr.latticeSteppedCellMM = cells
+        mr.latticeSteppedCellBeforeBaseRuleMM = choices.beforeBaseRule   // ★ the guard on (b), as the app passes it
         mr.latticeSteppedShapeFit = lat.gradingMode.fitsShape
         mr.latticeSteppedDyadicSteps = lat.gradeStepsAreHalves
         mr.latticeSteppedCellStated = regions.map { r in r.faceID.map { statedByFace[$0] != nil } ?? false }

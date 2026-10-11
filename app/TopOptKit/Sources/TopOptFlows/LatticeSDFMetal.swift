@@ -2499,6 +2499,11 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var steppedCellStated: [Bool] = [] {
         didSet { if steppedCellStated != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★ Per region, the cell before Default Grade's base rule (b) — the bake's "do no harm" guard falls back to it
+    /// (`LatticePreviewOccupancy.octreeCellField(cellMMBeforeBaseRule:)`). Empty ⇒ no guard.
+    var steppedCellBeforeBaseRuleMM: [Double] = [] {
+        didSet { if steppedCellBeforeBaseRuleMM != oldValue, scene != nil { rebakeCellField() } }
+    }
     /// ★ Whether the last bake actually laid down the STEPPED field. False when stepped
     /// was asked for but no region derived a cell — the ladder is drawn then, and the
     /// banner must keep saying so rather than claiming a picture it is not showing.
@@ -3113,6 +3118,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 if let o = LatticePreviewOccupancy.octreeCellField(
                     occupancy: scene.prismOccupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
+                    cellMMBeforeBaseRule: steppedCellBeforeBaseRuleMM.count == steppedCellMM.count ? steppedCellBeforeBaseRuleMM : [],
                     lineWidthMM: lineWidthMM,
                     realFloorMM: tileFloorMM,
                     shapeFitBandMM: params.shapeFitBandMM,

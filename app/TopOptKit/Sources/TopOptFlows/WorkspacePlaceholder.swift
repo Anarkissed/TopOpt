@@ -1121,6 +1121,8 @@ public struct WorkspacePlaceholder: View {
                                                         project.lattice.gradeStepsAreHalves,
                                                      steppedCellStated:
                                                         latticePreviewSteppedStated,
+                                                     steppedCellBeforeBaseRuleMM:
+                                                        latticePreviewSteppedCellsBeforeBaseRule,
                                                      // ★ Hide the superseded picture
                                                      // while a NEW scene bakes (his
                                                      // request, 2026-08-24 evening) —
@@ -1969,6 +1971,11 @@ public struct WorkspacePlaceholder: View {
     ///   to its own local wall (his per-voxel ruling, 2026-08-24), so the region cell
     ///   anchors on the wall the region mostly is.
     private func latticeRegionCellsMM(widthPercentile: Double, quiltStep: Bool = false) -> [Double] {
+        latticeRegionCells(widthPercentile: widthPercentile, quiltStep: quiltStep).map(\.cellMM)
+    }
+
+    /// The region cells (and, per region, the cell before Default Grade's base rule (b)), memoised once for both.
+    private func latticeRegionCells(widthPercentile: Double, quiltStep: Bool = false) -> [LatticeRegionCells.RegionCell] {
         let bead = project.printParams.strutLineWidthMM
         guard bead > 0 else { return [] }
         let regions = project.latticeJobRegions().regions
@@ -1983,8 +1990,8 @@ public struct WorkspacePlaceholder: View {
             LatticeRegionCellMemo.byKey = [:]
         }
         if let hit = LatticeRegionCellMemo.byKey[memoKey] { return hit }
-        let out = LatticeRegionCells.cellsMM(project: project, scene: strutScene, regions: regions,
-                                             widthPercentile: widthPercentile, quiltStep: quiltStep)
+        let out = LatticeRegionCells.regionCells(project: project, scene: strutScene, regions: regions,
+                                                 widthPercentile: widthPercentile, quiltStep: quiltStep)
         LatticeRegionCellMemo.byKey[memoKey] = out
         return out
     }
@@ -2038,6 +2045,22 @@ public struct WorkspacePlaceholder: View {
         // options' Cell dial). The bake still caps it per voxel at
         // min(declared depth, local wall) — a typed number is not a licence to
         // overshoot.
+        let stated = latticeStatedCellByFace
+        if !stated.isEmpty {
+            let regions = project.latticeJobRegions().regions
+            for (i, r) in regions.enumerated() where i < cells.count {
+                if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm }
+            }
+        }
+        return cells
+    }
+
+    /// ★ Per region, the cell before Default Grade's base rule (b) — for the bake's "do no harm" guard (the reviewer,
+    /// 2026-10-11 04:31). The same derivation and stated cells as `latticePreviewSteppedCells`; equal to it except where
+    /// (b) moved a region's base.
+    private var latticePreviewSteppedCellsBeforeBaseRule: [Double] {
+        guard Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) else { return [] }
+        var cells = latticeRegionCells(widthPercentile: 0.5, quiltStep: true).map(\.cellBeforeBaseRuleMM)
         let stated = latticeStatedCellByFace
         if !stated.isEmpty {
             let regions = project.latticeJobRegions().regions
@@ -12034,5 +12057,5 @@ enum LatticeRegionCellMemo {
     // Fit (p05) and Stepped (p50) can both evaluate in one frame, so one slot
     // would thrash between the two and memoise nothing.
     @MainActor static var token = ""
-    @MainActor static var byKey: [String: [Double]] = [:]
+    @MainActor static var byKey: [String: [LatticeRegionCells.RegionCell]] = [:]
 }
