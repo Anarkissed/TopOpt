@@ -891,6 +891,16 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// plans)", production OFF): the proof lets a Stepped plan ride its job. Production never sets it.
     nonisolated(unsafe) public static var anyStepPlansForTests = false
 
+    /// ★★ K3 IN THE PREVIEW (the reviewer's ruling, 2026-10-11 00:35, item 2: "The preview should draw prism
+    /// space that no cell covers as SOLID, behind the K3 probe … because the build prints it solid … so a slit
+    /// can never again look like a hole the print doesn't have"). Core prints that space solid only on a job that
+    /// CARRIES the plan (K3 is "on a plan job the PLAN is the design"); without one core lattices it by its own
+    /// law. So: the job of this algorithm sends the preview's plan, and the linked core carries K3.
+    public static func uncoveredPrintsSolid(algorithm: String, wired: Bool, k3: Bool,
+                                            enabled: Bool = defaultGradePlansEnabled) -> Bool {
+        k3 && sendsPlan(algorithm: algorithm, wired: wired, enabled: enabled)
+    }
+
     /// ★★ RULING 6 (maintainer, 2026-10-03): "Default Grade and Stepped previews carry one
     /// plain line saying the run currently builds core's own (coarser) layout. Show it only
     /// while the plan isn't sent." True exactly when the preview draws a plan the job would

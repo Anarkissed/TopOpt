@@ -127,6 +127,11 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         mr.latticeSteppedShapeFit = lat.gradingMode.fitsShape
         mr.latticeSteppedDyadicSteps = lat.gradeStepsAreHalves
         mr.latticeSteppedCellStated = regions.map { r in r.faceID.map { statedByFace[$0] != nil } ?? false }
+        // ★ K3 in the picture: DG_K3_SOLID=1 draws the uncovered prism space solid (the forced plan, built the way
+        // core builds it), 0 draws it as air; unset = production's answer (plans off ⇒ air)
+        if let k = env["DG_K3_SOLID"] { mr.latticeUncoveredPrintsSolid = k == "1" }
+        print("DG-K3 uncovered prism space drawn \(mr.latticeUncoveredPrintsSolid.map { $0 ? "SOLID (forced)" : "as air (forced)" } ?? "per production") "
+              + "| core carries K3: \(TopOptKit.corePrintsWhatThePlanLeavesSolid)")
         mr.setLatticeScene(s1, token: 1)
         let b = try XCTUnwrap(baked, "the bake handed back no plan")
         let plan = LatticeSteppedCellWire.wire(b.cells, regions: b.regions)
@@ -205,17 +210,116 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
             }
             print(String(format: "DG-REGIONS voxel=%.3f mm | ", h) + rows.joined(separator: " | "))
         }
+        // ★★ THE BEAM MEASURE (c) (the reviewer, 2026-10-10 23:32): "on 570B38E2's plan, how much of the preview's
+        // 1.21 mm band is simply space the plan's cells leave uncovered, which K3 now prints solid, and how much the
+        // shader draws OVER cut cells. That decides whether core needs a band of its own on a plan run at all."
+        // The band: the part's material, inside a planned region's prism, within the bake's beam of the outline
+        // (0 ≤ inPlaneDistance < beam — the expanded true edge, the datum pinned in LatticeOneOutlineTests), sampled
+        // 0.25 mm in-plane × 0.5 mm in depth. Each sample: covered by NO plan cell (K3 prints it solid), inside a
+        // CUT cell (one the outline cuts: the shader draws the band over its struts), or inside a WHOLE cell (the
+        // bake's corner test runs eps = min(0.05·S, 0.2) mm in, so a whole cell may stand that far into the band).
+        if env["DG_BAND"] == "1" {
+            let occ = s1.occupancy
+            let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
+            let beam = LatticeSDFRenderer.outlineBeamMM(lineWidthMM: bead, voxelMM: voxel)
+            let bucket = 8.0
+            struct K: Hashable { let x: Int; let y: Int; let z: Int }
+            func key(_ p: SIMD3<Double>) -> K { K(x: Int((p.x / bucket).rounded(.down)), y: Int((p.y / bucket).rounded(.down)), z: Int((p.z / bucket).rounded(.down))) }
+            var grid: [K: [Int]] = [:]
+            for (ci, c) in b.cells.enumerated() {
+                let k0 = key(c.originMM), k1 = key(c.originMM + c.sizeMM)
+                for x in k0.x...k1.x { for y in k0.y...k1.y { for z in k0.z...k1.z { grid[K(x: x, y: y, z: z), default: []].append(ci) } } }
+            }
+            let m = s1.partMaterialSDF
+            func inMaterial(_ p: SIMD3<Double>) -> Bool {
+                let g = (SIMD3<Float>(p) - m.origin) / m.spacing
+                let a = Int(g.x.rounded()), bb = Int(g.y.rounded()), c = Int(g.z.rounded())
+                guard a >= 0, a < m.nx, bb >= 0, bb < m.ny, c >= 0, c < m.nz else { return false }
+                return m.values[(c * m.ny + bb) * m.nx + a] < 0
+            }
+            // a cell is CUT when some in-plane corner of it lies outside its region's polygon
+            var cut = [Bool](repeating: false, count: b.cells.count)
+            for (ci, c) in b.cells.enumerated() {
+                let r = b.regions[c.region], nrm = LatticeRegionMask.unit(r.normal), (bu, bv) = LatticeRegionMask.basis(nrm)
+                for cx in 0...1 { for cy in 0...1 { for cz in 0...1 {
+                    let q = c.originMM + SIMD3(Double(cx), Double(cy), Double(cz)) * c.sizeMM - r.origin
+                    if r.inPlaneDistance(SIMD2(simd_dot(q, bu), simd_dot(q, bv))) < 0 { cut[ci] = true }
+                }}}
+            }
+            let du = 0.25, ds = 0.5, dv = du * du * ds
+            var rows: [String] = []
+            var tot = (band: 0.0, bare: 0.0, overCut: 0.0, overWhole: 0.0)
+            for ri in Set(b.cells.map(\.region)).sorted() {
+                let r = b.regions[ri], nrm = LatticeRegionMask.unit(r.normal), (bu, bv) = LatticeRegionMask.basis(nrm)
+                var lo = SIMD2<Double>(repeating: 1e9), hi = SIMD2<Double>(repeating: -1e9)
+                for loop in r.outlinePolygon { for q in loop { lo = simd_min(lo, q); hi = simd_max(hi, q) } }
+                guard lo.x < hi.x else { continue }
+                var band = 0, bare = 0, overCut = 0, overWhole = 0
+                var u = lo.x + 0.5 * du
+                while u < hi.x { var v = lo.y + 0.5 * du
+                    while v < hi.y {
+                        let d = r.inPlaneDistance(SIMD2(u, v))
+                        if d >= 0, d < beam {
+                            var sd = 0.5 * ds
+                            while sd < r.depthMM {
+                                let p = r.origin + bu * u + bv * v + nrm * sd
+                                if inMaterial(p) {
+                                    band += 1
+                                    let covering = (grid[key(p)] ?? []).filter { ci in
+                                        let c = b.cells[ci]
+                                        return p.x >= c.originMM.x && p.x < c.originMM.x + c.sizeMM && p.y >= c.originMM.y
+                                            && p.y < c.originMM.y + c.sizeMM && p.z >= c.originMM.z && p.z < c.originMM.z + c.sizeMM
+                                    }
+                                    if covering.isEmpty { bare += 1 }
+                                    else if covering.contains(where: { cut[$0] }) { overCut += 1 } else { overWhole += 1 }
+                                }
+                                sd += ds
+                            }
+                        }
+                        v += du
+                    }
+                    u += du
+                }
+                let id = b.regions[..<ri].filter { $0.role == .include }.count + 1
+                func mm3(_ x: Int) -> Double { Double(x) * dv }
+                func pc(_ x: Int) -> Double { band > 0 ? 100 * Double(x) / Double(band) : 0 }
+                rows.append(String(format: "r%d band %.0f mm3 = uncovered %.0f (%.1f%%) + over cut cells %.0f (%.1f%%) + over whole cells %.0f (%.1f%%)",
+                                   id, mm3(band), mm3(bare), pc(bare), mm3(overCut), pc(overCut), mm3(overWhole), pc(overWhole)))
+                tot.band += mm3(band); tot.bare += mm3(bare); tot.overCut += mm3(overCut); tot.overWhole += mm3(overWhole)
+            }
+            print(String(format: "DG-BAND beam %.4f mm (voxel %.3f) | total %.0f mm3 = uncovered %.0f + over cut %.0f + over whole %.0f | ",
+                         beam, voxel, tot.band, tot.bare, tot.overCut, tot.overWhole) + rows.joined(separator: " | "))
+        }
         // ★ THE PICTURE (condition 1): the same views, before and after, through the app's own renderer
         if let dir = env["DG_RENDER_DIR"], !dir.isEmpty {
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            for body in [Float(1), 0] {
-                mr.setBodyAlpha(body)
-                for (name, az, el) in [("front", Float(0.6), Float(0.35)), ("back", Float(3.74), Float(0.35)), ("top", Float(0.6), Float(1.2))] {
-                    LatticeQuiltFrameProbe.aim(mr, mesh.bounds, azimuth: az, elevation: el, zoom: 0.9, height: 0.5)
-                    guard let px = mr.renderOffscreen(size: 1200, clear: MTLClearColor(red: 0.05, green: 0.06, blue: 0.1, alpha: 1)) else { continue }
-                    let path = dir + "/\(body > 0 ? "part" : "lattice")_\(name).png"
-                    LatticeQuiltFrameProbe.writePNG(px, size: 1200, to: path)
-                    print("DG-RENDER \(path)")
+            // ★ DG_FOCUS="k,k|k,k,k" (1-based include ids; groups by '|'): frame each group's prisms, not the part
+            let incs = b.regions.filter { $0.role == .include }
+            var frames: [(String, MeshBounds)] = []
+            for (gi, grp) in (env["DG_FOCUS"].map { $0.split(separator: "|").map(String.init) } ?? [""]).enumerated() {
+                var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+                for k in grp.split(separator: ",").compactMap({ Int($0) }) where k >= 1 && k <= incs.count {
+                    let r = incs[k - 1], n = LatticeRegionMask.unit(r.normal), (bu, bv) = LatticeRegionMask.basis(n)
+                    for loop in r.outlineLoops { for q in loop { for d in [0.0, r.depthMM] {
+                        let pt = SIMD3<Float>(r.origin + bu * q.x + bv * q.y + n * d)
+                        lo = simd_min(lo, pt); hi = simd_max(hi, pt)
+                    } } }
+                }
+                frames.append((grp.isEmpty ? "" : "f\(gi + 1)_", lo.x <= hi.x ? MeshBounds(min: lo, max: hi, isEmpty: false) : mesh.bounds))
+            }
+            let views: [(String, Float, Float, Float)] = env["DG_VIEWS"].map { v in
+                v.split(separator: ";").map { t in let c = t.split(separator: ","); return (String(c[0]), Float(c[1])!, Float(c[2])!, Float(c[3])!) }
+            } ?? [("front", 0.6, 0.35, 0.9), ("back", 3.74, 0.35, 0.9), ("top", 0.6, 1.2, 0.9)]
+            for (prefix, frame) in frames {
+                for body in [Float(1), 0] {
+                    mr.setBodyAlpha(body)
+                    for (name, az, el, zoom) in views {
+                        LatticeQuiltFrameProbe.aim(mr, frame, azimuth: az, elevation: el, zoom: zoom, height: 0.5)
+                        guard let px = mr.renderOffscreen(size: 1200, clear: MTLClearColor(red: 0.05, green: 0.06, blue: 0.1, alpha: 1)) else { continue }
+                        let path = dir + "/\(prefix)\(body > 0 ? "part" : "lattice")_\(name).png"
+                        LatticeQuiltFrameProbe.writePNG(px, size: 1200, to: path)
+                        print("DG-RENDER \(path)")
+                    }
                 }
             }
         }

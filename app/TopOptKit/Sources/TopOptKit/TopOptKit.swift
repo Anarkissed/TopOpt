@@ -2453,6 +2453,16 @@ public enum TopOptKit {
         return jobSchemaError(job(#", "organic_probe_cells_mm": [3.5, 4.5], "organic_probe_grades_mm": [[3, 5]]"#)) == nil
     }()
 
+    /// ★★ K3 (#358 f0d8bf27; the reviewer's ruling, 2026-10-11 00:35, item 2): on a PLAN job core prints the
+    /// prism space the plan's cells leave SOLID — the companion is printed minus the plan's cells. K3 added no
+    /// schema key; K4 (39db7c33, on top of it on #358's branch) added `lattice.emit_plan_laid`, so a core whose
+    /// lattice schema takes that key carries K3. Whole-job probe with its control (`emit_stl`, a key every core
+    /// here takes). FALSE ⇒ the preview draws uncovered prism space as it always has (air).
+    public static let corePrintsWhatThePlanLeavesSolid: Bool = {
+        guard latticeSchemaAccepts(key: "emit_stl") else { return false }   // the control
+        return latticeSchemaAccepts(key: "emit_plan_laid")
+    }()
+
     public static func latticeSchemaAccepts(key: String) -> Bool {
         // ★ STRICT: accepted ⇔ core's schema raises NO error on the base job carrying
         // the key. A test that merely asked "does the error name the key" passed a
