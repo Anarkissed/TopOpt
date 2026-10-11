@@ -1181,6 +1181,56 @@ public enum TopOptKit {
         return v > 0 ? .prints(v) : .noneUnderTheCap
     }
 
+    /// ★★ CORE'S ONE PRINTS-OPEN RULE (#358 588672f5, `lattice_prints_open`): a bead-wide strut leaves a
+    /// cell this size at or under 0.20 relative density. The rule core's halving ladder and any-step
+    /// menu ask; the app's ladder, Stepped's menu and the quilt step ask it here. nil ⇒ core refused
+    /// (a type it does not call live) — `lastCoreRefusal` keeps its words.
+    ///
+    /// ★ ASKED ONCE PER BEAD. Core's forward law voxelises a unit cell at 48³ on every call — 7 ms an ask,
+    /// against microseconds for the Swift law this replaces, and a bake asks hundreds of times. The law
+    /// reads radius/cell only and is monotone in it, so for one (topology, bead) core's answer is a
+    /// THRESHOLD in the cell: the first ask bisects core's own predicate down to two adjacent doubles,
+    /// and every ask after is that comparison — core's answer for every double (pinned against direct
+    /// asks in `LatticeDefaultGradeBaseRuleTests`).
+    public static func latticePrintsOpen(topology: String, cellMM: Double, beadMM: Double) -> Bool? {
+        notePerTypeCall(#function, topology)
+        guard cellMM.isFinite, cellMM > 0, beadMM.isFinite, beadMM > 0,
+              let crossing = printsOpenCrossingMM(topology: topology, beadMM: beadMM)
+        else { return askCorePrintsOpen(topology: topology, cellMM: cellMM, beadMM: beadMM) }   // core's own words
+        return cellMM >= crossing
+    }
+
+    /// One direct ask of core's `lattice_prints_open` (no cache) — the reference the threshold is pinned to.
+    public static func askCorePrintsOpen(topology: String, cellMM: Double, beadMM: Double) -> Bool? {
+        let v = topoptbridge.lattice_prints_open(std.string(topology), cellMM, beadMM)
+        guard v.isFinite, v != 0 else { return nil }
+        return v > 0
+    }
+
+    private static let printsOpenLock = NSLock()
+    nonisolated(unsafe) private static var printsOpenCrossings: [String: Double?] = [:]
+
+    /// The smallest cell core's predicate calls open at this bead (nil: core refuses the type, or calls
+    /// nothing open even at 1000 beads — then every ask goes to core directly).
+    public static func printsOpenCrossingMM(topology: String, beadMM: Double) -> Double? {
+        let key = "\(topology)|\(beadMM.bitPattern)"
+        printsOpenLock.lock()
+        if let hit = printsOpenCrossings[key] { printsOpenLock.unlock(); return hit }
+        printsOpenLock.unlock()
+        var found: Double?
+        if askCorePrintsOpen(topology: topology, cellMM: 1000 * beadMM, beadMM: beadMM) == true {
+            var lo = beadMM, hi = 1000 * beadMM   // core: a cell no wider than the bead never prints open
+            for _ in 0..<200 {
+                let m = 0.5 * (lo + hi)
+                guard m > lo, m < hi else { break }   // adjacent doubles
+                if askCorePrintsOpen(topology: topology, cellMM: m, beadMM: beadMM) == true { hi = m } else { lo = m }
+            }
+            found = hi
+        }
+        printsOpenLock.lock(); printsOpenCrossings[key] = found; printsOpenLock.unlock()
+        return found
+    }
+
     /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
     /// definition) — octet's 0.218871… on the linked core; nil where core has none for the type.
     /// Since the #358 sync the bridge asks core's per-type `lattice_aesthetic_density_ceiling`

@@ -16,22 +16,23 @@ final class LatticeOctetQuiltAndBandTests: XCTestCase {
     /// leg's facets 0.120–0.182. Face 2 steps (12.03 → 6.015 mm), the others do not.
     func testAWallDrawnAtTheCeilingStepsAndTheOthersDoNot() {
         let lo = 0.05, ceiling = 0.219
-        let open = 0.10           // the smaller cell's bead-wide strut density: prints open
-        XCTAssertTrue(LatticeRegionCells.quiltTrips(p90: 0.219, lo: lo, ceiling: ceiling, smallerCellFloor: open), "face 2")
-        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.080, lo: lo, ceiling: ceiling, smallerCellFloor: open), "face 15")
-        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.182, lo: lo, ceiling: ceiling, smallerCellFloor: open), "face 23's middle facet")
+        let open = true           // the smaller cell's bead-wide strut prints open (core's verdict)
+        XCTAssertTrue(LatticeRegionCells.quiltTrips(p90: 0.219, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: open), "face 2")
+        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.080, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: open), "face 15")
+        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.182, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: open), "face 23's middle facet")
         // the trip sits at the top fifth of [floor, ceiling]
         let trip = lo + LatticeRegionCells.quiltTripFraction * (ceiling - lo)
-        XCTAssertTrue(LatticeRegionCells.quiltTrips(p90: trip + 1e-6, lo: lo, ceiling: ceiling, smallerCellFloor: open))
-        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: trip - 1e-3, lo: lo, ceiling: ceiling, smallerCellFloor: open))
+        XCTAssertTrue(LatticeRegionCells.quiltTrips(p90: trip + 1e-6, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: open))
+        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: trip - 1e-3, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: open))
         // ★ never into a cell whose bead-wide strut would itself quilt (the floor would push
         // the smaller cell back over the ceiling)
-        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.219, lo: lo, ceiling: ceiling,
-                                                     smallerCellFloor: LatticePreviewOccupancy.finestRungMaxDensity + 0.01))
-        // ★ the octet's 6.015 mm cell prints open with his 0.45 mm bead; a 2.0 mm one does not
-        let law = LatticeType.octet
-        XCTAssertLessThanOrEqual(law.printabilityDensityFloor(lineWidthMM: 0.45, cellMM: 6.015), LatticePreviewOccupancy.finestRungMaxDensity)
-        XCTAssertGreaterThan(law.printabilityDensityFloor(lineWidthMM: 0.45, cellMM: 2.0), LatticePreviewOccupancy.finestRungMaxDensity)
+        XCTAssertFalse(LatticeRegionCells.quiltTrips(p90: 0.219, lo: lo, ceiling: ceiling, smallerCellPrintsOpen: false))
+        // ★ the octet's 6.015 mm cell prints open with his 0.45 mm bead; a 2.0 mm one does not — core's
+        // one rule (`lattice_prints_open`, #358 588672f5), whose 0.20 crossing is 2.370917 mm at 0.45
+        XCTAssertTrue(LatticePreviewOccupancy.printsOpen(cellMM: 6.015, lineWidthMM: 0.45, latticeID: "octet"))
+        XCTAssertFalse(LatticePreviewOccupancy.printsOpen(cellMM: 2.0, lineWidthMM: 0.45, latticeID: "octet"))
+        XCTAssertTrue(LatticePreviewOccupancy.printsOpen(cellMM: 2.3712, lineWidthMM: 0.45, latticeID: "octet"))
+        XCTAssertFalse(LatticePreviewOccupancy.printsOpen(cellMM: 2.3706, lineWidthMM: 0.45, latticeID: "octet"))
     }
 
     // MARK: - the octree: a tilted face gets its ladder; the grade band stays under the ceiling

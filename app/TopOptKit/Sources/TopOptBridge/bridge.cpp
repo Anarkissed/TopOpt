@@ -3119,6 +3119,15 @@ double lattice_min_density_for_strut(const std::string& topology, double cell_mm
   });
 }
 
+double lattice_prints_open(const std::string& topology, double cell_size_mm, double bead_mm) {
+  // ★★ ONE RULE, ONE PLACE (#358 588672f5): core's own predicate, the one its halving ladder and
+  // any-step menu ask. The app's three copies (the dyadic ladder, Stepped's menu, the quilt step)
+  // compared its own law to 0.20 with a 1e-9 slack; they ask this instead. 0 is a refusal.
+  return guarded_empty("lattice_prints_open", [&]() -> double {
+    return topopt::lattice_prints_open(live_topology(topology), cell_size_mm, bead_mm) ? 1.0 : -1.0;
+  });
+}
+
 // ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
 // not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
 // depends only on radius/cell, so every cell gives the same number for the same

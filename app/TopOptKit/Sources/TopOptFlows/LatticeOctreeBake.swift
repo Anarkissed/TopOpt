@@ -96,6 +96,24 @@ extension LatticePreviewOccupancy {
     /// bead: 2 mm is 26.5 %, 2.58 mm 17 %, 3 mm 13 %.
     public static let finestRungMaxDensity = 0.20
 
+    /// ★★ ONE RULE, ONE PLACE (#358 588672f5; the reviewer's ruling, 2026-10-10: "the app replaces its two
+    /// call sites with it through the bridge"): does a bead-wide strut print OPEN in a cell this size —
+    /// core's `lattice_prints_open` (≤ `finestRungMaxDensity`, open from 2.370917 mm at a 0.45 mm bead),
+    /// through the guarded bridge. The dyadic ladder, Stepped's menu, the quilt step and Default Grade's
+    /// base rule (`LatticeRegionCells.cellWhoseHalvesEndAtTheFloor`) all ask this. No law in the Swift
+    /// table, no bead, or core refusing the type ⇒ no bound, as before.
+    /// The smallest rung the octree bake lays: the job's tile floor, never under the occupancy voxel or
+    /// 0.5 mm. One definition — the bake and Default Grade's base rule
+    /// (`LatticeRegionCells.cellWhoseHalvesEndAtTheFloor`) read the same floor.
+    nonisolated public static func bakeFloorMM(realFloorMM: Double, voxelMM: Double) -> Double {
+        Swift.max(realFloorMM > 0 ? realFloorMM : voxelMM, voxelMM, 0.5)
+    }
+
+    nonisolated public static func printsOpen(cellMM: Double, lineWidthMM: Double, latticeID: String) -> Bool {
+        guard !latticeID.isEmpty, LatticeType.named(latticeID) != nil, lineWidthMM > 0 else { return true }
+        return TopOptKit.latticePrintsOpen(topology: latticeID, cellMM: cellMM, beadMM: lineWidthMM) ?? true
+    }
+
     /// A face region gets a ladder when its normal is within 30° of an axis (cos 30°).
     public static let ladderAxisCos = 0.866
     /// A tilted face's slots cover the prism's real extent along the axis; false = the
@@ -344,10 +362,9 @@ extension LatticePreviewOccupancy {
     public static func steppedSizeMenu(base: Double, floorMM: Double,
                                        lineWidthMM: Double, latticeID: String,
                                        printsOpenBound: Bool = true) -> [Double] {
-        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         func printsOpen(_ r: Double) -> Bool {
-            guard printsOpenBound, let law, lineWidthMM > 0 else { return true }
-            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+            guard printsOpenBound else { return true }
+            return Self.printsOpen(cellMM: r, lineWidthMM: lineWidthMM, latticeID: latticeID)   // ★ core's one rule
         }
         var menu: [Double] = [base]
         // ★★ ONLY THE FAMILIES THE PACKER'S GRID HOLDS (round 5, 2026-10-08; the reviewer's yes to
@@ -410,7 +427,7 @@ extension LatticePreviewOccupancy {
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
-        let floorMM = Swift.max(realFloorMM > 0 ? realFloorMM : voxel, voxel, 0.5)
+        let floorMM = Self.bakeFloorMM(realFloorMM: realFloorMM, voxelMM: voxel)
 
         // Each region's ladder: its cell halved while the half is still printable.
         /// `span`: where the prism lies along `axis`, in mm from the face plane going into the
@@ -504,10 +521,8 @@ extension LatticePreviewOccupancy {
         // exceeds `finestRungMaxDensity` is not a rung, so his ladders are 12 → 6 → 3
         // and 10.31 → 5.16 → 2.58 ("if there isn't space, the 2.58 one is ok"), and
         // the grade's quilt band starts from an open cell.
-        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         func printsOpen(_ r: Double) -> Bool {
-            guard let law, lineWidthMM > 0 else { return true }
-            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+            Self.printsOpen(cellMM: r, lineWidthMM: lineWidthMM, latticeID: latticeID)   // ★ core's one rule
         }
         func ladderSizes(base: Double) -> [Double] {
             // The finest rung: the smallest base/(2^a·3^b) still at or above the floor

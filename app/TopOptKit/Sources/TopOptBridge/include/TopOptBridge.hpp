@@ -1192,6 +1192,11 @@ double lattice_min_printable_cell_mm(const std::string& topology,
 double lattice_min_density_for_strut(const std::string& topology, double cell_mm,
                                      double min_extrudable_width_mm,
                                      double max_relative_density);
+/// ★ CORE'S ONE PRINTS-OPEN RULE (#358 588672f5; ruling 2026-10-10: "the app replaces its two call
+/// sites with it through the bridge"): does a bead-wide strut leave a cell of this size at or under
+/// core's 0.20 relative density? 1 = open, −1 = not open, 0 = a refusal (a type core does not call
+/// live; `bridge_last_refusal()` keeps core's words).
+double lattice_prints_open(const std::string& topology, double cell_size_mm, double bead_mm);
 /// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
 /// definition). The linked core carries it for OCTET only, as the inline
 /// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's

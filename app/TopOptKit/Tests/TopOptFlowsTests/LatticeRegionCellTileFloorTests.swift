@@ -69,6 +69,7 @@ final class LatticeRegionCellTileFloorTests: XCTestCase {
     func testRegionCellsUseTheFit() throws {
         var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }
         let src = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/LatticeRegionCells.swift"), encoding: .utf8)
-        XCTAssertTrue(src.contains("return RegionCell(measuredWidthMM: w, cellMM: Self.wholeCellsAcross(depthMM: effDepth"))
+        XCTAssertTrue(src.contains("var cell = Self.wholeCellsAcross(depthMM: effDepth"))
+        XCTAssertTrue(src.contains("return RegionCell(measuredWidthMM: w, cellMM: cell)"))
     }
 }

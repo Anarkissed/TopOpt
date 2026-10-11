@@ -1975,7 +1975,7 @@ public struct WorkspacePlaceholder: View {
         let memoKey = "\(strutSceneToken)|\(widthPercentile)|\(quiltStep)|\(project.lattice.allowQuilt)|\(bead)|"
             + "\(project.lattice.stageMode ?? .structural)|"
             + "\(project.lattice.topologyID)|\(project.lattice.singleCellMembers)|"
-            + "\(project.lattice.boundary)|"
+            + "\(project.lattice.boundary)|\(project.lattice.algorithm)|"   // ★ Default Grade's base rule (b) reads it
             + regions.map { "\($0.role):\($0.depthMM)" }.joined(separator: ",")
         let tokenPart = "\(strutSceneToken)"
         if LatticeRegionCellMemo.token != tokenPart {
