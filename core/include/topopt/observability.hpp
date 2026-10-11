@@ -1313,6 +1313,44 @@ struct RunInfo {
   long long stepped_plan_rho_queries_plan = 0;
   long long stepped_plan_rho_queries_posture = 0;
   long long stepped_plan_rho_queries_floor = 0;
+
+  // ── ★ K4 (2026-10-10): THE PLAN AS LAID, PER REGION AND PER GROUP ───────────
+  // The summary above says how many cells over how many regions in how many passes.
+  // This says WHICH: each region's base, the grid it was packed on, and every group the
+  // run laid -- its own size, its own grid origin, the PHASE of that origin against the
+  // region's slot grid (which is what the pass bucketing keys on), and what the
+  // generator actually put there.
+  //
+  // `cell_mm` elsewhere in this receipt is the LAW's cell, which on a plan run names a
+  // grid the file does not contain. These are the file's own numbers; nothing here is
+  // derived a second time.
+  struct PlanGroup {
+    double size_mm = 0.0;
+    double origin_mm[3] = {0.0, 0.0, 0.0};
+    // origin - slot_origin reduced into [0, size): the grid phase, per axis.
+    double phase_mm[3] = {0.0, 0.0, 0.0};
+    int nx = 0, ny = 0, nz = 0;
+    long long cells = 0;
+    long long struts_laid = 0;     // what the GENERATOR emitted in these cells
+    long long nodes_laid = 0;
+    long long cells_with_no_strut = 0;
+  };
+  struct PlanRegion {
+    int region_id = 0;
+    double base_cell_mm = 0.0;
+    double slot_origin_mm[3] = {0.0, 0.0, 0.0};
+    bool slot_origin_stated = false;
+    double plane_origin_mm[3] = {0.0, 0.0, 0.0};
+    double normal[3] = {0.0, 0.0, 0.0};
+    double depth_mm = 0.0;
+    long long cells = 0;
+    std::string sizes;             // "6.00=4, 3.00=12", descending by size
+    std::vector<PlanGroup> groups;
+  };
+  std::vector<PlanRegion> stepped_plan_by_region;
+  // Elements the generator emitted that no plan cell shares. 0 is the expected value;
+  // a non-zero count means geometry was written outside every cell of the plan.
+  long long stepped_plan_laid_unattributed = 0;
   // The outline beam as APPLIED (ruling B): the width core derived from bead and
   // voxel, the bleed the band asked for, and how far in the solid actually reaches.
   // 0 when the shape grade is off, which is when there is no beam.

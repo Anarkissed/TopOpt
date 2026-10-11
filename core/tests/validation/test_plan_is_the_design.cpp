@@ -267,6 +267,47 @@ int main() {
   CHECK(part_int > 0.0 && full_int > part_int,
         "the control's strut soup is larger (twice the cells), and neither is empty");
 
+  // ── K4: THE PLAN AS LAID, PER REGION AND PER GROUP, AND THE LEDGER ──────────
+  // `plan_laid_ledger` is `outline_clip_quadrant` with the ledger key and a STATED slot
+  // origin. 32 cells fill the rectangle, the outline keeps a quarter, so 24 of them are
+  // clipped to nothing -- which is the number the app's classifier asks for and which no
+  // receipt stated before. The ledger file carries one line per PLAN cell, laid or not.
+  const Run led = run_job("plan_laid_ledger");
+  CHECK(led.rc == 0, "the ledger run must be ACCEPTED");
+  CHECK(has(led.out, "plan laid: 32 cell(s) written to"),
+        "the run must say it wrote the ledger, and for how many cells");
+  // Every number below is read from the receipt, not recomputed here.
+  CHECK(has(led.run_info, "\"plan_laid_unattributed\": 0"),
+        "no emitted element may fall outside every cell of the plan");
+  CHECK(has(led.run_info, "\"slot_origin_stated\": true"),
+        "the receipt must say the slot grid was the app's, not one core assumed");
+  CHECK(has(led.run_info, "\"base_cell_mm\": 6"),
+        "and must state the region's own base");
+  CHECK(has(led.run_info, "\"cells_with_no_strut\": 24"),
+        "24 of the 32 cells sit outside the outline and are clipped to nothing: that is "
+        "the per-cell answer the classifier needs");
+  CHECK(has(led.run_info, "\"phase_mm\""),
+        "the grid phase is reported -- the pass bucketing keys on it and nothing said so");
+  double led_struts = 0.0;
+  CHECK(num_after(led.run_info, "struts_laid", &led_struts) && led_struts > 0.0,
+        "the receipt states what the GENERATOR laid, not what the plan asked for");
+
+  // ★ OBSERVING MUST NOT MOVE THE BYTES. lattice_gen.hpp says so; this is where it is
+  // checked. The ledger fixture differs from `outline_clip_quadrant` only by the key and
+  // the stated slot origin (which is the grid core already assumed), so the two meshes
+  // must be identical byte for byte.
+  {
+    const Run plainq = run_job("outline_clip_quadrant");
+    CHECK(plainq.rc == 0, "the keyless arm runs");
+    const std::string a = std::string(CLI_TMP_DIR) + "/k3_plan_laid_ledger";
+    const std::string b = std::string(CLI_TMP_DIR) + "/k3_outline_clip_quadrant";
+    const std::string sa = read_file(a + "/oc_073_lattice.stl");
+    const std::string sb = read_file(b + "/oc_073_lattice.stl");
+    CHECK(!sa.empty() && sa.size() > 1000, "the ledger run wrote a real mesh");
+    CHECK(sa == sb,
+          "arming the ledger must not change one byte of the emitted mesh");
+  }
+
   // ── THE ORDERING: THE PLAN'S REFUSAL COMES FIRST ────────────────────────────
   // `plan_before_law` is empty_after_beam's job -- a 31 mm outline beam that clears every
   // voxel the law graded -- plus a 4 mm cell on a 6 mm halving ladder. Both are refusals.

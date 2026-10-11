@@ -145,6 +145,10 @@ struct SteppedPlanRegion {
   // cell must lie within it, which is the one containment test that needs no in-plane
   // axis convention. 0 depth => the depth test is skipped.
   Vec3 slot_origin{0, 0, 0};
+  // ★ K4: whether the SLOT ORIGIN above was sent on the wire or defaulted to the region
+  // origin. The receipt reports it, because "the app packed on this grid" and "core
+  // assumed the region origin" are different claims and the app can only check the first.
+  bool slot_origin_stated = false;
   // ── ★ K2 (reviewer, 2026-10-08, correcting the ruling of 2026-10-05) ───────────
   // THE SLOT ORIGIN IS A GRID PHASE, NOT A PLANE POINT. It was required to lie in the
   // face plane, which is wrong for a TILTED facet: the app's octree grid there is

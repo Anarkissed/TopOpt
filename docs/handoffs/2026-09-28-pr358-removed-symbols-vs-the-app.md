@@ -963,3 +963,108 @@ Both belong with K4's "report per-region cells and sizes", and neither is change
 "Prove strut diameters on 570B38E2" needs #354's after-run job with `plan_base_cell_mm`.
 A run on a base supplied by hand would prove diameters against a ladder the app may never
 have used, which is the thing the reviewer's ruling 3 rules out.
+
+## Addendum 15 — K4: the plan as laid, per region and per group, and the ledger (2026-10-10)
+
+> report per-region cells and sizes, the grid phase, and the laid group origins in
+> `run_info`.
+
+The summary (`anystep_cells` / `_regions` / `_passes` / `_size_histogram`) says how many.
+This says **which**, and every number in it is either the plan as validated or what the
+generator's own observer counted — nothing is derived a second time.
+
+### What the app gets, in `run_info`'s graded block
+
+```json
+"plan_laid_unattributed": 0,
+"plan_by_region": [{
+  "region": 1, "base_cell_mm": 6,
+  "slot_origin_mm": [18, 0, 14], "slot_origin_stated": true,
+  "plane_origin_mm": [18, 0, 14], "normal": [0, 1, 0], "depth_mm": 12,
+  "cells": 32, "sizes": "6.000=32",
+  "groups": [{
+    "size_mm": 6, "origin_mm": [18, 0, 14], "phase_mm": [0, 0, 0],
+    "nx": 4, "ny": 2, "nz": 4, "cells": 32,
+    "struts_laid": 144, "nodes_laid": 13, "cells_with_no_strut": 24
+  }]
+}]
+```
+
+Three fields are new information rather than a restatement:
+
+* **`phase_mm`** — the group origin's offset modulo its **own** size, per axis, against
+  the region's slot grid. `stepped_group_cells` buckets by (region, size, phase), so two
+  cells of the same size on offset grids are different passes, and nothing in the receipt
+  said so. The app packs on the slot grid, so this is the number it can check its own
+  packer against.
+* **`slot_origin_stated`** — whether the grid came from the wire or core defaulted to the
+  region origin. "The app packed on this grid" and "core assumed the region origin" are
+  different claims and only the first is checkable; `SteppedPlanRegion` gained the flag so
+  the receipt can tell them apart.
+* **`cells_with_no_strut`** — per group, how many of the plan's cells the generator put
+  nothing in. On the `plan_laid_ledger` fixture that is **24 of 32**: the outline keeps a
+  quarter of the rectangle, so three quarters of the cells are clipped to nothing. This is
+  the per-cell answer `classify_unlaid_cells.py` asks for, and no receipt stated it
+  before.
+
+### The ledger file — `lattice.emit_plan_laid`
+
+Off by default, and it writes nothing on a run that sent no plan, so no existing job's
+artifacts change. Armed, it writes `<base>_LAID.txt` beside the meshes, using the same
+`lattice_base_name` the meshes use so the rung is the file's rung and not one recomputed:
+
+```
+# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes>
+PLAN 4 1 1 0
+LAID 1 21 3 11 6 0.18 32 9
+LAID 1 21 3 17 6 0.18 28 6
+LAID 1 27 3 11 6 0.18 28 6
+LAID 1 27 3 17 6 0.18 24 4
+```
+
+One line per **plan** cell, laid or not, in the plan's own order (region, then size
+descending, then cell index), so the order is deterministic and the file diffs cleanly.
+`PLAN` carries cells, regions, passes and the unattributed count.
+
+It exists because core had no way to answer the question the app's classifier asks:
+`emit_organic_spans` is the **organic** span writer and a Default Grade plan run produces
+no organic spans at all. The reviewer made it conditional on exactly that, and that is how
+it turned out.
+
+### How it is counted, and why that is not the density's rule
+
+The generator already reports every emitted element through `LatticeGenObserver`, and
+`lattice_gen.hpp` states that observing never changes the emitted bytes — but the observer
+is built **inside** `export_latticed_variant`, so a caller wanting to attribute struts to
+the plan's cells could not reach it. A `laid_tap` parameter now chains onto whichever
+observer the run already uses (the welded-body tap, or the protrusion measurement's), and
+the welded push moved inside its own callback gated on its own key, so the welded body
+cannot change because the ledger was asked for.
+
+Attribution takes the **lex-smallest** plan cell sharing the point (group index, then k,
+j, i) — a ball at its own centre, a strut fragment at its **midpoint**, which is where
+the generator sampled its radius, so the ledger and the density agree about which cell a
+strut belongs to. That is deliberately **not** K5's `max` rule: the density has to satisfy
+every cell meeting at a shared node, while the ledger needs each element counted exactly
+once.
+
+**Measured**: arming the ledger leaves the mesh byte-identical —
+`plan_laid_ledger` and `outline_clip_quadrant` both emit md5
+`5827508ce78ad04ef9ef105cdee82217`. The test checks the two streams against each other
+rather than trusting the header's promise.
+
+### The two gaps K5 turned up are reported, not redefined
+
+* the per-variant report's **`cell_mm` is still the LAW's cell** (14.5 mm on a plan made
+  entirely of 6 mm cells);
+* `min_strut_diameter_mm` / `max_strut_diameter_mm` are still the run's cross-variant
+  aggregate and still never count a node.
+
+Neither is changed in place: an app reading `cell_mm` today would silently get a different
+number, which is a wire change for #354 to agree. `plan_by_region` carries the plan's own
+figures under their own keys instead, and on a plan run the law's fields describe the law
+and not the file.
+
+`test_plan_is_the_design` is now 41 checks; 12 go red at the pre-K4/K5 binary through
+`TOPOPT_CLI_OVERRIDE` (the K4 ones partly because the key itself is refused there, which
+is the honest answer for a feature that did not exist).

@@ -1895,7 +1895,15 @@ LatticeExportOutcome export_latticed_variant(
     double organic_dc_tolerance_mm = 0.0,
     // ★ Solve the bead factor against the spans this function EMITS, rather than against
     // the curves the tracer drew. See the calibration loop below.
-    bool organic_calibrate_on_shipped = true) {
+    bool organic_calibrate_on_shipped = true,
+    // ★ K4: EVERY EMITTED ELEMENT, FOR THE CALLER'S OWN LEDGER. The generator already
+    // reports each one through LatticeGenObserver, and lattice_gen.hpp states that
+    // observing never changes the emitted bytes -- but the observer is built INSIDE this
+    // function, so a caller that wants to attribute struts to the plan's cells could not
+    // reach it. This chains onto whichever observer the run already uses, so arming it
+    // adds a callback and nothing else. Null on every run that does not ask.
+    const std::function<void(LatticeGenElement, const Vec3&, const Vec3&, double)>*
+        laid_tap = nullptr) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2415,11 +2423,17 @@ LatticeExportOutcome export_latticed_variant(
   }
 
   LatticeGenObserver weld_obs;
-  weld_obs.on_element = [&organic_spans](LatticeGenElement, const Vec3& a,
-                                         const Vec3& b, double r) {
-    organic_spans.push_back({a, b, r});
+  weld_obs.on_element = [&organic_spans, &lat, laid_tap](LatticeGenElement k,
+                                                         const Vec3& a, const Vec3& b,
+                                                         double r) {
+    if (lat.emit_welded_stl) organic_spans.push_back({a, b, r});
+    if (laid_tap && *laid_tap) (*laid_tap)(k, a, b, r);
   };
-  const LatticeGenObserver* weld_tap = lat.emit_welded_stl ? &weld_obs : nullptr;
+  // ★ K4: the tap arms the observer on its own, so a run that wants the ledger but not
+  // the welded body still gets one. The welded push is now inside the callback and gated
+  // on its own key, so the body cannot change because the ledger was asked for.
+  const LatticeGenObserver* weld_tap =
+      (lat.emit_welded_stl || (laid_tap && *laid_tap)) ? &weld_obs : nullptr;
   auto emit_lattice = [&](TriangleSink& w) {
     if (!measure_protrusion) {
       if (organic)
@@ -2449,7 +2463,7 @@ LatticeExportOutcome export_latticed_variant(
     // escape to THAT strut -- endpoints and radius -- which is what a clip fix needs.
     long long prev_n_out = 0;
     LatticeGenObserver obs;
-    obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out](
+    obs.on_element = [&m, &pass_marks, &organic_spans, &lat, &prev_n_out, laid_tap](
                          LatticeGenElement k, const Vec3& ea, const Vec3& eb,
                          double er) {
       if (m.this_element_out) { ++m.elements_out; m.this_element_out = false; }
@@ -2465,6 +2479,7 @@ LatticeExportOutcome export_latticed_variant(
       // Same ledger as the non-measuring path above, so the welded body does not
       // depend on whether the protrusion measurement happened to be armed.
       if (lat.emit_welded_stl) organic_spans.push_back({ea, eb, er});
+      if (laid_tap && *laid_tap) (*laid_tap)(k, ea, eb, er);   // ★ K4
       const char* name = "unknown";
       switch (k) {
         case LatticeGenElement::InteriorStrut: name = "interior strut"; break;
@@ -4275,6 +4290,9 @@ struct LatticeVariantOutcome {
   // ★ K5: where the generator's strut and node radius queries got their density.
   long long plan_rho_queries_plan = 0, plan_rho_queries_posture = 0,
             plan_rho_queries_floor = 0;
+  // ★ K4: the plan as laid, per region and per group, and the generator's own ledger.
+  std::vector<RunInfo::PlanRegion> plan_by_region;
+  long long plan_laid_unattributed = 0;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -5492,6 +5510,7 @@ LatticeVariantOutcome lattice_one_variant(
         // region the run lays. Absent, the region origin stands, which is what every
         // existing job gets. Its in-plane-ness is settled at parse time (job.cpp).
         pr.slot_origin = jr.slot_origin_stated ? jr.slot_origin_mm : jr.origin;
+        pr.slot_origin_stated = jr.slot_origin_stated;
         // ★ K2: the region's own plane, which DEPTH is measured from -- the slot origin
         // above is only the grid phase and may stand off the plane on a tilted facet.
         pr.plane_origin = jr.origin;
@@ -6601,6 +6620,50 @@ LatticeVariantOutcome lattice_one_variant(
     ++rho_q_floor;
     return gf.band_rho_min;
   };
+  // ── ★ K4: WHICH PLAN CELL AN EMITTED ELEMENT BELONGS TO ──────────────────────
+  // For the ledger, one element must land on exactly ONE cell -- unlike the density,
+  // where a shared node takes the max of its sharers. Every octet node sits on a cell
+  // plane, so the closed box finds several; the tally takes the lex-smallest sharer that
+  // is in the plan (group index, then k, j, i). Deterministic, and every element that
+  // touches the plan is attributed rather than filed as "unattributed".
+  // Returns false when no plan cell shares the point at all.
+  auto plan_cell_slot_at = [&plan_groups, &plan_occ](const Vec3& p, std::size_t* gout,
+                                                     std::size_t* cout) {
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      const SteppedCellGroup& g = plan_groups[gi];
+      const double tol = 1e-9 * g.size_mm;
+      const double fx = (p.x - g.origin.x) / g.size_mm;
+      const double fy = (p.y - g.origin.y) / g.size_mm;
+      const double fz = (p.z - g.origin.z) / g.size_mm;
+      const int bx = static_cast<int>(std::floor(fx));
+      const int by = static_cast<int>(std::floor(fy));
+      const int bz = static_cast<int>(std::floor(fz));
+      const bool ex = std::fabs(fx - std::round(fx)) <= tol;
+      const bool ey = std::fabs(fy - std::round(fy)) <= tol;
+      const bool ez = std::fabs(fz - std::round(fz)) <= tol;
+      for (int sz = (ez ? -1 : 0); sz <= 0; ++sz)
+        for (int sy = (ey ? -1 : 0); sy <= 0; ++sy)
+          for (int sx = (ex ? -1 : 0); sx <= 0; ++sx) {
+            const int ci = bx + sx, cj = by + sy, ck = bz + sz;
+            if (ci < 0 || cj < 0 || ck < 0 || ci >= g.nx || cj >= g.ny || ck >= g.nz)
+              continue;
+            const std::size_t at = (static_cast<std::size_t>(ck) * g.ny + cj) * g.nx + ci;
+            if (!plan_occ[gi][at]) continue;
+            // The cells list is ascending, so find this cell's index in it.
+            for (std::size_t n = 0; n < g.cells.size(); ++n)
+              if (g.cells[n][0] == ci && g.cells[n][1] == cj && g.cells[n][2] == ck) {
+                *gout = gi;
+                *cout = n;
+                return true;
+              }
+          }
+    }
+    return false;
+  };
+  // Per group, per cell (in the group's own ascending order): what the generator laid
+  // there. Filled by the tap below, which fires once per emitted element.
+  std::vector<std::vector<long long>> plan_laid_struts, plan_laid_nodes;
+  long long plan_laid_unattributed = 0;
   // Where the plan left a voxel's density to core's own grading, per voxel -- so the
   // receipt can count the fallbacks PER REGION rather than leave them silent. A plan
   // that sent a rho with every cell shows 0 on every region.
@@ -6619,6 +6682,12 @@ LatticeVariantOutcome lattice_one_variant(
         plan_occ[gi][at] = 1;
         if (ci < g.rho.size()) plan_cell_rho[gi][at] = g.rho[ci];
       }
+    }
+    plan_laid_struts.resize(plan_groups.size());
+    plan_laid_nodes.resize(plan_groups.size());
+    for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+      plan_laid_struts[gi].assign(plan_groups[gi].cells.size(), 0);
+      plan_laid_nodes[gi].assign(plan_groups[gi].cells.size(), 0);
     }
     const std::vector<SteppedCellGroup>& pg = plan_groups;
     const std::vector<std::vector<char>>& po = plan_occ;
@@ -7703,6 +7772,30 @@ LatticeVariantOutcome lattice_one_variant(
   // start here.
   const long long rho_q_plan0 = rho_q_plan, rho_q_posture0 = rho_q_posture,
                   rho_q_floor0 = rho_q_floor;
+  // ── ★ K4: THE LEDGER'S TAP, ARMED ONLY WHEN A PLAN RAN AND THE JOB ASKED ─────
+  // One callback per emitted element, attributing it to the plan cell it belongs to.
+  // Not armed on a run with no plan, and not armed without the key, so no existing
+  // job's artifacts or timings change. lattice_gen.hpp: observing never changes the
+  // emitted bytes.
+  std::function<void(LatticeGenElement, const Vec3&, const Vec3&, double)> laid_fn;
+  if (job.lattice.emit_plan_laid && !plan_groups.empty()) {
+    laid_fn = [&plan_cell_slot_at, &plan_laid_struts, &plan_laid_nodes,
+               &plan_laid_unattributed](LatticeGenElement k, const Vec3& a,
+                                        const Vec3& b, double) {
+      // A ball reports a == b and is attributed at its own centre; a strut fragment at
+      // its MIDPOINT, which is where the generator sampled its radius, so the ledger and
+      // the density agree about which cell a strut belongs to.
+      const bool ball = (k == LatticeGenElement::Node ||
+                         k == LatticeGenElement::AnchorNode);
+      const Vec3 at = ball ? a
+                           : Vec3{0.5 * (a.x + b.x), 0.5 * (a.y + b.y),
+                                  0.5 * (a.z + b.z)};
+      std::size_t gi = 0, ci = 0;
+      if (!plan_cell_slot_at(at, &gi, &ci)) { ++plan_laid_unattributed; return; }
+      if (ball) ++plan_laid_nodes[gi][ci];
+      else ++plan_laid_struts[gi][ci];
+    };
+  }
   const double tg0 = wall_seconds();
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
@@ -7718,13 +7811,122 @@ LatticeVariantOutcome lattice_one_variant(
       stepped_passes.empty() ? nullptr : &stepped_passes,
       job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
       job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
-      job.grading.organic_calibrate_on_shipped);
+      job.grading.organic_calibrate_on_shipped, laid_fn ? &laid_fn : nullptr);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.
   R.oc.growth = organic.growth;
   R.oc.growth_ran = organic.growth_ran;
   R.gen_seconds = wall_seconds() - tg0;
+  // ── ★ K4: THE PLAN AS LAID, PER REGION AND PER GROUP ─────────────────────────
+  // The summary (anystep_cells / regions / passes / histogram) says how many. This says
+  // WHICH, and it is built from `plan_groups` and the generator's own ledger rather than
+  // re-derived: every number here is either the plan as validated or what the tap
+  // counted, so the receipt cannot agree with the law while disagreeing with the file.
+  //
+  // ★ WHY THE PHASE IS HERE. `stepped_group_cells` buckets by (region, size, phase),
+  // where the phase is the group origin's offset modulo its OWN size -- two cells of the
+  // same size on offset grids are different passes, and nothing in the receipt said so.
+  // The app packs on the slot grid, so the phase against THAT grid is the number it can
+  // check its own packer against.
+  if (!plan_groups.empty()) {
+    R.plan_laid_unattributed = plan_laid_unattributed;
+    for (const SteppedPlanRegion& pr : plan_regions) {
+      RunInfo::PlanRegion rr;
+      rr.region_id = pr.region_id;
+      rr.base_cell_mm = pr.base_cell_mm;
+      rr.slot_origin_mm[0] = pr.slot_origin.x;
+      rr.slot_origin_mm[1] = pr.slot_origin.y;
+      rr.slot_origin_mm[2] = pr.slot_origin.z;
+      rr.slot_origin_stated = pr.slot_origin_stated;
+      rr.plane_origin_mm[0] = pr.plane_origin.x;
+      rr.plane_origin_mm[1] = pr.plane_origin.y;
+      rr.plane_origin_mm[2] = pr.plane_origin.z;
+      rr.normal[0] = pr.normal.x;
+      rr.normal[1] = pr.normal.y;
+      rr.normal[2] = pr.normal.z;
+      rr.depth_mm = pr.depth_mm;
+      // Sizes descending, the same order as the histogram, so the two can be read
+      // against each other entry for entry.
+      std::map<double, long long, std::greater<double>> per_size;
+      for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+        const SteppedCellGroup& g = plan_groups[gi];
+        if (g.region_id != pr.region_id) continue;
+        per_size[g.size_mm] += static_cast<long long>(g.cells.size());
+        RunInfo::PlanGroup gg;
+        gg.size_mm = g.size_mm;
+        gg.origin_mm[0] = g.origin.x;
+        gg.origin_mm[1] = g.origin.y;
+        gg.origin_mm[2] = g.origin.z;
+        const double off[3] = {g.origin.x - pr.slot_origin.x,
+                               g.origin.y - pr.slot_origin.y,
+                               g.origin.z - pr.slot_origin.z};
+        for (int a = 0; a < 3; ++a) {
+          double ph = std::fmod(off[a], g.size_mm);
+          if (ph < 0.0) ph += g.size_mm;        // into [0, size)
+          gg.phase_mm[a] = ph;
+        }
+        gg.nx = g.nx; gg.ny = g.ny; gg.nz = g.nz;
+        gg.cells = static_cast<long long>(g.cells.size());
+        if (gi < plan_laid_struts.size())
+          for (std::size_t n = 0; n < plan_laid_struts[gi].size(); ++n) {
+            gg.struts_laid += plan_laid_struts[gi][n];
+            gg.nodes_laid += plan_laid_nodes[gi][n];
+            if (plan_laid_struts[gi][n] == 0) ++gg.cells_with_no_strut;
+          }
+        rr.groups.push_back(std::move(gg));
+        rr.cells += static_cast<long long>(g.cells.size());
+      }
+      for (const auto& kv : per_size) {
+        char sb[48];
+        std::snprintf(sb, sizeof sb, "%s%.3f=%lld", rr.sizes.empty() ? "" : ", ",
+                      kv.first, kv.second);
+        rr.sizes += sb;
+      }
+      R.plan_by_region.push_back(std::move(rr));
+    }
+    // ── ★ THE LEDGER FILE (job key lattice.emit_plan_laid) ─────────────────────
+    // One line per PLAN cell -- laid or not -- so the app's classifier has core's own
+    // answer per cell instead of having to infer it from a mesh. Written only when the
+    // key is set; a run without it writes nothing, so no existing artifact changes.
+    if (job.lattice.emit_plan_laid) {
+      // The SAME base name the meshes use (lattice_base_name), so the ledger sits
+      // beside its own file and the rung is the file's rung, not one recomputed here.
+      const std::string lp =
+          join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
+                                               v.requested_volume_fraction)) +
+          "_LAID.txt";
+      std::ofstream lf(lp);
+      if (lf) {
+        lf.setf(std::ios::fmtflags(0), std::ios::floatfield);
+        lf.precision(10);
+        lf << "# K4 laid plan. One LAID line per plan cell, in the plan's own order\n"
+              "# (region, then size descending, then cell index). CENTRE is the cell's\n"
+              "# centre in part coordinates. struts/nodes are what the GENERATOR emitted\n"
+              "# and attributed to that cell (a ball at its centre, a strut fragment at\n"
+              "# its midpoint, which is where its radius was sampled).\n"
+              "# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes>\n";
+        lf << "PLAN " << plan_chk.cells << ' ' << plan_chk.regions << ' '
+           << plan_groups.size() << ' ' << plan_laid_unattributed << '\n';
+        for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
+          const SteppedCellGroup& g = plan_groups[gi];
+          for (std::size_t n = 0; n < g.cells.size(); ++n) {
+            const std::array<int, 3>& c = g.cells[n];
+            lf << "LAID " << g.region_id << ' '
+               << (g.origin.x + (c[0] + 0.5) * g.size_mm) << ' '
+               << (g.origin.y + (c[1] + 0.5) * g.size_mm) << ' '
+               << (g.origin.z + (c[2] + 0.5) * g.size_mm) << ' ' << g.size_mm << ' '
+               << (n < g.rho.size() ? g.rho[n] : 0.0) << ' '
+               << (gi < plan_laid_struts.size() ? plan_laid_struts[gi][n] : 0) << ' '
+               << (gi < plan_laid_nodes.size() ? plan_laid_nodes[gi][n] : 0) << '\n';
+          }
+        }
+        std::printf("plan laid: %zu cell(s) written to %s\n", plan_chk.cells,
+                    lp.c_str());
+      }
+    }
+  }
+
   // ── ★ K5: WHERE EVERY STRUT AND NODE GOT ITS DENSITY ─────────────────────────
   // The generator samples the radius at a strut's MIDPOINT and at a node's own position
   // (lattice_gen.cpp). Both of those sit on cell planes for the octet -- a corner node is
@@ -10818,6 +11020,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
       gi.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
       gi.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
+      gi.stepped_plan_by_region = R.plan_by_region;
+      gi.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;
