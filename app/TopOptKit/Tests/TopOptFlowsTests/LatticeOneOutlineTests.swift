@@ -159,4 +159,78 @@ final class LatticeOneOutlineTests: XCTestCase {
         XCTAssertLessThanOrEqual(worst, 0.01, "★ the largest chord gap")
         print(String(format: "ONE-OUTLINE largest chord gap %.4f mm", worst))
     }
+
+    /// ★★ THE BAND'S DATUM IS THE EXPANDED EDGE (the reviewer, 2026-10-10 23:32, (ii): "at a true edge, the
+    /// band's solid width is measured from the polygon's boundary. With an expand, that is the expanded edge, not
+    /// the raw one. The band is the subject of the beam measure, so its datum must be pinned.") A 16 mm square
+    /// face grown 4 mm (the polygon is the 24 mm square, round corners) and a 1.21 mm band (the preview's band at
+    /// a 1.719 mm voxel): `inPlaneDistance` is 0 on the expanded edge and 4 on the raw one; the bake keeps every
+    /// whole base cell the band's width clear of the EXPANDED edge, and its whole cells reach past the RAW edge
+    /// into the expand ring — which a raw-edge datum (cells ≥ 1.21 mm inside ±8 mm) could not do.
+    func testTheBandIsMeasuredFromTheExpandedEdge() throws {
+        let n = 44, origin = SIMD3<Float>(-2, -2, -2)
+        var vals = [Float](repeating: 0, count: n * n * n)
+        for k in 0..<n { for j in 0..<n { for i in 0..<n {
+            let p = SIMD3<Float>(Float(i), Float(j), Float(k)) + origin + 0.5
+            if p.x > 0, p.x < 40, p.y > 0, p.y < 40, p.z > 0, p.z < 40 { vals[(k * n + j) * n + i] = 1 }
+        }}}
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = SIMD3(20, 0, 20); r.normal = SIMD3(0, 1, 0); r.halfUMM = 19; r.halfWMM = 19; r.depthMM = 12
+        r.outlineLoops = [square(-8, -8, 8, 8)]
+        r.inPlaneOffsetMM = 4
+        let band = 1.21
+        // the distance's datum, at a true edge: 0 on the expanded edge, the band's width inside it, 4 on the raw edge
+        XCTAssertEqual(r.inPlaneDistance(SIMD2(12, 0)), 0, accuracy: 1e-6, "★ zero on the expanded edge")
+        XCTAssertEqual(r.inPlaneDistance(SIMD2(12 - band, 0)), band, accuracy: 1e-6)
+        XCTAssertEqual(r.inPlaneDistance(SIMD2(8, 0)), 4, accuracy: 1e-6, "the raw edge is 4 mm inside it")
+        XCTAssertLessThan(r.inPlaneDistance(SIMD2(12.5, 0)), 0, "outside the polygon")
+        let sp = SIMD3<Float>(repeating: 1)
+        let occ = LatticeVoxelGrid(nx: n, ny: n, nz: n, origin: origin, spacing: sp, values: vals)
+        let dem = LatticeVoxelGrid(nx: n, ny: n, nz: n, origin: origin, spacing: sp,
+                                   values: [Float](repeating: 0.3, count: vals.count))
+        var st = LatticePreviewOccupancy.OctreeBakeStats()
+        let field = try XCTUnwrap(LatticePreviewOccupancy.octreeCellField(
+            occupancy: occ, demand: dem, regions: [r], cellMM: [6], lineWidthMM: 0.45, realFloorMM: 2.25,
+            shapeFitBandMM: 0, shapeFit: false, solidBandMM: band, densityLo: 0.1, densityHi: 0.3, densityGamma: 1,
+            latticeID: "octet", dyadicSteps: true, stats: &st))
+        let (bu, bv) = LatticeRegionMask.basis(LatticeRegionMask.unit(r.normal))
+        func uv(_ p: SIMD3<Double>) -> SIMD2<Double> { let d = p - r.origin; return SIMD2(simd_dot(d, bu), simd_dot(d, bv)) }
+        // ★ the bake tests each corner nudged eps = min(0.05·S, 0.2) mm into the cell on every axis (`fits`), so a whole
+        // cell's TRUE corner may stand up to eps (√2·eps at a round corner) inside the band: measured and reported
+        var whole = 0, reachPastRaw = 0, tooClose: [String] = [], trueCornerMin = Double.greatestFiniteMagnitude
+        for c in field.steppedCells where c.sizeMM > 3.0 + 1e-6 {   // the 6 mm base cells: only ever laid whole
+            whole += 1
+            let eps = Swift.min(0.05 * c.sizeMM, 0.2)
+            var nudged = Double.greatestFiniteMagnitude, outermost = 0.0
+            for cx in 0...1 { for cz in 0...1 {
+                let corner = c.originMM + SIMD3(Double(cx), 0, Double(cz)) * c.sizeMM
+                let sgn = SIMD3<Double>(cx == 0 ? 1 : -1, 0, cz == 0 ? 1 : -1)
+                nudged = Swift.min(nudged, r.inPlaneDistance(uv(corner + sgn * eps)))
+                trueCornerMin = Swift.min(trueCornerMin, r.inPlaneDistance(uv(corner)))
+                let q = uv(corner)
+                outermost = Swift.max(outermost, Swift.max(abs(q.x), abs(q.y)))
+            }}
+            if nudged < band - 1e-9 { tooClose.append(String(format: "(%.2f, %.2f) %.3f", c.originMM.x, c.originMM.z, nudged)) }
+            if outermost > 8 + 1e-6 { reachPastRaw += 1 }
+        }
+        print("ONE-OUTLINE band datum: \(whole) whole 6 mm cells, \(reachPastRaw) reach past the raw edge; "
+              + String(format: "nearest TRUE corner %.3f mm from the expanded edge (band %.2f); cells %d",
+                       trueCornerMin, band, field.steppedCells.count))
+        XCTAssertGreaterThanOrEqual(trueCornerMin, band - 0.2 * 2.0.squareRoot() - 1e-6, "within the bake's eps")
+        XCTAssertGreaterThan(whole, 0, "control: base cells are laid")
+        XCTAssertEqual(tooClose, [], "★ no whole cell inside the band (at the bake's own test points), from the EXPANDED edge")
+        XCTAssertGreaterThan(reachPastRaw, 0, "★ whole cells reach into the expand ring: the datum is not the raw edge")
+        // CONTROL: the same face with no expand — the polygon IS the raw square, and no whole cell reaches past it
+        var raw = r; raw.inPlaneOffsetMM = 0
+        var st0 = LatticePreviewOccupancy.OctreeBakeStats()
+        let f0 = try XCTUnwrap(LatticePreviewOccupancy.octreeCellField(
+            occupancy: occ, demand: dem, regions: [raw], cellMM: [6], lineWidthMM: 0.45, realFloorMM: 2.25,
+            shapeFitBandMM: 0, shapeFit: false, solidBandMM: band, densityLo: 0.1, densityHi: 0.3, densityGamma: 1,
+            latticeID: "octet", dyadicSteps: true, stats: &st0))
+        let past0 = f0.steppedCells.filter { c in
+            c.sizeMM > 3.0 + 1e-6 && [0.0, 1.0].contains { cx in [0.0, 1.0].contains { cz in
+                let q = uv(c.originMM + SIMD3(cx, 0, cz) * c.sizeMM); return Swift.max(abs(q.x), abs(q.y)) > 8 + 1e-6 } }
+        }.count
+        XCTAssertEqual(past0, 0, "control: with no expand no whole cell passes the raw edge")
+    }
 }
