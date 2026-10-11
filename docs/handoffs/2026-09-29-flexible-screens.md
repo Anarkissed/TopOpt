@@ -1,6 +1,165 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 6 · batch V review — "Role colours off" now does something you can see, an Undo is not a pick, and the last of m19 (2026-10-10) (read this first)
+## Round 6 · batch I2 — edges and corners as squeeze groups (your item 2, as you approved it) (2026-10-11) (read this first)
+
+The two group lists stay separate (your 2026-10-10 reversal, 7f710903): this batch works inside the Settings page's
+squeeze groups only. **The main page's Selections are not touched** — no row added, renamed or regrouped; a strip cut
+never joins a Selections group. **The app was NOT launched**: installed on the iPad Pro 13 simulator (147E56A1), never
+opened. The pictures are offscreen (the shipping renderer for the part, the hosted panel beside it), not device
+screenshots.
+
+**What you will see (Settings page):**
+- **[+ New] asks first, on one line: [Faces] [Edges/corners].** Faces is the list you know. Edges/corners opens a new
+  group (its number after yours, the first colour no group wears) in pick mode.
+- **Pick mode: every edge and corner of the part, highlighted and listed.** On your pad: 8 corners and 12 edges,
+  numbered 1–20 by position — the same number on the part's tag and on its row. Each wears a colour from the eight group
+  colours minus the new group's own, and two that touch (an edge and the corner at its end, two edges meeting) never wear
+  the same one. A candidate facing away is drawn faint, untagged, and stays in the list.
+- **Pick by the list or on the part.** A tap takes the nearest corner within 22 pt, else the nearest edge; tapping the
+  same spot again steps to the next candidate there — at your img3 camera the end-on edge between Face 2 and Face 3
+  (#14) sits under its two corners and is reached on the third tap. Every tag is a 44 pt target. Picked ones turn the
+  group's colour, thicker, with ✓. In pick mode a tap never selects a face.
+- **Grey, with one line why:** a face taken out of the setup ("Face 5 was taken out of the Flexible setup"), a candidate
+  over another edges group's strip ("In Group 4"), core's refusal of the press, a fillet ("A fillet · strips need a
+  sharp edge"), a curved edge. On your pad as saved, all 20 can be pressed (core was asked about each).
+- **Before [Done], one line per face that is in a face group:** "Face 1 keeps the rest · strip for Edge 9". (Your faces
+  read "Face 1" here, so the line takes its short form; with a short name it reads "Top keeps the rest · strip taken for
+  Edge 3", ≤ 44 characters either way.) The card also carries the group's one squeeze force — a press never invents a
+  weight; [Done] opens the keypad on it if it is empty.
+- **[Done · N picked] is ONE edit and ONE undo step.** An edge presses a STRIP along it on each of its two faces; a
+  corner a square PATCH on each face that meets there. Each is cut with the Surface stage's own cut. The face's own
+  squeeze group **keeps the rest**: its settings (weight and its link, group, curves, stamp, deepest) move onto the rest,
+  re-expressed through core's frames — your stamps stay exactly where you drew them on the part. Where two picked edges
+  meet the first keeps the shared corner square; a corner takes its square out of the strips' ends; nothing overlaps.
+- **The new group's tab:** "Group 4 · 1 edge" on the rail; its force; each press as one row — "Edge 9 · Face 1 + Face 2",
+  its **Strip width** box (mm; tap to type, drag to scrub), "Set up · core support pending", and which faces keep the
+  rest. The strips wear the group's glass on the part.
+- **Strip width:** starts at the lattice depth under the faces (core's, the smaller of the two), never more than half
+  the face across the edge, so the face group always keeps a rest. On your pad: Top 20 mm, Face 2 100 mm of lattice,
+  Face 2 is 20 mm tall → 10 mm. A change re-cuts that strip and any that meet it — one undo step.
+- **Each pick is a press at core's halfway, saved, never sent.** The arrow points halfway between the faces as CORE
+  frames the strips (45.00° from each face on your pad's edge), in the new group, at the force you typed. Nothing of it
+  is written to any job until core builds press stacks (AP9). The faces that gave a strip are their rests in the job now
+  (below).
+
+### Your words this batch builds
+| when | your words | what it means now |
+|---|---|---|
+| 2026-10-08 | "there should be the option to selecting 'edges/corners' in which case, different edges/corners are highlighted with different colours and listed. You then select from a list and/or tap on the edges/corners to add to the group. After that, the stamp and all that is the same." | pick mode, list + tap, presses in the group |
+| 2026-10-08 | a group is EITHER faces OR edges/corners (never mixed) | `FlexibleGroupKind`; normalise splits a mixed group; no face moves into an edges group |
+| 2026-10-09 | (item 2 OKed as posted: strip/patch with a width box; the face's group keeps the rest; the first pick keeps a shared corner) | FlexibleEdgeStrips |
+| 2026-10-10 | "Please revert back to the way things were before, with the two separate groups." | the Selections are not touched; the cut joins no Selections group |
+
+### Each item → where → pinned by (tests FIRST: 10 tests red against the stubs, 25 failures — round6/batch_i2/i2_red_run.txt)
+| item | where | pinned by (RED control, run inside the test) |
+|---|---|---|
+| a group holds faces OR edges/corners; normalise splits a mixed group (its edge presses to a new group; a tilted face press stays); no face moves into an edges group; a removed group's members join their own kind; a face's group chips list faces groups only; an edge press never joins a faces hand | `FlexibleGroupKind`, `FlexibleSqueezeGroup.kind`, `FlexibleSqueezeGroups.splitMixed` (+Kind, new), `move` / `remove` / `uniteHands` guards, `FlexibleFaceGroupRow.options` | `FlexibleEdgeGroupsTests.testAGroupHoldsFacesOrEdgesNeverBoth` (RED `controlNoSplit`: Group 2 holds face 2 AND the edge press) |
+| [+ New] → [Faces] [Edges/corners]; pick mode lists every edge and corner (AP2's FlexibleEdgeCandidates), numbered as on the model; colours from the 8 group colours minus the group's own, greedy so touching ones never match; pick mode hides the other groups' walls | `FlexibleEdgePick` (state), `FlexibleEdgePickRules.colours/touching` (new), `FlexibleStageModel.startEdgePick/loadEdgePick` (+EdgePick, new), `FlexibleNewGroupKindLine` / `FlexibleEdgePickCard` / `FlexibleEdgeCandidateRow` / `FlexibleEdgePickOverlay` (new) | `…testEveryEdgeAndCornerIsListedNumberedAndColouredSoTouchingOnesNeverMatch` — his pad 20 candidates, 48 touching pairs, 0 sharing; the cube the same (RED `controlRoundRobin`: 3 touching pairs share) |
+| the tap: nearest corner within 22 pt, else nearest edge; a repeat tap cycles; facing-away ones untapped (and untagged, faint); ≥ 44 pt tags; a tap never selects a face in pick mode | `FlexibleEdgePickRules.project/hit`, `edgePickTap`, the page's `onPickPoint` branch, `tapFace` / `select` guards | `…testATapPicksTheNearestCornerThenEdgeAndARepeatTapCycles` — at his img3 camera every one of the 16 facing candidates is reached (#14 on the 3rd tap) (RED `controlEdgeFirst`: the edge; `controlNoCycle`: #14 never reached) |
+| THE AREA: a strip on each face (L × w within 0.1 %), the face's group keeps the rest (settings moved, re-expressed through core's frames — the stamp unmoved on the part within 1e-6 mm), strip + rest = the face, no region in two entries, no shared surface, the Selections untouched, ONE undo step, the Surface tool's own cut | `FlexibleEdgeStrips.strip/plan/surfaceCut/halfSpaces` (new), `FlexibleStageModel.changeStrips` (one edit between two seals; a scene opened on the cut regions answers before the commit — `FlexibleSplitFrames`, `FlexibleWorker.install`) | `…testAnEdgePickPressesAStripOnEachFaceAndTheFaceGroupKeepsTheRest` — parity: `FlexibleEdgeStrips.surfaceCut` == ProjectModel.commitSurfaceCut's regions exactly; its Selections join added 1 region, ours 0 (RED `controlWholeFaces`: faces 1 and 2 in two entries — core's refusal) |
+| pick order: corners first, then edges by pick order (the first keeps a shared square) | `FlexibleEdgeStrips.plan` | `…testPickOrderCutsNeverOverlap` — 4 Top edges + 1 corner: the corner's square, then B over C, C over D, A over D; no overlap |
+| each pick an AP1 press at AP3's default — core's halfway on its strips, bit for bit — in the new group, at the typed force, never linked, NEVER SENT | `changeStrips` → `FlexibleStageModel.aimSet` (pressAim's engine, now over a `FlexibleAimSource`), `FlexiblePressAimSet.defaultRelease` | `…testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsNeverSent` — 45.00° from each face; no press_direction and no strip in any send's job; the wedge's slanted edge too (RED: the ViewerMesh-normal halfway on the wedge has other bits; on his axis-aligned pad the viewer's normals are exact, the same bits — printed) |
+| "Strip width": default core's lattice depth under the members, capped at half the face; a change re-cuts every chain it touches (one undo step); the cap holds | `FlexibleEdgeGroupRows`, `setStripWidth` | `…testTheStripWidthReCutsOnChangeAsOneUndoStep` |
+| grey with one line why | `loadEdgePick` | `…testWhatCannotBePickedIsGreyWithOneLine` — "In Group 4", AP2's line in the panel's names, the fillet's |
+| saved; the other faces' job entries byte-identical | `FlexiblePress.strip` (optional, omitted when nil) | `…testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries` |
+| hosted: the kind line one line, every row ≥ 44 pt, the edges tab's press row | the views | `FlexibleEdgeGroupsHostedTests.testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth` (RED: the stub card) |
+
+### The bytes: what moves and what does not
+- **Nothing moves until you press [Done].** Pick mode stores nothing. FlexibleAngledGoldenTests (no project there has an
+  edges group): 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded); tripwire control, tilt, edge accepted. Stage-job hashes: every row identical to batch V review's (stage_job_hashes_i2.txt vs stage_job_hashes_bvr.txt) — the stage job never reads Flexible, and the
+  strip cut never joins a Selections group, so the main page's lattice job cannot see it.
+- **After [Done], on the faces that gave a strip:** their job entry is their REST now — a new sector id, the rest's
+  footprint, the weight its main-page share gives it (Face 1: 19.8 of Top's 22 lb, its share of the face), its stamp
+  re-expressed (Face 2's stamp, centred at v = 10 on a 20 mm face, now sits at v = 0 of its 10 mm rest — the same point
+  on the part, on the strip's edge, so half of it lies on the strip). The new sectors are declared in the job's
+  face_regions. **Every other face's entry is byte-identical** (test 9: faces 0, 3, 4 and 5 in all three of your sends).
+  The press itself is in no job (no press_direction, no strip region) until AP9.
+
+### Re-pinned (each traced to his answer; the three AP1 tests' premise — an edge press sharing a faces group — is what he ruled out)
+| test | why it went red | re-pinned to |
+|---|---|---|
+| FlexiblePressReviewTests.testALinkedPressSitsInItsHandsGroup | the linked EDGE press joined its hand's FACES group (AP1's rule); his answer: a group is faces OR edges/corners | the edge presses sit in an edges group (split out together); AP1's rule asserted on a linked TILTED press (one face), which still joins its hand |
+| FlexibleSqueezeGroupsPressTests.testPressesAreRenumberedMergedAndForcedWithTheirGroup | its press [2, 4] sat in a faces group beside face 3 — now split out | the same checks on a tilted press [2] |
+| FlexibleSqueezeGroupsPressTests.testTheGroupPillSetsAPressOfHisOwn | addPress over [x, y] joined group 1 beside the top — now split out | a tilted press on face x joins group 1; the pill reaches it |
+| FlexibleBatchCHookTests.testTheSettingsPageLegendDrillsInAndTapsDoNotSelect (suite) | a source window of 400 characters after `onPickPoint:`; pick mode's branch pushed `tapFace(` past it | 900 characters, and pick mode's branch is pinned before `tapFace(` too (it never reaches a face) |
+
+### Hook lines in #354 / main files — NONE
+`git diff 29ffa5e4..HEAD` on WorkspacePlaceholder, ProjectModel, MetalMeshView, LatticeSettings, SelectionModel,
+ForceModel, DesignSystem, ClearanceGeometry, LatticeStageMode: empty. No LatticeStageMode case. The strip cut makes
+ProjectModel's own region calls on a COPY of `project.faceRegions` (FaceRegionModel.union / splitManual /
+splitDetached / revertSplit / dissolve / rename — public API) and assigns it in the one edit.
+
+Flexible files — new: FlexibleEdgeStrips, FlexibleEdgePick, FlexibleEdgePickViews, FlexibleStageModel+EdgePick,
+FlexibleSqueezeGroups+Kind, FlexibleRowCopy+Edges. Edited: FlexiblePress (`strip`, optional, omitted when nil),
+FlexibleSqueezeGroups (`kind`; normalise splits; move / remove / uniteHands keep the kinds apart), FlexibleSqueezeGroupRows
+(a face's chips list faces groups only), FlexibleStageModel (`edgePick`; the tap / select guards; `sceneJob(sectors:)`,
+`sceneKey(regionsKey:)`; FlexibleWorker.install), FlexibleStageModel+Aim (pressAim's engine over a `FlexibleAimSource` —
+one route for the open scene and the cut's scene), +Groups (an edges group's × gives its strips back), +Presses (a
+strip press's trash does too), FlexibleSettingsRail ([+ New]'s kind line and pick card; an edges tab; "1 edge"),
+FlexibleStagePage (pick mode's tap and overlay; an undo / redo that moved the regions re-opens the part),
+FlexibleGroupWalls (an edges group's glass on its strips), FlexibleMainPageLoads (a re-cut sector stands for its leaves).
+
+### Goldens, stage-job hashes, suite, iOS (raw: round6/batch_i2/i2_runs.txt; the red run: i2_red_run.txt)
+- **Tests first:** the API as RED STUBS (b2d3d15f), the ten tests run against them: 10 run, 10 red, 25 failures, each for its
+  stated reason (no candidates, the edge-first tap without cycling, a mixed group left mixed, no [Faces | Edges/corners]
+  line). A first red attempt crashed the xctest process on an unguarded index in test 1 — the tests now guard their
+  indices, so a stub can only fail them. Then the rules (76e6f22a): 10/10 green.
+- **Goldens:** 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded). **Stage-job
+  hashes:** every row identical to batch V review's. Every existing face press keeps its job bytes.
+- **Targeted suite at 76e6f22a** (146 classes: batch V's 144 + the two new; one run, no xctest death, under load ~10–17
+  from other sessions): TopOptFlowsTests 140 classes, 954 tests, 47 skipped, 17 failures — FlexibleBatchNVerifyTests ×8
+  (known, Xcode 27 text metrics), LatticeSlotOriginTests ×4 (known, #354's), LatticeSimSolveTriggerTests ×1 (known),
+  FlexibleBatchCHookTests ×1 (this batch's source window: re-pinned, 99fefe87, 4/4 green), FlexibleCoreClaimTests ×3 (ONE
+  test, `testACancelledStressSolveStillInCoreKeepsTheSimsOut`: the Stress solve read `.waiting` — the core gate still held
+  by an earlier class's solve; it did not reproduce in two isolated runs, 4/4 green each — noted, not loosened);
+  TopOptKitTests 6 classes, 39 tests, 2 skipped, 0 failures. The load flakes (FlexibleBatchNRefineTests,
+  FlexibleRound5SettingsHostedTests) did not fire. LatticeStaleTypeTests 6/6.
+- **iOS:** built at 76e6f22a and installed on 147E56A1 (booted, **never launched**): the installed TopOpt.debug.dylib
+  (78 394 960 B, 00:50) is cmp-identical to the build and carries "Tap edges or corners", "strips need a sharp edge" and
+  core 69b059611c26.
+
+### Evidence (round6/batch_i2/; offscreen — NOT device screenshots; the panel hosted at its own size beside the part)
+- `I2_A1_0003_pick_mode_iso.png` / `_top.png` — your pad at your img2 and img3 cameras in pick mode: every edge and
+  corner in its colour with its number, the list beside it (rows 1–19 visible; it scrolls to 20).
+- `I2_A1_0003_edge_picked_keeps_the_rest_iso.png` — Edge 9 (Face 1 + Face 2) picked: mint, thicker, ✓9; the card's two
+  "keeps the rest" lines; the force typed (11 lb); [Done · 1 picked].
+- `I2_A1_0003_strip_taken_edges_group_tab_iso.png` / `_top.png` — after [Done]: Group 4's tab (1 edge, its force, its
+  colour, "Edge 9 · Face 1 + Face 2", Strip width 10 mm, "Set up · core support pending", the two lines); on the part the
+  10 mm strip along the edge on both faces wears the group's glass, and the rest of each face keeps its map.
+- `I2_A1_0003_group1_keeps_the_rest_iso.png` — Group 1's tab: "Face 1" is the Top's rest, its stamp where it was, 19.8 of
+  Top's 22 lb (its share), and its group chips 1 · 2 · 3 (the edges group is not offered to a face).
+
+### What LOOKING at the evidence found (and changed)
+1. **The press row read "Edge 9 · Edge 9 · Face 1 + Edge 9…"** — it named the strips by their own sector names. It now
+   names the pick and the faces ("Edge 9 · Face 1 + Face 2"), pinned in test 6.
+2. **Every corner wears green** (Group 1's colour) — the greedy rule gives corners the first free colour, as none of them
+   touch each other. It follows the rule you approved ("the 8 group colours minus the picker's own"); say if candidates
+   should avoid every group's colour instead (that leaves 4 colours on your pad, still enough for a box).
+3. **At your img3 camera the end-on edge #14's tag sits on its corners' tags** (#2 is hidden under it). The list and the
+   repeat tap reach it (3 taps, pinned); tag overlap is not resolved on the part.
+
+### Not done / open
+- **Nothing seen on a device or the simulator.** Installed, never launched.
+- **The interim sim (your 2026-10-09 words, the reviewer's three conditions) is not in this batch** — a picked press is
+  saved and drawn on its tab, not squished. It is the SIM batch's (the chip "Lattice not tuned for this press yet"), then
+  AP9 (core's press stack, the rim fade, the job). The press's own arrow on the model (AP4) is not drawn yet either.
+- **Fillets and curved edges are listed grey** ("A fillet · strips need a sharp edge", "A curved edge · no straight
+  strip"): a straight cut cannot follow a fillet or a bore's rim. None on your pad or r5.
+- **A corner narrower than a strip beside it** (their widths differ when the lattice depth under them differs) leaves a
+  small sliver of the strip with the face's rest: a sector must be one convex piece (core refuses two sectors of one face
+  in a press). On your pad every pick defaults to 10 mm, so it does not arise.
+- **The legend row "Pick: colours tell edges apart"** (r6 spec) is not added; the card's (i) says it.
+- **#361's coded A3 refusal ("shared_footprint")** is not mapped yet (that sync is AP9's, per the 2026-10-10 note); the
+  strips never share surface (pinned: `FlexibleEdgeStrips.sharedSurface` is empty after every [Done] in the tests).
+
+### Questions for you
+1. **Candidate colours:** keep the eight group colours minus the new group's (corners all came out green on your pad —
+   Group 1's colour), or keep every existing group's colour off the candidates?
+2. **"Face 1 keeps the rest · strip for Edge 9":** your Settings page names faces "Face 1"; the line you wrote ("Top
+   keeps the rest · strip taken for Edge 3") fits only with a short name. Should a face in a main-page group read by that
+   group's name here ("Top")?
+
+## Round 6 · batch V review — "Role colours off" now does something you can see, an Undo is not a pick, and the last of m19 (2026-10-10)
 
 The two group lists stay separate (your 2026-10-10 reversal, 7f710903): nothing here touches the main page's Selections or
 the Settings squeeze groups as lists. This pass takes the verifier's nine findings on batch V, confirms each, and fixes the
