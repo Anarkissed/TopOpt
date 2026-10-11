@@ -1,0 +1,53 @@
+P1/P6 OUTLINE: BEFORE/AFTER RENDERS AND WHAT THEY SHOWED (2026-10-10)
+
+BEFORE = 56eadfd7 (P4; the seam flare and mitred rims). AFTER = p1-wip 96873413 (one generated outline,
+vertical prism). Harness: LatticeDefaultGradePlanProof (Default Grade), CLI sync-3952c411, snapshots
+S1-2026-10-02. The renders are framed on the regions the outline moves (DG_FOCUS):
+102117B9 f1 = include 6 (face 26, r6's 26 mm seam); 68BF7B74 f1 = includes 1,2 (faces 2 and 15),
+f2 = includes 3,4,5 (face 23, its three facets, 4.15 mm expand).
+
+PIXELS CHANGED (any channel > 0, per view, part and lattice-only):
+  102117B9 f1         0.00-0.01 %   (r6 carries no lattice cells after the floor fix; only its rims draw)
+  68BF7B74 f1         0.74-0.98 %
+  68BF7B74 f2         1.43-1.97 %
+
+A DEFECT THE AFTER RENDERS SHOW: 68BF7B74 face 23, job region 4 (the middle facet)
+  - A see-through slit on the inner wall, and a band of coarse, open cells across the top.
+  - DG-REGIONS r4:  before 1,524 cells [5.16 x 44, 2.58 x 1,480], uncovered 7.60 %
+                    after    342 cells [4.73 x 342],             uncovered 27.60 %
+  - plan_base_cell_mm r4: 10.3122 -> 9.4529. No other region on 68BF7B74 moves (4.0103, 5.1561,
+    24.1500 and 10.3122 are unchanged).
+  - CAUSE: r4's measured wall (p50 along the facet normal, LatticeMeasuredRegionWidth) dropped by
+    exactly ONE voxel, 20.6245 -> 18.9058 mm (12 -> 11 voxels of 1.7187 mm), so the cell is 18.91/2 =
+    9.45 instead of 20.62/2 = 10.31. 9.45 halves to 4.73 and then 2.36, and 2.36 does not print open
+    with a bead-wide strut, so the Default Grade ladder ends at 4.73. Its 2.58 rung was what filled
+    the facet's thin edges.
+  - CONTROL (DG_PIN_CELL, a temporary patch, never committed): the AFTER tree with r4's cell pinned
+    to 10.3122 lays 1,526 cells [5.16 x 43, 2.58 x 1,483], uncovered 6.30 %, and the slit and the band
+    are gone (68BF7B74_f2_lattice_front_CONTROL.png, 68BF7B74_f2_lattice_top_CONTROL.png). The new
+    outline itself draws like the old one there.
+  - WHY ONE VOXEL: r4's wall is TRIMODAL (after, n = 9,499 voxels): 1-4 h (1.7-6.9 mm) 2,353;
+    9-11 h (15.5-18.9 mm) 2,066; 19-21 h (32.7-36.1 mm) 2,798. The median sits in the sparse valley
+    between the middle and upper modes, on a knife edge:
+        before (P4 footprint)      n 9,144  p50 12 h = 20.6245  (57 voxels from the 11 h edge)
+        after  (P1 footprint)      n 9,499  p50 11 h = 18.9058  (14 voxels from the 12 h edge)
+        after, WITHOUT the expand  n 7,809  p50 11 h = 18.9058  ( 5 voxels from the 12 h edge)
+        sub-voxel (trilinear SDF crossing at both walk ends): before 20.26, after 19.72;
+        p45/p55 after 18.51 / 25.45
+    P1's footprint adds 355 voxels, mostly thin edge voxels (3-4 h: +220), and the median tips over.
+    Neither the expand nor the quantisation alone is the cause: without the expand it is still 11 h,
+    and the sub-voxel median moves 0.54 mm on its own.
+
+102117B9 (P5 and the outline):
+  - cells: the plan job lays 12,112 -> 12,113. The one new cell is job region 135 (face 75), 3.4374 mm,
+    its first plan base. Its half-extents went 53.07 x 127.70 (the face's rectangle) -> 6.49 x 22.99
+    (its own polygon).
+  - half-extents changed on 169 of 177 regions, nearly all shrinking to the polygon. The 1,648 mm one
+    is job region 48 (0-based 47), face 27: half_u 1648.168692 -> 3.874114, half_w 5.580154 -> 5.582818.
+    17 regions grow an extent (the seam strips are now part of the outline, e.g. job region 28 half_u
+    0.718 -> 2.761, region 29 0.843 -> 3.827).
+  - 14 zero-cell regions swap 0 % <-> 100 % uncovered: prisms of 5-36 mm3 (1-7 voxels of 1.719 mm),
+    moved across voxel centres by the polygon.
+68BF7B74: half-extents unchanged (to 6 decimals) on all 5 regions.
+
+Raw data: scratch/evidence-outline-{before,after,pinned,hist-before,hist-after,hist-after2}/ (not committed).
