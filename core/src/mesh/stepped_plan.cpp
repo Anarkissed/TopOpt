@@ -12,6 +12,21 @@
 
 namespace topopt {
 
+bool lattice_prints_open(LatticeTopology topo, double cell_size_mm, double bead_mm) {
+  if (!(cell_size_mm > 0.0) || !std::isfinite(cell_size_mm)) return false;
+  if (!(bead_mm > 0.0) || !std::isfinite(bead_mm)) return false;
+  if (cell_size_mm <= bead_mm) return false;   // the bead does not fit in the cell at all
+  try {
+    return lattice_density_from_strut(topo, cell_size_mm, 0.5 * bead_mm) <=
+           kSteppedPrintsOpenMaxRho;
+  } catch (const std::exception&) {
+    // Off the measured table: resolved by side, not swallowed. A bead-wide strut in a cell
+    // far wider than the bead is a density BELOW the band -- open by any reading.
+    return cell_size_mm > lattice_min_printable_cell_mm(topo, bead_mm,
+                                                        kSteppedPrintsOpenMaxRho);
+  }
+}
+
 std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
                                            double base_cell_mm, double bead_mm,
                                            double min_tile_mm, bool apply_prints_open,
@@ -29,15 +44,8 @@ std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
       const double tile = base_cell_mm / n;
       if (min_tile_mm > 0.0 && tile < min_tile_mm) break;
       if (tile <= bead_mm) break;
-      if (apply_prints_open) {
-        double rho = 1.0;
-        try {
-          rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
-        } catch (const std::exception&) {
-          break;
-        }
-        if (rho > kSteppedPrintsOpenMaxRho) break;
-      }
+      // ★ ONE RULE, ONE PLACE: the exported predicate, not a second copy of it.
+      if (apply_prints_open && !lattice_prints_open(topo, tile, bead_mm)) break;
       out.push_back(n);
     }
     return out;
@@ -47,16 +55,10 @@ std::vector<int> stepped_admitted_divisors(LatticeTopology topo,
     if (min_tile_mm > 0.0 && tile < min_tile_mm) continue;
     if (tile <= bead_mm) continue;      // the bead does not fit in the tile at all
     if (!apply_prints_open) { out.push_back(n); continue; }   // structural: floor alone
-    // ★ PRINTS OPEN, by the octet law and not by a rule of thumb: a bead-wide strut in a
-    // tile this size must leave the cell mostly air. octet_relative_density depends only
-    // on radius/cell, so this is a statement about the RATIO and nothing else.
-    double rho = 1.0;
-    try {
-      rho = lattice_density_from_strut(topo, tile, 0.5 * bead_mm);
-    } catch (const std::exception&) {
-      continue;                          // the cell fills solid: emphatically not open
-    }
-    if (rho > kSteppedPrintsOpenMaxRho) continue;
+    // ★ ONE RULE, ONE PLACE: the exported predicate (lattice_prints_open), which the app
+    // now calls too. A bead-wide strut in a tile this size must leave the cell mostly air;
+    // the law reads radius/cell only, so it is a statement about the RATIO alone.
+    if (!lattice_prints_open(topo, tile, bead_mm)) continue;
     out.push_back(n);
   }
   return out;

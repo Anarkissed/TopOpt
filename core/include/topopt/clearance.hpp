@@ -372,6 +372,30 @@ ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
 // identical to rasterize_clearance's per-voxel inside test, just point-vs-region
 // with an outward `tol`, so a frozen vertex and a FrozenVoid voxel agree on the
 // same geometry.
+// ── ★ K3: THE OUTLINE AS A DISTANCE, NOT ONLY A YES/NO ────────────────────────
+// `point_in_clearance_region` below answers "is this point in the region", outline
+// included. The STRUT CLIP needs the same answer as a DISTANCE, because
+// clip_segment's certificate is a Lipschitz argument over a signed distance and not
+// over a predicate. This returns the exact signed distance to the region's in-plane
+// outline, in the face's own (u, w) plane -- positive inside, negative outside -- for
+// the loops exactly as the app sent them and in the SAME frame the predicate reads
+// them in. The frame swap/negate therefore lives in ONE place and nothing re-derives
+// it.
+//
+// `du`, `dw` are the point's in-plane coordinates relative to the region origin:
+// dot(p - origin, geom.u) and dot(p - origin, geom.w). A region with no outline
+// returns +infinity -- the caller's own rectangle terms are then the whole in-plane
+// answer, which is what every job before the app sent an outline gets.
+double clearance_outline_signed_distance(const ClearanceGeometry& geom, double du,
+                                         double dw);
+
+// The two halves of that answer, exported so a caller with its own edge index (the
+// lattice boundary's outline clip) can take the DISTANCE from its index and still read
+// the FRAME and the inside/outside test from here. There is no second copy of either.
+void clearance_outline_frame_uv(const ClearanceGeometry& geom, double du, double dw,
+                                double* a, double* b);
+bool point_in_clearance_outline(const ClearanceGeometry& geom, double du, double dw);
+
 bool point_in_clearance_region(const ClearanceGeometry& geom, const Vec3& p,
                                double tol);
 
