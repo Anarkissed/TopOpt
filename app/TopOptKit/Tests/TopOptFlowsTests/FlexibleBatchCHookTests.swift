@@ -91,10 +91,14 @@ final class FlexibleBatchCHookTests: XCTestCase {
     func testTheSettingsPageLegendDrillsInAndTapsDoNotSelect() throws {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         let pick = try XCTUnwrap(page.range(of: "onPickPoint: { fid, pt in"))
-        let body = String(page[pick.upperBound...].prefix(400))
+        // ★ ROUND 6 ITEM 2 RE-PIN: the window is 900 characters (was 400) — pick mode's branch (an edge or corner hit-tested
+        // on screen, never a face) now sits between the reading and tapFace; it returns before tapFace too
+        let body = String(page[pick.upperBound...].prefix(900))
         let drilled = try XCTUnwrap(body.range(of: "if legendDrilled {"))
         let select = try XCTUnwrap(body.range(of: "model.tapFace("))
         XCTAssertLessThan(drilled.lowerBound, select.lowerBound, "while drilled in, a tap reads — it never reaches tapFace")
+        let picking = try XCTUnwrap(body.range(of: "if model.edgePick != nil {"))
+        XCTAssertLessThan(picking.lowerBound, select.lowerBound, "in pick mode a tap is an edge or a corner — it never reaches tapFace")
         XCTAssertTrue(page.contains("onLatticeProbeExit: legendDrilled ?"), "a double tap anywhere comes back out")
         XCTAssertTrue(page.contains("FlexibleProbe.dentReading(model: model,"), "the page reads through the one dent probe")
         // ★ RE-PINNED (batch C verification): the legend's BODY lets every touch through — the
