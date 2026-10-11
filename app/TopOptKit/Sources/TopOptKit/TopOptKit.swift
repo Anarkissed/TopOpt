@@ -900,7 +900,9 @@ public struct LatticeReport: Equatable, Sendable {
     /// when the JOB carried a plan (`lattice.stepped_cells`). On such a run the request's `cellMM`, the export's
     /// strut radii and the per-region receipt's cell figures describe core's grading LAW, not the plan the file was
     /// built from (K4: "on a plan run the law's fields describe the law and not the file"), so the results read
-    /// these instead. `regions` is empty when the run_info carried no `grading.plan_by_region` (a core before K4).
+    /// these instead. `regions` is empty when the run_info carried no `grading.stepped.plan_by_region` — a core
+    /// before K4, or (measured 2026-10-11, core 8bed216c) a Default Grade plan run, whose run_info has no
+    /// `grading.stepped` block at all although core laid the plan.
     public let planLaid: PlanLaid?
 
     public struct PlanLaid: Equatable, Sendable {
@@ -935,9 +937,11 @@ public struct LatticeReport: Equatable, Sendable {
                               cellsWithNoStrut: groups.reduce(0) { $0 + i($1, "cells_with_no_strut") })
             }
         }
-        /// From a run_info document: its `grading.plan_by_region` (an empty plan when it has none).
+        /// From a run_info document: its `grading.stepped.plan_by_region` (observability.cpp writes it inside the
+        /// `stepped` object), an empty plan when it has none.
         public init(runInfo: [String: Any]?) {
-            let arr = (runInfo?["grading"] as? [String: Any])?["plan_by_region"] as? [Any] ?? []
+            let stepped = (runInfo?["grading"] as? [String: Any])?["stepped"] as? [String: Any]
+            let arr = stepped?["plan_by_region"] as? [Any] ?? []
             self.init(planByRegionJSON: (try? JSONSerialization.data(withJSONObject: arr, options: [.sortedKeys]))
                       ?? Data("[]".utf8))
         }

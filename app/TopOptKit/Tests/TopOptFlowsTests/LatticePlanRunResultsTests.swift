@@ -28,14 +28,15 @@ final class LatticePlanRunResultsTests: XCTestCase {
         return (try build(true), try build(false))
     }
 
-    /// run_info as core writes it on a plan run (observability.cpp's K4 block, the ledger fixture's numbers).
-    private let runInfo: [String: Any] = ["grading": ["plan_by_region": [
+    /// run_info as core writes it on a plan run (observability.cpp's K4 block, inside `grading.stepped`; the ledger
+    /// fixture's numbers).
+    private let runInfo: [String: Any] = ["grading": ["stepped": ["plan_by_region": [
         ["region": 1, "base_cell_mm": 6, "cells": 32, "sizes": "6.000=32",
          "groups": [["size_mm": 6, "cells": 32, "struts_laid": 144, "nodes_laid": 13, "cells_with_no_strut": 24]]],
         ["region": 2, "base_cell_mm": 5.15612, "cells": 10, "sizes": "5.156=2 2.578=8",
          "groups": [["size_mm": 5.15612, "cells": 2, "struts_laid": 20, "nodes_laid": 4, "cells_with_no_strut": 0],
                     ["size_mm": 2.57806, "cells": 8, "struts_laid": 60, "nodes_laid": 9, "cells_with_no_strut": 1]]],
-    ]]]
+    ]]]]
 
     private func report(_ plan: LatticeReport.PlanLaid?) -> LatticeReport {
         LatticeReport(topologyID: "octet", cellMM: 14.5, generateRelativeDensity: 0.3, minRelativeDensity: 0.1,
@@ -69,6 +70,8 @@ final class LatticePlanRunResultsTests: XCTestCase {
         // a plan run on a core before K4: said, never the law's figures in their place
         let bare = ResultsModel.latticeNotes(report(LatticeReport.PlanLaid(runInfo: [:]))).joined(separator: "\n")
         XCTAssertTrue(bare.contains("did not report the plan as laid"))
+        // ★ core's path: a plan_by_region NOT inside `grading.stepped` is not read (observability.cpp nests it)
+        XCTAssertTrue(LatticeReport.PlanLaid(runInfo: ["grading": ["plan_by_region": [["region": 1, "cells": 3]]]]).regions.isEmpty)
         XCTAssertFalse(bare.contains("14.5 mm cell")); XCTAssertFalse(bare.contains("strut radius"))
         // CONTROL: no plan ⇒ byte-for-byte the old lines
         let old = ResultsModel.latticeNotes(report(nil)).joined(separator: "\n")

@@ -904,7 +904,7 @@ public final class ResultsModel: ObservableObject {
         let regionLines: [String] = {
             if let plan {
                 guard !plan.regions.isEmpty else {
-                    return ["Per region — the worker did not report the plan as laid (a core before K4)."]
+                    return ["Per region — the run did not report the plan as laid, so no per-region figures are shown."]
                 }
                 return ["Per region — your plan, as laid:"] + plan.regions.map { g in
                     "Region \(g.region): \(g.cells) cell\(g.cells == 1 ? "" : "s") on a "
