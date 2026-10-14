@@ -219,6 +219,60 @@ final class FlexibleLatticePass {
     }()
     var mapDepthPipelineDidBuild: Bool { mapDepthPipeline != nil }
 
+    // ── ★ ROUND 7, X1: THE PRINTED VIEW ──
+    /// X-ray off, the lattice shown, a finish that leaves it open (FlexibleLatticeLayerInputs.printed): the field is
+    /// marched with the printed solid (`shape2.w`), and the CLOSED body (its tints' solid flag) goes into the G-buffer
+    /// (`encodeBody`), so #354's shade writes its depth and the see-through body drawn after it keeps only its nearest
+    /// closed fragment — the solid part, with the lattice where the finish leaves it open.
+    var printed = false
+    /// How far (mm) the closed body's G-buffer depth is pushed back along its rays, so the see-through body's own front
+    /// face (drawn after, depth-tested, no depth write) is always nearer than it, and a back face never is.
+    static let bodyDepthBiasMM: Float = 0.5
+    /// Test control only: the plan's solid-flag route alone — no closed body in the G-buffer (the spike's NO-GO: the
+    /// translucent route writes no depth, so a far face drawn later painted over a near one).
+    var controlNoBodyInGBuffer = false
+    /// The renderer's buffers for THIS frame's body (handed to `encodeMapDepth` just before `encodeGBuffer`, in the same
+    /// prepass encoder), drawn by `encodeGBuffer` with the frame's matrices.
+    private var pendingBody: (vertices: MTLBuffer, flex: MTLBuffer, tints: MTLBuffer, count: Int, squish: Float)?
+    /// How many closed-body G-buffer draws were encoded (tests).
+    private(set) var bodyEncodes = 0
+    private lazy var bodyPipeline: MTLRenderPipelineState? = {
+        guard let vf = library.makeFunction(name: "flx_body_vertex"), let ff = library.makeFunction(name: "flx_body_gbuffer") else { return nil }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "flx_body_gbuffer"
+        pd.vertexFunction = vf
+        pd.fragmentFunction = ff
+        pd.colorAttachments[0].pixelFormat = MeshRenderer.sceneDepthFormat
+        pd.colorAttachments[1].pixelFormat = MeshRenderer.gbufferNormalFormat
+        pd.colorAttachments[2].pixelFormat = MeshRenderer.gbufferAlbedoFormat
+        pd.depthAttachmentPixelFormat = MeshRenderer.depthFormat
+        pd.rasterSampleCount = 1
+        return try? device.makeRenderPipelineState(descriptor: pd)
+    }()
+    var bodyPipelineDidBuild: Bool { bodyPipeline != nil }
+
+    /// ★ X1: the printed view's closed body into the G-buffer (eye-Z pushed back `bodyDepthBiasMM`, the eye normal, the
+    /// albedo, the mask) — only the fragments its tints flag solid. Returns false (nothing drawn) otherwise.
+    @discardableResult
+    private func encodeBody(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, eyeModel: SIMD3<Float>,
+                            clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
+        defer { pendingBody = nil }
+        guard printed, !controlNoBodyInGBuffer, let b = pendingBody, b.count > 0, let pipe = bodyPipeline else { return false }
+        struct BodyU { var clip: simd_float4x4; var eye: simd_float4x4; var normal: simd_float4x4; var flex: SIMD4<Float>; var eyeModel: SIMD4<Float> }
+        var u = BodyU(clip: clipFromModel, eye: eyeFromModel, normal: eyeNormalBasis, flex: SIMD4(b.squish, 0, 0, 0),
+                      eyeModel: SIMD4(eyeModel, Self.bodyDepthBiasMM))
+        enc.setRenderPipelineState(pipe)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBuffer(b.vertices, offset: 0, index: 0)
+        enc.setVertexBytes(&u, length: MemoryLayout<BodyU>.stride, index: 1)
+        enc.setVertexBuffer(b.tints, offset: 0, index: 2)
+        enc.setVertexBuffer(b.flex, offset: 0, index: 3)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: b.count)
+        bodyEncodes += 1
+        return true
+    }
+
     /// ★ BATCH M VERIFICATION: the SOLID dent planes' depth into the G-buffer, before the march (the hook
     /// in MeshRenderer's prepass — MeshRenderer+FlexibleLattice.encodeFlexibleMapDepth): the renderer's own
     /// vertex, displacement and tint buffers at this frame's scale, so the depth is the plane the body
@@ -227,6 +281,14 @@ final class FlexibleLatticePass {
     func encodeMapDepth(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, vertices: MTLBuffer, flex: MTLBuffer,
                         tints: MTLBuffer, count: Int, clipFromModel: simd_float4x4, squish: Float) -> Bool {
         mapDepthThisFrame = false
+        pendingBody = nil
+        // ★ X1: the printed view draws the closed body into the G-buffer itself (`encodeBody`, from `encodeGBuffer`, which
+        // has the frame's eye matrices) — its buffers are noted here
+        if printed, isDrawable, count > 0, enc.device === device,
+           vertices.length >= count * 24, flex.length >= count * 12, tints.length >= count * 32 {
+            pendingBody = (vertices, flex, tints, count, squish)
+            return false
+        }
         guard !controlNoMapDepth, isDrawable, count > 0, enc.device === device, let pipe = mapDepthPipeline,
               vertices.length >= count * 24, flex.length >= count * 12, tints.length >= count * 32 else { return false }
         struct MapU { var clip: simd_float4x4; var flex: SIMD4<Float> }
@@ -683,6 +745,7 @@ final class FlexibleLatticePass {
         u.squish = SIMD4(sq, Float(faces.count), ignoresColumnWalls ? 1 : 0, 0)
         u.march = SIMD4(stepFactor, stepCapCells, minStepMM, earlyOut ? 1 : 0)
         u.shape2.z = stepBudget
+        u.shape2.w = printed ? 1 : 0   // ★ X1: the printed view's gate (flx_field: min(F, S))
         var dil = SIMD3<Float>(repeating: sq * maxDepthMM)
         if feActive {
             // ★ BATCH G: the FE field moves everything — no column faces; the box dilates by how
@@ -740,6 +803,9 @@ final class FlexibleLatticePass {
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
         f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1)   // ★ batch M (M3): w = 1, the texture is the fraction
+        // ★ X1: the printed view's closed body first (its depth then culls every wall behind it, as the dent planes' does)
+        if encodeBody(enc, depthState: depthState, eyeModel: b.eye, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                      eyeNormalBasis: eyeNormalBasis) { mapDepthThisFrame = true }
         enc.setRenderPipelineState(gbufferPipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)

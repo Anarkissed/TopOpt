@@ -266,6 +266,10 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// VERIFICATION: each field on ITS OWN scale (the texture carries von Mises / that field's top —
     /// FlexibleFEStress.scaleTop), so "Play all" colours each turn by its own group's stress.
     public var stressWalls = false
+    /// ★ ROUND 7, X1: THE PRINTED VIEW — X-ray off, the lattice shown, a finish that leaves it open: the walls are marched
+    /// with the printed solid (FlexibleLatticeField.printedSolid) and the closed body goes into the G-buffer
+    /// (FlexibleLatticePass.encodeBody), so the solid part shows with the lattice where the finish leaves it open.
+    public var printed = false
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
                 loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {
@@ -276,6 +280,6 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     public static func == (a: Self, b: Self) -> Bool {
         a.token == b.token && a.hidden == b.hidden && a.loop === b.loop && a.facesToken == b.facesToken
             && a.feToken == b.feToken && a.feSequence == b.feSequence
-            && a.ghostWalls == b.ghostWalls && a.stressWalls == b.stressWalls
+            && a.ghostWalls == b.ghostWalls && a.stressWalls == b.stressWalls && a.printed == b.printed
     }
 }

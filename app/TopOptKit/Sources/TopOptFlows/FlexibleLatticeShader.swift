@@ -65,7 +65,7 @@ enum FlexibleLatticeShader {
     struct FlxUniforms {
         float4 boxMin, boxMax;        // the lattice region's AABB (dilated per frame by s·maxDepth)
         float4 shape;                 // x = topology (0 gyroid, 1 honeycomb), y = t, z = Lmin, w = Lmax
-        float4 shape2;                // x = honeycomb d, y = skinMM, z = max steps, w = reserved
+        float4 shape2;                // x = honeycomb d, y = skinMM, z = max steps, w = 1: THE PRINTED VIEW (X1)
         float4 buildDir;              // xyz
         float4 rmO, rmN;              // (ρ, mask) grid: xyz = voxel-(0,0,0) centre, w = spacing; dims xyz
         float4 dsO, dsN;              // (part SDF, skin distance) grid
@@ -244,9 +244,21 @@ enum FlexibleLatticeShader {
         return abs(0.5f * d - n) - 0.5f * t;
     }
 
+    // ── ★ ROUND 7, X1 — THE PRINTED SOLID (FlexibleLatticeField.printedSolid, the twin) ──────
+    // His words (2026-10-14): "The lattice should be visible without x-ray on as long as finish is set to something
+    // that isn't 'covered' … If lattice is on without x-ray view, we see the lattice plus the solid." With X-ray off the
+    // field also draws what the PRINT keeps solid around the walls: inside the part AND (inside the region within the
+    // finish's skin — Rim's bands, Skin's perforated sheet — OR outside the region: the pocket's own wall and floor).
+    // S = max(dPart, min(max(dRegion, −dSkin), −dRegion)); the field is min(F, S). Gated by shape2.w (0: X-ray and the
+    // Squish page — byte-identical).
+    static inline float flx_printed_solid(float dRegion, float dPart, float dSkin) {
+        return max(dPart, min(max(dRegion, -dSkin), -dRegion));
+    }
+
     // ── FlexibleLatticeField.lattice: F = max(wall, dRegion, dPart, dSkin) ──────────────
-    static float flx_field(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
-                           float3 p, thread float& Lcur) {
+    // `S` (X1): the printed solid at p (FlexibleLatticeField.terms).
+    static float flx_terms(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                           float3 p, thread float& Lcur, thread float& S) {
         float3 gRho;
         float2 rm = flx_sample2g(rmT, U.rmO, U.rmN, p, gRho);
         float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
@@ -254,7 +266,15 @@ enum FlexibleLatticeShader {
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
         float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         float dSkin = U.shape2.y - ds.y;
+        S = flx_printed_solid(dRegion, dPart, dSkin);
         return max(max(wall, dRegion), max(dPart, dSkin));
+    }
+
+    static float flx_field(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                           float3 p, thread float& Lcur) {
+        float S;
+        float F = flx_terms(U, rmT, dsT, p, Lcur, S);
+        return U.shape2.w > 0.5f ? min(F, S) : F;   // ★ X1: the printed view adds the printed solid
     }
 
     // ── the march's view of F: the SAME value, or a cheaper LOWER bound far from the walls ─
@@ -263,6 +283,9 @@ enum FlexibleLatticeShader {
     // fetch and the gyroid's trig are skipped. dRegion is not a distance, but it never
     // exceeds one mask voxel, the step the full max takes there too. Near the walls the
     // full expression runs in flx_field's order, so a hit is flx_field's zero.
+    // ★ X1, THE PRINTED VIEW: every term of S is ≥ dPart too, so the first early-out holds; dSkin and dRegion bound F
+    // but not S (the printed solid is negative IN the skin and OUTSIDE the region), so there the bound is
+    // min(max(dRegion, dPart, dSkin), S) — the same full expression near a surface (flx_field's min(F, S)).
     static float flx_field_march(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
                                  float3 p, thread float& Lcur) {
         const float far = 0.25f;
@@ -270,10 +293,18 @@ enum FlexibleLatticeShader {
         float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         if (dPart > far) { Lcur = 1e30f; return dPart; }
         float dSkin = U.shape2.y - ds.y;
-        if (dSkin > far) { Lcur = 1e30f; return max(dPart, dSkin); }
+        bool printed = U.shape2.w > 0.5f;
+        if (!printed && dSkin > far) { Lcur = 1e30f; return max(dPart, dSkin); }
         float3 gRho;
         float2 rm = flx_sample2g(rmT, U.rmO, U.rmN, p, gRho);
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
+        if (printed) {
+            float S = flx_printed_solid(dRegion, dPart, dSkin);
+            float lb = min(max(dRegion, max(dPart, dSkin)), S);
+            if (lb > far) { Lcur = 1e30f; return lb; }
+            float wall = flx_wall(U, rm.x, gRho, p, Lcur);
+            return min(max(max(wall, dRegion), max(dPart, dSkin)), S);
+        }
         if (dRegion > far) { Lcur = 1e30f; return max(dRegion, max(dPart, dSkin)); }
         float wall = flx_wall(U, rm.x, gRho, p, Lcur);
         return max(max(wall, dRegion), max(dPart, dSkin));
@@ -502,9 +533,17 @@ enum FlexibleLatticeShader {
         o.eyeZ = -(F.eyeFromModel * float4(h.p, 1.0f)).z;   // eye looks down −Z → positive into the screen
         o.enormal = float4(eyeN, 0.0f);
         float3 albedo = mix(F.sparse.rgb, F.dense.rgb, clamp(0.25f + 0.75f * frac, 0.0f, 1.0f));
+        // ★ X1: a hit on the PRINTED SOLID (the finish's skin, the pocket's wall and floor) is the body's own clay
+        bool printedHit = false;
+        if (U.shape2.w > 0.5f) {
+            float Lx, S;
+            float Fw = flx_terms(U, rmT, dsT, p0, Lx, S);
+            printedHit = S < Fw;
+            if (printedHit) { albedo = float3(0.78f, 0.77f, 0.75f); }
+        }
         // ★ BATCH M (M3): Stress on — the wall takes the group's von Mises at its REST point (the FE
         // field's w: node stress as a fraction of ITS field's top — each Play-all turn on its own scale)
-        if (F.rhoSpan.z > 0.5f && U.feK.x > 0.5f) {
+        if (!printedHit && F.rhoSpan.z > 0.5f && U.feK.x > 0.5f) {
             constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
             float vm = feT.sample(smp, ((p0 - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).w;
             albedo = flx_rainbow(vm * F.rhoSpan.w);
@@ -544,6 +583,50 @@ enum FlexibleLatticeShader {
 
     fragment void flx_map_depth(FlxMapOut in [[stage_in]]) {
         if (in.solid < 0.5f) { discard_fragment(); }
+    }
+
+    // ── ★ ROUND 7, X1: THE PRINTED VIEW'S BODY, IN THE G-BUFFER ──────────────────────────────
+    // The plan's solid-flag route (the body see-through, its closed fragments flagged opaque) draws the body on the
+    // TRANSLUCENT route, which writes no depth: on his pad the far side face painted over the Top (the spike's pictures).
+    // So the closed fragments are ALSO written here, into the G-buffer — eye-Z, eye normal, albedo, the mask — pushed
+    // `eye.w` mm back along their rays: #354's lsdf_shade then lights them (the same material) AND writes their depth into
+    // the main pass's shared buffer, and the see-through body drawn after it (MeshRenderer's ghost-after-lattice order)
+    // keeps only its NEAREST closed fragment there (the front face is nearer than the pushed-back depth; a back face is
+    // behind it). The walls are marched against the same buffer, so a wall behind the closed body is never drawn.
+    struct FlxBodyU { float4x4 clipFromModel; float4x4 eyeFromModel; float4x4 eyeNormalBasis; float4 flex; float4 eye; };
+    struct FlxBodyOut { float4 pos [[position]]; float solid; float eyeZ; float3 eyeN; float4 tint; };
+    struct FlxBodyGBuf {
+        float  eyeZ    [[color(0)]];
+        float4 enormal [[color(1)]];
+        float4 albedo  [[color(2)]];
+    };
+
+    vertex FlxBodyOut flx_body_vertex(uint vid [[vertex_id]],
+                                      const device float* verts [[buffer(0)]],   // pos.xyz + normal.xyz (stride 24)
+                                      constant FlxBodyU& u [[buffer(1)]],
+                                      const device float* tints [[buffer(2)]],   // rgba + flags (stride 32)
+                                      const device packed_float3* disp [[buffer(3)]]) {
+        float3 p = float3(verts[vid * 6], verts[vid * 6 + 1], verts[vid * 6 + 2]) + u.flex.x * float3(disp[vid]);
+        float3 n = float3(verts[vid * 6 + 3], verts[vid * 6 + 4], verts[vid * 6 + 5]);
+        float3 pb = p + normalize(p - u.eye.xyz) * u.eye.w;
+        FlxBodyOut o;
+        o.pos = u.clipFromModel * float4(pb, 1.0f);
+        o.eyeZ = -(u.eyeFromModel * float4(pb, 1.0f)).z;
+        o.eyeN = (u.eyeNormalBasis * float4(n, 0.0f)).xyz;
+        o.solid = tints[vid * 8 + 5];
+        o.tint = float4(tints[vid * 8], tints[vid * 8 + 1], tints[vid * 8 + 2], tints[vid * 8 + 3]);
+        return o;
+    }
+
+    fragment FlxBodyGBuf flx_body_gbuffer(FlxBodyOut in [[stage_in]]) {
+        if (in.solid < 0.5f) { discard_fragment(); }
+        float3 n = length_squared(in.eyeN) > 1e-12f ? normalize(in.eyeN) : float3(0, 0, 1);
+        if (n.z < 0.0f) { n = -n; }
+        FlxBodyGBuf o;
+        o.eyeZ = in.eyeZ;
+        o.enormal = float4(n, 0.0f);
+        o.albedo = float4(mix(float3(0.78f, 0.77f, 0.75f), in.tint.rgb, clamp(in.tint.a, 0.0f, 1.0f)), 1.0f);
+        return o;
     }
 
     // ── ★ BATCH M (M6): THE WALLS AS A GHOST ─────────────────────────────────────────────

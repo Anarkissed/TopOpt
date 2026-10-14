@@ -49,8 +49,13 @@ extension MeshRenderer {
         return translucent && latticeShaded
     }
 
-    /// Test control only: bind the lattice-only AO to the re-issued body.
-    var flexibleGhostKeepsAO: Bool { flexibleLattice?.controlKeepAOForGhost == true }
+    /// Test control only: bind the lattice-only AO to the re-issued body. ★ ROUND 7, X1: and THE PRINTED VIEW's body
+    /// (the closed body is in the G-buffer then — FlexibleLatticePass.encodeBody — so the occlusion and the creases are
+    /// the whole part's, as on #354's opaque body).
+    var flexibleGhostKeepsAO: Bool {
+        guard let fx = flexibleLattice else { return false }
+        return fx.controlKeepAOForGhost || (fx.printed && fx.isDrawable && !fx.controlNoBodyInGBuffer)
+    }
 
     /// ★ BATCH M (M6): the dent view is on — the Flexible walls are drawn as a GHOST in the main pass
     /// (`encodeFlexibleGhostWalls`) instead of by #354's opaque lsdf_shade, no depth written. ★ BATCH M
@@ -126,6 +131,7 @@ extension MeshRenderer {
         // ★ BATCH M: the dent view's ghost walls (M6) and the Stress view's wall colours (M3)
         if pass.ghostWalls != inputs.ghostWalls { pass.ghostWalls = inputs.ghostWalls; changed = true }
         if pass.stressWalls != inputs.stressWalls { pass.stressWalls = inputs.stressWalls; changed = true }
+        if pass.printed != inputs.printed { pass.printed = inputs.printed; changed = true }   // ★ ROUND 7, X1: the printed view
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true
