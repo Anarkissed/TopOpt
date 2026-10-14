@@ -240,11 +240,36 @@ extension FlexibleStageModel {
     /// ★ RED CONTROL (verify of R7-S): today's — on [+ New] or [Model], a face no group holds opens Group 1.
     @MainActor static var controlNewTabOpensGroupOne = false
 
-    /// ★ VERIFY OF R7-S: [+ New] → a tap on a face no group holds starts a NEW group from it. (STUB: today's — only with
-    /// nothing pressed.)
+    /// ★ VERIFY OF R7-S (finding: "On [+ New] (with faces pressed) … tapping a face no group holds still opens Group 1"):
+    /// [+ New] → a tap on a face no group holds starts the NEXT group from it, as the tab's line says — pressed at the main
+    /// page's weight when a Load group presses it, else at `kg` (the keypad's answer); with neither, the keypad asks
+    /// (`newGroupAsk`) and false is returned. ONE undo step; its tab opens. With nothing pressed: Group 1
+    /// (`startFirstGroup`).
     @discardableResult
     public func startNewGroup(_ region: Int, kg: Double?) -> Bool {
-        startFirstGroup(region, kg: kg)
+        if settings.loadedFaces.isEmpty && presses.isEmpty { return startFirstGroup(region, kg: kg) }
+        guard settings.face(region) == nil, !settings.pressRegions.contains(region) else { return false }
+        let inherited = mainPageLoads.entry(region)?.role == .pressed
+        guard inherited || (kg ?? 0) > 0 else { newGroupAsk = region; return false }
+        project.sealUndoStep()
+        guard press(region, kg: kg) else { newGroupAsk = region; return false }   // (it joins Group 1 for a moment)
+        newGroupAsk = nil
+        if let g = squeezeGroup(of: region), g.regions.count > 1 || !g.presses.isEmpty { _ = newGroup(with: region) }
+        if let g = squeezeGroup(of: region) { rail = .group(g.id) }
+        selectedRegion = region
+        if tab == .more { tab = .face }
+        save()
+        return true
+    }
+
+    /// Is a whole face of the part in no group, no press and not resting (a tap on [+ New] can start a group from it)?
+    public var hasFreeFace: Bool {
+        guard let mesh = project.viewerMesh else { return false }
+        let all = mesh.faceGeometry.isEmpty ? Set(mesh.faceIDs.map(Int.init)) : Set(0..<mesh.faceGeometry.count)
+        let s = settings
+        var held = Set<Int>()
+        for r in s.faces.map(\.faceRegionID) + Array(s.pressRegions) { held.formUnion(regions.faces(of: r, mesh: mesh)) }
+        return !all.subtracting(held).isEmpty
     }
 
     // MARK: 4h [+ New] with nothing pressed
@@ -306,10 +331,14 @@ extension FlexibleStagePage {
     /// ★ RED CONTROL (verify of R7-S): today's rule — every new blocker his action caused pops, the [+ New] tab's too.
     @MainActor static var controlPopOnNewTab = false
 
-    /// ★ VERIFY OF R7-S: does `issue` (new, caused by his last action) open the pop-up at once? (STUB: today's — always.)
+    /// ★ VERIFY OF R7-S (finding: "Reset all at once pops a blocker" — the [Press Face 1] pop-up over [Model] [New], which
+    /// would have put the Top back, still up while the keypad asked Face 3's weight): does `issue` — new, caused by his last
+    /// action — open the pop-up at once? Always, except "nothing pressed" while [+ New] is open: that tab asks for exactly
+    /// it ("Tap the face that starts it"). It stays in the top line, and Exit still names it.
     @MainActor
     static func popsAtOnce(_ issue: FlexibleIssue, model m: FlexibleStageModel) -> Bool {
-        true
+        if controlPopOnNewTab { return true }
+        return !(issue.kind == .noPressedFace && m.rail == .newGroup)
     }
 
     /// ★ 4f (f): the face the fix pop-up selects as it opens on `issue` — its face only when the open tab admits it;

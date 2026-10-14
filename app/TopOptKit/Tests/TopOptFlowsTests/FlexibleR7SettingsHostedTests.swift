@@ -12,6 +12,7 @@
 import XCTest
 import SwiftUI
 import AppKit
+import MetalKit
 import simd
 import TopOptDesign
 @testable import TopOptFlows
@@ -79,6 +80,48 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         guard let rep = h.view.bitmapImageRepForCachingDisplay(in: h.view.bounds) else { return }
         h.view.cacheDisplay(in: h.view.bounds, to: rep)
         if let data = rep.representation(using: .png, properties: [:]) { try? data.write(to: dir.appendingPathComponent(name)) }
+    }
+
+    /// ★ VERIFY OF R7-S: the PAGE as he sees it (portrait) — the part by the page's own renderer (its camera), the page's
+    /// chrome over it (the panel-only pictures had hidden the Reset pop-up).
+    func composite(_ h: Host, _ name: String) {
+        guard let dir = Self.dir else { return }
+        func renderer(_ v: NSView) -> MeshRenderer? {
+            if let m = v as? MTKView, let r = m.delegate as? MeshRenderer { return r }
+            for s in v.subviews { if let r = renderer(s) { return r } }
+            return nil
+        }
+        h.view.layoutSubtreeIfNeeded()
+        guard let rep = h.view.bitmapImageRepForCachingDisplay(in: h.view.bounds) else { return }
+        h.view.cacheDisplay(in: h.view.bounds, to: rep)
+        guard let page = rep.cgImage else { return }
+        let W = page.width, H = page.height
+        var pg = [UInt8](repeating: 0, count: W * H * 4)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let pctx = CGContext(data: &pg, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: cs,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        pctx.draw(page, in: CGRect(x: 0, y: 0, width: W, height: H))
+        let bg = (pg[4 * (W + 1)], pg[4 * (W + 1) + 1], pg[4 * (W + 1) + 2])
+        var out = [UInt8](repeating: 0, count: W * H * 4)
+        if let mr = renderer(h.view), W <= H,
+           var rgba = mr.renderOffscreen(size: H, clear: MTLClearColor(red: Double(bg.0) / 255, green: Double(bg.1) / 255, blue: Double(bg.2) / 255, alpha: 1)) {
+            for i in stride(from: 0, to: rgba.count, by: 4) { rgba.swapAt(i, i + 2); rgba[i + 3] = 255 }
+            let x0 = (H - W) / 2
+            for y in 0..<H { for x in 0..<W {
+                let a = 4 * (y * H + x + x0), d = 4 * (y * W + x)
+                out[d] = rgba[a]; out[d + 1] = rgba[a + 1]; out[d + 2] = rgba[a + 2]; out[d + 3] = 255
+            } }
+        }
+        for i in stride(from: 0, to: pg.count, by: 4) {
+            let isBg = abs(Int(pg[i]) - Int(bg.0)) <= 3 && abs(Int(pg[i + 1]) - Int(bg.1)) <= 3 && abs(Int(pg[i + 2]) - Int(bg.2)) <= 3
+            if !isBg || out[i + 3] == 0 { out[i] = pg[i]; out[i + 1] = pg[i + 1]; out[i + 2] = pg[i + 2]; out[i + 3] = 255 }
+        }
+        guard let octx = CGContext(data: &out, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W * 4, space: cs,
+                                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue), let img = octx.makeImage() else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let dest = CGImageDestinationCreateWithURL(dir.appendingPathComponent(name) as CFURL, "public.png" as CFString, 1, nil) {
+            CGImageDestinationAddImage(dest, img, nil); CGImageDestinationFinalize(dest)
+        }
     }
 
     static let sizes: [(String, CGSize)] = [("11l", CGSize(width: 1194, height: 834)), ("11p", CGSize(width: 834, height: 1194)),
@@ -260,9 +303,12 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         var report: [String] = []
         // ★ HIS CASE
         _ = try typeName(h, m, g2, "Thumbs")
+        composite(h, "R7S_verify_name_1_typing_Thumbs_on_group2.png")
         withAnimation(.easeInOut(duration: 0.15)) { m.rail = .group(g1.id) }   // the rail tab's own action
         pump(0.8)
         let left = openFields(h)
+        pump(1.5)   // (the panel's height animates to the new tab: a picture at 0.8 s caught it half-drawn)
+        composite(h, "R7S_verify_name_2_group1_tab_no_field.png")
         (h.window.firstResponder as? NSTextView)?.insertNewline(nil)
         pump(0.6)
         XCTAssertEqual(names(), ["Group 1", "Thumbs", "Group 3"], "what he typed names the group he typed it on — never the tab he moved to")
@@ -275,6 +321,7 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         pump(0.6)
         XCTAssertEqual(m.groupName(try XCTUnwrap(m.railGroup(g3.id))), "Index finger", "12 characters at most")
         XCTAssertEqual(railTitle(h, g3.id)?.text, "Index finger", "the rail's tab says it at once (nothing else changed)")
+        composite(h, "R7S_verify_name_3_index_finger_on_tab_header_player.png")
         // ★ WHOLE on the rail: a realistic 12 and the widest 12
         for name in ["Index finger", "WWWWWWWWWWWW"] {
             if m.groupName(try XCTUnwrap(m.railGroup(g3.id))) != name {
@@ -289,10 +336,20 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
             XCTAssertLessThanOrEqual(t.frame.width, FlexibleSettingsRailView.width, "…inside its tab")
             report.append(String(format: "rail '%@': drawn %.0f×%.0f, needs %.0f pt tall", name, t.frame.width, t.frame.height, need))
         }
-        snapshot(h, "R7S_verify_rail_widest_name.png")
-        // the player's line beside a long name (a probe: the player's layout is R7-V's)
-        if let note = local(h, "playerNote") {
-            report.append(String(format: "player note drawn %.0f pt beside '%@'", note.width, m.groupName(try XCTUnwrap(m.railGroup(g3.id)))))
+        composite(h, "R7S_verify_name_4_widest_12_whole_on_the_rail.png")
+        // the player's line beside a long name (a PROBE, printed: the player's layout is R7-V's) — "Group 3", then 12
+        for name in ["", "Index finger", "WWWWWWWWWWWW"] {
+            m.setGroupName(g3.id, name)
+            pump(0.8)
+            let shown = m.groupName(try XCTUnwrap(m.railGroup(g3.id)))
+            if let note = local(h, "playerNote"), let text = FlexibleSettingsSquish.note(model: m, fe: false) {
+                let natural = NSHostingView(rootView: Text(text).dsStyle(DS.TypeScale.footnote).fixedSize()).fittingSize.width
+                // PRINTED, not asserted: beside a 12-character name the player's line is shortened ("Column preview · no lattice
+                // buil…" beside "Index finger" in the picture) — the player's row is R7-V's (and the redesign's); asked
+                report.append(String(format: "player beside '%@': note '%@' drawn %.0f of %.0f pt", shown, text, note.width, natural))
+            } else {
+                report.append("player beside '\(shown)': no note drawn (\(FlexibleSettingsSquish.note(model: m, fe: false) ?? "none"))")
+            }
         }
 
         // ★ RED CONTROL 1: today's field — it stays open on the header he moved to and names THAT group
@@ -342,7 +399,10 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         func resetByHand() throws {
             let b = try XCTUnwrap(local(h, "resetAll"), "[Reset all]")
             click(h, CGPoint(x: b.midX, y: b.midY))
-            pump(0.6)
+            if !pumpUntil(3, { local(h, "resetConfirm") != nil }) {
+                print("FLEX-R7-VERIFY-RESET no confirm: resetAll \(b) · keys \(h.frames.all.keys.sorted())")
+                composite(h, "R7S_verify_reset_DEBUG_no_confirm.png")
+            }
             let c = try XCTUnwrap(local(h, "resetConfirm"), "[Reset]")
             click(h, CGPoint(x: c.midX, y: c.midY))
             pump(0.5)
@@ -355,12 +415,12 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).map(\.title), ["Model", "New"])
         XCTAssertEqual(fixes(), [], "no pop-up over [Model] [New]")
         XCTAssertEqual(exitTitle(), "Fix 1 thing", "Exit still names it (asked of him)")
-        snapshot(h, "R7S_verify_reset_page_no_popup.png")
+        composite(h, "R7S_verify_reset_1_page_model_and_new_no_popup.png")
         m.tapFace(3)
         pump(1.2)
         XCTAssertEqual(m.newGroupAsk, 3, "the keypad asks Face 3's weight")
         XCTAssertEqual(fixes(), [], "…with no pop-up beside it")
-        snapshot(h, "R7S_verify_reset_page_keypad_no_popup.png")
+        composite(h, "R7S_verify_reset_2_keypad_asks_face3_no_popup.png")
         print("FLEX-R7-VERIFY-RESET exit '\(exitTitle() ?? "-")' · fixes \(fixes())")
         // ★ RED CONTROL: today's — the pop-up opens on his Reset
         m.newGroupAsk = nil
@@ -369,8 +429,11 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         pump(1.5)
         FlexibleStagePage.controlPopOnNewTab = true
         defer { FlexibleStagePage.controlPopOnNewTab = false }
-        try resetByHand()
+        m.resetAll()   // (the model's own Reset: the keypad the ask opened stays up over [Reset all] in this window)
+        XCTAssertTrue(pumpUntil(240) { settled() }, "the part open on whole faces")
+        pump(1.5)
         XCTAssertFalse(fixes().isEmpty, "control: today's [Press …] pop-up over [Model] [New]")
+        composite(h, "R7S_verify_reset_CONTROL_todays_popup.png")
         print("FLEX-R7-VERIFY-RESET control fixes \(fixes())")
     }
 }

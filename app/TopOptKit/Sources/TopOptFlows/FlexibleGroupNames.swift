@@ -2,10 +2,12 @@
 // round 7 batch S, 4d; his img3 words of 2026-10-14: "All groups should have a trash icon next to them and their names
 // should be editable by tapping "group 1" or whatever the default name is.").
 //
-// ★ THE NAME. "Group 2" until he taps it: then ONE line, a text field (16 characters at most), the keyboard up; Return or
-// leaving it keeps what he typed; clearing it (or typing its default back) is "Group 2" again. Stored per group by its
-// STORED number (FlexibleStageSettings.groupNames), DISPLAY ONLY like the colour — never the lattice's key — and carried to
-// the group's new number when an earlier group goes (FlexibleSqueezeGroups.normalise). The Settings page reads it
+// ★ THE NAME. "Group 2" until he taps it: then ONE line, a text field (12 characters at most — the verify of R7-S: 16 were
+// cut on the rail's 72 pt tab, "Index finger…"), the keyboard up; Return or leaving it keeps what he typed; clearing it (or
+// typing its default back) is "Group 2" again. What he typed names the group he TAPPED, whatever tab he moves to before
+// Return (the verify: the open field moved with the tab's header and named Group 1); the rail's tab says it at once.
+// Stored per group by its STORED number (FlexibleStageSettings.groupNames), DISPLAY ONLY like the colour — never the
+// lattice's key — and carried to the group's new number when an earlier group goes (FlexibleSqueezeGroups.normalise). The Settings page reads it
 // everywhere it names a squeeze group (the rail's tab, the tab's header, the face list's header, a face's group menu, the
 // player's picker, the grey "In Group 4" line, a group's miss line); the main page's Selections never do (the two lists stay
 // separate, his 2026-10-10 reversal).
@@ -21,8 +23,9 @@ import TopOptKit
 
 extension FlexibleStageModel {
 
-    /// The longest name he can give a group.
-    public static let groupNameMax = 16
+    /// The longest name he can give a group (★ verify of R7-S: 12 — the widest 12 still sit whole on the rail's tab, on two
+    /// lines at most; 16 were cut there and pushed the player's line).
+    public static let groupNameMax = 12
 
     /// The name group `g` shows on the Settings page: his, else "Group N".
     public func groupName(_ g: FlexibleSqueezeGroup) -> String {
@@ -39,6 +42,9 @@ extension FlexibleStageModel {
     public func setGroupName(_ groupID: Int, _ name: String) {
         guard let g = squeezeGroups.first(where: { $0.id == groupID }) else { return }
         let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.groupNameMax))
+        // ★ VERIFY OF R7-S: the rail (it observes the MODEL) redraws at once — `settings` is computed over the project, so an
+        // edit that re-runs nothing published nothing and the tab kept "Group N" until something else changed
+        if !Self.controlNameEditPublishesNothing { objectWillChange.send() }
         edit({ s in
             var n = s.groupNames ?? [:]
             if trimmed.isEmpty || trimmed == FlexibleRowCopy.groupName(g.number) { n[String(groupID)] = nil } else { n[String(groupID)] = trimmed }
@@ -125,6 +131,19 @@ struct FlexibleGroupNameField: View {
     @FocusState private var focused: Bool
     /// The field had the keyboard once (leaving it then keeps the name; a field that never got focus stays open).
     @State private var hadFocus = false
+    /// ★ VERIFY OF R7-S: the group he TAPPED, by what it holds (its faces and presses — a renumber changes its id, never
+    /// them), and the name it had then: what he types names THAT group, and only a changed name is written.
+    @State private var editingMembers: Set<String>?
+    @State private var startDraft = ""
+
+    /// What a group holds, whatever its number.
+    static func members(_ g: FlexibleSqueezeGroup) -> Set<String> {
+        Set(g.regions.map { "r\($0)" } + g.presses.map { "p\($0.uuidString)" })
+    }
+    /// The header's group as the field sees it: its id and what it holds (a change = another group under the field).
+    private var identity: String {
+        "\(group.id)|" + Self.members(group).sorted().joined(separator: ",")
+    }
 
     var body: some View {
         let name = model.groupName(group)
@@ -149,7 +168,13 @@ struct FlexibleGroupNameField: View {
                     .accessibilityIdentifier("flexible-group-\(group.number)-name-field")
                     .onAppear { focused = true }
             } else {
-                Button { draft = model.settings.groupNames?[String(group.id)] ?? ""; hadFocus = false; editing = true } label: {
+                Button {
+                    draft = model.settings.groupNames?[String(group.id)] ?? ""
+                    startDraft = draft
+                    editingMembers = Self.members(group)
+                    hadFocus = false
+                    editing = true
+                } label: {
                     Text(name)
                         .font(.system(size: size, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1)
@@ -164,12 +189,19 @@ struct FlexibleGroupNameField: View {
                 .accessibilityIdentifier("flexible-group-\(group.number)-line")
             }
         }
+        // ★ VERIFY OF R7-S: the header now shows ANOTHER group (he tapped another tab, the group was deleted or renumbered
+        // under it): the field closes, and what he typed goes to the group he tapped (never the one now shown)
+        .onChange(of: identity) { _ in if !Self.controlCommitsToTheHeadersGroup { commit() } }
+        .onDisappear { if !Self.controlCommitsToTheHeadersGroup { commit() } }
     }
 
     private func commit() {
         guard editing else { return }
         editing = false
-        model.setGroupName(group.id, draft)
+        if Self.controlCommitsToTheHeadersGroup { model.setGroupName(group.id, draft); return }   // (the red control: today's)
+        guard draft != startDraft, let key = editingMembers,
+              let tapped = model.squeezeGroups.first(where: { Self.members($0) == key }) else { return }
+        model.setGroupName(tapped.id, draft)
     }
 }
 

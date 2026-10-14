@@ -542,6 +542,14 @@ public final class FlexibleStageModel: ObservableObject {
             ensureStack(region)
             return
         }
+        // ★ VERIFY OF R7-S: [+ New] with faces pressed — a face no group holds starts the NEXT group (the keypad asks its
+        // weight where no main-page Load group gives one); it had opened Group 1
+        if rail == .newGroup, settings.face(region) == nil, !settings.pressRegions.contains(region),
+           !Self.controlRailFollowsSelection, !Self.controlNewTabOpensGroupOne {
+            startNewGroup(region, kg: nil)
+            ensureStack(region)
+            return
+        }
         selectedRegion = region
         followSelection()   // ★ ROUND 7 (S, 4f b): his tap is a pick — its tab opens
         if tab == .more { tab = .face }

@@ -44,6 +44,16 @@ extension FlexibleStageModel {
         switch rail {
         case .group(let id) where squeezeGroups.contains(where: { $0.id == id }): return rail
         case .rests: return rail
+        // ★ VERIFY OF R7-S (his img4: "brings me back to Group 1"): a face no group holds never sends him to Group 1 by
+        // default — on [+ New] it starts a group (tapFace; the tab stays meanwhile), on [Model] the group (or Rests) he
+        // was working on opens (its card offers [Press it] there)
+        case .newGroup where !Self.controlNewTabOpensGroupOne: return .newGroup
+        case .model where !Self.controlNewTabOpensGroupOne:
+            switch lastWorkTab {
+            case .group(let id)? where railGroup(id) != nil: return .group(id)
+            case .rests? where settings.faces.contains(where: { !$0.isLoaded }): return .rests
+            default: return .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
+            }
         default: return .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
         }
     }
@@ -79,6 +89,7 @@ extension FlexibleStageModel {
     }
 
     func railChanged() {
+        switch rail { case .group, .rests: lastWorkTab = rail; default: break }   // ★ verify of R7-S: [Model]'s fallback
         let t: Tab = rail == .model ? .more : .face
         if tab != t { tab = t }
         if rail != .newGroup, edgePick != nil { edgePick = nil }   // ★ ROUND 6 ITEM 2: leaving [+ New] ends pick mode
@@ -236,10 +247,14 @@ struct FlexibleSettingsRailView: View {
         return Button { withAnimation(.easeInOut(duration: 0.15)) { model.rail = t.tab } } label: {
             VStack(spacing: 3) {
                 icon(t.tab)
+                // ★ VERIFY OF R7-S: his name WHOLE — it wraps (two lines at most for 12 characters) where one line was cut
+                // ("Index finger…"); "Group 2", "Model", "Rests", "New" stay one line
                 Text(t.title)
                     .font(Self.titleFont)
                     .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .lineLimit(Self.controlOneLineTitle ? 1 : nil).minimumScaleFactor(Self.controlOneLineTitle ? 0.8 : 1)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: !Self.controlOneLineTitle)
                     // the title as drawn, by tab (the hosted test reads what it says and its frame)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["railTitle:\(t.id):\(t.title)": g.frame(in: .global)])
@@ -489,13 +504,15 @@ struct FlexibleNewGroupTab: View {
             Text(FlexibleRowCopy.newGroupTitle(next))
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(minHeight: 36)
-            // ★ ROUND 7 (S, 4h): with NOTHING pressed (after Reset all) a tap on any face starts Group 1
+            // ★ ROUND 7 (S, 4h): with NOTHING pressed (after Reset all) a tap on any face starts Group 1; ★ verify of R7-S: and
+            // with faces pressed, a tap on a face no group holds starts the next group — "Tap the face that starts it" is
+            // true whenever a face is free ("Press two faces first" only when every face is set and none can leave its group)
             let nothingPressed = model.settings.loadedFaces.isEmpty && model.presses.isEmpty
-            Text(candidates.isEmpty && !nothingPressed ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
+            Text(candidates.isEmpty && !nothingPressed && !model.hasFreeFace ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .accessibilityIdentifier("flexible-new-group-line")
-            if nothingPressed, let r = model.newGroupAsk {
+            if let r = model.newGroupAsk {
                 FlexibleNewGroupAsk(model: model, padTarget: $padTarget, region: r)
             }
             ForEach(candidates, id: \.self) { hand in
