@@ -46,6 +46,8 @@ public enum FlexibleLatticeView {
     @MainActor
     public static func available(model m: FlexibleStageModel) -> Bool {
         let failed: Bool = { if case .failed = m.sceneState { return true } else { return false } }()
+        // ★ ROUND 7, M1 (1a): no face-prism — no lattice can come (the build refuses)
+        if m.sceneState == .ready, !m.facePrismsSet { return false }
         let fresh = m.lattice != nil && !m.latticeIsStale
         if fresh || m.latticeBuilding { return true }
         if failed { return false }

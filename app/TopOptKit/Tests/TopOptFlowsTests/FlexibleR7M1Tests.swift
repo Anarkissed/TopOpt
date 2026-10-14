@@ -48,7 +48,7 @@ enum FlexibleR7M1Fixtures {
 
     /// His pad on a main stage (the shared model), settled; `live`: with his live lattice.
     static func hisPad(_ test: XCTestCase, live: Bool) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
-        let r = try FlexiblePressFixtures.a1Project(3, test)
+        let r = try FlexiblePressFixtures.a1Project(3, test, facePrism: false)   // as he saved it: no face-prism
         if live { try hisLiveLattice(r.project) }
         let s = FlexibleMainStage()
         s.reduceMotion = { true }
@@ -139,10 +139,13 @@ final class FlexibleR7M1Tests: XCTestCase {
         guard case .shell(let sh3) = moved.volume.shape else { return XCTFail("a shell") }
         XCTAssertEqual(String(format: "%.1f mm", sh3.reachedDepthMM), String(format: "%.1f mm", p.latticeSlabDepthMM(.face(group: c.id, face: 3), in: c.id)))
         XCTAssertEqual(String(format: "%.1f mm", sh3.reachedDepthMM), "17.3 mm", "★ the list's 17.3, on the model too")
-        // ★ RED CONTROL: round 6's squish prism (S1b) — Face 3 drawn at its squish depth, 24.5 mm against the list's 25.0
+        // ★ RED CONTROL: round 6's squish prisms (S1b) — under [Prisms] (as in his img1) Face 3 drawn at its SQUISH depth
+        // (24.5 mm × k), not the list's 25.0 (a Protect-only group's own prisms were never drawn: batch V's Pending rule)
         p.writeLatticeDepthMM(.face(group: c.id, face: 3), mm: 25)
         s.controlSquishPrismsOnMain = true
+        m.views.insert(.prisms)
         let control = s.volumes(p, on: .lattice, drilledIn: false)
+        m.views.remove(.prisms)
         s.controlSquishPrismsOnMain = false
         let squish3 = control.first { $0.volume.faceID == 3 }.flatMap { FlexibleDepthPrism.handle($0.volume) }
         XCTAssertNotNil(squish3, "★ RED CONTROL: the squish prism on Face 3")
@@ -373,7 +376,7 @@ final class FlexibleR7M1Tests: XCTestCase {
     // MARK: - fixtures
 
     private func padStage() async throws -> (ProjectModel, FlexibleMainStage, FlexibleStageModel, Int) {
-        let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
+        let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"), facePrism: false)
         let stage = FlexibleMainStage()
         stage.reduceMotion = { true }
         let m = stage.model(for: pm, materialsPath: FlexibleHisProject.materialsPath, stampsPath: nil, persist: {})

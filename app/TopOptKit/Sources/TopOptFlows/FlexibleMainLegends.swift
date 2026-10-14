@@ -196,8 +196,9 @@ public struct FlexibleMainLegends: View {
     }
 
     private var drilled: FlexibleReadKind? { FlexibleReadKind(mode: mode) }
-    /// ★ S1b: the card's header with no scale to read (only [Prisms]' row) — nothing to tap.
-    static let prismsOnlyTab = "SQUISH PRISMS"
+    /// ★ S1b: the card's header with no scale to read (only [Prisms]' row) — nothing to tap. ★ ROUND 7, M1: the face-prisms'
+    /// (the main page draws no squish prism any more).
+    static let prismsOnlyTab = FlexibleRowCopy.mainFacePrismsTab
 
     public var body: some View {
         // the view a tap comes through, for the readings (no publish)
@@ -258,7 +259,8 @@ public struct FlexibleMainLegends: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(kinds) { k in content(k) }
                     // ★ S1b (round 6 item 3): [Prisms]' one line — the Settings page's own row, at this page's k
-                    if main.legendPrismsRow { FlexibleLegendViewRows.prisms(k: main.prismLegendK) }
+                    // ★ ROUND 7, M1: the face-prism's row (the picked group's lattice face-prisms — no squish ×k here)
+                    if main.legendPrismsRow { FlexibleLegendViewRows.facePrisms() }
                 }
             }
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)

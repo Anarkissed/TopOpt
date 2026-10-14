@@ -764,7 +764,9 @@ public final class FlexibleStageModel: ObservableObject {
                 let st = try await worker.withScene { try $0.stack(face: k.region, rotation: k.rotation) }
                 let g = try await worker.withScene { try FlexFaceGeometry.compute(scene: $0, key: k, stack: st, partFlat: partFlat) }
                 await MainActor.run {
-                    self.stacks[k] = st; self.geometry[k] = g
+                    // ★ ROUND 7, M1 (1a): with no face-prism the stage keeps NO lattice on the stack (core's own rule for no
+                    // include region is the whole part — FlexibleStageModel+FacePrisms)
+                    self.stacks[k] = self.facePrismsSet ? st : st.withoutLattice(); self.geometry[k] = g
                     self.seedStampIfNeeded(k.region)   // ★ Stamp chosen before the stack landed (D1 verification)
                     self.recomputeAll()
                 }
@@ -1117,6 +1119,12 @@ public final class FlexibleStageModel: ObservableObject {
     /// the FIRMER density per voxel; each face then squishes by what its column holds in that
     /// combined field (≈ as built), and a group that misses its design says so.
     public func generateLattice() {
+        // ★ ROUND 7, M1 (1a — his img1: "ONLY the face-prism creates the lattice structure in any area"): no face-prism, no
+        // lattice — nothing is built, a lattice built before is cleared (it was the whole part's), and it is no failure
+        guard facePrismsSet else {
+            if lattice != nil { discardLattice() }
+            return
+        }
         let ready = readiness
         // blocked, or still designing (a face without its design would be left out silently)
         guard ready.isReady, !ready.designing, !latticeBuilding, let part = project.viewerMesh else { return }

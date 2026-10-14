@@ -164,6 +164,11 @@ final class FlexiblePressSaveTests: XCTestCase {
     /// the AP1 red commit keys on it.
     func testAPendingPressNeverMakesTheLatticeStale() async throws {
         let (m, _, _) = try await G.padModel(self)
+        // ★ ROUND 7, M1 (ruling 4 — no face-prism, no lattice): this pad is the golden's (its run job's bytes are compared
+        // below), so it keeps NO face-prism; its lattice is built through the pre-ruling path (`controlWholePartWithoutPrism`,
+        // the whole part). The subject — a pending press never stales a lattice — is the same with a face-prism.
+        m.controlWholePartWithoutPrism = true
+        defer { m.controlWholePartWithoutPrism = false }
         _ = try await FlexibleSquishFixture.build(m, "the pad")
         let lattice = try XCTUnwrap(m.lattice)
         XCTAssertFalse(m.latticeIsStale, "premise: the lattice is current")

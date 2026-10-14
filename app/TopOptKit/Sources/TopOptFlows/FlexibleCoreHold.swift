@@ -89,6 +89,7 @@ public struct FlexibleCoreHold: Equatable, Sendable {
     public static func kind(calibrateFirst: Bool, groups: Int, pinches: Int, edgesBeside: Bool = false) -> Kind? {
         if calibrateFirst { return .shapeOnly }
         if groups > 1 { return .squeezeGroups }
+        if edgesBeside, !controlEdgesSilentlyDropped { return .edgesBeside }
         if pinches > 0 { return .pinch }
         return nil
     }

@@ -186,9 +186,10 @@ enum FlexiblePressFixtures {
         }
     }
 
-    /// C1's pad, nothing pressed.
+    /// C1's pad, nothing pressed — ★ M1: and no face-prism (the AP0 baseline the goldens and frames were recorded on, byte
+    /// for byte; FlexibleHisProject.padProject's default sets one).
     static func padProject() throws -> ProjectModel {
-        try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
+        try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"), facePrism: false)
     }
 
     /// His round-5 pad AS SAVED (no [Lattice under it] taps), through the app's own restore.
@@ -237,11 +238,27 @@ enum FlexiblePressFixtures {
     }
 
     /// The A1 store's project n AS SAVED, from the frozen copy, through the app's own restore.
-    static func a1Project(_ n: Int, _ test: XCTestCase) throws -> FlexibleHisProject.Restored {
+    /// ★ ROUND 7, M1 (ruling 4 — only a face-prism makes lattice): his pad (n = 3) was saved with NO face-prism, so the
+    /// Flexible stage builds nothing on it now. `facePrism` (the default) sets one face-prism under his Top — the Top's own
+    /// Selections row set to Lattice, 20 mm deep (the pad's thickness: the whole pad, as the suites written on the old
+    /// whole-part lattice expect; `topFacePrism`). `facePrism: false` restores it exactly as saved (the no-prism tests, and
+    /// his live lattice — FlexibleR7M1Fixtures). The frozen files are never touched.
+    static func a1Project(_ n: Int, _ test: XCTestCase, facePrism: Bool = true) throws -> FlexibleHisProject.Restored {
         try assertFrozen(a1Dir(n))
         let r = try FlexibleHisProject.restore(a1Dir(n), asSaved: true)
         test.addTeardownBlock { r.cleanup() }
+        if n == 3, facePrism { try topFacePrism(r.project) }
         return r
+    }
+
+    /// ★ M1: his Top's Selections row set to Lattice, 20 mm deep (the main page's own setters — the row's Lattice chip and
+    /// its depth), the Top's group a lattice role. Nothing else of his groups moves.
+    static func topFacePrism(_ p: ProjectModel) throws {
+        let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" }, "his Top")
+        p.lattice.enabled = true
+        if p.lattice.groupRoles[top.id] == nil { p.lattice.groupRoles[top.id] = .include }
+        p.lattice.selectableRoles[LatticeSelectableRef.face(group: top.id, face: 1).key] = .include
+        p.writeLatticeDepthMM(.face(group: top.id, face: 1), mm: 20)
     }
 
     /// His 'l bracket 3' (S0's 92A8016E, a STEP part), frozen. XCTSkip — printed and counted — when OCCT throws.

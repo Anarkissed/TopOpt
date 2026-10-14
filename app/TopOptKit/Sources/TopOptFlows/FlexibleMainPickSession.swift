@@ -61,8 +61,18 @@ extension FlexibleMainStage {
         return false
     }
 
-    /// The group whose prism and number the main page may draw: the active Selections group, only once he has picked in
-    /// this session, and never a Pending group. (R7-M narrows it to a picked group with a lattice face-prism.)
+    /// ★ ROUND 7, M1 (H15'): the group whose LATTICE face-prisms the main page draws — the active Selections group, only once
+    /// he has picked in this session (his fixed rule), whatever its role: a group with no face-prism draws nothing (a Pending
+    /// group cannot hold one — LatticeFaceRoleGate), and a Protect-only group with a Lattice face draws it (batch V's Pending
+    /// test hid his Group C).
+    func pickedGroup(_ project: ProjectModel) -> SelectionGroup? {
+        guard let g = project.selection.activeGroup else { return nil }
+        if controlPrismOnOpen { return g }   // RED CONTROL: S1b's rule — the active group's prism on open
+        return sessionPicked ? g : nil
+    }
+
+    /// The group whose SQUISH prism round 6 drew (the RED CONTROL `controlSquishPrismsOnMain` only, since M1): the active
+    /// Selections group, only once he has picked in this session, and never a Pending group.
     func prismGroup(_ project: ProjectModel) -> SelectionGroup? {
         guard let g = project.selection.activeGroup else { return nil }
         if controlPrismOnOpen { return g }   // RED CONTROL: S1b's rule — the active group's prism on open

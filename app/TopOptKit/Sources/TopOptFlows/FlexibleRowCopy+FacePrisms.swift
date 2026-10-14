@@ -3,6 +3,8 @@
 // copy never meets it.
 
 import Foundation
+import SwiftUI
+import TopOptDesign
 
 extension FlexibleRowCopy {
     /// ★ M1 (1a, ruling 4): no face is set to Lattice — no lattice on the Flexible stage; the pill and the Export step's
@@ -29,4 +31,22 @@ extension FlexibleRowCopy {
 extension FlexibleRowCopy.Info {
     /// ★ M1: the legend card's (i) with only the [Prisms] row in it.
     public static let mainFacePrisms = "A face-prism is the lattice under a face: only inside a face-prism does the part become lattice. It is drawn from the face to its depth — the depth set in Selections, the same number its row shows. Pick a group in Selections to see its face-prisms; [Prisms] adds this row and X-ray. The squish is set on the Squish page."
+}
+
+extension FlexibleLegendViewRows {
+    /// ★ M1 (H15'): the MAIN page's [Prisms] row — "▮ Face-prism = where the lattice goes", the swatch the face-prism's own
+    /// violet (the Settings page keeps its squish row, "Prism = squish shown ×k").
+    static func facePrisms() -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(FlexibleStageStyle.facePrismToken.color).frame(width: 10, height: 12)
+            Text(FlexibleRowCopy.mainFacePrismsRow)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legendPrismsRow": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flexible-legend-face-prisms-row")
+    }
 }

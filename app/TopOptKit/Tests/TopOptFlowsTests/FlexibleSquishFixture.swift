@@ -104,6 +104,18 @@ enum FlexibleSquishFixture {
         m.openScene()
         try await FlexibleHisProject.waitFor(90, "\(what): the scene") { m.sceneState == .ready }
         prepare(m)
+        // ★ ROUND 7, M1 (ruling 4 — only a face-prism makes lattice): a part with none gets [Lattice under it] (the app's own
+        // one-tap fix — ProjectModel.flexibleLatticeUnder, a protected selection set to Lattice) under every face of its
+        // setup, 50 mm deep (the deepest a face-prism goes): the suites written on the whole-part lattice keep a lattice.
+        if !m.facePrismsNow {
+            for f in m.settings.faces where !FlexibleRegions.isSector(f.faceRegionID) {
+                pm.flexibleLatticeUnder(.newGroup(face: FaceID(f.faceRegionID), region: nil, name: m.displayName(f.faceRegionID), depthMM: 50))
+            }
+            m.openScene()
+            try await FlexibleHisProject.waitFor(90, "\(what): the scene on its face-prisms") {
+                m.sceneState == .ready && m.openedKey == m.currentSceneKey
+            }
+        }
         _ = try await build(m, what)
         try await solve(m, what)
         return m

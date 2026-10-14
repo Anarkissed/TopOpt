@@ -501,7 +501,7 @@ enum FlexibleAngledGoldens {
         case "his_0004": r = try FlexiblePressFixtures.his0004(test)
         case "his_r5": r = try FlexiblePressFixtures.hisRound5(test)
         case "A1_0002": r = try FlexiblePressFixtures.a1Project(2, test)
-        case "A1_0003": r = try FlexiblePressFixtures.a1Project(3, test)
+        case "A1_0003": r = try FlexiblePressFixtures.a1Project(3, test, facePrism: false)   // ★ M1: AS SAVED (no face-prism) — the encoder's bytes
         case "A1_0004": r = try FlexiblePressFixtures.a1Project(4, test)
         default: throw XCTSkip("no send set \(label)")
         }
@@ -666,6 +666,13 @@ enum FlexibleAngledGoldens {
             return out.joined(separator: "\n") + "\n"
         }
         m.keepCombinedField = true
+        // ★ ROUND 7, M1 (ruling 4 — no face-prism, no lattice): C1's pad sets no face-prism, so the stage builds NOTHING on it
+        // now. This golden pins the app's field ASSEMBLY (core's group fields combined), which is the same code with a
+        // face-prism; on a pad with none it is built through the pre-ruling path (`controlWholePartWithoutPrism`, the whole
+        // part) so its bytes stay comparable. The gate itself is FlexibleR7M1Tests'. His 0004 / r5 set face-prisms: untouched.
+        let wholePart = !m.facePrismsSet
+        if wholePart { m.controlWholePartWithoutPrism = true }
+        defer { if wholePart { m.controlWholePartWithoutPrism = false } }
         m.generateLattice()
         try await FlexibleHisProject.waitFor(180, "\(label): the lattice") { (m.lattice != nil && !m.latticeIsStale) || m.latticeError != nil }
         await m.waitForIdle()

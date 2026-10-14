@@ -565,9 +565,12 @@ final class FlexibleRound6Tests: XCTestCase {
     func testTheWorkspaceHandsTheMainPagesPrismsToTheViewer() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         XCTAssertTrue(ws.contains("legendDrilledIn"), "premise: the S1 base (#354's legendDrilledIn)")
-        let h15 = "? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),"
-        XCTAssertTrue(ws.contains(h15), "H15: the main page's prisms join the clearance list")
-        XCTAssertEqual(ws.components(separatedBy: h15).count - 1, 1, "H15 is one line")
+        // ★ RE-PINNED (round 7, M1 — H15', approved by the reviewer 2026-10-14; his img1: "The face-prism depth in the modal
+        // and on the face-prism are not equal? … they should *always* be equal"): on the Flexible stage ONLY the main page's
+        // prisms (the picked group's lattice face-prisms) — #354's slabs stay on every other stage. FlexibleR7M1Tests pins it.
+        let h15 = "? (flexibleMain.owns(project, stage) ? [] : stageVolumeItems) + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),"
+        XCTAssertTrue(ws.contains(h15), "H15': the main page's prisms are the clearance list on the Flexible stage")
+        XCTAssertEqual(ws.components(separatedBy: h15).count - 1, 1, "H15' is one line")
         XCTAssertFalse(ws.contains("? stageVolumeItems : [],"), "H15 replaces the old line (+1 −1)")
         XCTAssertEqual(ws.components(separatedBy: "flexibleMain.volumes(").count - 1, 2, "volumes( is asked only on H15's line")
     }

@@ -112,8 +112,13 @@ enum FlexibleHisProject {
     }
 
     /// C1's plain pad (100 × 100 × 20, pseudo-faces) as a project the Flexible model can
-    /// open: the same STL his project uses, with no groups and no split.
-    static func padProject(_ flexible: FlexibleStageSettings) throws -> ProjectModel {
+    /// open: the same STL his project uses, with no split.
+    /// ★ ROUND 7, M1 (ruling 4 — only a face-prism makes lattice; with none the Flexible stage builds nothing): `facePrism`
+    /// (the default) sets a face-prism under the pad's TOP as deep as the pad (20 mm) — exactly what the readiness's one-tap
+    /// [Lattice under it] makes for it (a protected selection "Top", Lattice; `padFacePrism`). Under the top to 20 mm IS the
+    /// whole pad, so the suites written on the old whole-part lattice keep the same lattice. `facePrism: false` is the pad
+    /// with no group at all (the AP0 / golden baseline, FlexiblePressFixtures.padProject; the no-prism tests).
+    static func padProject(_ flexible: FlexibleStageSettings, facePrism: Bool = true) throws -> ProjectModel {
         let path = repoRoot.appendingPathComponent(
             "docs/handoffs/evidence/2026-09-28-flexible-squish-maths/a_pad_centre_soft/pad_100x100x20.stl").path
         let m = try TopOptKit.importMesh(path: path)
@@ -121,7 +126,15 @@ enum FlexibleHisProject {
                                 faceCount: m.faceCount, watertight: m.watertight, pseudoFaces: m.pseudoFaces)
         let pm = ProjectModel(id: UUID(), name: "pad", material: "ABS", process: .fdm, importedFile: file, importedMesh: m)
         pm.lattice.flexible = flexible
+        if facePrism { padFacePrism(pm) }
         return pm
+    }
+
+    /// ★ M1: the pad's face-prism — [Lattice under it] for its top (ProjectModel.flexibleLatticeUnder, the app's own edit):
+    /// a protected selection "Top" with its face set to Lattice, 20 mm deep (the pad's thickness: the whole pad).
+    static func padFacePrism(_ pm: ProjectModel) {
+        guard let mesh = pm.viewerMesh else { return }
+        pm.flexibleLatticeUnder(.newGroup(face: FaceID(topFace(mesh)), region: nil, name: "Top", depthMM: 20))
     }
 
     /// The pad's top face id (its triangles sit at z = 20).

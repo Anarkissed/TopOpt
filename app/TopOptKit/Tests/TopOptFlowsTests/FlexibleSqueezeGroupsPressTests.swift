@@ -53,7 +53,12 @@ final class FlexibleSqueezeGroupsPressTests: XCTestCase {
         XCTAssertEqual(m.squeezeGroups.count, 2, "group 2 is a tab")
         XCTAssertEqual(m.squeezeGroup(ofPress: id)?.number, 2)
         XCTAssertEqual(m.sentSqueezeGroups.count, 1)
-        XCTAssertNil(m.coreHoldKind, "★ core's hold is not raised by a press it cannot take yet")
+        // ★ RE-PINNED (round 7, M1 — the reviewer's ruling 4 of 2026-10-14: "Export offers ONE group at a time; the app must
+        // SAY so before export … Never silently drop a group"): an EDGES group (this two-region press) beside a face group
+        // now raises the hold — the export makes Group 1 only and says so first; its one send is this very job (nothing of
+        // group 2 is in it, still). A tilted one-region press alone is not an edges group and raises nothing (as before).
+        XCTAssertEqual(m.coreHoldKind, .edgesBeside, "★ said before export: this export makes Group 1 only")
+        XCTAssertEqual(m.coreHold?.fixes.map(\.resting), [[]], "its one send rests nothing: the job below")
         XCTAssertEqual(m.sims.count, 1, "one sim: the press plays nothing until core builds it")
         XCTAssertNil(m.groupMiss(1))
         try G.assertGolden(try G.runJob(m, roots: [G.repo]), "c1_pad_model_run_job.json")

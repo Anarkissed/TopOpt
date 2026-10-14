@@ -78,11 +78,13 @@ extension FlexibleRound7ViewsTests {
         let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
         p.selection.setActive(top.id)
         XCTAssertTrue(s.sessionPicked, "premise: his pick of the Top")
-        XCTAssertEqual(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID), [1], "the picked Top's prism, faint (after his pick)")
+        XCTAssertEqual(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID), [1], "the picked Top's face-prism (after his pick; ★ M1: the lattice face-prism)")
         let afterPick = tags()
         XCTAssertEqual(afterPick, [], "★ no squish number on the main page after his pick (img2's 12.0 mm)")
         m.views.insert(.prisms)
-        XCTAssertEqual(Set(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1, 2, 3, 4, 5], "[Prisms]: every pressed face's prism")
+        // ★ RE-PINNED (round 7, M1 — H15'): [Prisms] is every face-prism of the picked group (the fixture's Top face-prism,
+        // Face 1), never every pressed face's squish prism
+        XCTAssertEqual(Set(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1], "[Prisms]: every face-prism of the picked Top")
         let underPrisms = tags()
         XCTAssertEqual(underPrisms, [], "★ …nor under [Prisms]")
         // ★ RED CONTROL: S1b's tags — the Top's squish number on the main page

@@ -247,7 +247,7 @@ extension FlexibleMainStage {
         case .dent: return dentInfo
         case .stress: return stressInfo
         case .lattice: return FlexibleReadKind.lattice.info
-        case nil: return legendPrismsRow ? FlexibleRowCopy.Info.mainPrisms : FlexibleReadKind.lattice.info   // ★ S1b: [Prisms]' row alone
+        case nil: return legendPrismsRow ? FlexibleRowCopy.Info.mainFacePrisms : FlexibleReadKind.lattice.info   // ★ S1b: [Prisms]' row alone (★ M1: the face-prism's)
         }
     }
 

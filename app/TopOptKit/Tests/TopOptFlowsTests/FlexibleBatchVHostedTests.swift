@@ -259,8 +259,11 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         XCTAssertEqual(prisms(), [1], "the Top again")
         m.views = [.prisms]
         let all = s.volumes(p, on: .lattice, drilledIn: false)
-        XCTAssertEqual(Set(all.map(\.volume.faceID)), [1, 4, 2, 3, 5], "[Prisms]: every pressed face")
-        XCTAssertEqual(all.filter(\.selected).map(\.volume.faceID), [1], "the picked Top brighter")
+        // ★ RE-PINNED (round 7, M1 — H15'; his img1: "they should *always* be equal", img2: "What is this 12mm?"): the main
+        // page draws the picked group's LATTICE face-prisms, never the squish prisms of every pressed face — [Prisms] is every
+        // face-prism of the picked group (the fixture's Top face-prism, Face 1: FlexiblePressFixtures.topFacePrism)
+        XCTAssertEqual(Set(all.map(\.volume.faceID)), [1], "[Prisms]: every face-prism of the picked Top")
+        XCTAssertEqual(all.filter(\.selected).map(\.volume.faceID), [1], "#354's look for the picked group's face-prism")
         m.views = []
         print("FLEX-BV-1b (fixed, R7-V) after his pick: Top [1] · Group C [] · [Prisms] \(all.map(\.volume.faceID).sorted())")
     }

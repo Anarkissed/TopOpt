@@ -156,6 +156,9 @@ public final class FlexibleCoreRun: ObservableObject {
     public func send(_ m: FlexibleStageModel) {
         shown = true
         guard !isSending else { return }
+        // ★ ROUND 7, M1 (ruling 4: "The Flexible job builder must NEVER send a job with no include region"): with no
+        // face-prism core would lattice the whole part — not sent, the reason said (asked fresh: an edit on another stage)
+        if Self.noFacePrismFirst(m) { refuseNoFacePrism(); return }
         hold = m.coreHold
         if let h = hold {
             if let f = sentFix, h.fixes.contains(f), case .ran = phase,
@@ -185,6 +188,7 @@ public final class FlexibleCoreRun: ObservableObject {
     public func send(_ m: FlexibleStageModel, fix: FlexibleCoreFix) {
         guard case .send = fix, !isSending else { return }
         shown = true
+        if Self.noFacePrismFirst(m) { refuseNoFacePrism(); return }   // ★ M1 (ruling 4): the step's buttons too
         let job: String
         do {
             job = try m.runJobJSON(resting: Set(fix.resting))
@@ -197,6 +201,19 @@ public final class FlexibleCoreRun: ObservableObject {
         }
         if job == sentJob, case .ran = phase { return }
         start(job, model: m, fix: fix)
+    }
+
+    /// ★ M1 (ruling 4): no face-prism refuses the send — after what the encoder says first (no part, no filament, no
+    /// pressed face: each its own line, as before), before core's holds.
+    static func noFacePrismFirst(_ m: FlexibleStageModel) -> Bool {
+        guard m.project.importedFile != nil, m.settings.materialID != nil, !m.settings.loadedFaces.isEmpty else { return false }
+        return !m.facePrismsNow
+    }
+
+    /// ★ M1 (ruling 4): nothing set to Lattice — the Export step says so and nothing reaches core.
+    private func refuseNoFacePrism() {
+        hold = nil; sentJob = nil; sentFix = nil
+        phase = .notSent(line: Self.notSentLine(.noFacePrism), why: FlexibleJob.EncodeError.noFacePrism.description)
     }
 
     private func start(_ job: String, model m: FlexibleStageModel, fix: FlexibleCoreFix?) {

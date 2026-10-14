@@ -1013,7 +1013,7 @@ public struct WorkspacePlaceholder: View {
                               (showLatticePage
                                || (force.phase == .edit && !fullScreenPageUp))
                               && !legendDrilledIn
-                              ? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),   // Flexible (PR #362) H15: the main page's faint prisms (the active group's, or the Prisms view's) — [] off the Flexible stage (FlexibleMainStage.volumes)
+                              ? (flexibleMain.owns(project, stage) ? [] : stageVolumeItems) + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) : flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),   // Flexible (PR #362) H15': on the Flexible stage ONLY the main page's prisms — the picked group's lattice face-prisms (FlexibleMainStage.volumes); #354's slabs on every other stage, as before
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
                           // body is not drawn at all (alpha 0), it only keeps serving the
@@ -5999,6 +5999,7 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
+            if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }   // Flexible (PR #362) H18: Topology's "Protect 3 mm" and "Minimize plastic" chips off the Flexible stage (FlexibleMainChips.swift)
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0

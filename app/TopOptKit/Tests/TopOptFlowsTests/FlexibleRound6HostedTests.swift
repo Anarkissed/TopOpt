@@ -564,11 +564,14 @@ final class FlexibleRound6HostedTests: XCTestCase {
         r.project.selection.setActive(top.id)
         stage.refresh()
         let active = stage.volumes(r.project, on: .lattice, drilledIn: false)
-        XCTAssertEqual(active.map(\.volume.faceID), [1], "the active group Top: face 1's prism")
-        XCTAssertNotNil(active.first?.faceAlpha, "faint")
+        // ★ RE-PINNED (round 7, M1 — H15'; his img1: "they should *always* be equal", img2: "What is this 12mm?"): the picked
+        // group's LATTICE face-prisms (the fixture's Top face-prism on Face 1 — FlexiblePressFixtures.topFacePrism), in #354's
+        // look; [Prisms] is every face-prism of the picked group, never every pressed face's squish prism
+        XCTAssertEqual(active.map(\.volume.faceID), [1], "the active group Top: face 1's face-prism")
+        XCTAssertTrue(active.allSatisfy { $0.selected && $0.faceAlpha == nil }, "#354's look for the picked group's face-prism")
         m.views = [.prisms]
         let all = stage.volumes(r.project, on: .lattice, drilledIn: false)
-        XCTAssertEqual(Set(all.map(\.volume.faceID)), [1, 4, 2, 3, 5], "the Prisms view: every pressed face")
+        XCTAssertEqual(Set(all.map(\.volume.faceID)), [1], "the Prisms view: every face-prism of the picked Top")
         XCTAssertTrue(stage.volumes(r.project, on: .topology, drilledIn: false).isEmpty, "off the Flexible stage")
         XCTAssertTrue(stage.volumes(r.project, on: .lattice, drilledIn: true).isEmpty, "while a legend reads")
         m.views = []
@@ -669,8 +672,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
             click(h, prisms)
             XCTAssertTrue(m.views.contains(.prisms), "\(tag): [Prisms] on")
             XCTAssertTrue(stage.xrayOn, "\(tag): …and X-ray with it (★ R7-V: no longer the Lattice view)")
-            XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1, 4, 2, 3, 5],
-                           "\(tag): every pressed face's prism in H15's list")
+            // ★ RE-PINNED (round 7, M1 — H15'): every face-prism of the PICKED group (none picked here: nothing), never every
+            // pressed face's squish prism
+            XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [],
+                           "\(tag): no group picked — no face-prism in the list H15' hands the viewer")
             click(h, prisms)
             XCTAssertFalse(m.views.contains(.prisms), "\(tag): off again")
             XCTAssertTrue(stage.xrayOn, "\(tag): X-ray stays as it is")
@@ -710,8 +715,12 @@ final class FlexibleRound6HostedTests: XCTestCase {
     /// before: no row, and no card without a scale.
     func testTheMainLegendCardCarriesThePrismsRowWhilePrismsIsOn() throws {
         let legends = try FlexibleSource.code("FlexibleMainLegends.swift")
-        XCTAssertEqual(legends.components(separatedBy: "FlexibleLegendViewRows.prisms(k: main.prismLegendK)").count - 1, 1,
-                       "one Prisms row, in the one card, at the page's k")
+        // ★ RE-PINNED (round 7, M1 — H15'): the main page's [Prisms] row is the FACE-PRISM's ("▮ Face-prism = where the lattice
+        // goes" — the picked group's lattice face-prisms; no squish ×k on the main page, his 2026-10-14 answer); the Settings
+        // page keeps "Prism = squish shown ×k"
+        XCTAssertEqual(legends.components(separatedBy: "FlexibleLegendViewRows.facePrisms()").count - 1, 1,
+                       "one Prisms row, in the one card: the face-prism's")
+        XCTAssertFalse(legends.contains("FlexibleLegendViewRows.prisms(k:"), "no squish row on the main page")
         let rows1 = FlexibleMainLegendLayout.cardSize(rows: 1, minimized: false)
         let rows1Prisms = FlexibleMainLegendLayout.cardSize(rows: 1, minimized: false, viewRows: 1)
         XCTAssertEqual(rows1Prisms.height, rows1.height + FlexibleMainLegendLayout.viewRowHeight, accuracy: 0.5, "the row adds one line")
@@ -732,7 +741,7 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let only = try XCTUnwrap(stage.legendCard(viewport: v, bottomClearance: 90, chipColumnWidth: 0), "[Prisms] with no scale: the card, for its row")
         XCTAssertTrue(only.expanded)
         XCTAssertEqual(stage.prismLegendK, Int(stage.prismK.rounded()), "the row's ×k is the prisms' k")
-        XCTAssertLessThanOrEqual(FlexibleRowCopy.legendPrismsRow(stage.prismLegendK).count, FlexibleRowCopy.maxChars)
+        XCTAssertLessThanOrEqual(FlexibleRowCopy.mainFacePrismsRow.count, FlexibleRowCopy.maxChars)   // ★ M1: the face-prism's row
         var lines: [String] = []
         for (tag, size) in [Self.sizes[0], Self.sizes[2]] {
             m.views = [.prisms]
@@ -769,6 +778,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
         // are the test control `controlSquishTagsOnMain`. This test pins their placement (the floor, the leader, the
         // keep-outs), which R7-M's face-prism chips reuse (FlexibleStageViewTags.placeMain), not that they show.
         stage.controlSquishTagsOnMain = true
+        // ★ RE-PINNED (round 7, M1 — H15'; his img1 / img2): the main page's prisms are the picked group's LATTICE face-prisms
+        // now; the squish prisms these tags sit on are the test control `controlSquishPrismsOnMain` (FlexibleR7M1Tests pins
+        // the face-prisms). This test still pins the tags' placement on them.
+        stage.controlSquishPrismsOnMain = true
         let size = CGSize(width: 900, height: 900)
         let proj = try projection(r.project)
         func tags(_ drilledIn: Bool = false, on s: WorkspaceStage = .lattice, keepOut: [CGRect] = []) -> [FlexibleStageViewTags.Tag] {

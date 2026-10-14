@@ -242,6 +242,8 @@ public final class FlexibleMainStage: ObservableObject {
     var overlaySerial = 0
     /// ★ ROUND 6: the main page's prisms, and the state they were built for (`volumes`).
     var volumesCache: (key: String, items: [ClearanceRenderItem])?
+    /// ★ ROUND 7, M1: the picked group's face-prisms, and what they were built from (`volumes`).
+    var facePrismCache: (inputs: FacePrismInputs, items: [ClearanceRenderItem])?
     /// ★ S1b: the model's views, observed (`ensure`).
     private var viewsObservation: AnyCancellable?
     /// The lattice generation the loop started its FE sequence for (from rest).
@@ -500,12 +502,44 @@ public final class FlexibleMainStage: ObservableObject {
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
         owns(project, stage) ? (xray ? FlexibleStagePage.xrayBodyAlpha : 1) : nil
     }
-    /// ★ ROUND 6 (item 3, hook H15 — WorkspacePlaceholder hands it to the viewer on the S1 base): the main
-    /// page's prisms, faint (FlexibleDepthPrism's, at the page's k) — the ACTIVE Selections group's pressed
-    /// faces, or every pressed face while the Prisms view is on; [] off the Flexible stage, under a page, or
-    /// while a legend reads. Cached per state (the workspace's body asks on every pass).
+    /// ★ ROUND 7, M1 (hook H15' — WorkspacePlaceholder hands ONLY this to the viewer on the Flexible stage): the main page's
+    /// prisms ARE the picked group's LATTICE face-prisms — #354's own `LatticeDepthPlane`s (the Selections modal's Lattice
+    /// rows), each at its list depth (`latticeSlabDepthMM`, one store, so the prism and the list are always equal — his img1:
+    /// "they should *always* be equal"), in the face-prism violet, #354's look for the active group. Only after he picks a
+    /// group in this session (his fixed rule); a group with no face-prism draws nothing — the Top, Off in Selections, no longer
+    /// draws its SQUISH prism (his img2: "What is this 12mm? … please remove whatever it is"; the squish depth and its number
+    /// are the Squish page's). [Prisms] = every face-prism of the picked group (its legend row, and X-ray). [] off the Flexible
+    /// stage, under a page, or while a legend reads. Cached on its inputs (the workspace's body asks on every pass).
+    /// RED CONTROL `controlSquishPrismsOnMain`: round 6's squish prisms (S1b).
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
+        if controlSquishPrismsOnMain { return squishVolumes(project, m) }
+        guard let g = pickedGroup(project) else { return [] }
+        let inputs = FacePrismInputs(group: g.id, lattice: project.lattice, selection: project.selection, force: project.force,
+                                     regions: project.faceRegions, groupView: project.groupView,
+                                     mesh: project.viewerMesh?.triangleCount ?? 0)
+        if let c = facePrismCache, c.inputs == inputs { return c.items }
+        let items = project.groupView.isHidden(g.id) ? [] : project.latticeDepthPlanes()
+            .filter { $0.groupID == g.id && $0.role == .include }
+            .map { ClearanceRenderItem(volume: $0.volume, selected: true, tint: FlexibleStageStyle.facePrismTint) }
+        facePrismCache = (inputs, items)
+        return items
+    }
+
+    /// ★ M1: what the face-prisms are built from (every input of `ProjectModel.latticeDepthPlanes` for the picked group).
+    struct FacePrismInputs: Equatable {
+        let group: UUID
+        let lattice: LatticeSettings
+        let selection: SelectionModel
+        let force: ForceModel
+        let regions: FaceRegionModel
+        let groupView: GroupViewState
+        let mesh: Int
+    }
+
+    /// The RED CONTROL's prisms: round 6 (item 3, hook H15) — the main page's SQUISH prisms, faint (FlexibleDepthPrism's,
+    /// at the page's k) — the ACTIVE Selections group's pressed faces, or every pressed face while the Prisms view is on.
+    func squishVolumes(_ project: ProjectModel, _ m: FlexibleStageModel) -> [ClearanceRenderItem] {
         let k = prismK   // ★ S1b: the page's ONE k (the tags and the legend's ×k read it too)
         // ★ "Prism after a pick" (★ R7-V: fixed, no longer a setting): the active group only once he has picked in this
         // session, and never a Pending group's (FlexibleMainPickSession.prismGroup)
@@ -578,7 +612,9 @@ public final class FlexibleMainStage: ObservableObject {
         // below is kept for R7-M's face-prism chips. RED CONTROL `controlSquishTagsOnMain`.
         guard controlSquishTagsOnMain else { return [] }
         guard let m = current(project, stage) else { return [] }
-        let cands: [FlexibleStageViewTags.MainCandidate] = volumes(project, on: stage, drilledIn: drilledIn).compactMap { item in
+        guard !drilledIn, !frozen else { return [] }
+        // (the control's tags sit on the control's squish prisms — M1's face-prisms carry no number on this page yet)
+        let cands: [FlexibleStageViewTags.MainCandidate] = squishVolumes(project, m).compactMap { item in
             let r = item.volume.faceID
             guard let f = m.settings.face(r), let h = FlexibleDepthPrism.handle(item.volume) else { return nil }
             // ★ S1b VERIFICATION: the prism's axis — its floor (the handle's anchor) to its face (the base centre)
@@ -821,13 +857,16 @@ public final class FlexibleMainStage: ObservableObject {
         // group's faces, on ONE scale over the groups of the sequence (Play all's turns compare)
         let feNow = feHeat(m)
         // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
-        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
+        // ★ ROUND 7, M1 (1a): no face-prism — the PLAIN model (no dent heat, no dent: nothing can squish)
+        let prisms = m.facePrismsSet
+        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat && prisms,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
                                               controlColumnColours: controlColumnHeat, groupColours: false,
                                               roleMarks: controlRolesOnMain)   // ★ R7-V: no role mark on the main page's model
+        if !prisms { c.dents = nil; c.exaggeration = 0; c.mapValues = nil }
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN
+        dentMaxMM = prisms ? (feNow?.scaleMM ?? shown.maxDepth) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism)
         heatValues = c.mapValues
         dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
         // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,
@@ -949,6 +988,11 @@ public struct FlexibleMainStatus: Equatable, Sendable {
     public static func of(model m: FlexibleStageModel?) -> FlexibleMainStatus {
         guard let m else { return .init(line: notOpened, tone: .idle, fix: nil) }
         if case .failed = m.sceneState { return .init(line: "The part could not be opened", tone: .fix, fix: nil) }
+        // ★ ROUND 7, M1 (1a, ruling 4): no face-prism — no lattice and nothing to send: the one line, after the readiness's own
+        // blockers (a filament, a pressed face); its tap opens the one-tap fix ([Lattice under it]) on the Squish page
+        if m.sceneState == .ready, !m.facePrismsSet, m.readiness.blocking.isEmpty {
+            return .init(line: FlexibleRowCopy.noFacePrism, tone: .fix, fix: FlexibleLatticeUnder.first(m.readiness))
+        }
         // ★ ROUND 5 (S9): saved with the Lattice view off — nothing bakes until the view is on (a tap turns it on)
         if m.latticeBuildDeferred, m.lattice == nil || m.latticeIsStale, m.sceneState == .ready,
            m.readiness.blocking.isEmpty, !m.latticeBuilding { return .init(line: deferred, tone: .idle, fix: nil) }

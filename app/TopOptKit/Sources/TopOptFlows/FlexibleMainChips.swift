@@ -21,7 +21,7 @@ import Foundation
 public enum FlexibleMainChips {
     /// The chips hidden on the Flexible stage (H18). RED CONTROL `controlNothingHidden`: today's column (img1's five rows).
     public static var hidden: Set<SettingsChipID> {
-        controlNothingHidden ? [] : []   // STUB (red run): today's column
+        controlNothingHidden ? [] : [.faceProtectDepth, .minimizePlastic]
     }
 
     /// Test control only: nothing hidden — the column as it was before H18 (his img1: "Protect 3 mm", "Minimize plastic").

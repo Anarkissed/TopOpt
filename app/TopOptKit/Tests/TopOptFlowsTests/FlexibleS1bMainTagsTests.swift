@@ -16,6 +16,9 @@
 // (FlexibleMainStage.prismTags); S1b's tags are the test control `controlSquishTagsOnMain`, set on every stage below. These
 // tests pin the tags' PLACEMENT (the leader, the greedy pass, the axis slide, the keep-outs where the chrome is drawn) —
 // FlexibleStageViewTags.placeMain, which R7-M's face-prism chips reuse — not that the squish number shows.
+// ★ RE-PINNED (round 7, M1 — H15', his img1 "they should *always* be equal" / img2 "What is this 12mm?"): the main page's
+// prisms are the picked group's LATTICE face-prisms now; the SQUISH prisms these tags sit on are the test control
+// `controlSquishPrismsOnMain`, set beside `controlSquishTagsOnMain` on every stage below (FlexibleR7M1Tests pins the face-prisms).
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -106,6 +109,7 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
     func mainPage(_ label: String, _ r: FlexibleHisProject.Restored) async throws -> (FlexibleMainStage, FlexibleStageModel) {
         let stage = FlexibleMainStage()
         stage.controlSquishTagsOnMain = true   // ★ R7-V review: the squish tags are a control now (see the header)
+        stage.controlSquishPrismsOnMain = true   // ★ M1 (H15'): …and the squish prisms they sit on (see the header)
         stage.reduceMotion = { true }
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
                             stampsPath: FlexibleHisProject.stampsPath, persist: {})
@@ -185,6 +189,7 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         stage.controlSquishTagsOnMain = true   // ★ R7-V review: the squish tags are a control now (see the header)
+        stage.controlSquishPrismsOnMain = true   // ★ M1 (H15'): …and the squish prisms they sit on (see the header)
         let m = settled(r.project, stage)
         // ★ RE-PINNED (R7-V — his 2026-10-14 answer fixes "prism after a pick" ON; batch V's setting is gone): S1b's rule — the
         // active group's prism and number, a Pending group's (Group C) too — is now only the test control `controlPrismOnOpen`.
@@ -317,6 +322,7 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         stage.controlSquishTagsOnMain = true   // ★ R7-V review: the squish tags are a control now (see the header)
+        stage.controlSquishPrismsOnMain = true   // ★ M1 (H15'): …and the squish prisms they sit on (see the header)
         let m = settled(r.project, stage)
         // ★ RE-PINNED (R7-V — his 2026-10-14 answer fixes "prism after a pick" ON; batch V's setting is gone): S1b's rule — the
         // active group's prism and number, a Pending group's (Group C) too — is now only the test control `controlPrismOnOpen`.
@@ -369,6 +375,7 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         stage.controlSquishTagsOnMain = true   // ★ R7-V review: the squish tags are a control now (see the header)
+        stage.controlSquishPrismsOnMain = true   // ★ M1 (H15'): …and the squish prisms they sit on (see the header)
         let m = settled(r.project, stage)
         let cam = try Camera(stage, r.project)
         let proj = cam.projection()
