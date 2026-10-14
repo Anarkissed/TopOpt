@@ -189,6 +189,13 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// nil — never [] — when there are none (`setPresses`), so a project without presses encodes
     /// byte-identical. OPTIONAL so old projects decode.
     public var presses: [FlexiblePress]?
+    /// ★ ROUND 7 (batch S, his img3 words of 2026-10-14: "their names should be editable by tapping "group 1" or whatever
+    /// the default name is"): each squeeze group's NAME, keyed by its STORED group number ("1", "2" …); a group with no
+    /// entry reads "Group N". DISPLAY ONLY, like `groupColours`: never part of the lattice's key (`designInputs`);
+    /// carried to its new number when groups renumber (FlexibleSqueezeGroups.normalise). Settings page only — never the
+    /// main page's Selections (the two lists stay separate). OPTIONAL, omitted when nil: old projects encode
+    /// byte-identical.
+    public var groupNames: [String: String]?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -207,6 +214,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     public var designInputs: FlexibleStageSettings {
         var c = self
         c.groupColours = nil
+        c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
         c.weightUnit = nil
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)

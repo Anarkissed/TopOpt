@@ -731,8 +731,10 @@ struct FlexibleStageOverlays: View {
         ZStack {
             // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
-            if model.edgePick == nil, model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
-               let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
+            // ★ ROUND 7 (S, 4g): only the face he works on in the OPEN group (`workingFace` — his img4's chip and curves
+            // were Group 1's Face 1, drawn over Group 2's tab)
+            if let w = Self.workingFace(model: model) {
+                let r = w.region, g = w.geometry, f = w.face
                 // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
                 ForEach(Self.curveAxes(f), id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
