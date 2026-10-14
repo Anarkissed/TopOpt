@@ -49,6 +49,9 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
                             stampsPath: FlexibleHisProject.stampsPath, persist: {})
         addTeardownBlock { @MainActor in await m.waitForIdle() }
+        // ★ RE-PINNED (R7-V — his 2026-10-14 answer: Play OFF on open, the model at rest until he taps Play): these pin the
+        // squish as it PLAYS — the fixture turns his Play view on (no assertion changes)
+        m.views.insert(.play)
         m.keepFERequest = true
         m.squishSolver.controlFailSimIDs = failing
         m.squishSolver.controlFailDelayS = failDelayS
@@ -115,6 +118,28 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
         let red = try await run(control: true)
         print("FLEX-GV EXIT control (sims read before they start): frames not at rest \(red.bad.count) (\(red.bad.prefix(3)))")
         XCTAssertFalse(red.bad.isEmpty, "control: batch G played the old column squish before the field")
+    }
+
+    /// ★ R7-V TWIN (his 2026-10-14 words: "When the pause is selected for the simulator, any action taken anywhere
+    /// automatically re-starts the simulation. Only by pressing Play should the sim actually restart."): the same Save &
+    /// Exit, but he drags the timeline to rest while the sims run (his pause) — the field lands and it STAYS paused.
+    /// RED CONTROL: `controlIgnoreHisPause` — the landing plays it (rounds 3–6).
+    func testSaveAndExitPausedByHimStaysPausedWhenItsFieldLands() async throws {
+        func run(control: Bool) async throws -> (paused: Bool, playing: Bool) {
+            var dragged = false
+            let (_, s, _) = try await stage(split: true, configure: { $0.loop.controlIgnoreHisPause = control }, sample: { s, _ in
+                if !dragged, s.fe.pending { s.loop.scrub(to: 0); dragged = true }   // his drag to rest while it simulates
+            })
+            XCTAssertTrue(dragged, "premise: he dragged while the sims ran")
+            XCTAssertTrue(s.fe.active, "premise: the field landed")
+            return (s.loop.pausedByHim, s.loop.playing)
+        }
+        let fixed = try await run(control: false)
+        XCTAssertTrue(fixed.paused)
+        XCTAssertFalse(fixed.playing, "★ the field landed and his pause held")
+        let red = try await run(control: true)
+        XCTAssertTrue(red.playing, "★ RED CONTROL: the landing played over his pause")
+        print("FLEX-GV EXIT paused twin: playing after the landing \(fixed.playing) (control \(red.playing))")
     }
 
     // MARK: - a failed only sim plays the column squish (correctness major)

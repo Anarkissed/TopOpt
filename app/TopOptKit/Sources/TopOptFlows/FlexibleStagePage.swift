@@ -92,6 +92,8 @@ public struct FlexibleStagePage: View {
     @State private var glassHeat: [Int: [SIMD3<Float>]] = [:]
     @State private var playingNumber: Int?
     @State private var playingFE = false
+    /// ★ R7-V: Bend with Play — the full-depth pose's faint ghost (FlexibleBendGhost).
+    @State private var bendGhost: ClearanceRenderItem?
     private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
     /// The chips', the stamp handle's and the curve editors' keep-outs, in the stage's frame.
     /// ★ S VERIFICATION: the player as its two DRAWN parts — the capsule and its top row's picker
@@ -116,6 +118,28 @@ public struct FlexibleStagePage: View {
         self.model = model
         self.onExit = onExit
     }
+    /// ★ R7-V: tests hand the page its squish loop, to watch it (the pause latch, Play, Bend).
+    init(project: ProjectModel, model: FlexibleStageModel, loop: FlexibleSquishLoop, onExit: @escaping () -> Void) {
+        self.project = project
+        self.model = model
+        self._loop = StateObject(wrappedValue: loop)
+        self.onExit = onExit
+    }
+    /// ★ R7-V (his img4: "a 'bend' icon view … the entire group's bend at the full depth - all together", and his answer:
+    /// frozen): the page's ONE scale — k × the loop's amount, or k × 1 while Bend shows without Play (the current group's
+    /// dent at full depth, every face of it; with Play the bar animates and the full pose is a ghost — FlexibleBendGhost).
+    static func dentScale(views: FlexibleStageViews, exaggeration k: Double, amount: Double) -> Float {
+        views.contains(.bend) && !views.contains(.play) ? Float(k) : Float(k * amount)
+    }
+    /// ★ R7-V: Bend ALONE — no Heat, no Prisms or Groups, no Play — shows only the bent model: the layer drawn on the part
+    /// (the curves, the depth chip, the stamp's handle, the tags) is left out. Bend with Heat or Prisms brings it back;
+    /// pick mode keeps its overlay.
+    static func overlaysHidden(views: FlexibleStageViews, edgePick: Bool) -> Bool {
+        views.contains(.bend) && views.heatScope == .off && !views.contains(.prisms) && !views.contains(.groups)
+            && !views.contains(.play) && !edgePick
+    }
+    /// Test control only (R7-V): today's composeTints — the heat always on, every pressed face's (the red control of 4c).
+    @MainActor static var controlHeatAlwaysOn = false
 
     public var body: some View {
         GeometryReader { geo in
@@ -192,11 +216,11 @@ public struct FlexibleStagePage: View {
             // is drawn on this page, so this ticker steps his drawing (the renderer's loop is the
             // main page's)
             guard loop.playing, dents != nil else { return }
-            dentScale = Float(dentExaggeration * loop.amount)
+            dentScale = Self.dentScale(views: model.views, exaggeration: dentExaggeration, amount: loop.amount)
         }
         // a drag on the timeline, a pause: the one scale follows at once
         .onReceive(loop.$held) { a in
-            if !loop.playing, dents != nil { dentScale = Float(dentExaggeration * a) }
+            if !loop.playing, dents != nil { dentScale = Self.dentScale(views: model.views, exaggeration: dentExaggeration, amount: a) }
         }
         // A fresh lattice (a Save & Exit build that lands while this page is up) refreshes the
         // channels. ★ VERIFICATION OF D1: it no longer flips the map to "What can be built" or
@@ -211,6 +235,17 @@ public struct FlexibleStagePage: View {
         .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
         // ★ while the legend reads, the squish holds still (the reading stays on its surface)
         .onChange(of: legendDrilled) { loop.holdWhileReading($0) }
+        // ★ R7-V: the views (shared with the main page) — Play opens or closes this page's loop (off: at rest; his tap on
+        // either page plays it), Heat and Bend recompose the picture
+        .onAppear { loop.playView = model.views.contains(.play) }
+        .onChange(of: model.views) { v in
+            let on = v.contains(.play)
+            if on != loop.playView {
+                loop.playView = on
+                if on, dents != nil { loop.playByHim() }
+            }
+            refreshChannels()
+        }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -275,7 +310,8 @@ public struct FlexibleStagePage: View {
                 // ★ R6 REVIEW: ONE k (`prismK`) for the prisms, the chip, the stamp handle, the tags and the legend; the glass
                 // over the page's own heat
                 clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration), part: project.viewerMesh,
-                                                             heat: glassHeat),
+                                                             heat: glassHeat, heated: FlexibleStageHeat.shown(model: model, views: model.views))
+                    + (bendGhost.map { [$0] } ?? []),   // ★ R7-V: Bend with Play — the full-depth pose, faint
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
@@ -288,7 +324,7 @@ public struct FlexibleStagePage: View {
             // the discs and a reading keep out of it as views (a mask over the layer took the depth chip's glass with it)
             // ★ BATCH V REVIEW: …out of the WHOLE chrome too (the fix pop-up, the top line and its toast, the Exit row, the gizmo,
             // the player whole) — they kept out of the panel, the legend, the view buttons and the player's parts only
-            if !Self.controlNoOverlays {
+            if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
                 FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
                                       clip: clip)
@@ -344,8 +380,15 @@ public struct FlexibleStagePage: View {
     /// The page's tints, composed (lifted out of `refreshChannels` so a test reads EXACTLY the page's).
     /// ★ ROUND 6 (his img1 and answer): no group colour on the body — no frame, no digit, no tinted map-less
     /// face; the OPEN group wears its glass instead (FlexibleGroupWalls, through `clearanceVolumes`).
-    @MainActor static func composeTints(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?) -> FlexiblePageChannels.Channels {
-        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil, groupColours: false)
+    /// ★ R7-V (his img3: "make the heatmap view actually show/hide the actual heatmap on the model", and his answer: tap =
+    /// the current group's heat, hold 3 s = every group's, tap again = none): the heat only where his Heat view shows it
+    /// (`views`, the model's by default).
+    @MainActor static func composeTints(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?,
+                                        views: FlexibleStageViews? = nil) -> FlexiblePageChannels.Channels {
+        let v = views ?? model.views
+        let filter = controlHeatAlwaysOn ? nil : FlexibleStageHeat.filter(model: model, views: v)
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil,
+                                              heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter)
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
         return c
     }
@@ -374,13 +417,20 @@ public struct FlexibleStagePage: View {
         dents = c.dents
         dentExaggeration = c.exaggeration
         loop.exaggeration = c.exaggeration   // the renderer's scale is k × amount
-        // ★ a lattice appears → the squish plays (not under reduced motion); his live drawing
-        // (no lattice, or a stale one) holds still at the full squish — he can still play it
-        if c.animated != dentAnimated {
-            if c.animated { loop.autoPlay(reduceMotion: reduceMotion) } else { loop.hold(1) }
+        // ★ R7-V (his img1: "When it is on the simulation plays"; his answer: Play off on open, at rest): a dent to show →
+        // the squish plays while Play is on — his drawing too (round 3's editing hold at the full squish is reversed by
+        // his 2026-10-14 words); Play off: at rest. Every start goes through the loop's gate, so his pause holds.
+        let animates = c.dents != nil
+        if loop.playView != model.views.contains(.play) { loop.playView = model.views.contains(.play) }   // (before any start)
+        if animates != dentAnimated {
+            if animates { loop.autoPlay(reduceMotion: reduceMotion) } else { loop.hold(1) }
         }
-        dentAnimated = c.animated
-        dentScale = c.dents == nil ? 0 : Float(c.exaggeration * loop.amount)
+        dentAnimated = animates
+        dentScale = c.dents == nil ? 0 : Self.dentScale(views: model.views, exaggeration: c.exaggeration, amount: loop.amount)
+        // ★ R7-V: Bend with Play — the full-depth pose as a faint ghost while the bar animates
+        let ghost = model.views.contains(.bend) && model.views.contains(.play)
+            ? FlexibleBendGhost.item(overlay: overlay, dents: c.dents, k: c.exaggeration) : nil
+        if ghost != bendGhost { bendGhost = ghost }
         // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
         let r = model.readiness
         if let i = prompt.next(r, actionSerial: model.actionSerial,
@@ -419,7 +469,8 @@ public struct FlexibleStagePage: View {
     // MARK: the squish player (bottom-centre, its frame computed against the page's keep-outs)
 
     @ViewBuilder private func player(in size: CGSize) -> some View {
-        if dents != nil, let r = playerFrame(size) {
+        // ★ R7-V: only with his Play view (shared with the main page) — off, no bar
+        if dents != nil, model.views.contains(.play), let r = playerFrame(size) {
             // ★ ROUND 5 (S2): which group plays, in its colour ("● Group 2 ▾"); a pick selects that
             // group's first face (the page plays the selected face's group)
             let sims = FlexibleSettingsSquish.playerSims(model: model)
@@ -580,7 +631,8 @@ public struct FlexibleStagePage: View {
                 .accessibilityIdentifier("flexible-legend-expand")
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
-                               reading: legendDrilled ? reading : nil, hasDent: dents != nil, k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()))
+                               reading: legendDrilled ? reading : nil, hasDent: dents != nil && model.views.heatScope != .off,   // ★ R7-V
+                               k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()))
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
                             Color.clear
@@ -955,7 +1007,11 @@ struct FlexibleLegend: View {
     static let tabHeight: CGFloat = DS.Space.ml + 16
 
     /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
-    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool { hasDent || !views.isEmpty }
+    /// ★ R7-V: the dent's rows only while his Heat view shows heat; the rows only for the views that have one (Prisms,
+    /// Groups — Play and Bend have none).
+    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool {
+        (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups)
+    }
 
     var body: some View {
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)

@@ -47,22 +47,26 @@ public final class FlexibleMainStage: ObservableObject {
     /// What the Lattice button shows as on, and what is drawn: his choice AND a lattice to show
     /// (one drawn, or one on its way without Settings — `latticeAvailable`).
     public var latticeShown: Bool { latticeOn && latticeAvailable }
-    /// ★ C2: X-ray is no longer a button — it is the Lattice view's rendering (the walls are only
-    /// ever seen through the ghost), so the two are on together and off together.
-    /// ★ BATCH M (M6, his round-5 img 6: "When the dent view is selected, the xray view should also
-    /// initiate (that's why there is no point to include the actual button), showing the lattice (if
-    /// selected) as a ghost and the dents bending through the ghosts … make it solid"): the DENT view
-    /// turns X-ray on too — the body a ghost, the dent planes solid; with the lattice shown its walls
-    /// are a ghost as well (`ghostWalls`, the layer's).
-    public var xray: Bool { latticeShown || dentXray }
+    /// ★ ROUND 7, R7-V (his img5, 2026-10-14: "Please re-add the x-ray view icon. In the default view, we should be able to
+    /// see the model +the finish in the latticed area"): X-RAY IS ITS OWN ICON AGAIN, OFF BY DEFAULT — the default view is
+    /// the opaque model (exact for the Covered finish; the finish openings over the lattice are R7-X). Heat and the
+    /// lattice no longer force it. This REVERSES two rulings, by his 2026-10-14 words: C2 (commit 140c8d454, his round-4
+    /// img 5 — the Lattice view IS the X-ray) and M6 (batch M, his round-5 img 6 — the dent view turns X-ray on).
+    @Published public var xrayOn = false { didSet { if oldValue != xrayOn { refresh() } } }
+    /// The body is the ghost (his X-ray icon). RED CONTROL `controlXrayIsLatticeView`: C2 + M6's derived rule.
+    public var xray: Bool { controlXrayIsLatticeView ? (latticeShown || dentXray) : xrayOn }
+    /// The walls are seen: the Lattice view on with X-ray (step 1 — out of X-ray an opaque body hides them) — what the
+    /// Lattice icon shows lit.
+    public var wallsShown: Bool { latticeShown && xray }
     /// The dent view is on and has a map to show (kept by `refresh` — read on every body pass).
+    /// (★ R7-V: no longer turns X-ray on — it decides only whether the walls are a ghost under its solid planes.)
     public var dentXray: Bool { heat && dentMapShown && !dentOnColumnFallback }
     var dentMapShown = false
     /// ★ BATCH M VERIFICATION: the map is the column squish of a drawn lattice (the FE field is not driving
     /// it) — kept by `refresh`.
     var dentOnColumnFallback = false
-    /// The walls are drawn as a ghost under the solid dent planes (the dent view and the lattice on).
-    public var ghostWalls: Bool { dentXray && latticeShown }
+    /// The walls are drawn as a ghost under the solid dent planes (the dent view and the lattice on, in X-ray).
+    public var ghostWalls: Bool { dentXray && latticeShown && xray }
     public func toggleLattice() {
         latticeOn = !latticeShown
     }
@@ -187,7 +191,7 @@ public final class FlexibleMainStage: ObservableObject {
     private(set) var channels: FlexiblePageChannels.Channels?
     private var channelsKey: String?
     /// The lattice generation the loop last auto-played for.
-    private var playedGeneration: Int?
+    var playedGeneration: Int?
     // ★ BATCH G: the squish sims (FlexibleMainStage+Squish)
     /// The FE view of the lattice on screen (refreshed with the picture, never per frame).
     var fe = FlexibleFEView()
@@ -243,12 +247,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// Test control only (round 6, item 1 — it retires the S + M merge's `controlTurnsWithoutFrames`): round 5's
     /// group frames painted on the main page's model, in every view and every Play-all turn.
     var controlRound5Frames = false
-    /// ★ BATCH V (his two view settings, 2026-10-10 — FlexibleMainViewSettings): "Role colours off" and "Prism after a
-    /// pick", per project on this device (`viewStore`), read when the project's model is made (`ensure`).
-    public internal(set) var viewSettings = FlexibleMainViewSettings()
-    var viewStore = FlexibleMainViewSettingsStore.standard
-    /// ★ BATCH V ("Prism after a pick"): he picked a group in this session (FlexibleMainViewSettings) — the selection as
-    /// last seen, and its observation (from the stage's first look at the project on).
+    /// ★ "A group's prism only after a pick" (his answer of 2026-10-09; batch V's view setting, fixed ON by R7-V —
+    /// FlexibleMainPickSession): he picked a group in this session — the selection as last seen, and its observation (from
+    /// the stage's first look at the project on).
     public internal(set) var sessionPicked = false
     var lastSelection: SelectionModel?
     var selectionObservation: AnyCancellable?
@@ -257,10 +258,17 @@ public final class FlexibleMainStage: ObservableObject {
     var lastUndo: UndoHistory?
     var undoObservation: AnyCancellable?
     var restoreWritePending = false
-    /// Test controls only (batch V review): an Undo / Redo's selection write counted as a pick (as batch V built it), and
-    /// "Role colours" unticked painting #354's colours only where Flexible leaves the part clay (as batch V built it).
+    /// Test control only (batch V review): an Undo / Redo's selection write counted as a pick (as batch V built it).
     var controlUndoIsAPick = false
-    var controlRolesUnderMarks = false
+    /// ★ R7-V, test controls only (each the rule it reverses): #354's roles and Flexible's role marks on the main page's
+    /// model (batch V's toggles unticked); the active group's prism on open (S1b's rule); the play bar with no Play view in
+    /// its gate (rounds 3–6); X-ray as the Lattice view's rendering and the dent view's (C2 + M6).
+    var controlRolesOnMain = false
+    var controlPrismOnOpen = false
+    var controlPlayerIgnoresPlayView = false
+    var controlXrayIsLatticeView = false
+    /// ★ R7-V: Play turned on while a page was up (the loop starts when the main page shows again).
+    var playStartPending = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
     var squishBusy: (() -> Bool)?
     /// The Stress solve waited for a sim (it starts when the sims go idle).
@@ -328,7 +336,12 @@ public final class FlexibleMainStage: ObservableObject {
         projectID = project.id
         overlay = nil; overlayKey = nil; channels = nil; channelsKey = nil; playedGeneration = nil
         // (called from a view's init: publish nothing unless a previous project left it playing)
-        if loop.playing || loop.held != 1 { DispatchQueue.main.async { [loop] in loop.hold(1) } }
+        // ★ R7-V: the Play view as the model has it (OFF on open: at rest — every hold is), no pause of his carried over
+        DispatchQueue.main.async { [loop, weak m] in
+            loop.playView = m?.views.contains(.play) ?? false
+            loop.forgetHisPause()
+            if loop.playing || loop.held != (loop.playView ? 1 : 0) { loop.hold(1) }
+        }
         // ★ D2: another project's squeeze pick does not carry over (async: never inside an update)
         if shownSim != nil { DispatchQueue.main.async { [weak self] in self?.shownSim = nil } }
         observation = m.objectWillChange
@@ -340,15 +353,16 @@ public final class FlexibleMainStage: ObservableObject {
         fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
         feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
-        // ★ BATCH V: his two view settings for this project, and a fresh session of picks (FlexibleMainViewSettings)
-        openViewSettings(project)
+        // a fresh session of picks (FlexibleMainPickSession); ★ R7-V: batch V's two view settings are gone — his kept keys too
+        openPickSession(project)
+        UserDefaults.standard.removeObject(forKey: Self.batchVSettingsKey(project.id))
         projectObservation = project.objectWillChange
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.projectChanged() }
         // ★ S1b: the views ([Prisms] here, either view on Settings) redraw what the main page draws from them — H15's
         // list, the legend card's Prisms row, the button — at once (never the first value: this runs in a view's init)
         viewsObservation = m.$views.dropFirst().removeDuplicates()
-            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .sink { [weak self] v in self?.viewsChanged(v) }   // ★ R7-V: and Play, on either page
         return m
     }
 
@@ -381,13 +395,15 @@ public final class FlexibleMainStage: ObservableObject {
         if let solver { attach(solver) }
         frozen = false
         visible = true
+        if playStartPending { playStartPending = false; refresh() }   // ★ R7-V: Play turned on while Settings was up
         model?.checkStampShown = nil
         model?.pendingFix = nil
         // ★ ROUND 5 (S9): "Exit" — nothing changed on Settings: the main page stays EXACTLY as it was
         if model?.takeExitUnchanged() == true { showLatticeOnExit = false; return }
         model?.retryFailedBuild()   // his Save & Exit asks for the build: a failed one is tried once more
-        // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view
-        if showLatticeOnExit { showLatticeOnExit = false; latticeOn = true }
+        // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view (★ R7-V: in X-ray, where
+        // its walls are seen)
+        if showLatticeOnExit { showLatticeOnExit = false; showLatticeView() }
         // ★ ROUND 5 (S9): with the Lattice view OFF, Save & Exit only STORES — the bake waits for the view
         model?.latticeBuildDeferred = !latticeOn
         noteLoads()        // what Settings did to the groups (a weight written back) is in hand
@@ -461,8 +477,8 @@ public final class FlexibleMainStage: ObservableObject {
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
         let k = prismK   // ★ S1b: the page's ONE k (the tags and the legend's ×k read it too)
-        // ★ BATCH V ("Prism after a pick", ON by default): the active group only once he has picked in this session, and
-        // never a Pending group's; OFF: the active group, as S1b drew it (FlexibleMainViewSettings.prismGroup)
+        // ★ "Prism after a pick" (★ R7-V: fixed, no longer a setting): the active group only once he has picked in this
+        // session, and never a Pending group's (FlexibleMainPickSession.prismGroup)
         let active = prismGroup(project)
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
             + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
@@ -557,19 +573,20 @@ public final class FlexibleMainStage: ObservableObject {
                 CGPoint(x: d, y: d * 0.6), CGPoint(x: -d, y: d * 0.6), CGPoint(x: d, y: -d * 0.6), CGPoint(x: -d, y: -d * 0.6)]
     }
 
-    /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and the Lattice view (the X-ray) with it
-    /// (a view that needs another turns it on itself). The button itself joins the toggles on the S1 base.
+    /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and X-ray with it (a view that needs another turns
+    /// it on itself). ★ R7-V: X-ray, not the Lattice view — a prism sits under its face, inside the part.
     public func togglePrisms() {
         guard let m = model else { return }
         m.toggleView(.prisms)
-        if m.views.contains(.prisms), !latticeShown { latticeOn = true }
+        if m.views.contains(.prisms), !xrayOn { xrayOn = true }
     }
 
     /// The squish player shows only when there is something to squish: a lattice that still
-    /// matches the settings, on the visible main page.
+    /// matches the settings, on the visible main page — ★ R7-V: and his Play view on (his img1: "When it is on the
+    /// simulation plays - otherwise, remove the play-bar from the bottom of the screen entirely").
     public var playerShown: Bool {
         guard visible, !frozen, let m = model, m.lattice != nil, !m.latticeIsStale, channels?.dents != nil else { return false }
-        return true
+        return m.views.contains(.play) || controlPlayerIgnoresPlayView
     }
     /// The player's full end ("10 kg").
     public var fullLabel: String {
@@ -770,7 +787,7 @@ public final class FlexibleMainStage: ObservableObject {
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
                                               controlColumnColours: controlColumnHeat, groupColours: false,
-                                              roleMarks: !viewSettings.roleColoursOff)   // ★ BATCH V: "Role colours off"
+                                              roleMarks: controlRolesOnMain)   // ★ R7-V: no role mark on the main page's model
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
         dentMaxMM = feNow?.scaleMM ?? shown.maxDepth   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN

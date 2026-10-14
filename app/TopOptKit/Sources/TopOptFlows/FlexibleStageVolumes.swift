@@ -24,15 +24,20 @@ enum FlexibleStageVolumes {
     /// The Settings page's clearance volumes: the prisms, then the glass. `k`: the page's exaggeration
     /// (`prismK`: 1 while nothing is dented — the prism is then drawn at its true depth). `heat`: each pressed
     /// region's colours on the page (FlexibleGroupWalls.heatSamples — the glass's alpha is its colour's over them).
+    /// ★ R7-V (his img3: the Heat view "adds a layer of a heat map? … Remove that"): `heated` — the regions whose heat the
+    /// page shows wear NO glass (glass only where the heat is hidden), so the glass never lays a second colour on the heat.
     static func items(model: FlexibleStageModel, k: Double, part: ViewerMesh?,
-                      heat: [Int: [SIMD3<Float>]] = [:]) -> [ClearanceRenderItem] {
+                      heat: [Int: [SIMD3<Float>]] = [:], heated: Set<Int> = []) -> [ClearanceRenderItem] {
+        // ★ R7-V: Bend ALONE shows the bent model only — no prism or glass standing at the rest pose beside it
+        if FlexibleStagePage.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) { return [] }
         let k = prismK(k)
         let key = "\(k)|\(model.frozenExaggeration ?? -1)|\(model.views.rawValue)|\(model.selectedRegion ?? -1)|\(model.rail)|"
             + "\(model.settings.hashValue)|\(model.stacks.count)|\(model.geometry.count)|\(model.stampGrids.count)|"
-            + "\(part?.signature.contentHash ?? 0)|\(model.regions.key)|" + FlexibleGroupWalls.signature(heat)
+            + "\(part?.signature.contentHash ?? 0)|\(model.regions.key)|" + FlexibleGroupWalls.signature(heat) + "|\(heated.sorted())"
         if let c = cache, c.key == key { return c.items }
         let items = FlexibleDepthPrism.renderItems(model: model, k: k, views: model.views)
             + FlexibleGroupWalls.items(model: model, views: model.views, mesh: part, heat: heat)
+                .filter { !($0.surfaceOnly && heated.contains($0.volume.faceID)) }
         cache = (key, items)
         return items
     }

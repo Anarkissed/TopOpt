@@ -216,24 +216,23 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let tris = o.keptFace.indices.filter { o.keptFace[$0] == 0 }
         XCTAssertFalse(tris.isEmpty, "face 0's part triangles are in the overlay")
         func face0(_ t: [Float]) -> Set<SIMD4<Float>> { Set(tris.flatMap { tri in (0..<3).map { Self.rgba(t, 3 * tri + $0) } }) }
-        // ★ RE-PINNED (round 6 batch V, his view setting "Role colours off" — ON by default: no role mark on the main page's
-        // model, his answer of 2026-10-09): ON, the map-less pressed face wears nothing; OFF, round 6 item 1's plain pressed
-        // colour (what this test pinned before batch V). Set directly — never kept for his project.
+        // ★ RE-PINNED (R7-V — his 2026-10-14 answer: no role colour on the main page's model, FIXED; batch V's "Role colours
+        // off" setting is gone): the map-less pressed face wears nothing; round 6 item 1's plain pressed colour is now the
+        // test control `controlRolesOnMain` (the marks passed through).
         let none = SIMD4<Float>(0, 0, 0, 0)
-        XCTAssertTrue(s.viewSettings.roleColoursOff, "premise: the default")
         let turns = s.playAllBaseTints(m, scaleMM: 1)   // (fe is still the landed sims': no refresh since the edit)
         XCTAssertFalse(turns.isEmpty, "the Play-all turns' tints")
-        for (id, t) in turns { XCTAssertEqual(face0(t), [none], "\(id)'s turn: face 0 pressed, no map — no mark (Role colours off)") }
-        s.viewSettings.roleColoursOff = false
-        for (id, t) in s.playAllBaseTints(m, scaleMM: 1) { XCTAssertEqual(face0(t), [FlexibleColours.loadedFace], "\(id)'s turn, OFF: the plain pressed colour") }
-        s.viewSettings.roleColoursOff = true
+        for (id, t) in turns { XCTAssertEqual(face0(t), [none], "\(id)'s turn: face 0 pressed, no map — no mark") }
+        s.controlRolesOnMain = true
+        for (id, t) in s.playAllBaseTints(m, scaleMM: 1) { XCTAssertEqual(face0(t), [FlexibleColours.loadedFace], "\(id)'s turn, control: the plain pressed colour") }
+        s.controlRolesOnMain = false
         s.refresh()
         XCTAssertNil(m.stacks[FlexFaceKey(region: 0, rotation: 0)], "still no map for face 0")
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "the refresh: no mark (Role colours off)")
-        s.viewSettings.roleColoursOff = false
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "the refresh: no mark")
+        s.controlRolesOnMain = true
         s.refresh()
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "the refresh, OFF: the plain pressed colour")
-        s.viewSettings.roleColoursOff = true
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.loadedFace], "the refresh, control: the plain pressed colour")
+        s.controlRolesOnMain = false
         s.refresh()
         // ★ RED CONTROL: the channels with the group colours (round 4–5) — face 0 wears Group 2's pink
         let red = FlexiblePageChannels.channels(model: m, overlay: o, xray: false, drawnLattice: nil, groupColours: true)
@@ -571,12 +570,17 @@ final class FlexibleRound6HostedTests: XCTestCase {
     // MARK: - R6-3g / R6-3h (the main page's [Prisms] button: step 6, on the S1 base)
     // ★ S1b (2026-10-08): UN-GATED — the S1 base is on this branch (e2652a41); R6-3g runs, red until the fourth button.
 
+    /// ★ RE-PINNED (R7-V — his 2026-10-14 words: "Please re-add the x-ray view icon", "add a Play button icon"): SIX icons —
+    /// one line of six where the note keeps its room beside them (11" landscape, 13" both ways), three over three where it
+    /// would not (11" portrait, the iPad mini); the legends and the player keep out of the row after the wrap.
     func testTheFourMainButtonsClearTheNoteLegendAndPlayer() throws {
         XCTAssertTrue(try FlexibleSource.code("WorkspacePlaceholder.swift").contains("legendDrilledIn"), "premise: the S1 base")
-        XCTAssertEqual(FlexibleMainViewToggles.buttons, 4, "Dent heat, Stress, Lattice, Prisms")
+        XCTAssertEqual(FlexibleMainViewToggles.buttons, 6, "Dent heat, Stress, Lattice, Prisms, X-ray, Play")
         for (tag, size) in Self.sizes {
             let row = FlexibleMainViewToggles.rowFrame(viewport: size)
-            XCTAssertEqual(row.width, 4 * 40 + 3 * DS.Space.s, tag)
+            let c = tag == "11p" ? 3 : 6
+            XCTAssertEqual(row.width, CGFloat(c) * 40 + CGFloat(c - 1) * DS.Space.s, tag)
+            XCTAssertGreaterThanOrEqual(FlexibleMainViewToggles.noteFrame(viewport: size).width, FlexibleMainNote.minWidth, "\(tag): the note keeps its room")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 120, chipColumnWidth: 180)
             XCTAssertTrue(keep.contains { $0.contains(row) }, "\(tag): the legends keep out of the four buttons")
             XCTAssertTrue(FlexibleMainPlayerSlot.keepOut(viewport: size).contains { $0.contains(row) }, "\(tag): the player too")
@@ -586,27 +590,31 @@ final class FlexibleRound6HostedTests: XCTestCase {
         // there the four wrap two over two, and the note keeps its room on the row's line, clear of the left panel.
         let mini = CGSize(width: 744, height: 1133)
         let row = FlexibleMainViewToggles.rowFrame(viewport: mini), note = FlexibleMainViewToggles.noteFrame(viewport: mini)
-        XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: mini), 2, "mini: two over two")
-        XCTAssertEqual(row.width, 2 * 40 + DS.Space.s, "mini: two 40 pt buttons across")
+        XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: mini), 3, "mini: three over three")
+        XCTAssertEqual(row.width, 3 * 40 + 2 * DS.Space.s, "mini: three 40 pt buttons across")
         XCTAssertEqual(row.height, 2 * 40 + DS.Space.s, "mini: two lines")
         XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "mini: the note keeps its room")
         XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: mini)), "mini: clear of the left panel")
-        for (tag, size) in Self.sizes { XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: size), 4, "\(tag): one line of four") }
+        for (tag, size) in Self.sizes { XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: size), tag == "11p" ? 3 : 6, "\(tag): one line of six, or three over three") }
         print("FLEX-R6-3g mini row \(row.integral) · note \(note.integral)")
     }
 
     /// ★ R6 REVIEW: un-gated — `togglePrisms` is on this base (only its button waits for S1), so it is tested now.
+    /// ★ RE-PINNED (R7-V — his 2026-10-14 words: "Please re-add the x-ray view icon"; C2 reversed): [Prisms] turns X-RAY on
+    /// itself (a prism sits under its face, inside the part), no longer the Lattice view.
     func testPrismsTurnsTheLatticeViewOnItself() throws {
         let stage = FlexibleMainStage()
         let (_, m) = try his(stage)
         stage.latticeOn = false
+        XCTAssertFalse(stage.xrayOn, "premise: X-ray off by default")
         stage.togglePrisms()
         XCTAssertTrue(m.views.contains(.prisms))
-        XCTAssertTrue(stage.latticeOn, "[Prisms] turns the Lattice view (the X-ray) on itself")
-        // off again: the Prisms view goes, the Lattice view stays as he left it
+        XCTAssertTrue(stage.xrayOn, "[Prisms] turns X-ray on itself")
+        XCTAssertFalse(stage.latticeOn, "…and leaves the Lattice view as he left it")
+        // off again: the Prisms view goes, X-ray stays as it is
         stage.togglePrisms()
         XCTAssertFalse(m.views.contains(.prisms))
-        XCTAssertTrue(stage.latticeOn)
+        XCTAssertTrue(stage.xrayOn)
     }
 
     // MARK: - S1b: the main-page half of item 3 (R6-3j, R6-3k, R6-3l)
@@ -638,18 +646,23 @@ final class FlexibleRound6HostedTests: XCTestCase {
             let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: size)
             pump(0.3)
             let row = FlexibleMainViewToggles.rowFrame(viewport: size)
-            let prisms = CGPoint(x: row.maxX - 20, y: row.midY)                               // the fourth (trailing)
-            let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)      // the third
+            // ★ RE-PINNED (R7-V): six icons — Heat · Stress · Lattice · Prisms · X-ray · Play; one line, or three over three
+            let oneLine = FlexibleMainViewToggles.columns(viewport: size) == FlexibleMainViewToggles.buttons
+            let prisms = oneLine ? CGPoint(x: row.minX + 3 * (40 + DS.Space.s) + 20, y: row.midY)   // the fourth
+                : CGPoint(x: row.minX + 20, y: row.maxY - 20)                                     // the second line's first
+            let lattice = oneLine ? CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)  // the third
+                : CGPoint(x: row.maxX - 20, y: row.minY + 20)                                     // the first line's last
             m.views = []
             stage.latticeOn = false
+            stage.xrayOn = false
             click(h, prisms)
             XCTAssertTrue(m.views.contains(.prisms), "\(tag): [Prisms] on")
-            XCTAssertTrue(stage.latticeOn, "\(tag): …and the Lattice view (the X-ray) with it")
+            XCTAssertTrue(stage.xrayOn, "\(tag): …and X-ray with it (★ R7-V: no longer the Lattice view)")
             XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1, 4, 2, 3, 5],
                            "\(tag): every pressed face's prism in H15's list")
             click(h, prisms)
             XCTAssertFalse(m.views.contains(.prisms), "\(tag): off again")
-            XCTAssertTrue(stage.latticeOn, "\(tag): the Lattice view stays as he left it")
+            XCTAssertTrue(stage.xrayOn, "\(tag): X-ray stays as it is")
             // the third is still Lattice: it never touches the Prisms view
             let before = (stage.latticeOn, opened)
             click(h, lattice)
@@ -658,21 +671,23 @@ final class FlexibleRound6HostedTests: XCTestCase {
             lines.append("\(tag) row \(row.integral)")
             snapshot(h, "R6_S1b_\(tag)_main_four_buttons.png")
         }
-        // ★ the narrow pad (iPad mini portrait): two over two, as `rowFrame` says — [Prisms] bottom right, Lattice bottom left
+        // ★ the narrow pad (iPad mini portrait): ★ R7-V three over three, as `rowFrame` says — [Prisms] bottom left, Lattice
+        // top right
         let mini = CGSize(width: 744, height: 1133)
         let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: mini)
         pump(0.3)
         let row = FlexibleMainViewToggles.rowFrame(viewport: mini)
         m.views = []
         stage.latticeOn = false
-        click(h, CGPoint(x: row.maxX - 20, y: row.maxY - 20))
-        XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is bottom right")
-        XCTAssertTrue(stage.latticeOn, "mini: …with the Lattice view")
-        click(h, CGPoint(x: row.maxX - 20, y: row.maxY - 20))
-        let before = (stage.latticeOn, opened)
+        stage.xrayOn = false
         click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
-        XCTAssertFalse(m.views.contains(.prisms), "mini: bottom left is not Prisms")
-        XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "mini: bottom left is Lattice")
+        XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is bottom left")
+        XCTAssertTrue(stage.xrayOn, "mini: …with X-ray")
+        click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
+        let before = (stage.latticeOn, opened)
+        click(h, CGPoint(x: row.maxX - 20, y: row.minY + 20))
+        XCTAssertFalse(m.views.contains(.prisms), "mini: top right is not Prisms")
+        XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "mini: top right is Lattice")
         snapshot(h, "R6_S1b_mini_main_buttons_two_over_two.png")
         lines.append("mini row \(row.integral)")
         m.views = []
@@ -734,9 +749,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
     func testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce() throws {
         let stage = FlexibleMainStage()
         let (r, m) = try his(stage)
-        // ★ RE-PINNED (round 6 batch V): S1b's rule — the active group's prism and number, a Pending group's too — is his view
-        // setting "Prism after a pick" OFF (ON by default: FlexibleBatchVHostedTests V1b). Set directly — never kept.
-        stage.viewSettings.prismAfterPick = false
+        // ★ RE-PINNED (R7-V — his 2026-10-14 answer fixes "prism after a pick" ON; batch V's setting is gone): S1b's rule — the
+        // active group's prism and number, a Pending group's too — is now only the test control `controlPrismOnOpen`. This
+        // test pins the tags, not that rule (FlexibleRound7ViewsTests pins the rule).
+        stage.controlPrismOnOpen = true
         let size = CGSize(width: 900, height: 900)
         let proj = try projection(r.project)
         func tags(_ drilledIn: Bool = false, on s: WorkspaceStage = .lattice, keepOut: [CGRect] = []) -> [FlexibleStageViewTags.Tag] {

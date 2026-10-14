@@ -62,6 +62,66 @@ final class FlexibleSquishPlayerTests: XCTestCase {
         XCTAssertTrue(l.playing, "control: without reduced motion a fresh lattice plays")
     }
 
+    /// ★ ROUND 7 (R7-V), his words 2026-10-14: "When the pause is selected for the simulator, any action taken anywhere
+    /// automatically re-starts the simulation. Only by pressing Play should the sim actually restart." HIS pause is latched:
+    /// every automatic path (a new lattice, its sims landing, a reading ending, a drag's own pause then a lattice) only
+    /// positions the loop; his ▶ plays. RED CONTROL: `controlIgnoreHisPause` (rounds 3–6) — autoPlay plays over it.
+    func testHisPauseHoldsUntilHePressesPlay() {
+        func paused() -> FlexibleSquishLoop {
+            let (l, _) = loop()
+            l.play()
+            l.toggle()   // his ❚❚
+            return l
+        }
+        var l = paused()
+        XCTAssertFalse(l.playing)
+        XCTAssertTrue(l.pausedByHim, "★ his pause is latched")
+        let held = l.held
+        l.autoPlay(reduceMotion: false)
+        XCTAssertFalse(l.playing, "★ a fresh lattice: still paused"); XCTAssertEqual(l.held, held, accuracy: 1e-12, "…where he left it")
+        l.restartFromRest(reduceMotion: false)
+        XCTAssertFalse(l.playing, "★ the sims landing (restart from rest): still paused"); XCTAssertEqual(l.heldCycle, 0)
+        XCTAssertEqual(l.held, held, accuracy: 1e-12, "…where he left it")
+        l.holdWhileReading(true); l.restartFromRest(reduceMotion: false); l.holdWhileReading(false)
+        XCTAssertFalse(l.playing, "★ a reading ending: still paused")
+        l = paused()
+        l.scrub(to: 0.3)
+        l.autoPlay(reduceMotion: false)
+        XCTAssertFalse(l.playing, "★ a drag is his pause too")
+        XCTAssertEqual(l.held, 0.3, accuracy: 1e-12)
+        l.hold(0.8)
+        XCTAssertFalse(l.playing, "a hold never plays")
+        l.toggle()
+        XCTAssertTrue(l.playing, "★ his ▶ plays")
+        XCTAssertFalse(l.pausedByHim)
+        l.autoPlay(reduceMotion: false)
+        XCTAssertTrue(l.playing)
+        // his Play view icon plays and clears it too
+        l = paused()
+        l.playByHim()
+        XCTAssertTrue(l.playing && !l.pausedByHim)
+        // a playing loop that a reading held resumes when the reading ends (not his pause)
+        let (r, _) = loop()
+        r.play(); r.holdWhileReading(true)
+        XCTAssertFalse(r.playing)
+        r.holdWhileReading(false)
+        XCTAssertTrue(r.playing, "positive control: a reading's hold resumes")
+        // the Play view off: every hold is at rest and nothing automatic plays
+        let (v, _) = loop()
+        v.playView = false
+        v.autoPlay(reduceMotion: false)
+        XCTAssertFalse(v.playing); XCTAssertEqual(v.held, 0, "★ Play off: at rest")
+        v.hold(1)
+        XCTAssertEqual(v.held, 0, "★ Play off: his live drawing too sits at rest")
+        v.restartFromRest(reduceMotion: false)
+        XCTAssertFalse(v.playing)
+        // ★ RED CONTROL: the automatic paths over his pause
+        let c = paused()
+        c.controlIgnoreHisPause = true
+        c.autoPlay(reduceMotion: false)
+        XCTAssertTrue(c.playing, "★ RED CONTROL: rounds 3–6 played over his pause")
+    }
+
     func testTheEndsSayRestAndTheFullLoad() {
         XCTAssertEqual(FlexibleSquishLoop.fullLabel(weightsKg: [10]), "10 kg")
         XCTAssertEqual(FlexibleSquishLoop.fullLabel(weightsKg: [10, 10]), "10 kg each")

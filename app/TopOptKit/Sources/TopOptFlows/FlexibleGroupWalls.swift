@@ -268,6 +268,9 @@ enum FlexibleGroupWalls {
     /// ★ R6 REVIEW: each pressed region's colours on the page — its map's column quads in the page's composed tints
     /// (`overlay.flatStart`, six flat vertices per column), at most `heatSampleCount`, evenly spaced. Taken where the
     /// page composes its tints (FlexibleStagePage.refreshChannels), never per frame.
+    /// ★ R7-V (his Heat view: a face's heat may be hidden): only the HEAT's colours — the map's opaque, heat-coloured
+    /// vertices (flags.y); a face whose heat is hidden keeps no sample, so its glass is judged over the page's ground
+    /// (`backdrop`), as a resting face's is (its map's X-ray ghost tint is not what he sees there).
     @MainActor
     static func heatSamples(tints: [Float]?, overlay: FlexibleOverlayMesh?, model m: FlexibleStageModel) -> [Int: [SIMD3<Float>]] {
         guard let t = tints, let o = overlay else { return [:] }
@@ -278,8 +281,8 @@ enum FlexibleGroupWalls {
             let count = 6 * n, step = max(1, count / heatSampleCount)
             var cs: [SIMD3<Float>] = []
             var v = start
-            while v < start + count, v * 8 + 2 < t.count {
-                cs.append(SIMD3(t[v * 8], t[v * 8 + 1], t[v * 8 + 2]))
+            while v < start + count, v * 8 + 5 < t.count {
+                if t[v * 8 + 5] > 0.5 { cs.append(SIMD3(t[v * 8], t[v * 8 + 1], t[v * 8 + 2])) }
                 v += step
             }
             if !cs.isEmpty { out[r] = cs }

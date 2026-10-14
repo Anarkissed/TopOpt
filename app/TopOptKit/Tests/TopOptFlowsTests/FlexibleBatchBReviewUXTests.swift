@@ -236,19 +236,22 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
         XCTAssertEqual(m.toast, "second", "the first one's clear does not take the second")
     }
 
-    /// ★ RE-PINNED (round 4, C2 — his img 5: "remove the xray view selector if the lattice view
-    /// is going to use the rendering anyways"): there is no X-ray button any more — X-ray IS the
-    /// Lattice view's rendering, so the button still shows what is DRAWN, and the two can never
-    /// disagree (FlexibleMainPageRound4Tests pins the rest).
+    /// ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2, his round-4 img 5, reversed):
+    /// X-ray is its own icon again, OFF by default (the opaque model). The Lattice icon still shows what is SEEN — lit while
+    /// its walls are drawn (in X-ray) — and turning it on turns X-ray on (a view that needs another turns it on itself);
+    /// turning it off leaves his X-ray alone.
     @MainActor
     func testTheLatticeViewTurnsXRayOn() {
         let stage = FlexibleMainStage()
-        XCTAssertTrue(stage.xray && stage.latticeShown, "the default: the lattice view, in X-ray")
-        stage.toggleLattice()
+        XCTAssertTrue(stage.latticeShown && !stage.xray, "the default: the lattice view on, X-ray off (the opaque model)")
+        XCTAssertFalse(stage.wallsShown, "…its walls not seen: the Lattice icon not lit")
+        stage.toggleLatticeView()
+        XCTAssertTrue(stage.xray && stage.wallsShown, "turning the lattice on turns X-ray on")
+        stage.toggleLatticeView()
         XCTAssertFalse(stage.latticeShown)
-        XCTAssertFalse(stage.xray, "the lattice hidden: the solid part (X-ray goes with it)")
-        stage.toggleLattice()
-        XCTAssertTrue(stage.xray && stage.latticeShown, "turning the lattice on turns X-ray on")
+        XCTAssertTrue(stage.xray, "the lattice hidden: his X-ray stays")
+        stage.toggleLatticeView()
+        XCTAssertTrue(stage.xray && stage.latticeShown)
         // ★ CONTROL: the button shows what is drawn — with nothing to show it is not lit, even on
         stage.latticeAvailable = false
         XCTAssertTrue(stage.latticeOn)

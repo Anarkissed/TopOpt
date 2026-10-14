@@ -2,16 +2,10 @@
 // Settings page's overlays kept out of its chrome (the item-4 verifier's m19). On HIS projects — A1_0003 (his img1–4
 // pad) and his r5 — restored as he saved them, hosted offscreen (never the app). Written BEFORE the code; each with its
 // red control.
-//   V1a "Role colours off" (ON by default — his answer of 2026-10-09, built inside item 4 and reverted with it): no role
-//       colour on the main page's MODEL — #354's Selections colours (H4 hands them over as `roles`) nor Flexible's own
-//       marks (the resting cyan, the pressed green); OFF brings both back (the positive control). Settings keeps its marks.
-//   V1b "Prism after a pick" (ON by default — his other answer of 2026-10-09): nothing on open; the picked group's prism
-//       and mm after his pick (re-tapping the active group counts); a Pending group none; OFF: the active group's on open
-//       (S1b's rule — the positive control).
-//   V1c the two are kept PER PROJECT on this device: a fresh stage reads them back, another project keeps its own, and the
-//       project never moves (its undoable state, its undo history, the Flexible settings, the action serial).
-//   V1d one line each, under the view buttons: clear of the buttons, the note, the left panel and the gizmo; the legends,
-//       the player and the prism tags keep out of them; a click flips each (11" and 13", both ways, and the iPad mini).
+//   ★ R7-V (his 2026-10-14 words: "Remove the two full worded view icons. I've decided against them.") — the two view
+//   settings are gone and both behaviours fixed ON: V1a keeps its fixed state (no role colour on the main model; Settings
+//   keeps its marks), V1b its fixed state (nothing on open, the picked group's prism, none for a Pending group); V1c (kept
+//   per project) and V1d (their chips) are gone — the legend card's places beside the icon row stay pinned.
 //   V2a m19: NOTHING DRAWN ON THE PART SHOWS INSIDE THE SETTINGS PANEL OR THE LEGEND — the hosted page rendered with and
 //       without that layer (the dashed outlines, the curves, the stamp, the chips, the tags) differs by 0 pixels inside
 //       them, nor inside the pop-up, the top line, the Exit row or the view buttons; and it differs somewhere (the layer
@@ -112,18 +106,9 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         }
     }
 
-    /// A store of the view settings in a scratch defaults suite (never the test runner's own defaults).
-    func scratchStore() -> FlexibleMainViewSettingsStore {
-        let name = "flexible-batch-v-\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: name)!
-        addTeardownBlock { UserDefaults.standard.removePersistentDomain(forName: name) }
-        return FlexibleMainViewSettingsStore(defaults: d)
-    }
-
-    /// A main stage keeping its view settings in `store` (a scratch one by default).
-    func mainStage(_ store: FlexibleMainViewSettingsStore? = nil) -> FlexibleMainStage {
+    /// A main stage (★ R7-V: batch V's view settings and their store are gone — his 2026-10-14 words).
+    func mainStage() -> FlexibleMainStage {
         let s = FlexibleMainStage()
-        s.viewStore = store ?? scratchStore()
         s.reduceMotion = { true }
         return s
     }
@@ -177,78 +162,67 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         return out
     }
 
-    // MARK: - V1a: "Role colours off"
+    // MARK: - V1a: no role colour on the main page's model (★ R7-V: fixed — the toggle is gone)
 
     /// ★ HIS ANSWER OF 2026-10-09 ("no group or role colour on the main page model; colours show in the Selections list and
-    /// on the Settings page only"), back as a view setting (2026-10-10): ON by default, OFF at will.
-    func testRoleColoursOffKeepsEveryRoleColourOffTheMainModelAndOffBringsThemBack() throws {
+    /// on the Settings page only") — batch V's view setting, ★ RE-PINNED by R7-V (his 2026-10-14 words: "Remove the two full
+    /// worded view icons"; his answer: the behaviour fixed ON): the fixed-state cases kept, the OFF flips gone; the positive
+    /// control is the red control `controlRolesOnMain` (the roles and marks passed through).
+    func testNoRoleColourIsOnTheMainModelAndTheSettingsPageKeepsItsMarks() throws {
         let s = mainStage()
         let (r, m) = try his(s)
         s.apply(r.project, owned: true, pageUp: false)
         m.selectedRegion = nil   // (a selected face would tint face 0 as its linked other end)
         s.latticeOn = false; s.heat = true; s.stress = false
         s.refresh()
-        XCTAssertEqual(s.viewSettings, FlexibleMainViewSettings(roleColoursOff: true, prismAfterPick: true), "both ON by default")
         let o = try XCTUnwrap(s.overlay)
         let none = SIMD4<Float>(0, 0, 0, 0)
         let tris0 = o.keptFace.indices.filter { o.keptFace[$0] == 0 }
         XCTAssertFalse(tris0.isEmpty, "premise: face 0 (his resting bottom) is in the overlay")
         func face0(_ t: [Float]) -> Set<SIMD4<Float>> { Set(tris0.flatMap { tri in (0..<3).map { Self.rgba(t, 3 * tri + $0) } }) }
         var lines: [String] = []
-        // ── (1) Flexible's own marks — his resting bottom (the item-4 verifier: cyan for good, 49 152 vertices)
         let marks: Set<SIMD4<Float>> = [FlexibleColours.restingFace, FlexibleColours.loadedFace, FlexibleColours.selectedFace, FlexibleColours.linkedEnd]
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "★ ON: his resting bottom wears no mark")
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "★ his resting bottom wears no mark")
         let onMarks = Self.inked(try XCTUnwrap(s.channels?.tints), marks)
-        XCTAssertEqual(onMarks, 0, "★ ON: no role mark anywhere on the model")
-        s.setRoleColoursOff(false)
-        XCTAssertFalse(s.viewSettings.roleColoursOff)
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.restingFace], "OFF (positive control): the resting cyan, as before")
-        let offMarks = Self.inked(try XCTUnwrap(s.channels?.tints), marks)
-        XCTAssertGreaterThan(offMarks, 0, "OFF: the marks are back")
-        s.setRoleColoursOff(true)
-        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [none], "ON again: none")
-        lines.append("marks: ON \(onMarks) vertices · OFF \(offMarks) (face 0 cyan)")
+        XCTAssertEqual(onMarks, 0, "★ no role mark anywhere on the model")
+        s.controlRolesOnMain = true
+        s.refresh()
+        XCTAssertEqual(face0(try XCTUnwrap(s.channels?.tints)), [FlexibleColours.restingFace], "control (the marks passed through): the resting cyan")
+        let controlMarks = Self.inked(try XCTUnwrap(s.channels?.tints), marks)
+        s.controlRolesOnMain = false
+        s.refresh()
+        XCTAssertGreaterThan(controlMarks, 0, "control: the marks")
+        lines.append("marks: \(onMarks) vertices (control \(controlMarks))")
         // the Settings page keeps them (his answer): its composed tints, the same model
         let settings = FlexibleStagePage.composeTints(model: m, overlay: FlexiblePageChannels.overlay(model: m))
         XCTAssertGreaterThan(Self.inked(try XCTUnwrap(settings.tints), [FlexibleColours.restingFace]), 0, "the Settings page keeps the resting cyan")
-        // a Play-all turn's tints follow the setting too (the renderer swaps them in with each group's field)
-        for (id, t) in s.playAllBaseTints(m, scaleMM: 1) { XCTAssertEqual(face0(t), [none], "★ ON: \(id)'s turn — no mark") }
-        // ── (2) #354's Selections colours, where they would show: a face Flexible does not tint (face 0 out of Settings while
-        // Bottom still anchors it on the main page)
+        for (id, t) in s.playAllBaseTints(m, scaleMM: 1) { XCTAssertEqual(face0(t), [none], "★ \(id)'s turn — no mark") }
+        // #354's Selections colours, where they would show: a face Flexible does not tint
         m.edit({ st in st.removeFace(0) }, recompute: false)
         s.refresh()
         let roles = Self.roleTints(r.project), roleInk = Set(roles.values)
-        let anchor = SIMD4<Float>(Float(ForceModel.anchorColor.r), Float(ForceModel.anchorColor.g), Float(ForceModel.anchorColor.b), 1)
-        XCTAssertTrue(roleInk.contains(anchor), "premise: Bottom's Anchor colour is among the role colours")
         for (name, lattice, heat) in [("the model", false, false), ("the model, heat on", false, true), ("Lattice", true, false)] {
-            s.latticeOn = lattice; s.heat = heat; s.stress = false
-            s.setRoleColoursOff(false)
-            s.refresh()
-            let roled = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: roles, stress: nil))
-            let before = face0(roled).contains(anchor)
-            s.setRoleColoursOff(true)
+            s.latticeOn = lattice; s.xrayOn = lattice; s.heat = heat; s.stress = false
             s.refresh()
             let t = try XCTUnwrap(s.tints(r.project, on: .lattice, roles: roles, stress: nil))
-            XCTAssertTrue(face0(t).isDisjoint(with: roleInk), "★ ON, \(name): no role colour on face 0")
-            XCTAssertEqual(Self.inked(t, roleInk), 0, "★ ON, \(name): no role colour on the model")
-            if !lattice { XCTAssertTrue(before, "OFF (positive control), \(name): #354's Anchor colour on face 0") }
-            lines.append("roles, \(name): ON \(Self.inked(t, roleInk)) role-coloured vertices · OFF face 0 \(before ? "Anchor green" : "plain")")
+            XCTAssertTrue(face0(t).isDisjoint(with: roleInk), "★ \(name): no role colour on face 0")
+            XCTAssertEqual(Self.inked(t, roleInk), 0, "★ \(name): no role colour on the model")
+            lines.append("roles, \(name): \(Self.inked(t, roleInk)) role-coloured vertices")
         }
-        print("FLEX-BV-1a\n  " + lines.joined(separator: "\n  "))
+        print("FLEX-BV-1a (fixed, R7-V)\n  " + lines.joined(separator: "\n  "))
     }
 
-    // MARK: - V1b: "Prism after a pick"
+    // MARK: - V1b: a group's prism after a pick (★ R7-V: fixed — the toggle is gone)
 
     /// ★ HIS ANSWER OF 2026-10-09 ("the main page shows a group's prism and mm number ONLY AFTER he picks a group in this
-    /// session; nothing on open; a Pending group shows no number"), back as a view setting: ON by default, OFF at will.
-    func testPrismAfterAPickShowsNothingOnOpenThenThePickedGroupsPrismAndNumber() throws {
+    /// session; nothing on open; a Pending group shows no number") — ★ RE-PINNED by R7-V: the fixed-state cases kept, the
+    /// OFF flips gone (their positive control is `controlPrismOnOpen`, S1b's rule).
+    func testAGroupsPrismShowsNothingOnOpenThenThePickedGroupsPrismAndNumber() throws {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let p = r.project
         let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
         let groupC = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
         XCTAssertTrue(p.force.kind(for: groupC.id).isPending, "premise: Group C is Pending")
-        print("FLEX-BV-1b saved active group: \(p.selection.activeGroup?.name ?? "none")")
-        // the Top is the group active as the project opens (before the page has looked at it)
         p.selection.setActive(top.id)
         let s = mainStage()
         let m = settledModel(p, stage: s)
@@ -259,19 +233,13 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         func tags() -> [Int] {
             s.prismTags(p, on: .lattice, drilledIn: false, viewport: size, keepOut: [], projector: { proj.project($0) }).map(\.region)
         }
-        var lines: [String] = []
-        XCTAssertTrue(s.viewSettings.prismAfterPick, "ON by default")
         XCTAssertFalse(s.sessionPicked, "nothing picked as the page opens")
         XCTAssertEqual(prisms(), [], "★ on open: no prism (the Top is active, but he has not picked it)")
         XCTAssertEqual(tags(), [], "★ on open: no number")
-        // ★ POSITIVE CONTROL: OFF — S1b's rule, the active group's prism and number on open
-        s.setPrismAfterPick(false)
-        XCTAssertEqual(prisms(), [1], "OFF (positive control): the active Top's prism on open")
-        XCTAssertEqual(tags(), [1], "OFF: its number")
-        s.setPrismAfterPick(true)
-        XCTAssertEqual(prisms(), [], "ON again: none until a pick")
-        lines.append("on open (Top active): ON \(prisms()) · OFF [1]")
-        // his pick — re-tapping the group already active (#354's row re-sets it: an equal write) is a pick
+        s.controlPrismOnOpen = true
+        XCTAssertEqual(prisms(), [1], "control (S1b's rule): the active Top's prism on open")
+        s.controlPrismOnOpen = false
+        XCTAssertEqual(prisms(), [], "none until a pick")
         p.selection.setActive(top.id)
         XCTAssertTrue(s.sessionPicked, "his tap on the Top's row")
         XCTAssertEqual(prisms(), [1], "★ after his pick: the Top's prism")
@@ -279,114 +247,26 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         let f1 = try XCTUnwrap(m.settings.face(1))
         XCTAssertEqual(s.prismTags(p, on: .lattice, drilledIn: false, viewport: size, keepOut: [], projector: { proj.project($0) }).first?.text,
                        String(format: "%.1f mm", f1.deepestMM), "his deepest, read-only")
-        // a Pending group shows none — not even the face Settings presses (Group C holds face 3)
         p.selection.setActive(groupC.id)
         XCTAssertEqual(prisms(), [], "★ a Pending group: no prism")
         XCTAssertEqual(tags(), [], "★ …and no number")
-        s.setPrismAfterPick(false)
-        XCTAssertEqual(prisms(), [3], "OFF (control): S1b showed Group C's face 3")
-        s.setPrismAfterPick(true)
         p.selection.setActive(top.id)
         XCTAssertEqual(prisms(), [1], "the Top again")
-        // [Prisms]: every pressed face's prism, the picked group's brighter
         m.views = [.prisms]
         let all = s.volumes(p, on: .lattice, drilledIn: false)
         XCTAssertEqual(Set(all.map(\.volume.faceID)), [1, 4, 2, 3, 5], "[Prisms]: every pressed face")
         XCTAssertEqual(all.filter(\.selected).map(\.volume.faceID), [1], "the picked Top brighter")
         m.views = []
-        lines.append("after his pick: Top \(prisms()) · Group C [] · [Prisms] \(all.map(\.volume.faceID).sorted())")
-        print("FLEX-BV-1b " + lines.joined(separator: " · "))
+        print("FLEX-BV-1b (fixed, R7-V) after his pick: Top [1] · Group C [] · [Prisms] \(all.map(\.volume.faceID).sorted())")
     }
 
-    // MARK: - V1c: kept per project
+    // MARK: - V1c / V1d (★ R7-V: gone with the two toggles — his 2026-10-14 words)
+    // V1c pinned the two settings kept per project in the app's defaults, and V1d their two worded chips under the view
+    // buttons. Both are gone; the icon row and its keep-outs are pinned by FlexibleRound7ViewsHostedTests (H1) and by the
+    // re-pinned FlexibleMainPageRound4 tests; the legend card's two places beside the row:
 
-    /// ★ "persisted per project": a fresh stage over the same project reads both back; another project keeps its own; the
-    /// project itself never moves — no undoable state, no undo step, no Flexible setting, no action.
-    func testTheTwoSettingsAreKeptPerProjectAndNeverTouchTheProject() throws {
-        let store = scratchStore()
-        let s = mainStage(store)
-        let (r, m) = try his(s)
-        s.apply(r.project, owned: true, pageUp: false)
-        let snap = r.project.editSnapshot, past = r.project.undo.past.count, future = r.project.undo.future.count
-        let settings = m.settings, serial = m.actionSerial, design = m.settings.designInputs
-        XCTAssertEqual(store.load(r.project.id), FlexibleMainViewSettings(), "nothing kept yet: both ON")
-        s.setRoleColoursOff(false)
-        s.setPrismAfterPick(false)
-        pump(1.5)   // (past the project's undo debounce)
-        XCTAssertEqual(store.load(r.project.id), FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false), "★ kept under his project")
-        XCTAssertEqual(r.project.editSnapshot, snap, "★ the project's undoable state never moves")
-        XCTAssertEqual(r.project.undo.past.count, past, "★ no undo step")
-        XCTAssertEqual(r.project.undo.future.count, future)
-        XCTAssertEqual(m.settings, settings, "★ no Flexible setting")
-        XCTAssertEqual(m.settings.designInputs, design, "★ never the lattice's key")
-        XCTAssertEqual(m.actionSerial, serial, "★ never an action")
-        // a fresh stage (the next launch) over the same project reads them back
-        let again = mainStage(store)
-        _ = again.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
-        XCTAssertEqual(again.viewSettings, FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false), "★ read back for his project")
-        // another project keeps its own (both ON)
-        let other = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
-        XCTAssertNotEqual(other.id, r.project.id)
-        let third = mainStage(store)
-        _ = third.model(for: other, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
-        XCTAssertEqual(third.viewSettings, FlexibleMainViewSettings(), "another project: its own (both ON)")
-        // …and the stage that turned them off, moved to that project and back, follows each project
-        _ = s.model(for: other, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
-        XCTAssertEqual(s.viewSettings, FlexibleMainViewSettings(), "the stage on the other project: both ON")
-        _ = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
-        XCTAssertEqual(s.viewSettings, FlexibleMainViewSettings(roleColoursOff: false, prismAfterPick: false), "back on his: his")
-        print("FLEX-BV-1c kept under \(FlexibleMainViewSettingsStore.key(r.project.id)) · undo \(past)→\(r.project.undo.past.count)")
-    }
-
-    // MARK: - V1d: one line each, under the view buttons
-
-    /// ★ HIS UX RULES: one visible line per setting, ≤ 44 characters; never covering a button; the legends and the player
-    /// keep clear (they read the toggles' frame); a click flips each. 11" and 13", both ways, and the iPad mini.
-    func testTheTwoSettingsAreOneLineEachUnderTheViewButtonsClearOfEverything() throws {
-        let s = mainStage()
-        let (_, _) = try his(s)
-        XCTAssertLessThanOrEqual(FlexibleRowCopy.mainRoleColoursOff.count, FlexibleRowCopy.maxChars)
-        XCTAssertLessThanOrEqual(FlexibleRowCopy.mainPrismAfterPick.count, FlexibleRowCopy.maxChars)
-        var lines: [String] = []
+    func testTheLegendCardKeepsItsPlacesBesideTheIconRow() throws {
         for (tag, size) in Self.sizes + [Self.mini] {
-            let h = host(FlexibleMainViewToggles(main: s, openSettings: {}), size: size)
-            pump(0.4)
-            let frame = FlexibleMainViewToggles.settingsFrame(viewport: size)
-            let row = FlexibleMainViewToggles.rowFrame(viewport: size), note = FlexibleMainViewToggles.noteFrame(viewport: size)
-            for (key, label, flip) in [("mainSetting-roleColoursOff", FlexibleRowCopy.mainRoleColoursOff, { s.viewSettings.roleColoursOff }),
-                                       ("mainSetting-prismAfterPick", FlexibleRowCopy.mainPrismAfterPick, { s.viewSettings.prismAfterPick })] {
-                guard let chip = h.frames.all[key] else { XCTFail("\(tag): \(label) is on the page"); continue }
-                let text = try XCTUnwrap(h.frames.all[key + "-label"], "\(tag): its words")
-                XCTAssertLessThanOrEqual(text.height, 20, "\(tag): \(label) — one line")
-                XCTAssertGreaterThanOrEqual(chip.height, 36, "\(tag): \(label) — a finger's target")
-                XCTAssertLessThanOrEqual(chip.height, 44, "\(tag): \(label) — one line")
-                XCTAssertTrue(frame.insetBy(dx: -1, dy: -1).contains(chip), "\(tag): \(label) inside the toggles' own frame (\(chip) in \(frame))")
-                XCTAssertFalse(chip.intersects(row), "\(tag): \(label) clear of the four buttons")
-                XCTAssertFalse(chip.intersects(note), "\(tag): …of the note")
-                XCTAssertFalse(chip.intersects(FlexibleMainLegendLayout.leftStrip(viewport: size)), "\(tag): …of the left panel")
-                XCTAssertFalse(chip.intersects(FlexibleLegendPlacement.gizmoFrame(viewport: size)), "\(tag): …of the gizmo")
-                XCTAssertGreaterThanOrEqual(chip.minX, 0); XCTAssertLessThanOrEqual(chip.maxX, size.width)
-                // a click flips it, a second flips it back
-                let was = flip()
-                click(h, CGPoint(x: chip.midX, y: chip.midY))
-                XCTAssertEqual(flip(), !was, "\(tag): a click on \(label) flips it")
-                click(h, CGPoint(x: chip.midX, y: chip.midY))
-                XCTAssertEqual(flip(), was, "\(tag): …and back")
-                lines.append("\(tag) \(label) \(chip.integral)")
-            }
-            // ★ landscape: on the buttons' line (the right edge keeps its height for the legend card); portrait: under them
-            let landscape = size.width > size.height
-            XCTAssertEqual(FlexibleMainViewToggles.settingsOnRowLine(viewport: size), landscape, "\(tag): on the buttons' line iff landscape")
-            if landscape {
-                XCTAssertEqual(frame.midY, row.midY, accuracy: 0.5, "\(tag): on the buttons' line")
-                XCTAssertLessThanOrEqual(frame.maxX, row.minX, "\(tag): left of the buttons")
-                XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "\(tag): the note keeps its room left of them")
-                XCTAssertEqual(FlexibleMainViewToggles.frame(viewport: size).maxY, row.maxY, accuracy: 0.5, "\(tag): no taller than the buttons")
-            } else {
-                XCTAssertGreaterThanOrEqual(frame.minY, row.maxY, "\(tag): under the buttons")
-            }
-            // the folded legend card stays on the very edge (his tuning — batch M verification), the open one in the
-            // trailing column
             let keep = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 94, chipColumnWidth: 222)
             for rows in 1...2 {
                 let folded = FlexibleMainLegendLayout.placeCard(rows: rows, minimized: true, viewport: size, keepOut: keep,
@@ -394,15 +274,11 @@ final class FlexibleBatchVHostedTests: XCTestCase {
                 XCTAssertEqual(folded?.frame.maxX ?? 0, size.width, accuracy: 0.5, "\(tag): the folded card (\(rows) rows) on the very edge")
                 let open = FlexibleMainLegendLayout.placeCard(rows: rows, minimized: false, viewport: size, keepOut: keep)
                 XCTAssertEqual(open?.frame.maxX ?? 0, size.width - PageChrome.edge, accuracy: 0.5, "\(tag): the open card (\(rows) rows) in the trailing column")
+                if let f = open?.frame { XCTAssertFalse(f.intersects(FlexibleMainViewToggles.frame(viewport: size)), "\(tag): the card clear of the icon row") }
             }
-            // the legends, the player and the prism tags keep out of them (they read the toggles' frame)
-            XCTAssertTrue(FlexibleMainViewToggles.frame(viewport: size).contains(frame), "\(tag): the toggles' frame holds them")
-            let legends = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 120, chipColumnWidth: 180)
-            XCTAssertTrue(legends.contains { $0.contains(frame) }, "\(tag): the legends keep out of them")
-            XCTAssertTrue(FlexibleMainPlayerSlot.keepOut(viewport: size).contains { $0.contains(frame) }, "\(tag): the player too")
-            snapshot(h, "BV_\(tag)_main_view_settings.png")
+            XCTAssertTrue(FlexibleMainPlayerSlot.keepOut(viewport: size).contains { $0.contains(FlexibleMainViewToggles.rowFrame(viewport: size)) },
+                          "\(tag): the player keeps out of the icon row")
         }
-        print("FLEX-BV-1d " + lines.joined(separator: " · "))
     }
 
     // MARK: - V2a: m19 — nothing drawn on the part shows inside the Settings panel or the legend

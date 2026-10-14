@@ -40,6 +40,11 @@ struct FlexibleViewColumn: View {
 }
 
 /// The workspace's view-mode button, same metrics and tokens.
+/// ★ ROUND 7, R7-V (his answer, 2026-10-14 — Heat on the Settings page: "TAP = the heat on every face of the CURRENT group;
+/// HOLD 3 s = the heat on ALL groups' faces"): an optional `onLongPress` — a 3 s hold, simultaneous with the tap, as the
+/// workspace's own view-mode buttons do (WorkspacePlaceholder.viewModeButton, copied — #354's file is not edited): the
+/// release that ends the hold is also delivered as a tap and is swallowed by the PRESS it ends (ViewModeHold.swallowsTap).
+/// Icon only — the label is the accessibility text (his rule: view buttons are icons, never words).
 struct FlexibleViewButton: View {
     let icon: String
     let label: String
@@ -47,9 +52,21 @@ struct FlexibleViewButton: View {
     let action: () -> Void
     /// ★ R6 REVIEW: a glyph of its own in place of the SF symbol (the Settings page's [Prisms] / [Groups]).
     var glyph: AnyView? = nil
+    /// ★ R7-V: a 3 s hold's action (nil: no hold).
+    var onLongPress: (() -> Void)? = nil
+    /// Test control only (R7-V): the release tap NOT swallowed (it undoes the hold).
+    @MainActor static var controlNoSwallow = false
+
+    @State var holdFiredAt = Date.distantPast
+    @State var pressBeganAt: Date?
+    @GestureState var pressDown = false
 
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            if onLongPress != nil, !Self.controlNoSwallow,
+               ViewModeHold.swallowsTap(holdFiredAt: holdFiredAt, pressBeganAt: pressBeganAt, now: Date()) { return }
+            action()
+        }) {
             Group {
                 if let glyph {
                     glyph
@@ -68,6 +85,17 @@ struct FlexibleViewButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 3.0)
+                .onEnded { _ in holdFiredAt = Date(); onLongPress?() },
+            including: onLongPress == nil ? .none : .all)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($pressDown) { _, down, _ in down = true },
+            including: onLongPress == nil ? .none : .all)
+        .onChange(of: pressDown) { down in
+            if down { pressBeganAt = Date() }
+        }
         .accessibilityLabel(label)
         .accessibilityValue(on ? "On" : "Off")
     }

@@ -27,6 +27,7 @@ final class FlexibleBatchMGroupTests: XCTestCase {
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
                             stampsPath: FlexibleHisProject.stampsPath, persist: {})
         addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.views.insert(.play)   // ★ RE-PINNED (R7-V — his answer: Play OFF on open): these pin Play all as it plays — his Play on
         m.openScene()
         try await FlexibleSquishFixture.settle(m, "his round 5")
         stage.didExitSettings()

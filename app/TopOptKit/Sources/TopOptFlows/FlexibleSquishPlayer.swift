@@ -76,6 +76,32 @@ public final class FlexibleSquishLoop: ObservableObject {
 
     public init() {}
 
+    // ★ ROUND 7, BATCH R7-V — his words, 2026-10-14: "When the pause is selected for the simulator, any action taken
+    // anywhere automatically re-starts the simulation. Only by pressing Play should the sim actually restart." and "add a
+    // Play button icon … When it is on the simulation plays - otherwise, remove the play-bar from the bottom of the screen
+    // entirely", with his answer: "Play view on open: OFF, the model sits still AT REST … until he taps Play".
+    /// HIS PAUSE: set when he pauses (the player's ❚❚, a drag on the timeline), cleared only when he plays (the player's ▶,
+    /// the Play view's icon — `playByHim`). While it is set nothing automatic plays the loop (a new lattice, its sims
+    /// landing, a legend's reading ending, a group switch): they only position it. The Settings page's own loop is this
+    /// class too, so both pages keep his pause.
+    public private(set) var pausedByHim = false
+    /// THE PLAY VIEW (each page sets it from the shared `FlexibleStageModel.views`): off, the loop sits AT REST — every
+    /// hold is at rest and nothing automatic plays it. On by default, so a loop on its own plays as it always did.
+    public var playView = true {
+        didSet { if oldValue != playView, !playView { hold(0) } }
+    }
+    /// Test control only (R7-V's red control): his pause forgotten by the automatic paths (round 3 – round 6).
+    public var controlIgnoreHisPause = false
+    /// Whether an automatic path may play the loop now.
+    var mayAutoPlay: Bool { playView && (!pausedByHim || controlIgnoreHisPause) }
+    /// His Play: clears his pause and plays (the Play view's icon; the player's ▶ goes through `toggle`).
+    public func playByHim() {
+        pausedByHim = false
+        play()
+    }
+    /// A new project: no pause of his carries over.
+    public func forgetHisPause() { pausedByHim = false }
+
     /// Whole periods since the anchor (the cycle holds while paused).
     public func cycle(at now: CFTimeInterval) -> Int {
         guard playing else { return heldCycle }
@@ -131,31 +157,50 @@ public final class FlexibleSquishLoop: ObservableObject {
     /// its first sim, rising from 0 — so a swap never lands mid-squeeze.
     public func restartFromRest(reduceMotion: Bool) {
         heldCycle = 0
+        // ★ R7-V: his pause holds — the new sequence's first sim, where he left it (the renderer binds a new field at once
+        // while paused); the Play view off: at rest. Never plays, never arms the resume.
+        if !mayAutoPlay {
+            if playing { playing = false }
+            if !playView, held != 0 { held = 0 }
+            wake()
+            return
+        }
         if playing { playing = false }
         held = 0
         if reading { resumeAfterReading = !reduceMotion; wake(); return }
         if reduceMotion { hold(1) } else { play() }
     }
 
-    public func toggle() { playing ? pause() : play() }
+    /// The player's ▶ / ❚❚ — HIS: a pause is his (`pausedByHim`), a play clears it.
+    public func toggle() {
+        if playing { pause(); pausedByHim = true } else { pausedByHim = false; play() }
+    }
 
-    /// A drag on the timeline: pauses and sets the amount directly.
+    /// A drag on the timeline: pauses (★ R7-V: his pause) and sets the amount directly.
     public func scrub(to a: Double) {
         let v = min(1, max(0, a.isFinite ? a : 0))
         if playing { heldCycle = cycle(at: clock()); playing = false }
+        pausedByHim = true
         if held != v { held = v }
         wake()
     }
 
-    /// Hold still at `a` (nothing to loop: his live drawing, held at full).
+    /// Hold still at `a` (nothing to loop: his live drawing, held at full). ★ R7-V: never plays; with the Play view off
+    /// every hold is at REST (his answer: the model sits still at rest until he taps Play).
     public func hold(_ a: Double = 1) {
+        let a = playView ? a : 0
         if playing { heldCycle = cycle(at: clock()); playing = false }
         if held != a { held = a }
         wake()
     }
 
-    /// A fresh lattice: it plays — unless reduced motion, which holds the full squish.
+    /// A fresh lattice: it plays — unless reduced motion, which holds the full squish. ★ R7-V: unless he paused (it stays
+    /// where he left it) or the Play view is off (at rest).
     public func autoPlay(reduceMotion: Bool) {
+        if !mayAutoPlay {
+            if !playView { hold(0) }
+            return
+        }
         if reading { resumeAfterReading = !reduceMotion; hold(1); return }   // it plays when the reading ends
         if reduceMotion { hold(1) } else { play() }
     }
@@ -173,7 +218,7 @@ public final class FlexibleSquishLoop: ObservableObject {
             if playing { resumeAfterReading = true; hold(1) }
         } else if resumeAfterReading {
             resumeAfterReading = false
-            play()
+            if mayAutoPlay { play() }   // ★ R7-V: never over his pause, nor with the Play view off
         }
     }
 

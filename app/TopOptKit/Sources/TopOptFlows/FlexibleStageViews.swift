@@ -26,9 +26,15 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
     /// The buttons, in order (icon, label, accessibility id). ★ R6 REVIEW (the verifier: the glyphs did not say what
     /// they do — stacked layers, an apps grid): [Prisms] is "down to a depth" in the prisms' own purple; [Groups] is
     /// his first three groups' colours as three dots (`glyphColours`; its SF name is the accessibility fallback only).
+    /// ★ ROUND 7, R7-V (his img3 and img4, 2026-10-14): [Heat] (the main page's glyph — a tap: the current group's heat or
+    /// none, a 3 s hold: every group's; its bit is `heatOff`, the page opening with the current group's), [Bend] (the
+    /// current group at full depth, every face at once, frozen) and [Play] (the sim and its bar; shared with the main page).
     static let buttons: [(view: FlexibleStageViews, icon: String, label: String, id: String)] = [
         (.prisms, "arrow.down.to.line", "Prisms", "flexible-settings-view-prisms"),
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
+        (.heatOff, "thermometer.medium", "Heat", "flexible-settings-view-heat"),
+        (.bend, "rectangle.compress.vertical", "Bend", "flexible-settings-view-bend"),
+        (.play, "play.fill", "Play", "flexible-settings-view-play"),
     ]
     static let buttonSize: CGFloat = 40
     /// [Prisms]' SF symbol (its glyph's, and the accessibility fallback) — ★ S1b: the main page's [Prisms] too.
@@ -54,7 +60,7 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
 }
 
 extension FlexibleStageModel {
-    /// A view button: on ⇄ off.
+    /// A view button: on ⇄ off. (★ R7-V: [Heat]'s button is `heatTapped` / `heatHeld` — its bit means hidden.)
     public func toggleView(_ v: FlexibleStageViews) {
         if views.contains(v) { views.remove(v) } else { views.insert(v) }
         // RED CONTROL: the views written into the settings (an action, a modified page)
@@ -65,15 +71,18 @@ extension FlexibleStageModel {
     }
 }
 
-/// [Prisms] [Groups], under the gizmo (FlexibleViewColumn mounts it).
+/// [Prisms] [Groups] [Heat] [Bend] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
 struct FlexibleStageViewButtons: View {
     @ObservedObject var model: FlexibleStageModel
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
             ForEach(FlexibleStageViews.buttons, id: \.id) { b in
-                let on = model.views.contains(b.view)
-                FlexibleViewButton(icon: b.icon, label: b.label, on: on, action: { model.toggleView(b.view) }, glyph: glyph(b.view, on: on))
+                let on = Self.isOn(b.view, model.views)
+                FlexibleViewButton(icon: icon(b), label: b.label, on: on, action: { tapped(b.view) }, glyph: glyph(b.view, on: on),
+                                   onLongPress: b.view == .heatOff ? { held() } : nil)
+                    .accessibilityValue(b.view == .heatOff ? heatValue : (on ? "On" : "Off"))
+                    .accessibilityHint(b.view == .heatOff ? FlexibleRowCopy.heatHint : "")
                     .accessibilityIdentifier(b.id)
             }
         }
@@ -85,8 +94,47 @@ struct FlexibleStageViewButtons: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
+    /// ★ R7-V: a button is lit while its view shows — [Heat] while any heat shows (its bit means hidden).
+    static func isOn(_ v: FlexibleStageViews, _ views: FlexibleStageViews) -> Bool {
+        v == .heatOff ? views.heatScope != .off : views.contains(v)
+    }
+    /// [Heat]'s glyph: fuller for every group's heat (his hold).
+    private func icon(_ b: (view: FlexibleStageViews, icon: String, label: String, id: String)) -> String {
+        b.view == .heatOff && model.views.heatScope == .all ? "thermometer.high" : b.icon
+    }
+    private var heatValue: String {
+        switch model.views.heatScope {
+        case .off: return "Off"
+        case .group: return FlexibleRowCopy.heatGroup
+        case .all: return FlexibleRowCopy.heatAll
+        }
+    }
+    /// A tap: [Heat] cycles (shown → hidden → the current group's); the others on ⇄ off. An edges/corners group has
+    /// nothing to heat or bend yet — the page says so once.
+    private func tapped(_ v: FlexibleStageViews) {
+        if v == .heatOff {
+            var next = model.views
+            next.heatTapped()
+            model.views = next
+            if next.heatScope != .off { sayEdgesPending(FlexibleRowCopy.noHeatYet) }
+            return
+        }
+        model.toggleView(v)
+        if v == .bend, model.views.contains(.bend) { sayEdgesPending(FlexibleRowCopy.noBendYet) }
+    }
+    /// His 3 s hold on [Heat]: every group's heat.
+    private func held() {
+        var next = model.views
+        next.heatHeld()
+        model.views = next
+    }
+    private func sayEdgesPending(_ line: String) {
+        if model.playingGroup?.kind == .edges { model.toast = line }
+    }
+
     /// ★ R6 REVIEW: what each button shows — the prisms' purple arrow down to a line; his groups' three colours.
-    private func glyph(_ v: FlexibleStageViews, on: Bool) -> AnyView {
+    private func glyph(_ v: FlexibleStageViews, on: Bool) -> AnyView? {
+        guard v == .prisms || v == .groups else { return nil }   // ★ R7-V: Heat, Bend and Play are their SF icons
         if v == .groups {
             let cs = FlexibleStageViews.glyphColours(model: model)
             return AnyView(ZStack {

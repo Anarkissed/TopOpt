@@ -368,14 +368,11 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(note.width, 180, "room for 'Lattice ready · Show' at \(name)")
             XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)), "clear of the left panel at \(name)")
             XCTAssertTrue(frame.contains(note))
-            // ★ RE-PINNED (round 6 batch V): his two view settings share the row's line in landscape and sit one line under
-            // it in portrait (FlexibleMainViewToggles.settingsOnRowLine — their own cost to the card is pinned by
-            // FlexibleBatchVHostedTests V1d: the card stays in the trailing column, folded on the very edge). The NOTE still
-            // costs the legends nothing: the keep-out ends where the row — or, in portrait, the settings' line — ends, and the
-            // legends are compared with the row and that line held out without the note.
-            let settings = FlexibleMainViewToggles.settingsOnRowLine(viewport: v) ? CGRect.null : FlexibleMainViewToggles.settingsFrame(viewport: v)
-            let held = row.union(settings)
-            XCTAssertEqual(frame.maxY, held.maxY, accuracy: 0.5, "the keep-out ends where the row (or the settings' line) ends at \(name)")
+            // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's settings' line is
+            // gone — the NOTE costs the legends nothing again: the keep-out ends where the row ends, and the legends are
+            // compared with the row alone held out.
+            let held = row
+            XCTAssertEqual(frame.maxY, held.maxY, accuracy: 0.5, "the keep-out ends where the row ends at \(name)")
             for chip: CGFloat in [0, 222] {
                 let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: chip)
                 let placed = FlexibleMainLegendLayout.place(kinds, minimized: [], viewport: v, keepOut: keep)

@@ -33,9 +33,6 @@ final class FlexibleBatchVEvidenceProbe: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let p = r.project
         let stage = FlexibleMainStage()
-        let suite = "flexible-batch-v-probe-\(UUID().uuidString)"
-        stage.viewStore = FlexibleMainViewSettingsStore(defaults: UserDefaults(suiteName: suite)!)
-        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
         stage.reduceMotion = { true }
         let m = stage.model(for: p, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
         addTeardownBlock { @MainActor in await m.waitForIdle() }
@@ -70,15 +67,11 @@ final class FlexibleBatchVEvidenceProbe: XCTestCase {
         let below = FlexibleRound6Tests.Cam(name: "below", azimuth: .pi / 4, elevation: -0.55, zoom: 1)
         stage.heat = false
         try render("BV_M_roles_ON_default_from_below.png", cam: below)
-        stage.setRoleColoursOff(false)
-        try render("BV_M_roles_OFF_from_below.png", cam: below)
-        stage.setRoleColoursOff(true)
+        // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): the OFF renders went with the
+        // toggles — the ON state is fixed (FlexibleMainPickSession)
         stage.heat = true
         // ── "Prism after a pick": on open, then after his pick of the Top
         try render("BV_M_prism_after_pick_ON_on_open.png")
-        stage.setPrismAfterPick(false)
-        try render("BV_M_prism_after_pick_OFF_on_open.png")
-        stage.setPrismAfterPick(true)
         let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
         p.selection.setActive(top.id)
         try render("BV_M_prism_after_pick_ON_after_picking_Top.png")

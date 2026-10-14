@@ -112,6 +112,9 @@ extension FlexibleBatchMXrayTests {
         try await FlexibleSquishFixture.settle(m, "his round 5")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"): the walls (and their legend)
+        // are seen in HIS X-ray now, off by default — batch M's card pinned his Lattice view in X-ray
+        stage.xrayOn = true
         try await FlexibleHisProject.waitFor(300, "his round 5: the sims") {
             stage.refresh()
             return m.lattice != nil && !m.squish.isEmpty && !m.squish.values.contains(.pending)

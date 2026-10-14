@@ -1,10 +1,7 @@
 // FlexibleBatchVReviewTests — round 6, batch V's review (2026-10-10): the verifier's confirmed findings, each as a test with
 // its red control, on HIS pad (A1_0003, restored as he saved it). Part of FlexibleBatchVHostedTests (its hosting and helpers).
-//   VR1 (major, UX) "Role colours off" UNTICKED changed nothing he could see: on his pad every face carries Flexible's own
-//       tint or map, and #354's colours were laid only where Flexible leaves the part clay — the Top never turned blue, the
-//       Bottom never green. Unticked now paints them as Topology does wherever no heat or Stress is drawn — over Flexible's
-//       marks and on the maps (X-ray ghosts them in their own colour). Measured in pixels at HIS camera (img1), in the Model
-//       view and his Lattice view, by the shipping renderer. RED CONTROL: `controlRolesUnderMarks` (batch V as built).
+//   VR1 (★ RE-PINNED by R7-V: the toggle is gone — his 2026-10-14 words) the main page's model shows no Selections colour
+//       at HIS camera (img1), in the Model view and his Lattice view, by the shipping renderer (the ticked case, fixed).
 //   VR2 "Prism after a pick": an Undo or a Redo re-writes the selection (ProjectModel.applyEditSnapshot, an equal write as
 //       often as not) — it was counted as his pick. RED CONTROL: `controlUndoIsAPick`. Positive control: re-tapping the
 //       active row still counts.
@@ -75,9 +72,13 @@ extension FlexibleBatchVHostedTests {
         return n
     }
 
-    /// ★ THE VERIFIER'S SCREENS (verify_V/SBS_roles_*): ticked and unticked were the same frame on his pad — no Top blue, no
-    /// Bottom green, anywhere he looks. Unticked must now show them (as #354 paints them: tasks.md, 2026-10-10), ticked never.
-    func testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera() throws {
+    /// ★ RE-PINNED (R7-V — his 2026-10-14 words: "All view buttons should be icons - never full words. Remove the two full
+    /// worded view icons. I've decided against them.", and his answer: NO Selections role colours on the main page's model):
+    /// batch V review's VR1 measured "Role colours off" UNTICKED (#354's colours where he looks); the toggle is gone, so only
+    /// its TICKED case is kept — fixed. At his img1 camera, by the shipping renderer: no Top blue, no Anchor green, in the
+    /// Model view and his Lattice view (heat off), whatever roles H4 hands over. (The roles' red control is
+    /// FlexibleRound7ViewsTests.testTheMainPageModelWearsNoRoleColourWhateverRolesAreHandedOver.)
+    func testTheMainPageModelShowsNoSelectionsColourAtHisCamera() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let s = mainStage()
         let (r, m) = try his(s)
@@ -86,86 +87,18 @@ extension FlexibleBatchVHostedTests {
         m.selectedRegion = nil
         s.stress = false
         let roles = Self.roleTints(p)
-        let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
-        let bottom = try XCTUnwrap(p.selection.groups.first { $0.name == "Bottom" })
         let topInk = try XCTUnwrap(roles[1], "premise: the Top (face 1) wears the Top's colour")
         let bottomInk = try XCTUnwrap(roles[0], "premise: the Bottom (face 0) wears the Anchor's colour")
-        let c = p.force.tint(for: top), b = p.force.tint(for: bottom)
-        XCTAssertEqual(topInk, SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
-        XCTAssertEqual(bottomInk, SIMD4<Float>(Float(b.r), Float(b.g), Float(b.b), 1))
         var lines: [String] = []
-        // his views: the Model view (heat off), and his img1 / img4 Lattice view (X-ray), heat off and on
-        for (name, lattice, heat) in [("model_heatOff", false, false), ("lattice_heatOff", true, false), ("lattice_heatOn", true, true)] {
-            s.latticeOn = lattice; s.heat = heat
-            s.controlRolesUnderMarks = false
-            s.setRoleColoursOff(true)
-            let ticked = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_\(name)_ticked.png")
-            s.setRoleColoursOff(false)
-            let unticked = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_\(name)_unticked.png")
-            // ★ RED CONTROL: unticked as batch V built it (#354's colours only where Flexible leaves clay)
-            s.controlRolesUnderMarks = true
-            let control = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_\(name)_unticked_control.png")
-            s.controlRolesUnderMarks = false
-            s.setRoleColoursOff(true)
-            let t = (Self.hued(ticked, like: topInk), Self.hued(ticked, like: bottomInk))
-            let u = (Self.hued(unticked, like: topInk), Self.hued(unticked, like: bottomInk))
-            let k = (Self.hued(control, like: topInk), Self.hued(control, like: bottomInk))
-            let moved = Self.frameDiffering(ticked, unticked), movedControl = Self.frameDiffering(ticked, control)
-            lines.append("\(name): Top blue / Anchor green px — ticked \(t.0) / \(t.1) · unticked \(u.0) / \(u.1) · control (batch V) \(k.0) / \(k.1)"
-                         + " · px that change on the tap: \(moved) (control \(movedControl))")
-            if !heat {
-                XCTAssertEqual(t.0, 0, "★ \(name), ticked: no Top colour on the model")
-                XCTAssertEqual(t.1, 0, "★ \(name), ticked: no Anchor / Group C green")
-                // the Top is his camera's face: unticked, it wears the Top's colour (the dent map's quads, heat off)
-                XCTAssertGreaterThan(u.0, 5_000, "★ \(name), unticked: the Top wears the Top's colour where he looks")
-                XCTAssertGreaterThan(moved, 5_000, "★ \(name): the tap changes what he sees")
-                // (the control's few "blue" px are the resting bottom's cyan edge — a neighbouring hue)
-                XCTAssertLessThan(k.0 * 20, u.0, "★ RED CONTROL (\(name)): batch V's unticked showed (next to) no Top colour on his pad")
-            } else {
-                // heat on: the dent heat owns the maps (its ramp shares the Top's hue, so the frames are compared) — the tap
-                // hides nothing he set under a role colour
-                XCTAssertLessThan(moved, 500, "\(name), unticked: the heat keeps every map")
-            }
+        for (name, lattice, xray) in [("model_heatOff", false, false), ("lattice_heatOff", true, true)] {
+            s.latticeOn = lattice; s.xrayOn = xray; s.heat = false
+            let frame = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_\(name)_fixed.png")
+            let t = (Self.hued(frame, like: topInk), Self.hued(frame, like: bottomInk))
+            XCTAssertEqual(t.0, 0, "★ \(name): no Top colour on the model")
+            XCTAssertEqual(t.1, 0, "★ \(name): no Anchor / Group C green")
+            lines.append("\(name): Top blue / Anchor green px \(t.0) / \(t.1)")
         }
-        // the Bottom: from below (it faces away from img1), the Anchor's green unticked; Flexible's resting cyan before
-        s.latticeOn = false; s.heat = false
-        s.setRoleColoursOff(false)
-        s.refresh()
-        let tints = try XCTUnwrap(s.tints(p, on: .lattice, roles: roles, stress: nil))
-        let o = try XCTUnwrap(s.overlay)
-        let tris0 = o.keptFace.indices.filter { o.keptFace[$0] == 0 }
-        XCTAssertFalse(tris0.isEmpty)
-        let face0 = Set(tris0.flatMap { tri in (0..<3).map { Self.rgba(tints, 3 * tri + $0) } })
-        XCTAssertEqual(face0, [bottomInk], "★ unticked: the Bottom wears the Anchor's colour, as #354 paints it (Flexible's cyan under it)")
-        s.controlRolesUnderMarks = true
-        s.refresh()
-        let before = try XCTUnwrap(s.tints(p, on: .lattice, roles: roles, stress: nil))
-        XCTAssertEqual(Set(tris0.flatMap { tri in (0..<3).map { Self.rgba(before, 3 * tri + $0) } }), [FlexibleColours.restingFace],
-                       "control (batch V): Flexible's resting cyan, the Anchor's colour nowhere")
-        s.controlRolesUnderMarks = false
-        s.setRoleColoursOff(true)
-        // his r5 (the verifier: unticking showed only the Protect hatch, and only in the Model view): the Model view, heat off
-        let r5 = try FlexibleHisProject.restore(FlexibleHisProject.round5Dir, asSaved: true)
-        addTeardownBlock { r5.cleanup() }
-        let s5 = mainStage()
-        let m5 = settledModel(r5.project, stage: s5)
-        s5.apply(r5.project, owned: true, pageUp: false)
-        m5.selectedRegion = nil
-        s5.stress = false; s5.latticeOn = false; s5.heat = false
-        let roles5 = Self.roleTints(r5.project)
-        let ticked5 = try mainFrame(s5, r5.project, roles: roles5, device: device, name: "BVR_r5_roles_model_heatOff_ticked.png")
-        s5.setRoleColoursOff(false)
-        let unticked5 = try mainFrame(s5, r5.project, roles: roles5, device: device, name: "BVR_r5_roles_model_heatOff_unticked.png")
-        s5.controlRolesUnderMarks = true
-        let control5 = try mainFrame(s5, r5.project, roles: roles5, device: device, name: "BVR_r5_roles_model_heatOff_unticked_control.png")
-        s5.controlRolesUnderMarks = false
-        s5.setRoleColoursOff(true)
-        let moved5 = Self.frameDiffering(ticked5, unticked5), control5Moved = Self.frameDiffering(ticked5, control5)
-        lines.append("r5 model_heatOff: px that change on the tap \(moved5) (control, batch V: \(control5Moved)) · role colours "
-                     + roles5.values.map { c in "\(Self.hued(unticked5, like: c))" }.joined(separator: "/"))
-        XCTAssertGreaterThan(moved5, 5_000, "★ r5, Model view: the tap changes what he sees")
-        XCTAssertGreaterThan(moved5, control5Moved, "★ r5: more than batch V's (the Protect hatch alone)")
-        print("FLEX-BVR-1 (his pad and his r5, his img1 camera, the shipping renderer)\n  " + lines.joined(separator: "\n  "))
+        print("FLEX-BVR-1 (fixed, R7-V) " + lines.joined(separator: " · "))
     }
 
     // MARK: - VR2: an Undo / Redo is never his pick
@@ -179,7 +112,8 @@ extension FlexibleBatchVHostedTests {
         _ = settledModel(p, stage: s)
         s.apply(p, owned: true, pageUp: false)
         func prisms() -> [Int] { s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID) }
-        XCTAssertTrue(s.viewSettings.prismAfterPick, "ON by default")
+        // (★ R7-V: "Prism after a pick" is no longer a setting — fixed ON by his 2026-10-14 answer; this test is otherwise
+        // carried over unchanged)
         XCTAssertFalse(s.sessionPicked)
         XCTAssertEqual(prisms(), [], "on open: nothing")
         // an edit that is not a pick (the Top's weight, on the main page), sealed as one undo step

@@ -314,7 +314,7 @@ extension FlexibleMainStage {
             out[fe.fields[i].versionKey] = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: d, heat: heat,
                                                                         depthScaleMM: scale, mapValues: feMapValues(fe.fields[i], m),
                                                                         groupColours: false,
-                                                                        roleMarks: !viewSettings.roleColoursOff).tints   // ★ R6: no group tint (★ BATCH V: "Role colours off")
+                                                                        roleMarks: controlRolesOnMain).tints   // ★ R6: no group tint (★ R7-V: no role mark)
         }
         return out
     }

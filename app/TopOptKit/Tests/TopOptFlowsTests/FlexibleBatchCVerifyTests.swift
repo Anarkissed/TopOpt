@@ -200,7 +200,8 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
     @MainActor
     func testStressTakesTheMapFromHeatAndLeavesXrayAndTheLatticeAlone() {
         let stage = FlexibleMainStage()
-        XCTAssertTrue(stage.xray && stage.heat && stage.latticeOn && !stage.stress, "premise: the defaults")
+        stage.xrayOn = true   // ★ RE-PINNED (R7-V): his X-ray icon (off by default now) — Stress must leave it alone
+        XCTAssertTrue(stage.xray && stage.heat && stage.latticeOn && !stage.stress, "premise: the defaults (his X-ray on)")
         stage.toggleStress()
         XCTAssertTrue(stage.stress)
         XCTAssertFalse(stage.heat, "one colouring of the map: Stress takes it from Heat")
@@ -370,7 +371,8 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
             return n
         }
         XCTAssertNotNil(stage.overlay?.subdivision, "the main page draws the overlay subdivided for colour")
-        XCTAssertTrue(stage.xray && stage.heat && !stage.stress, "premise: the default view")
+        stage.xrayOn = true   // ★ RE-PINNED (R7-V): batch C's default view was the X-ray — now his X-ray icon (off by default)
+        XCTAssertTrue(stage.xray && stage.heat && !stage.stress, "premise: the default view (his X-ray on)")
         let base = try render("v1_default_xray_heat.png")
         // ★ RED CONTROL: batch C's mix — Heat keeps the map, Stress the ghosted part
         stage.stress = true
@@ -466,7 +468,7 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         // the setting OFF (set directly — never kept for the project)
         XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
         XCTAssertEqual(evaluated, 0, "Role colours off (the default): not evaluated on the Flexible stage either")
-        stage.viewSettings.roleColoursOff = false
+        stage.controlRolesOnMain = true   // ★ RE-PINNED (R7-V): batch V's setting is gone — the roles only through the red control
         stage.refresh()
         XCTAssertNotNil(stage.tints(flex, on: .lattice, roles: roles(), stress: field))
         XCTAssertNotNil(stage.stressField, "control: the Flexible stage notes it")

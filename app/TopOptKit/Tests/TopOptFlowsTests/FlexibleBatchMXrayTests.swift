@@ -34,6 +34,9 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "his round 5")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; M6 and C2 reversed): X-ray is
+        // his own icon again, off by default — these renders are of HIS X-ray (the ghost body, the solid planes over the walls)
+        stage.xrayOn = true
         try await FlexibleHisProject.waitFor(300, "his round 5: the sims") {
             stage.refresh()
             return m.lattice != nil && !m.squish.isEmpty && !m.squish.values.contains(.pending)
@@ -52,19 +55,28 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         XCTAssertTrue(stage.xray && stage.ghostWalls)
         XCTAssertEqual(layer()?.ghostWalls, true)
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha)
-        // the lattice hidden: the DENT view keeps X-ray (the planes bend through the ghost body)
+        // the lattice hidden: X-ray stays — ★ R7-V: because it is HIS icon (the dent view no longer turns it on: M6 reversed)
         stage.toggleLattice(); stage.refresh()
         XCTAssertFalse(stage.latticeShown)
-        XCTAssertTrue(stage.xray, "the dent view initiates X-ray")
+        XCTAssertTrue(stage.xray, "his X-ray stays with the lattice hidden")
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha)
         XCTAssertEqual(layer()?.hidden, true, "no walls")
-        // ★ RED CONTROL: C2's rule (X-ray IS the Lattice view) left the body solid here
-        XCTAssertFalse(stage.latticeShown, "control: C2's X-ray (= the Lattice view) would be off")
-        // Dent heat off (Stress on — the two never on together): the lattice decides alone
+        // ★ R7-V: and the dent view never turns X-ray on by itself (his icon off: the solid part, the dent view on)
+        stage.toggleXray(); stage.refresh()
+        XCTAssertTrue(stage.heat && stage.dentXray, "premise: the dent view shows a map")
+        XCTAssertFalse(stage.xray, "★ the dent view no longer forces X-ray (M6 reversed)")
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1)
+        stage.controlXrayIsLatticeView = true
+        XCTAssertTrue(stage.xray, "★ RED CONTROL: M6's rule — the dent view X-rays the body")
+        stage.controlXrayIsLatticeView = false
+        stage.toggleXray(); stage.refresh()
+        // Dent heat off (Stress on — the two never on together)
         stage.toggleStress(); stage.refresh()
         XCTAssertFalse(stage.heat)
-        XCTAssertFalse(stage.xray, "no dent, no lattice: the solid part")
+        stage.toggleXray(); stage.refresh()
+        XCTAssertFalse(stage.xray, "his X-ray off: the solid part")
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1)
+        stage.toggleXray()
         stage.toggleLattice(); stage.refresh()
         XCTAssertTrue(stage.xray && stage.latticeShown)
         XCTAssertFalse(stage.ghostWalls, "Stress: the walls are drawn solid (in its colours)")

@@ -319,7 +319,9 @@ final class FlexibleRound6Tests: XCTestCase {
         // the page's composed tints, read as the channels with no group colour (the SAME tints before round 6's
         // item 1 and after it on his pad — every pressed face has its map — so the nil-alpha hash compares the pass)
         let c = FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil, groupColours: false)
-        XCTAssertEqual(c.tints, FlexibleStagePage.composeTints(model: m, overlay: o).tints, "the page composes exactly these")
+        // ★ RE-PINNED (R7-V — his 2026-10-14 Heat view: tap = the current group's heat, hold 3 s = every group's): the page
+        // composes exactly these with every group's heat shown (`heatAll`)
+        XCTAssertEqual(c.tints, FlexibleStagePage.composeTints(model: m, overlay: o, views: [.heatAll]).tints, "the page composes exactly these")
         var cache: (key: String, dents: [Float])?
         let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         let sc = Scene(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), settle: settle)
@@ -594,7 +596,11 @@ final class FlexibleRound6Tests: XCTestCase {
         let part = try XCTUnwrap(r.project.viewerMesh)
         let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
         let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
-        let c = FlexibleStagePage.composeTints(model: m, overlay: o)
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img3: the Heat view "adds a layer of a heat map? … Remove that"): the page
+        // draws NO glass over a face whose heat shows; the glass is seen only where his Heat view hides the heat. So the
+        // glass is measured where it is drawn: the heat hidden (`heatOff`) — over the X-ray ghost, judged over the page's
+        // ground (FlexibleGroupWalls.heatSamples keeps the heat's colours only)
+        let c = FlexibleStagePage.composeTints(model: m, overlay: o, views: [.heatOff])
         var cache: (key: String, dents: [Float])?
         let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         let sc = Scene(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), settle: settle)
@@ -655,7 +661,8 @@ final class FlexibleRound6Tests: XCTestCase {
         // the page hands the glass this heat: taken where it composes its tints, passed with the one list
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         XCTAssertTrue(page.contains("let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: overlay, model: model)"), "the page samples its heat")
-        XCTAssertTrue(page.contains("heat: glassHeat),"), "…and hands it to the glass")
+        XCTAssertTrue(page.contains("heat: glassHeat, heated: FlexibleStageHeat.shown(model: model, views: model.views))"),
+                      "…and hands it to the glass, with the faces whose heat shows (no glass over them — R7-V)")
     }
 
     /// ★ A FAINT PRISM'S SIDE EDGES STAND ONLY WHERE ITS OUTLINE TURNS (the verifier: "faint prisms draw an edge at every

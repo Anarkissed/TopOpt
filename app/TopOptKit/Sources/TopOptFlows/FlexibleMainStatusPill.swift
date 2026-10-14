@@ -18,8 +18,8 @@
 // another stage "Building…" (and a Ready his edits there made stale) takes him to the Lattice
 // stage, where builds start.
 //
-// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; C2: no X-ray button; ★ S1b: [Prisms])
-// and the main page's squish player slot.
+// Also here: the Flexible view toggles (H5 — Dent heat, Stress, Lattice; ★ S1b: [Prisms]; ★ R7-V: X-ray and Play,
+// icons only) and the main page's squish player slot (★ R7-V: only with Play).
 
 import SwiftUI
 import TopOptDesign
@@ -106,12 +106,10 @@ private struct FlexibleMainStatusPillBody: View {
 }
 
 /// H5 / H5': the main Flexible page's views, where `viewModeToggles` sits (below the gizmo, on
-/// `edge`) — the same 40 pt buttons. ★ ROUND 4 (C2, his img 5): Dent heat, Stress, Lattice — no
-/// X-ray button: the Lattice view IS the X-ray rendering (FlexibleMainStage.xray). Heat and
-/// Lattice on by default. The Lattice button shows / hides the lattice, or — with nothing to
-/// show — opens Settings, whose Exit turns the view on (`openSettings`, H5's closure). The
-/// "Lattice ready" note sits on the row's line, left of the buttons (FlexibleMainNoteView — ★ C2
-/// verification: it was under the row);
+/// `edge`) — the same 40 pt buttons. ★ ROUND 4 (C2, his img 5): Dent heat, Stress, Lattice.
+/// The Lattice button shows / hides the lattice, or — with nothing to show — opens Settings, whose Exit turns the view on
+/// (`openSettings`, H5's closure). The "Lattice ready" note sits on the row's line, left of the buttons
+/// (FlexibleMainNoteView — ★ C2 verification: it was under the row);
 /// ★ BATCH C VERIFICATION: Stress and Dent heat are the two colourings of the pressed map — one
 /// at a time (FlexibleMainStage.toggleStress); Stress leaves X-ray and the lattice alone.
 /// ★ STRESS IS SOLVED DIRECTLY (item T): `solver` is the workspace's own FlexibleStressSolver
@@ -119,6 +117,11 @@ private struct FlexibleMainStatusPillBody: View {
 /// `lattice.enabled && needsStressSolve`, which a fresh Flexible part never passes). While it
 /// solves the button spins; the Stress legend says "Simulating…" — once (the #354 banner and a
 /// caption under this row said it too: four times).
+/// ★ ROUND 7, R7-V (his img1 and img5, 2026-10-14: "All view buttons should be icons - never full words. Remove the two
+/// full worded view icons. I've decided against them. Instead, add a Play button icon" … "Please re-add the x-ray view
+/// icon."): ICONS ONLY — batch V's two worded settings are gone (their behaviours fixed: FlexibleMainPickSession); X-RAY
+/// is its own icon again (off by default: the opaque model — C2 and M6 reversed) and PLAY is a view (off on open: no bar,
+/// the model at rest). Six 40 pt icons: one line where it fits beside the note, else three over three.
 public struct FlexibleMainViewToggles: View {
     @ObservedObject var main: FlexibleMainStage
     let solver: FlexibleStressSolver?
@@ -133,8 +136,12 @@ public struct FlexibleMainViewToggles: View {
 
     static let heatIcon = "thermometer.medium"
     static let stressIcon = "waveform.path.ecg"
-    /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph).
-    static let buttons = 4
+    /// ★ R7-V: the X-ray icon (the glyph C2 removed) and the Play icon.
+    static let xrayIcon = "square.stack.3d.up"
+    static let playIcon = "play.fill"
+    /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph);
+    /// ★ R7-V: X-ray and Play.
+    static let buttons = 6
 
     // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
     private var heatButton: some View {
@@ -151,47 +158,59 @@ public struct FlexibleMainViewToggles: View {
             }
             .accessibilityIdentifier("flexible-main-view-stress")
     }
-    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings
+    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ R7-V: lit while its walls are seen
+    // (in X-ray); turning it on turns X-ray on (a view that needs another turns it on itself)
     private var latticeButton: some View {
-        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeShown) {
+        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.wallsShown) {
             main.latticeButtonTapped(openSettings: openSettings)
         }
             .accessibilityIdentifier("flexible-main-view-lattice")
     }
     // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
-    // faint, with its mm; it turns the Lattice view (the X-ray) on itself
+    // faint, with its mm; ★ R7-V: it turns X-ray on itself
     private var prismsButton: some View {
         FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn,
                            action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn))
             .accessibilityIdentifier("flexible-main-view-prisms")
+    }
+    // ★ R7-V: X-ray — the ghost and the walls inside it; off, the opaque model
+    private var xrayButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: main.xrayOn) { main.toggleXray() }
+            .accessibilityIdentifier("flexible-main-view-xray")
+    }
+    // ★ R7-V: Play — the sim plays and its bar shows; off, no bar and the model at rest. A small ring while the sims run
+    // or refine (the bar's note said so)
+    private var playButton: some View {
+        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn) { main.togglePlay() }
+            .overlay(alignment: .topTrailing) {
+                if main.simsWorking {
+                    ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color).scaleEffect(0.7)
+                        .padding(3).allowsHitTesting(false)
+                        .accessibilityIdentifier("flexible-main-view-play-working")
+                }
+            }
+            .accessibilityIdentifier("flexible-main-view-play")
     }
 
     public var body: some View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
         GeometryReader { g in
-            VStack(alignment: .trailing, spacing: DS.Space.s) {
-                HStack(spacing: DS.Space.s) {
-                    // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
-                    FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
-                    // ★ BATCH V: his two view settings on the buttons' line where it holds them (landscape)
-                    if Self.settingsOnRowLine(viewport: g.size) { settingsRow }
-                    // ★ S1b: one line of four — or, on a pad too narrow for the note beside four (the iPad mini), two over two
-                    Group {
-                        if Self.columns(viewport: g.size) >= Self.buttons {
-                            HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton }
-                        } else {
-                            VStack(alignment: .trailing, spacing: DS.Space.s) {
-                                HStack(spacing: DS.Space.s) { heatButton; stressButton }
-                                HStack(spacing: DS.Space.s) { latticeButton; prismsButton }
-                            }
+            HStack(spacing: DS.Space.s) {
+                // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
+                FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
+                // ★ R7-V: one line of six — or, on a pad too narrow for the note beside six, three over three
+                Group {
+                    if Self.columns(viewport: g.size) >= Self.buttons {
+                        HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton; xrayButton; playButton }
+                    } else {
+                        VStack(alignment: .trailing, spacing: DS.Space.s) {
+                            HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton }
+                            HStack(spacing: DS.Space.s) { prismsButton; xrayButton; playButton }
                         }
                     }
-                    .latticeBandChipKeepOut()
                 }
-                // ★ BATCH V (his two view settings, 2026-10-10): else one line under the buttons, trailing — each one
-                // visible line, a tap flips it (FlexibleMainViewSettings)
-                if !Self.settingsOnRowLine(viewport: g.size) { settingsRow }
+                .latticeBandChipKeepOut()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(.top, PageChrome.belowGizmo)
@@ -199,61 +218,22 @@ public struct FlexibleMainViewToggles: View {
         }
     }
 
-    /// ★ BATCH V: "Role colours off" and "Prism after a pick", side by side at their fixed widths (`settingsFrame`).
-    private var settingsRow: some View {
-        HStack(spacing: DS.Space.s) {
-            FlexibleMainViewSettingChip(label: FlexibleRowCopy.mainRoleColoursOff, hint: FlexibleRowCopy.mainRoleColoursOffHint,
-                                        on: main.viewSettings.roleColoursOff, width: Self.settingWidths[0], id: "mainSetting-roleColoursOff") {
-                main.setRoleColoursOff(!main.viewSettings.roleColoursOff)
-            }
-            FlexibleMainViewSettingChip(label: FlexibleRowCopy.mainPrismAfterPick, hint: FlexibleRowCopy.mainPrismAfterPickHint,
-                                        on: main.viewSettings.prismAfterPick, width: Self.settingWidths[1], id: "mainSetting-prismAfterPick") {
-                main.setPrismAfterPick(!main.viewSettings.prismAfterPick)
-            }
-        }
-        .latticeBandChipKeepOut()
-    }
-
-    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ S1b: four 40 pt
-    /// buttons, `s` apart — two over two on a narrow pad) AND the note's band beside it (★ C2: reserved, so a note coming and
+    /// Where the toggles sit, for the player's and the legends' keep-outs: the row (★ R7-V: six 40 pt
+    /// buttons, `s` apart — three over three on a narrow pad) AND the note's band beside it (★ C2: reserved, so a note coming and
     /// going never moves a legend; ★ C2 VERIFICATION: on the row's line, so it ends where the row
     /// ends and costs the legends nothing).
-    /// ★ BATCH V: …and his two view settings' line under them (`settingsFrame`), so nothing is placed over them either.
     static func frame(viewport: CGSize) -> CGRect {
-        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport)).union(settingsFrame(viewport: viewport))
+        rowFrame(viewport: viewport).union(noteFrame(viewport: viewport))
     }
-    /// ★ BATCH V (his two view settings): two chips at fixed widths (the words at 12 pt with room to spare: "Prism after a
-    /// pick" is ≈ 112 pt), a finger's 40 pt tall — the buttons' own height.
-    static let settingHeight: CGFloat = 40
-    static let settingWidths: [CGFloat] = [150, 164]
-    static var settingsWidth: CGFloat { settingWidths.reduce(0, +) + CGFloat(settingWidths.count - 1) * DS.Space.s }
-    /// ★ BATCH V: the two share the buttons' line — left of them, the note left of the two — where that line holds them and
-    /// the note's least room (11" and 13" landscape): the right edge keeps its height for the legend card (folded, on the
-    /// very edge at 11" landscape — his tuning; one line more under the buttons pushed it a column in). Else (portrait, the
-    /// iPad mini, the buttons two over two) one line under the buttons, where a portrait page has the height.
-    static func settingsOnRowLine(viewport: CGSize) -> Bool {
-        let row = rowFrame(viewport: viewport)
-        let room = row.minX - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
-        return row.height <= settingHeight && room >= settingsWidth + DS.Space.s + FlexibleMainNote.minWidth
-    }
-    /// ★ BATCH V: where the two sit (`settingsOnRowLine`: on the buttons' line, else `s` under them, trailing on `edge`).
-    static func settingsFrame(viewport: CGSize) -> CGRect {
-        let row = rowFrame(viewport: viewport)
-        let w = settingsWidth
-        if settingsOnRowLine(viewport: viewport) {
-            return CGRect(x: row.minX - DS.Space.s - w, y: row.midY - settingHeight / 2, width: w, height: settingHeight)
-        }
-        return CGRect(x: viewport.width - PageChrome.edge - w, y: row.maxY + DS.Space.s, width: w, height: settingHeight)
-    }
-    /// The buttons alone (★ S1b: one line of four, or two over two — `columns`).
+    /// The buttons alone (★ R7-V: one line of six, or three over three — `columns`).
     static func rowFrame(viewport: CGSize) -> CGRect {
         let c = columns(viewport: viewport), r = (buttons + c - 1) / c
         let w = CGFloat(c) * 40 + CGFloat(c - 1) * DS.Space.s
         let h = CGFloat(r) * 40 + CGFloat(r - 1) * DS.Space.s
         return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: h)
     }
-    /// ★ S1b: the buttons per line — four, unless four in a line would leave the "Lattice ready · Show" note less than
-    /// its `minWidth` beside them, clear of the left panel (the iPad mini portrait: 148 pt); then two over two.
+    /// ★ S1b: the buttons per line — all of them, unless one line would leave the "Lattice ready · Show" note less than
+    /// its `minWidth` beside them, clear of the left panel; then half (★ R7-V: three over three).
     static func columns(viewport: CGSize) -> Int {
         let line = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
         let room = viewport.width - PageChrome.edge - line - DS.Space.s
@@ -336,46 +316,5 @@ public struct FlexibleMainPlayerSlot: View {
                     .position(x: r.midX, y: r.midY)
             }
         }
-    }
-}
-
-/// ★ BATCH V: one of his two view settings — one line: a check (on) or an empty circle (off), and its words; the view
-/// buttons' fills (on: the accent's deep tone; off: the bar's).
-struct FlexibleMainViewSettingChip: View {
-    let label: String
-    let hint: String
-    let on: Bool
-    let width: CGFloat
-    let id: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: on ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle((on ? DS.Color.accent : DS.Color.textTertiary).color)
-                Text(label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    .lineLimit(1).minimumScaleFactor(0.85)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: [id + "-label": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-            }
-            .padding(.horizontal, 12)
-            .frame(width: width, height: FlexibleMainViewToggles.settingHeight)
-            .background(Capsule().fill(on ? DS.Color.accentDeep.opacity(0.55).color : DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [id: g.frame(in: .global)])
-        }.allowsHitTesting(false))
-        .accessibilityLabel(label)
-        .accessibilityValue(on ? "On" : "Off")
-        .accessibilityHint(hint)
-        .accessibilityIdentifier("flexible-main-\(id)")
     }
 }

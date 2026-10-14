@@ -114,6 +114,9 @@ final class FlexibleRound5SquishExitTests: XCTestCase {
         let m = stage.model(for: pm, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath,
                             persist: persisted)
         addTeardownBlock { @MainActor in await m.waitForIdle() }
+        // ★ RE-PINNED (R7-V — his answer: Play OFF on open, the model at rest until he taps Play): these pin the squish as it
+        // plays across Settings — the fixture turns his Play view on (no assertion changes)
+        m.views.insert(.play)
         m.openScene()
         try await FlexibleHisProject.waitFor(60, "the pad's scene") { m.sceneState == .ready }
         _ = m.press(FlexibleHisProject.topFace(mesh), kg: 20)

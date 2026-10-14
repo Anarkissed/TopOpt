@@ -42,6 +42,9 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "his round 5")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; M6 and C2 reversed): X-ray is
+        // his own icon again, off by default — batch M's verification pinned HIS X-ray view (the ghost body, the planes)
+        stage.xrayOn = true
         try await FlexibleHisProject.waitFor(300, "his round 5: the sims") {
             stage.refresh()
             return m.lattice != nil && !m.squish.isEmpty && !m.squish.values.contains(.pending)
@@ -267,20 +270,20 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
         XCTAssertNotNil(stage.fe.failure, "premise: every sim failed — the column squish plays")
         XCTAssertTrue(stage.heat && stage.dentMapShown, "premise: the dent view shows a map")
         XCTAssertTrue(stage.dentOnColumnFallback)
-        // the lattice shown: X-ray is the lattice's (the walls opaque, as before batch M)
+        // the lattice shown in his X-ray: the walls opaque, as before batch M (never ghosted under the fallback's planes)
         XCTAssertTrue(stage.latticeShown && stage.xray)
         XCTAssertFalse(stage.ghostWalls)
         XCTAssertEqual(stage.layer(pm, stage: .lattice, pageUp: false)?.ghostWalls, false)
-        // the lattice hidden: the solid part
-        stage.toggleLattice(); stage.refresh()
+        // the lattice hidden and ★ R7-V his X-ray off: the solid part (the dent view never forces X-ray now — M6 reversed)
+        stage.toggleLattice(); stage.toggleXray(); stage.refresh()
         XCTAssertFalse(stage.xray)
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "the column planes are never seen through a ghost")
-        // ★ RED CONTROL: batch M's rule — the dent view X-rays the fallback too
-        stage.controlDentXrayOnFallback = true; stage.refresh()
+        // ★ RED CONTROL: batch M's rule — the dent view X-rays the fallback too (★ R7-V: with M6's derived X-ray)
+        stage.controlDentXrayOnFallback = true; stage.controlXrayIsLatticeView = true; stage.refresh()
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "control: batch M ghosted the body")
         stage.toggleLattice(); stage.refresh()
         XCTAssertTrue(stage.ghostWalls, "control: …and the walls")
-        stage.controlDentXrayOnFallback = false; stage.refresh()
+        stage.controlDentXrayOnFallback = false; stage.controlXrayIsLatticeView = false; stage.refresh()
         // the FE route keeps it (a pick of a group whose sim landed)
         let (_, ok, _) = try await round5()
         XCTAssertFalse(ok.dentOnColumnFallback)
@@ -481,6 +484,7 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "his round 5, Fine")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        stage.xrayOn = true   // ★ RE-PINNED (R7-V): his X-ray icon (off by default now)
         try await FlexibleHisProject.waitFor(600, "Fine: the sims") {
             stage.refresh()
             return m.lattice != nil && !m.latticeIsStale && !m.squish.isEmpty && !m.squish.values.contains(.pending)

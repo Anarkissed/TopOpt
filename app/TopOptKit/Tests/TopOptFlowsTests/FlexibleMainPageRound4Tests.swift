@@ -55,13 +55,15 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
     // MARK: img 5 — no X-ray selector; the Lattice view IS the X-ray
 
     func testTheViewRowHasNoXRayButton() throws {
-        // ★ RE-PINNED (S1b, round 6 item 3 — the main page's [Prisms]): four buttons; still no X-ray
-        XCTAssertEqual(FlexibleMainViewToggles.buttons, 4, "Dent heat · Stress · Lattice · Prisms")
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon", img1: "add a Play button icon";
+        // C2's removal reversed): six icons — the X-ray button is back (its own toggle, off by default) and Play joins
+        XCTAssertEqual(FlexibleMainViewToggles.buttons, 6, "Dent heat · Stress · Lattice · Prisms · X-ray · Play")
         let code = try FlexibleSource.code("FlexibleMainStatusPill.swift")
-        XCTAssertFalse(code.contains("flexible-main-view-xray"), "no X-ray button on the main page")
-        XCTAssertFalse(code.contains("label: \"X-ray\""))
+        XCTAssertTrue(code.contains("flexible-main-view-xray"), "★ the X-ray button is back")
+        XCTAssertTrue(code.contains("main.toggleXray()"), "…its own toggle")
         XCTAssertFalse(code.contains("main.xray.toggle()"))
-        for id in ["flexible-main-view-heat", "flexible-main-view-stress", "flexible-main-view-lattice", "flexible-main-view-prisms"] {
+        for id in ["flexible-main-view-heat", "flexible-main-view-stress", "flexible-main-view-lattice", "flexible-main-view-prisms",
+                   "flexible-main-view-play"] {
             XCTAssertTrue(code.contains(id), "\(id) stays")
         }
         // the Lattice button asks the stage (it may open Settings), never a bare toggle
@@ -69,18 +71,21 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         XCTAssertFalse(code.contains("{ main.toggleLattice() }"))
     }
 
-    /// The main page's X-ray rendering follows the Lattice view — on together, off together.
+    /// ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2 reversed): the main page's
+    /// X-ray follows HIS X-ray icon, not the Lattice view — the Lattice view on with X-ray off is the opaque model.
     @MainActor
     func testTheLatticeViewIsTheXRayRendering() throws {
         let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"))
         let stage = FlexibleMainStage()
         XCTAssertTrue(stage.latticeOn, "premise: the view is on by default")
-        for on in [true, false, true] {
-            if stage.latticeShown != on { stage.toggleLattice() }
-            XCTAssertEqual(stage.latticeShown, on)
-            XCTAssertEqual(stage.xray, stage.latticeShown, "X-ray is the Lattice view's rendering")
-            XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), on ? FlexibleStagePage.xrayBodyAlpha : 1,
-                           on ? "the lattice shows through the ghosted part" : "the lattice hidden: the solid part")
+        XCTAssertFalse(stage.xrayOn, "X-ray off by default")
+        for (lattice, xray) in [(true, false), (false, false), (true, true), (false, true)] {
+            if stage.latticeShown != lattice { stage.toggleLattice() }
+            stage.xrayOn = xray
+            XCTAssertEqual(stage.latticeShown, lattice)
+            XCTAssertEqual(stage.xray, xray, "X-ray is his icon, whatever the Lattice view")
+            XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), xray ? FlexibleStagePage.xrayBodyAlpha : 1)
+            XCTAssertEqual(stage.wallsShown, lattice && xray, "the Lattice icon lit while its walls are seen")
         }
     }
 
@@ -122,10 +127,12 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         // with a lattice: show / hide, never Settings
         stage.latticeButtonTapped(openSettings: { opened += 1 })
         XCTAssertFalse(stage.latticeShown, "hidden")
-        // ★ RE-PINNED (batch M, M6 — his round-5 img 6: "When the dent view is selected, the xray view should
-        // also initiate"): the dent view (on, with a map) keeps the part a ghost; with it off the part is solid
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words; M6, his round-5 img 6, reversed): the dent view no longer keeps the part
+        // a ghost — X-ray is his icon (on since Exit showed the lattice); off, the part is solid with the dent view on
         XCTAssertTrue(stage.heat && stage.dentXray, "premise: the dent view shows a map")
-        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "the dent view: X-ray")
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "his X-ray (turned on with the lattice)")
+        stage.toggleXray(); stage.refresh()
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "★ his X-ray off: the solid part, the dent view on")
         stage.toggleStress(); stage.refresh()
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "no dent view, no lattice: the solid part")
         stage.toggleHeat(); stage.refresh()
@@ -352,11 +359,10 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         for (name, v) in viewports {
             let f = FlexibleMainViewToggles.frame(viewport: v), n = FlexibleMainViewToggles.noteFrame(viewport: v)
             XCTAssertTrue(f.contains(n), "the note band is inside the reserved frame at \(name)")
-            // ★ RE-PINNED (round 6 batch V): in landscape his two view settings share the row's line — the note is beside THEM,
-            // left of them (FlexibleMainViewToggles.settingsOnRowLine); in portrait beside the row, as before
-            let right = FlexibleMainViewToggles.settingsOnRowLine(viewport: v) ? FlexibleMainViewToggles.settingsFrame(viewport: v).minX
-                : FlexibleMainViewToggles.rowFrame(viewport: v).minX
-            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row (or his settings on its line), left of it")
+            // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's settings left the
+            // row's line — the note is beside the row again, left of it
+            let right = FlexibleMainViewToggles.rowFrame(viewport: v).minX
+            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }

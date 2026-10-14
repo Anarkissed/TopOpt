@@ -65,7 +65,7 @@ public enum FlexiblePageChannels {
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
                                 depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
                                 controlColumnColours: Bool = false, groupColours: Bool = true,
-                                roleMarks: Bool = true) -> Channels {
+                                roleMarks: Bool = true, heatRegions: Set<Int>? = nil) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
@@ -148,7 +148,9 @@ public enum FlexiblePageChannels {
         let vertexColour: ((Int) -> SIMD4<Float>?)? = values.map { vals in
             { v in v < vals.count && vals[v].isFinite ? FlexibleColours.depth(Double(vals[v]), max: scale) : nil }
         }
-        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? colours : [:], vertexColour: heat ? vertexColour : nil,
+        // ★ R7-V (the Settings page's Heat view): only `heatRegions`' maps take the heat (nil: every pressed face's)
+        let heated = heatRegions.map { only in colours.filter { only.contains($0.key.region) } } ?? colours
+        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? heated : [:], vertexColour: heat ? vertexColour : nil,
                                   ghost: xray ? FlexibleColours.ghost : nil)
         guard shown.showsDent else {
             return Channels(tints: tints, dents: nil, exaggeration: 0, animated: false, legendLine: "", mapValues: values, heatScaleMM: scale)

@@ -313,6 +313,7 @@ final class FlexibleMainViewsTests: XCTestCase {
         let solver = FlexibleStressSolver(sim: sim, context: { FlexibleBatchCVerifyTests.context() })
         let stage = FlexibleMainStage()
         stage.attach(solver)
+        stage.xrayOn = true   // ★ RE-PINNED (R7-V): his X-ray icon (off by default now) — Stress leaves it alone
         stage.toggleStress()
         XCTAssertTrue(stage.stress)
         XCTAssertEqual(sim.phase, .running, "Stress on with no field: the solve runs")
@@ -452,6 +453,9 @@ final class FlexibleMainViewsTests: XCTestCase {
         let dents = try XCTUnwrap(stage.channels?.dents)
         let a = FlexFaceKey(region: FlexibleHisProject.topA, rotation: 0)
         let (c, mm) = try deepColumn(m, a, drawn: stage.drawn)
+        // ★ RE-PINNED (R7-V — his answer: Play OFF on open, the model at rest, every hold at rest): this reads the dent at
+        // the FULL squish — the loop's Play gate opened, as his Play view does
+        stage.loop.playView = true
         stage.loop.hold(1)
         let k = stage.loop.scale(at: 0)
         let start = try XCTUnwrap(overlay.flatStart[a]), pos = overlay.mesh.flat.positions
@@ -491,7 +495,7 @@ final class FlexibleMainViewsTests: XCTestCase {
         // dent view off and the lattice hidden the part is solid (M6: the DENT view is X-ray too); with a
         // lattice, Stress is its group's own sim (M3) — read once it lands
         stage.toggleStress()
-        stage.latticeOn = false   // ★ round 4 (C2): X-ray off = the lattice view hidden (no X-ray button)
+        stage.latticeOn = false; stage.xrayOn = false   // ★ RE-PINNED (R7-V): X-ray off is his icon again (C2 reversed)
         try await FlexibleHisProject.waitFor(300, "the group's sim") {
             stage.refresh()
             return !m.squish.isEmpty && !m.squish.values.contains(.pending)

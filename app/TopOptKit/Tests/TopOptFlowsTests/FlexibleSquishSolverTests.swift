@@ -139,6 +139,9 @@ final class FlexibleSquishSolverTests: XCTestCase {
         stage.controlNoFallback = noFallback
         let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
         addTeardownBlock { @MainActor in await m.waitForIdle() }
+        // ★ RE-PINNED (R7-V — his answer: Play OFF on open, the model at rest until he taps Play): the fallback is pinned as it
+        // plays — the fixture turns his Play view on (no assertion changes)
+        m.views.insert(.play)
         m.squishSolver.controlFailSimIDs = failing
         m.openScene()
         try await FlexibleSquishFixture.settle(m, "his")

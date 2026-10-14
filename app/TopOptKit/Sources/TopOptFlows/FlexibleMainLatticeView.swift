@@ -107,7 +107,7 @@ extension FlexibleMainStage {
         if let m = model { latticeAvailable = FlexibleLatticeView.available(model: m) }
         switch FlexibleLatticeView.tap(available: latticeAvailable) {
         case .toggle:
-            toggleLattice()
+            toggleLatticeView()   // ★ R7-V: shown = in X-ray (step 1); FlexibleMainStage+Play
         case .openSettings:
             showLatticeOnExit = true
             openSettings()
@@ -116,7 +116,7 @@ extension FlexibleMainStage {
 
     /// The note's [Show]: the view on, the note gone.
     public func showFromNote() {
-        latticeOn = true
+        showLatticeView()   // ★ R7-V: in X-ray, where its walls are seen
         note.clear()
     }
 
@@ -138,7 +138,7 @@ extension FlexibleMainStage {
     /// lattice his edits there have made stale (`sendToCore`).
     public func pillTapped(_ s: FlexibleMainStatus, open: () -> Void, goToLattice: @escaping () -> Void = {}) {
         self.goToLattice = goToLattice
-        if s.line == FlexibleMainStatus.deferred { latticeOn = true; return }   // ★ S9: saved with the view off — show it (it bakes)
+        if s.line == FlexibleMainStatus.deferred { showLatticeView(); return }   // ★ S9: saved with the view off — show it (it bakes)
         switch s.tap {
         case .send:
             sendToCore()
@@ -156,10 +156,10 @@ extension FlexibleMainViewToggles {
     /// The note's band: ★ C2 VERIFICATION — on the row's own line, left of the three buttons, clear
     /// of the left panel (inside `frame`, which every legend and the player keep out of — and
     /// which now ends where the row ends, so the note costs the legends nothing).
-    /// ★ BATCH V: left of his two view settings when they share the buttons' line (`settingsOnRowLine`).
+    /// (★ R7-V: batch V's two worded view settings, which sat between it and the buttons in landscape, are gone.)
     public static func noteFrame(viewport: CGSize) -> CGRect {
         let row = rowFrame(viewport: viewport)
-        let right = settingsOnRowLine(viewport: viewport) ? settingsFrame(viewport: viewport).minX : row.minX
+        let right = row.minX
         let room = right - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
         let w = max(0, min(FlexibleMainNote.width, room))
         return CGRect(x: right - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
@@ -176,7 +176,7 @@ struct FlexibleMainNoteView: View {
 
     var body: some View {
         if let k = note.kind {
-            let showable = k == .ready && !main.latticeShown
+            let showable = k == .ready && !main.wallsShown   // ★ R7-V: [Show] while its walls are not seen (X-ray off too)
             Group {
                 if showable {
                     // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)

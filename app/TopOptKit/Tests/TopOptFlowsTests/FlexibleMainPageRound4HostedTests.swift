@@ -75,17 +75,14 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 let h = host(FlexibleMainViewToggles(main: stage), size: size)
                 pump(0.3)
                 let row = FlexibleMainViewToggles.rowFrame(viewport: size), band = FlexibleMainViewToggles.noteFrame(viewport: size)
-                // ★ RE-PINNED (round 6 batch V): a third keep-out is drawn — his two view settings' line (on the row's line in
-                // landscape, left of the buttons and right of the note; under the row in portrait), inside its own frame
-                let settings = FlexibleMainViewToggles.settingsFrame(viewport: size)
-                let all = h.frames.all.filter { $0.width > 1 }
-                let got = all.filter { !settings.insetBy(dx: -1, dy: -1).contains($0) }
-                print("FLEX-HOSTED \(name) \(kind): drawn \(all.map(\.integral)) · row slot \(row.integral) · note band \(band.integral) · settings \(settings.integral)")
-                XCTAssertEqual(all.count - got.count, 1, "his two settings' line, in its frame, at \(name)")
+                // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's third keep-out
+                // (his two view settings' line) is gone — the row and the note only, as in C2's verification
+                let got = h.frames.all.filter { $0.width > 1 }
+                print("FLEX-HOSTED \(name) \(kind): drawn \(got.map(\.integral)) · row slot \(row.integral) · note band \(band.integral)")
                 XCTAssertEqual(got.count, 2, "the row and the note at \(name)")
                 let drawnRow = got.max { $0.minX < $1.minX } ?? .zero, note = got.min { $0.minX < $1.minX } ?? .zero
                 XCTAssertTrue(row.insetBy(dx: -1, dy: -1).contains(drawnRow), "the three buttons fill their slot at \(name): \(drawnRow) in \(row)")
-                XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "the row's 40 pt buttons fill their slot, no X-ray")
+                XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "the row's 40 pt buttons fill their slot (★ R7-V: X-ray and Play among them)")
                 XCTAssertTrue(band.insetBy(dx: -1, dy: -1).contains(note), "the \(kind) note inside its band at \(name): \(note) in \(band)")
                 XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
                 XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
@@ -105,8 +102,12 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
         pump(0.3)
         let row = FlexibleMainViewToggles.rowFrame(viewport: size)
         let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)   // the third button (★ S1b re-pin: [Prisms] trails it now)
-        // with a lattice to show: it hides, then shows
-        XCTAssertTrue(stage.latticeShown, "premise")
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2 reversed): the Lattice
+        // icon is lit while its walls are SEEN (in X-ray, off by default) — the first click shows them (X-ray on with them, a
+        // view that needs another turns it on itself), the next hides them, the next shows them again
+        XCTAssertTrue(stage.latticeShown && !stage.wallsShown, "premise: the view on, its walls not seen (X-ray off)")
+        click(h, lattice)
+        XCTAssertTrue(stage.wallsShown && stage.xrayOn, "clicked: shown, in X-ray")
         click(h, lattice)
         XCTAssertFalse(stage.latticeShown, "clicked: hidden")
         click(h, lattice)
