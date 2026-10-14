@@ -204,7 +204,7 @@ struct FlexibleSettingsRailView: View {
                 ? FlexibleRowCopy.edgesDetail(edges: g.presses.filter { model.press($0)?.kind == .edge }.count,
                                               corners: g.presses.filter { model.press($0)?.kind == .corner }.count)
                 : FlexibleRowCopy.faceCount(g.regions.count)
-            out.append(Tab(tab: .group(g.id), title: FlexibleRowCopy.groupName(g.number), detail: detail))
+            out.append(Tab(tab: .group(g.id), title: model.groupName(g), detail: detail))   // ★ ROUND 7 (S, 4d): his name
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
@@ -366,36 +366,21 @@ struct FlexibleGroupTabHeader: View {
         VStack(alignment: .leading, spacing: DS.Space.xxs) {
             HStack(spacing: DS.Space.s) {
                 Circle().fill(model.groupColour(group).color).frame(width: 12, height: 12)
-                Text(FlexibleRowCopy.groupName(group.number))
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1)
-                    // the name's own frame (the hosted test measures it against the words)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupLine-\(group.number)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityIdentifier("flexible-group-\(group.number)-line")
+                // ★ ROUND 7 (S, 4d): his name — a tap renames it (one line, 16 characters at most)
+                FlexibleGroupNameField(model: model, group: group)
                 Spacer(minLength: DS.Space.xs)
+                // ★ ROUND 7 (S, 4d): the trash on EVERY group (the only one's too), 44 pt — it deletes the group
                 if row?.removable == true {
-                    Button { model.removeGroup(group.id) } label: {
-                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                            .frame(width: 32, height: 32).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(group.number)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityLabel("Remove \(FlexibleRowCopy.groupName(group.number))")
-                    .accessibilityIdentifier("flexible-group-remove-\(group.number)")
+                    FlexibleGroupTrashButton(model: model, groupID: group.id, number: group.number, name: model.groupName(group))
                 }
-                FlexInfoButton(title: FlexibleRowCopy.groupName(group.number), text: FlexibleRowCopy.Info.groups,
+                FlexInfoButton(title: model.groupName(group), text: FlexibleRowCopy.Info.groups,
                                id: "flexible-group-\(group.number)-info")
             }
-            .frame(minHeight: 36)
+            .frame(minHeight: 44)
             FlexRow(FlexibleRowCopy.squeezeRow, info: FlexibleRowCopy.Info.squeeze,
                     id: "flexible-row-squeeze") {
                 FlexNumberBox(key: "group-\(group.id)",
-                              title: FlexibleRowCopy.groupName(group.number) + " · squeeze",
+                              title: model.groupName(group) + " · squeeze",
                               spec: FlexibleNumberSpecs.weight(kg: kg, unit: unit),
                               padTarget: $padTarget, units: FlexibleWeightUnit.allCases,
                               onUnit: { model.setWeightUnit($0) }, onNote: { model.toast = $0 }) { v in

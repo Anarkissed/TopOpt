@@ -135,6 +135,8 @@ public enum FlexibleSqueezeGroups {
         // ★ ROUND 5 (S1): each group's colour goes with it to its new number — ★ S VERIFICATION: the
         // colour it was SHOWN in (a pick or its old number's default), kept in normal form
         s.groupColours = canonical(remapColours(shownColours(s, ids: order), rank: rank), groups: groups(s))
+        // ★ ROUND 7 (S, 4d): each group's NAME goes with it to its new number too (a group gone drops its name)
+        s.groupNames = remapNames(s.groupNames, rank: rank)
     }
 
     /// Move a pressed face into the group stored as `groupID`. ★ D2 REVIEW: `hand` — the faces

@@ -226,13 +226,11 @@ extension FlexibleStageModel {
     /// Remove a group: its faces join the first other group (never the only group).
     /// ★ D2 REVIEW: like a move, they take THAT group's one force — the merged group had kept
     /// both forces ("Squeeze 6–10 kg"), and the next press asked for the pad.
+    /// ★ ROUND 7 (S, 4d — his img3 words of 2026-10-14: "All groups should have a trash icon next to them"): the trash
+    /// DELETES the group and what it holds (FlexibleGroupNames.deleteGroup) — it no longer merges its faces into another
+    /// group ("Join the groups", the pop-up's fix, still merges: `mergeGroup`).
     public func removeGroup(_ groupID: Int) {
-        // ★ ROUND 6 ITEM 2: an edges/corners group goes with its presses — each strip goes back to its face
-        if let g = squeezeGroups.first(where: { $0.id == groupID }), g.kind == .edges {
-            track(Task { @MainActor [weak self] in _ = await self?.removeStripPresses(g.presses) })
-            return
-        }
-        mergeGroup(groupID, into: nil)
+        deleteGroup(groupID)
     }
 
     /// ★ D2 REVIEW ("Join the groups"): every face of group `groupID` joins group `target` (nil:

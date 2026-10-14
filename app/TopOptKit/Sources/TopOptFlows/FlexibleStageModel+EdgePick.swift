@@ -83,7 +83,7 @@ extension FlexibleStageModel {
                 if let why = c.why { greyed[c.number] = FlexibleRowCopy.fit(why); continue }
                 if let r = c.members.first(where: { held.contains($0) }),
                    let p = s.pressHolding(r), let g = FlexibleSqueezeGroups.group(ofPress: p.id, in: s) {
-                    greyed[c.number] = FlexibleRowCopy.inGroup(g.number)
+                    greyed[c.number] = FlexibleRowCopy.inGroup(name: groupName(g))   // ★ ROUND 7 (S, 4d): his name
                     continue
                 }
                 var lattice: [Double?] = []

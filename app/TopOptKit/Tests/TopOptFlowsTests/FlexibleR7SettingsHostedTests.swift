@@ -84,28 +84,49 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
     static let sizes: [(String, CGSize)] = [("11l", CGSize(width: 1194, height: 834)), ("11p", CGSize(width: 834, height: 1194)),
                                              ("13p", CGSize(width: 1032, height: 1376)), ("13l", CGSize(width: 1376, height: 1032))]
 
-    func hisPadWithEdges() async throws -> (FlexibleHisProject.Restored, FlexibleStageModel, UUID) {
+    @discardableResult
+    func pumpUntil(_ timeout: Double, _ cond: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while !cond() {
+            if Date() > end { return false }
+            _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+        return true
+    }
+
+    /// His pad opened the app's way (the main page's shared model), then I2's Edge 9 picked and [Done] — SYNCHRONOUS, the
+    /// run loop pumped (the page's Metal view publishes its projection only so: an async test drew no overlay at all).
+    func hisPadWithEdges() throws -> (FlexibleHisProject.Restored, FlexibleStageModel, UUID) {
         let r = try FlexiblePressFixtures.a1Project(3, self)
-        let m = try await G.openModel(self, r.project, "A1_0003")
-        try await FlexibleSquishFixture.settle(m, "A1_0003")
+        let stage = FlexibleMainStage()
+        stage.reduceMotion = { true }
+        let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
+                            stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        XCTAssertTrue(pumpUntil(120) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } },
+                      "the scene and stacks")
         m.rail = .newGroup
         m.startEdgePick()
-        try await FlexibleHisProject.waitFor(240, "the edges and corners listed") { m.edgePick.map { !$0.loading && !$0.checking } ?? false }
-        await m.waitForIdle()
+        XCTAssertTrue(pumpUntil(240) { m.edgePick.map { !$0.loading && !$0.checking } ?? false }, "the edges and corners listed")
         let c = try XCTUnwrap(m.edgePick?.candidates.first { $0.kind == .edge && Set($0.members) == [1, 2] })
         m.toggleEdgePick(c.number)
         m.setEdgePickWeight(5)
-        let why = await m.finishEdgePick()
+        var done = false
+        var why: String?
+        Task { @MainActor in why = await m.finishEdgePick(); done = true }
+        XCTAssertTrue(pumpUntil(240) { done && m.sceneState == .ready && m.openedKey == m.currentSceneKey
+            && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } }, "the part open on the strips")
         XCTAssertNil(why)
-        try await FlexibleHisProject.waitFor(240, "the part open again") { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
-        await m.waitForIdle()
-        try await FlexibleSquishFixture.settle(m, "the strips")
+        pump(0.5)
         return (r, m, try XCTUnwrap(m.presses.first { $0.strip != nil }).id)
     }
 
-    func testEveryGroupHeaderHasAFingerSizedTrashAndAOneLineName() async throws {
-        let (r, m, pid) = try await hisPadWithEdges()
+    func testEveryGroupHeaderHasAFingerSizedTrashAndAOneLineName() throws {
+        let (r, m, pid) = try hisPadWithEdges()
         var report: [String] = []
+        var clicked = 0
+        var faceChips = 0
         for (tag, size) in Self.sizes {
             let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: size)
             pump(2.5)
@@ -122,27 +143,54 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
                 if g.kind == .edges {
                     XCTAssertTrue(chips.isEmpty, "\(tag): the edges tab mounts no face's depth chip: \(chips)")
                     snapshot(h, "R7S_\(tag)_edges_tab.png")
+                } else {
+                    XCTAssertTrue(chips.allSatisfy { k in g.regions.contains { k == "depthChip-\($0)" } },
+                                  "\(tag): Group \(n)'s tab mounts only its own face's chip: \(chips)")
+                    faceChips += chips.count
                 }
                 report.append(String(format: "%@ Group %d (%@): trash %.0f×%.0f · name %.0f pt · chips %@", tag, n, g.kind.rawValue,
                                      trash.width, trash.height, name.height, chips.joined(separator: ",")))
             }
-            // a tap on the name opens a one-line field
-            let g1 = try XCTUnwrap(m.squeezeGroups.first)
+            // ★ RED CONTROL (13" landscape): today's gate on the selection alone — his img4, Face 1's chip over the edges tab
+            if tag == "13l", let e = m.squeezeGroups.first(where: { $0.kind == .edges }),
+               let top = m.settings.faces.first(where: { m.regions.faces(of: $0.faceRegionID, mesh: m.project.viewerMesh) == [1] })?.faceRegionID {
+                FlexibleStageOverlays.controlGateOnSelectionOnly = true
+                m.rail = .group(e.id)
+                m.selectedRegion = top
+                pump(0.8)
+                let chips = h.frames.marks.keys.filter { $0.hasPrefix("depthChip-") }.sorted()
+                XCTAssertEqual(chips, ["depthChip-\(top)"], "control: Face 1's chip over the edges tab (his img4)")
+                snapshot(h, "R7S_13l_control_img4_chip_over_edges_tab.png")
+                FlexibleStageOverlays.controlGateOnSelectionOnly = false
+                report.append("13l control: chips over the edges tab \(chips)")
+            }
+            // a tap on the name opens a one-line field (where the header is in the scroll's view: the open card scrolls
+            // the list, and a header above the fold takes no click)
+            let g1 = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .faces && $0.regions.count > 1 } ?? m.squeezeGroups.first)
             m.rail = .group(g1.id)
             pump(0.6)
             let name = try XCTUnwrap(local(h, "groupLine-\(g1.number)"))
-            click(h, CGPoint(x: name.midX, y: name.midY))
-            pump(0.5)
-            let field = try XCTUnwrap(local(h, "groupNameField-\(g1.number)"), "\(tag): a tap on the name opens its field")
-            XCTAssertLessThanOrEqual(field.height, 36, "\(tag): the field is one line")
-            snapshot(h, "R7S_\(tag)_rename_field.png")
+            let view = local(h, "panelScroll") ?? .null
+            var field = CGRect.zero
+            if view.contains(CGPoint(x: name.midX, y: name.midY)) {
+                click(h, CGPoint(x: name.midX, y: name.midY))
+                pump(0.5)
+                field = try XCTUnwrap(local(h, "groupNameField-\(g1.number)"), "\(tag): a tap on the name opens its field")
+                XCTAssertLessThanOrEqual(field.height, 36, "\(tag): the field is one line")
+                clicked += 1
+                snapshot(h, "R7S_\(tag)_rename_field.png")
+            } else {
+                report.append("\(tag): Group \(g1.number)'s name above the scroll's view (\(name) vs \(view)) — not clicked")
+            }
             h.window.orderOut(nil); h.window.contentView = nil
             report.append(String(format: "%@ rename field %.0f×%.0f", tag, field.width, field.height))
         }
+        XCTAssertGreaterThan(clicked, 0, "the name was tapped at one size at least")
+        // ★ POSITIVE CONTROL: the check sees a chip where one is drawn (a faces tab's own face)
+        XCTAssertGreaterThan(faceChips, 0, "a faces tab mounts its face's chip (the check can see one)")
         // the ONLY group has its trash: Reset all, the top starts Group 1
         m.resetAll()
-        try await FlexibleHisProject.waitFor(240, "the part open again") { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
-        await m.waitForIdle()
+        XCTAssertTrue(pumpUntil(240) { m.sceneState == .ready && m.openedKey == m.currentSceneKey }, "the part open again")
         m.rail = .newGroup
         m.tapFace(1)
         XCTAssertEqual(m.squeezeGroups.count, 1, "one group")

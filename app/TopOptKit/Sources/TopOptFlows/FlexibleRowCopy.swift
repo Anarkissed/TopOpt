@@ -184,7 +184,11 @@ public enum FlexibleRowCopy {
     /// pressed face); the force is in its pill (`squeezeValue`) and its faces are listed under it.
     /// D2's one line with the faces AND the force was cut at the force on every iPad.
     public static func groupHeader(number: Int, single: Bool) -> String {
-        single ? "Squeeze" : "\(groupName(number)) · Squeeze"
+        groupHeader(name: groupName(number), single: single)
+    }
+    /// ★ ROUND 7 (S, 4d): the same with his name ("Thumbs · Squeeze").
+    public static func groupHeader(name: String, single: Bool) -> String {
+        single ? "Squeeze" : fit("\(name) · Squeeze")
     }
     /// The force in the header's pill: "10 kg" · "6–10 kg" · "—".
     public static func squeezeValue(_ force: ClosedRange<Double>?) -> String {
@@ -202,14 +206,22 @@ public enum FlexibleRowCopy {
     /// ★ D2 REVIEW: under a group's header when it will squish less than designed (the lattice
     /// carries every group; the firmer wins): "Squishes ~0.3 of 2.6 mm · Group 2 firmer".
     public static func groupMissLine(asBuiltMM: Double, designedMM: Double, firmer: Int) -> String {
-        fit(String(format: "Squishes ~%.1f of %.1f mm · %@ firmer", asBuiltMM, designedMM, groupName(firmer)))
+        groupMissLine(asBuiltMM: asBuiltMM, designedMM: designedMM, firmerName: groupName(firmer))
+    }
+    /// ★ ROUND 7 (S, 4d): the same naming the firmer group by his name.
+    public static func groupMissLine(asBuiltMM: Double, designedMM: Double, firmerName: String) -> String {
+        fit(String(format: "Squishes ~%.1f of %.1f mm · %@ firmer", asBuiltMM, designedMM, firmerName))
     }
     /// A pinched face whose two-segment design failed: it keeps core's one profile for now.
     public static func pinchedOneProfile(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · one profile for now") }
     /// The squish player's picker: "Group 2 · Face 3 + Face 5" / "Play all" (★ batch G: the groups in
     /// turn — D2's "All at once" is dropped).
     public static func simTitle(number: Int, names: [String]) -> String {
-        let head = "\(groupName(number)) · "
+        simTitle(name: groupName(number), names: names)
+    }
+    /// ★ ROUND 7 (S, 4d): the same with his name ("Thumbs · Face 4 + Face 2").
+    public static func simTitle(name: String, names: [String]) -> String {
+        let head = "\(name) · "
         return fit(head + faceList(names, room: 34 - head.count), 34)
     }
     public static let simAll = "Play all"
