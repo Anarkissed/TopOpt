@@ -1,6 +1,196 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 7 · batches R7-S and R7-V — the Squish (Settings) page, and the view icons on both Flexible pages (2026-10-14) (read this first)
+## Round 7 · batch M1 — only a face-prism makes lattice; the main page's prism is the lattice face-prism, at the list's depth; "Protect 3 mm" and "Minimize plastic" off this page; one group per export, said first (2026-10-14) (read this first)
+
+This is round 7's step 2a: the two hooks the reviewer approved (H15' and H18), your img1 words "ONLY the face-prism creates
+the lattice structure in any area", and the reviewer's ruling 4 on exports with an edges group. Branch
+`claude/flexible-screens` (PR #362), main worktree, commits `c444cb7d` (tests first), `6c6e0d95`, `1c0a27be` and this section's.
+
+**Nothing is pushed. The build is ready but NOT installed:** TopOpt was open on the simulator (147E56A1), and installing
+would have closed your session. Install pending: the app is open. Every picture here is offscreen (the shipping renderer
+draws the part, the page's own chrome sits over it); none is a device screenshot.
+
+### What you will see, in plain words
+
+**On the main Flexible page**
+- **No face-prism, no lattice.** If no face is set to Lattice in Selections, the part stays the plain model: no walls, no
+  dent, no heat. The bottom pill says **"Set a face to Lattice in Selections first"**. Tapping it opens the Squish page on
+  the one-tap fix, [Lattice under it] (or [Lattice under all N]). Nothing is ever sent to core in this state.
+  - Before this batch, the whole part became lattice (your img1 words). Core still does that for a job with no face-prism,
+    so the app now never builds or sends one.
+- **The prism you see after picking a group IS that group's lattice face-prism**, drawn from #354's own face-prism at
+  exactly the depth in the Selections list. On your pad, Group C picked shows Face 3 and Face 5 at 25.0 mm, the same as
+  the list's 25.0 mm rows (your img1: "they should *always* be equal"). Type 17.26 in the list and the prism is drawn at
+  17.3 mm.
+  - The 24.5 mm you saw was Face 3's **squish** depth from the Squish page, drawn as a second prism. It is gone from the
+    main page.
+- **Picking the Top shows no prism and no "12.0 mm"** (your img2). That was the Top's squish prism. The Top is Off in
+  Selections, so it has no face-prism.
+- **Nothing shows before you pick a group**, as you asked. #354's own slabs no longer draw every group's face-prism on the
+  Flexible page (hook H15').
+- **[Prisms]** shows every face-prism of the group you picked, adds the legend row "▮ Face-prism = where the lattice goes",
+  and turns X-ray on.
+- **"Protect 3 mm" and "Minimize plastic" are gone from the bottom-right corner** on the Flexible stage (hook H18). Fast ·
+  64³, Plate up and Gravity stay (each one changes the Flexible lattice). CAD surfaces is not touched here: the reviewer
+  left it for the redesign. Your saved values stay; Topology's Optimize still uses them.
+- **Not in this batch:** the face-prism's number on the model (tap to type). It comes with the redesign's B1 handles.
+
+**Exports with an edges group beside a face group** (the reviewer's ruling 4)
+- Core designs one squeeze group per job and does not take edge or corner presses yet. With an edges group beside a face
+  group, the pill reads "Preview · one group per export". Its tap opens the Export step, which **says before anything is
+  sent**:
+  - "This export makes Group 1 only." (your name for the group if you renamed it, for example "This export makes Thumbs
+    only.")
+  - "Edges and faces go in separate exports for now."
+  - One button: [Send Group 1 only]. Core's answer line then names the one group it made ("Core designed it · Group 1 only
+    · …").
+- With two or more face groups beside the edges group, the line is "Each export makes one group only." with the same second
+  line and the existing [Send Group N only] buttons. Before this batch the edges group was dropped without a word.
+
+### Your words → the fix → the test (each test runs its RED control inside; the red run is `round7/batch_m1/r7m1_red_run.txt`)
+
+| your words (2026-10-14) / the ruling | the fix | pinned by (RED control) |
+|---|---|---|
+| img1: "ONLY the face-prism creates the lattice structure in any area" | `FlexibleStageModel.facePrismsSet` (read with the scene's key). With none: the stacks are kept without lattice (`FlexStackInfo.withoutLattice`), the build refuses and clears an old lattice, the main page draws the plain opaque model, the pill says "Set a face to Lattice in Selections first". Core itself still lattices the whole part for such a job, so the gate is the app's. | `FlexibleR7M1Tests.testNoFacePrismMeansNoLatticeAnywhere`, his pad as saved: every stack 0 latticed columns (core's own Top: 4 096), "No lattice under" all 5 pressed faces, no lattice, no failure, no dent, X-ray off, the pill's line. RED `controlWholePartWithoutPrism`: the whole part is built. Positive control `testHisFacePrismsLatticeOnlyUnderThem`, his live lattice: 26 624 lattice voxels of the whole part's 53 248, Face 3 latticed 50 mm (25 under each prism), the Top 2 048 of 4 096 columns. |
+| Ruling 4: "The Flexible job builder must NEVER send a job with no include region … Export disabled with a stated reason" (red first) | `FlexibleCoreRun.send` and `send(_:fix:)` refuse `.noFacePrism` (after "no part", "no filament", "no pressed face", which keep their own lines). The pure encoder is untouched, so the goldens keep their bytes. | `testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet`: core's runner is a stand-in that counts. 0 runs, the line "Set a face to Lattice in Selections first"; with a face-prism, 1 run. RED (the stub run): 1 run with no face-prism. The control inside: `controlWholePartWithoutPrism` sends. |
+| img1: "The face-prism depth in the modal and on the face-prism are not equal? … they should *always* be equal" | `FlexibleMainStage.volumes` returns the picked group's Lattice `LatticeDepthPlane`s, #354's own volumes at `latticeSlabDepthMM` (the list's store), in the face-prism violet. Hook H15' makes them the only volumes on the Flexible stage. | `testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth`: Face 3 and Face 5 drawn at 25.0 mm, the list's 25.0. Typing 17.26 gives 17.3 on both. Face 3's squish depth (24.5) is not used. RED `controlSquishPrismsOnMain`: round 6's squish prisms (Face 3 at 24.5 mm). |
+| img2: "What is this 12mm? … please remove whatever it is" | It was the Top's squish prism (its group owns the Top's weight). The main page draws no squish prism and no squish number. | `testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections`: []. RED: `[1]`, the Top's squish prism. |
+| (re-scope of the main [Prisms] view) | [Prisms] = every face-prism of the picked group; legend row "▮ Face-prism = where the lattice goes"; X-ray on. | `testPrismsIsEveryFacePrismOfThePickedGroup` |
+| img1: "Remove the "Protect 3mm" chip"; Minimize plastic: remove it (your answer) | `FlexibleMainChips.hidden = [.faceProtectDepth, .minimizePlastic]` through hook H18. CAD surfaces is not hidden (the ruling). | `testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs`. RED `controlNothingHidden`: your img1's column. |
+| the two hooks | stage switches at their anchors, nothing else in #354's file | `testH15PrimeAndH18AreStageSwitchesAtTheirAnchors` (red before the hooks were written) |
+| Ruling 4: "Export offers ONE group at a time; the app must SAY so before export … Never silently drop a group" | `FlexibleCoreHold.edgesBeside`: the line "This export makes <your group's name> only.", the note "Edges and faces go in separate exports for now.", one [Send … only]. Core's answer line names the group it made. With 2+ face groups, "Each export makes one group only." and the same note. | `testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst` (the pad + an edge press in group 2): 0 runs before the tap, 1 after, scope "Group 1 only"; "Thumbs" after a rename. RED `controlEdgesSilentlyDropped`: no hold, the edges group dropped without a word. |
+| (what looking found) his None pad with no face-prism opened as an empty dark X-ray ghost | `xrayDefault` is off while the opened scene has no face-prism; your own X-ray tap still wins | the same 1a test (the first evidence run logged `xray true`) |
+
+
+### The #354 / main-file lines (exactly the two approved; nothing else in a #354 or main file)
+
+| hook | file | anchor | +a −r | gate |
+|---|---|---|---|---|
+| H15' | WorkspacePlaceholder.swift | :1016, H15's line (the `clearanceVolumes:` true branch) — edited | +1 −1 | `(flexibleMain.owns(project, stage) ? [] : stageVolumeItems) + flexibleMain.volumes(…)`: on the Flexible stage only the main page's face-prisms; every other stage `stageVolumeItems + …` as before (`flexibleMain.volumes` is [] off the Flexible stage) |
+| H18 | WorkspacePlaceholder.swift | :6002, the first statement inside `SettingsChipID.allCases.filter { id in` (`visibleSettingsChips`) | +1 −0 | `if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }` |
+
+`git diff 034e400c..HEAD` on WorkspacePlaceholder is exactly these 3 lines. ProjectModel, MetalMeshView, LatticeSettings, SelectionModel,
+ForceModel and core/ are untouched. The new and changed Flexible files exist on neither #354 nor main.
+
+
+### The blast radius, the fixtures and the re-pins (each attributed in the test)
+
+**The blast radius (ruling 4's gate, counted before any fixture change).** The targeted suite ran with the gate on and the old
+fixtures: chunks 1–2 (21 classes, 85 tests) gave 3 failures, each a test waiting out its 180–400 s timeout for a lattice that no
+longer comes (the golden's C1 pad field, `FlexibleBatchM2Tests.testTheTwoPagesAgreeOnAFourFingertipStamp`,
+`FlexibleBatchM2VerifyTests.testAWholeFaceRigidPlateFollowsTheMainPagesSim`). **I stopped that count there** (by PID, after 26
+minutes): at that rate the 192 classes would have taken many hours of timeouts. The fixture change below was made instead, and
+the full suite was run on it (run 1). Every failure of run 1 is listed in the table after this one, with its fix.
+
+**Fixtures** (your real workflow: a face-prism under the pressed faces, through the shared builders):
+- `FlexibleHisProject.padProject` (34 suites use C1's pad) sets, by default, a face-prism under the pad's top, 20 mm deep. That is
+  what [Lattice under it] makes for it (a protected selection "Top", set to Lattice). Under the top to 20 mm IS the whole pad, so
+  those suites keep the same lattice. `facePrism: false` gives the pad with no group at all.
+- `FlexiblePressFixtures.a1Project(3)` (your pad, 34 calls) sets, by default, your Top's own Selections row to Lattice, 20 mm deep
+  (the whole pad again). `facePrism: false` restores it exactly as you saved it (no face-prism). The frozen files are never
+  touched.
+- `FlexibleSquishFixture.model` (generated parts: the M2 stand, a cylinder) sets [Lattice under it] under every face of a part
+  that has no face-prism, 50 mm deep (the deepest a face-prism goes).
+- They stay **as saved** (no face-prism), because their bytes are pinned: `FlexiblePressFixtures.padProject` (the AP0 baseline
+  of the frames and goldens), the goldens' A1_0003 send set, and FlexibleR7M1Tests' own no-prism pad and pad.
+- Two tests build on a pad with no face-prism through the pre-ruling path (`controlWholePartWithoutPrism`, said in each): the
+  golden's C1 pad "app field" (its subject is the field assembly; 0 DIFFERS) and
+  `FlexiblePressSaveTests.testAPendingPressNeverMakesTheLatticeStale` (it compares the golden pad's run-job bytes).
+
+**Re-pinned** (each comment names your words or the ruling):
+
+| test | was | now | why |
+|---|---|---|---|
+| FlexibleRound6Tests.testTheWorkspaceHandsTheMainPagesPrismsToTheViewer | H15's text | the H15' text | H15', approved 2026-10-14 |
+| FlexibleRound6HostedTests R6-3f (`testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView`) | the Top's faint squish prism; [Prisms] = every pressed face | the Top's face-prism (#354's look); [Prisms] = [1] | img1 "always be equal", img2 "12mm" |
+| FlexibleRound6HostedTests R6-3j (`testThePrismsButtonIsTheFourthAndShowsEveryPrism`) | [Prisms] = every pressed face's prism | no group picked → no face-prism | the same |
+| FlexibleRound6HostedTests R6-3k (`testTheMainLegendCardCarriesThePrismsRowWhilePrismsIsOn`) | the row "Prism = squish shown ×k" | the row "Face-prism = where the lattice goes" | the same (no squish ×k on the main page) |
+| FlexibleRound6HostedTests R6-3l, FlexibleS1bMainTagsTests (all 4 setups) | the tags on the main page's squish prisms | the same, with `controlSquishPrismsOnMain` beside `controlSquishTagsOnMain` | they pin the tags' placement, kept for the redesign's chips |
+| FlexibleBatchVHostedTests (`testAGroupsPrismShowsNothingOnOpen…`) | [Prisms] = 5 faces, the Top brighter | [Prisms] = the Top's face-prism | the same |
+| FlexibleRound7ViewsReviewTests RV3 | [Prisms] = 5 faces | [1] | the same |
+| FlexibleSqueezeGroupsPressTests.testAGroupWithOnlyPressesIsATabButNotAJobGroup | an edges press alone in group 2 raises no hold (AP1) | it raises `.edgesBeside`; its one send is the same job | ruling 4: say it, never drop a group silently. A tilted 1-region press still raises nothing |
+| FlexibleAngledGoldenRecorder (test helper) | the A1_0003 send set through `a1Project(3)`; C1's pad field built by the stage | `a1Project(3, facePrism: false)`; C1's field through the control | ruling 4 (bytes unchanged: 0 DIFFERS) |
+
+
+### The pictures (`round7/batch_m1/`, his pad A1_0003; the probe's log is `r7m1_evidence_log.txt`)
+- `R7M1_no_face_prism_plain_model_img1_13p.png` / `_11l.png`: your pad as saved (no face-prism). The plain, opaque model; the
+  pill "Set a face to Lattice in Selections first". RED control `R7M1_no_face_prism_CONTROL_whole_part_lattice_img1_13p.png`: the
+  stage as it was, the whole pad latticed.
+- `R7M1_live_lattice_nothing_picked_img1_13p.png`: your live lattice (Group C, Face 3 + Face 5 at 25 mm), nothing picked: no prism.
+  The walls are only inside the two 25 mm slabs; the middle of the pad is solid.
+- `R7M1_live_lattice_groupC_picked_img1_xray_13p.png` / `_11l.png`: Group C picked. The two face-prisms at 25.0 mm, the same as the
+  list's rows (printed: "Face 3 row 25.0 mm, Face 5 row 25.0 mm"). `…_xray_off_13p.png`: the same prisms read over the opaque
+  model. RED control `R7M1_live_lattice_groupC_CONTROL_squish_prisms_img1_13p.png`: round 6's squish prisms (Face 3 24.5 mm,
+  Face 1 12.0 mm, …).
+- `R7M1_live_lattice_groupC_prisms_view_img1_13p.png`: [Prisms], with the legend row whole.
+- `R7M1_img2_front_top_picked_no_12mm_13p.png`: img2's front camera, the Top picked: no prism and no 12 mm. RED control
+  `…_CONTROL_squish_prism_13p.png`: the Top's 12.0 mm squish prism. `R7M1_img2_front_groupC_picked_13p.png`: Group C from the front.
+- `R7M1_export_no_face_prism_stated_reason_13p.png`: the Export step with no face-prism. The stated reason; 0 sends.
+- `R7M1_export_edges_beside_said_first_13p.png` / `_11l.png`: an edges group beside Group 1. "This export makes Group 1 only." and
+  "Edges and faces go in separate exports for now.", then [Send Group 1 only]; 0 sends before the tap.
+- **What looking found:** in the first pictures, your None pad with no face-prism opened as an EMPTY dark X-ray ghost (X-ray's
+  default follows the finish, and there was nothing inside). Fixed in `1c0a27be`: with no face-prism, X-ray defaults to off.
+  Also, the first red-control picture was built on stacks already stripped of lattice and did not show the whole part. The probe
+  now opens its own pre-ruling scene for it.
+- **Not pictured:** #354's Selections card (its 25.0 mm rows) and the bottom-right chip column are WorkspacePlaceholder's own
+  views, which the probe does not host. The rows' numbers are printed beside the pictures, and the chip column is pinned by
+  `FlexibleR7M1Tests` (the chip set and H18's source pin).
+
+### The runs (raw: `round7/batch_m1/r7m1_runs.txt`)
+- **Tests first:** `c444cb7d`, 9 tests, 48 failures against the stubs (`r7m1_red_run.txt`).
+- **Implementation:** `6c6e0d95` (code, fixtures, re-pins) and `1c0a27be` (the X-ray default, from looking at the pictures).
+- **Targeted suite, run 2, at the final code head `1c0a27be`:** 192 classes (12 per run), 16:48 → 18:11. 1 311 passed, 55 skipped,
+  4 tests failed (14 assertions):
+  - Known and pre-existing: FlexibleBatchNVerifyTests ×8 assertions (Xcode 27 text metrics), LatticeSlotOriginTests ×4 (#354's),
+    LatticeSimSolveTriggerTests ×1.
+  - **New, and not caused by this batch:** `FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff`. Its
+    turning ring was counted at 19–23 px where it needs more than 120. It passed in run 1 (407 px) and in R7-V's runs (404 px).
+    I rebuilt with `6c6e0d95`'s FlexibleMainStage (before the only later code change) and it failed the same way (16 and 19 px).
+    The ring is a `TimelineView(.animation)` captured offscreen, and the machine's state changed during the evening. I did not
+    change it; please re-run it with the display awake.
+  - xctest exited with signal 11 once (chunk 4), after all 49 of its tests had passed: the known exit crash.
+  - LatticeStaleTypeTests 6/6. ProjectStoreTests, UndoHistoryTests, LatticeSettingsPersistTests, ViewerTests,
+    SmoothingPageRound2Tests, BottomBarMeasurementTests, LatticeIncludeGateTests and FlexibleMainPageHookTests are green.
+- **Run 1** (the new fixtures, before the re-pins): 1 297 passed, 18 failed. Each failure is in the runs file with what was done.
+  One was a real order bug, now fixed: the send gate spoke before "the part's file is missing".
+- **Goldens** (FlexibleAngledGoldenTests, 13/13 in each mode), 0 DIFFERS:
+  - deterministic: 38 identical
+  - unseeded: 32 identical, 1 PART-SKIP
+  - (The C1 pad's app field is built through the control; see the fixtures above.)
+- **The 16 stage-job hashes:** `round7/batch_m1/stage_job_hashes_r7m1.txt` is byte-identical to
+  `round7/merge/stage_job_hashes_r7merge.txt` (the whole file). The stage job never reads Flexible, and the frozen projects are
+  read from disk, so the fixture face-prisms never reach them.
+- **iOS:** BUILD SUCCEEDED (derived data flexA1; TopOpt.debug.dylib 79 359 456 bytes, Oct 14 18:17:14). It carries "Set a face to
+  Lattice in Selections first", "This export makes ", "Edges and faces go in separate exports for now.", "Face-prism = where the
+  lattice goes" and FlexibleMainChips. **Not installed:** TopOpt was running on 147E56A1 (`launchctl`: UIKitApplication:
+  com.nadim.topopt). Install pending: the app is open.
+
+
+### Not done in this batch (said, not hidden)
+- **The face-prism's number on the model (tap to type).** It comes with the redesign's B1 numbered handles, as planned.
+- **Ruling 3's "move I2's Surface sectors to Flexible-only and say what moved"** is not in M1. I2's edge strips are still committed
+  as Surface-stage sectors (`FlexibleEdgeStrips.surfaceCut` on `project.faceRegions`). That goes with the Squish-page lattice
+  sections batch (4a/4b).
+- **The blast-radius count is partial** (2 chunks, 3 failures; stopped by hand, see above).
+- **The bottom-right chip column and the Selections rows are not pictured** (see "Not pictured").
+- **Install:** pending, because the app was open.
+
+### Questions
+1. **[Prisms] on the main page** now draws the same face-prisms a pick does. It adds the legend row and X-ray. Keep it like
+   this, drop it, or have it show every group's face-prisms, with the picked group's brighter?
+2. **Solid (exclude) face-prisms** are not drawn on the main page; only Lattice ones are. Before, #354 drew every group's slabs,
+   Solid included, before any pick. Should a picked group's Solid slabs show too, in #354's deep indigo?
+3. **With no face-prism, the pill's tap** opens the Squish page on [Lattice under it] / [Lattice under all N]. That is the one-tap
+   fix: it makes the face-prisms as protected selections, as deep as the part. Should it open the Selections card on the main
+   page instead, where a face is set to Lattice?
+4. **The Squish page's top line** with no face-prism reads "Ready · No lattice under Face 1" (warning colour, [Fix]). Should it say
+   "Set a face to Lattice in Selections first" too?
+5. **The Export step's line uses your Squish-page group name** ("This export makes Thumbs only."). R7-S's question 1 (names on the
+   main page) is still open. Is the name right here?
+6. **A tilted one-face press alone in a group** (not an edges group) still raises nothing in the Export step, because it is not
+   edges beside faces. Should it be said too?
+
+## Round 7 · batches R7-S and R7-V — the Squish (Settings) page, and the view icons on both Flexible pages (2026-10-14)
 
 This round covers the first two batches of your 2026-10-14 breakdown, built from your words and both sets of your answers.
 **R7-S** is the Settings page (your img3 and img4). **R7-V** is the view icons on both pages (img1, img3, img4 and img5). The
