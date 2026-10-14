@@ -1,0 +1,268 @@
+# Round 7 batch S — the VERIFY fixes: raw runs (side worktree wt-r7s, branch claude/flexible-screens-r7s, scratch /tmp/r7s-build)
+# tests first 79b62b1d (red run: r7s_verify_red_run.txt) · fixes 20356410 · the reset test's click made robust (test only) at the next commit
+
+## The new tests, green at 20356410, with the evidence written (FLEX_R7S_EVIDENCE_DIR)
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew]' passed (31.715 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole]' passed (58.366 seconds).
+FLEX-R7-VERIFY-RESET exit 'Fix 1 thing' · fixes []
+FLEX-R7-VERIFY-RESET control fixes ["fix-press-1"]
+FLEX-R7-VERIFY-NAME
+  his case: names ["Group 1", "Thumbs", "Group 3"] · fields after the switch []
+  rail 'Index finger': drawn 66×14, needs 14 pt tall
+  rail 'WWWWWWWWWWWW': drawn 66×28, needs 28 pt tall
+  player beside 'Group 3': note 'Column preview · no lattice built yet' drawn 190 of 196 pt
+  player beside 'Index finger': note 'Column preview · no lattice built yet' drawn 166 of 196 pt
+  player beside 'WWWWWWWWWWWW': note 'Column preview · no lattice built yet' drawn 93 of 196 pt
+  control 1: names ["Palms", "Thumbs", "WWWWWWWWWWWW"] · fields ["groupNameField-1"]
+  control 2: rail WWWWWWWWWWWW
+  control 3: one line 10 pt tall
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAnExplicitPickStillMovesTheTabAndTheTabIsWhatPlays]' passed (3.683 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAPopUpAboutAnotherGroupsFaceLeavesTheTab]' passed (3.712 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds]' passed (2.854 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName]' passed (2.378 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testOnlyTheOpenGroupsNumbersShow]' passed (4.948 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllLeavesOnlyModelAndNew]' passed (7.739 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllPopsNothingOverModelAndNew]' passed (1.840 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testTheOpenGroupNeverShiftsAfterAnyChange]' passed (30.680 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testADeletedFaceComesBackWithDefaults]' passed (1.450 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testANewGroupTakesAFreeColourAndAPickLeavesTheLatticeCurrent]' passed (1.169 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testAWeightTypedInPoundsReachesTheMainPageGroupExactlyAndTheUnitPersists]' passed (0.957 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testEveryFaceIsDeletableAndStaysDeleted]' passed (0.895 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testExitSaysSaveAndExitOnlyWhileSomethingDiffers]' passed (0.952 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testGroupColoursAreChosenSwappedAndCarriedWithTheirGroup]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testResetAllIsABrandNewSetupOfThisPartAndUndoable]' passed (1.433 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testTheKeypadCommitsOnceInRange]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testTheNumberBoxScrubsBySteppingClampsAndWraps]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testTheRailFollowsTheSelectedFaceAndThePlayingGroupIsTheTabs]' passed (1.257 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsTests testWeightUnitsRoundTripExactly]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testAnEditWhileThePartOpensCountsAndTheOpensOwnReadDoesNot]' passed (1.051 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testANudgeNeverRewritesAnOffGridValue]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testATapOnThePartStartsTheNewGroupAndTheRowsAreHands]' passed (1.039 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testATypedWeightOutsideTheMainPagesLimitsIsClampedAndSaid]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testColoursAreStoredInNormalFormAndCarriedAsShown]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testTheCurvesKeepOutIsThePlayersDrawnPartsNotItsWholeWidth]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testThePlayerSaysWhyTheColumnPreviewPlaysAndEndsOnTheGroupsForce]' passed (0.466 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testTheSharedMaterialNoteIsOnlyOnAGroupsTab]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleRound5SettingsVerifyTests testTheStampsWidthAndLengthAreTwoBoxesThatKeepItsProportions]' passed (0.000 seconds).
+
+## The targeted suite at 20356410 (149 classes = the batch's 149; 12 per run; 07:41 -> 08:53; R7-V's own suite ran on the same machine, load 8-9)
+PASSED TopOptFlowsTests.ComputeLocationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.CoreBuildIdentityTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.DeviceRunEntryGateTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder tests 10 skipped 10 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCHookTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Probe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Tests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMDentTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMGroupTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMLegendTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMProbe tests 5 skipped 5 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMStressTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests tests 8 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMXrayTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNRefineTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests tests 4 skipped 0 failures 8
+PASSED TopOptFlowsTests.FlexibleBatchVEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchVHostedTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCoreClaimTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCurveEditTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleDepthPrismTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsHostedTests tests 2 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEFieldTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEVerifyGTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleInPassCompositeTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeFieldTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeGradingTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLegendPlacementTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageHookTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainStageTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainViewsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetReviewTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMergeR5SMTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlayClipTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlaySeamTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePinchTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimReviewTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressFixturesTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReframeTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReviewTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressSaveTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsEvidence tests 1 skipped 1 failures 0
+FAILED TopOptFlowsTests.FlexibleR7SettingsHostedTests tests 3 skipped 0 failures 1
+PASSED TopOptFlowsTests.FlexibleR7SettingsTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleReadinessTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRegionsTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6HostedTests tests 17 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6Tests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRowCopyTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests tests 5 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleShownValuesTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPerfProbe tests 2 skipped 2 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishSolverTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleStageTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSurfaceNavTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCellFitModeTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCorePlanRulesTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreProbeReportTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeOrganicSettingsTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticePageRound2Tests tests 15 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticePageTests tests 25 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeRetentionControlTests tests 45 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeSettingsPersistTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests tests 2 skipped 0 failures 1
+FAILED TopOptFlowsTests.LatticeSlotOriginTests tests 5 skipped 0 failures 4
+PASSED TopOptFlowsTests.LatticeStaleTypeTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests tests 16 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicDeadWallParityTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicForecastTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicMainWiringTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicShapeFitTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSizeCheckTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSolidRimTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.ProjectStoreTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.RecommendThePrintedObjectTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.RemoteRunnerE2ETests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.SmoothingPageRound2Tests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.UndoHistoryTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantEntryGatingTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantRetentionTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.ViewerTests tests 33 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleBridgeTests tests 17 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSliceProbe tests 1 skipped 1 failures 0
+PASSED TopOptKitTests.FlexibleSquishFETests tests 12 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishModulusTests tests 2 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishStepsTests tests 6 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleTimingProbe tests 1 skipped 1 failures 0
+TOTAL classes 149 tests 1005 skipped 50 failures 14
+
+TopOptFlowsTests: 143 classes, 966 tests, 48 skipped, 14 failures — 13 known pre-existing (FlexibleBatchNVerifyTests x8 testEveryRefineLineIsWholeBesideTheLivePlayAllPicker, Xcode 27 text metrics; LatticeSlotOriginTests x4 testTheAppWithholdsExactlyWhatCoreRefuses, #354's; LatticeSimSolveTriggerTests x1 testTheTriggerRefusesOnAllThreeGrounds) + 1 of this batch: FlexibleR7SettingsHostedTests.testResetAllOnHisPadOpensNoPopUpOverModelAndNew — its click on [Reset all] missed under load (no confirm appeared; frame and keys below). TopOptKitTests: 6 classes, 39 tests, 2 skipped, 0 failures. No xctest death.
+FlexibleR7SettingsHostedTests.swift:406: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew] : XCTUnwrap failed: expected non-nil value of type "CGRect" - [Reset]
+FLEX-R7-VERIFY-RESET no confirm: resetAll (369.5, 616.0, 70.5, 30.0) · keys ["colourSwatches-1", "exitButton", "exitRow", "exitTitle:Exit", "faceCard", "faceList", "faceRemove-1", "flexible-rail-group-1", "flexible-rail-group-2", "flexible-rail-group-3", "flexible-rail-model", "flexible-rail-new", "flexible-rail-rests", "groupChips", "groupLine-1", "groupRemove-1", "groupRow-1", "legend", "notice", "numberBox-deepest-1", "numberBox-group-1", "numberBox-stamp-length-1", "numberBox-stamp-size-1", "numberBox-stamp-turn-1", "page", "panel", "panelScroll", "player", "playerCapsule", "playerNote", 
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is dra
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is draw
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is draw
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whol
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole
+FlexibleR7SettingsHostedTests.swift:406: error: -[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew] : XCTUnwrap failed: expected non-nil value of type "CGRect" - [Reset]
+LatticeStressTintTests.swift:195: error: -[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds] : XCTAssertTrue failed - ★ …and otherwise it actually runs
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ 2e-6 off: app failure(TopOpt
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ short normal, 2e-6 off (unit
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ tilted 18°, the bake's grid
+LatticeSlotOriginTests.swift:139: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertNotNil failed - ★ core refuses the tilted grid
+
+## The R7-S classes again after the reset test's click was made robust (re-read the frame, make the window key, up to 3 tries; the page settled first) — twice in a row
+-- run 1
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsEvidence testEvidenceOnHisPad]' skipped (0.003 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testEveryGroupHeaderHasAFingerSizedTrashAndAOneLineName]' passed (96.994 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew]' passed (18.823 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole]' passed (38.762 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAnExplicitPickStillMovesTheTabAndTheTabIsWhatPlays]' passed (3.780 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAPopUpAboutAnotherGroupsFaceLeavesTheTab]' passed (3.741 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds]' passed (2.890 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName]' passed (2.374 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testOnlyTheOpenGroupsNumbersShow]' passed (5.168 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllLeavesOnlyModelAndNew]' passed (7.807 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllPopsNothingOverModelAndNew]' passed (1.897 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testTheOpenGroupNeverShiftsAfterAnyChange]' passed (31.290 seconds).
+-- run 2
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsEvidence testEvidenceOnHisPad]' skipped (0.001 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testEveryGroupHeaderHasAFingerSizedTrashAndAOneLineName]' passed (97.339 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testResetAllOnHisPadOpensNoPopUpOverModelAndNew]' passed (17.833 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testTheNameFieldNamesItsOwnGroupAndTheRailTabSaysItWhole]' passed (37.417 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAnExplicitPickStillMovesTheTabAndTheTabIsWhatPlays]' passed (3.785 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAPopUpAboutAnotherGroupsFaceLeavesTheTab]' passed (3.762 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testATapOnNewStartsAGroupFromAFaceNoGroupHolds]' passed (2.886 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName]' passed (2.365 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testOnlyTheOpenGroupsNumbersShow]' passed (5.116 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllLeavesOnlyModelAndNew]' passed (8.023 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllPopsNothingOverModelAndNew]' passed (1.927 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testTheOpenGroupNeverShiftsAfterAnyChange]' passed (31.391 seconds).
+
+## Goldens (FlexibleAngledGoldenTests, 13 tests each)
+golden_det: Executed 13 tests, with 0 failures (0 unexpected) in 13.779 (13.780) seconds · identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded: Executed 13 tests, with 0 failures (0 unexpected) in 13.728 (13.730) seconds · identical 32 · DIFFERS 0 · PART-SKIP 1
+
+## Stage-job hashes (angled_presses/stage_job_hashes.sh; SWIFT_TEST_ARGS="--scratch-path /tmp/r7s-build")
+stage_job_hashes_r7s_verify.txt vs angled_presses/stage_job_hashes_i2.txt: the whole file identical (16 rows exit 0, the controls, the source lines)
+
+## Suite chunk 005 whole again at 3d112b35 (FlexiblePinchTests … FlexibleR7SettingsEvidence, FlexibleR7SettingsHostedTests, FlexibleR7SettingsTests, FlexibleReadinessTests)
+	 Executed 73 tests, with 1 test skipped and 0 failures (0 unexpected) in 241.942 (241.951) seconds
+
+## The chip probe (a temporary test, not committed): why the verifier saw no depth chip on a cut rest
+PROBE before the cut, Face 1 region 1: stamp? true stack true cols 4096 geometry true placement 50.0,50.0 40.0mm grid 52x64 o(30.0,25.0) coverage max 1.0 foot max 1.0 (n 4096) volume ok chip true
+PROBE before the cut, Face 1 stack u 0.78125…99.21875 v 0.78125…99.21875
+PROBE after the cut, Face 1's rest region 1000105: stamp? true stack true cols 3712 geometry true placement 50.0,50.0 40.0mm grid 52x64 o(30.0,25.0) coverage max 1.0 foot max 1.0 (n 3712) volume ok chip true
+PROBE after the cut, Face 1's rest stack u 0.78125…99.21875 v 0.78125…89.84375
+PROBE after Strip width 15, Face 1's rest region 1000105: stamp? true stack true cols 3712 geometry true placement 50.0,50.0 40.0mm grid 52x64 o(30.0,25.0) coverage max 1.0 foot max 1.0 (n 3712) volume ok chip true
+PROBE after Strip width 15, Face 1's rest stack u 0.78125…99.21875 v 0.78125…89.84375
+PROBE after undo + redo, Face 1's rest region 1000105: stamp? true stack true cols 3712 geometry true placement 50.0,50.0 40.0mm grid 52x64 o(30.0,25.0) coverage max 1.0 foot max 1.0 (n 3712) volume ok chip true
+PROBE after undo + redo, Face 1's rest stack u 0.78125…99.21875 v 0.78125…89.84375
+(the Strip width 15 call did not change the rest's columns — its answer was not read — so that row proves nothing)
+
+## iOS (build only — NOT installed, never launched)
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1r7s build at 3d112b35 (sources final since 20356410): BUILD SUCCEEDED; TopOpt.debug.dylib 78,864,016 B (09:08), carries "groupNameField-", "railTitle:", "flexible-new-group-ask".
