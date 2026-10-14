@@ -1,5 +1,5 @@
 {
- "_comment": "R1: the app states the grid it packed on. Both cells sit ON that grid, and the 1.5 mm one is 3.4 mm / 0.4 mm off the region origin, so only the stated slot origin can make it valid. Must be ACCEPTED.",
+ "_comment": "R1: the app states the grid it packed on. Both cells sit ON that grid; from the region origin the 3 mm cell is off by (6.4, 0, 0.4), so only the stated slot origin can make it valid. ACCEPTED.",
  "bake_build_orientation": "off",
  "grading": {
   "algorithm": "doubled",
@@ -17,8 +17,8 @@
    {
     "geometry": {
      "depth_mm": 12.0,
-     "half_u_mm": 6.0,
-     "half_w_mm": 6.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
      "normal": [
       0.0,
       1.0,
@@ -34,7 +34,7 @@
       0.0,
       8.4
      ],
-     "plan_base_cell_mm": 3.0
+     "plan_base_cell_mm": 6.0
     },
     "kind": "face",
     "role": "include"
@@ -49,16 +49,16 @@
      0.0,
      8.4
     ],
-    "size_mm": 3.0
+    "size_mm": 6.0
    },
    {
     "region_id": 1,
     "origin_mm": [
-     21.4,
+     24.4,
      0.0,
      8.4
     ],
-    "size_mm": 1.5
+    "size_mm": 3.0
    }
   ],
   "topology": "octet"

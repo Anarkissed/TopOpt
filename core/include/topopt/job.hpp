@@ -386,6 +386,14 @@ struct JobLattice {
   // is not a substitute: it writes before the region-net drop and the prune rounds,
   // so it describes the traced network and not the shipped part.
   bool emit_organic_spans = false;
+  // ── ★ K4: THE LAID PLAN, ONE LINE PER PLAN CELL (reviewer, 2026-10-10) ───────
+  // Writes `<prefix>_<rung>_LAID.txt` beside the meshes: the run's own answer to "which
+  // of my cells did you lay, and with how many struts". It exists because the app's
+  // classifier needs core's emitted geometry per cell and core had no way to give it --
+  // `emit_organic_spans` is the ORGANIC span writer, and a Default Grade plan run
+  // produces no organic spans at all. Off by default; writes nothing on a run that sent
+  // no plan, so no existing job's artifacts change.
+  bool emit_plan_laid = false;
   // The weld raster pitch (mm). 0 (the DEFAULT) = half the thinnest emitted strut's
   // RADIUS, which resolves the strut properly and is what the volume measurement
   // wants. A coarser pitch trades surface fidelity for triangle count: the count
