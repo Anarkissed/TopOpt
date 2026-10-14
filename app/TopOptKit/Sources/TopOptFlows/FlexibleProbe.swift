@@ -423,9 +423,12 @@ public enum FlexibleMainTints {
 
     /// `roles`: a role colour wherever Flexible leaves the part clay (★ R7-V: the main page hands none — its model wears no
     /// role colour; batch V review's `rolesOverMarks`, for its "Role colours" toggle unticked, went with the toggle).
+    /// ★ ROUND 7, X1: `open` — the PRINTED VIEW (one flag per flat vertex, `overLattice`): the body's CLOSED surface flagged
+    /// solid (it draws opaque through the see-through body and goes into the G-buffer — FlexibleLatticePass.encodeBody), the
+    /// surface over the lattice region left open (the walls show), and no ghost anywhere.
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,
                                roles: [FaceID: SIMD4<Float>], stress: (field: LatticeDemandField, peak: Double)?,
-                               ghost: SIMD4<Float>?) -> [Float]? {
+                               ghost: SIMD4<Float>?, open: [Bool]? = nil) -> [Float]? {
         guard let mesh = overlay?.mesh ?? part else { return nil }
         let n = mesh.flat.vertexCount
         guard n > 0 else { return nil }
@@ -459,6 +462,9 @@ public enum FlexibleMainTints {
             }
         }
         if let g = ghost { FlexibleOverlayMesh.markGhost(&out, colour: g) }
+        if let o = open, o.count == n {
+            for v in 0..<n { out[v * 8 + 5] = o[v] ? 0 : 1; out[v * 8 + 6] = 0 }
+        }
         return out
     }
 }

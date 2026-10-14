@@ -3,7 +3,8 @@
 // FlexibleRound7ViewsHostedTests (its hosting, clicks and pixel helpers), on HIS pad (A1_0003 as he saved it).
 //   RH1 (major) his None pad: the default view drew no wall (X-ray off for every finish); X-ray off hides the walls under
 //       ANY finish (step 1's limit — H6 proved it for Covered only), so a None pad opens in X-ray. The shipping renderer.
-//       RED `controlXrayOffOnOpen`.
+//       ★ RE-PINNED by round 7 batch X1 (his Q9 answer): X-ray off on open, the walls seen in the printed view; RED
+//       `controlNoPrintedView`.
 //   RH2 (major) Settings, Bend alone: the bent part was a near-black smudge (the page's X-ray ghost, no heat on it) — his
 //       img4: "showing the entire 3d model at its full squish depth". The shipping renderer. RED `controlBendGhost`.
 //   RH3 (major) Settings: Heat hidden while the legend read left the page stuck in its reading (every tap read, none
@@ -46,8 +47,13 @@ extension FlexibleRound7ViewsHostedTests {
         return n
     }
 
-    // MARK: - RH1: a None pad opens in X-ray; X-ray off hides the walls under ANY finish
+    // MARK: - RH1 (★ RE-PINNED by X1): a None pad opens with X-ray OFF and its lattice SEEN; Covered is the plain model
 
+    /// ★ RE-PINNED, round 7 batch X1 — his answer on the R7-V handoff's Q9 (2026-10-14): "The lattice should be visible
+    /// without x-ray on as long as finish is set to something that isn't 'covered' … If lattice is on without x-ray view, we
+    /// see the lattice plus the solid." R7-V's review opened a None pad IN X-RAY so its lattice was not hidden (the stopgap,
+    /// `xrayDefault`); X1 retires it: X-ray off, the printed view shows the walls. Covered (X-ray off): the plain model.
+    /// RED CONTROL `controlNoPrintedView` (R7-V's rule: out of X-ray the walls were hidden under ANY finish — 0 px).
     func testANonePadOpensInXrayAndXrayOffHidesTheWallsUnderAnyFinish() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let s = FlexibleMainStage()
@@ -71,22 +77,20 @@ extension FlexibleRound7ViewsHostedTests {
             let bg = DS.Color.background
             return try XCTUnwrap(mr.renderOffscreen(size: FlexibleRound6EvidenceProbe.size, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
         }
-        // as the page opens on his None pad: X-ray on — the walls are seen
-        XCTAssertTrue(s.xrayOn, "★ None: X-ray on as the page opens")
+        // as the page opens on his None pad: X-ray OFF (X1) — and the walls are SEEN (the printed view)
+        XCTAssertFalse(s.xrayOn, "★ X1: None — X-ray off as the page opens")
         let seen = Self.frameDiffering(try frame(lattice: true), try frame(lattice: false))
-        XCTAssertGreaterThan(seen, 2_000, "★ his lattice is SEEN as the page opens (\(seen) px: the walls inside the ghost)")
-        // X-ray off (his tap): out of X-ray the walls are hidden under ANY finish — None too (step 1's limit; R7-X's printed
-        // view draws them through the finish's openings) — the reason a None pad opens in X-ray
-        s.xrayOn = false
-        let hiddenNone = Self.frameDiffering(try frame(lattice: true), try frame(lattice: false))
-        XCTAssertEqual(hiddenNone, 0, "★ X-ray off, Finish None: no wall drawn either (\(hiddenNone) px)")
-        // ★ RED CONTROL: R7-V's first build — X-ray off on open whatever the finish: the opaque block, no lattice
-        s.xrayChoice = [:]
-        s.controlXrayOffOnOpen = true
+        XCTAssertGreaterThan(seen, 2_000, "★ his lattice is SEEN with X-ray off (\(seen) px: the printed view)")
+        // ★ RED CONTROL: R7-V's rule — out of X-ray the walls hidden under any finish (why R7-V opened a None pad in X-ray)
+        s.controlNoPrintedView = true
         let control = Self.frameDiffering(try frame(lattice: true), try frame(lattice: false))
-        s.controlXrayOffOnOpen = false
-        XCTAssertEqual(control, 0, "★ RED CONTROL: the first build opened his None pad with no wall seen")
-        print("FLEX-R7V-RH1 None pad: walls seen on open \(seen) px · X-ray off (any finish) \(hiddenNone) px · control (first build) \(control) px")
+        s.controlNoPrintedView = false
+        XCTAssertEqual(control, 0, "★ RED CONTROL: R7-V's rule drew no wall with X-ray off")
+        // Covered, X-ray off: the plain model (the skin hides the lattice — the print); the frame's lattice changes nothing
+        m.edit({ $0.finish = FlexibleFinish.covered.rawValue }, recompute: false)
+        let covered = Self.frameDiffering(try frame(lattice: true), try frame(lattice: false))
+        XCTAssertEqual(covered, 0, "★ Covered, X-ray off: no wall drawn (\(covered) px)")
+        print("FLEX-R7V-RH1 (re-pinned by X1) None pad, X-ray off: walls seen \(seen) px · control (R7-V's rule) \(control) px · Covered \(covered) px")
     }
 
     // MARK: - RH2: Bend alone draws the bent part readable

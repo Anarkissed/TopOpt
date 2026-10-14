@@ -34,6 +34,8 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
         (.heatOff, "thermometer.medium", "Heat", "flexible-settings-view-heat"),
         (.bend, "rectangle.compress.vertical", "Bend", "flexible-settings-view-bend"),
+        // ★ ROUND 7, X1: [X-ray] (the main page's glyph) — the ghost and the bend's prism into the model
+        (.xray, FlexibleMainViewToggles.xrayIcon, "X-ray", "flexible-settings-view-xray"),
         (.play, "play.fill", "Play", "flexible-settings-view-play"),
     ]
     static let buttonSize: CGFloat = 40
@@ -71,7 +73,7 @@ extension FlexibleStageModel {
     }
 }
 
-/// [Prisms] [Groups] [Heat] [Bend] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
+/// [Prisms] [Groups] [Heat] [Bend] [X-ray] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
 struct FlexibleStageViewButtons: View {
     @ObservedObject var model: FlexibleStageModel
     /// Test control only (R7-V review): no "every group" mark on [Heat] (R7-V's first build — the glyph alone).

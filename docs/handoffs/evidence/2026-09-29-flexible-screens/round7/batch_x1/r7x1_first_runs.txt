@@ -1,0 +1,374 @@
+# X1 — the first runs on the code (raw). green1: 6 of 7 green; XH1's RED CONTROL 2 (the solid flags alone) did not show a mis-sort at img5's top camera with Heat off (98.85 % match) — the control moved to img1 with Heat on (the spike's condition), and the solid-part mask eroded off the silhouette/strip edges (green2..green5 are those iterations; the measurement was changed, never the code). green5 = XH1 green. The evidence run's XH1 adds the plan's AO check.
+
+######## r7x1_green1.log
+Test Suite 'Selected tests' started at 2026-10-14 18:34:00.926.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:34:00.927.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:34:00.927.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:34:00.927.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:34:01.088.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:34:01.089.
+Test Suite 'FlexibleLatticePassTests' started at 2026-10-14 18:34:01.089.
+Test Case '-[TopOptFlowsTests.FlexibleLatticePassTests testThePrintedTermMatchesTheSwiftTwin]' started.
+Test Case '-[TopOptFlowsTests.FlexibleLatticePassTests testThePrintedTermMatchesTheSwiftTwin]' passed (1.328 seconds).
+Test Suite 'FlexibleLatticePassTests' passed at 2026-10-14 18:34:02.418.
+	 Executed 1 test, with 0 failures (0 unexpected) in 1.328 (1.329) seconds
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:34:02.418.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' started.
+2026-10-14 18:34:02.447 xctest[25377:4743356] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:34:02.526 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testCoveredIsThePlainModelSkinAndRimSitBetween]' passed (85.617 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:35:28.122 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:146: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertLessThan failed: ("0.9885333040067451") is not less than ("0.95") - ★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' failed (99.981 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:37:08.016.
+	 Executed 2 tests, with 1 failure (0 unexpected) in 185.598 (185.598) seconds
+Test Suite 'FlexibleR7X1Tests' started at 2026-10-14 18:37:08.017.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn]' started.
+2026-10-14 18:37:08.102 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheLatticeViewAndPrismsNeverTurnXrayOn]' passed (42.417 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered]' started.
+2026-10-14 18:37:50.518 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testThePrintedViewDrawsTheLatticeWithXrayOffUnlessCovered]' passed (36.253 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel]' started.
+2026-10-14 18:38:26.769 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testTheSquishPagesXrayIsTheBendsPrismIntoTheModel]' passed (13.787 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish]' started.
+2026-10-14 18:38:40.555 xctest[25377:4743356] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1Tests testXrayIsOffByDefaultOnBothPagesWhateverTheFinish]' passed (23.230 seconds).
+Test Suite 'FlexibleR7X1Tests' passed at 2026-10-14 18:39:03.704.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 115.687 (115.687) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:39:03.704.
+	 Executed 7 tests, with 1 failure (0 unexpected) in 302.613 (302.615) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:39:03.704.
+	 Executed 7 tests, with 1 failure (0 unexpected) in 302.613 (302.615) seconds
+FLEX-PRINTED gyroid: max |gpu − swift| 0.0015881062 mm over 3000 points; the printed solid decides at 2124 (inside it: skin 649, pocket 598), the walls at 876; unprinted parity 0.0011863708 mm; controls: gate off 32.036263 mm, unprinted reference 32.035835 mm
+FLEX-PRINTED honeycomb: max |gpu − swift| 0.0015881062 mm over 3000 points; the printed solid decides at 1966 (inside it: skin 649, pocket 598), the walls at 1034; unprinted parity 0.001116991 mm; controls: gate off 4.654723 mm, unprinted reference 4.654724 mm
+FLEX-R7X1-XH2 his strips, img5 top, Heat off:
+  none: inside the strips 98.3 % differ · printed view true
+  skin: inside the strips 42.3 % differ · printed view true
+  rim: inside the strips 91.8 % differ · printed view true
+  covered: inside the strips 0.0 % differ · printed view false
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  n 900: outside the strips 99.21 % match (of 136395 px) · inside 98.3 % differ (of 143301 px)
+  controls: R7-V's rule inside 0.0 % differ · solid flags alone outside 98.85 % match
+  n 2064: outside the strips 98.94 % match (of 716804 px) · inside 98.3 % differ (of 752295 px)
+FLEX-R7X1-2 Lattice / note / pill / [Prisms] / Exit: X-ray stays off · controls: [Prisms] true, Lattice true
+FLEX-R7X1-3 None X-ray off: walls drawn, printed, body alpha 0 · open surface 50788 (flagged 0) · closed 40804 (unflagged 0) · control hidden true alpha Optional(1.0) · Covered plain
+FLEX-R7X1-4 Squish X-ray: off → no prism, no ghost flag · on → prism 1820 corners, deepest 11.663259 mm (expect 11.663258) · control ghost 0.04, items 0
+FLEX-R7X1-1 X-ray on open: false for every finish · Squish page opaque · controls: stopgap true, Squish ghost 0.04
+Test Suite 'Selected tests' started at 2026-10-14 18:39:03.803.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:39:03.804.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:39:03.804.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:39:03.804.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+
+######## r7x1_green2.log
+Test Suite 'Selected tests' started at 2026-10-14 18:40:12.192.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:40:12.193.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:40:12.193.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:40:12.193.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:40:12.356.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:40:12.357.
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:40:12.357.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:40:12.404 xctest[27745:4756590] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:40:12.484 xctest[27745:4756590] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:142: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertLessThan failed: ("0.9646053479909519") is not less than ("0.95") - ★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' failed (120.249 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:42:12.606.
+	 Executed 1 test, with 1 failure (0 unexpected) in 120.249 (120.249) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:42:12.606.
+	 Executed 1 test, with 1 failure (0 unexpected) in 120.249 (120.249) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:42:12.606.
+	 Executed 1 test, with 1 failure (0 unexpected) in 120.249 (120.250) seconds
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  img5 (top) n 900: outside the strips 99.21 % match (of 136395 px) · inside 98.3 % differ (of 143301 px)
+  control (img5): R7-V's rule inside 0.0 % differ
+  img5 (top) n 2064: outside the strips 98.94 % match (of 716804 px) · inside 98.3 % differ (of 752295 px)
+  img1 n 900: outside the strips 97.15 % match (of 91511 px) · inside 99.0 % differ (of 128408 px)
+  control (img1): the solid flags alone, outside 96.46 % match
+Test Suite 'Selected tests' started at 2026-10-14 18:42:12.707.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:42:12.708.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:42:12.708.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:42:12.708.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+
+######## r7x1_green3.log
+Test Suite 'Selected tests' started at 2026-10-14 18:42:47.973.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:42:47.974.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:42:47.974.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:42:47.974.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:42:48.134.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:42:48.135.
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:42:48.135.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:42:48.194 xctest[28261:4763837] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:42:48.273 xctest[28261:4763837] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:131: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertLessThan failed: ("0.015768596125056003") is not less than ("0.01") - ★ img1 n 900: …correctly sorted (no other surface shows through: ΔE > 15 under 1 %)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' failed (123.972 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:44:52.107.
+	 Executed 1 test, with 1 failure (0 unexpected) in 123.972 (123.972) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:44:52.107.
+	 Executed 1 test, with 1 failure (0 unexpected) in 123.972 (123.972) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:44:52.107.
+	 Executed 1 test, with 1 failure (0 unexpected) in 123.972 (123.973) seconds
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  img5 (top) n 900: outside the strips 99.21 % match (of 136395 px), 0.31 % grossly off (ΔE > 15) · inside 98.3 % differ (of 143301 px)
+  control (img5): R7-V's rule inside 0.0 % differ
+  img5 (top) n 2064: outside the strips 98.94 % match (of 716804 px), 0.50 % grossly off (ΔE > 15) · inside 98.3 % differ (of 752295 px)
+  img1 n 900: outside the strips 97.15 % match (of 91511 px), 1.58 % grossly off (ΔE > 15) · inside 99.0 % differ (of 128408 px)
+  control (img1): the solid flags alone, outside 96.46 % match, 2.26 % grossly off
+Test Suite 'Selected tests' started at 2026-10-14 18:44:52.205.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:44:52.206.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:44:52.206.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:44:52.206.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+
+######## r7x1_green4.log
+Test Suite 'Selected tests' started at 2026-10-14 18:45:51.860.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:45:51.861.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:45:51.861.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:45:51.861.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:45:52.026.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:45:52.027.
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:45:52.027.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:45:52.085 xctest[28873:4776143] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:45:52.165 xctest[28873:4776143] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7X1HostedTests.swift:154: error: -[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff] : XCTAssertLessThan failed: ("0.015768596125056003") is not less than ("0.01") - ★ img1 n 900: …correctly sorted (no other surface shows through: ΔE > 15 under 1 %)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' failed (130.072 seconds).
+Test Suite 'FlexibleR7X1HostedTests' failed at 2026-10-14 18:48:02.099.
+	 Executed 1 test, with 1 failure (0 unexpected) in 130.072 (130.072) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-14 18:48:02.099.
+	 Executed 1 test, with 1 failure (0 unexpected) in 130.072 (130.072) seconds
+Test Suite 'Selected tests' failed at 2026-10-14 18:48:02.099.
+	 Executed 1 test, with 1 failure (0 unexpected) in 130.072 (130.073) seconds
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  img5 (top) n 900: outside the strips 99.21 % match (of 136395 px), 0.31 % grossly off (ΔE > 15) · inside 98.3 % differ (of 143301 px)
+  control (img5): R7-V's rule inside 0.0 % differ
+  img5 (top) n 2064: outside the strips 98.94 % match (of 716804 px), 0.50 % grossly off (ΔE > 15) · inside 98.3 % differ (of 752295 px)
+  img1 n 900: outside the strips 97.15 % match (of 91511 px), 1.58 % grossly off (ΔE > 15) · inside 99.0 % differ (of 128408 px)
+  control (img1): the solid flags alone, outside 96.46 % match, 2.26 % grossly off
+Test Suite 'Selected tests' started at 2026-10-14 18:48:02.200.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:48:02.201.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:48:02.201.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:48:02.201.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)
+
+######## r7x1_green5.log
+Test Suite 'Selected tests' started at 2026-10-14 18:49:06.773.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:49:06.774.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:49:06.774.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:49:06.774.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:49:06.933.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:49:06.934.
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:49:06.934.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:49:06.988 xctest[29546:4781480] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:49:07.069 xctest[29546:4781480] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' passed (150.229 seconds).
+Test Suite 'FlexibleR7X1HostedTests' passed at 2026-10-14 18:51:37.163.
+	 Executed 1 test, with 0 failures (0 unexpected) in 150.229 (150.229) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-14 18:51:37.163.
+	 Executed 1 test, with 0 failures (0 unexpected) in 150.229 (150.229) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:51:37.163.
+	 Executed 1 test, with 0 failures (0 unexpected) in 150.229 (150.230) seconds
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  img5 (top) n 900: outside the strips 100.00 % match (of 131829 px), 0.00 % grossly off (ΔE > 15) · inside 98.3 % differ (of 143301 px)
+  control (img5): R7-V's rule inside 0.0 % differ
+  img5 (top) n 2064: outside the strips 99.98 % match (of 695540 px), 0.00 % grossly off (ΔE > 15) · inside 98.3 % differ (of 752295 px)
+  img1 n 900: outside the strips 99.75 % match (of 85417 px), 0.13 % grossly off (ΔE > 15) · inside 99.0 % differ (of 128408 px)
+  control (img1): the solid flags alone, outside 16.12 % match, 83.83 % grossly off
+Test Suite 'Selected tests' started at 2026-10-14 18:51:37.260.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 18:51:37.261.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 18:51:37.261.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:51:37.261.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+######## r7x1_evidence1.log
+Test Suite 'Selected tests' started at 2026-10-14 18:54:01.472.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 18:54:01.473.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 18:54:01.473.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 18:54:01.473.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 18:54:01.681.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 18:54:01.683.
+Test Suite 'FlexibleR7X1EvidenceProbe' started at 2026-10-14 18:54:01.683.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheMainPageOnHisPad]' started.
+2026-10-14 18:54:01.733 xctest[30310:4788114] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 18:54:10.474 xctest[30310:4788114] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+2026-10-14 18:57:48.844 xctest[30310:4788114] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheMainPageOnHisPad]' passed (255.393 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheSquishPageXrayOnHisPad]' started.
+2026-10-14 18:58:17.159 xctest[30310:4788114] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheSquishPageXrayOnHisPad]' passed (65.237 seconds).
+Test Suite 'FlexibleR7X1EvidenceProbe' passed at 2026-10-14 18:59:22.313.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 320.630 (320.630) seconds
+Test Suite 'FlexibleR7X1HostedTests' started at 2026-10-14 18:59:22.313.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' started.
+2026-10-14 18:59:22.399 xctest[30310:4788114] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1HostedTests testFinishNoneShowsTheSolidPartAndTheLatticeWithXrayOff]' passed (143.799 seconds).
+Test Suite 'FlexibleR7X1HostedTests' passed at 2026-10-14 19:01:46.112.
+	 Executed 1 test, with 0 failures (0 unexpected) in 143.799 (143.799) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-14 19:01:46.112.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 464.429 (464.429) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 19:01:46.112.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 464.429 (464.431) seconds
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_no_face_prism_plain_model_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img1_11l.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_heat_off_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_lattice_off_plain_model_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_groupC_picked_face_prisms_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_groupC_picked_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_prisms_view_xray_stays_off_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_play_at_0.6_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_skin_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_skin_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_rim_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_rim_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_covered_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_covered_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_covered_xray_on_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_top_face_prism_default_none_img1_13p.png
+FLEX-R7X1-EVIDENCE main
+  R7X1_no_face_prism_plain_model_img1_13p.png: finish none · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit false · legend [] · prisms 0
+  R7X1_default_none_img5_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_img1_11l.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_heat_off_img5_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat false · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_lattice_off_plain_model_img1_13p.png: finish none · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit false · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 0
+  R7X1_xray_on_img5_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_xray_on_img1_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_xray_on_groupC_picked_face_prisms_img1_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_groupC_picked_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_prisms_view_xray_stays_off_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_none_play_at_0.6_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_skin_img5_13p.png: finish skin · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_skin_img1_13p.png: finish skin · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_rim_img5_13p.png: finish rim · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_rim_img1_13p.png: finish rim · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_covered_img5_13p.png: finish covered · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 2
+  R7X1_default_covered_img1_13p.png: finish covered · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 2
+  R7X1_covered_xray_on_img1_13p.png: finish covered · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_top_face_prism_default_none_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_S_13p_default_xray_off.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_S_13p_xray_on_bend_prism.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_S_13p_xray_on_bend_prism_with_bend.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_S_13p_prisms_xray_off.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_S_13p_bend_alone_xray_off.png
+FLEX-R7X1-EVIDENCE squish
+  R7X1_S_13p_default_xray_off.png: views 0 · X-ray false · body alpha 1.0 · bend prism - (k 1.0, fe true) · scale 0.0
+  R7X1_S_13p_xray_on_bend_prism.png: views 64 · X-ray true · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · scale 0.0
+  R7X1_S_13p_xray_on_bend_prism_with_bend.png: views 96 · X-ray true · body alpha 0.04 · bend prism 11.7 mm (k 1.0, fe true) · scale 1.0
+  R7X1_S_13p_prisms_xray_off.png: views 1 · X-ray false · body alpha 0.3 · bend prism - (k 1.0, fe true) · scale 0.0
+  R7X1_S_13p_bend_alone_xray_off.png: views 40 · X-ray false · body alpha 1.0 · bend prism - (k 1.0, fe true) · scale 1.0
+FLEX-R7X1-XH1 his strips, Finish None, img5 top, Heat off:
+  img5 (top) n 900: outside the strips 100.00 % match (of 131829 px), 0.00 % grossly off (ΔE > 15) · inside 98.3 % differ (of 143301 px) · AO check: the solid part next to the strips, mean ΔE 0.00 over 29381 px
+  control (img5): R7-V's rule inside 0.0 % differ
+  img5 (top) n 2064: outside the strips 99.98 % match (of 695540 px), 0.00 % grossly off (ΔE > 15) · inside 98.3 % differ (of 752295 px) · AO check: the solid part next to the strips, mean ΔE 0.00 over 156287 px
+  img1 n 900: outside the strips 99.75 % match (of 85417 px), 0.13 % grossly off (ΔE > 15) · inside 99.0 % differ (of 128408 px) · AO check: the solid part next to the strips, mean ΔE 0.05 over 32496 px
+  control (img1): the solid flags alone, outside 16.12 % match, 83.83 % grossly off
+Test Suite 'Selected tests' started at 2026-10-14 19:01:46.209.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 19:01:46.211.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 19:01:46.211.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 19:01:46.211.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+
+######## r7x1_evidence2.log
+Test Suite 'Selected tests' started at 2026-10-14 19:05:29.816.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-14 19:05:29.817.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-14 19:05:29.817.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 19:05:29.817.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-14 19:05:29.978.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-14 19:05:29.979.
+Test Suite 'FlexibleR7X1EvidenceProbe' started at 2026-10-14 19:05:29.979.
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheMainPageOnHisPad]' started.
+2026-10-14 19:05:30.039 xctest[32701:4804794] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+2026-10-14 19:05:38.109 xctest[32701:4804794] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+2026-10-14 19:11:11.966 xctest[32701:4804794] DIAG seam occupancy: 128x128x27 in 0.07 s (once per mesh)
+Test Case '-[TopOptFlowsTests.FlexibleR7X1EvidenceProbe testTheMainPageOnHisPad]' passed (371.950 seconds).
+Test Suite 'FlexibleR7X1EvidenceProbe' passed at 2026-10-14 19:11:41.930.
+	 Executed 1 test, with 0 failures (0 unexpected) in 371.950 (371.951) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-14 19:11:41.930.
+	 Executed 1 test, with 0 failures (0 unexpected) in 371.950 (371.951) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 19:11:41.930.
+	 Executed 1 test, with 0 failures (0 unexpected) in 371.950 (371.952) seconds
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_no_face_prism_plain_model_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_img1_11l.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_heat_off_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_lattice_off_plain_model_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_prisms_view_xray_stays_off_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_none_play_at_0.6_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_skin_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_skin_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_rim_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_rim_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_covered_img5_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_covered_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_covered_xray_on_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_xray_on_groupC_picked_face_prisms_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_default_groupC_picked_img1_13p.png
+FLEX-R7X1-EVIDENCE wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/wt-r7x/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_x1/R7X1_top_face_prism_default_none_img1_13p.png
+FLEX-R7X1-EVIDENCE main
+  R7X1_no_face_prism_plain_model_img1_13p.png: finish none · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit false · legend [] · prisms 0
+  R7X1_default_none_img5_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_img1_11l.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_heat_off_img5_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat false · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_lattice_off_plain_model_img1_13p.png: finish none · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit false · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 0
+  R7X1_xray_on_img5_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_xray_on_img1_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_prisms_view_xray_stays_off_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_none_play_at_0.6_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_skin_img5_13p.png: finish skin · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_skin_img1_13p.png: finish skin · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_rim_img5_13p.png: finish rim · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_rim_img1_13p.png: finish rim · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_default_covered_img5_13p.png: finish covered · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 0
+  R7X1_default_covered_img1_13p.png: finish covered · X-ray false · printed false · walls hidden true · body alpha 1.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent] · prisms 0
+  R7X1_covered_xray_on_img1_13p.png: finish covered · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+  R7X1_xray_on_groupC_picked_face_prisms_img1_13p.png: finish none · X-ray true · printed false · walls hidden false · body alpha 0.04 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_default_groupC_picked_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 2
+  R7X1_top_face_prism_default_none_img1_13p.png: finish none · X-ray false · printed true · walls hidden false · body alpha 0.0 · heat true · Lattice icon lit true · legend [TopOptFlows.FlexibleReadKind.dent, TopOptFlows.FlexibleReadKind.lattice] · prisms 0
+Test Suite 'Selected tests' started at 2026-10-14 19:11:42.032.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-14 19:11:42.033.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-14 19:11:42.033.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-14 19:11:42.033.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

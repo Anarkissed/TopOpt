@@ -127,8 +127,11 @@ extension FlexibleMainStage {
         // ★ BATCH M (M3): on the FE route, each group's OWN stress (the sequence's first here; each Play
         // all turn its own below), on the sequence's one scale
         let feRoute = feStressRoute
+        // ★ ROUND 7, X1: the printed view's open surface (over the lattice region), per flat vertex — nil out of it
+        let open = printedOpen()
         let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
             + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)|\(controlRolesOnMain)"
+            + "|\(openCache.map { open != nil ? $0.key : "-" } ?? "-")"
         if key != composedKey {
             composedKey = key
             // ★ BATCH M VERIFICATION: each group's field on ITS OWN scale (its top — FlexibleFEStress.scaleTop);
@@ -144,7 +147,7 @@ extension FlexibleMainStage {
             }
             let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil)
+                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil, open: open)
             // ★ ROUND 6 (his img1): no group frame in any view — round 5's paint is the red control's only
             if controlRound5Frames, let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
@@ -152,14 +155,14 @@ extension FlexibleMainStage {
             var per: [String: [Float]] = [:]
             for (id, base) in feBaseTints {
                 per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open)
             }
             // ★ BATCH M (M3): Stress under Play all with Heat off — each turn its own stress too
             if showStress, feRoute, per.isEmpty, fe.sequence.count > 1 || !fe.retained.isEmpty, let base = c.tints {
                 for i in fe.sequence + fe.retained where i < fe.fields.count {
                     let id = fe.fields[i].versionKey
                     per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil)
+                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open)
                 }
             }
             // ★ ROUND 6 (his img1): no Play-all turn wears a group frame either (the renderer swaps a turn's own
@@ -172,6 +175,18 @@ extension FlexibleMainStage {
         // …and the page hands the one the RENDERER shows now (a re-upload never shows another group's)
         if let id = feShownField?.versionKey, let t = feTintBox.tints(id) { return t }
         return composed
+    }
+
+    /// ★ ROUND 7, X1: the printed view's open surface — per flat vertex of the overlay, over the lattice region
+    /// (FlexibleMainTints.overLattice) — while the printed view is DRAWN (`printedDrawn`); nil otherwise. Cached per overlay
+    /// and lattice generation (a full pass over the overlay's vertices, never per body pass).
+    func printedOpen() -> [Bool]? {
+        guard let m = model, printedDrawn(m), let o = overlay, let g = m.lattice else { return nil }
+        let key = "\(overlaySerial)|\(g.generation)|\(o.mesh.flat.vertexCount)"
+        if let c = openCache, c.key == key { return c.open }
+        let open = FlexibleMainTints.overLattice(mesh: o.mesh, lattice: g.inputs)
+        openCache = (key, open)
+        return open
     }
 
     /// The field's identity (its shape and 32 strided samples — never a full scan per body

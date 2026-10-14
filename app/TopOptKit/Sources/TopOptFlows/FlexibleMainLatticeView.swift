@@ -109,7 +109,7 @@ extension FlexibleMainStage {
         if let m = model { latticeAvailable = FlexibleLatticeView.available(model: m) }
         switch FlexibleLatticeView.tap(available: latticeAvailable) {
         case .toggle:
-            toggleLatticeView()   // ★ R7-V: shown = in X-ray (step 1); FlexibleMainStage+Play
+            toggleLatticeView()   // ★ X1: a plain show / hide (FlexibleMainStage+Play)
         case .openSettings:
             showLatticeOnExit = true
             openSettings()
@@ -118,7 +118,7 @@ extension FlexibleMainStage {
 
     /// The note's [Show]: the view on, the note gone.
     public func showFromNote() {
-        showLatticeView()   // ★ R7-V: in X-ray, where its walls are seen
+        showLatticeView()   // ★ X1: the view on (X-ray stays as he set it)
         note.clear()
     }
 
@@ -178,7 +178,7 @@ struct FlexibleMainNoteView: View {
 
     var body: some View {
         if let k = note.kind {
-            let showable = k == .ready && !main.wallsShown   // ★ R7-V: [Show] while its walls are not seen (X-ray off too)
+            let showable = k == .ready && !main.latticeIconLit   // ★ X1: [Show] while his Lattice view is off
             Group {
                 if showable {
                     // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)

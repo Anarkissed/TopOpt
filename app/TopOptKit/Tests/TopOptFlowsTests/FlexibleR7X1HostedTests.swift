@@ -6,7 +6,7 @@
 // view, we see the lattice plus the solid. If the user adds x-ray, we see through the solid."
 //   XH1  Finish None, the default view (the lattice on, X-ray off): OUTSIDE the strips' screen footprint ≥ 95 % of the
 //        model's pixels match the plain opaque model within ΔE 3 (the solid part, correctly sorted — at the page's 900 pt
-//        and at his 13" pixel size); INSIDE ≥ 60 % differ (the walls and the voids, not the skin). X-ray on: the frame is
+//        and at his 13" pixel size, and at his img1 camera); INSIDE ≥ 60 % differ (the walls and the voids, not the skin). X-ray on: the frame is
 //        R7-V's X-ray frame, byte for byte. RED controls: R7-V's rule (the walls only in X-ray: ~0 % differ inside), and the
 //        plan's solid-flag route alone (no closed body in the G-buffer: the far face painted over the Top, < 95 % outside).
 //   XH2  Covered: ≤ 5 % differ inside (the plain model). Skin: the perforated sheet — fewer differ than under None, more
@@ -22,6 +22,8 @@ import TopOptDesign
 
 /// img5's TOP camera (R7-V's evidence probe's).
 let r7x1Img5 = FlexibleRound6Tests.Cam(name: "img5 (top)", azimuth: .pi / 9, elevation: 1.42, zoom: 1)
+/// img1's camera (his main-page screenshot's; the M1 probe's).
+let r7x1Img1 = FlexibleRound6Tests.Cam(name: "img1", azimuth: .pi / 4, elevation: 0.62, zoom: 1)
 
 @MainActor
 final class FlexibleR7X1HostedTests: XCTestCase {
@@ -64,6 +66,50 @@ final class FlexibleR7X1HostedTests: XCTestCase {
         return (strips, model)
     }
 
+    /// Opt-in (FLEX_R7X1_DUMP=<dir>): a frame written as a PNG, to look at what a measurement counted.
+    static func dump(_ f: Frame, _ name: String, mark: [Bool]? = nil) {
+        guard let d = ProcessInfo.processInfo.environment["FLEX_R7X1_DUMP"] else { return }
+        var rgba = f.px
+        for i in stride(from: 0, to: rgba.count, by: 4) {
+            rgba.swapAt(i, i + 2); rgba[i + 3] = 255
+            if let m = mark, m[i / 4] { rgba[i] = 255; rgba[i + 1] = 0; rgba[i + 2] = 255 }
+        }
+        guard let ctx = CGContext(data: &rgba, width: f.n, height: f.n, bitsPerComponent: 8, bytesPerRow: f.n * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue),
+              let img = ctx.makeImage() else { return }
+        try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
+        let url = URL(fileURLWithPath: d).appendingPathComponent(name)
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { return }
+        CGImageDestinationAddImage(dest, img, nil)
+        CGImageDestinationFinalize(dest)
+    }
+    /// The pixels within `r` (a square) of a selected one.
+    static func near(_ sel: [Bool], n: Int, r: Int) -> [Bool] {
+        var rows = [Bool](repeating: false, count: sel.count), out = rows
+        for y in 0..<n { var last = -1_000_000
+            for x in 0..<n { if sel[y * n + x] { last = x }; if x - last <= r { rows[y * n + x] = true } }
+            last = 1_000_000
+            for x in stride(from: n - 1, through: 0, by: -1) { if sel[y * n + x] { last = x }; if last - x <= r { rows[y * n + x] = true } } }
+        for x in 0..<n { var last = -1_000_000
+            for y in 0..<n { if rows[y * n + x] { last = y }; if y - last <= r { out[y * n + x] = true } }
+            last = 1_000_000
+            for y in stride(from: n - 1, through: 0, by: -1) { if rows[y * n + x] { last = y }; if last - y <= r { out[y * n + x] = true } } }
+        return out
+    }
+    /// `sel` kept only where every pixel within `r` (a square) is selected too.
+    static func eroded(_ sel: [Bool], n: Int, r: Int) -> [Bool] {
+        var out = [Bool](repeating: false, count: sel.count)
+        for y in r..<(n - r) { for x in r..<(n - r) where sel[y * n + x] {
+            var all = true
+            outer: for dy in -r...r { for dx in -r...r where !sel[(y + dy) * n + x + dx] { all = false; break outer } }
+            out[y * n + x] = all
+        } }
+        return out
+    }
+    static func grossMask(_ a: Frame, _ ref: Frame, where sel: [Bool]) -> [Bool] {
+        sel.indices.map { sel[$0] && deltaE(a.px, ref.px, $0) > 15 }
+    }
+
     /// CIE76 ΔE between two BGRA pixels (sRGB → Lab, D65).
     static func deltaE(_ a: [UInt8], _ b: [UInt8], _ i: Int) -> Float {
         func lab(_ px: [UInt8]) -> SIMD3<Float> {
@@ -77,12 +123,15 @@ final class FlexibleR7X1HostedTests: XCTestCase {
         return simd_length(lab(a) - lab(b))
     }
 
-    /// Of the pixels `where`, the share whose ΔE to the reference is above 3.
-    static func differing(_ a: Frame, _ ref: Frame, where sel: [Bool]) -> (share: Double, count: Int) {
+    /// Of the pixels `where`, the share whose ΔE to the reference is above `above` (3: the plan's bar).
+    static func differing(_ a: Frame, _ ref: Frame, where sel: [Bool], above: Float = 3) -> (share: Double, count: Int) {
         var n = 0, d = 0
-        for i in sel.indices where sel[i] { n += 1; if deltaE(a.px, ref.px, i) > 3 { d += 1 } }
+        for i in sel.indices where sel[i] { n += 1; if deltaE(a.px, ref.px, i) > above { d += 1 } }
         return (n > 0 ? Double(d) / Double(n) : 0, n)
     }
+    /// A body drawn in the wrong order shows another SURFACE (another face's shading) — a gross difference, not a shading
+    /// nuance: the share of pixels `where` above ΔE 15.
+    static func grossly(_ a: Frame, _ ref: Frame, where sel: [Bool]) -> Double { differing(a, ref, where: sel, above: 15).share }
 
     func hisStrips() async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
         let (r, s, m) = try await FlexibleR7M1Fixtures.hisPad(self, live: true)
@@ -109,41 +158,62 @@ final class FlexibleR7X1HostedTests: XCTestCase {
         XCTAssertEqual(m.settings.finishMode, .none, "premise: Finish None")
         XCTAssertFalse(s.xrayOn, "premise: the default view (X-ray off)")
         var lines: [String] = []
-        for n in [900, 2064] {   // the page's 900 pt, and his 13" portrait's pixels (the G-buffer's 1152 cap below it)
-            let fp = try footprint(s, p, m, n: n, device: device)
-            let outside = zip(fp.model, fp.strips).map { $0 && !$1 }
+        // img5's top camera at the page's 900 pt and at his 13" portrait's pixels (the G-buffer's 1152 cap below it), and his
+        // img1 camera (the side faces in view — where a mis-sorted body shows: the far face over the Top)
+        for (cam, n) in [(Self.img5, 900), (Self.img5, 2064), (r7x1Img1, 900)] {
+            let fp = try footprint(s, p, m, cam: cam, n: n, device: device)
+            // (the solid part's own pixels: away from the silhouette and the strips' edge by a few pixels — an edge pixel is
+            // half background or half lattice in one frame and not the other)
+            let outside = Self.eroded(zip(fp.model, fp.strips).map { $0 && !$1 }, n: n, r: max(2, n / 450))
             XCTAssertGreaterThan(fp.strips.filter { $0 }.count, n * n / 50, "premise: the strips are on screen")
-            let printed = try frame(s, p, n: n, device: device)
+            let printed = try frame(s, p, cam: cam, n: n, device: device)
             s.latticeOn = false
-            let plain = try frame(s, p, n: n, device: device)
+            let plain = try frame(s, p, cam: cam, n: n, device: device)
             s.latticeOn = true
             let out = Self.differing(printed, plain, where: outside), ins = Self.differing(printed, plain, where: fp.strips)
-            lines.append("n \(n): outside the strips \(String(format: "%.2f", 100 * (1 - out.share))) % match (of \(out.count) px) · inside \(String(format: "%.1f", 100 * ins.share)) % differ (of \(ins.count) px)")
-            XCTAssertGreaterThanOrEqual(1 - out.share, 0.95, "★ n \(n): outside the strips the solid part (ΔE ≤ 3)")
-            XCTAssertGreaterThanOrEqual(ins.share, 0.60, "★ n \(n): inside the strips the lattice (the walls and the voids)")
-            if n == 900 {
+            // the plan's AO check: the solid part NEXT to the strips (within ~24 px of them at 900) — the printed body's
+            // occlusion and creases against #354's opaque body's, as a mean ΔE (reported)
+            let nearStrips = Self.near(fp.strips, n: n, r: max(4, n * 24 / 900))
+            let band = zip(outside, nearStrips).map { $0 && $1 }
+            let bandN = band.filter { $0 }.count
+            let bandMean = bandN > 0 ? band.indices.filter { band[$0] }.map { Double(Self.deltaE(printed.px, plain.px, $0)) }.reduce(0, +) / Double(bandN) : 0
+            let gross = Self.grossly(printed, plain, where: outside)
+            Self.dump(printed, "XH1_\(cam.name.prefix(4))_\(n)_printed.png", mark: Self.grossMask(printed, plain, where: outside))
+            Self.dump(plain, "XH1_\(cam.name.prefix(4))_\(n)_plain.png", mark: fp.strips)
+            lines.append("\(cam.name) n \(n): outside the strips \(String(format: "%.2f", 100 * (1 - out.share))) % match (of \(out.count) px), \(String(format: "%.2f", 100 * gross)) % grossly off (ΔE > 15) · inside \(String(format: "%.1f", 100 * ins.share)) % differ (of \(ins.count) px) · AO check: the solid part next to the strips, mean ΔE \(String(format: "%.2f", bandMean)) over \(bandN) px")
+            XCTAssertGreaterThanOrEqual(1 - out.share, 0.95, "★ \(cam.name) n \(n): outside the strips the solid part (ΔE ≤ 3)")
+            XCTAssertLessThan(gross, 0.01, "★ \(cam.name) n \(n): …correctly sorted (no other surface shows through: ΔE > 15 under 1 %)")
+            XCTAssertGreaterThanOrEqual(ins.share, 0.60, "★ \(cam.name) n \(n): inside the strips the lattice (the walls and the voids)")
+            if cam.name == r7x1Img1.name {
+                // ★ RED CONTROL 2: the plan's solid-flag route alone (no closed body in the G-buffer — no depth to sort it),
+                // as the spike drew it: Heat ON (the Top's heat quads)
+                s.heat = true
+                let printedHeat = try frame(s, p, cam: cam, n: n, device: device)
+                var flagOnly = s.layer(p, stage: .lattice, pageUp: false)
+                flagOnly?.printed = true
+                let settle = p.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+                let mr = try FlexibleRound6EvidenceProbe().renderer(
+                    mesh: try XCTUnwrap(s.mesh(p, on: .lattice)), tints: s.tints(p, on: .lattice, roles: [:], stress: nil),
+                    dents: s.dents(p, on: .lattice), scale: s.dentScale(p, on: .lattice), bodyAlpha: 0, settle: settle, cam: cam,
+                    device: device, items: [], layer: flagOnly)
+                mr.flexibleLattice?.controlNoBodyInGBuffer = true
+                let bg = DS.Color.background
+                let c2f = Frame(px: try XCTUnwrap(mr.renderOffscreen(size: n, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1))), n: n)
+                s.heat = false
+                let c2 = Self.differing(c2f, printedHeat, where: outside), c2g = Self.grossly(c2f, printedHeat, where: outside)
+                Self.dump(c2f, "XH1_control_solidflags_img1.png", mark: Self.grossMask(c2f, printedHeat, where: outside))
+                Self.dump(printedHeat, "XH1_printed_heat_img1.png")
+                lines.append("control (img1): the solid flags alone, outside \(String(format: "%.2f", 100 * (1 - c2.share))) % match, \(String(format: "%.2f", 100 * c2g)) % grossly off")
+                XCTAssertGreaterThanOrEqual(c2g, 0.01, "★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)")
+            }
+            if n == 900, cam.name == Self.img5.name {
                 // ★ RED CONTROL 1: R7-V's rule — the walls only in X-ray: the strips are the plain skin
                 s.controlNoPrintedView = true
                 let r7v = try frame(s, p, n: n, device: device)
                 s.controlNoPrintedView = false
                 let c1 = Self.differing(r7v, plain, where: fp.strips)
-                // ★ RED CONTROL 2: the plan's solid-flag route alone (no closed body in the G-buffer — no depth to sort it)
-                var flagOnly = s.layer(p, stage: .lattice, pageUp: false)
-                flagOnly?.printed = true
-                let pass = { () -> Frame in
-                    let settle = p.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-                    let mr = try FlexibleRound6EvidenceProbe().renderer(
-                        mesh: try XCTUnwrap(s.mesh(p, on: .lattice)), tints: s.tints(p, on: .lattice, roles: [:], stress: nil),
-                        dents: s.dents(p, on: .lattice), scale: s.dentScale(p, on: .lattice), bodyAlpha: 0, settle: settle, cam: Self.img5,
-                        device: device, items: [], layer: flagOnly)
-                    mr.flexibleLattice?.controlNoBodyInGBuffer = true
-                    let bg = DS.Color.background
-                    return Frame(px: try XCTUnwrap(mr.renderOffscreen(size: n, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1))), n: n)
-                }
-                let c2 = Self.differing(try pass(), plain, where: outside)
-                lines.append("controls: R7-V's rule inside \(String(format: "%.1f", 100 * c1.share)) % differ · solid flags alone outside \(String(format: "%.2f", 100 * (1 - c2.share))) % match")
+                lines.append("control (img5): R7-V's rule inside \(String(format: "%.1f", 100 * c1.share)) % differ")
                 XCTAssertLessThan(c1.share, 0.60, "★ RED CONTROL: R7-V's rule shows no lattice inside the strips")
-                XCTAssertLessThan(1 - c2.share, 0.95, "★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)")
                 // X-ray: R7-V's X-ray frame, byte for byte (the printed gate is off there)
                 s.xrayOn = true
                 let xr = try frame(s, p, n: n, device: device)
