@@ -265,7 +265,8 @@ enum FlexibleDepthPrism {
     @MainActor
     static func renderItems(model: FlexibleStageModel, k: Double, views: FlexibleStageViews = []) -> [ClearanceRenderItem] {
         let dragging = model.frozenExaggeration != nil
-        let sel = model.selectedRegion.flatMap { model.settings.face($0)?.isLoaded == true ? $0 : nil }
+        // ★ ROUND 7 (S, 4g): the face he works on in the OPEN tab (never Group 1's behind an edges tab)
+        let sel = FlexibleStageOverlays.workingRegion(model: model).flatMap { model.settings.face($0)?.isLoaded == true ? $0 : nil }
         guard k > 0, !controlOnlyWhileDragging || dragging else { return [] }   // (RED CONTROL: round 3's rule)
         let all = views.contains(.prisms) && !controlOnlyWhileDragging
         let regions = all ? model.settings.loadedFaces.map(\.faceRegionID) : sel.map { [$0] } ?? []

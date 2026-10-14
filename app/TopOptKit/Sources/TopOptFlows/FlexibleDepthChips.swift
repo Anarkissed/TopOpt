@@ -75,7 +75,8 @@ struct FlexibleDepthChips: View {
 
     var body: some View {
         ZStack {
-            if let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
+            // ★ ROUND 7 (S, 4g): the face he works on in the OPEN tab only (his img4: Face 1's "3.0 mm" over Group 2's tab)
+            if let r = FlexibleStageOverlays.workingRegion(model: model), let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
                let st = model.stacks[key], let proj = projection,
                // ★ batch E review: no lattice under the face — nothing to drag into (the row says why)
                !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
@@ -83,6 +84,10 @@ struct FlexibleDepthChips: View {
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
                 chip(f.deepestMM, arrow: arrowAngle(proj, h, at: p))
+                    // ★ ROUND 7 (S): what is drawn, by name (the hosted tests read it: no face's chip on an edges tab)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["depthChip-\(r)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                     .position(p)
                     .gesture(drag(region: r, handle: h, stack: st, proj: proj, startMM: f.deepestMM)
                         .updating($dragging) { _, state, _ in state = true })
@@ -97,7 +102,7 @@ struct FlexibleDepthChips: View {
     /// rule the chip and the stamp handle (which keeps clear of it) both read.
     @MainActor
     static func handle(model: FlexibleStageModel, k: Double) -> ClearanceHandle? {
-        guard let r = model.selectedRegion, let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
+        guard let r = FlexibleStageOverlays.workingRegion(model: model), let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
               let st = model.stacks[key], let g = model.geometry[key],
               let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
                                                 k: model.frozenExaggeration ?? k, footprint: model.prismFootprint(r))

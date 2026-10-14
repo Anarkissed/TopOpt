@@ -363,7 +363,7 @@ struct FlexibleFaceStampHandle: View {
     }
 
     var body: some View {
-        let placed = Self.placements(model.settings, selected: model.selectedRegion)
+        let placed = Self.placements(model.settings, selected: FlexibleStageOverlays.workingRegion(model: model))   // ★ ROUND 7 (S, 4g)
         let vp = projection?.viewportSize ?? .zero
         let chip = placed.isEmpty ? nil : FlexibleDepthChips.handle(model: model, k: k).flatMap { projection?.project($0.anchor) }
         ZStack {
