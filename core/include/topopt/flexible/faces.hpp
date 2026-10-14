@@ -29,10 +29,15 @@ inline constexpr double kNormalSpreadFlagDeg = 30.0;
 inline constexpr double kSameAxisDeg = 15.0;
 
 // THE PRESS API's version (A7, reviewer 2026-10-08): the wire keys face_region_ids /
-// press_direction, build_press_stack, refuse_shared_footprints, press_unit,
-// stack_owns_projection and DensityField's owner_weight / runner_up. Raised when any of
-// them changes meaning, so the app can refuse a core it was not written against.
-inline constexpr int kPressApiVersion = 1;
+// press_direction, build_press_stack, refuse_shared_footprints / find_shared_footprints,
+// press_unit, stack_owns_projection, DensityField's owner_weight / runner_up, and how the
+// run reports a shared footprint. Raised when any of them changes meaning, so the app can
+// refuse a core it was not written against.
+//   1  2026-10-08  first
+//   2  2026-10-10  the run REFUSES a shared footprint with code "shared_footprint" (receipt
+//                  and drawn maps written; `shared_footprints` in the receipt) instead of
+//                  throwing JobError; find_shared_footprints added
+inline constexpr int kPressApiVersion = 2;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is
@@ -215,6 +220,20 @@ struct PressFootprint {
   std::vector<const ResolvedFaceRegion*> regions;
 };
 void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses);
+
+// The same finding as VALUES (follow-up 2026-10-10), for the run's refusal code
+// "shared_footprint": every (press, press, region, region) pair that shares surface, with
+// the shared area, in press order then region order. Empty = no shared surface.
+// refuse_shared_footprints throws shared_footprint_sentence of the first.
+struct SharedFootprint {
+  int press_a = -1, press_b = -1;
+  int face_region_a = -1, face_region_b = -1;
+  double shared_mm2 = 0.0;
+};
+std::vector<SharedFootprint> find_shared_footprints(const TriangleMesh& mesh,
+                                                    const std::vector<PressFootprint>& presses);
+// "presses A and B share surface (face region a and face region b overlap by N mm2); ..."
+std::string shared_footprint_sentence(const SharedFootprint& s);
 
 // Angle between two load LINES (0..90°): the sign of a direction does not matter.
 double axis_angle_deg(const Vec3& a, const Vec3& b);

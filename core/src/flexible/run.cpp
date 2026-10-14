@@ -567,6 +567,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     if (f.role == "loaded") loaded.push_back(&f);
   stacks.reserve(loaded.size());
   // A3: no two presses share surface (a face and its own sector, overlapping sectors).
+  std::vector<SharedFootprint> shared;
   {
     std::vector<PressFootprint> presses;
     for (const JobFlexibleFace* f : loaded) {
@@ -578,11 +579,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         for (int id : f->footprint_region_ids) p.regions.push_back(&find_region(id));
       presses.push_back(p);
     }
-    try {
-      refuse_shared_footprints(model.mesh, presses);
-    } catch (const FlexibleError& e) {
-      throw JobError(e.what());
-    }
+    shared = find_shared_footprints(model.mesh, presses);  // refused below, with a code
   }
   for (const JobFlexibleFace* f : loaded) {
     try {
@@ -637,7 +634,11 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
 
   Recommendation rec;
   std::string refusal_code, refusal_reason;
-  if (!conflicts.empty()) {
+  if (!shared.empty()) {
+    // First: two presses sharing surface usually ALSO conflict; the sharing is the cause.
+    refusal_code = "shared_footprint";
+    refusal_reason = shared_footprint_sentence(shared.front());
+  } else if (!conflicts.empty()) {
     refusal_code = "one_profile_per_stack";
     refusal_reason = "faces " + std::to_string(conflicts[0].face_a) + " and " +
                      std::to_string(conflicts[0].face_b) +
@@ -1009,8 +1010,18 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                                   .add("volume_mm3", jnum(lattice_voxels * grid.voxel_volume())).str())
       .add("faces", jlist(face_json))
       .add("resting_faces", jlist(resting))
-      .add("conflicts", jlist(cf))
-      .add("handover", jlist(hv))
+      .add("conflicts", jlist(cf));
+  // A3 (follow-up 2026-10-10): the shared-surface pairs, only when there are any, so a
+  // receipt without one is unchanged.
+  if (!shared.empty()) {
+    std::vector<std::string> sf;
+    for (const SharedFootprint& x : shared)
+      sf.push_back(Obj().add("press_a", jnum(x.press_a)).add("press_b", jnum(x.press_b))
+                       .add("face_region_a", jnum(x.face_region_a)).add("face_region_b", jnum(x.face_region_b))
+                       .add("shared_mm2", jnum(x.shared_mm2)).str());
+    r.add("shared_footprints", jlist(sf));
+  }
+  r.add("handover", jlist(hv))
       .add("field", refusal_code.empty()
                         ? Obj().add("lattice_voxels", jnum(static_cast<double>(field.lattice_voxels)))
                               .add("assigned_voxels", jnum(static_cast<double>(field.assigned_voxels)))

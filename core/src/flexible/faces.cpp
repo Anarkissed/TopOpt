@@ -769,7 +769,8 @@ Vec3 press_unit(const Vec3& d) {
   return {d.x / n, d.y / n, d.z / n};
 }
 
-void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses) {
+std::vector<SharedFootprint> find_shared_footprints(const TriangleMesh& mesh,
+                                                    const std::vector<PressFootprint>& presses) {
   auto area_of = [](const TriangleMesh& m, const std::vector<int>& ids) {
     double a = 0.0;
     for (int t : ids) {
@@ -781,6 +782,7 @@ void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressF
     }
     return a;
   };
+  std::vector<SharedFootprint> out;
   for (std::size_t i = 0; i < presses.size(); ++i)
     for (std::size_t j = i + 1; j < presses.size(); ++j)
       for (const ResolvedFaceRegion* a : presses[i].regions)
@@ -799,15 +801,23 @@ void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressF
           clip_into(mesh, shared, both, clipped, ids);
           const double area = area_of(clipped, ids);
           if (!(area > 1e-6)) continue;
-          char buf[64];
-          std::snprintf(buf, sizeof(buf), "%.6g", area);
-          throw FlexibleError("presses " + std::to_string(presses[i].press_id) + " and " +
-                              std::to_string(presses[j].press_id) + " share surface (face region " +
-                              std::to_string(a->id) + " and face region " + std::to_string(b->id) +
-                              " overlap by " + buf +
-                              " mm2); a surface is pressed by one press: split the face so the "
-                              "sectors do not overlap");
+          out.push_back({presses[i].press_id, presses[j].press_id, a->id, b->id, area});
         }
+  return out;
+}
+
+std::string shared_footprint_sentence(const SharedFootprint& s) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.6g", s.shared_mm2);
+  return "presses " + std::to_string(s.press_a) + " and " + std::to_string(s.press_b) +
+         " share surface (face region " + std::to_string(s.face_region_a) + " and face region " +
+         std::to_string(s.face_region_b) + " overlap by " + buf +
+         " mm2); a surface is pressed by one press: split the face so the sectors do not overlap";
+}
+
+void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses) {
+  const std::vector<SharedFootprint> sh = find_shared_footprints(mesh, presses);
+  if (!sh.empty()) throw FlexibleError(shared_footprint_sentence(sh.front()));
 }
 
 bool stack_owns_projection(const Stack& s, const Vec3& p) {

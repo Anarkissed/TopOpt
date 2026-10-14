@@ -1,7 +1,7 @@
 {
   "cli_version": "0.1.0",
-  "fingerprint": "021b73210598",
-  "build_time": "Oct  8 2026 15:23:06",
+  "fingerprint": "ea325c448bc3",
+  "build_time": "Oct 10 2026 15:17:01",
   "mode": "flexible",
   "job_mode": "analyze",
   "material": "varioshore_tpu",

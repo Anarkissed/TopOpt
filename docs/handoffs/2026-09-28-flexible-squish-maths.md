@@ -805,3 +805,44 @@ None of this is implemented until the maintainer approves it and the data exists
 | `press_unit` | d · (1/\|d\|) | d / \|d\| (the last bit can differ; the receipt prints 6 significant digits, so unchanged) | `test_one_normaliser` |
 | receipt | — | `press_api_version: 1` beside the `press` block, only when that block is present | — |
 
+
+## A3 as a coded refusal (reviewer 2026-10-10, from #362)
+
+The shared-surface refusal used to arrive as a thrown JobError. It is now a refusal with a code, in
+the same scheme as the other Flexible refusals.
+
+What the run does when two presses share surface:
+- It returns `refused = true` with `refusal_code = "shared_footprint"`.
+- The reason is `shared_footprint_sentence` of the first pair: "presses A and B share surface (face
+  region a and face region b overlap by N mm2); a surface is pressed by one press: split the face so
+  the sectors do not overlap".
+- Like every refusal, it still writes the receipt and the drawn maps, and makes no prediction.
+- The receipt gains `"shared_footprints": [{press_a, press_b, face_region_a, face_region_b,
+  shared_mm2}, ...]`, only when there are any. A receipt with no shared surface is unchanged.
+- **Precedence:** a shared footprint is checked BEFORE `one_profile_per_stack`. A face and its own
+  sector pressed the same way also conflict, and the sharing is the cause.
+
+Core changes:
+- New `std::vector<SharedFootprint> find_shared_footprints(mesh, presses)` lists every sharing pair
+  with its area, in press order then region order.
+- New `std::string shared_footprint_sentence(const SharedFootprint&)`.
+- `refuse_shared_footprints` is unchanged in meaning: it throws the first pair's sentence.
+- **`kPressApiVersion` is now 2.** The run's report of a shared footprint changed meaning: a coded
+  refusal instead of a JobError. faces.hpp keeps the version log.
+
+Tests went red first:
+- `test_flexible_run`: 4 failures plus an uncaught JobError.
+- `test_flexible_press`: 2 failures, and the `kPressApiVersion == 2` static_assert did not compile.
+- Then green: press 45 checks, run 56.
+- What they check:
+  - `find_shared_footprints` gives the exact five pairs on the 60 mm top: 400, 1800, 2400, 400 and
+    600 mm2, with the complementary sectors absent.
+  - At the job: the code, the reason (presses 101 and 111, both regions, 5000 mm2), the receipt's
+    `shared_footprints` entry, and the files written.
+  - A plain job has no `shared_footprints` key.
+  - Precedence over `one_profile_per_stack`.
+- Mutation control: checking the conflict first turns the precedence check red.
+- My own A3 job test from 9d32b381 had expected a JobError. I rewrote it to expect the coded
+  refusal, as this ruling requires.
+
+Evidence (a)–(c): only provenance lines change. (d): `press_api_version` goes from 1 to 2.

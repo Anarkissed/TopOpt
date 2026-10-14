@@ -160,25 +160,57 @@ int main() {
   CHECK(r.field.density.size() == static_cast<std::size_t>(r.field.nx) * r.field.ny * r.field.nz &&
             r.field.nx > 0 && r.field.owner_weight.size() == r.field.density.size(),
         "A5: ... and its density field, with A6's weight and runner-up");
-  // A3 at the job: the whole top and a sector of it, in two presses: refused, naming both.
+  // A3 at the job: the whole top and a sector of it, in two presses. FOLLOW-UP (reviewer
+  // 2026-10-10): a REFUSAL with a code, like every other Flexible refusal (it was a thrown
+  // JobError): "shared_footprint", naming both presses, both regions and the mm2; the
+  // receipt and the drawn maps are still written, no prediction; the receipt lists the
+  // shared pairs.
   {
-    std::string jt = job("varioshore_tpu", "220", "auto",
-                         "[" + kTop + ",{\"face_region_id\":111,\"press_direction\":[-1,0,-1],\"role\":\"loaded\","
-                                      "\"weight_n\":100,\"deepest_squish_mm\":1,\"mode\":\"both\","
-                                      "\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}]");
-    const std::string regs = "{\"id\":103,\"add\":[3]}]";
-    jt.replace(jt.find(regs), regs.size(),
-               "{\"id\":103,\"add\":[3]},{\"id\":111,\"add\":[1],\"cuts\":[{\"point\":[50,0,0],\"normal\":[1,0,0]}]}]");
+    auto shared_job = [&](const std::string& sector_press) {
+      std::string jt = job("varioshore_tpu", "220", "auto", "[" + kTop + "," + sector_press + "]");
+      const std::string regs = "{\"id\":103,\"add\":[3]}]";
+      jt.replace(jt.find(regs), regs.size(),
+                 "{\"id\":103,\"add\":[3]},{\"id\":111,\"add\":[1],\"cuts\":[{\"point\":[50,0,0],\"normal\":[1,0,0]}]}]");
+      return jt;
+    };
+    const std::string angled =
+        "{\"face_region_id\":111,\"press_direction\":[-1,0,-1],\"role\":\"loaded\","
+        "\"weight_n\":100,\"deepest_squish_mm\":1,\"mode\":\"both\","
+        "\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}";
+    FlexibleRunResult rs;
     bool threw = false;
     try {
-      run("shared", jt);
+      rs = run("shared", shared_job(angled));
     } catch (const JobError& e) {
-      const std::string w = e.what();
-      threw = w.find("101") != std::string::npos && w.find("111") != std::string::npos &&
-              w.find("share") != std::string::npos;
-      if (!threw) std::fprintf(stderr, "  (%s)\n", e.what());
+      threw = true;
+      std::fprintf(stderr, "  (threw: %s)\n", e.what());
     }
-    CHECK(threw, "A3: a face and its own sector in two presses: refused at the job, naming both");
+    CHECK(!threw && rs.refused && rs.refusal_code == "shared_footprint",
+          "A3: a face and its own sector in two presses: refused with code shared_footprint, not thrown");
+    CHECK(rs.refusal_reason.find("presses 101 and 111") != std::string::npos &&
+              rs.refusal_reason.find("face region 101") != std::string::npos &&
+              rs.refusal_reason.find("face region 111") != std::string::npos &&
+              rs.refusal_reason.find("5000 mm2") != std::string::npos,
+          "A3: the reason names both presses, both regions and the shared mm2 (the 50 x 100 sector)");
+    CHECK(rs.receipt_json.find("\"refusal\": {\"code\": \"shared_footprint\"") != std::string::npos &&
+              rs.receipt_json.find("\"shared_footprints\": [{\"press_a\": 101, \"press_b\": 111, "
+                                   "\"face_region_a\": 101, \"face_region_b\": 111, \"shared_mm2\": 5000}]") !=
+                  std::string::npos,
+          "A3: the receipt carries the code and the shared pair as numbers");
+    CHECK(fs::exists(kDir + "/shared/out/run_info.json") && fs::exists(kDir + "/shared/out/face101_target_depth.svg") &&
+              fs::exists(kDir + "/shared/out/face111_target_depth.svg") &&
+              !fs::exists(kDir + "/shared/out/face101_density.svg"),
+          "A3: like every refusal, the receipt and the drawn maps are written, and no prediction");
+    CHECK(r.receipt_json.find("shared_footprints") == std::string::npos,
+          "A3: a job with no shared surface has no shared_footprints key (receipt unchanged)");
+    // The sector pressed straight down is ALSO a same-axis conflict with the top; the
+    // shared surface is the cause, so it is the code.
+    const std::string straight =
+        "{\"face_region_id\":111,\"role\":\"loaded\",\"weight_n\":100,\"deepest_squish_mm\":1,\"mode\":\"both\","
+        "\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}";
+    const FlexibleRunResult rc = run("shared_conflict", shared_job(straight));
+    CHECK(rc.refused && rc.refusal_code == "shared_footprint",
+          "A3: shared surface AND one stack: the shared surface is the code");
   }
 
   // Refusals: named, receipt still written, the drawn map still written.
