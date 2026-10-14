@@ -208,9 +208,9 @@ struct FlexibleSettingsRailView: View {
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
-        if !model.settings.loadedFaces.isEmpty || !model.presses.isEmpty {
-            out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil))
-        }
+        // ★ ROUND 7 (S, 4h): [+ New] ALWAYS shows — after Reset all the rail is [Model] [+ New], and a tap on a face there
+        // starts Group 1 (it hid whenever nothing was pressed)
+        out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil))
         return out
     }
 
@@ -496,10 +496,15 @@ struct FlexibleNewGroupTab: View {
             Text(FlexibleRowCopy.newGroupTitle(next))
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(minHeight: 36)
-            Text(candidates.isEmpty ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
+            // ★ ROUND 7 (S, 4h): with NOTHING pressed (after Reset all) a tap on any face starts Group 1
+            let nothingPressed = model.settings.loadedFaces.isEmpty && model.presses.isEmpty
+            Text(candidates.isEmpty && !nothingPressed ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .accessibilityIdentifier("flexible-new-group-line")
+            if nothingPressed, let r = model.newGroupAsk {
+                FlexibleNewGroupAsk(model: model, padTarget: $padTarget, region: r)
+            }
             ForEach(candidates, id: \.self) { hand in
                 let r = hand[0]
                 Button { model.startGroup(with: r) } label: {

@@ -300,13 +300,23 @@ final class FlexibleRound5SettingsTests: XCTestCase {
         n.pickMaterial(try XCTUnwrap(n.defaultMaterialID))
         n.setWeightUnit(.lb)
         await n.waitForIdle()
-        print("FLEX-R5 reset: \(reset.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · material \(reset.materialID ?? "-") · fresh \(n.settings.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" })")
-        XCTAssertEqual(reset, n.settings, "Reset all == a brand-new setup of this part")
+        print("FLEX-R5 reset: \(reset.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · material \(reset.materialID ?? "-") · fresh \(n.settings.faces.map { "\($0.faceRegionID):\($0.role):\($0.weightKg)" }) · removed \(reset.removedRegions ?? [])")
+        // ★ RE-PINNED (round 7 batch S, 4h — his img4 words of 2026-10-14: "The "reset all" button does not clear out *all*
+        // groups, currently. It should absolutely do that. All that should be viewed is the "model" folder tab and the "New"
+        // one."): a brand-new setup with NOTHING read in from the main page — no face, no group, no Rests — and every face
+        // a main-page Load or Anchor group holds remembered as deleted (the re-open reads none in; pressing one brings it
+        // back). It was: the brand-new setup WITH the main page's loads read in (one group, the deleted face back).
+        var brandNew = n.settings
+        brandNew.faces = []
+        brandNew.removedRegions = n.mainPageLoads.entries.keys.sorted()
+        XCTAssertEqual(reset, brandNew, "Reset all == a brand-new setup of this part, nothing read in")
         XCTAssertEqual(reset.materialID, "varioshore_tpu", "the filament with squish data")
         XCTAssertEqual(reset.feel, "springy"); XCTAssertEqual(reset.finishMode, .covered); XCTAssertEqual(reset.topology, "auto")
-        XCTAssertEqual(m.squeezeGroups.count, 1, "one group")
-        XCTAssertNil(reset.groupColours); XCTAssertNil(reset.removedRegions)
-        XCTAssertNotNil(reset.face(FlexibleHisProject.topA), "the deleted main-page face is back")
+        XCTAssertEqual(m.squeezeGroups.count, 0, "no group: only [Model] and [New]")
+        XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).map(\.title), ["Model", "New"])
+        XCTAssertNil(reset.groupColours)
+        XCTAssertNil(reset.face(FlexibleHisProject.topA), "no face read in again")
+        XCTAssertTrue(reset.isRemoved(FlexibleHisProject.topA), "the main page's Top is remembered as deleted (pressing it brings it back)")
         XCTAssertEqual(reset.weightUnit, "lb", "the unit is how he reads — kept")
         // ★ RED CONTROL: the session's settings are not a fresh setup
         XCTAssertNotEqual(edited, n.settings, "control: before the reset they differed")

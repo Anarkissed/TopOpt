@@ -8,6 +8,11 @@
 // on this branch, batch F's preselect is not here), feel and finish; the main page's Load and Anchor groups read again as
 // pressed / resting faces at their weights, every face at its defaults; one squeeze group; nothing
 // deleted. The weight UNIT is kept — it is how he reads weights, not an input of the part.
+// ★ ROUND 7 (batch S, 4h — REVERSES S5's "the main page's loads read again", his img4 words of 2026-10-14: "The "reset
+// all" button does not clear out *all* groups, currently. It should absolutely do that. All that should be viewed is the
+// "model" folder tab and the "New" one."): NOTHING is read in — no face, no group, no Rests; every strip I2 cut is given
+// back to its face; the main page's Load / Anchor faces are remembered as deleted so the re-open reads none in again
+// (pressing one brings it back); [+ New] opens and a tap on a face there starts Group 1. One undo step restores it all.
 // ★ S9 — "If there are *any* modifications, it should say "Save & Exit". This will run the lattice
 // bake (if the view is already selected). Otherwise, it should say "Exit" and no changes should
 // occur on the main screen." The page keeps the settings as they were when it opened (a VALUE,
@@ -27,33 +32,89 @@ extension FlexibleStageModel {
         catalogue.first { $0.noPrediction == nil }?.id ?? catalogue.first?.id
     }
 
-    /// ★ S5: a brand-new Flexible setup of THIS part, the main page's loads read in (the unit kept).
-    /// ★ AP1: no presses — it is built new, so its `presses` is nil.
-    public func freshSettings() -> FlexibleStageSettings {
+    /// ★ S5 / ★ ROUND 7 (S, 4h — his img4 words of 2026-10-14: "The "reset all" button does not clear out *all* groups,
+    /// currently. It should absolutely do that. All that should be viewed is the "model" folder tab and the "New" one."): a
+    /// brand-new Flexible setup of THIS part with NOTHING read in — no face, no press, no colour, no name; the filament,
+    /// feel and finish at their defaults; the weight unit kept (it is how he reads). Every face a main-page Load or Anchor
+    /// group holds is remembered as deleted (`removedRegions`), so the part's re-open reads none of them in again; pressing
+    /// one brings it back (the S6 rule). `faceRegions`: the regions the main page's groups are read over (the strips given
+    /// back); nil: the project's.
+    public func freshSettings(faceRegions: FaceRegionModel? = nil) -> FlexibleStageSettings {
+        if Self.controlResetAdopts { return freshSettingsReadingTheMainPage() }
+        var s = FlexibleStageSettings(materialID: defaultMaterialID)
+        s.weightUnit = settings.weightUnit
+        if let mesh = project.viewerMesh {
+            let m = faceRegions ?? project.faceRegions
+            let loads = FlexibleMainPageLoads.derive(groups: project.selection.groups, force: project.force, faceRegions: m,
+                                                     mesh: mesh, regions: FlexibleRegions(model: m, mesh: mesh))
+            let held = loads.entries.keys.sorted()
+            s.removedRegions = held.isEmpty ? nil : held
+        }
+        return FlexibleSettingsMigration.migrated(s)
+    }
+
+    /// ★ RED CONTROL (round 5's S5 rule, today's before round 7): the main page's loads read in again.
+    func freshSettingsReadingTheMainPage() -> FlexibleStageSettings {
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
         s.weightUnit = settings.weightUnit
         if let loads = deriveMainPageLoads() { _ = Self.adopt(loads, into: &s) }
         return FlexibleSettingsMigration.migrated(s)
     }
 
-    /// ★ S5: every input back to a brand-new setup — one undoable step; the page's per-face copies
-    /// of core's answers go with the old faces.
+    /// The regions with every strip given back to its face (I2's own plan, with no pick left on any chain — an identity
+    /// region the strips made goes, unless the main page refers to it); the project's when there is no strip.
+    func regionsWithoutStrips() -> FaceRegionModel {
+        let roots = Set((settings.presses ?? []).compactMap(\.strip).flatMap { $0.members.map(\.root) }.filter { $0 >= 0 })
+        guard !roots.isEmpty, let mesh = project.viewerMesh else { return project.faceRegions }
+        let keep = Set(project.selection.groups.flatMap(\.regionIDs).map { Int($0) })
+        return FlexibleEdgeStrips.plan([], replay: roots, faceRegions: project.faceRegions, mesh: mesh, keep: keep).faceRegions
+    }
+
+    /// ★ S5 / ★ ROUND 7 (S, 4h): every input back to a brand-new setup — every group gone (only [Model] and [+ New] are
+    /// left on the rail), every strip given back to its face — ONE undoable step; the page's per-face copies of core's
+    /// answers go with the old faces; [+ New] opens.
     public func resetAll() {
-        let fresh = freshSettings()
+        if Self.controlResetAdopts { resetAllReadingTheMainPage(); return }
+        let regionsAfter = regionsWithoutStrips()
+        let fresh = freshSettings(faceRegions: regionsAfter)
+        let before = settings
+        guard fresh != before || regionsAfter != project.faceRegions else { return }
+        actionSerial += 1
+        let old = Set(before.faces.map(\.faceRegionID))
+        project.sealUndoStep()   // the edits before it are their own step (their save may still be pending)
+        if regionsAfter != project.faceRegions { project.faceRegions = regionsAfter }
+        edit { $0 = fresh }
+        for r in old { purgeFaceCaches(r) }
+        refreshMainPageLoads()
+        relinkedWeights = [:]
+        curvePoint = nil
+        frozenExaggeration = nil
+        selectedPress = nil
+        newGroupAsk = nil
+        rail = .newGroup
+        selectedRegion = nil
+        save()   // one undo step (the project's snapshot history)
+        // the strips given back: the part re-opens on its whole faces
+        if sceneState == .ready, openedKey != currentSceneKey { openScene() }
+    }
+
+    /// ★ RED CONTROL: round 5's Reset all (the main page's loads read in again; the strips left cut).
+    func resetAllReadingTheMainPage() {
+        let fresh = freshSettingsReadingTheMainPage()
         let before = settings
         guard fresh != before else { return }
         actionSerial += 1
         let regions = Set(before.faces.map(\.faceRegionID))
-        project.sealUndoStep()   // the edits before it are their own step (their save may still be pending)
+        project.sealUndoStep()
         edit { $0 = fresh }
         for r in regions { purgeFaceCaches(r) }
         refreshMainPageLoads()
         relinkedWeights = [:]
         curvePoint = nil
         frozenExaggeration = nil
-        selectedPress = nil   // ★ AP1: the fresh setup has no presses (freshSettings builds none)
+        selectedPress = nil
         selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID
-        save()   // one undo step (the project's snapshot history)
+        save()
     }
 
     /// ★ S9 (S VERIFICATION): the page's "nothing changed" snapshot once a part that was still
