@@ -392,17 +392,24 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
     func testResetAllOnHisPadOpensNoPopUpOverModelAndNew() throws {
         let (r, m) = try hisPadOpened()
         let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: CGSize(width: 1032, height: 1376))
-        pump(2.5)
         func settled() -> Bool {
             m.sceneState == .ready && m.openedKey == m.currentSceneKey && !m.designsInFlight && !m.readiness.designing
         }
+        pump(2.5)
+        XCTAssertTrue(pumpUntil(240) { settled() }, "his pad open, its designs settled")
+        pump(1.0)
         func resetByHand() throws {
-            let b = try XCTUnwrap(local(h, "resetAll"), "[Reset all]")
-            click(h, CGPoint(x: b.midX, y: b.midY))
-            if !pumpUntil(3, { local(h, "resetConfirm") != nil }) {
-                print("FLEX-R7-VERIFY-RESET no confirm: resetAll \(b) · keys \(h.frames.all.keys.sorted())")
-                composite(h, "R7S_verify_reset_DEBUG_no_confirm.png")
+            // (the panel settles while the part opens — under load its header moved after the frame was read and the click
+            // missed in one suite run: the button's frame is read afresh and the click tried again, up to three times)
+            var asked = false
+            for attempt in 1...3 where !asked {
+                let b = try XCTUnwrap(local(h, "resetAll"), "[Reset all]")
+                h.window.makeKey()   // (an earlier test's window may hold the key: a first click would only activate)
+                click(h, CGPoint(x: b.midX, y: b.midY))
+                asked = pumpUntil(2) { local(h, "resetConfirm") != nil }
+                if !asked { print("FLEX-R7-VERIFY-RESET attempt \(attempt): no confirm after a click on \(b)") }
             }
+            if !asked { composite(h, "R7S_verify_reset_no_confirm.png") }
             let c = try XCTUnwrap(local(h, "resetConfirm"), "[Reset]")
             click(h, CGPoint(x: c.midX, y: c.midY))
             pump(0.5)
