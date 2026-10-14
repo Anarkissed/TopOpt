@@ -1,0 +1,12 @@
+# R7-V: the main page's loop across an edit while he has paused (his 0004, Play on, the page's own refresh)
+  9.23 s  Play on, sims landed · playing 1 held 0.00 paused-by-him 0 · lattice 1 stale 0 · sims r
+  9.23 s  HIS PAUSE · playing 0 held 0.38 paused-by-him 1 · lattice 1 stale 0 · sims r
+  9.23 s  $playing → 0
+  9.24 s  edit: Group 1's squeeze +3 kg · playing 0 held 0.38 paused-by-him 1 · lattice 1 stale 1 · sims r
+  9.24 s  … · playing 0 held 0.38 paused-by-him 1 · lattice 1 stale 1 · sims r
+ 11.80 s  … · playing 0 held 1.00 paused-by-him 1 · lattice 2 stale 0 · sims 
+ 13.05 s  … · playing 0 held 0.00 paused-by-him 1 · lattice 2 stale 0 · sims p
+ 18.63 s  … · playing 0 held 0.00 paused-by-him 1 · lattice 2 stale 0 · sims r
+ 45.29 s  rebuilt, every sim landed · playing 0 held 0.00 paused-by-him 1 · lattice 2 stale 0 · sims r
+ 45.29 s  $playing → 1
+ 45.29 s  HIS PLAY (the player's ▶) · playing 1 held 0.00 paused-by-him 0 · lattice 2 stale 0 · sims r
