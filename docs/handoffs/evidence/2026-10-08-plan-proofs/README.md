@@ -122,9 +122,15 @@ phase. It stamps every planned region with the bake's grid point (19 regions on 
     > menu (base 8.756 mm at a 0.45 mm bead admits 4 size(s), largest 8.756, finest 2.919). Core
     > validates the plan and does not repack it -- the run lays down the arrangement the preview
     > showed, or it stops here."
-  - The app's region-1 base is 7 mm (4.67 = 2/3·7, 3.5 = 7/2). Core builds the any-step menu on its
-    OWN base for the region (8.756 mm, its FEA cell). This is K1: the any-step base comes from the
-    app's plan.
+  - ★ CORRECTED 2026-10-10. This line first said "the app's region-1 base is 7 mm (4.67 = 2/3·7,
+    3.5 = 7/2)". That was my inference from the cell sizes, and it was WRONG. The bake's own DIAG on
+    this run says `regionCell depth=14.0 … final=14.0` and `quiltStep r0 … n 1 cell 14.000`: region
+    1's base is **14 mm**, so 4.67 = 14/3 (thirds) and 3.5 = 14/4 (quarters). Both tiles print
+    open under either prints-open rule. Region 2's base is 6.
+  - Core builds the any-step menu on its OWN base for the region (8.756 mm, its FEA cell). This is
+    K1: the base comes from the app's plan, now as `geometry.plan_base_cell_mm` on every planned
+    region (#358 664f222c). Core's K1 comment repeats the "base 7"; the 2026-10-10 post on the #354
+    channel corrects it.
   - The no-plan job is ACCEPTED.
 
 ### Where the proofs stand
@@ -151,3 +157,55 @@ Each arm's folder in `plans/` holds:
 `lattice.emit_organic_spans` set true. These jobs are #358's documents for the pass-count gate.
 
 The owner swap's parity proof on 68BF7B74 is in `owner-68BF7B74/`.
+
+## Round 6 (2026-10-10): the after-run, app cfca986d, core 3952c411
+
+**The jobs are in `plans-r6/<project>-<arm>/`.** Each folder holds `job_plan.json`, `job_noplan.json`
+and `summary.txt`.
+- The jobs are exactly as the app wrote them, compacted with sorted keys. It is the same JSON value as
+  the harness's pretty-printed write, and each summary lists its SHA-256.
+- They come from the frozen CLI `scratch/evidence/cli/sync-3952c411/topopt-cli`, sha 1538ab06. Its
+  banner says `core 30982e5284b2`, which is a stale version string. The binary holds
+  `plan_base_cell_mm` and the 36f5fdde one does not.
+- **Every planned region carries `geometry.plan_base_cell_mm` and `geometry.slot_origin_mm`:**
+  - 570B38E2 Default Grade: 2 of 2
+  - 3418E167 Default Grade: 2 of 2
+  - 3418E167 Stepped: 2 of 2, with bases 14 and 6
+  - 102117B9 Default Grade: 3 of 3
+  - 68BF7B74 Default Grade: 5 of 5
+  - 68BF7B74 Stepped: 5 of 5
+- The round-5 folders (`plans/`) predate K1 and carry neither key.
+
+**The spans arm** (cell for cell from what core ships):
+- Its job is `job_plan.json` plus two keys that core's own schema already takes:
+  - `lattice.emit_welded_stl: true` (job.cpp:1692). This installs core's weld tap (run_job.cpp:2394),
+    which records every strut the stepped and doubled emission generates.
+  - `lattice.emit_organic_spans: true` (job.cpp:1702). This writes those spans to `<prefix>_SPANS.txt`
+    (run_job.cpp:2577).
+- A Doubled plan with only `emit_organic_spans` records nothing and writes no file, because the
+  ledger fills only through the weld tap. Both keys are needed. Nothing app-side is involved.
+- `plans-r6/570B38E2-dg/job_plan_spans.json` is the full spans job for one Default Grade arm. Every
+  other arm's spans job is its `job_plan.json` plus those two keys (`tools/plan_proof.sh`).
+- The command, run from the arm's folder:
+  `topopt-cli lattice-variant job_plan_spans.json --out run_plan_spans --materials core/src/materials/materials.json --rules core/src/settings/rules.json`
+- It wrote, for example, `run_plan_spans/variant_022_lattice_SPANS.txt` (11,918,492 B) on 570B38E2.
+
+**The tools:**
+- `tools/compare_plan_spans.py` counts the struts in each plan cell.
+- `tools/classify_unlaid_cells.py`, at its committed revision (dce32e0e, blob 5c30bf67), classifies
+  each unlaid cell as OUTSIDE outline_uv, PAST_DEPTH or IN_REGION.
+
+| arm | core | cell for cell |
+|---|---|---|
+| 570B38E2 Default Grade | ACCEPTED | 4,188/4,198 laid, 0 foreign; 10 unlaid, all OUTSIDE |
+| 68BF7B74 Default Grade | ACCEPTED | 9,333/11,120 laid, 0 foreign; 574 OUTSIDE, 1,213 IN_REGION |
+| 68BF7B74 Aesthetic Stepped | ACCEPTED (round 5 and before: refused on overlaps) | 8,796/9,951 laid, 0 foreign; 388 OUTSIDE, 767 IN_REGION |
+| **3418E167 Aesthetic Stepped** | **ACCEPTED** | **2,827/2,827 laid, 0 foreign, 0 unlaid: the first STL that is the preview, cell for cell (the regression bar)** |
+| 3418E167 Default Grade | refused by the law mask (K3) | — |
+| 102117B9 Default Grade | refused by the law mask (K3) | the floor fix holds: 0 cells under 2.25 mm |
+
+**The packer, before and after:** `packer-before-after/` holds the renders side by side. The "before"
+is the old packer at 95144488; the "after" is cfca986d.
+- Overlaps: 329 to 0 on 68BF7B74 Stepped, and 141 to 0 on 3418E167 Stepped.
+- The per-region uncovered split (outside the slab, near the outline, interior) is in the 2026-10-10
+  posts on the #354 channel.
