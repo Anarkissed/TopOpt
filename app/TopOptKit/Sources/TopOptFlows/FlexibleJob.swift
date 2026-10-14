@@ -31,7 +31,8 @@ public enum FlexibleJob {
         public var faceCount: Int
         public var settings: FlexibleStageSettings
         /// The placement: the lattice stage's own include/exclude regions (M10), as
-        /// `LatticeRegionSpec.wireDictionary` values. Empty ⇒ the whole part.
+        /// `LatticeRegionSpec.wireDictionary` values. Empty ⇒ core lattices the whole part — ★ ROUND 7, M1: which the
+        /// Flexible stage never SENDS (FlexibleCoreRun refuses `.noFacePrism`; the stage builds no lattice without one).
         public var regions: [[String: Any]]
         /// Rasterised stamps by placement id (FlexibleStamps), for the run job.
         public var stampGrids: [UUID: FlexStamp]
@@ -68,6 +69,10 @@ public enum FlexibleJob {
         /// ★ ROUND 4 (D2): a pinch (two faces of one group on one stack) — core designs one
         /// profile per stack (core brief).
         case pinch
+        /// ★ ROUND 7, M1 (ruling 4: "The Flexible job builder must NEVER send a job with no include region"): nothing is set
+        /// to Lattice — core would lattice the WHOLE part. Thrown by the SEND gate (FlexibleCoreRun), never by the pure
+        /// encoder below (its bytes are the goldens').
+        case noFacePrism
         public var description: String {
             switch self {
             case .noFilament: return "Pick a filament first."
@@ -76,6 +81,7 @@ public enum FlexibleJob {
             case .missingStampGrid: return "A stamp has not been laid on its face yet."
             case .squeezeGroups: return "Squeeze groups are the app's preview for now: core designs one squeeze at a time."
             case .pinch: return "A pinch is the app's preview for now: core designs one squish profile per stack."
+            case .noFacePrism: return "No face is set to Lattice in Selections. With none, core would lattice the whole part; only a face-prism makes lattice."
             }
         }
     }

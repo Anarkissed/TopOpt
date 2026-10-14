@@ -145,6 +145,7 @@ public final class FlexibleCoreRun: ObservableObject {
         case .missingStampGrid: return "Not sent: a stamp is not on its face yet"
         case .squeezeGroups: return "Not sent: core runs one squeeze group at a time"
         case .pinch: return "Not sent: core can\u{2019}t press both ends yet"
+        case .noFacePrism: return FlexibleRowCopy.noFacePrism   // ★ M1: the reason, in his words (ruling 4)
         }
     }
 

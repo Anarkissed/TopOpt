@@ -204,6 +204,28 @@ public struct FlexStackInfo: Equatable, Sendable {
     /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
     /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
     public var sector: FlexSectorVerdict? = nil
+
+    /// ★ ROUND 7, M1 (his img1, 2026-10-14: "ONLY the face-prism creates the lattice structure in any area"): this stack
+    /// as the app keeps it when NO face-prism is set — core's frame, columns and entries unchanged, but no lattice on any
+    /// column's path (every `latticeMM` 0, `latticedColumns` 0, the lattice min / mean / max 0). Core's own rule for a job
+    /// with no include region is "the whole part" (the lattice stage's precedence, which core keeps); the Flexible stage
+    /// overrides it app-side, so every reader (the readiness's "No lattice under …", the Settings depth row, the prism's
+    /// clamp, the build) agrees there is nothing to squish into.
+    public func withoutLattice() -> FlexStackInfo {
+        let cols = columns.map {
+            FlexColumn(iu: $0.iu, iv: $0.iv, uMM: $0.uMM, vMM: $0.vMM, areaMM2: $0.areaMM2,
+                       entryT: $0.entryT, exitT: $0.exitT, latticeMM: 0, exitFace: $0.exitFace)
+        }
+        return FlexStackInfo(
+            frameValid: frameValid, frameReason: frameReason, load: load, xAxis: xAxis, yAxis: yAxis,
+            centroid: centroid, rotationDeg: rotationDeg, uMin: uMin, vMin: vMin, uExtentMM: uExtentMM, vExtentMM: vExtentMM,
+            areaMM2: areaMM2, projectedAreaMM2: projectedAreaMM2, normalSpreadDeg: normalSpreadDeg,
+            normalSpreadFlag: normalSpreadFlag, buildAngleDeg: buildAngleDeg, side: side, principalAxisTied: principalAxisTied,
+            pitchMM: pitchMM, nu: nu, nv: nv, cell: cell, columns: cols, exitFaces: exitFaces, exitRegions: exitRegions,
+            exitUnresolvedFraction: exitUnresolvedFraction, footprintAreaMM2: footprintAreaMM2,
+            latticedColumns: 0, latticeMMMin: 0, latticeMMMean: 0, latticeMMMax: 0, stackMMMax: stackMMMax,
+            sector: sector)
+    }
 }
 
 /// ★ S1 (#361's 254cb137 — the spec's V2): core's ownership of a SECTOR stack's voxels. Core's

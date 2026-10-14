@@ -62,6 +62,14 @@ public struct FlexibleExportSheet: View {
                     .accessibilityIdentifier("flexible-export-close")
                 }
                 coreRow
+                // ★ ROUND 7, M1 (5 — the reviewer's ruling 4): an edges group beside the face groups is SAID under core's
+                // line, before anything is sent ("Edges and faces go in separate exports for now.")
+                if let note = run.hold?.note {
+                    Text(note)
+                        .font(.system(size: 14)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("flexible-export-hold-note")
+                }
                 if let fixes = run.hold?.fixes, !fixes.isEmpty {
                     fixRow(fixes)
                 }

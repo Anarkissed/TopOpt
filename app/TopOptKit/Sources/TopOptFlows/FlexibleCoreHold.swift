@@ -60,7 +60,9 @@ public enum FlexibleCoreFix: Hashable, Sendable {
 
 /// Why the job Settings describes is not sent as it stands, and what can be sent instead.
 public struct FlexibleCoreHold: Equatable, Sendable {
-    public enum Kind: Equatable, Sendable { case shapeOnly, squeezeGroups, pinch }
+    /// ★ ROUND 7, M1 (5): `edgesBeside` — an edges/corners group beside face groups (the reviewer's ruling 4): core designs
+    /// one squeeze group per job and takes no edge press yet, so the export makes ONE group, said before anything is sent.
+    public enum Kind: Equatable, Sendable { case shapeOnly, squeezeGroups, pinch, edgesBeside }
     public let kind: Kind
     /// The Export step's ONE line ("Not sent: …").
     public let line: String
@@ -68,14 +70,23 @@ public struct FlexibleCoreHold: Equatable, Sendable {
     public let why: String
     /// 1–3 buttons (none when nothing core can run is at hand).
     public let fixes: [FlexibleCoreFix]
+    /// ★ M1 (5): a second line under the step's line, while an edges group sits beside face groups ("Edges and faces go in
+    /// separate exports for now.") — never a group dropped without a word. nil otherwise.
+    public let note: String?
 
-    public init(kind: Kind, line: String, why: String, fixes: [FlexibleCoreFix]) {
-        self.kind = kind; self.line = line; self.why = why; self.fixes = fixes
+    public init(kind: Kind, line: String, why: String, fixes: [FlexibleCoreFix], note: String? = nil) {
+        self.kind = kind; self.line = line; self.why = why; self.fixes = fixes; self.note = note
     }
+
+    /// Test control only (M1): today's rule — an edges group that core does not take yet is not counted (no hold: the face
+    /// group is sent and the edges group dropped without a word).
+    nonisolated(unsafe) static var controlEdgesSilentlyDropped = false
 
     /// The rule's order: a calibrate-first filament first (any send would be refused), then
     /// several squeeze groups, then a pinch (the encoder's order).
-    public static func kind(calibrateFirst: Bool, groups: Int, pinches: Int) -> Kind? {
+    /// ★ M1 (5): `edgesBeside` — an edges group core does not take yet sits beside the face groups sent; after several face
+    /// groups (their hold already makes one group per export), before a pinch (its sends are made one group's).
+    public static func kind(calibrateFirst: Bool, groups: Int, pinches: Int, edgesBeside: Bool = false) -> Kind? {
         if calibrateFirst { return .shapeOnly }
         if groups > 1 { return .squeezeGroups }
         if pinches > 0 { return .pinch }
@@ -89,6 +100,7 @@ public struct FlexibleCoreHold: Equatable, Sendable {
         case .shapeOnly: return shapeOnlyLabel ?? "Shape only \u{2014} no squish predicted"
         case .squeezeGroups: return "Preview \u{00B7} core runs one group at a time"
         case .pinch: return "Preview \u{00B7} core can\u{2019}t pinch yet"
+        case .edgesBeside: return FlexibleRowCopy.edgesBesidePill   // ★ M1 (5)
         }
     }
 
@@ -131,7 +143,15 @@ extension FlexibleStageModel {
     /// What the pill reads (cheap: the filament, the groups, core's stack conflicts).
     /// ★ AP1: the groups with something SENT (a press alone in a group is not core's to run yet).
     public var coreHoldKind: FlexibleCoreHold.Kind? {
-        FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count)
+        FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count,
+                              edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty)
+    }
+
+    /// ★ ROUND 7, M1 (5): the edges/corners groups core does not take yet (none of their presses is sent until AP9) — never
+    /// dropped from an export without a word.
+    public var unsentEdgeGroups: [FlexibleSqueezeGroup] {
+        let sent = Set(sentSqueezeGroups.map(\.id))
+        return squeezeGroups.filter { $0.kind == .edges && !sent.contains($0.id) }
     }
 
     /// The Export step's hold, in full (read on the tap, never per body pass).
@@ -145,9 +165,28 @@ extension FlexibleStageModel {
             return FlexibleCoreHold(kind: .shapeOnly, line: "Not sent: \(name) has no squish data yet", why: why,
                                     fixes: with.map { [.useFilament(id: $0.id, name: $0.displayName)] } ?? [])
         case .squeezeGroups:
-            return FlexibleCoreHold(kind: .squeezeGroups, line: FlexibleCoreRun.notSentLine(.squeezeGroups),
-                                    why: FlexibleJob.EncodeError.squeezeGroups.description,
-                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) }))
+            // ★ M1 (5): an edges group beside them is SAID (each export makes one face group; the edges wait for core)
+            let edges = unsentEdgeGroups
+            return FlexibleCoreHold(kind: .squeezeGroups,
+                                    line: edges.isEmpty ? FlexibleCoreRun.notSentLine(.squeezeGroups) : FlexibleRowCopy.exportMakesOneEach,
+                                    why: FlexibleJob.EncodeError.squeezeGroups.description + edgesWhy(edges),
+                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) }),
+                                    note: edges.isEmpty ? nil : FlexibleRowCopy.edgesExportSeparately)
+        case .edgesBeside:
+            // ★ M1 (5, the reviewer's ruling 4): ONE face group beside the edges group(s) — "This export makes Group 1 only."
+            // and "Edges and faces go in separate exports for now.", before anything is sent; his name for the group
+            let g = sentSqueezeGroups[0]
+            let name = groupName(g)
+            let p = pinches
+            let fixes: [FlexibleCoreFix] = p.isEmpty
+                ? [.send(resting: [], title: "Send \(name) only", scope: "\(name) only")]
+                : FlexibleCoreHold.sends(groups: [g], pinches: p, name: { self.displayName($0) }).map { f in
+                    guard case .send(let rest, _, let scope) = f else { return f }
+                    return .send(resting: rest, title: "Send \(name) only, \(scope)", scope: "\(name) only, \(scope)")
+                }
+            return FlexibleCoreHold(kind: .edgesBeside, line: FlexibleRowCopy.exportMakesOnly(name),
+                                    why: "Core designs one squeeze group per job." + edgesWhy(unsentEdgeGroups),
+                                    fixes: fixes, note: FlexibleRowCopy.edgesExportSeparately)
         case .pinch:
             let p = pinches
             let line = p.count == 1
@@ -156,5 +195,13 @@ extension FlexibleStageModel {
             return FlexibleCoreHold(kind: .pinch, line: line, why: FlexibleJob.EncodeError.pinch.description,
                                     fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: p, name: { self.displayName($0) }))
         }
+    }
+
+    /// ★ M1 (5): behind the (i) — the edges groups this export leaves out, by name, and why.
+    func edgesWhy(_ edges: [FlexibleSqueezeGroup]) -> String {
+        guard !edges.isEmpty else { return "" }
+        let names = edges.map { groupName($0) }
+        let who = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return " \(who) (edges and corners) \(names.count == 1 ? "is" : "are") not in this export: core does not take edge or corner presses yet."
     }
 }

@@ -293,6 +293,10 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ R7-V REVIEW, test control only: the squish number on the main page (S1b's mm tags — after a pick, under [Prisms]),
     /// which his 2026-10-14 answer moved to the Squish page only.
     var controlSquishTagsOnMain = false
+    /// ★ ROUND 7, M1 (H15'), test control only: round 6's SQUISH prisms on the main page (S1b — the active group's pressed
+    /// faces at their Settings squish depth, every pressed face under [Prisms]), which his img1 / img2 words replaced by the
+    /// picked group's LATTICE face-prisms.
+    var controlSquishPrismsOnMain = false
     /// ★ R7-V: Play turned on while a page was up (the loop starts when the main page shows again).
     var playStartPending = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy

@@ -426,12 +426,16 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 6 ITEM 2: `regionsKey` — the key over sectors not committed yet (the strips' [Done]); nil: the project's.
     func sceneKey(regionsKey: String? = nil) -> String {
         guard let file = project.importedFile else { return "" }
-        let regions = project.latticeJobRegions().regions.map(\.wireDictionary)
+        let emitted = project.latticeJobRegions().regions
+        let regions = emitted.map(\.wireDictionary)
         let r = (try? JSONSerialization.data(withJSONObject: regions, options: [.sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? ""
         let (b, p) = buildDirections
-        return "\(file.path)|\(project.quality.resolution)|\(r)|\(regionsKey ?? self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
+        let key = "\(file.path)|\(project.quality.resolution)|\(r)|\(regionsKey ?? self.regions.key)|\(b)|\(p.map { "\($0)" } ?? "-")"
             + "|\(project.printParams.strutLineWidthMM)"
+        // ★ ROUND 7, M1 (1a): whether these regions hold a face-prism, from the same list (never asked twice)
+        lastKeyFacePrisms = (key, LatticeJobIncludeGate.hasIncludeWall(emitted))
+        return key
     }
 
     /// The scene key the project describes NOW (the main page compares it with the opened one).
@@ -469,6 +473,12 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// The key the ready scene was opened with (the lattice is keyed by it too).
     private(set) var openedKey: String?
+    /// ★ ROUND 7, M1 (1a — FlexibleStageModel+FacePrisms): the opened scene's regions hold a face-prism (an include wall),
+    /// read from the same emitted list as its key; and the last key's own answer (`sceneKey` keeps it — never computed twice).
+    var openedFacePrisms = false
+    var lastKeyFacePrisms: (key: String, has: Bool)?
+    /// Test control only (M1): the stage as it was before ruling 4 — no include region lattices the WHOLE part (core's rule).
+    var controlWholePartWithoutPrism = false
     /// The key the last open was ATTEMPTED with (a failed open is retried only on a new one).
     private(set) var openAttemptKey: String?
 
@@ -484,6 +494,7 @@ public final class FlexibleStageModel: ObservableObject {
             return
         }
         openAttemptKey = key
+        let prisms = lastKeyFacePrisms.map { $0.key == key && $0.has } ?? false   // ★ M1: read with the key above
         guard let job = try? sceneJob() else {
             sceneState = .failed("This project has no imported part to open.")
             return
@@ -501,6 +512,7 @@ public final class FlexibleStageModel: ObservableObject {
                     self.stackErrors = [:]
                     self.designErrors = [:]
                     self.openedKey = key
+                    self.openedFacePrisms = prisms   // ★ ROUND 7, M1 (1a): the scene's own answer, with its key
                     self.sceneState = .ready
                     // ★ ROUND 3 (item 1.2): the main page's loads arrive as pressed / resting faces
                     self.adoptMainPageLoads(recompute: false)
