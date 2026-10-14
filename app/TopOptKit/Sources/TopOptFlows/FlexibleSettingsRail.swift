@@ -55,28 +55,25 @@ extension FlexibleStageModel {
         return rail
     }
 
-    /// ★ After every edit: the rail follows the selected face to the group it is in NOW (a move, a new
-    /// group, a merge, [Pressed] on a resting face) — the tab open, the face selected and the group
-    /// that plays can never disagree. The [Model] and [+] tabs stay put.
-    func syncRail() {
-        if rail == .model || rail == .newGroup { return }
-        let t = railTab(for: selectedRegion)
-        if t != rail { rail = t }
-    }
+    // ★ ROUND 7 (S, 4f): syncRail lives in FlexibleSettingsOpenGroup — the OPEN tab is the master (it stays on its
+    // members through every edit); round 5's rule (the tab follows the selected face) is its red control only.
 
     /// The group the tab `.group(id)` shows — nil when that group is gone (the rail falls back).
     public func railGroup(_ id: Int) -> FlexibleSqueezeGroup? { squeezeGroups.first { $0.id == id } }
 
-    /// ★ S2: the group the Settings page's squish plays — the selected pressed face's; else the group
-    /// whose tab is open; else the first.
+    /// ★ S2: the group the Settings page's squish plays. ★ ROUND 7 (S, 4f): the OPEN tab's group (his img4: Group 1
+    /// played behind Group 2's tab); on [Model], [Rests] or [+ New], the selected pressed face's; else the first.
     public var playingGroup: FlexibleSqueezeGroup? {
+        if !Self.controlRailFollowsSelection, case .group(let id) = rail, let g = railGroup(id) { return g }
         if let r = selectedRegion, let g = squeezeGroup(of: r) { return g }
         if case .group(let id) = rail, let g = railGroup(id) { return g }
         return squeezeGroups.first
     }
 
+    /// ★ ROUND 7 (S, 4f b): a selection the CODE makes moves no tab (only his picks do — `followSelection`); round 5's
+    /// rule is the red control's.
     func selectionChanged() {
-        guard let r = selectedRegion else { return }
+        guard Self.controlRailFollowsSelection, let r = selectedRegion else { return }
         let t = railTab(for: r)
         if t != rail { rail = t }
     }
@@ -85,6 +82,14 @@ extension FlexibleStageModel {
         let t: Tab = rail == .model ? .more : .face
         if tab != t { tab = t }
         if rail != .newGroup, edgePick != nil { edgePick = nil }   // ★ ROUND 6 ITEM 2: leaving [+ New] ends pick mode
+        if rail != .newGroup, newGroupAsk != nil { newGroupAsk = nil }
+        // ★ ROUND 7 (S, 4f c–e): the selection stays inside the tab now open (an edges tab: no face, its first press),
+        // and the tab's members are remembered for the next change
+        if !Self.controlRailFollowsSelection {
+            keepSelectionInOpenTab(railKeep)
+            railKeep = captureRail()
+            return
+        }
         switch rail {
         case .group(let id):
             // the group's tab: its face is the one selected (its curves on the part, its squish)
@@ -139,6 +144,7 @@ extension FlexibleStageModel {
     public func press(_ region: Int, kg: Double? = nil, into groupID: Int?) -> Bool {
         guard press(region, kg: kg) else { return false }
         if let id = groupID, railGroup(id) != nil, squeezeGroup(of: region)?.id != id { moveToGroup(region, id) }
+        selectIfAdmitted(region)   // ★ ROUND 7 (S): pressed on this tab, its card opens here
         return true
     }
 
@@ -307,7 +313,8 @@ struct FlexibleRailContent: View {
             }
         }
         .onAppear {
-            if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
+            // ★ ROUND 7 (S, 4f e): the OPEN tab's first face (never Group 1's)
+            if model.selectedRegion == nil { model.selectedRegion = FlexibleStageModel.appearSelection(model) }
         }
     }
 }

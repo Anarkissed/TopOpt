@@ -395,9 +395,13 @@ public struct FlexibleStagePage: View {
     /// both ends, one after the other), turn the camera to see them (two: an oblique view).
     private func present(_ issue: FlexibleIssue) {
         fixShown = issue
-        guard let r = issue.region else { return }
-        model.selectedRegion = r
-        model.tab = .face
+        guard issue.region != nil else { return }
+        // ★ ROUND 7 (S, 4f f): its face is selected only in the OPEN tab — a face in another group is named and pulsed,
+        // and the tab stays (it had opened Group 1 behind the edges tab: his img4); the pop-up's own fix is his pick
+        if let r = Self.presentSelection(issue, model: model) {
+            model.selectedRegion = r
+            if FlexibleStageModel.controlRailFollowsSelection { model.tab = .face }
+        }
         let named = issue.named
         for (i, region) in named.enumerated() {
             guard let f = regionsFaces(region).first else { continue }

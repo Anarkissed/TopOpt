@@ -245,6 +245,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
         public var groupRegions: (Int) -> [Int] = { _ in [] }
         /// ★ BATCH E: [Lattice under it] has a one-tap main-page edit for this face.
         public var canLatticeUnder: (Int) -> Bool = { _ in false }
+        /// ★ ROUND 7 (S, 4f f): the key a face's issue ids carry — the face's ROOT (FlexibleStageModel.issueKey), so a
+        /// strip's re-cut rest is the same issue and never a new pop-up. Default: the region's id (as before).
+        public var issueKey: (Int) -> String = { "\($0)" }
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
@@ -302,14 +305,14 @@ public struct FlexibleReadiness: Equatable, Sendable {
         for f in i.pressed {
             let r = f.region
             if let e = f.stackError {
-                out.append(FlexibleIssue(id: "noStack|\(r)", kind: .noStack, region: r,
+                out.append(FlexibleIssue(id: "noStack|\(i.issueKey(r))", kind: .noStack, region: r,
                                          oneLine: "\(name(r)) can't be squished here: \(firstSentence(e))",
                                          blocking: true, fixes: restOrRemove(r),
                                          pill: "Fix: \(name(r)) can't be squished"))
                 continue
             }
             if !(f.weightKg > 0) {
-                out.append(FlexibleIssue(id: "noWeight|\(r)", kind: .noWeight, region: r,
+                out.append(FlexibleIssue(id: "noWeight|\(i.issueKey(r))", kind: .noWeight, region: r,
                                          oneLine: "How much weight presses \(name(r))?",
                                          blocking: true, fixes: [.weight(r)] + restOrRemove(r).prefix(1),
                                          pill: "Fix: the weight on \(name(r))"))
@@ -317,7 +320,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
             }
             // ★ BATCH E: no (or little) lattice under a pressed face — said, never blocking
             if let share = f.latticedShare, share < FlexibleLatticeUnder.minShare {
-                out.append(FlexibleLatticeUnder.issue(r, share: share, name: name(r), canFix: i.canLatticeUnder(r)))
+                out.append(FlexibleLatticeUnder.issue(r, share: share, name: name(r), canFix: i.canLatticeUnder(r), key: i.issueKey(r)))
             }
             // a calibrate-first filament designs nothing — its lattice needs only the drawing
             guard !i.calibrateFirst else { continue }
@@ -334,13 +337,13 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                                     toast: "Lattice set to Gyroid — \(name(r)) can't use that one"))
                     }
                 } else {
-                    out.append(FlexibleIssue(id: "refused|\(r)|\(code)", kind: .refused, region: r,
+                    out.append(FlexibleIssue(id: "refused|\(i.issueKey(r))|\(code)", kind: .refused, region: r,
                                              oneLine: "\(name(r)): \(firstSentence(reason))",
                                              blocking: true, fixes: restOrRemove(r),
                                              pill: "Fix: \(name(r)) can't be designed"))
                 }
             case .failed(let why):
-                out.append(FlexibleIssue(id: "designFailed|\(r)", kind: .designFailed, region: r,
+                out.append(FlexibleIssue(id: "designFailed|\(i.issueKey(r))", kind: .designFailed, region: r,
                                          oneLine: "\(name(r)): \(firstSentence(why))",
                                          blocking: true, fixes: restOrRemove(r),
                                          pill: "Fix: \(name(r)) can't be designed"))
@@ -547,6 +550,7 @@ extension FlexibleStageModel {
                                                               pinchedWith: pinchedKeys(keys)).shown
         }
         i.canLatticeUnder = { [weak self] r in self?.latticeUnderPlan(r) != nil }   // ★ batch E
+        i.issueKey = { [weak self] r in self?.issueKey(r) ?? "\(r)" }   // ★ ROUND 7 (S, 4f f)
         if squeezeGroups.count > 1 {
             i.groupMisses = groupMisses
             let gs = squeezeGroups

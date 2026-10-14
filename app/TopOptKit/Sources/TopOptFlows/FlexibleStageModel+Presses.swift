@@ -143,6 +143,7 @@ extension FlexibleStageModel {
     /// press the history took away closes.
     public func historyRestored() {
         if let id = selectedPress, settings.press(id) == nil { selectedPress = nil }
+        syncRail()   // ★ ROUND 7 (S, 4f): the open tab stays on its members through an undo / redo too
     }
 
     // MARK: inputs between two of core's frames (FlexiblePressReframe)

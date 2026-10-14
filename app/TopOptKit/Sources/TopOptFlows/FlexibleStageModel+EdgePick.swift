@@ -449,8 +449,11 @@ extension FlexibleStageModel {
         project.sealUndoStep()
         refreshMainPageLoads()   // the cache follows (no edit)
         for mv in moved { for id in mv.old where settings.face(id) == nil { purgeFaceCaches(id) } }
+        // ★ ROUND 7 (S, 4f d): the selected face's rest — only where the OPEN tab shows it (it opened Group 1 behind the
+        // edges tab, his img4), else none
         if let r = selectedRegion, settings.face(r) == nil, let mv = moved.first(where: { $0.old.contains(r) }) {
-            selectedRegion = mv.new.first?.faceRegionID
+            let n = mv.new.first?.faceRegionID
+            selectedRegion = n.flatMap { Self.controlRailFollowsSelection || admitsSelection($0) ? $0 : nil }
         }
         // ── the page's scene: the one core was asked on, when the project's key is its key now
         if currentSceneKey == key { await frameWorker.install(scene, key: key) }

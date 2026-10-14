@@ -215,6 +215,11 @@ extension FlexibleStageModel {
         }
         actionSerial += 1
         edit { $0 = s }
+        // ★ ROUND 7 (S, 4f): a group he MADE opens (the tab stays put through every other change)
+        if !Self.controlRailFollowsSelection, let g = squeezeGroup(of: region) {
+            rail = .group(g.id)
+            selectedRegion = region
+        }
         return n
     }
 

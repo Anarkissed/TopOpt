@@ -52,7 +52,8 @@ struct FlexibleFacePanel: View {
             FlexibleFaceList(model: model, padTarget: $padTarget)
         }
         .onAppear {
-            if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
+            // ★ ROUND 7 (S, 4f e): the OPEN tab's first face (never Group 1's)
+            if model.selectedRegion == nil { model.selectedRegion = FlexibleStageModel.appearSelection(model) }
         }
     }
 }
