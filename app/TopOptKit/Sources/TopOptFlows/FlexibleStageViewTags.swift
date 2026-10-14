@@ -138,14 +138,19 @@ enum FlexibleStageViewTags {
 
     /// Each pressed face's prism floor (model space) but the selected one's, with its text and its size —
     /// cached per model state (the projection moves every frame; the prisms do not).
+    /// ★ ROUND 7 (S, 4g — his img4: "I should only be able to view numbers associated to what I'm working on"): only the
+    /// OPEN group's faces carry a tag; the other groups' prisms stay drawn, faint, with no number.
     struct Floor { let region: Int; let columns: Int; let text: String; let anchor: SIMD3<Float> }
     @MainActor private static var floorCache: (key: String, floors: [Floor])?
     @MainActor
     static func floors(model m: FlexibleStageModel, k: Double) -> [Floor] {
-        let key = "\(k)|\(m.selectedRegion ?? -1)|\(m.settings.hashValue)|\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
+        let open = openMembers(m)
+        let working = FlexibleStageOverlays.workingRegion(model: m)
+        let key = "\(k)|\(working ?? -1)|\(m.settings.hashValue)|\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)|\(m.rail)"
+            + "|\(FlexibleStageOverlays.controlGateOnSelectionOnly)"
         if let c = floorCache, c.key == key { return c.floors }
         var out: [Floor] = []
-        for f in m.settings.loadedFaces where f.faceRegionID != m.selectedRegion {
+        for f in m.settings.loadedFaces where f.faceRegionID != working && open.map({ $0.contains(f.faceRegionID) }) ?? true {
             let r = f.faceRegionID
             guard let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
                   let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
@@ -155,6 +160,15 @@ enum FlexibleStageViewTags {
         }
         floorCache = (key, out)
         return out
+    }
+
+    /// ★ ROUND 7 (S, 4g): the faces whose mm tags show — the open group's (an edges group's: none; [Model], [Rests] and
+    /// [+ New]: none); nil under the red control (every pressed face, today's).
+    @MainActor
+    static func openMembers(_ m: FlexibleStageModel) -> Set<Int>? {
+        if FlexibleStageOverlays.controlGateOnSelectionOnly { return nil }
+        if case .group(let id) = m.rail, let g = m.railGroup(id) { return Set(g.regions) }
+        return []
     }
 
     /// A tag's frame on screen (its hit area).

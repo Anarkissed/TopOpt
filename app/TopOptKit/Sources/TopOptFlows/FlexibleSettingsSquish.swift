@@ -97,7 +97,16 @@ public enum FlexibleSettingsSquish {
     /// time here); none with one group.
     public static func playerSims(model m: FlexibleStageModel) -> [FlexibleSim] {
         let groups = m.sims.filter { if case .group = $0.kind { return true }; return false }
-        return groups.count > 1 ? groups : []
+        // ★ ROUND 7 (S, 4d): each group by HIS name (the Settings page's picker; the main page keeps "Group N")
+        let named = groups.map { sim -> FlexibleSim in
+            guard case .group(let n) = sim.kind else { return sim }
+            let name = m.groupName(number: n)
+            guard name != sim.short else { return sim }
+            let faces = m.squeezeGroups.first { $0.number == n }?.regions.map { m.displayName($0) } ?? []
+            return FlexibleSim(id: sim.id, kind: sim.kind, title: FlexibleRowCopy.simTitle(name: name, names: faces),
+                               short: name, keys: sim.keys)
+        }
+        return named.count > 1 ? named : []
     }
 
     /// The player's end label: the PLAYING group's one squeeze force in the page's unit ("10 kg",

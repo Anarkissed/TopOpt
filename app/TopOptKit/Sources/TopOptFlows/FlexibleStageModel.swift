@@ -159,8 +159,17 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
     /// stored in the project until [Done].
     @Published public var edgePick: FlexibleEdgePick?
+    /// ★ ROUND 7 (S, 4h): on [+ New] with nothing pressed, the face a tap chose to start Group 1 while the keypad asks its
+    /// weight ("How much weight presses here?"); nil when nothing is asked.
+    @Published public var newGroupAsk: Int?
     /// ★ ROUND 5 (S8): the folder tab open on the Settings modal's left rail (FlexibleSettingsRail).
     @Published public var rail: FlexibleRailTab = .group(FlexibleSqueezeGroups.first) { didSet { if oldValue != rail { railChanged() } } }
+    /// ★ ROUND 7 (S, 4f): the open tab's members as they were after the last change (FlexibleSettingsOpenGroup) — the tab
+    /// stays on them through the next one.
+    var railKeep: FlexibleRailKeep?
+    /// ★ ROUND 7 (S, verify): the last group (or [Rests]) tab he had open — a face no group holds, tapped on [Model], opens
+    /// it (its card offers [Press it] there), never Group 1 by default.
+    var lastWorkTab: FlexibleRailTab?
     /// ★ ROUND 5 (S9): the page's Exit left with nothing changed — the main page does nothing.
     var exitUnchanged = false
     /// ★ ROUND 5 (S9): a Save & Exit with the main page's Lattice view OFF only stored — the bake
@@ -526,7 +535,23 @@ public final class FlexibleStageModel: ObservableObject {
             ensureStack(region)
             return
         }
+        // ★ ROUND 7 (S, 4h): [+ New] with NOTHING pressed (after Reset all) — the tap starts Group 1 (the keypad asks
+        // its weight where no main-page Load group gives one)
+        if rail == .newGroup, settings.loadedFaces.isEmpty, presses.isEmpty, !Self.controlRailFollowsSelection {
+            startFirstGroup(region, kg: nil)
+            ensureStack(region)
+            return
+        }
+        // ★ VERIFY OF R7-S: [+ New] with faces pressed — a face no group holds starts the NEXT group (the keypad asks its
+        // weight where no main-page Load group gives one); it had opened Group 1
+        if rail == .newGroup, settings.face(region) == nil, !settings.pressRegions.contains(region),
+           !Self.controlRailFollowsSelection, !Self.controlNewTabOpensGroupOne {
+            startNewGroup(region, kg: nil)
+            ensureStack(region)
+            return
+        }
         selectedRegion = region
+        followSelection()   // ★ ROUND 7 (S, 4f b): his tap is a pick — its tab opens
         if tab == .more { tab = .face }
         ensureStack(region)
     }
@@ -538,6 +563,7 @@ public final class FlexibleStageModel: ObservableObject {
         if edgePick != nil { return }   // ★ ROUND 6 ITEM 2: pick mode selects no face
         curvePoint = nil
         selectedRegion = region
+        followSelection()   // ★ ROUND 7 (S, 4f b): a row picked is his pick — its tab opens
         if tab == .more { tab = .face }
         ensureStack(region)
     }
@@ -564,7 +590,8 @@ public final class FlexibleStageModel: ObservableObject {
         edit({ s in relinked = Self.adopt(loads, into: &s) }, recompute: recompute)
         relinkedWeights.merge(relinked) { old, _ in old }
         if settings != before { project.sealUndoStep() }
-        if selectedRegion == nil { selectedRegion = settings.loadedFaces.first?.faceRegionID }
+        // ★ ROUND 7 (S, 4f e): the OPEN group's first face — never Group 1's (`loadedFaces.first`)
+        if selectedRegion == nil { selectedRegion = Self.appearSelection(self) }
     }
 
     func deriveMainPageLoads() -> FlexibleMainPageLoads? {
@@ -619,7 +646,7 @@ public final class FlexibleStageModel: ObservableObject {
             FlexibleSqueezeGroups.normalise(&s)
         }
         relinkedWeights[region] = nil
-        selectedRegion = region
+        selectIfAdmitted(region)   // ★ ROUND 7 (S, 4f): a face that left the open tab is not selected (the tab never shifts)
         ensureStack(region)
         return true
     }
@@ -637,7 +664,7 @@ public final class FlexibleStageModel: ObservableObject {
             FlexibleSqueezeGroups.normalise(&s)   // ★ D2: a resting face is in no squeeze group
         }
         relinkedWeights[region] = nil
-        selectedRegion = region
+        selectIfAdmitted(region)   // ★ ROUND 7 (S, 4f): the tab stays; the face is selected only where it is shown
     }
 
     /// A weight typed on the Flexible page. ★ ONE SOURCE OF TRUTH (maintainer): for a face
@@ -688,7 +715,8 @@ public final class FlexibleStageModel: ObservableObject {
             FlexibleSqueezeGroups.normalise(&s)
         }
         purgeFaceCaches(region)
-        if selectedRegion == region { selectedRegion = settings.loadedFaces.first?.faceRegionID ?? settings.faces.first?.faceRegionID }
+        // ★ ROUND 7 (S, 4f d): the OPEN group's first face, else none — never Group 1's
+        if selectedRegion == region { selectedRegion = Self.appearSelection(self) }
         return true
     }
 

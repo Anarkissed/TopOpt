@@ -55,7 +55,9 @@ extension FlexibleRowCopy {
     // MARK: greyed lines
 
     /// A candidate whose member is in another edges/corners group's press already.
-    public static func inGroup(_ number: Int) -> String { "In \(groupName(number))" }
+    public static func inGroup(_ number: Int) -> String { inGroup(name: groupName(number)) }
+    /// ★ ROUND 7 (S, 4d): naming the group by his name ("In Thumbs").
+    public static func inGroup(name: String) -> String { fit("In \(name)") }
     /// A fillet: the area needs a sharp, straight edge.
     public static let stripFillet = "A fillet · strips need a sharp edge"
     /// An edge that is not one straight line.

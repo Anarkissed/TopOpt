@@ -38,8 +38,9 @@ public enum FlexibleLatticeUnder {
         share <= 0 ? "No lattice under \(name)" : "Little lattice under \(name)"
     }
 
-    static func issue(_ region: Int, share: Double, name: String, canFix: Bool) -> FlexibleIssue {
-        FlexibleIssue(id: "noLatticeUnder|\(region)", kind: .noLatticeUnder, region: region,
+    static func issue(_ region: Int, share: Double, name: String, canFix: Bool, key: String? = nil) -> FlexibleIssue {
+        // ★ ROUND 7 (S, 4f f): keyed by the face's root (a strip's re-cut rest is the same issue)
+        FlexibleIssue(id: "noLatticeUnder|\(key ?? "\(region)")", kind: .noLatticeUnder, region: region,
                       oneLine: line(name, share: share), blocking: false,
                       fixes: (canFix ? [.latticeUnder(region)] : []) + [.rest(region)],
                       pill: pill(name, share: share))

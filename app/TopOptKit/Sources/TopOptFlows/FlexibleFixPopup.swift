@@ -82,6 +82,7 @@ struct FlexibleFixPopup: View {
                                         seed: nil) { typed in
                     let v = model.weightUnit.toKg(typed)   // ★ ROUND 5 (S4): typed in the page's unit, stored in kgf
                     if model.settings.face(r)?.isLoaded == true { model.setWeight(r, kg: v) } else { model.press(r, kg: v) }
+                    Self.follow(fix, model: model)   // ★ ROUND 7 (S): his fix — its tab opens
                     onDone()
                 })
         case .press(let r) where model.pressNeedsWeight(r):
@@ -93,6 +94,7 @@ struct FlexibleFixPopup: View {
                                         config: .init(title: FlexibleRowCopy.askWeight, unit: model.weightUnit.label, allowsDecimal: true),
                                         seed: nil) { v in
                     model.press(r, kg: model.weightUnit.toKg(v))
+                    Self.follow(fix, model: model)   // ★ ROUND 7 (S): his fix — its tab opens
                     onDone()
                 })
         default:
@@ -129,6 +131,20 @@ struct FlexibleFixPopup: View {
         case .weight: break   // the pad commits
         case .latticeUnder(let r): model.latticeUnder(r)   // ★ batch E: the main page's own edit
         case .latticeUnderAll(let rs): model.latticeUnder(all: rs)   // ★ batch E review: one tap, one undo step
+        }
+        follow(fix, model: model)
+    }
+
+    /// ★ ROUND 7 (S, 4f b): the pop-up's own fix is HIS pick — the face it fixed is selected and its tab opens (the pop-up
+    /// opening on its own never moves the tab: FlexibleStagePage.presentSelection).
+    static func follow(_ fix: FlexibleFix, model: FlexibleStageModel) {
+        switch fix {
+        case .rest(let r), .press(let r), .weight(let r), .latticeUnder(let r):
+            if model.settings.face(r) != nil { model.select(r) }
+        case .latticeUnderAll(let rs):
+            if let r = rs.first, model.settings.face(r) != nil { model.select(r) }
+        default:
+            break
         }
     }
 

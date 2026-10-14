@@ -44,6 +44,16 @@ extension FlexibleStageModel {
         switch rail {
         case .group(let id) where squeezeGroups.contains(where: { $0.id == id }): return rail
         case .rests: return rail
+        // ★ VERIFY OF R7-S (his img4: "brings me back to Group 1"): a face no group holds never sends him to Group 1 by
+        // default — on [+ New] it starts a group (tapFace; the tab stays meanwhile), on [Model] the group (or Rests) he
+        // was working on opens (its card offers [Press it] there)
+        case .newGroup where !Self.controlNewTabOpensGroupOne: return .newGroup
+        case .model where !Self.controlNewTabOpensGroupOne:
+            switch lastWorkTab {
+            case .group(let id)? where railGroup(id) != nil: return .group(id)
+            case .rests? where settings.faces.contains(where: { !$0.isLoaded }): return .rests
+            default: return .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
+            }
         default: return .group(squeezeGroups.first?.id ?? FlexibleSqueezeGroups.first)
         }
     }
@@ -55,36 +65,42 @@ extension FlexibleStageModel {
         return rail
     }
 
-    /// ★ After every edit: the rail follows the selected face to the group it is in NOW (a move, a new
-    /// group, a merge, [Pressed] on a resting face) — the tab open, the face selected and the group
-    /// that plays can never disagree. The [Model] and [+] tabs stay put.
-    func syncRail() {
-        if rail == .model || rail == .newGroup { return }
-        let t = railTab(for: selectedRegion)
-        if t != rail { rail = t }
-    }
+    // ★ ROUND 7 (S, 4f): syncRail lives in FlexibleSettingsOpenGroup — the OPEN tab is the master (it stays on its
+    // members through every edit); round 5's rule (the tab follows the selected face) is its red control only.
 
     /// The group the tab `.group(id)` shows — nil when that group is gone (the rail falls back).
     public func railGroup(_ id: Int) -> FlexibleSqueezeGroup? { squeezeGroups.first { $0.id == id } }
 
-    /// ★ S2: the group the Settings page's squish plays — the selected pressed face's; else the group
-    /// whose tab is open; else the first.
+    /// ★ S2: the group the Settings page's squish plays. ★ ROUND 7 (S, 4f): the OPEN tab's group (his img4: Group 1
+    /// played behind Group 2's tab); on [Model], [Rests] or [+ New], the selected pressed face's; else the first.
     public var playingGroup: FlexibleSqueezeGroup? {
+        if !Self.controlRailFollowsSelection, case .group(let id) = rail, let g = railGroup(id) { return g }
         if let r = selectedRegion, let g = squeezeGroup(of: r) { return g }
         if case .group(let id) = rail, let g = railGroup(id) { return g }
         return squeezeGroups.first
     }
 
+    /// ★ ROUND 7 (S, 4f b): a selection the CODE makes moves no tab (only his picks do — `followSelection`); round 5's
+    /// rule is the red control's.
     func selectionChanged() {
-        guard let r = selectedRegion else { return }
+        guard Self.controlRailFollowsSelection, let r = selectedRegion else { return }
         let t = railTab(for: r)
         if t != rail { rail = t }
     }
 
     func railChanged() {
+        switch rail { case .group, .rests: lastWorkTab = rail; default: break }   // ★ verify of R7-S: [Model]'s fallback
         let t: Tab = rail == .model ? .more : .face
         if tab != t { tab = t }
         if rail != .newGroup, edgePick != nil { edgePick = nil }   // ★ ROUND 6 ITEM 2: leaving [+ New] ends pick mode
+        if rail != .newGroup, newGroupAsk != nil { newGroupAsk = nil }
+        // ★ ROUND 7 (S, 4f c–e): the selection stays inside the tab now open (an edges tab: no face, its first press),
+        // and the tab's members are remembered for the next change
+        if !Self.controlRailFollowsSelection {
+            keepSelectionInOpenTab(railKeep)
+            railKeep = captureRail()
+            return
+        }
         switch rail {
         case .group(let id):
             // the group's tab: its face is the one selected (its curves on the part, its squish)
@@ -139,6 +155,7 @@ extension FlexibleStageModel {
     public func press(_ region: Int, kg: Double? = nil, into groupID: Int?) -> Bool {
         guard press(region, kg: kg) else { return false }
         if let id = groupID, railGroup(id) != nil, squeezeGroup(of: region)?.id != id { moveToGroup(region, id) }
+        selectIfAdmitted(region)   // ★ ROUND 7 (S): pressed on this tab, its card opens here
         return true
     }
 
@@ -172,6 +189,10 @@ struct FlexibleSettingsRailView: View {
     @ObservedObject var model: FlexibleStageModel
 
     static let width: CGFloat = 72
+    /// A tab's title type (the hosted test measures a name in it).
+    static let titleFont = Font.system(size: 11, weight: .semibold)
+    /// ★ RED CONTROL (verify of R7-S): today's title — one line, so a long name is cut ("Index finger…").
+    @MainActor static var controlOneLineTitle = false
     static func tabID(_ t: FlexibleRailTab) -> String {
         switch t {
         case .model: return "flexible-rail-model"
@@ -198,13 +219,13 @@ struct FlexibleSettingsRailView: View {
                 ? FlexibleRowCopy.edgesDetail(edges: g.presses.filter { model.press($0)?.kind == .edge }.count,
                                               corners: g.presses.filter { model.press($0)?.kind == .corner }.count)
                 : FlexibleRowCopy.faceCount(g.regions.count)
-            out.append(Tab(tab: .group(g.id), title: FlexibleRowCopy.groupName(g.number), detail: detail))
+            out.append(Tab(tab: .group(g.id), title: model.groupName(g), detail: detail))   // ★ ROUND 7 (S, 4d): his name
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count
         if rests > 0 { out.append(Tab(tab: .rests, title: FlexibleRowCopy.railRests, detail: FlexibleRowCopy.faceCount(rests))) }
-        if !model.settings.loadedFaces.isEmpty || !model.presses.isEmpty {
-            out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil))
-        }
+        // ★ ROUND 7 (S, 4h): [+ New] ALWAYS shows — after Reset all the rail is [Model] [+ New], and a tap on a face there
+        // starts Group 1 (it hid whenever nothing was pressed)
+        out.append(Tab(tab: .newGroup, title: FlexibleRowCopy.railNew, detail: nil))
         return out
     }
 
@@ -226,10 +247,18 @@ struct FlexibleSettingsRailView: View {
         return Button { withAnimation(.easeInOut(duration: 0.15)) { model.rail = t.tab } } label: {
             VStack(spacing: 3) {
                 icon(t.tab)
+                // ★ VERIFY OF R7-S: his name WHOLE — it wraps (two lines at most for 12 characters) where one line was cut
+                // ("Index finger…"); "Group 2", "Model", "Rests", "New" stay one line
                 Text(t.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Self.titleFont)
                     .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .lineLimit(Self.controlOneLineTitle ? 1 : nil).minimumScaleFactor(Self.controlOneLineTitle ? 0.8 : 1)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: !Self.controlOneLineTitle)
+                    // the title as drawn, by tab (the hosted test reads what it says and its frame)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["railTitle:\(t.id):\(t.title)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                 if let d = t.detail {
                     Text(d).font(.system(size: 10, weight: .medium))
                         .foregroundStyle(DS.Color.textTertiary.color)
@@ -307,7 +336,8 @@ struct FlexibleRailContent: View {
             }
         }
         .onAppear {
-            if model.selectedRegion == nil { model.selectedRegion = model.settings.loadedFaces.first?.faceRegionID }
+            // ★ ROUND 7 (S, 4f e): the OPEN tab's first face (never Group 1's)
+            if model.selectedRegion == nil { model.selectedRegion = FlexibleStageModel.appearSelection(model) }
         }
     }
 }
@@ -359,36 +389,21 @@ struct FlexibleGroupTabHeader: View {
         VStack(alignment: .leading, spacing: DS.Space.xxs) {
             HStack(spacing: DS.Space.s) {
                 Circle().fill(model.groupColour(group).color).frame(width: 12, height: 12)
-                Text(FlexibleRowCopy.groupName(group.number))
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1)
-                    // the name's own frame (the hosted test measures it against the words)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupLine-\(group.number)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityIdentifier("flexible-group-\(group.number)-line")
+                // ★ ROUND 7 (S, 4d): his name — a tap renames it (one line, 16 characters at most)
+                FlexibleGroupNameField(model: model, group: group)
                 Spacer(minLength: DS.Space.xs)
+                // ★ ROUND 7 (S, 4d): the trash on EVERY group (the only one's too), 44 pt — it deletes the group
                 if row?.removable == true {
-                    Button { model.removeGroup(group.id) } label: {
-                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                            .frame(width: 32, height: 32).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(group.number)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityLabel("Remove \(FlexibleRowCopy.groupName(group.number))")
-                    .accessibilityIdentifier("flexible-group-remove-\(group.number)")
+                    FlexibleGroupTrashButton(model: model, groupID: group.id, number: group.number, name: model.groupName(group))
                 }
-                FlexInfoButton(title: FlexibleRowCopy.groupName(group.number), text: FlexibleRowCopy.Info.groups,
+                FlexInfoButton(title: model.groupName(group), text: FlexibleRowCopy.Info.groups,
                                id: "flexible-group-\(group.number)-info")
             }
-            .frame(minHeight: 36)
+            .frame(minHeight: 44)
             FlexRow(FlexibleRowCopy.squeezeRow, info: FlexibleRowCopy.Info.squeeze,
                     id: "flexible-row-squeeze") {
                 FlexNumberBox(key: "group-\(group.id)",
-                              title: FlexibleRowCopy.groupName(group.number) + " · squeeze",
+                              title: model.groupName(group) + " · squeeze",
                               spec: FlexibleNumberSpecs.weight(kg: kg, unit: unit),
                               padTarget: $padTarget, units: FlexibleWeightUnit.allCases,
                               onUnit: { model.setWeightUnit($0) }, onNote: { model.toast = $0 }) { v in
@@ -489,10 +504,17 @@ struct FlexibleNewGroupTab: View {
             Text(FlexibleRowCopy.newGroupTitle(next))
                 .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .frame(minHeight: 36)
-            Text(candidates.isEmpty ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
+            // ★ ROUND 7 (S, 4h): with NOTHING pressed (after Reset all) a tap on any face starts Group 1; ★ verify of R7-S: and
+            // with faces pressed, a tap on a face no group holds starts the next group — "Tap the face that starts it" is
+            // true whenever a face is free ("Press two faces first" only when every face is set and none can leave its group)
+            let nothingPressed = model.settings.loadedFaces.isEmpty && model.presses.isEmpty
+            Text(candidates.isEmpty && !nothingPressed && !model.hasFreeFace ? FlexibleRowCopy.newGroupNone : FlexibleRowCopy.newGroupPick)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1).minimumScaleFactor(0.85)
                 .accessibilityIdentifier("flexible-new-group-line")
+            if let r = model.newGroupAsk {
+                FlexibleNewGroupAsk(model: model, padTarget: $padTarget, region: r)
+            }
             ForEach(candidates, id: \.self) { hand in
                 let r = hand[0]
                 Button { model.startGroup(with: r) } label: {

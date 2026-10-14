@@ -451,7 +451,12 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let proj = try projection(r.project)
         let tags = FlexibleStageViewTags.tags(model: m, k: k, projection: proj, keepOut: [])
         XCTAssertFalse(tags.contains { $0.region == 2 }, "the selected face shows its chip, not a tag")
-        XCTAssertGreaterThanOrEqual(tags.count, 2, "the other faces' tags (overlaps dropped)")
+        // ★ RE-PINNED (round 7 batch S, his img4 words of 2026-10-14: "I should only be able to view numbers associated to
+        // what I'm working on."): only the OPEN group's other faces carry a tag (Group 2 here: face 4); the other groups'
+        // prisms are still drawn (the items above), faint, with no number. It was ≥ 2 tags, every pressed face's.
+        let open = Set(try XCTUnwrap(m.squeezeGroup(of: 2)).regions)
+        XCTAssertGreaterThanOrEqual(tags.count, 1, "the open group's other face's tag")
+        XCTAssertTrue(tags.allSatisfy { open.contains($0.region) }, "only the open group's tags: \(tags.map(\.region)) ⊆ \(open)")
         for t in tags {
             let f = try XCTUnwrap(m.settings.face(t.region))
             XCTAssertEqual(t.text, String(format: "%.1f mm", f.deepestMM), "face \(t.region): his deepest, read-only")

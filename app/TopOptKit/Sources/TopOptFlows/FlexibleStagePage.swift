@@ -467,7 +467,7 @@ public struct FlexibleStagePage: View {
         let r = model.readiness
         if let i = prompt.next(r, actionSerial: model.actionSerial,
                                settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),
-           fixShown == nil {
+           fixShown == nil, Self.popsAtOnce(i, model: model) {   // ★ R7-S verify: not over [+ New]'s own ask
             present(i)
         }
         if let f = fixShown, !r.popping.contains(where: { $0.id == f.id }) { fixShown = nil }
@@ -477,9 +477,13 @@ public struct FlexibleStagePage: View {
     /// both ends, one after the other), turn the camera to see them (two: an oblique view).
     private func present(_ issue: FlexibleIssue) {
         fixShown = issue
-        guard let r = issue.region else { return }
-        model.selectedRegion = r
-        model.tab = .face
+        guard issue.region != nil else { return }
+        // ★ ROUND 7 (S, 4f f): its face is selected only in the OPEN tab — a face in another group is named and pulsed,
+        // and the tab stays (it had opened Group 1 behind the edges tab: his img4); the pop-up's own fix is his pick
+        if let r = Self.presentSelection(issue, model: model) {
+            model.selectedRegion = r
+            if FlexibleStageModel.controlRailFollowsSelection { model.tab = .face }
+        }
         let named = issue.named
         for (i, region) in named.enumerated() {
             guard let f = regionsFaces(region).first else { continue }
@@ -818,8 +822,10 @@ struct FlexibleStageOverlays: View {
         ZStack {
             // ★ ROUND 3: BOTH curves on the selected pressed face, on its own two edges, at once
             // ("X and Y always combined"); the frame arrows went with the frame rotation.
-            if model.edgePick == nil, model.tab == .face, let r = model.selectedRegion, let k = model.key(r),
-               let g = model.geometry[k], let f = model.settings.face(r), f.isLoaded {
+            // ★ ROUND 7 (S, 4g): only the face he works on in the OPEN group (`workingFace` — his img4's chip and curves
+            // were Group 1's Face 1, drawn over Group 2's tab)
+            if let w = Self.workingFace(model: model) {
+                let r = w.region, g = w.geometry, f = w.face
                 // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
                 ForEach(Self.curveAxes(f), id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,

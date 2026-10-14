@@ -166,6 +166,9 @@ extension FlexibleStageModel {
     /// ★ S1: his pick in the group's folder tab (a colour another group wears swaps with it).
     /// Display only: the designs are not re-run and the lattice stays current.
     public func setGroupColour(_ groupID: Int, _ c: FlexibleGroupColour) {
+        // ★ VERIFY OF R7-S: the rail's tab (it observes the model) wears the new colour at once — an edit that re-runs
+        // nothing published nothing (`settings` is computed over the project)
+        if !Self.controlNameEditPublishesNothing { objectWillChange.send() }
         edit({ s in FlexibleSqueezeGroups.setColour(c, group: groupID, in: &s) }, recompute: false)
     }
 }

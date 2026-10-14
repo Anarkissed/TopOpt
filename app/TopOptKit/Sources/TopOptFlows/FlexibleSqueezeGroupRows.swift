@@ -51,11 +51,13 @@ enum FlexibleSqueezeGroupRows {
         let single = model.settings.loadedFaces.count == 1
         return gs.map { g in
             let force = model.groupForce(g)
-            let line = controlLongLine ? model.groupLine(g) : FlexibleRowCopy.groupHeader(number: g.number, single: single)
+            // ★ ROUND 7 (S, 4d): his names; the trash on EVERY group, the only one's too (it deletes the group)
+            let line = controlLongLine ? model.groupLine(g) : FlexibleRowCopy.groupHeader(name: model.groupName(g), single: single)
             return Row(id: g.id, number: g.number, line: line, value: FlexibleRowCopy.squeezeValue(force),
-                       kg: force?.upperBound ?? 0, removable: gs.count > 1,
+                       kg: force?.upperBound ?? 0, removable: controlRemovableOnlyWithTwo ? gs.count > 1 : true,
                        miss: model.groupMiss(g.id).map {
-                           FlexibleRowCopy.groupMissLine(asBuiltMM: $0.asBuiltMM, designedMM: $0.designedMM, firmer: $0.firmerNumber)
+                           FlexibleRowCopy.groupMissLine(asBuiltMM: $0.asBuiltMM, designedMM: $0.designedMM,
+                                                         firmerName: model.groupName(number: $0.firmerNumber))
                        },
                        regions: g.regions)
         }
@@ -86,27 +88,17 @@ struct FlexibleSqueezeGroupHeader: View {
                 Spacer(minLength: DS.Space.xs)
                 // ★ ROUND 5 (S3 / S4): the force in a number box, in the page's unit (the pencil pill went)
                 let unit = model.weightUnit
-                FlexNumberBox(key: "group-\(row.id)", title: FlexibleRowCopy.groupName(row.number) + " · squeeze",
+                FlexNumberBox(key: "group-\(row.id)", title: model.groupName(number: row.number) + " · squeeze",
                               spec: FlexibleNumberSpecs.weight(kg: row.kg, unit: unit), padTarget: $padTarget,
                               units: FlexibleWeightUnit.allCases, onUnit: { model.setWeightUnit($0) },
                               onNote: { model.toast = $0 }) { v in
                     model.setGroupForce(row.id, kg: unit.toKg(v))
                 }
+                // ★ ROUND 7 (S, 4d): the trash, 44 pt, on every group — it deletes the group
                 if row.removable {
-                    Button { model.removeGroup(row.id) } label: {
-                        Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(row.number)": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityLabel("Remove \(FlexibleRowCopy.groupName(row.number))")
-                    .accessibilityIdentifier("flexible-group-remove-\(row.number)")
+                    FlexibleGroupTrashButton(model: model, groupID: row.id, number: row.number, name: model.groupName(number: row.number))
                 }
-                FlexInfoButton(title: FlexibleRowCopy.groupName(row.number), text: FlexibleRowCopy.Info.groups,
+                FlexInfoButton(title: model.groupName(number: row.number), text: FlexibleRowCopy.Info.groups,
                                id: "flexible-group-\(row.number)-info")
             }
             .frame(minHeight: 44)
@@ -193,7 +185,7 @@ struct FlexibleFaceGroupRow: View {
         } label: {
             HStack(spacing: 6) {
                 Circle().fill(model.groupColour(mine).color).frame(width: 10, height: 10)
-                Text(FlexibleRowCopy.groupName(mine.number)).font(.system(size: 12, weight: .semibold))
+                Text(model.groupName(mine)).font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DS.Color.textSecondary.color)
@@ -208,6 +200,6 @@ struct FlexibleFaceGroupRow: View {
 
     /// A menu line: "Group 3", or "+ New".
     static func menuTitle(_ o: (id: String, label: String), model: FlexibleStageModel) -> String {
-        Int(o.label).map { FlexibleRowCopy.groupName($0) } ?? o.label
+        Int(o.label).map { model.groupName(number: $0) } ?? o.label
     }
 }

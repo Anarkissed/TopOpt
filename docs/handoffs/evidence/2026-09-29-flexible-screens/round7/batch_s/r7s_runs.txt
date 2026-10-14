@@ -1,0 +1,394 @@
+# Round 7 batch S — the raw runs (side worktree wt-r7s, branch claude/flexible-screens-r7s, scratch /tmp/r7s-build; unseeded unless said)
+
+## The red runs: r7s_red_run.txt (tests first, against the stubs at ddd0feaf)
+
+## The R7-S tests at the final head 45ddf18e (their lines in the final suite run below)
+FLEX-R7-HOSTED
+  11l Group 1 (faces): trash 44×44 · name 19 pt · chips depthChip-1000105
+  11l Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  11l Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  11l Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  11l: Group 2's name above the scroll's view ((138.0, 89.5, 57.0, 19.0) vs (118.0, 142.0, 372.0, 654.0)) — not clicked
+  11l rename field 0×0
+  11p Group 1 (faces): trash 44×44 · name 19 pt · chips 
+  11p Group 2 (faces): trash 44×44 · name 19 pt · chips 
+  11p Group 3 (faces): trash 44×44 · name 19 pt · chips 
+  11p Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  11p rename field 190×26
+  13p Group 1 (faces): trash 44×44 · name 19 pt · chips 
+  13p Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  13p Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  13p Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  13p rename field 190×26
+  13l Group 1 (faces): trash 44×44 · name 19 pt · chips depthChip-1000105
+  13l Group 2 (faces): trash 44×44 · name 19 pt · chips depthChip-4
+  13l Group 3 (faces): trash 44×44 · name 19 pt · chips depthChip-3
+  13l Group 4 (edges): trash 44×44 · name 19 pt · chips 
+  13l control: chips over the edges tab ["depthChip-1000105"]
+  13l rename field 190×26
+FLEX-R7-4g Group 2 tags ["1000107 19.0 mm"] · Group 1: chip on 1000105
+FLEX-R7-4h before: ["Model", "Group 1", "Group 2", "Group 3", "Group 4", "Rests", "New"]
+FLEX-R7-4f groups: 1 faces 1 | 2 faces 2,4 | 3 faces 3,5 | 4 presses 6CF5D0E9-92A5-4286-A0A8-5EC4A05E71AE
+FLEX-R7-4f standing pop-up issues: []
+FLEX-R7-4f noLatticeUnder standing on Face 1's rest: ["noLatticeUnder|1"] → ["noLatticeUnder|1"] · popped none
+FLEX-R7-4f each tab after every step:
+  Group 1 [faces 1] → faces 1 · selected 1000117
+  Group 2 [faces 2,4] → faces 2,4 · selected 4
+  Group 3 [faces 3,5] → faces 3,5 · selected 3
+  Group 4 [presses 6CF5D0E9-92A5-4286-A0A8-5EC4A05E71AE] → presses 6CF5D0E9-92A5-4286-A0A8-5EC4A05E71AE · selected none
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsHostedTests testEveryGroupHeaderHasAFingerSizedTrashAndAOneLineName]' passed (96.751 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testAnExplicitPickStillMovesTheTabAndTheTabIsWhatPlays]' passed (3.858 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testEveryGroupHasATrashAndATapToRenameName]' passed (2.405 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testOnlyTheOpenGroupsNumbersShow]' passed (5.103 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testResetAllLeavesOnlyModelAndNew]' passed (7.960 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7SettingsTests testTheOpenGroupNeverShiftsAfterAnyChange]' passed (31.378 seconds).
+
+## The targeted suite, FIRST run at 1af69007 (148 classes: I2s 146 + the two new; 12 per run; 02:26 -> 03:57, load 5-9)
+PASSED TopOptFlowsTests.ComputeLocationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.CoreBuildIdentityTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.DeviceRunEntryGateTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder tests 10 skipped 10 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCHookTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Probe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Tests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMDentTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMGroupTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMLegendTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMProbe tests 5 skipped 5 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMStressTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests tests 8 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMXrayTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNRefineTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests tests 4 skipped 0 failures 8
+PASSED TopOptFlowsTests.FlexibleBatchVEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchVHostedTests tests 11 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleBridgeTests tests 17 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCoreClaimTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCurveEditTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleDepthPrismTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsHostedTests tests 2 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEFieldTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEVerifyGTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleInPassCompositeTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeFieldTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeGradingTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLegendPlacementTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageHookTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainStageTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainViewsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetReviewTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMergeR5SMTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlayClipTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlaySeamTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePinchTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimReviewTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressFixturesTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReframeTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReviewTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressSaveTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsHostedTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleReadinessTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRegionsTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe tests 1 skipped 1 failures 0
+FAILED TopOptFlowsTests.FlexibleRound5SettingsHostedTests tests 4 skipped 0 failures 4
+PASSED TopOptFlowsTests.FlexibleRound5SettingsTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe tests 3 skipped 3 failures 0
+FAILED TopOptFlowsTests.FlexibleRound6HostedTests tests 17 skipped 0 failures 5
+PASSED TopOptFlowsTests.FlexibleRound6Tests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRowCopyTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests tests 5 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleShownValuesTests tests 6 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSliceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests tests 8 skipped 0 failures 1
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests tests 8 skipped 0 failures 0
+FAILED TopOptFlowsTests.FlexibleSqueezeGroupsUITests tests 4 skipped 0 failures 3
+PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptKitTests.FlexibleSquishFETests tests 12 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishModulusTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPerfProbe tests 2 skipped 2 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishSolverTests tests 5 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishStepsTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleStageTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSurfaceNavTests tests 3 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleTimingProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCellFitModeTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCorePlanRulesTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreProbeReportTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeOrganicSettingsTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticePageRound2Tests tests 15 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticePageTests tests 25 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeRetentionControlTests tests 45 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeSettingsPersistTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests tests 2 skipped 0 failures 1
+FAILED TopOptFlowsTests.LatticeSlotOriginTests tests 5 skipped 0 failures 4
+PASSED TopOptFlowsTests.LatticeStaleTypeTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests tests 16 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicDeadWallParityTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicForecastTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicMainWiringTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicShapeFitTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSizeCheckTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSolidRimTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.ProjectStoreTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.RecommendThePrintedObjectTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.RemoteRunnerE2ETests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.SmoothingPageRound2Tests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.UndoHistoryTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantEntryGatingTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantRetentionTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.ViewerTests tests 33 skipped 0 failures 0
+TOTAL classes 148 tests 999 skipped 49 failures 26
+
+# its failures beyond the known (each traced, fixed or re-pinned in 7170ad84):
+FlexibleRound5SettingsHostedTests.swift:178: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNotNil failed - 11l: top A back
+FlexibleRound5SettingsHostedTests.swift:178: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNotNil failed - 11p: top A back
+FlexibleRound5SettingsHostedTests.swift:178: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNotNil failed - 13p: top A back
+FlexibleRound5SettingsHostedTests.swift:178: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNotNil failed - 13l: top A back
+FlexibleRound6HostedTests.swift:228: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.45)]") is not equal to ("[SIMD4<Float>(0.1882353, 
+FlexibleRound6HostedTests.swift:228: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.45)]") is not equal to ("[SIMD4<Float>(0.1882353, 
+FlexibleRound6HostedTests.swift:228: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.45)]") is not equal to ("[SIMD4<Float>(0.1882353, 
+FlexibleRound6HostedTests.swift:235: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.45)]") is not equal to ("[SIMD4<Float>(0.1882353, 
+FlexibleRound6HostedTests.swift:241: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.45)]") is not equal to ("[SIMD4<Float>(0.95686275,
+FlexibleSqueezeGroupsReviewTests.swift:61: error: -[TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests testRemovingAGroupGivesItsFacesTheOtherGroupsOneForce] : XCTAssertEqualWithAccuracy failed: ("0.0") is not equal to ("10.0") +/- ("1e-09")
+FlexibleSqueezeGroupsUITests.swift:152: error: -[TopOptFlowsTests.FlexibleSqueezeGroupsUITests testNewGroupAndRemoveGroupByClickingThePage] : XCTAssertEqual failed: ("[1000104, 1000103]") is not equal to ("[1000103, 3, 5, 1000104]") - removing a group: its fac
+FlexibleSqueezeGroupsUITests.swift:106: error: -[TopOptFlowsTests.FlexibleSqueezeGroupsUITests testNewGroupAndRemoveGroupByClickingThePage] : XCTUnwrap failed: expected non-nil value of type "CGRect"
+FlexibleSqueezeGroupsUITests.swift:190: error: -[TopOptFlowsTests.FlexibleSqueezeGroupsUITests testThePartTintsEachGroupAndNeverTheOldWarning] : XCTAssertEqual failed: ("Optional(SIMD4<Float>(0.9490196, 0.9490196, 0.9607843, 0.45))") is not equal to ("Optional
+# chunk 003 (FlexibleGroupFieldPerfTests ... FlexibleLatticeUnderTests): every class passed, then xctest "exited with unexpected signal code 11"
+
+## The targeted suite at the FINAL head 45ddf18e (149 classes: + FlexibleR7SettingsEvidence, skipped without its env; 04:20 -> 06:3x, load 8-10; no xctest death)
+PASSED TopOptFlowsTests.ComputeLocationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.CoreBuildIdentityTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.DeviceRunEntryGateTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder tests 10 skipped 10 failures 0
+PASSED TopOptFlowsTests.FlexibleAngledGoldenTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCHookTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Probe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2Tests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMDentTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMGroupTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMLegendTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMProbe tests 5 skipped 5 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMStressTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests tests 8 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchMXrayTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchNRefineTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests tests 4 skipped 0 failures 8
+PASSED TopOptFlowsTests.FlexibleBatchVEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleBatchVHostedTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCoreClaimTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleCurveEditTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleDepthPrismTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsHostedTests tests 2 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleEdgeGroupsTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEFieldTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleFEPassTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleFEVerifyGTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleGroupPaletteTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleInPassCompositeTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeFieldTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeGradingTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticePassTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLatticeUnderTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleLegendPlacementTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageHookTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainStageTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMainViewsTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetReviewTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMeetTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleMergeR5SMTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlayClipTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleOverlaySeamTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePinchTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimReviewTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressAimTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressFixturesTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReframeTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressReviewTests tests 12 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexiblePressSaveTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsEvidence tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsHostedTests tests 1 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleR7SettingsTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleReadinessTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRegionsTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests tests 9 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6HostedTests tests 17 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRound6Tests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleRowCopyTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1VerifyTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests tests 5 skipped 1 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests tests 14 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleShownValuesTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe tests 3 skipped 3 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPerfProbe tests 2 skipped 2 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishPlayerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishSolverTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleStageTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.FlexibleSurfaceNavTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCellFitModeTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeCoreOwnerTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCorePlanRulesTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeCoreProbeReportTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeOrganicSettingsTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticePageRound2Tests tests 15 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticePageTests tests 25 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeRetentionControlTests tests 45 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeSettingsPersistTests tests 4 skipped 0 failures 0
+FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests tests 2 skipped 0 failures 1
+FAILED TopOptFlowsTests.LatticeSlotOriginTests tests 5 skipped 0 failures 4
+PASSED TopOptFlowsTests.LatticeStaleTypeTests tests 6 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests tests 16 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicDeadWallParityTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicForecastTests tests 13 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests tests 2 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicMainWiringTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests tests 3 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicShapeFitTests tests 4 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSizeCheckTests tests 11 skipped 0 failures 0
+PASSED TopOptFlowsTests.OrganicSolidRimTests tests 7 skipped 0 failures 0
+PASSED TopOptFlowsTests.ProjectStoreTests tests 5 skipped 0 failures 0
+PASSED TopOptFlowsTests.RecommendThePrintedObjectTests tests 8 skipped 0 failures 0
+PASSED TopOptFlowsTests.RemoteRunnerE2ETests tests 1 skipped 1 failures 0
+PASSED TopOptFlowsTests.SmoothingPageRound2Tests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.UndoHistoryTests tests 10 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantEntryGatingTests tests 21 skipped 0 failures 0
+PASSED TopOptFlowsTests.VariantRetentionTests tests 15 skipped 0 failures 0
+PASSED TopOptFlowsTests.ViewerTests tests 33 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleBridgeTests tests 17 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSliceProbe tests 1 skipped 1 failures 0
+PASSED TopOptKitTests.FlexibleSquishFETests tests 12 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishModulusTests tests 2 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleSquishStepsTests tests 6 skipped 0 failures 0
+PASSED TopOptKitTests.FlexibleTimingProbe tests 1 skipped 1 failures 0
+TOTAL classes 149 tests 1000 skipped 50 failures 13
+
+# its 13 failures, all known pre-existing (FlexibleBatchNVerifyTests x8 Xcode 27 text metrics; LatticeSlotOriginTests x4 #354s; LatticeSimSolveTriggerTests x1):
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is dra
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is draw
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is draw
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn w
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whol
+FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole
+LatticeStressTintTests.swift:195: error: -[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds] : XCTAssertTrue failed - ★ …and otherwise it actually runs
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ 2e-6 off: app failure(TopOpt
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ short normal, 2e-6 off (unit
+LatticeSlotOriginTests.swift:135: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertEqual failed: ("true") is not equal to ("false") - ★ tilted 18°, the bake's grid
+LatticeSlotOriginTests.swift:139: error: -[TopOptFlowsTests.LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses] : XCTAssertNotNil failed - ★ core refuses the tilted grid
+
+## The xctest SIGSEGV at exit (chunk 003s twelve classes, run together; every test passes before it)
+head 1af69007 suite run 1: signal 11 · head, the re-run with the re-pins: signal 11 · head 7170ad84 runs 3 and 4: signal 11, none · final suite (45ddf18e): none
+BASE 61cfce05 (built in a scratch worktree, /tmp/r7s-base-build): run 1 signal 11, run 2 none — pre-existing; each class alone: none (12 runs at head)
+
+## Goldens at 45ddf18e
+deterministic (SWIFT_DETERMINISTIC_HASHING=1): 38 identical, 0 DIFFERS · 	 Executed 13 tests, with 0 failures (0 unexpected) in 15.725 (15.727) seconds
+unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP · 	 Executed 13 tests, with 0 failures (0 unexpected) in 15.930 (15.933) seconds
+
+## Stage-job hashes at 45ddf18e: stage_job_hashes_r7s.txt — byte-identical to angled_presses/stage_job_hashes_i2.txt (diff empty; 16 rows + the controls)
+
+## iOS (build only, NEVER installed, never launched)
+xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1r7s build
+
+TopOpt.debug.dylib 78797136 B Oct 14 04:20
+carries: flexible-new-group-ask x1, groupNameField- x1, "Tap the face that starts it" x1

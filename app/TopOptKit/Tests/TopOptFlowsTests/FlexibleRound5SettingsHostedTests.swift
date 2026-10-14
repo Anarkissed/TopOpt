@@ -175,7 +175,13 @@ final class FlexibleRound5SettingsHostedTests: XCTestCase {
             let fresh = m.freshSettings()
             try click(h, "resetConfirm")
             XCTAssertEqual(m.settings, fresh, "\(tag): reset")
-            XCTAssertNotNil(m.settings.face(FlexibleHisProject.topA), "\(tag): top A back")
+            // ★ RE-PINNED (round 7 batch S, 4h — his img4 words of 2026-10-14: "The "reset all" button does not clear out
+            // *all* groups, currently. It should absolutely do that. All that should be viewed is the "model" folder tab and
+            // the "New" one."): nothing is read in again — top A stays out (remembered as deleted; pressing it brings it
+            // back), and the rail is [Model] [New]. It was: "top A back" (the main page's loads read in again).
+            XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "\(tag): nothing read in again")
+            XCTAssertTrue(m.settings.isRemoved(FlexibleHisProject.topA), "\(tag): top A remembered as deleted")
+            XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).map(\.title), ["Model", "New"], "\(tag): only [Model] and [New]")
             report.append(String(format: "%@: panel x %.0f–%.0f · rail x %.0f–%.0f · tab x %.0f–%.0f · %d tabs · titles Exit → Save & Exit", tag,
                                  panel.minX, panel.maxX, rail.minX, rail.maxX, scroll.minX, scroll.maxX, tabs.count))
             // the Model tab
