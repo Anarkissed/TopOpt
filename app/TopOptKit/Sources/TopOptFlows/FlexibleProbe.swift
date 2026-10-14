@@ -404,6 +404,23 @@ public enum FlexibleProbe {
 /// opaque. (★ Batch C verification: the stage never asks for Heat AND Stress — they are the two
 /// colourings of the map, one at a time; `heat: true` with a stress field stays defined here.)
 public enum FlexibleMainTints {
+    /// ★ ROUND 7, X1: per flat vertex of `mesh`, its surface lies OVER the lattice region — the region's mask, sampled a
+    /// little to either side of the face (a face region begins ON the face, where a sampled mask reads ½), is ≥ ½. The
+    /// printed view leaves the body open there (the walls show), and closed everywhere else.
+    public static func overLattice(mesh: ViewerMesh, lattice f: FlexibleLatticeInputs) -> [Bool] {
+        let n = mesh.flat.vertexCount
+        let pos = mesh.flat.positions, nor = mesh.flat.normals
+        guard pos.count >= n * 3, nor.count >= n * 3 else { return [Bool](repeating: false, count: n) }
+        let d = nudgeVoxels * f.mask.spacing
+        return (0..<n).map { v in
+            let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+            let nn = SIMD3<Float>(nor[3 * v], nor[3 * v + 1], nor[3 * v + 2])
+            return Swift.max(f.mask.sample(p - nn * d), f.mask.sample(p + nn * d)) >= 0.5
+        }
+    }
+    /// How far (in mask voxels) `overLattice` samples to either side of the face.
+    static let nudgeVoxels: Float = 0.75
+
     /// `roles`: a role colour wherever Flexible leaves the part clay (★ R7-V: the main page hands none — its model wears no
     /// role colour; batch V review's `rolesOverMarks`, for its "Role colours" toggle unticked, went with the toggle).
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,

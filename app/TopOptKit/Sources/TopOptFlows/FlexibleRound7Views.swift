@@ -36,6 +36,7 @@ extension FlexibleStageViews {
     public static let heatAll = FlexibleStageViews(rawValue: 1 << 4)
     /// ★ R7-V: Bend — the current group bent at full depth, every face of it at once, frozen (Settings).
     public static let bend = FlexibleStageViews(rawValue: 1 << 5)
+    public static let xray = FlexibleStageViews(rawValue: 1 << 6)   // X1 STUB
 
     /// The Heat view's scope.
     public var heatScope: FlexibleHeatScope {

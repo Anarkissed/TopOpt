@@ -152,6 +152,10 @@ public struct FlexibleStagePage: View {
     }
     /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build).
     @MainActor static var controlBendGhost = false
+    // X1 STUBS (the red run)
+    @MainActor static var controlAlwaysXray = false
+    @MainActor static func xrayItems(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double,
+                                     views: FlexibleStageViews) -> [ClearanceRenderItem] { [] }
     /// ★ R7-V REVIEW (the verify: Heat hidden while the legend read left the page stuck in its reading — every tap on the
     /// part went to the reading, none selected a face): the legend can READ only while the dent's rows show — a dent, and
     /// his Heat view showing heat.

@@ -79,6 +79,12 @@ public final class FlexibleMainStage: ObservableObject {
     static let noProject = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
     /// Test control only (R7-V review): X-ray off on open whatever the finish (R7-V's first build).
     var controlXrayOffOnOpen = false
+    // X1 STUBS (the red run): the API the tests read, today's behaviour behind it
+    var controlXrayByFinish = false
+    var controlViewsForceXray = false
+    var controlNoPrintedView = false
+    public var printedView: Bool { false }
+    public var latticeIconLit: Bool { wallsShown }
     /// The body is the ghost (his X-ray icon). RED CONTROL `controlXrayIsLatticeView`: C2 + M6's derived rule.
     public var xray: Bool { controlXrayIsLatticeView ? (latticeShown || dentXray) : xrayOn }
     /// The walls are seen: the Lattice view on with X-ray (step 1 — out of X-ray an opaque body hides them) — what the
