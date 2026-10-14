@@ -167,6 +167,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 7 (S, 4f): the open tab's members as they were after the last change (FlexibleSettingsOpenGroup) — the tab
     /// stays on them through the next one.
     var railKeep: FlexibleRailKeep?
+    /// ★ ROUND 7 (S, verify): the last group (or [Rests]) tab he had open — a face no group holds, tapped on [Model], opens
+    /// it (its card offers [Press it] there), never Group 1 by default.
+    var lastWorkTab: FlexibleRailTab?
     /// ★ ROUND 5 (S9): the page's Exit left with nothing changed — the main page does nothing.
     var exitUnchanged = false
     /// ★ ROUND 5 (S9): a Save & Exit with the main page's Lattice view OFF only stored — the bake

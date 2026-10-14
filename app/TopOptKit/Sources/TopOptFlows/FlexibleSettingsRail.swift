@@ -178,6 +178,10 @@ struct FlexibleSettingsRailView: View {
     @ObservedObject var model: FlexibleStageModel
 
     static let width: CGFloat = 72
+    /// A tab's title type (the hosted test measures a name in it).
+    static let titleFont = Font.system(size: 11, weight: .semibold)
+    /// ★ RED CONTROL (verify of R7-S): today's title — one line, so a long name is cut ("Index finger…").
+    @MainActor static var controlOneLineTitle = false
     static func tabID(_ t: FlexibleRailTab) -> String {
         switch t {
         case .model: return "flexible-rail-model"
@@ -233,9 +237,13 @@ struct FlexibleSettingsRailView: View {
             VStack(spacing: 3) {
                 icon(t.tab)
                 Text(t.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(Self.titleFont)
                     .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                     .lineLimit(1).minimumScaleFactor(0.8)
+                    // the title as drawn, by tab (the hosted test reads what it says and its frame)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["railTitle:\(t.id):\(t.title)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                 if let d = t.detail {
                     Text(d).font(.system(size: 10, weight: .medium))
                         .foregroundStyle(DS.Color.textTertiary.color)

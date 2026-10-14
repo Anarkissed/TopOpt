@@ -385,7 +385,7 @@ public struct FlexibleStagePage: View {
         let r = model.readiness
         if let i = prompt.next(r, actionSerial: model.actionSerial,
                                settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),
-           fixShown == nil {
+           fixShown == nil, Self.popsAtOnce(i, model: model) {   // ★ R7-S verify: not over [+ New]'s own ask
             present(i)
         }
         if let f = fixShown, !r.popping.contains(where: { $0.id == f.id }) { fixShown = nil }

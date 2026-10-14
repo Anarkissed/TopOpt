@@ -103,11 +103,20 @@ extension FlexibleSqueezeGroupRows {
     @MainActor static var controlRemovableOnlyWithTwo = false
 }
 
+extension FlexibleStageModel {
+    /// ★ RED CONTROL (verify of R7-S): a rename (or a colour) publishes nothing — the rail's tab kept "Group N".
+    @MainActor static var controlNameEditPublishesNothing = false
+}
+
 // MARK: - the name, tapped to rename
 
 /// A group's name on its header: the name (a tap opens ONE line of text, 16 characters at most); Return or leaving the
 /// field keeps it; empty is "Group N" again.
 struct FlexibleGroupNameField: View {
+    /// ★ RED CONTROL (verify of R7-S): today's field — it stays open when the header shows another group, and commits to
+    /// whichever group the header shows then.
+    @MainActor static var controlCommitsToTheHeadersGroup = false
+
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
     var size: CGFloat = 15

@@ -237,6 +237,16 @@ extension FlexibleStageModel {
         return "\(FlexibleRegions.wireID(r))"
     }
 
+    /// ★ RED CONTROL (verify of R7-S): today's — on [+ New] or [Model], a face no group holds opens Group 1.
+    @MainActor static var controlNewTabOpensGroupOne = false
+
+    /// ★ VERIFY OF R7-S: [+ New] → a tap on a face no group holds starts a NEW group from it. (STUB: today's — only with
+    /// nothing pressed.)
+    @discardableResult
+    public func startNewGroup(_ region: Int, kg: Double?) -> Bool {
+        startFirstGroup(region, kg: kg)
+    }
+
     // MARK: 4h [+ New] with nothing pressed
 
     /// ★ 4h: [+ New] with nothing pressed — a tap on a face starts Group 1: at the main page's weight when a Load group
@@ -292,6 +302,15 @@ extension FlexibleStageOverlays {
 }
 
 extension FlexibleStagePage {
+
+    /// ★ RED CONTROL (verify of R7-S): today's rule — every new blocker his action caused pops, the [+ New] tab's too.
+    @MainActor static var controlPopOnNewTab = false
+
+    /// ★ VERIFY OF R7-S: does `issue` (new, caused by his last action) open the pop-up at once? (STUB: today's — always.)
+    @MainActor
+    static func popsAtOnce(_ issue: FlexibleIssue, model m: FlexibleStageModel) -> Bool {
+        true
+    }
 
     /// ★ 4f (f): the face the fix pop-up selects as it opens on `issue` — its face only when the open tab admits it;
     /// otherwise nil: the pop-up names and pulses the face, and the tab stays (its own fix is his pick and moves it).

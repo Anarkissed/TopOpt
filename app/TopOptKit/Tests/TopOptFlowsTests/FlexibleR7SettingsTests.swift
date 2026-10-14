@@ -406,9 +406,11 @@ final class FlexibleR7SettingsTests: XCTestCase {
         XCTAssertTrue(sims.contains { $0.short == "Thumbs" }, "the player's picker: \(sims.map(\.short))")
         XCTAssertEqual(m.settings.designInputs, inputs, "a name never makes the lattice stale")
         XCTAssertTrue(String(decoding: try enc.encode(m.settings), as: UTF8.self).contains("groupNames"), "a name is saved")
-        // 16 characters at most; cleared → its number again
+        // ★ VERIFY OF R7-S: 12 characters at most (16 were cut on the rail's tab and pushed the player's line: "Index
+        // finger…", "no latti…"); cleared → its number again
         m.setGroupName(g2.id, "A name much longer than sixteen")
-        XCTAssertLessThanOrEqual(m.groupName(try XCTUnwrap(m.railGroup(g2.id))).count, 16)
+        XCTAssertLessThanOrEqual(m.groupName(try XCTUnwrap(m.railGroup(g2.id))).count, 12)
+        XCTAssertEqual(FlexibleStageModel.groupNameMax, 12)
         m.setGroupName(g2.id, "")
         XCTAssertEqual(m.groupName(try XCTUnwrap(m.railGroup(g2.id))), "Group 2", "cleared: 'Group 2' again")
         m.setGroupName(g2.id, "Thumbs")
@@ -425,6 +427,7 @@ final class FlexibleR7SettingsTests: XCTestCase {
         XCTAssertEqual(m.settings, before, "one undo step")
         // ★ RED CONTROL: a name not carried through the renumber is lost
         FlexibleSqueezeGroups.controlNoNameRemap = true
+        defer { FlexibleSqueezeGroups.controlNoNameRemap = false }   // (a throw below must not leave it on for later tests)
         m.removeGroup(try XCTUnwrap(m.squeezeGroups.first).id)
         XCTAssertNotEqual(m.squeezeGroups.first.map { m.groupName($0) }, "Thumbs", "control: the name lost on the renumber")
         FlexibleSqueezeGroups.controlNoNameRemap = false
@@ -448,5 +451,124 @@ final class FlexibleR7SettingsTests: XCTestCase {
         FlexibleSqueezeGroupRows.controlRemovableOnlyWithTwo = true
         defer { FlexibleSqueezeGroupRows.controlRemovableOnlyWithTwo = false }
         XCTAssertEqual(FlexibleSqueezeGroupRows.rows(model: m).map(\.removable), [false], "control: the only group has no trash")
+    }
+
+    // MARK: - the verify of R7-S (2026-10-14): what the review found
+
+    /// ★ VERIFY (finding: present()'s new rule had no test — "the fix pop-up on every issue that pops now" looped over an
+    /// empty list on his pad): an issue standing on GROUP 1's face, with another tab open, is named and pulsed — the tab and
+    /// the selection stay; with its own group open it selects its face. RED CONTROL: today's present() (it selected the face
+    /// and the tab followed it to Group 1 — his img4).
+    func testAPopUpAboutAnotherGroupsFaceLeavesTheTab() async throws {
+        let (_, m) = try await hisPad()
+        let pid = try await withEdge9(m)
+        let rest = try XCTUnwrap(faceOn(m, 1), "Face 1's rest")
+        let g1 = try XCTUnwrap(m.squeezeGroup(of: rest))
+        let edges = try XCTUnwrap(m.squeezeGroup(ofPress: pid))
+        let g2 = try XCTUnwrap(m.squeezeGroups.first { token(m, $0) == "faces 2,4" })
+        // the issue made to stand on Face 1's rest (core's latticed share 10 %, as issueKeysSurviveTheCut does)
+        var inputs = m.readinessInputs
+        inputs.pressed = inputs.pressed.map { f in var f = f; if f.region == rest { f.latticedShare = 0.1 }; return f }
+        let issue = try XCTUnwrap(FlexibleReadiness.evaluate(inputs).popping.first { $0.region == rest }, "an issue on Face 1's rest")
+        print("FLEX-R7-VERIFY pop-up issue \(issue.id) on \(rest)")
+        /// The page's present(): its face selected only when presentSelection gives it.
+        func present() { if let s = FlexibleStagePage.presentSelection(issue, model: m) { m.selectedRegion = s } }
+        for (what, g) in [("the edges tab", edges), ("Group 2's tab", g2)] {
+            m.rail = .group(g.id)
+            let sel = m.selectedRegion
+            XCTAssertNil(FlexibleStagePage.presentSelection(issue, model: m), "\(what): the pop-up selects no face of another group")
+            present()
+            XCTAssertEqual(m.rail, .group(g.id), "\(what): the tab stays")
+            XCTAssertEqual(m.selectedRegion, sel, "\(what): the selection stays")
+            XCTAssertNotEqual(FlexibleStageOverlays.workingRegion(model: m), rest, "\(what): Face 1's numbers are not drawn")
+        }
+        m.rail = .group(g1.id)
+        XCTAssertEqual(FlexibleStagePage.presentSelection(issue, model: m), rest, "its own group open: the pop-up selects its face")
+        // ★ RED CONTROL: today's present() — it selects Face 1 behind the edges tab, and the tab follows it to Group 1
+        FlexibleStageModel.controlRailFollowsSelection = true
+        defer { FlexibleStageModel.controlRailFollowsSelection = false }
+        m.selectedRegion = nil
+        m.rail = .group(edges.id)
+        XCTAssertEqual(FlexibleStagePage.presentSelection(issue, model: m), rest, "control: today's pop-up selects Face 1")
+        present()
+        XCTAssertEqual(m.rail, .group(g1.id), "control: …and the tab jumps to Group 1 (his img4)")
+    }
+
+    /// ★ VERIFY (finding: "On [+ New] (with faces pressed) and on [Model], tapping a face no group holds still opens Group 1"):
+    /// [+ New]'s line says "Tap the face that starts it" — a tap on a face no group holds STARTS a new group from it (the
+    /// keypad asks its weight where no main-page Load group gives one; ONE undo step; its tab opens); on [Model] it opens the
+    /// group he was working on (its card offers [Press it] there). Never Group 1 by default. RED CONTROL: today's default.
+    func testATapOnNewStartsAGroupFromAFaceNoGroupHolds() async throws {
+        let (r, m) = try await hisPad()
+        m.removeFace(3)
+        XCTAssertNil(m.settings.face(3), "premise: face 3 is in no group")
+        XCTAssertEqual(m.squeezeGroups.map(\.regions), [[1], [4, 2], [5]])
+        let g3 = try XCTUnwrap(m.squeezeGroups.first { $0.regions == [5] })
+        // [+ New]: the tap asks the weight — the tab stays [+ New]
+        m.rail = .newGroup
+        m.tapFace(3)
+        XCTAssertEqual(m.rail, .newGroup, "the tab stays [+ New] — never Group 1")
+        XCTAssertEqual(m.newGroupAsk, 3, "the keypad asks face 3's weight (no main-page load presses it)")
+        XCTAssertNil(m.settings.face(3), "nothing pressed before the weight")
+        XCTAssertTrue(m.startNewGroup(3, kg: 2), "the typed weight starts it")
+        let g = try XCTUnwrap(m.squeezeGroup(of: 3))
+        XCTAssertEqual(g.regions, [3], "a group of its own")
+        XCTAssertEqual(g.number, 4, "the next number")
+        XCTAssertEqual(m.settings.face(3)?.weightKg, 2)
+        XCTAssertEqual(m.squeezeGroups.map(\.regions), [[1], [4, 2], [5], [3]], "the other groups untouched")
+        XCTAssertEqual(m.rail, .group(g.id), "its tab opens")
+        XCTAssertEqual(m.selectedRegion, 3)
+        XCTAssertNil(m.newGroupAsk)
+        FlexibleStagePage.history(undo: true, project: r.project, model: m)
+        XCTAssertNil(m.settings.face(3), "one undo step")
+        XCTAssertEqual(m.squeezeGroups.map(\.regions), [[1], [4, 2], [5]])
+        // [Model]: the group he was working on opens (its card offers [Press it] there)
+        m.rail = .group(g3.id)
+        m.rail = .model
+        m.tapFace(3)
+        XCTAssertEqual(m.rail, .group(g3.id), "[Model]: the group he had open — never Group 1")
+        XCTAssertEqual(m.selectedRegion, 3)
+        // ★ RED CONTROL: today's default — Group 1 opens from [+ New] and from [Model]
+        FlexibleStageModel.controlNewTabOpensGroupOne = true
+        defer { FlexibleStageModel.controlNewTabOpensGroupOne = false }
+        let first = try XCTUnwrap(m.squeezeGroups.first).id
+        m.rail = .newGroup
+        m.tapFace(3)
+        XCTAssertEqual(m.rail, .group(first), "control: [+ New] → Group 1")
+        m.rail = .group(g3.id)
+        m.rail = .model
+        m.tapFace(3)
+        XCTAssertEqual(m.rail, .group(first), "control: [Model] → Group 1")
+    }
+
+    /// ★ VERIFY (findings: "Reset all at once pops a blocker" — the [Press Face 1] pop-up over [Model] [New], still up while
+    /// the keypad asked Face 3's weight): the blocker "nothing pressed" his Reset caused does not POP while [+ New] is open
+    /// (that tab asks for exactly that: "Tap the face that starts it"); it stays in the top line and Exit still names it
+    /// ("Fix 1 thing" — whether an empty setup may leave is asked of him). Any other tab: blockers pop at once as before.
+    /// RED CONTROL: today's — it pops.
+    func testResetAllPopsNothingOverModelAndNew() async throws {
+        let (_, m) = try await hisPad()
+        var prompt = FlexibleFixPrompt(actionSerial: m.actionSerial)   // the page as it opened
+        _ = prompt.next(m.readiness, actionSerial: m.actionSerial, settled: true)
+        m.resetAll()
+        try await reopened(m, "the part open on whole faces")
+        let i = try XCTUnwrap(prompt.next(m.readiness, actionSerial: m.actionSerial, settled: true),
+                              "premise: 'nothing pressed' stands, new, from his Reset")
+        XCTAssertEqual(i.kind, .noPressedFace)
+        XCTAssertEqual(m.rail, .newGroup)
+        XCTAssertFalse(FlexibleStagePage.popsAtOnce(i, model: m), "no pop-up over [Model] [New]")
+        XCTAssertEqual(FlexibleSettingsExit.title(m.readiness, modified: true), "Fix 1 thing", "Exit still names it (asked of him)")
+        // the keypad's ask on face 3: nothing pops either
+        m.tapFace(3)
+        XCTAssertEqual(m.newGroupAsk, 3)
+        XCTAssertFalse(prompt.next(m.readiness, actionSerial: m.actionSerial, settled: true).map { FlexibleStagePage.popsAtOnce($0, model: m) } ?? false)
+        // another tab open: the rule is [+ New]'s only
+        m.rail = .model
+        XCTAssertTrue(FlexibleStagePage.popsAtOnce(i, model: m), "[Model] open: a blocker pops at once as always")
+        // ★ RED CONTROL: today's — the [Press Face 1] pop-up over [Model] [New]
+        FlexibleStagePage.controlPopOnNewTab = true
+        defer { FlexibleStagePage.controlPopOnNewTab = false }
+        m.rail = .newGroup
+        XCTAssertTrue(FlexibleStagePage.popsAtOnce(i, model: m), "control: today's pop-up")
     }
 }
