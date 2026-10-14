@@ -47,12 +47,14 @@ enum FlexibleR7M1Fixtures {
     }
 
     /// His pad on a main stage (the shared model), settled; `live`: with his live lattice.
-    static func hisPad(_ test: XCTestCase, live: Bool) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
+    /// `wholePartControl`: the RED CONTROL from the scene's first open (core's stacks kept as they come — the whole part).
+    static func hisPad(_ test: XCTestCase, live: Bool, wholePartControl: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
         let r = try FlexiblePressFixtures.a1Project(3, test, facePrism: false)   // as he saved it: no face-prism
         if live { try hisLiveLattice(r.project) }
         let s = FlexibleMainStage()
         s.reduceMotion = { true }
         let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        m.controlWholePartWithoutPrism = wholePartControl
         test.addTeardownBlock { @MainActor in await m.waitForIdle() }
         m.openScene()
         try await FlexibleSquishFixture.settle(m, "his pad")
@@ -232,6 +234,10 @@ final class FlexibleR7M1Tests: XCTestCase {
         XCTAssertNil(m.lattice)
         XCTAssertTrue(s.layer(p, stage: .lattice, pageUp: false)?.hidden ?? true, "★ no wall drawn")
         XCTAssertNil(s.dents(p, on: .lattice), "★ no dent: the plain model")
+        // (looking at the first pictures: his None pad's X-ray default drew an empty dark ghost — with no face-prism the
+        // default is the opaque model; his own X-ray tap still wins)
+        XCTAssertFalse(s.xrayOn, "★ X-ray off by default with no face-prism (nothing inside to see)")
+        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1, "★ the plain, opaque model")
         XCTAssertFalse(s.legendKinds.contains(.dent), "no dent scale")
         let st = s.status
         XCTAssertEqual(st.line, FlexibleRowCopy.noFacePrism, "★ the pill says what to do")

@@ -152,15 +152,18 @@ final class FlexibleR7M1EvidenceProbe: XCTestCase {
             XCTAssertFalse(m.facePrismsSet)
             try shot(s, p, "R7M1_no_face_prism_plain_model_img1_13p.png", cam: Self.img1, size: Self.p13, lines: &lines)
             try shot(s, p, "R7M1_no_face_prism_plain_model_img1_11l.png", cam: Self.img1, size: Self.l11, lines: &lines)
-            // the RED CONTROL: today's whole-part lattice with no face-prism (his img1 words: "the entire object becomes a lattice")
-            m.controlWholePartWithoutPrism = true
-            m.discardLattice()
-            s.refresh()
-            s.buildIfReady()
-            try await FlexibleHisProject.waitFor(240, "the control's lattice") { m.lattice != nil && !m.latticeBuilding }
-            try await FlexibleHisProject.waitFor(300, "the control's sims") { !m.squish.values.contains(.pending) }
+        }
+        // the RED CONTROL: the same pad, the stage as it was (no gate from the scene's first open) — his img1 words: "when no
+        // face-prism has been set, the entire object becomes a lattice"
+        do {
+            let (r, s, m) = try await FlexibleR7M1Fixtures.hisPad(self, live: false, wholePartControl: true)
+            let p = r.project
+            s.didExitSettings()
+            s.apply(p, owned: true, pageUp: false)
+            try await FlexibleHisProject.waitFor(240, "the control's lattice") { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+            try await FlexibleHisProject.waitFor(300, "the control's sims") { !m.squish.isEmpty && !m.squish.values.contains(.pending) }
+            for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }
             try shot(s, p, "R7M1_no_face_prism_CONTROL_whole_part_lattice_img1_13p.png", cam: Self.img1, size: Self.p13, lines: &lines)
-            m.controlWholePartWithoutPrism = false
         }
         // ★ his LIVE lattice: Group C's two 25 mm face-prisms
         let (r, s, m) = try await FlexibleR7M1Fixtures.hisPad(self, live: true)

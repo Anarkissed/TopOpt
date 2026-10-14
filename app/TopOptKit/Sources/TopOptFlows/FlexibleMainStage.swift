@@ -70,8 +70,11 @@ public final class FlexibleMainStage: ObservableObject {
     /// print); ON for None, Rim and Skin, whose lattice shows in the print — until R7-X's printed view (step 2) draws it
     /// through the finish's openings with X-ray off. RED CONTROL `controlXrayOffOnOpen`: R7-V's first build (off for every
     /// finish — the opaque block on his None pad).
+    /// ★ ROUND 7, M1 (1a — looking at his pad as saved, no face-prism: the X-ray default drew an EMPTY dark ghost, nothing
+    /// inside to see): with no face-prism there is no lattice, so the default is the plain opaque model whatever the finish.
     public var xrayDefault: Bool {
         !controlXrayOffOnOpen && (model?.settings.finishMode ?? .covered) != .covered
+            && (model.map { $0.sceneState != .ready || $0.facePrismsSet } ?? true)
     }
     static let noProject = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
     /// Test control only (R7-V review): X-ray off on open whatever the finish (R7-V's first build).
