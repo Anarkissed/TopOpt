@@ -98,7 +98,18 @@ extension FlexibleBatchVHostedTests {
             XCTAssertEqual(t.1, 0, "★ \(name): no Anchor / Group C green")
             lines.append("\(name): Top blue / Anchor green px \(t.0) / \(t.1)")
         }
-        print("FLEX-BVR-1 (fixed, R7-V) " + lines.joined(separator: " · "))
+        // ★ R7-V REVIEW (the verify: once its unticked case went, this test could not fail): the POSITIVE CONTROL, in the
+        // same frame and probe — #354's roles composed in (`controlRolesOnMain`, the first build's unticked toggle): the
+        // probe sees the Top's blue
+        s.latticeOn = false; s.xrayOn = false; s.heat = false
+        s.controlRolesOnMain = true
+        let control = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_model_heatOff_control.png")
+        s.controlRolesOnMain = false
+        let controlBlue = Self.hued(control, like: topInk)
+        // (Flexible's own marks come back with the roles under the control, over part of the Top's map — fewer than batch V's
+        // unticked 5 000 px, still thousands where the fixed frame has none)
+        XCTAssertGreaterThan(controlBlue, 1_000, "★ POSITIVE CONTROL: with the roles composed in, the probe finds the Top's blue")
+        print("FLEX-BVR-1 (fixed, R7-V) " + lines.joined(separator: " · ") + " · control (roles composed in): Top blue \(controlBlue) px")
     }
 
     // MARK: - VR2: an Undo / Redo is never his pick

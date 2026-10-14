@@ -49,10 +49,33 @@ public final class FlexibleMainStage: ObservableObject {
     public var latticeShown: Bool { latticeOn && latticeAvailable }
     /// ★ ROUND 7, R7-V (his img5, 2026-10-14: "Please re-add the x-ray view icon. In the default view, we should be able to
     /// see the model +the finish in the latticed area"): X-RAY IS ITS OWN ICON AGAIN, OFF BY DEFAULT — the default view is
-    /// the opaque model (exact for the Covered finish; the finish openings over the lattice are R7-X). Heat and the
+    /// the opaque model (exact for the Covered finish; the finish openings over the lattice are R7-X; ★ the review: for the
+    /// other finishes it starts ON until then — `xrayDefault`). Heat and the
     /// lattice no longer force it. This REVERSES two rulings, by his 2026-10-14 words: C2 (commit 140c8d454, his round-4
     /// img 5 — the Lattice view IS the X-ray) and M6 (batch M, his round-5 img 6 — the dent view turns X-ray on).
-    @Published public var xrayOn = false { didSet { if oldValue != xrayOn { refresh() } } }
+    /// ★ R7-V REVIEW (the verify, on his pad — saved with Finish None: the page opened as an opaque block with NO lattice at
+    /// all, the Lattice icon unlit): his X-ray CHOICE is kept per project (session state); until he makes one, the DEFAULT
+    /// follows the finish (`xrayDefault`).
+    @Published var xrayChoice: [UUID: Bool] = [:]
+    public var xrayOn: Bool {
+        get { xrayChoice[projectID ?? Self.noProject] ?? xrayDefault }
+        set {
+            guard newValue != xrayOn else { return }
+            xrayChoice[projectID ?? Self.noProject] = newValue
+            refresh()
+        }
+    }
+    /// ★ R7-V REVIEW — his img5: "In the default view, we should be able to see the model +the finish in the latticed area
+    /// (and pure lattice if 'off' is set)": OFF for the Covered finish (the skin hides the lattice: the opaque model IS the
+    /// print); ON for None, Rim and Skin, whose lattice shows in the print — until R7-X's printed view (step 2) draws it
+    /// through the finish's openings with X-ray off. RED CONTROL `controlXrayOffOnOpen`: R7-V's first build (off for every
+    /// finish — the opaque block on his None pad).
+    public var xrayDefault: Bool {
+        !controlXrayOffOnOpen && (model?.settings.finishMode ?? .covered) != .covered
+    }
+    static let noProject = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+    /// Test control only (R7-V review): X-ray off on open whatever the finish (R7-V's first build).
+    var controlXrayOffOnOpen = false
     /// The body is the ghost (his X-ray icon). RED CONTROL `controlXrayIsLatticeView`: C2 + M6's derived rule.
     public var xray: Bool { controlXrayIsLatticeView ? (latticeShown || dentXray) : xrayOn }
     /// The walls are seen: the Lattice view on with X-ray (step 1 — out of X-ray an opaque body hides them) — what the
@@ -267,6 +290,9 @@ public final class FlexibleMainStage: ObservableObject {
     var controlPrismOnOpen = false
     var controlPlayerIgnoresPlayView = false
     var controlXrayIsLatticeView = false
+    /// ★ R7-V REVIEW, test control only: the squish number on the main page (S1b's mm tags — after a pick, under [Prisms]),
+    /// which his 2026-10-14 answer moved to the Squish page only.
+    var controlSquishTagsOnMain = false
     /// ★ R7-V: Play turned on while a page was up (the loop starts when the main page shows again).
     var playStartPending = false
     /// ★ the gate: another core solve runs (the Stress view's sim, a topology run) — FlexibleStressSolver.busy
@@ -540,6 +566,13 @@ public final class FlexibleMainStage: ObservableObject {
     func prismTags(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool, viewport: CGSize, keepOut: [CGRect],
                    projector: (SIMD3<Float>) -> CGPoint?,
                    viewDirection: ((SIMD3<Float>) -> SIMD3<Float>?)? = nil) -> [FlexibleStageViewTags.Tag] {
+        // ★ R7-V REVIEW — his img2 (2026-10-14): "What is this 12mm? … this screen should only show the lattice selection and
+        // so this 12mm is completely worthless and makes no sense … please remove whatever it is", and his answer: "The
+        // squish number: only on the Squish page" (the main page shows only the face-prism's own depth — R7-M's chips). The
+        // squish number is never drawn here — after a pick or under [Prisms]; the prisms stay, faint. This REVERSES S1b's
+        // tags (round 6 item 3, his img3: "we should automatically be able to see the amount of squish"). The placement
+        // below is kept for R7-M's face-prism chips. RED CONTROL `controlSquishTagsOnMain`.
+        guard controlSquishTagsOnMain else { return [] }
         guard let m = current(project, stage) else { return [] }
         let cands: [FlexibleStageViewTags.MainCandidate] = volumes(project, on: stage, drilledIn: drilledIn).compactMap { item in
             let r = item.volume.faceID

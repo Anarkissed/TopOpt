@@ -243,10 +243,15 @@ final class FlexibleBatchVHostedTests: XCTestCase {
         p.selection.setActive(top.id)
         XCTAssertTrue(s.sessionPicked, "his tap on the Top's row")
         XCTAssertEqual(prisms(), [1], "★ after his pick: the Top's prism")
-        XCTAssertEqual(tags(), [1], "★ …and its number")
+        // ★ RE-PINNED (R7-V review — his img2, 2026-10-14: "this 12mm is completely worthless … please remove whatever it is",
+        // and his answer: "The squish number: only on the Squish page"): after his pick the prism shows, faint — its NUMBER
+        // never does on the main page (S1b's tags reversed; R7-M's face-prism chips carry the face-prism's own depth).
+        XCTAssertEqual(tags(), [], "★ …and no squish number")
         let f1 = try XCTUnwrap(m.settings.face(1))
+        s.controlSquishTagsOnMain = true   // RED CONTROL: S1b's tags — the Top's squish number on the main page
         XCTAssertEqual(s.prismTags(p, on: .lattice, drilledIn: false, viewport: size, keepOut: [], projector: { proj.project($0) }).first?.text,
-                       String(format: "%.1f mm", f1.deepestMM), "his deepest, read-only")
+                       String(format: "%.1f mm", f1.deepestMM), "★ RED CONTROL: S1b's tag, his deepest (img2's 12.0 mm)")
+        s.controlSquishTagsOnMain = false
         p.selection.setActive(groupC.id)
         XCTAssertEqual(prisms(), [], "★ a Pending group: no prism")
         XCTAssertEqual(tags(), [], "★ …and no number")

@@ -165,19 +165,28 @@ final class FlexibleRound7ViewsEvidenceProbe: XCTestCase {
             lines.append("\(name): xray \(s.xrayOn) body \(s.bodyAlpha(p, on: .lattice) ?? -1) walls hidden \(s.layer(p, stage: .lattice, pageUp: false)?.hidden ?? true) · play \(s.playOn) bar \(s.playerShown) playing \(s.loop.playing) held \(s.loop.held) · legends \(s.legendKinds.map(\.rawValue))")
         }
         let p13 = ("13p", CGSize(width: 1032, height: 1376)), l11 = ("11l", CGSize(width: 1194, height: 834))
-        // the default: X-ray off (the opaque model), Play off (no bar, at rest), Heat and the Lattice view on
-        try shot("R7V_M_img1_default_xray_off_play_off_13p.png", cam: Self.img1, size: p13)
-        try shot("R7V_M_img5_default_xray_off_play_off_13p.png", cam: Self.img5, size: p13)
-        try shot("R7V_M_img1_default_xray_off_play_off_11l.png", cam: Self.img1, size: l11)
-        // X-ray on: today's look (the ghost, the walls inside)
+        // ★ R7-V REVIEW: the default on HIS pad (Finish None): X-ray ON — his lattice seen (until R7-X's printed view); Play
+        // off (no bar, at rest); Heat and the Lattice view on (the Lattice icon lit)
+        XCTAssertTrue(s.xrayOn, "his None pad opens in X-ray")
+        try shot("R7V_M_img1_default_none_xray_on_13p.png", cam: Self.img1, size: p13)
+        try shot("R7V_M_img5_default_none_xray_on_13p.png", cam: Self.img5, size: p13)
+        try shot("R7V_M_img1_default_none_xray_on_11l.png", cam: Self.img1, size: l11)
+        // his X-ray tap: off — the opaque model (no wall under any finish out of X-ray: step 1)
         s.toggleXray()
-        try shot("R7V_M_img1_xray_on_13p.png", cam: Self.img1, size: p13)
-        try shot("R7V_M_img5_xray_on_13p.png", cam: Self.img5, size: p13)
+        try shot("R7V_M_img1_xray_off_13p.png", cam: Self.img1, size: p13)
+        try shot("R7V_M_img5_xray_off_13p.png", cam: Self.img5, size: p13)
+        s.toggleXray()
         // Play on: the bar, playing (the frame is the loop at rest — a still)
         s.togglePlay()
         try shot("R7V_M_img1_xray_on_play_on_13p.png", cam: Self.img1, size: p13)
         try shot("R7V_M_img1_xray_on_play_on_11l.png", cam: Self.img1, size: l11)
-        s.togglePlay(); s.toggleXray()
+        s.togglePlay()
+        // the Covered finish: X-ray off by default — the opaque model is the print
+        s.xrayChoice = [:]
+        m.edit({ $0.finish = FlexibleFinish.covered.rawValue }, recompute: false)
+        XCTAssertFalse(s.xrayOn, "Covered opens with X-ray off")
+        try shot("R7V_M_img1_default_covered_xray_off_13p.png", cam: Self.img1, size: p13)
+        m.edit({ $0.finish = FlexibleFinish.none.rawValue }, recompute: false)
         print("FLEX-R7V-EVIDENCE main\n  " + lines.joined(separator: "\n  "))
     }
 
@@ -214,7 +223,9 @@ final class FlexibleRound7ViewsEvidenceProbe: XCTestCase {
             if views.contains(.bend), views.contains(.play), let g = FlexibleBendGhost.item(overlay: overlay, dents: sq.dents, k: sq.exaggeration) { items.append(g) }
             let n = 1600
             let cam = Cam(name: "iso", azimuth: .pi / 4, elevation: .pi / 6, zoom: 1.25)
-            let model = try render(mesh: overlay.mesh, tints: c.tints, dents: sq.dents, scale: scale, bodyAlpha: FlexibleStagePage.xrayBodyAlpha,
+            // ★ R7-V REVIEW: the page's own body alpha for its views (Bend alone: the bent part drawn to read)
+            let model = try render(mesh: overlay.mesh, tints: c.tints, dents: sq.dents, scale: scale,
+                                   bodyAlpha: FlexibleStagePage.bodyAlpha(views: views, edgePick: false, hasDent: sq.dents != nil),
                                    settle: settle, cam: cam, items: items, layer: nil, n: n)
             let chrome = try hostedPixels(FlexibleStagePage(project: p, model: m, onExit: {}), size: size, settle: 2.5)
             // the model where the page leaves room on his 13" portrait: above and right of the panel
@@ -224,7 +235,7 @@ final class FlexibleRound7ViewsEvidenceProbe: XCTestCase {
         try shot("R7V_S_13p_heat_group_default.png", views: [])
         try shot("R7V_S_13p_heat_off.png", views: [.heatOff])
         try shot("R7V_S_13p_heat_all.png", views: [.heatAll])
-        try shot("R7V_S_13p_bend_alone.png", views: [.bend, .heatOff])
+        try shot("R7V_S_13p_bend_alone.png", views: [.bend, .heatOff])   // ★ R7-V review: the opaque, shaded bent part
         try shot("R7V_S_13p_bend_heat.png", views: [.bend])
         try shot("R7V_S_13p_bend_play_ghost.png", views: [.bend, .play], amount: 0.35)
         m.views = []
@@ -270,7 +281,9 @@ final class FlexibleRound7ViewsEvidenceProbe: XCTestCase {
         while Date().timeIntervalSince(start) < 400 {
             let line = "\(m.lattice?.generation ?? -1)\(m.latticeIsStale)\(m.squish.values.map { $0 == .pending ? "p" : "r" }.sorted())"
             if line != last { note("…"); last = line }
-            if let l = m.lattice, l.generation > gen, !m.latticeIsStale, !m.squish.values.contains(.pending), m.squishSolver.isIdle { break }
+            // ★ R7-V REVIEW: …and the sims STARTED and landed (an empty map between the rebuild and the sims' start is not "landed")
+            if let l = m.lattice, l.generation > gen, !m.latticeIsStale, !m.squish.isEmpty, !m.squish.values.contains(.pending),
+               m.squishSolver.isIdle { break }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }

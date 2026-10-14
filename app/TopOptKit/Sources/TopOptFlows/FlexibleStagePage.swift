@@ -21,6 +21,7 @@
 // core's results (M9). Numbers carry their tier and ± band (R7); a column core could not
 // give a number for is drawn as "no number", never a guess.
 
+import Combine
 import SwiftUI
 import simd
 import TopOptDesign
@@ -138,6 +139,30 @@ public struct FlexibleStagePage: View {
         views.contains(.bend) && views.heatScope == .off && !views.contains(.prisms) && !views.contains(.groups)
             && !views.contains(.play) && !edgePick
     }
+    /// ★ R7-V REVIEW (the verify, S06 / S18: Bend alone drew the bent part as a near-black smudge — this page is always in
+    /// X-ray, and with the heat hidden nothing on the part was opaque): the body's opacity for the page's views.
+    /// Bend with the heat hidden: the bent part is drawn to READ (his img4: "showing the entire 3d model at its full squish
+    /// depth") — Bend ALONE opaque (the shaded part, nothing inside it to see), with Prisms / Groups / Play at the dent's 30 %
+    /// (what sits inside still shows through). Otherwise the page's X-ray ghost, the heat opaque on it.
+    static func bodyAlpha(views: FlexibleStageViews, edgePick: Bool, hasDent: Bool) -> Float {
+        guard !controlBendGhost, hasDent, views.contains(.bend), views.heatScope == .off else { return xrayBodyAlpha }
+        return overlaysHidden(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
+    }
+    /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build).
+    @MainActor static var controlBendGhost = false
+    /// ★ R7-V REVIEW (the verify: Heat hidden while the legend read left the page stuck in its reading — every tap on the
+    /// part went to the reading, none selected a face): the legend can READ only while the dent's rows show — a dent, and
+    /// his Heat view showing heat.
+    static func reads(hasDent: Bool, views: FlexibleStageViews) -> Bool {
+        hasDent && views.heatScope != .off
+    }
+    /// Test controls only (R7-V review): the reading kept when the heat goes hidden; the TAP TO READ strip live with the heat
+    /// hidden (R7-V's first build).
+    @MainActor static var controlKeepReadingWithoutHeat = false
+    @MainActor static var controlTabIgnoresHeat = false
+    /// Tests only (R7-V review): the legend's drill in / out, driven — the hosted harness's clicks land on the MTKView under
+    /// the chrome (AppKit's hit test), never on the TAP TO READ strip. Nothing sends it in the app.
+    @MainActor static let testDrill = PassthroughSubject<Bool, Never>()
     /// Test control only (R7-V): today's composeTints — the heat always on, every pressed face's (the red control of 4c).
     @MainActor static var controlHeatAlwaysOn = false
 
@@ -233,8 +258,13 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
         // the legend went (no dent to show): it cannot stay drilled in
         .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
+        // ★ R7-V REVIEW: …nor once the heat is hidden (its rows leave the card — a tap on the part selects again)
+        .onChange(of: Self.reads(hasDent: dents != nil, views: model.views)) { can in
+            if !can, !Self.controlKeepReadingWithoutHeat { legendDrilled = false; reading = nil }
+        }
         // ★ while the legend reads, the squish holds still (the reading stays on its surface)
         .onChange(of: legendDrilled) { loop.holdWhileReading($0) }
+        .onReceive(Self.testDrill) { on in legendDrilled = on; reading = nil }   // (tests only)
         // ★ R7-V: the views (shared with the main page) — Play opens or closes this page's loop (off: at rest; his tap on
         // either page plays it), Heat and Bend recompose the picture
         .onAppear { loop.playView = model.views.contains(.play) }
@@ -314,7 +344,9 @@ public struct FlexibleStagePage: View {
                     + (bendGhost.map { [$0] } ?? []),   // ★ R7-V: Bend with Play — the full-depth pose, faint
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
-                bodyAlpha: xray ? Self.xrayBodyAlpha : (dents != nil ? Self.dentBodyAlpha : 1),
+                // ★ R7-V REVIEW: Bend with the heat hidden draws the bent part to read (bodyAlpha(views:…))
+                bodyAlpha: xray ? Self.bodyAlpha(views: model.views, edgePick: model.edgePick != nil, hasDent: dents != nil)
+                    : (dents != nil ? Self.dentBodyAlpha : 1),
                 // ★ BATCH B: the face the fix pop-up names, pulsed
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
@@ -478,6 +510,7 @@ public struct FlexibleStagePage: View {
                                  sims: sims, shown: sims.first { $0.id == playingNumber.map(FlexibleSim.groupID) },
                                  onPick: { id in FlexibleSettingsSquish.pick(id, model: model) },
                                  note: FlexibleSettingsSquish.note(model: model, fe: playingFE),
+                                 shortNotes: FlexibleSettingsSquish.note(model: model, fe: playingFE).map(FlexibleRowCopy.shortForms) ?? [],   // ★ R7-V review
                                  colour: { model.groupColour(number: $0) })
                 .background(GeometryReader { g in
                     Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["player": g.frame(in: .global)])
@@ -643,7 +676,9 @@ public struct FlexibleStagePage: View {
                                 .accessibilityLabel(legendDrilled ? "Stop reading" : "Tap to read")
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityIdentifier("flexible-settings-legend-tab")
-                                .allowsHitTesting(dents != nil).accessibilityHidden(dents == nil)   // ★ R6: TAP TO READ only with a dent
+                                // ★ R6: TAP TO READ only with a dent — ★ R7-V REVIEW: and its heat shown (its rows on the card)
+                                .allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dents != nil, views: model.views))
+                                .accessibilityHidden(!Self.reads(hasDent: dents != nil, views: model.views))
                             Button { legendMinimized = true } label: {
                                 Image(systemName: "chevron.up")
                                     .font(.system(size: 11, weight: .bold))

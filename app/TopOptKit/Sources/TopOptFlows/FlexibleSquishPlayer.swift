@@ -92,6 +92,9 @@ public final class FlexibleSquishLoop: ObservableObject {
     }
     /// Test control only (R7-V's red control): his pause forgotten by the automatic paths (round 3 – round 6).
     public var controlIgnoreHisPause = false
+    /// Test control only (R7-V review): the automatic holds still MOVE a pose he paused (R7-V's first build — the verify's
+    /// trace: held 0.38 → 1.00 → 0.00 after an edit while paused).
+    public var controlPauseMovesPose = false
     /// Whether an automatic path may play the loop now.
     var mayAutoPlay: Bool { playView && (!pausedByHim || controlIgnoreHisPause) }
     /// His Play: clears his pause and plays (the Play view's icon; the player's ▶ goes through `toggle`).
@@ -187,7 +190,15 @@ public final class FlexibleSquishLoop: ObservableObject {
 
     /// Hold still at `a` (nothing to loop: his live drawing, held at full). ★ R7-V: never plays; with the Play view off
     /// every hold is at REST (his answer: the model sits still at rest until he taps Play).
+    /// ★ R7-V REVIEW (the verify's trace: after an edit while he had paused, the model moved 0.38 → 1.00 → 0.00 — it read as
+    /// the sim restarting): HIS PAUSE FREEZES THE POSE — an automatic hold (his drawing at full while the lattice is stale,
+    /// rest while the sims run) leaves it where he paused; a new field binds at it. The Play view off still sits at rest.
     public func hold(_ a: Double = 1) {
+        if pausedByHim, playView, !controlIgnoreHisPause, !controlPauseMovesPose {
+            if playing { heldCycle = cycle(at: clock()); playing = false }
+            wake()
+            return
+        }
         let a = playView ? a : 0
         if playing { heldCycle = cycle(at: clock()); playing = false }
         if held != a { held = a }
@@ -290,6 +301,9 @@ struct FlexibleSquishPlayer: View {
     var onPick: (String) -> Void = { _ in }
     /// "Group 2 squishes 1.2 of 3.0 mm · firmer wins" — beside the picker, above the capsule.
     var note: String?
+    /// ★ R7-V REVIEW (the verify at 11" portrait: "Column preview · no lattic…"): shorter forms of `note`, longest first —
+    /// the first that fits beside the picker is drawn, so the line is always WHOLE (his one-line rule). Empty: `note` only.
+    var shortNotes: [String] = []
     /// ★ ROUND 5 (S1): a group's colour by its shown number — his CHOSEN colour (the default palette
     /// when no model is at hand).
     var colour: (Int) -> RGBA = { FlexibleSqueezeGroups.colour(number: $0) }
@@ -335,18 +349,17 @@ struct FlexibleSquishPlayer: View {
                 HStack(spacing: DS.Space.s) {
                     if sims.count > 1 && !inline { picker }
                     if let note {
-                        Text(note)
-                            .dsStyle(DS.TypeScale.footnote)
-                            .foregroundStyle(DS.Color.textSecondary.color)
-                            .lineLimit(1).minimumScaleFactor(0.75)
-                            .padding(.horizontal, DS.Space.m).frame(height: Self.topRowHeight - 6)
-                            .background(Capsule().fill(DS.Surface.bar.color))
-                            // ★ BATCH N VERIFICATION: the note's DRAWN frame (the hosted test pins every
-                            // line WHOLE beside the live Play-all picker at 11" portrait)
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["playerNote": g.frame(in: .global)])
-                            }.allowsHitTesting(false))
-                            .accessibilityIdentifier("flexible-squish-note")
+                        // ★ R7-V REVIEW: with shorter forms, the first that fits beside the picker (always whole)
+                        if shortNotes.isEmpty {
+                            noteView(note, shortened: false)
+                        } else {
+                            ViewThatFits(in: .horizontal) {
+                                noteView(note, shortened: false).fixedSize()
+                                ForEach(shortNotes, id: \.self) { noteView($0, shortened: true).fixedSize() }
+                                noteView(shortNotes.last ?? note, shortened: false)   // (the last resort: scaled, never cut)
+                            }
+                            .accessibilityLabel(note)   // (the whole line for VoiceOver)
+                        }
                     }
                 }
                 // ★ S VERIFICATION: the row's DRAWN extent (the picker and the note), so the Settings
@@ -364,6 +377,22 @@ struct FlexibleSquishPlayer: View {
         }
         .frame(width: width)
         .accessibilityIdentifier("flexible-squish-player")
+    }
+
+    /// The note's pill. ★ BATCH N VERIFICATION: its DRAWN frame ("playerNote" — the hosted tests pin every line WHOLE beside
+    /// the picker at 11" portrait); ★ R7-V REVIEW: and which line is drawn ("playerNoteText:<line>").
+    private func noteView(_ line: String, shortened: Bool) -> some View {
+        Text(line)
+            .dsStyle(DS.TypeScale.footnote)
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .lineLimit(1).minimumScaleFactor(shortened ? 1 : 0.75)
+            .padding(.horizontal, DS.Space.m).frame(height: Self.topRowHeight - 6)
+            .background(Capsule().fill(DS.Surface.bar.color))
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                       value: ["playerNote": g.frame(in: .global), "playerNoteText:" + line: .zero])
+            }.allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-squish-note")
     }
 
     /// "[● Group 1 ▾]" — the shown squeeze's colour and name; the menu lists every squeeze.

@@ -606,7 +606,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let stage = FlexibleMainStage()
         let (_, m) = try his(stage)
         stage.latticeOn = false
-        XCTAssertFalse(stage.xrayOn, "premise: X-ray off by default")
+        // ★ RE-PINNED (R7-V review): his A1 pad is Finish None, so X-ray now STARTS on (its default follows the finish — the
+        // verify's opaque block with no lattice); he turns it off first here
+        stage.xrayOn = false
+        XCTAssertFalse(stage.xrayOn, "premise: X-ray off (his tap)")
         stage.togglePrisms()
         XCTAssertTrue(m.views.contains(.prisms))
         XCTAssertTrue(stage.xrayOn, "[Prisms] turns X-ray on itself")
@@ -753,6 +756,11 @@ final class FlexibleRound6HostedTests: XCTestCase {
         // active group's prism and number, a Pending group's too — is now only the test control `controlPrismOnOpen`. This
         // test pins the tags, not that rule (FlexibleRound7ViewsTests pins the rule).
         stage.controlPrismOnOpen = true
+        // ★ RE-PINNED (R7-V review — his img2, 2026-10-14: "this 12mm is completely worthless … please remove whatever it is",
+        // and his answer: "The squish number: only on the Squish page"): the main page draws NO squish tag now; S1b's tags
+        // are the test control `controlSquishTagsOnMain`. This test pins their placement (the floor, the leader, the
+        // keep-outs), which R7-M's face-prism chips reuse (FlexibleStageViewTags.placeMain), not that they show.
+        stage.controlSquishTagsOnMain = true
         let size = CGSize(width: 900, height: 900)
         let proj = try projection(r.project)
         func tags(_ drilledIn: Bool = false, on s: WorkspaceStage = .lattice, keepOut: [CGRect] = []) -> [FlexibleStageViewTags.Tag] {

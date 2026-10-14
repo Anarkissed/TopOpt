@@ -74,6 +74,8 @@ extension FlexibleStageModel {
 /// [Prisms] [Groups] [Heat] [Bend] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
 struct FlexibleStageViewButtons: View {
     @ObservedObject var model: FlexibleStageModel
+    /// Test control only (R7-V review): no "every group" mark on [Heat] (R7-V's first build — the glyph alone).
+    @MainActor static var controlNoHeatAllBadge = false
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
@@ -81,7 +83,15 @@ struct FlexibleStageViewButtons: View {
                 let on = Self.isOn(b.view, model.views)
                 FlexibleViewButton(icon: icon(b), label: b.label, on: on, action: { tapped(b.view) }, glyph: glyph(b.view, on: on),
                                    onLongPress: b.view == .heatOff ? { held() } : nil)
-                    .accessibilityValue(b.view == .heatOff ? heatValue : (on ? "On" : "Off"))
+                    // ★ R7-V REVIEW: [Heat] under his 3 s hold carries his groups' three dots ("every group" at a glance);
+                    // [Play] carries the sims' status while its bar is hidden (FlexiblePlayBadge)
+                    .overlay(alignment: .topTrailing) {
+                        if b.view == .heatOff, model.views.heatScope == .all, !Self.controlNoHeatAllBadge {
+                            FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: model))
+                        }
+                        if b.view == .play { FlexiblePlayBadge(status: playStatus) }
+                    }
+                    .accessibilityValue(b.view == .heatOff ? heatValue : (b.view == .play ? playValue(on) : (on ? "On" : "Off")))
                     .accessibilityHint(b.view == .heatOff ? FlexibleRowCopy.heatHint : "")
                     .accessibilityIdentifier(b.id)
             }
@@ -97,6 +107,18 @@ struct FlexibleStageViewButtons: View {
     /// ★ R7-V: a button is lit while its view shows — [Heat] while any heat shows (its bit means hidden).
     static func isOn(_ v: FlexibleStageViews, _ views: FlexibleStageViews) -> Bool {
         v == .heatOff ? views.heatScope != .off : views.contains(v)
+    }
+    /// ★ R7-V REVIEW: the sims' status on [Play] — from the line its hidden bar would carry (the open group's 3D sim running,
+    /// or failed).
+    private var playStatus: FlexiblePlayStatus {
+        FlexiblePlayStatus.settings(note: FlexibleSettingsSquish.note(model: model, fe: false))
+    }
+    private func playValue(_ on: Bool) -> String {
+        switch playStatus {
+        case .working: return (on ? "On" : "Off") + " · " + FlexibleRowCopy.playWorking
+        case .failed: return (on ? "On" : "Off") + " · " + FlexibleRowCopy.playFailed
+        case .idle: return on ? "On" : "Off"
+        }
     }
     /// [Heat]'s glyph: fuller for every group's heat (his hold).
     private func icon(_ b: (view: FlexibleStageViews, icon: String, label: String, id: String)) -> String {

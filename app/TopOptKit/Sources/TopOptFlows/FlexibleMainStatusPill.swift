@@ -142,6 +142,9 @@ public struct FlexibleMainViewToggles: View {
     /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph);
     /// ★ R7-V: X-ray and Play.
     static let buttons = 6
+    /// Test control only (R7-V review): the first build's Play status — a mini spinner while the sims work, nothing for a
+    /// failure.
+    @MainActor static var controlMiniSpinner = false
 
     // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
     private var heatButton: some View {
@@ -183,13 +186,29 @@ public struct FlexibleMainViewToggles: View {
     private var playButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn) { main.togglePlay() }
             .overlay(alignment: .topTrailing) {
-                if main.simsWorking {
-                    ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color).scaleEffect(0.7)
-                        .padding(3).allowsHitTesting(false)
-                        .accessibilityIdentifier("flexible-main-view-play-working")
+                if Self.controlMiniSpinner {
+                    if main.simsWorking {   // (the RED CONTROL only: the first build's faint grey speck)
+                        ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color).scaleEffect(0.7)
+                            .padding(3).allowsHitTesting(false)
+                    }
+                } else {
+                    // ★ R7-V REVIEW (the verify: a faint grey speck, and nothing for a failed sim): an accent arc turning on
+                    // the rim while the sims run or refine; an orange dot when one failed (the bar says why)
+                    FlexiblePlayBadge(status: main.playStatus)
                 }
             }
+            .accessibilityValue(playValue)
             .accessibilityIdentifier("flexible-main-view-play")
+    }
+
+    /// ★ R7-V REVIEW: the Play icon's spoken value — on / off, and the sims' status while its bar is hidden.
+    private var playValue: String {
+        let on = main.playOn ? "On" : "Off"
+        switch main.playStatus {
+        case .working: return on + " · " + FlexibleRowCopy.playWorking
+        case .failed: return on + " · " + FlexibleRowCopy.playFailed
+        case .idle: return on
+        }
     }
 
     public var body: some View {
