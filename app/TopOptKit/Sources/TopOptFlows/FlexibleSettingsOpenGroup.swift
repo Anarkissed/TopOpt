@@ -125,7 +125,7 @@ extension FlexibleStageModel {
         if t != rail {
             rail = t   // railChanged keeps the selection inside it and remembers its members
         } else {
-            keepSelectionInOpenTab(railKeep)
+            keepSelectionInOpenTab(railKeep, fillEmpty: false)   // (nothing selected stays so: an edit selects nothing)
             railKeep = captureRail()
         }
     }
@@ -164,7 +164,11 @@ extension FlexibleStageModel {
     /// ★ 4f (c)–(e): the selected face is one of the open tab's, or none. An edges tab selects no face and its first press;
     /// a face that moved out or went away is replaced by its own piece in the tab (a re-cut rest on the same face), else
     /// the tab's first face; a face tapped on the part that is not set yet stays (its card offers [Press it]).
-    func keepSelectionInOpenTab(_ k: FlexibleRailKeep?) {
+    /// `fillEmpty` (a tab OPENED — round 5's rule): with nothing selected, select the tab's first face, and replace any face
+    /// outside it. After an EDIT (false) only the face the edit moved out of the tab, or took away, is replaced; nothing
+    /// selected stays so, and a face the code selected elsewhere is left (the main page's model is shared: an edit made on
+    /// its page must not gain or move a selection — the overlays draw only the open tab's anyway, `workingRegion`).
+    func keepSelectionInOpenTab(_ k: FlexibleRailKeep?, fillEmpty: Bool = true) {
         func replacement(for r: Int?, among members: [Int]) -> Int? {
             if let r, let k, let mesh = project.viewerMesh {
                 let faces = Set(FlexibleRegions(model: k.faceRegions, mesh: mesh).faces(of: r, mesh: mesh))
@@ -173,7 +177,10 @@ extension FlexibleStageModel {
             return members.first
         }
         func stays(_ r: Int) -> Bool {
-            settings.face(r) == nil && !(k?.known.contains(r) ?? false) && regionExists(r)
+            if settings.face(r) == nil && !(k?.known.contains(r) ?? false) && regionExists(r) { return true }
+            // after an edit: a face that was not in the tab before, and is still set, is left where the code put it
+            if !fillEmpty, settings.face(r) != nil, !(k?.regions.contains(r) ?? false) { return true }
+            return false
         }
         switch rail {
         case .group(let id):
@@ -183,11 +190,13 @@ extension FlexibleStageModel {
                 if selectedPress.map({ !g.presses.contains($0) }) ?? true { selectedPress = g.presses.first }
                 return
             }
-            // (none selected: its first face — its curves on the part)
+            // (none selected: its first face — its curves on the part — when the tab opens)
+            if selectedRegion == nil && !fillEmpty { return }
             if let r = selectedRegion, g.regions.contains(r) || stays(r) { return }
             if let n = replacement(for: selectedRegion, among: g.regions) { select(n) } else if selectedRegion != nil { selectedRegion = nil }
         case .rests:
             let rests = settings.faces.filter { !$0.isLoaded }.map(\.faceRegionID)
+            if selectedRegion == nil && !fillEmpty { return }
             if let r = selectedRegion, rests.contains(r) || stays(r) { return }
             if let n = replacement(for: selectedRegion, among: rests) { select(n) } else if selectedRegion != nil { selectedRegion = nil }
         case .model, .newGroup:

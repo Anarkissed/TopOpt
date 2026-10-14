@@ -149,8 +149,15 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             }
             h.pump(0.5)
             XCTAssertEqual(m.squeezeGroups.count, 1)
-            XCTAssertEqual(Set(m.squeezeGroups[0].regions), Set([FlexibleHisProject.topA, FlexibleHisProject.topB, 3, 5]),
-                           "removing a group: its faces join the first other group")
+            // ★ RE-PINNED (round 7 batch S, 4d — his img3 words of 2026-10-14: "All groups should have a trash icon next to
+            // them"): the × is a TRASH now and DELETES group 2 — faces 3 and 5 leave the Flexible setup (one undo step); it
+            // had merged them into group 1 ("removing a group: its faces join the first other group").
+            XCTAssertEqual(Set(m.squeezeGroups[0].regions), Set([FlexibleHisProject.topA, FlexibleHisProject.topB]),
+                           "the trash deletes group 2: its faces leave the setup")
+            XCTAssertNil(m.settings.face(3)); XCTAssertNil(m.settings.face(5))
+            // (the next size starts as this one did: faces 3 and 5 pressed again, into group 1)
+            XCTAssertTrue(m.press(3)); XCTAssertTrue(m.press(5))
+            XCTAssertTrue(h.pumpUntil(60) { !m.designsInFlight && !m.readiness.designing })
             host.window.orderOut(nil); host.window.contentView = nil
         }
         print("FLEX-GROUPS-HOSTED\n  " + report.joined(separator: "\n  "))

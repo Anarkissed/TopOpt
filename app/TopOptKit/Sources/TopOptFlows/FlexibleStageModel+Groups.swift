@@ -214,9 +214,11 @@ extension FlexibleStageModel {
             s.groupColours = FlexibleSqueezeGroups.canonical(map, groups: FlexibleSqueezeGroups.groups(s))
         }
         actionSerial += 1
+        let fromItsCard = selectedRegion == region
         edit { $0 = s }
-        // ★ ROUND 7 (S, 4f): a group he MADE opens (the tab stays put through every other change)
-        if !Self.controlRailFollowsSelection, let g = squeezeGroup(of: region) {
+        // ★ ROUND 7 (S, 4f): a group he MADE from the face he works on (its card's [+ New] chip) opens, the face selected;
+        // the tab stays put through every other change
+        if !Self.controlRailFollowsSelection, fromItsCard, let g = squeezeGroup(of: region) {
             rail = .group(g.id)
             selectedRegion = region
         }

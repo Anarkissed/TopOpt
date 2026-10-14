@@ -54,7 +54,10 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         let d2Force = FlexibleSqueezeGroups.force(FlexibleSqueezeGroups.groups(d2)[0], settings: d2, loads: m.mainPageLoads,
                                                   liveKg: m.liveMainKg)
         XCTAssertEqual(d2Force, 6...10, "control: D2's remove left one group with two forces")
-        m.removeGroup(two.id)
+        // ★ RE-PINNED (round 7 batch S, 4d — his img3 words of 2026-10-14: "All groups should have a trash icon next to
+        // them"): the trash now DELETES a group (FlexibleR7SettingsTests pins it); the merge this test pins is the pop-up's
+        // [Join the groups] (`mergeGroup`), which still gives the faces the other group's one force. It called removeGroup.
+        m.mergeGroup(two.id, into: nil)
         print("FLEX-REVIEW remove: \(lines(m)) · face 3 \(m.settings.face(3)?.weightKg ?? -1) kg · first force \(String(describing: m.firstGroupForce))")
         XCTAssertEqual(m.squeezeGroups.count, 1)
         XCTAssertEqual(m.groupForce(m.squeezeGroups[0]), 10...10, "ONE force: group 1's 10 kg")
