@@ -96,6 +96,8 @@ public struct FlexibleStagePage: View {
     /// ★ R7-V: Bend with Play — the full-depth pose's faint ghost (FlexibleBendGhost).
     @State private var bendGhost: ClearanceRenderItem?
     private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
+    /// ★ R7 MERGE: the dent's rows (the legend's scale, TAP TO READ, the reading) — a dent AND heat drawn on the part.
+    private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }
     /// The chips', the stamp handle's and the curve editors' keep-outs, in the stage's frame.
     /// ★ S VERIFICATION: the player as its two DRAWN parts — the capsule and its top row's picker
     /// and note (the "Group 2 ▾" row made the whole player's width above the capsule a keep-out,
@@ -160,6 +162,16 @@ public struct FlexibleStagePage: View {
     /// hidden (R7-V's first build).
     @MainActor static var controlKeepReadingWithoutHeat = false
     @MainActor static var controlTabIgnoresHeat = false
+    /// ★ R7 MERGE (R7-S × R7-V; his img4, 2026-10-14: "I should only be able to view numbers associated to what I'm working
+    /// on"): the dent's rows — the legend's scale and its TAP TO READ — only where heat is DRAWN on the part. R7-S made the open
+    /// tab the group that plays; R7-V's Heat shows that group's heat; an edges/corners group has none yet (no stacks until AP9),
+    /// so on its tab the part wore no heat while the card still said "What you drew · 0 mm … 28.4 mm" and took a tap to read.
+    @MainActor static func heatDrawn(model: FlexibleStageModel, views: FlexibleStageViews) -> Bool {
+        if controlLegendIgnoresDrawnHeat { return views.heatScope != .off }
+        return !FlexibleStageHeat.shown(model: model, views: views).isEmpty
+    }
+    /// Test control only (the merge): the dent's rows whenever Heat is on, drawn or not (the merged code before this fix).
+    @MainActor static var controlLegendIgnoresDrawnHeat = false
     /// Tests only (R7-V review): the legend's drill in / out, driven — the hosted harness's clicks land on the MTKView under
     /// the chrome (AppKit's hit test), never on the TAP TO READ strip. Nothing sends it in the app.
     @MainActor static let testDrill = PassthroughSubject<Bool, Never>()
@@ -188,7 +200,7 @@ public struct FlexibleStagePage: View {
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
                 // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
-                if FlexibleLegend.shows(hasDent: dents != nil, views: model.views) {
+                if FlexibleLegend.shows(hasDent: dentRows, views: model.views) {   // ★ R7 MERGE: heat drawn
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -259,7 +271,8 @@ public struct FlexibleStagePage: View {
         // the legend went (no dent to show): it cannot stay drilled in
         .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
         // ★ R7-V REVIEW: …nor once the heat is hidden (its rows leave the card — a tap on the part selects again)
-        .onChange(of: Self.reads(hasDent: dents != nil, views: model.views)) { can in
+        // ★ R7 MERGE: …nor on a tab whose group wears no heat (an edges group's — no stacks until AP9)
+        .onChange(of: Self.reads(hasDent: dentRows, views: model.views)) { can in
             if !can, !Self.controlKeepReadingWithoutHeat { legendDrilled = false; reading = nil }
         }
         // ★ while the legend reads, the squish holds still (the reading stays on its surface)
@@ -668,7 +681,7 @@ public struct FlexibleStagePage: View {
                 .accessibilityIdentifier("flexible-legend-expand")
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
-                               reading: legendDrilled ? reading : nil, hasDent: dents != nil && model.views.heatScope != .off,   // ★ R7-V
+                               reading: legendDrilled ? reading : nil, hasDent: dentRows,   // ★ R7-V; ★ R7 MERGE: heat drawn
                                k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()))
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
@@ -681,8 +694,8 @@ public struct FlexibleStagePage: View {
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityIdentifier("flexible-settings-legend-tab")
                                 // ★ R6: TAP TO READ only with a dent — ★ R7-V REVIEW: and its heat shown (its rows on the card)
-                                .allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dents != nil, views: model.views))
-                                .accessibilityHidden(!Self.reads(hasDent: dents != nil, views: model.views))
+                                .allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dentRows, views: model.views))
+                                .accessibilityHidden(!Self.reads(hasDent: dentRows, views: model.views))
                             Button { legendMinimized = true } label: {
                                 Image(systemName: "chevron.up")
                                     .font(.system(size: 11, weight: .bold))

@@ -529,7 +529,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
         }
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         XCTAssertEqual(page.components(separatedBy: "FlexibleLegend(model:").count - 1, 1, "exactly one card on the page")
-        XCTAssertTrue(page.contains("FlexibleLegend.shows(hasDent: dents != nil, views: model.views)"), "the page reads the rule")
+        // ★ RE-PINNED by the R7 merge (R7-S × R7-V; his img4, 2026-10-14: "I should only be able to view numbers associated to
+        // what I'm working on"): the page's dent is `dentRows` — a dent AND heat drawn on the part (FlexibleR7MergeTests).
+        XCTAssertTrue(page.contains("FlexibleLegend.shows(hasDent: dentRows, views: model.views)"), "the page reads the rule")
+        XCTAssertTrue(page.contains("private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }"))
         // hosted: both rows on, each one line
         let (r, m) = try his()
         m.select(2)

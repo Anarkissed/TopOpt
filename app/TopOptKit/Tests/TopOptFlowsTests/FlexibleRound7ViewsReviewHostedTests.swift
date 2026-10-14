@@ -215,9 +215,14 @@ extension FlexibleRound7ViewsHostedTests {
         XCTAssertFalse(FlexibleStagePage.reads(hasDent: true, views: [.heatOff, .prisms]), "★ the heat hidden: nothing to read")
         XCTAssertFalse(FlexibleStagePage.reads(hasDent: false, views: []), "no dent: nothing to read")
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
-        XCTAssertTrue(page.contains(".allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dents != nil, views: model.views))"),
+        // ★ RE-PINNED by the R7 merge (R7-S × R7-V; his img4, 2026-10-14: "I should only be able to view numbers associated to
+        // what I'm working on"): the rule reads `dentRows` — a dent AND heat drawn on the part (on an edges group's tab the
+        // current group's heat is none). Pinned by FlexibleR7MergeTests.
+        XCTAssertTrue(page.contains(".allowsHitTesting(Self.controlTabIgnoresHeat ? dents != nil : Self.reads(hasDent: dentRows, views: model.views))"),
                       "★ the strip's hit test is the reading rule (its control: the first build's dent alone)")
-        XCTAssertTrue(page.contains(".onChange(of: Self.reads(hasDent: dents != nil, views: model.views)) { can in"), "★ the reset follows the same rule")
+        XCTAssertTrue(page.contains(".onChange(of: Self.reads(hasDent: dentRows, views: model.views)) { can in"), "★ the reset follows the same rule")
+        XCTAssertTrue(page.contains("private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }"),
+                      "★ dentRows needs the dent (and the heat drawn)")
         // ★ RED CONTROL: the first build's rule (a dent was enough) — the strip drilled in with the heat hidden
         let firstBuild: (Bool, FlexibleStageViews) -> Bool = { hasDent, _ in hasDent }
         XCTAssertTrue(firstBuild(true, [.heatOff, .prisms]), "★ RED CONTROL: the first build's strip took the tap with the heat hidden")
