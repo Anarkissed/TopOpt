@@ -37,6 +37,8 @@
 //   * flx_pullback / flx_deformed — the SQUISH (02 §6), inverted.
 //   * flx_march, flx_vertex, flx_gbuffer — the full-screen sphere trace into the G-buffer.
 //   * flx_field_probe / flx_squish_probe / flx_uniform_echo / flx_frame_echo — test kernels.
+//   * ★ X1 VERIFY: flx_wall_heat — Heat on, a wall takes the squish of its column (FlexibleWallHeat, slots 7…10);
+//     flx_heat_probe (tests).
 //   * ★ BATCH G: flx_fe_u / flx_fe_pullback — the squish as ONE continuous 3D displacement field
 //     (FlexibleFEField): texture slot 6, rgba16Float, hardware-filtered, node-centred, clamped to
 //     the node box; deformed → rest by fixed-point iteration (a contraction: the page's ×k keeps
@@ -50,6 +52,8 @@ enum FlexibleLatticeShader {
     static let maxFaces = FlexibleSquishField.maxFaces
     /// ★ BATCH G: the squish sim's displacement field (a 3D rgba16Float texture), after the columns.
     static let feSlot = 6
+    /// ★ X1 VERIFY: the walls' heat tables (FlexibleWallHeat), one per face slot, after the FE field (7…10).
+    static let heatSlot = 7
 
     /// The field, the squish and the march — everything but the entry points.
     static let fieldSource = """
@@ -87,7 +91,8 @@ enum FlexibleLatticeShader {
         float4 sparse, dense;             // LatticeStructureColour.pale / FlexibleLatticePass.denseWall
         float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span); ★ batch M: z = 1: the
                                           // walls take the Stress rainbow, w = its gain (1: the FE texture's
-                                          // w is already von Mises / the field's own top)
+                                          // w is already von Mises / the field's own top); ★ X1 verify: z = 2:
+                                          // the walls take the HEAT of their column, w = 1 / the legend's top (mm)
         float4 tail;
     };
 
@@ -411,6 +416,32 @@ enum FlexibleLatticeShader {
                      : flx_field(U, rmT, dsT, pb.p0, st.L);
     }
 
+    // ── ★ ROUND 7, X1 VERIFY — THE HEAT ON THE WALLS (FlexibleWallHeat.value, the twin) ─────────
+    // His words (2026-10-14): "X-ray mode should show the inside of the SOLID showing the extent of the face prism/bend
+    // amount/heat map etc." A wall at REST point p takes the squish of the pressed face's COLUMN it stands in — the number
+    // the face's heat map is coloured by there — the largest over the faces whose column holds it; 0 under no column. The
+    // cell is found as the squish finds it (flx_pullback): (iu, iv) = floor((u, v) / pitch), a column where the table's
+    // alpha says one exists, t within its [entry, exit] (± the slack: a wall cut at the pressed face's own surface).
+    static float flx_wall_heat(constant FlxUniforms& U, array<texture2d<float>, 4> cols, array<texture2d<float>, 4> heats,
+                               float3 p) {
+        float h = 0.0f;
+        for (int f = 0; f < 4; ++f) {
+            FlxFace F = U.faces[f];
+            if (F.extent.x < 0.5f || F.extent.y < 0.5f || !(F.load.w > 0.0f)) continue;   // an empty slot
+            float3 d = p - F.centroid.xyz;
+            float t = dot(d, F.load.xyz);
+            float u = dot(d, F.xAxis.xyz) - F.xAxis.w;
+            float v = dot(d, F.yAxis.xyz) - F.yAxis.w;
+            int iu = int(floor(u / F.load.w)), iv = int(floor(v / F.load.w));
+            if (iu < 0 || iv < 0 || iu >= int(F.extent.x) || iv >= int(F.extent.y)) continue;
+            float4 c = cols[f].read(uint2(uint(iu), uint(iv)));
+            if (c.a < 0.5f) continue;   // (1 + jump where a column is, −jump where none)
+            if (t < c.g - \(FlexibleWallHeat.spanSlackMM)f || t > c.b + \(FlexibleWallHeat.spanSlackMM)f) continue;
+            h = max(h, heats[f].read(uint2(uint(iu), uint(iv))).r);
+        }
+        return h;
+    }
+
     // ── the march ────────────────────────────────────────────────────────────────────────
     // status: 0 = left the box (a true miss), 1 = hit, 2 = ran out of steps
     struct FlxHit { int status; float3 p; };
@@ -505,7 +536,8 @@ enum FlexibleLatticeShader {
                                  texture3d<float> rmT [[texture(0)]],
                                  texture3d<float> dsT [[texture(1)]],
                                  array<texture2d<float>, 4> cols [[texture(2)]],
-                                 texture3d<float> feT [[texture(6)]]) {
+                                 texture3d<float> feT [[texture(6)]],
+                                 array<texture2d<float>, 4> heats [[texture(7)]]) {   // ★ X1 verify: the walls' heat
         float3 ro = F.eye.xyz;
         float3 rd = normalize(F.rayDir.xyz + F.rayX.xyz * in.uv.x + F.rayY.xyz * in.uv.y);
         FlxHit h = flx_march(U, rmT, dsT, cols, feT, ro, rd);
@@ -526,7 +558,8 @@ enum FlexibleLatticeShader {
         if (eyeN.z < 0.0f) { eyeN = -eyeN; }
         // the colour: the octet's lightness-by-density ramp, at the REST point's ρ
         float3 p0 = flx_pullback(U, cols, feT, h.p).p0;
-        float rho = flx_sample2(rmT, U.rmO, U.rmN, p0).x;
+        float2 rmAt = flx_sample2(rmT, U.rmO, U.rmN, p0);
+        float rho = rmAt.x;
         float span = F.rhoSpan.y - F.rhoSpan.x;
         float frac = span > 1e-4f ? clamp((rho - F.rhoSpan.x) / span, 0.0f, 1.0f) : 0.0f;
         FlxGBuf o;
@@ -547,6 +580,12 @@ enum FlexibleLatticeShader {
             constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
             float vm = feT.sample(smp, ((p0 - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).w;
             albedo = flx_rainbow(vm * F.rhoSpan.w);
+        }
+        // ★ ROUND 7, X1 VERIFY: Heat on — the wall takes the squish of its column (the dent's rainbow, the legend's scale);
+        // inside the region the printed finish too (Rim's bands, Skin's sheet squish with it); the pocket's own wall and
+        // floor stay the body's clay
+        if (F.rhoSpan.z > 1.5f && (!printedHit || rmAt.y >= 0.5f)) {
+            albedo = flx_rainbow(flx_wall_heat(U, cols, heats, p0) * F.rhoSpan.w);
         }
         o.albedo = float4(albedo, 1.0f);
         // ★ BATCH M VERIFICATION: with the solid dent planes' depth in this buffer (flx_map_depth), a wall's
@@ -682,6 +721,18 @@ enum FlexibleLatticeShader {
         if (id >= count) return;
         FlxStep st;
         out[id] = flx_deformed(U, rmT, dsT, cols, feT, pts[id].xyz, st);
+    }
+
+    // ★ X1 VERIFY: the walls' heat at each REST point (FlexibleWallHeat.value, the twin)
+    kernel void flx_heat_probe(const device float4* pts [[buffer(0)]],
+                               device float* out [[buffer(1)]],
+                               constant FlxUniforms& U [[buffer(2)]],
+                               constant uint& count [[buffer(3)]],
+                               array<texture2d<float>, 4> cols [[texture(2)]],
+                               array<texture2d<float>, 4> heats [[texture(7)]],
+                               uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        out[id] = flx_wall_heat(U, cols, heats, pts[id].xyz);
     }
 
     // ★ BATCH G: deformed → rest, the pulled-back point itself (xyz) and its step scale (w)

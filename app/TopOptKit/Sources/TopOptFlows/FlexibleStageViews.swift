@@ -152,6 +152,8 @@ struct FlexibleStageViewButtons: View {
         guard model.playingGroup?.kind == .edges else { return nil }
         if v == .heatOff { return views.heatScope != .off ? FlexibleRowCopy.noHeatYet : nil }
         if v == .bend { return views.contains(.bend) ? FlexibleRowCopy.noBendYet : nil }
+        // ★ X1 VERIFY: X-ray's prism is the bend — none yet on an edges group, said as Bend says it
+        if v == .xray { return views.contains(.xray) ? FlexibleRowCopy.noBendYet : nil }
         return nil
     }
     /// His 3 s hold on [Heat]: every group's heat.
@@ -196,6 +198,23 @@ enum FlexibleLegendViewRows {
         }.allowsHitTesting(false))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("flexible-legend-prisms-row")
+    }
+
+    /// ★ X1 VERIFY: X-ray's bend prism — "▮ Prism = bend at full load" (the swatch is the prism's own glass), "…, less than
+    /// drawn" when the sim's bend is well short of his curve.
+    @MainActor
+    static func bend(short: Bool) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(Color(red: Double(FlexibleBendPrism.tint.x), green: Double(FlexibleBendPrism.tint.y),
+                                                         blue: Double(FlexibleBendPrism.tint.z)).opacity(0.85))
+                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(DS.Color.textPrimary.color, lineWidth: 1))
+                .frame(width: 10, height: 12)
+            Text(FlexibleRowCopy.legendBendRow(short: short))
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flexible-legend-bend-row")
     }
 
     @MainActor

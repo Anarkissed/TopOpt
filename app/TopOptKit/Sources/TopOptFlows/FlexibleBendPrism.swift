@@ -5,7 +5,9 @@
 // ★ THE BEND AS A PRISM: the current group's (the open tab's — FlexibleStageModel.playingGroup) pressed faces AT REST, the
 // same faces BENT at full depth (k × the dent at full load, the page's one k), and the skirt between them along the group's
 // outline — one shell (FaceOffsetShell: base = rest, offset = bent), drawn by MetalMeshView's clearance pass in the
-// face-prism's purple, faint, through the X-ray ghost. A pinch's two faces are two prisms in the one shell. An
+// face-prism's purple, faint, through the X-ray ghost (★ X1 VERIFY: a NEUTRAL glass — the violet vanished on the heat's
+// blue, his Group 1's prism unseen under the Top's heat; and its number, in a box, at its deepest point, with the ONE card's
+// row). A pinch's two faces are two prisms in the one shell. An
 // edges/corners group has no press stacks yet (AP9): no prism.
 // ★ WELDED: the overlay's map quads are flat (each triangle its own corners), so its corners are welded by rest position
 // (to 1 µm) — the skirt then rides only the group's outline (the edges used by one triangle), and a corner's bend is the
@@ -13,6 +15,7 @@
 
 import Foundation
 import simd
+import TopOptDesign
 
 @MainActor
 enum FlexibleBendPrism {
@@ -22,15 +25,38 @@ enum FlexibleBendPrism {
     static let weldMM: Float = 0.001
     private static var cache: (key: String, item: ClearanceRenderItem?)?
 
-    /// ★ X1 VERIFY (stub): the prism's number, read-only, at its deepest point.
+    /// ★ X1 VERIFY (the verify: "nothing says how deep it is … He has no way to tell what the purple slab measures"; his
+    /// rule: numbers are boxes): the prism's number, read-only, at its deepest point (the floor — where the bend ends).
     struct Tag: Equatable {
         let text: String
         let anchor: SIMD3<Float>
         let depthMM: Double
     }
-    static func tag(_ item: ClearanceRenderItem?) -> Tag? { nil }
-    /// ★ X1 VERIFY (stub): the bend is short of what he drew.
-    static func shortOfDrawn(model m: FlexibleStageModel, depthMM: Double) -> Bool { false }
+    static func tag(_ item: ClearanceRenderItem?) -> Tag? {
+        guard !controlFirstBuild, let item, case .shell(let sh) = item.volume.shape, !sh.base.isEmpty, sh.base.count == sh.offset.count
+        else { return nil }
+        var best = 0, far: Float = -1
+        for i in sh.base.indices { let d = simd_length(sh.offset[i] - sh.base[i]); if d > far { far = d; best = i } }
+        return Tag(text: String(format: "%.1f mm", sh.reachedDepthMM), anchor: sh.offset[best], depthMM: sh.reachedDepthMM)
+    }
+    /// ★ X1 VERIFY (the verify: his Group 1's prism 3.8 mm beside its 12 mm Deepest squish, nothing said): the bend at full
+    /// load (the 3D sim's, when it is current) is well short of the curve he DREW on the open group's faces — the deepest
+    /// number the page's heat shows for them — by more than 10 % and 0.5 mm.
+    static func shortOfDrawn(model m: FlexibleStageModel, depthMM: Double) -> Bool {
+        guard let g = m.playingGroup else { return false }
+        let regions = Set(g.regions)
+        let shown = FlexibleShownValues(model: m, drawnLattice: nil)
+        var drawn = 0.0
+        for (k, vals) in shown.values where regions.contains(k.region) {
+            for v in vals { if case .depth(let d) = v { drawn = Swift.max(drawn, d) } }
+        }
+        return depthMM < 0.9 * drawn && drawn - depthMM > 0.5
+    }
+    /// ★ X1 VERIFY: the glass — a neutral white, far from every colour of the heat's rainbow (the violet sat on its blue).
+    static var tint: SIMD3<Float> {
+        controlFirstBuild ? FlexibleStageStyle.facePrismTint
+            : SIMD3(Float(DS.Color.textPrimary.r), Float(DS.Color.textPrimary.g), Float(DS.Color.textPrimary.b))
+    }
     /// Test control only (X1 verify): X1's first build — the violet prism, no number, no legend row.
     static var controlFirstBuild = false
 
@@ -46,7 +72,7 @@ enum FlexibleBendPrism {
         }
         guard !ranges.isEmpty else { return nil }
         var h = Hasher()
-        h.combine(o.mesh.signature.contentHash); h.combine(k)
+        h.combine(o.mesh.signature.contentHash); h.combine(k); h.combine(controlFirstBuild)
         for r in ranges { h.combine(r.lowerBound); h.combine(r.upperBound); var i = r.lowerBound; while i < r.upperBound { h.combine(d[3 * i]); h.combine(d[3 * i + 2]); i += 7 } }
         let key = "\(h.finalize())"
         if let c = cache, c.key == key { return c.item }
@@ -78,7 +104,7 @@ enum FlexibleBendPrism {
         let deepest = zip(base, offset).map { Double(simd_length($1 - $0)) }.max() ?? 0
         guard deepest > 1e-4 else { cache = (key, nil); return nil }
         let shell = FaceOffsetShell(base: base, offset: offset, indices: idx, reachedDepthMM: deepest)
-        let item = ClearanceRenderItem(volume: .shell(faceID: -1, shell: shell), selected: false, tint: FlexibleStageStyle.facePrismTint,
+        let item = ClearanceRenderItem(volume: .shell(faceID: -1, shell: shell), selected: false, tint: tint,   // ★ X1 VERIFY: neutral glass
                                        faceAlpha: faceAlpha, edgeAlpha: edgeAlpha)
         cache = (key, item)
         return item

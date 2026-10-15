@@ -51,6 +51,10 @@ extension FlexibleMainStage {
     public func toggleLatticeView() {
         if controlViewsForceXray { if wallsShown { latticeOn = false } else { showLatticeView() }; return }
         latticeOn = !latticeShown
+        // ★ X1 VERIFY (the verify: under Covered — every new project's finish — the icon lit and unlit with no visible change):
+        // Covered hides the lattice out of X-ray (the print) — say so at once, with the one-tap fix (X-ray). Never X-ray by
+        // itself. RED CONTROL `controlNoCoveredNote`.
+        if latticeShown, !xrayOn, !finishLeavesLatticeOpen, !controlNoCoveredNote { note.post(.coveredHidesLattice) }
     }
 
     /// The sims are running or refining — the Play icon carries a small ring, so the status the hidden bar's note gave is

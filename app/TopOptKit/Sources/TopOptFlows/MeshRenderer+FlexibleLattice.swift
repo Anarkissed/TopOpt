@@ -132,6 +132,11 @@ extension MeshRenderer {
         if pass.ghostWalls != inputs.ghostWalls { pass.ghostWalls = inputs.ghostWalls; changed = true }
         if pass.stressWalls != inputs.stressWalls { pass.stressWalls = inputs.stressWalls; changed = true }
         if pass.printed != inputs.printed { pass.printed = inputs.printed; changed = true }   // ★ ROUND 7, X1: the printed view
+        // ★ ROUND 7, X1 VERIFY: the walls' heat (Heat on, the walls drawn) — once per table, and again when the faces change
+        if pass.heat?.token != inputs.heatWalls?.token || pass.heatFacesToken != pass.facesToken {
+            pass.applyHeat(inputs.heatWalls)
+            changed = true
+        }
         if pass.hidden != inputs.hidden {
             pass.hidden = inputs.hidden
             changed = true

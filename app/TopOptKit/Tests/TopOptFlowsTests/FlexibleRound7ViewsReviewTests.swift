@@ -29,7 +29,8 @@ extension FlexibleRound7ViewsTests {
     /// 'covered'." R7-V's review made X-ray's DEFAULT follow the finish (on for None / Rim / Skin — the stopgap); X1 retires
     /// it: off for every finish, and the walls are drawn out of X-ray (the printed view) unless the finish is Covered.
     /// RED CONTROL `controlXrayByFinish` (the stopgap: X-ray on for his None pad).
-    func testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered() async throws {
+    /// ★ X1 VERIFY: renamed (was `testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testXrayOpensOffWhateverTheFinish() async throws {
         let (r, s, m) = try await hisPad()
         let p = r.project
         XCTAssertEqual(m.settings.finishMode, .none, "premise: his pad is saved with Finish None (pure lattice)")

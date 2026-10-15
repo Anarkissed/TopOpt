@@ -118,8 +118,11 @@ extension FlexibleMainStage {
         }
     }
 
-    /// ★ X1 VERIFY (stub): the Covered note's tap.
-    public func coveredNoteTapped() {}
+    /// ★ X1 VERIFY: the Covered note's one tap — X-ray on (the lattice inside the skin), the note gone.
+    public func coveredNoteTapped() {
+        note.clear()
+        if !xrayOn { xrayOn = true }
+    }
 
     /// The note's [Show]: the view on, the note gone.
     public func showFromNote() {
@@ -185,7 +188,12 @@ struct FlexibleMainNoteView: View {
         if let k = note.kind {
             let showable = k == .ready && !main.latticeIconLit   // ★ X1: [Show] while his Lattice view is off
             Group {
-                if showable {
+                if k == .coveredHidesLattice {
+                    // ★ X1 VERIFY: the whole note is the fix — X-ray
+                    Button { main.coveredNoteTapped() } label: { capsule(k, showable: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-main-note-xray")
+                } else if showable {
                     // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)
                     Button { main.showFromNote() } label: { capsule(k, showable: true) }
                         .buttonStyle(.plain)
@@ -202,7 +210,7 @@ struct FlexibleMainNoteView: View {
 
     private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : (k == .coveredHidesLattice ? FlexibleMainViewToggles.xrayIcon : "hourglass"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
             Text(FlexibleMainNote.line(k))
@@ -211,7 +219,7 @@ struct FlexibleMainNoteView: View {
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("flexible-main-note")
             if showable {
-                Text("Show")
+                Text(k == .coveredHidesLattice ? FlexibleRowCopy.coveredHidesLatticeAction : "Show")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DS.Color.accent.color)
             }

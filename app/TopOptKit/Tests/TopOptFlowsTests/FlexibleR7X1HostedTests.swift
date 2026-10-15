@@ -214,14 +214,17 @@ final class FlexibleR7X1HostedTests: XCTestCase {
                 let c1 = Self.differing(r7v, plain, where: fp.strips)
                 lines.append("control (img5): R7-V's rule inside \(String(format: "%.1f", 100 * c1.share)) % differ")
                 XCTAssertLessThan(c1.share, 0.60, "★ RED CONTROL: R7-V's rule shows no lattice inside the strips")
-                // X-ray: R7-V's X-ray frame, byte for byte (the printed gate is off there)
+                // X-ray (Heat off): the printed view's switch does not reach X-ray's frame — the same frame with R7-V's rule forced.
+                // ★ X1 VERIFY (the verify: both frames come from X1's own build, so this cannot show "R7-V's frame"): that the
+                // frame IS R7-V's rests on code reading — every new branch keys on shape2.w (0 in X-ray) and compose(open: nil) —
+                // not on this assertion. With Heat ON the X-ray frame is no longer R7-V's: the walls wear the heat (X1 verify).
                 s.xrayOn = true
                 let xr = try frame(s, p, n: n, device: device)
                 s.controlNoPrintedView = true
                 let xrR7V = try frame(s, p, n: n, device: device)
                 s.controlNoPrintedView = false
                 s.xrayOn = false
-                XCTAssertEqual(xr.px, xrR7V.px, "★ X-ray: R7-V's frame, byte for byte")
+                XCTAssertEqual(xr.px, xrR7V.px, "★ X-ray (Heat off): the printed view's switch leaves X-ray's frame alone")
                 XCTAssertGreaterThan(Self.differing(xr, printed, where: fp.model).share, 0.3, "X-ray sees through the solid (not the printed view)")
             }
         }

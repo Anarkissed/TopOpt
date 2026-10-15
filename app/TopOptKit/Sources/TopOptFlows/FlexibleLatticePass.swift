@@ -380,14 +380,92 @@ final class FlexibleLatticePass {
     /// The frame uniform the last `encodeGBuffer` bound (tests read it back).
     private(set) var lastFrame: Frame?
 
-    // ── ★ ROUND 7, X1 VERIFY: THE HEAT ON THE WALLS (stub) ──
+    // ── ★ ROUND 7, X1 VERIFY: THE HEAT ON THE WALLS ──
+    /// Heat on and the walls drawn (the page's FlexibleLatticeLayerInputs.heatWalls): each wall takes the squish of the
+    /// pressed face's column it stands in — FlexibleWallHeat, one r32Float table per face slot (its own nu × nv) at textures
+    /// 7…10, the frame's rhoSpan z = 2, w = 1 / the legend's top. nil: the density ramp (or Stress's rainbow).
     private(set) var heat: FlexibleWallHeat?
-    func applyHeat(_ h: FlexibleWallHeat?) {}
-    /// The walls' colour for this frame, the frame's `rhoSpan` (x, y = the in-mask ρ span; z = 0 density, 1 Stress; w = its
-    /// gain) (stub: today's).
-    func wallColourMode() -> SIMD4<Float> { SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1) }
-    /// `flx_wall_heat` at each rest point (stub).
-    func probeHeat(_ points: [SIMD3<Float>]) -> [Float]? { nil }
+    private var heatTex: [MTLTexture] = []
+    /// The faces token the tables were built for (a pick re-uploads the faces — the tables follow them).
+    private(set) var heatFacesToken = -1
+    private(set) var heatUploadCount = 0
+    /// A 1×1 zero table for the slots no face uses (bound on every draw; the shader never reads an empty slot).
+    private lazy var emptyHeat: MTLTexture? = {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: 1, height: 1, mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var zero: Float = 0
+        t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 4)
+        return t
+    }()
+
+    /// The walls' heat tables for the faces uploaded now (nil, or no face: none). Once per (table, faces) —
+    /// MeshRenderer.applyFlexibleLattice.
+    func applyHeat(_ h: FlexibleWallHeat?) {
+        heatFacesToken = facesToken
+        guard let h, h.topMM > 0, !faces.isEmpty else { heat = nil; heatTex = []; return }
+        let tables = faces.enumerated().compactMap { i, f in makeHeatTable(f, i < h.cells.count ? h.cells[i] : []) }
+        guard tables.count == faces.count else { heat = nil; heatTex = []; return }
+        heat = h
+        heatTex = tables
+        heatUploadCount += 1
+    }
+
+    private func makeHeatTable(_ f: FlexibleSquishFace, _ cells: [Float]) -> MTLTexture? {
+        guard f.nu > 0, f.nv > 0 else { return emptyHeat }   // (an empty slot: never read)
+        let n = f.nu * f.nv
+        var v = (0..<n).map { k -> Float in k < cells.count && cells[k].isFinite ? Swift.max(0, cells[k]) : 0 }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: f.nu, height: f.nv, mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        v.withUnsafeMutableBytes { raw in
+            tex.replace(region: MTLRegionMake2D(0, 0, f.nu, f.nv), mipmapLevel: 0, withBytes: raw.baseAddress!, bytesPerRow: f.nu * 4)
+        }
+        return tex
+    }
+
+    /// Every declared heat slot bound: the faces' tables, the 1×1 placeholder elsewhere.
+    private func boundHeat() -> [MTLTexture?] {
+        var t: [MTLTexture?] = heatTex
+        while t.count < FlexibleLatticeShader.maxFaces { t.append(emptyHeat) }
+        return t
+    }
+
+    /// The walls' colour for this frame, the frame's `rhoSpan`: x, y = the in-mask ρ span; z = 0 the density ramp, 1 Stress
+    /// (w = 1: the FE texture is the fraction), ★ X1 verify: 2 the heat of their column (w = 1 / the legend's top).
+    func wallColourMode() -> SIMD4<Float> {
+        if stressWalls && feActive { return SIMD4(rhoSpan.x, rhoSpan.y, 1, 1) }
+        if let h = heat, h.topMM > 0, !heatTex.isEmpty, heatTex.count == faces.count {
+            return SIMD4(rhoSpan.x, rhoSpan.y, 2, 1 / h.topMM)
+        }
+        return SIMD4(rhoSpan.x, rhoSpan.y, 0, 1)
+    }
+
+    /// `flx_wall_heat` at each REST point (the tables bound now) — compare with `FlexibleWallHeat.value` on `faces`.
+    func probeHeat(_ points: [SIMD3<Float>]) -> [Float]? {
+        guard let pipe = try? computePipeline("flx_heat_probe"), !points.isEmpty, var u = frameUniforms(squish: 0),
+              heat != nil, let queue else { return nil }
+        let pts = points.map { SIMD4<Float>($0, 0) }
+        var n = UInt32(points.count)
+        guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
+              let outBuf = device.makeBuffer(length: points.count * 4, options: .storageModeShared),
+              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(pipe)
+        enc.setBuffer(inBuf, offset: 0, index: 0)
+        enc.setBuffer(outBuf, offset: 0, index: 1)
+        enc.setBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 2)
+        enc.setBytes(&n, length: 4, index: 3)
+        enc.setTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        enc.setTextures(boundHeat(), range: FlexibleLatticeShader.heatSlot..<(FlexibleLatticeShader.heatSlot + FlexibleLatticeShader.maxFaces))
+        let w = Swift.max(1, Swift.min(64, pipe.maxTotalThreadsPerThreadgroup))
+        enc.dispatchThreadgroups(MTLSize(width: (points.count + w - 1) / w, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        guard cmd.status == .completed else { return nil }
+        let ptr = outBuf.contents().bindMemory(to: Float.self, capacity: points.count)
+        return Array(UnsafeBufferPointer(start: ptr, count: points.count))
+    }
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -828,6 +906,7 @@ final class FlexibleLatticePass {
         enc.setFragmentTexture(ds, index: 1)
         enc.setFragmentTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
         enc.setFragmentTexture(boundFE, index: FlexibleLatticeShader.feSlot)
+        enc.setFragmentTextures(boundHeat(), range: FlexibleLatticeShader.heatSlot..<(FlexibleLatticeShader.heatSlot + FlexibleLatticeShader.maxFaces))   // ★ X1 verify
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         lastFrame = f
         return true

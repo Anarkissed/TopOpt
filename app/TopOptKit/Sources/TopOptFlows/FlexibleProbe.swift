@@ -423,12 +423,14 @@ public enum FlexibleMainTints {
 
     /// `roles`: a role colour wherever Flexible leaves the part clay (★ R7-V: the main page hands none — its model wears no
     /// role colour; batch V review's `rolesOverMarks`, for its "Role colours" toggle unticked, went with the toggle).
+    /// ★ X1 VERIFY: `lidWithoutHeat` — the walls carry the heat (FlexibleMainStage.lidWithoutHeat): the map's closed part
+    /// plain in the printed view, the map unflagged (a faint ghost skin) in X-ray.
     /// ★ ROUND 7, X1: `open` — the PRINTED VIEW (one flag per flat vertex, `overLattice`): the body's CLOSED surface flagged
     /// solid (it draws opaque through the see-through body and goes into the G-buffer — FlexibleLatticePass.encodeBody), the
     /// surface over the lattice region left open (the walls show), and no ghost anywhere.
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,
                                roles: [FaceID: SIMD4<Float>], stress: (field: LatticeDemandField, peak: Double)?,
-                               ghost: SIMD4<Float>?, open: [Bool]? = nil) -> [Float]? {
+                               ghost: SIMD4<Float>?, open: [Bool]? = nil, lidWithoutHeat: Bool = false) -> [Float]? {
         guard let mesh = overlay?.mesh ?? part else { return nil }
         let n = mesh.flat.vertexCount
         guard n > 0 else { return nil }
@@ -459,6 +461,15 @@ public enum FlexibleMainTints {
                 // ★ BATCH C VERIFICATION: held OPAQUE, like the heat it replaces — the map reads
                 // the same (and hides the same) whichever colouring it carries
                 out[v * 8 + 5] = 1
+            }
+        }
+        // ★ X1 VERIFY: the lid carries no heat — the printed view's solid part (its closed map) is the plain part; in X-ray
+        // the map is a faint skin in its heat colours (the walls wear the heat — FlexibleWallHeat), never an opaque lid
+        if lidWithoutHeat {
+            if let o = open, o.count == n {
+                for v in partVerts..<n where !o[v] { out[v * 8] = 0; out[v * 8 + 1] = 0; out[v * 8 + 2] = 0; out[v * 8 + 3] = 0 }
+            } else if ghost != nil {
+                for v in partVerts..<n { out[v * 8 + 5] = 0 }
             }
         }
         if let g = ghost { FlexibleOverlayMesh.markGhost(&out, colour: g) }

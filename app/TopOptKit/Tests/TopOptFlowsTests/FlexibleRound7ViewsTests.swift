@@ -288,9 +288,8 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         XCTAssertEqual(FlexibleMainViewToggles.buttons, 6, "★ Heat · Stress · Lattice · Prisms · X-ray · Play")
         let (r, s, m) = try await hisPad()
         let p = r.project
-        // ★ RE-PINNED (R7-V review — the verify on his pad, saved Finish None: X-ray off for every finish opened it as an opaque
-        // block with no lattice): X-ray's default follows the finish — OFF for Covered (pinned here), on for None / Rim / Skin
-        // (FlexibleRound7ViewsTests.testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered)
+        // ★ RE-PINNED (R7-V review): X-ray's default followed the finish. ★ X1 (his 2026-10-14 Q9 answer): X-ray is OFF by default
+        // for EVERY finish (FlexibleRound7ViewsReviewTests.testXrayOpensOffWhateverTheFinish); Covered is pinned here
         m.edit { $0.finish = FlexibleFinish.covered.rawValue }
         try await FlexibleSquishFixture.settle(m, "his pad, Covered")
         s.didExitSettings()

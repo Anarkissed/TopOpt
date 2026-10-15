@@ -54,7 +54,8 @@ extension FlexibleRound7ViewsHostedTests {
     /// see the lattice plus the solid." R7-V's review opened a None pad IN X-RAY so its lattice was not hidden (the stopgap,
     /// `xrayDefault`); X1 retires it: X-ray off, the printed view shows the walls. Covered (X-ray off): the plain model.
     /// RED CONTROL `controlNoPrintedView` (R7-V's rule: out of X-ray the walls were hidden under ANY finish — 0 px).
-    func testANonePadOpensInXrayAndXrayOffHidesTheWallsUnderAnyFinish() throws {
+    /// ★ X1 VERIFY: renamed (was `testANonePadOpensInXrayAndXrayOffHidesTheWallsUnderAnyFinish` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testANonePadOpensWithXrayOffItsLatticeSeenAndCoveredThePlainModel() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let s = FlexibleMainStage()
         let (r, m) = try hisPad(s)

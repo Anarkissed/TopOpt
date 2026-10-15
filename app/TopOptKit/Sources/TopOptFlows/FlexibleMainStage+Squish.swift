@@ -189,9 +189,20 @@ extension FlexibleMainStage {
     /// the band exists to refuse. A column the sim stretches reads 0. NaN off the group's faces.
     /// Cached per (overlay, field).
     func feMapValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [Float]? {
-        guard let o = overlay else { return nil }
+        guard let o = overlay, let perColumn = feColumnValues(f, m) else { return nil }
         let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
         if let c = feValueCache[f.versionKey], c.key == key { return c.values }
+        let out = o.mapCornerValues(perColumn, stacks: m.stacks)
+        feValueCache[f.versionKey] = (key, out)
+        return out
+    }
+
+    /// ★ X1 VERIFY: the compression per COLUMN of the field's group's faces (the numbers `feMapValues` blends at the map's
+    /// corners) — the walls' heat on the FE route. Cached per (overlay, field).
+    func feColumnValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [FlexFaceKey: [Double?]]? {
+        guard let o = overlay else { return nil }
+        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
+        if let c = feColumnCache[f.versionKey], c.key == key { return c.values }
         let keys = Set(m.lattice?.sims.first { $0.id == f.simID }?.keys ?? [])
         let ratio = 1 / Swift.max(1e-6, f.foldShare ?? 1)
         var perColumn: [FlexFaceKey: [Double?]] = [:]
@@ -202,9 +213,19 @@ extension FlexibleMainStage {
                 Swift.max(0, f.columnCompression(stack: st, col: c, pinched: c < pinched.count && pinched[c]) * ratio)
             }
         }
-        let out = o.mapCornerValues(perColumn, stacks: m.stacks)
-        feValueCache[f.versionKey] = (key, out)
-        return out
+        feColumnCache[f.versionKey] = (key, perColumn)
+        return perColumn
+    }
+
+    /// ★ X1 VERIFY: the walls' heat on the FE route — every face by its OWN group's field over the sequence on screen (the
+    /// union `feHeat` colours the map by). nil off the FE route.
+    func feColumnHeat(_ m: FlexibleStageModel) -> [FlexFaceKey: [Double?]]? {
+        guard fe.active, !controlColumnHeat else { return nil }
+        var out: [FlexFaceKey: [Double?]] = [:]
+        for i in (fe.shownSequence.isEmpty ? fe.sequence : fe.shownSequence) where i < fe.fields.count {
+            for (k, v) in feColumnValues(fe.fields[i], m) ?? [:] where out[k] == nil { out[k] = v }
+        }
+        return out.isEmpty ? nil : out
     }
 
     /// The FE heat of the sequence on screen: every face by its OWN group's sim (the pick's field; under

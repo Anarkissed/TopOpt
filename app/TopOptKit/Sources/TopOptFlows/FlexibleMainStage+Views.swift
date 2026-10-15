@@ -129,7 +129,9 @@ extension FlexibleMainStage {
         let feRoute = feStressRoute
         // ★ ROUND 7, X1: the printed view's open surface (over the lattice region), per flat vertex — nil out of it
         let open = printedOpen()
-        let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|"
+        // ★ X1 VERIFY: the lid carries no heat — the walls do (X-ray: a faint skin), or the printed view (its solid part is plain)
+        let bare = lidWithoutHeat
+        let key = "\(generation)|\(h.finalize())|\(showStress ? (feRoute ? fe.token : stressKey) : 0)|\(xray)|\(heat)|\(overlay != nil)|\(bare)|"
             + feBaseTints.keys.sorted().joined(separator: ",") + "|\(controlStressScaleIsPeak)|\(controlRound5Frames)|\(controlRolesOnMain)"
             + "|\(openCache.map { open != nil ? $0.key : "-" } ?? "-")"
         if key != composedKey {
@@ -147,7 +149,8 @@ extension FlexibleMainStage {
             }
             let first = (fe.shownSequence.first ?? fe.sequence.first).map { fe.fields[$0].versionKey }   // ★ N verification: as on screen
             composed = FlexibleMainTints.compose(base: c.tints, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil, open: open)
+                                                 roles: roles, stress: stressOf(first), ghost: xray ? FlexibleColours.ghost : nil, open: open,
+                                                 lidWithoutHeat: bare)
             // ★ ROUND 6 (his img1): no group frame in any view — round 5's paint is the red control's only
             if controlRound5Frames, let m = model { FlexibleGroupFrames.paint(&composed, overlay: overlay, model: m) }
             // ★ BATCH G VERIFICATION: "Play all" — each group's own colours, composed the same way; the
@@ -155,14 +158,16 @@ extension FlexibleMainStage {
             var per: [String: [Float]] = [:]
             for (id, base) in feBaseTints {
                 per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open)
+                                                    roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open,
+                                                 lidWithoutHeat: bare)
             }
             // ★ BATCH M (M3): Stress under Play all with Heat off — each turn its own stress too
             if showStress, feRoute, per.isEmpty, fe.sequence.count > 1 || !fe.retained.isEmpty, let base = c.tints {
                 for i in fe.sequence + fe.retained where i < fe.fields.count {
                     let id = fe.fields[i].versionKey
                     per[id] = FlexibleMainTints.compose(base: base, overlay: overlay, part: project.viewerMesh, heat: heat,
-                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open)
+                                                        roles: roles, stress: stressOf(id), ghost: xray ? FlexibleColours.ghost : nil, open: open,
+                                                 lidWithoutHeat: bare)
                 }
             }
             // ★ ROUND 6 (his img1): no Play-all turn wears a group frame either (the renderer swaps a turn's own
@@ -181,7 +186,7 @@ extension FlexibleMainStage {
     /// (FlexibleMainTints.overLattice) — while the printed view is DRAWN (`printedDrawn`); nil otherwise. Cached per overlay
     /// and lattice generation (a full pass over the overlay's vertices, never per body pass).
     func printedOpen() -> [Bool]? {
-        guard let m = model, printedDrawn(m), let o = overlay, let g = m.lattice else { return nil }
+        guard let m = model, printedReady(m), let o = overlay, let g = m.lattice else { return nil }   // ★ X1 VERIFY: the one rule
         let key = "\(overlaySerial)|\(g.generation)|\(o.mesh.flat.vertexCount)"
         if let c = openCache, c.key == key { return c.open }
         let open = FlexibleMainTints.overLattice(mesh: o.mesh, lattice: g.inputs)
@@ -215,9 +220,11 @@ extension FlexibleMainStage {
     public var legendKinds: [FlexibleReadKind] {
         guard let m = model else { return [] }
         var out: [FlexibleReadKind] = []
-        if heat, overlay?.flatStart.isEmpty == false, dentMaxMM > 0 { out.append(.dent) }
+        // ★ X1 VERIFY: the Squish row only with the heat DRAWN (the walls, or the lid — the 19:45 ruling); the density row
+        // not while the walls wear the squish
+        if heat, overlay?.flatStart.isEmpty == false, dentMaxMM > 0, heatDrawn { out.append(.dent) }
         if stress { out.append(.stress) }
-        if wallsShown, m.lattice != nil, !m.latticeIsStale, !m.latticeBuilding { out.append(.lattice) }
+        if wallsShown, m.lattice != nil, !m.latticeIsStale, !m.latticeBuilding, !heatOnWalls { out.append(.lattice) }
         return out
     }
 
@@ -449,7 +456,7 @@ extension FlexibleMainStage {
         guard let k = FlexibleReadKind(mode: mode) else { return true }
         // ★ BATCH M (M4): one card — while it reads and the walls are in it, a tap may land on a wall
         // (`readLattice` then reads the dent plane instead where one is what he sees)
-        return k == .lattice || legendKinds.contains(.lattice)
+        return k == .lattice || legendKinds.contains(.lattice) || heatOnWalls   // ★ X1 VERIFY: the walls carry the heat
     }
 
     /// H14 (S1 verification): the Flexible key's drill-in, for #354's `legendDrilledIn` — which is
@@ -476,9 +483,26 @@ extension FlexibleMainStage {
            ghostWalls || simd_dot(hit.point - p, simd_normalize(dir)) < 0 {
             if let r = surfaceReading(k, at: hit.point) { reading = r; return true }
         }
-        guard kind == .lattice || legendKinds.contains(.lattice), let g = shownLattice else { return true }
+        guard kind == .lattice || legendKinds.contains(.lattice) || heatOnWalls, let g = shownLattice else { return true }
+        let wallKind: FlexibleReadKind = heatOnWalls ? .dent : .lattice
         guard let r = FlexibleProbe.lattice(g.inputs, faces: g.squishFaces, squish: currentScale, at: p, fe: feShownField) else {
-            reading = FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
+            reading = FlexibleReading(kind: wallKind, value: "—", unit: wallKind.nothingHere, fraction: nil, anchor: p)
+            return true
+        }
+        // ★ X1 VERIFY: in the printed view the closed body is in the G-buffer too — a tap on it (outside the lattice region)
+        // is the solid part, not a wall: it does not squish, and it has no density
+        if let m = model, printedReady(m), FlexibleLatticeField.dRegion(r.rest, g.inputs) > 0 {
+            reading = heatOnWalls
+                ? FlexibleReading(kind: .dent, value: "0", unit: "mm · solid here", fraction: 0, anchor: p)
+                : FlexibleReading(kind: .lattice, value: "—", unit: FlexibleReadKind.lattice.nothingHere, fraction: nil, anchor: p)
+            return true
+        }
+        // ★ X1 VERIFY: Heat on — the wall reads the squish of its column (its colour), and its density
+        if heatOnWalls, let hw = wallHeatTable {
+            let mm = FlexibleWallHeat.value(at: r.rest, faces: g.squishFaces, cells: hw.cells) ?? 0
+            reading = FlexibleReading(kind: .dent, value: String(format: "%.1f", mm),
+                                      unit: FlexibleRowCopy.wallHeatUnit(densityPercent: Int((r.rho * 100).rounded())),
+                                      fraction: hw.topMM > 0 ? Double(Swift.min(1, Swift.max(0, mm / hw.topMM))) : 0, anchor: p)
             return true
         }
         // ★ BATCH M (M3): Stress colours the walls — the wall reads its group's von Mises at its rest point

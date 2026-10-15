@@ -613,7 +613,8 @@ final class FlexibleRound6HostedTests: XCTestCase {
     /// ★ R6 REVIEW: un-gated — `togglePrisms` is on this base (only its button waits for S1), so it is tested now.
     /// ★ RE-PINNED (R7-V — his 2026-10-14 words: "Please re-add the x-ray view icon"; C2 reversed): [Prisms] turns X-RAY on
     /// itself (a prism sits under its face, inside the part), no longer the Lattice view.
-    func testPrismsTurnsTheLatticeViewOnItself() throws {
+    /// ★ X1 VERIFY: renamed (was `testPrismsTurnsTheLatticeViewOnItself` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testPrismsLeavesXrayAsItIs() throws {
         let stage = FlexibleMainStage()
         let (_, m) = try his(stage)
         stage.latticeOn = false

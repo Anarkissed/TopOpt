@@ -243,7 +243,8 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     /// PLAIN show / hide — lit by his view (and a lattice to show), and it NEVER turns X-ray on (R7-V's "lit while its walls
     /// are seen … turning it on turns X-ray on", reversed). RED CONTROL `controlViewsForceXray` (R7-V's rule).
     @MainActor
-    func testTheLatticeViewTurnsXRayOn() {
+    /// ★ X1 VERIFY: renamed (was `testTheLatticeViewTurnsXRayOn` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testTheLatticeViewNeverTurnsXRayOn() {
         let stage = FlexibleMainStage()
         XCTAssertTrue(stage.latticeShown && !stage.xray, "the default: the lattice view on, X-ray off")
         XCTAssertTrue(stage.latticeIconLit, "★ X1: the Lattice icon is lit by his view")
