@@ -102,6 +102,19 @@ public final class FlexibleMainStage: ObservableObject {
     func printedDrawn(_ m: FlexibleStageModel) -> Bool {
         printedView && m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding && !frozen
     }
+    /// ★ X1 VERIFY (stub): one rule for the printed view's layer, body alpha and tints.
+    func printedReady(_ m: FlexibleStageModel) -> Bool { printedDrawn(m) }
+    /// Tests only (stub).
+    func dropOverlayForTests() {}
+    /// ★ X1 VERIFY, test control only: X1's first build — the layer read `printedDrawn && !pageUp`, the body alpha and the
+    /// tints `printedDrawn` (whose `frozen` lags a page by a turn).
+    var controlPrintedRulesApart = false
+    /// ★ X1 VERIFY (stub): the walls carry the heat.
+    public var heatOnWalls: Bool { false }
+    /// ★ X1 VERIFY, test control only: X1's first build — the heat only on the lid.
+    var controlHeatOnLid = false
+    /// ★ X1 VERIFY, test control only: no Covered note.
+    var controlNoCoveredNote = false
     /// The walls are SEEN: in X-ray, or (★ X1) in the printed view — the lattice legend shows then.
     public var wallsShown: Bool { latticeShown && (xray || (finishLeavesLatticeOpen && !controlNoPrintedView)) }
     /// ★ X1: the Lattice icon is a plain show / hide — lit by his view (and a lattice to show), never by X-ray (R7-V's handoff

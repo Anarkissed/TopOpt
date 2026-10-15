@@ -380,6 +380,15 @@ final class FlexibleLatticePass {
     /// The frame uniform the last `encodeGBuffer` bound (tests read it back).
     private(set) var lastFrame: Frame?
 
+    // ── ★ ROUND 7, X1 VERIFY: THE HEAT ON THE WALLS (stub) ──
+    private(set) var heat: FlexibleWallHeat?
+    func applyHeat(_ h: FlexibleWallHeat?) {}
+    /// The walls' colour for this frame, the frame's `rhoSpan` (x, y = the in-mask ρ span; z = 0 density, 1 Stress; w = its
+    /// gain) (stub: today's).
+    func wallColourMode() -> SIMD4<Float> { SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1) }
+    /// `flx_wall_heat` at each rest point (stub).
+    func probeHeat(_ points: [SIMD3<Float>]) -> [Float]? { nil }
+
     init(device: MTLDevice) throws {
         self.device = device
         let lib: MTLLibrary
@@ -802,7 +811,7 @@ final class FlexibleLatticePass {
         let pale = LatticeStructureColour.pale, dense = FlexibleLatticePass.denseWall
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
-        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1)   // ★ batch M (M3): w = 1, the texture is the fraction
+        f.rhoSpan = wallColourMode()   // ★ batch M (M3): z = 1 Stress (w = 1, the texture is the fraction)
         // ★ X1: the printed view's closed body first (its depth then culls every wall behind it, as the dent planes' does)
         if encodeBody(enc, depthState: depthState, eyeModel: b.eye, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
                       eyeNormalBasis: eyeNormalBasis) { mapDepthThisFrame = true }

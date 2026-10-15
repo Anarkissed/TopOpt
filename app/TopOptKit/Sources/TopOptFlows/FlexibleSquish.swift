@@ -270,6 +270,10 @@ public struct FlexibleLatticeLayerInputs: Equatable {
     /// with the printed solid (FlexibleLatticeField.printedSolid) and the closed body goes into the G-buffer
     /// (FlexibleLatticePass.encodeBody), so the solid part shows with the lattice where the finish leaves it open.
     public var printed = false
+    /// ★ ROUND 7, X1 VERIFY: THE HEAT ON THE WALLS — Heat on and the walls drawn (X-ray or the printed view): each wall takes
+    /// the squish of the pressed face's column it stands in (FlexibleWallHeat), on the dent's rainbow and the legend's scale.
+    /// nil: the walls by density (or Stress's rainbow).
+    public var heatWalls: FlexibleWallHeat?
 
     public init(lattice: FlexibleLatticeInputs, faces: [FlexibleSquishFace], token: Int, hidden: Bool = false,
                 loop: FlexibleSquishLoop? = nil, facesToken: Int? = nil) {
@@ -281,5 +285,6 @@ public struct FlexibleLatticeLayerInputs: Equatable {
         a.token == b.token && a.hidden == b.hidden && a.loop === b.loop && a.facesToken == b.facesToken
             && a.feToken == b.feToken && a.feSequence == b.feSequence
             && a.ghostWalls == b.ghostWalls && a.stressWalls == b.stressWalls && a.printed == b.printed
+            && a.heatWalls?.token == b.heatWalls?.token
     }
 }

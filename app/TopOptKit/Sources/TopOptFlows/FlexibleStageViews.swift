@@ -140,20 +140,25 @@ struct FlexibleStageViewButtons: View {
             var next = model.views
             next.heatTapped()
             model.views = next
-            if next.heatScope != .off { sayEdgesPending(FlexibleRowCopy.noHeatYet) }
+            if let line = Self.edgesPendingLine(v, views: next, model: model) { model.toast = line }
             return
         }
         model.toggleView(v)
-        if v == .bend, model.views.contains(.bend) { sayEdgesPending(FlexibleRowCopy.noBendYet) }
+        if let line = Self.edgesPendingLine(v, views: model.views, model: model) { model.toast = line }
+    }
+    /// The line a view's tap says on an edges/corners group (nothing to heat or bend until core builds press stacks — AP9),
+    /// or nil. `views`: the page's views after the tap.
+    static func edgesPendingLine(_ v: FlexibleStageViews, views: FlexibleStageViews, model: FlexibleStageModel) -> String? {
+        guard model.playingGroup?.kind == .edges else { return nil }
+        if v == .heatOff { return views.heatScope != .off ? FlexibleRowCopy.noHeatYet : nil }
+        if v == .bend { return views.contains(.bend) ? FlexibleRowCopy.noBendYet : nil }
+        return nil
     }
     /// His 3 s hold on [Heat]: every group's heat.
     private func held() {
         var next = model.views
         next.heatHeld()
         model.views = next
-    }
-    private func sayEdgesPending(_ line: String) {
-        if model.playingGroup?.kind == .edges { model.toast = line }
     }
 
     /// ★ R6 REVIEW: what each button shows — the prisms' purple arrow down to a line; his groups' three colours.

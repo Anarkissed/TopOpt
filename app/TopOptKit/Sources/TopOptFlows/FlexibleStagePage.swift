@@ -1085,6 +1085,9 @@ struct FlexibleLegend: View {
     var hasDent = true
     /// The page's exaggeration (the Prisms row's "×k").
     var k = 1
+    /// ★ X1 VERIFY: X-ray's bend prism (its legend row), and whether the bend is well short of the curve he drew.
+    var bendPrism = false
+    var bendShort = false
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
     /// the "TAP TO READ" line, the line, and half the gap under it).
     static let tabHeight: CGFloat = DS.Space.ml + 16
@@ -1092,7 +1095,7 @@ struct FlexibleLegend: View {
     /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
     /// ★ R7-V: the dent's rows only while his Heat view shows heat; the rows only for the views that have one (Prisms,
     /// Groups — Play and Bend have none).
-    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool {
+    static func shows(hasDent: Bool, views: FlexibleStageViews, bendPrism: Bool = false) -> Bool {
         (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups)
     }
 

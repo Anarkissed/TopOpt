@@ -22,6 +22,18 @@ enum FlexibleBendPrism {
     static let weldMM: Float = 0.001
     private static var cache: (key: String, item: ClearanceRenderItem?)?
 
+    /// ★ X1 VERIFY (stub): the prism's number, read-only, at its deepest point.
+    struct Tag: Equatable {
+        let text: String
+        let anchor: SIMD3<Float>
+        let depthMM: Double
+    }
+    static func tag(_ item: ClearanceRenderItem?) -> Tag? { nil }
+    /// ★ X1 VERIFY (stub): the bend is short of what he drew.
+    static func shortOfDrawn(model m: FlexibleStageModel, depthMM: Double) -> Bool { false }
+    /// Test control only (X1 verify): X1's first build — the violet prism, no number, no legend row.
+    static var controlFirstBuild = false
+
     /// The current group's bend prism, or nil (no group, no stack, no dent).
     static func item(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh?, dents: [Float]?, k: Double) -> ClearanceRenderItem? {
         guard let o, let d = dents, k > 0, let g = m.playingGroup, g.kind != .edges else { return nil }

@@ -54,5 +54,50 @@ extension FlexibleLatticePassTests {
         pass.printed = false
         XCTAssertEqual(try XCTUnwrap(pass.frameUniforms(squish: 0)).shape2.w, 0, "shape2.w = 0 otherwise (X-ray, the Squish page)")
     }
+
+    /// ★ X1 VERIFY — THE HEAT ON THE WALLS in both twins (the MSL `flx_wall_heat`, the Swift `FlexibleWallHeat.value`): two
+    /// pressed faces at right angles over the region-and-skin box (the top pressed down, the x = 0 side pressed in), each with
+    /// its own heat table (some cells with no column), sampled at the same rest points. RED controls inside: the tables in the
+    /// wrong face slots miss; with no table the frame stays on the density ramp.
+    func testTheWallHeatMatchesTheSwiftTwin() throws {
+        let pass = try FlexibleLatticePass(device: try Fx.device())
+        var topCells: [SIMD4<Float>] = []
+        for k in 0..<400 { topCells.append(SIMD4(2, 0, 20, k % 11 == 0 ? 0 : 1)) }
+        let top = FlexibleSquishFace(centroid: SIMD3(20, 20, 20), xAxis: SIMD3(1, 0, 0), yAxis: SIMD3(0, 1, 0), load: SIMD3(0, 0, -1),
+                                     uMin: -20, vMin: -20, pitchMM: 2, nu: 20, nv: 20, cells: topCells)
+        let side = FlexibleSquishFace(centroid: SIMD3(0, 20, 10), xAxis: SIMD3(0, 1, 0), yAxis: SIMD3(0, 0, 1), load: SIMD3(1, 0, 0),
+                                      uMin: -20, vMin: -10, pitchMM: 2, nu: 20, nv: 10,
+                                      cells: [SIMD4<Float>](repeating: SIMD4(3, 0, 30, 1), count: 200))
+        pass.upload(Fx.layer(Fx.regionAndSkinBox(.gyroid), faces: [top, side], token: 300))
+        let heat = FlexibleWallHeat(cells: [(0..<400).map { Float($0 % 37) * 0.2 }, (0..<200).map { Float($0 % 13) * 0.5 }], topMM: 8)
+        XCTAssertEqual(pass.wallColourMode().z, 0, "no table: the density ramp")
+        pass.applyHeat(heat)
+        let mode = pass.wallColourMode()
+        XCTAssertEqual(mode.z, 2, "★ a table: the walls take the heat")
+        XCTAssertEqual(mode.w, 1 / 8, accuracy: 1e-6, "★ …on the legend's scale (1 / its top)")
+        let pts = Fx.probePoints(3000, seed: 0x4EA7_0F_71)
+        let gpu = try XCTUnwrap(pass.probeHeat(pts), "★ the GPU's flx_wall_heat")
+        var worst: Float = 0, both = 0, none = 0, hot = 0
+        for (i, p) in pts.enumerated() {
+            let ref = try XCTUnwrap(FlexibleWallHeat.value(at: p, faces: pass.faces, cells: heat.cells))
+            worst = max(worst, abs(gpu[i] - ref))
+            let inTop = FlexibleWallHeat.value(at: p, faces: [top], cells: [heat.cells[0]]) ?? 0
+            let inSide = FlexibleWallHeat.value(at: p, faces: [top, side], cells: [[Float](repeating: 0, count: 400), heat.cells[1]]) ?? 0
+            if inTop > 0, inSide > 0 { both += 1 }
+            if ref == 0 { none += 1 } else { hot += 1 }
+        }
+        // ★ RED CONTROL: the tables in the wrong slots (the side's on the top) miss
+        let swapped = pts.indices.map { i -> Float in
+            let s = FlexibleWallHeat.value(at: pts[i], faces: [side, top], cells: heat.cells) ?? 0
+            return abs(gpu[i] - s)
+        }.max() ?? 0
+        print("FLEX-WALL-HEAT max |gpu − swift| \(worst) mm over \(pts.count) points (both faces \(both), none \(none), hot \(hot)); control (swapped slots) \(swapped) mm")
+        XCTAssertLessThanOrEqual(worst, 1e-4, "★ the wall heat drifted between the twins")
+        XCTAssertGreaterThan(both, 50, "the probe reaches walls under both faces (the larger wins)")
+        XCTAssertGreaterThan(none, 50, "…and walls under no column (0 mm)")
+        XCTAssertGreaterThan(swapped, 0.5, "★ RED CONTROL: the wrong slots miss")
+        pass.applyHeat(nil)
+        XCTAssertEqual(pass.wallColourMode().z, 0, "the table gone: the density ramp again")
+    }
 }
 #endif

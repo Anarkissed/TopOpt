@@ -61,7 +61,8 @@ public enum FlexibleLatticeView {
 /// The one-line note under the view row (his "notification … when it is ready").
 @MainActor
 public final class FlexibleMainNote: ObservableObject {
-    public enum Kind: Equatable, Sendable { case ready, building }
+    /// ★ X1 VERIFY: `coveredHidesLattice` — the Lattice icon turned on under Covered with X-ray off (FlexibleRowCopy).
+    public enum Kind: Equatable, Sendable { case ready, building, coveredHidesLattice }
     @Published public private(set) var kind: Kind?
     /// How many notes were posted (tests).
     var posts = 0
@@ -91,6 +92,7 @@ public final class FlexibleMainNote: ObservableObject {
         switch k {
         case .ready: return "Lattice ready"
         case .building: return "Still building \u{2014} it shows here when ready"
+        case .coveredHidesLattice: return FlexibleRowCopy.coveredHidesLattice
         }
     }
     /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is
@@ -115,6 +117,9 @@ extension FlexibleMainStage {
             openSettings()
         }
     }
+
+    /// ★ X1 VERIFY (stub): the Covered note's tap.
+    public func coveredNoteTapped() {}
 
     /// The note's [Show]: the view on, the note gone.
     public func showFromNote() {
