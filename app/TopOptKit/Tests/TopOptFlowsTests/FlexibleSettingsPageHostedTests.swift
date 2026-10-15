@@ -162,6 +162,7 @@ final class FlexibleSettingsPageHostedTests: XCTestCase {
         s.setFace(FlexibleFaceSettings(faceRegionID: top, weightKg: 10, deepestMM: 3))
         let project = try FlexibleHisProject.padProject(s)
         let m = settledModel(project)
+        m.views = []   // ★ RE-PINNED (round 7 batch F, his answer 12): the page opens with Heat off — his tap shows the heat (and its card)
         let h = host(FlexibleStagePage(project: project, model: m, onExit: {}), size: CGSize(width: 1032, height: 1376))
         pump(2.5)
         let open = try XCTUnwrap(local(h, "legend"), "the legend is shown (a dent)")

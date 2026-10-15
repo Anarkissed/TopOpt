@@ -234,7 +234,7 @@ final class FlexibleS1bMainTagsTests: XCTestCase {
         let face = try XCTUnwrap(t.face)
         XCTAssertTrue(leader.insetBy(dx: -1, dy: -1).contains(t.point) && leader.insetBy(dx: -1, dy: -1).contains(face),
                       "from the tag \(t.point) to the face \(face): \(leader)")
-        XCTAssertEqual(m.views, [], "never a view switch")
+        XCTAssertEqual(m.views, FlexibleStageModel.openingViews, "never a view switch")   // ★ F: the views as they open (Heat off)
         lines.append("hosted leader-3 \(leader.integral)")
         print("FLEX-S1bV-1 " + lines.joined(separator: " · "))
     }

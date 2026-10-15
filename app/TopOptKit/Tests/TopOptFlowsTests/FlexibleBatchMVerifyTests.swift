@@ -42,6 +42,9 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "his round 5")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (round 7 batch F, his answer 13: "first group as default. Hold for 3 seconds to view all."): "Play all"
+        // is his 3 s hold now, no longer the main page's default — this file pins Play all, so the fixture picks it
+        stage.pick(FlexibleSim.allID)
         // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; M6 and C2 reversed): X-ray is
         // his own icon again, off by default — batch M's verification pinned HIS X-ray view (the ghost body, the planes)
         stage.xrayOn = true

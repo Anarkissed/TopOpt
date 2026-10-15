@@ -1,6 +1,139 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 7 · batch M2 — the Squish page presses the lattice under a face-prism, and the edge strips are Flexible-only (2026-10-15) (read this first)
+## Round 7 · batch F — the Squish page's follow-ups from your 2026-10-14 answers (2026-10-15) (read this first)
+
+Round 7 step 2, the short follow-up batch in the reviewer's 19:45 order (trash confirm, empty-setup Exit, the Bend rules,
+your 19:24 answers). Branch `claude/flexible-screens` (PR #362), main worktree, commits `104ecaef` (tests first, against
+stubs), `c5dc8231` (the code and the re-pins) and this section's (three more re-pins, the runs and the hashes). It sits on M2 (below). App only: no #354, main or core file.
+
+**Nothing is pushed. Not installed** (none was asked for this batch). No pictures were made: every change is pinned by a model or
+hosted test, and the budget was tight.
+
+### What you will see, in plain words
+
+**On the Squish page**
+- **A group's trash asks first.** Tapping it puts one line in the panel's header: **"Delete Group 2? · [Delete] [Keep]"**
+  (your name for the group if you gave one: "Delete Thumbs?"). Only [Delete] deletes it, and one Undo brings it back.
+- **A face row's trash is now a small ⊖ (take out)**, smaller than the group's trash. It still takes only that face out.
+- **After Reset all you can leave with nothing set.** Exit reads "Save & Exit" (or "Exit" if nothing changed), never
+  "Fix 1 thing". The top line says **"Nothing to squish yet"**. It names no face (it no longer suggests the Top), has no
+  [Fix], and no pop-up opens on any tab.
+- **Tapping the Top after Reset all** starts Group 1 on the lattice part under your tap, at an **equal share** of the main
+  page's Top weight: 5 of 10 kg (11 of 22 lb) for each of the two lattice parts. Tapping the other part adds it at the other
+  half. M2 had already built this; the new test only confirms it.
+- **The face card's group chips show the names** ("Thumbs", "Group 2", "Group 3", "+ New"). They are squeeze-group names
+  only: the main page never shows them.
+- **With no view on you see only the curve**, with no colour. The page now opens with Heat off. Heat on shows the open
+  group's colour, and a 3 s hold shows every group's. Bend shows the bend, and Play plays the sim.
+- **Bend and Play are never on together.** Turning one on turns the other off, on both pages (the views are shared).
+- **With Bend on, everything drawn on the part sits where the bent part puts it:** the curves, the stamp and its handle,
+  the group discs and outlines, the prisms' faces and the glass. What stands *inside* the part stays put: a prism's floor,
+  its depth chip and the Prisms view's floor tags. The bent face comes down to meet them. Bend alone no longer hides the
+  curves and chip. The body is still drawn solid so the bent part reads.
+
+**On the main Lattice page**
+- **The heat follows the squeeze group of the face you last tapped**, and the first group until you tap one. A **3 s hold on
+  the heat icon shows every group's** heat (the icon fills and wears your groups' three colours). A tap hides the heat;
+  the next tap shows the selected group's again.
+- **The play bar has no group picker any more.** What plays is the same selected group, and every group in turn under the
+  hold. "Play all" used to be the default with two groups; it is now the hold.
+
+### Your words → the fix → the test (tests FIRST: 8 tests, 8 red, 48 failures — `round7/batch_f/r7f_red_run.txt`)
+| your words | the fix | pinned by (RED control inside) |
+|---|---|---|
+| "Group trash should confirm deletion." / the face-row trash looks different: yes | `askDeleteGroup` → `groupDeleteAsk` → the header's one line (`FlexibleSettingsPanel.groupDeleteConfirm`); `confirmDeleteGroup` / `keepGroup`; `FlexibleTrashGlyphs` (group "trash" 14 pt, face "minus.circle" 12 pt) | `FlexibleR7FTests.testTheGroupTrashAsksFirstAndTheFaceRowLooksDifferent` (RED `controlTrashDeletesAtOnce`: deleted at once); hosted: `FlexibleSqueezeGroupsUITests` / `ReviewUITests` click the trash, see the line, click [Delete] |
+| "Yes. Allow an *empty* setup after reset all." / the top line: "Do not." | `FlexibleSettingsExit.emptyLeaves` (nothing set and only "nothing pressed" stands): title / decide / `topLine` ("Nothing to squish yet"); no [Fix] (`noticeFix`), no pop-up (`popsAtOnce`) | `testAnEmptySetupMayExitAndATapOnTheTopStartsGroupOneAtItsShare` (RED `controlEmptyBlocks`: "Fix 1 thing" and today's line) |
+| answer 7 (clarified): an equal share per lattice part | already M2's (`FlexibleMainPageLoads`): the test pins it after Reset all — section 2000004 at 5.0 of 10 kg, linked to the Top, the other part at the other half, never the whole Top | same test (passed on the stubs: printed in the red run) |
+| face card group chips: show the group names | `FlexibleFaceGroupRow.options` labels = `groupName`; `menuTitle` by stored id | `testTheFaceCardsGroupChipsShowTheNames` (RED `controlChipsByNumber`) |
+| "If bend is on, all views move to the furthest bend. Always. Bend view and Play cannot be viewed simultaneously." | `FlexibleStageViews.toggle` (one rule; `toggleView` and the main page's `togglePlay` use it); `FlexibleBendPose` (the overlay mesh's nearest vertex × its displacement × k, the renderer's own; a point farther than one cell from the surface stays); the page poses the curve baselines, the stamp, the discs/outlines and the 3D items' bases; `overlaysHidden` is R7-V's rule only under `controlBendRestPose` (`bendAlone` keeps the opaque body) | `testBendAndPlayNeverShowTogether` (RED `controlBendWithPlay`), `testTheBendPoseMovesWhatIsDrawnOnThePart` (RED `controlBendRestPose`), `testOnHisPadTheFaceUnderTheBendMovesWithIt` (his pad, Face 4: its centres move up to 22.5 mm at k 1); hosted `testBendAloneKeepsWhatIsDrawnOnThePartAtTheFullBend` |
+| "The curve should be viewed as nothing but the curve without any view turned on. Turning heat map on shows colour…" | `FlexibleStageModel.openingViews` = Heat off | `testNoViewOnIsTheCurveOnly` (RED `controlHeatOnByDefault`) |
+| "Heat follows whatever group is selected, first group as default. Hold for 3 seconds to view all. No picker needed." + on the main page: the face last tapped; the hold there too | `FlexibleMainStage.heatSim` / `selectedSim` (hold → "Play all", tapped face's group, else the first); `noteMainTap` from H7's surface tap (`read`, gated on the Flexible page being up); `heatHeld` (the icon's 3 s hold); `FlexibleMainPlayerSlot.pickerSims` = none | `testTheMainPagesHeatFollowsTheLastTappedFacesGroup` (RED `controlPlayAllDefault`: Play all and the picker back) |
+
+### Rulings and rules this batch reverses (your words win)
+- **R7-S verify: Exit holds an empty setup ("Fix 1 thing")** → it leaves (answer 3).
+- **R7-S verify: on [Model] a blocker pops at once after Reset all** → nothing pops over the empty setup (answers 3, 9).
+- **R7-S: the trash deletes at once** → it asks first (answer 7a).
+- **R7-V: the page opens with the current group's heat** → Heat off (answer 12).
+- **R7-V: Bend alone hides the overlays; Bend + Play = a ghost** → overlays at the full bend; Bend and Play exclusive
+  (answer 5). `FlexibleBendGhost` stays in the code but never shows (Bend and Play can't both be on), apart from tests that
+  set both bits directly.
+- **Batch G: "Play all" is the main page's default with two groups; the main page's heat icon is a plain on/off; the group
+  picker in the bar** → the first group by default, the hold for all, no picker (answer 13 + clarification).
+
+### The re-pins (each attributed in the test)
+- `FlexibleR7SettingsHostedTests.testResetAllOnHisPadOpensNoPopUpOverModelAndNew`: Exit after Reset all reads "Save & Exit"
+  (was "Fix 1 thing"). Answer 3.
+- `FlexibleR7SettingsTests.testResetAllPopsNothingOverModelAndNew`: on [Model], nothing pops over the empty setup. R7-S's
+  pop is now `controlEmptyBlocks`, run inside. Answers 3 and 9.
+- `FlexibleSqueezeGroupsUITests` and `FlexibleSqueezeGroupsReviewUITests`: the trash click opens the line, and a click on
+  [Delete] deletes. The chips read ["Group 1", "+ New"]. Answers 7a and 10.
+- `FlexibleRound7ViewsHostedTests`:
+  - H4: opens with Heat off; a tap shows, a tap hides, a hold shows all (answer 12).
+  - H5: renamed `testBendAloneKeepsWhatIsDrawnOnThePartAtTheFullBend`. Bend alone draws the overlays (7221 px) and the prism
+    and glass. The bent page differs from the same page at the rest pose by 12752 px. R7-V's hide is the red control: 0 px and
+    no items. Answer 5.
+- `FlexibleRound7ViewsReviewHostedTests`: one premise reads `bendAlone` (the predicate's new name), and the reading test turns
+  Heat on before hosting (the page now opens with it off).
+- `FlexibleRound6Tests.testTheViewsAreNeverASettingAndNeverABuild` and `FlexibleRound6HostedTests` (selecting never switches
+  views): compared with `openingViews`.
+- `FlexibleSqueezeGroupsModelTests`: the main page's default is group 1 (answer 13).
+- Play-all fixtures (`FlexibleRound6HostedTests.mainStage`, `FlexibleSquishVerifyGTests.stage`,
+  `FlexibleSquishSolverTests.stage`): they pick "Play all" once, as his 3 s hold does. No assertion changes, except one
+  message that read "is the default".
+- After the suite (same answers): the `FlexibleBatchMVerifyTests.round5` fixture picks "Play all";
+  `FlexibleS1bMainTagsTests` compares the views with `openingViews`; `FlexibleSettingsPageHostedTests`' legend test turns
+  Heat on before hosting.
+- Source pins:
+  - `FlexibleMainPageHookTests`: the Exit lines now carry `empty: empty`.
+  - `FlexibleSettingsRound4Tests`: the stamp handle gets `pose: pose`.
+  - `FlexibleSquishTests`: `showing(selectedSim)`.
+  - The two Round 6 clearance-list pins are kept byte for byte (the pose is applied as a postfix, `.posed(by:)`).
+
+### #354 hooks
+None. `read` (H7) already runs on every surface tap. The tap note is Flexible-side, gated on the main Flexible page being up
+and the tapped project being the model's.
+
+### The bytes
+None of this reaches a job. The trash line, names, views, pose, heat selection and Exit title are all display or session
+state; the delete is R7-S's own path.
+- **FlexibleAngledGoldenTests:** 0 DIFFERS in both modes (SWIFT_DETERMINISTIC_HASHING=1: 38 identical; unseeded: 32
+  identical), the same counts as M2.
+- **The 16 stage-job hashes:** `round7/batch_f/stage_job_hashes_r7f.txt` is byte-identical to
+  `round7/merge/stage_job_hashes_r7merge.txt` (the whole file; 16 rows exit 0, plus the controls).
+
+### The runs
+`round7/batch_f/r7f_runs.txt`:
+- **Red run** (tests first, `104ecaef`): 8 tests, 8 red, 48 failures (`r7f_red_run.txt`).
+- **FlexibleR7FTests on the code:** 8/8.
+- **The touched classes:** 20 classes run first. The 14 that failed or were re-pinned were run again: all pass except the known
+  Play ring (display asleep).
+- **Goldens:** 0 DIFFERS in both modes.
+- **The 16 stage-job hashes:** byte-identical to r7merge.
+- **The targeted suite, once:** 189 classes (M2's 188 plus FlexibleR7FTests). 1273 test cases started, counted by their Test
+  Case lines, so the count is not comparable with M2's 1226. 58 skipped.
+  - The known failures: the refine line (8 asserts), the Play ring, and the sim-solve trigger.
+  - Three more classes still assumed the old defaults and were re-pinned: FlexibleBatchMVerifyTests (Play all),
+    FlexibleS1bMainTagsTests and FlexibleSettingsPageHostedTests (Heat on at open). Run again: 13 passed, 0 failed.
+  - No exit signal 11 this time. LatticeStaleTypeTests passed.
+
+### Not done / open
+- **Main page, after Reset all on the Squish page:** its status line reads the shared readiness and was not changed (only the
+  Squish page's Exit and top line were in scope). Not checked on screen.
+- **Selected group on the main page**: only a face IN a squeeze group moves it (a resting or unpressed face keeps the last).
+  The selection is not saved: a new session starts on the first group.
+- **The Squish page's own player** keeps its group picker. Only the main page's was asked for.
+- **X1 merge** (branch `claude/flexible-screens-r7x`, not merged): X1 noted "Squish page opens with Heat lit". This batch
+  fixes that. Expect overlapping hunks in FlexibleStagePage (views, overlays, top line) and FlexibleStageViews when merging.
+- The pose snaps a point to the nearest overlay vertex within one cell (diag/48, ≥ 1 mm). On a coarse overlay a point on the
+  surface far from any vertex stays at rest; a shallow prism's floor (less than one cell deep) moves with the face.
+
+### Questions for you
+1. With Bend on, should the depth chip and the floor tags also move? Today they mark the deepest squish inside the part, so the
+   bent face comes down to meet them.
+2. The main page's selected group isn't saved between sessions (it starts on the first group). Is that right?
+3. After Reset all, should the main page's status line also say "Nothing to squish yet"?
+
+## Round 7 · batch M2 — the Squish page presses the lattice under a face-prism, and the edge strips are Flexible-only (2026-10-15)
 
 Round 7 step 2b: his img3 words (the lattice section, not the model's whole top) and the reviewer's ruling 3 on the 2026-10-14
 outbox ("FLEXIBLE-ONLY sectors carried in the job, NOT Surface-stage sectors … If I2 already writes Surface sectors, move them
