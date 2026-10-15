@@ -1,6 +1,190 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 7 · batch M1 verify — with no face-prism nothing pretends to be ready; the main page never shows a squish number; [Prisms] shows every face-prism; the Export names groups by number (2026-10-14) (read this first)
+## Round 7 · batch M2 — the Squish page presses the lattice under a face-prism, and the edge strips are Flexible-only (2026-10-15) (read this first)
+
+Round 7 step 2b: his img3 words (the lattice section, not the model's whole top) and the reviewer's ruling 3 on the 2026-10-14
+outbox ("FLEXIBLE-ONLY sectors carried in the job, NOT Surface-stage sectors … If I2 already writes Surface sectors, move them
+to Flexible-only and say what moved"). Branch `claude/flexible-screens` (PR #362), main worktree, commits `d87e97a9` (tests
+first), `b8142d3e` (the code, the re-pins and the evidence probe), `a22c34f8` (two goldens re-recorded under ruling 3 — see the bytes) (the code and the re-pins) and this section's. It sits on the M1 verify (below).
+
+**Nothing is pushed.** **Not installed:** this run built and tested only (no simulator install was asked for). The app was never launched. Every picture is offscreen: the Squish page hosted at 13"
+portrait (its own chrome — panel, top line, toast, legend card, view icons) over the part as the page's own MeshRenderer draws
+it; none is a device screenshot.
+
+### What you will see, in plain words
+
+Your live lattice (Group C = Face 3 + Face 5, Lattice at 25 mm) leaves the Top with lattice only in two 25 mm strips — one
+under each face-prism — and solid between them. Faces 0, 2 and 4 the same: a 25 mm lattice band at each end.
+
+- **A tap on the Top near Face 3 picks "Face 1 · lattice B"** — the 25 × 100 mm part of the Top that has lattice under it. Its
+  curves run along that part only (100 mm one way, 25 mm the other), its depth prism and its dent stand on it only, and the
+  solid middle never moves. (Before: the tap picked the whole Top and the curves ran 100 mm across the model — the red-control
+  picture.)
+- **A tap on the solid middle picks nothing.** One line appears under the top line: **"Solid here · only face-prisms get
+  latticed"** with one button, **[Go to Lattice]**, which leaves the Squish page for the main Lattice page (where face-prisms are
+  set). Your edits are kept; nothing is baked.
+- **The Top's 22 lb presses both lattice parts, 11 lb each** — your answer 7 ("an equal share per lattice part … whatever their
+  size"). With Face 5's face-prism at 10 mm the parts are 25 and 10 mm wide: still 11 + 11.
+- **A face you pressed whole before you set the face-prisms now presses its lattice parts** (your pad: the Top, Faces 2 and 4).
+  Each part takes the face's settings (group, curves, deepest squish, weight link). A stamp stays stored where you drew it, but a
+  part whose lattice does not hold the stamp's centre is set to Curves, and the page says so once: "Stamp on solid · the
+  lattice part is Curves". The whole face is never left pressed beside its parts (core would refuse the job).
+- **Where a tap works:** a lattice part nobody presses wears a faint violet; the legend card adds one row, "Violet = lattice ·
+  tap to pick". The solid rest of the face stays the part's colour. Pressed parts show their heat as before.
+- **A face wholly inside one face-prism (Faces 3 and 5) is the face itself** — its id, its card, its job bytes as before. Two
+  face-prisms that together cover a face (your split top's halves) also leave it whole. A face with no lattice at all keeps its
+  card ("No lattice under it").
+- **A face-prism depth change keeps each lattice part and its curves** (the same part, the same id): Face 3 at 17.26 mm — the
+  Top's part is 17.26 × 100 mm, your curve kept.
+- **Edges and corners nest inside the lattice.** Edge 14 (Face 2 + Face 3 — on your live lattice it is numbered **Edge 16**: the
+  list follows the lattice parts) takes a 12.5 mm strip inside Face 2's 25 mm band (half the band) and a strip on Face 3; the band
+  keeps the rest. An edge whose lattice on a face lies in two places is refused ("Edge N · its lattice is in two places"); with a
+  face-prism set, an edge on a face with no lattice is greyed ("No lattice at Edge N · set a face-prism").
+- **What moved off the Surface stage:** the edge/corner STRIPS and their RESTS. Round 6 (I2) cut them into the Surface stage's
+  own regions, so they showed on the Surface stage and in Selections' Regions popover, and Topology, the lattice stage and the
+  Stress solve declared them in their jobs. Now they are Flexible-only: the Flexible stage never writes the Surface stage's
+  regions; the strips live on their presses and are cut, every time, on a private copy. A project I2 saved is moved once when it
+  opens — the Surface stage gets its regions back exactly as before the cut, the Flexible job declares the same strips (the same
+  cuts, bit for bit) under new ids, and a toast says "Edge strips now live on Flexible only". If something was already undoable
+  when the stage opened, the move rides your next Flexible edit instead (one undo step). **Your simulator's projects have no I2
+  strips** (checked on a read-only copy): nothing moves for you.
+
+### Your words → the fix → the test (each test runs its RED control inside; red run `round7/batch_m2/r7m2_red_run.txt`: 17 tests, 16 red, 66 failures)
+
+| words | fix | pinned by (RED control) |
+|---|---|---|
+| img3: "when I tapped the top, it selected the model's top face, rather than one of the lattice's top faces" | `FlexibleRegions.pressable` — a Flexible section under the point; a whole / unlatticed root as before; nil on the solid part of a partly latticed face | `FlexibleLatticeSectionsTests.testATapOnTheTopSelectsTheLatticeUnderIt` — 2 500 mm², core's stack 1024/1024 latticed, 25.00 mm across (RED `controlWholeFace`: Face 1, 4096 columns, 2048 latticed) |
+| img3 (the same) — the tap on solid | toast + `toastFix = .goToLattice`; the page draws [Go to Lattice] (the page's Exit, never the bake) | `…testATapOnTheTop…` (the line and the fix) and `FlexibleLatticeSectionsHostedTests.testASolidTapShowsTheLineAndOneFix` — the line ≤ 44, one line, the button 32 pt, its click leaves the page (RED: the whole Face 1 selected, no fix) |
+| img3: "the pressed curves continue right through the entire model rather than the lattice section. It must only be the lattice section - regardless of what shape it is" | the section IS the pressed region (core frames it); `prismColumns`/`prismFootprint` = the latticed columns; the solid rest of a sectioned face stays still in the dent (`FlexiblePageChannels.stillRule`) | `…testTheCurvesSpanOnlyTheLatticeSection` — every baseline point inside the section, 25 mm, prism = latticed columns, the middle's 4 part triangles: 0 corners moved (12 without the rule) (RED `controlWholeFace`: 100 mm baseline) |
+| ruling 3 (sections Flexible-only, carried in the job) | `FlexibleSectors.resolve` + `FlexibleLatticeSections` on a scratch copy; ids 2 000 000 + n; the run job declares the sections it presses | `…testTheJobDeclaresSectionsAndEveryOtherEntryIsByteIdentical` — faces 0, 3, 5 byte-identical in every send, 1, 2, 4 → two sections each, core parses (RED `controlWholeFace`: the whole Top an entry) |
+| D1: a face wholly inside is the face itself | whole test with every plane relaxed 1e-4 mm; prisms that together cover a root leave it whole | `…testAFaceWhollyInsideOnePrismIsTheFaceItself` — Faces 3, 5 regions 3, 5; the C1 pad and A1_0003 at 20 mm: 0 sectors (RED `controlAlwaysCut`: a Face 3 piece, its entry moves) |
+| answer 7: "an EQUAL SHARE PER LATTICE PART … whatever their size, only on the latticed parts" | `FlexibleMainPageLoads.derive`: area per root (lattice area), then equal per section, by area within a section | `…testTheTopsLoadPressesOnlyItsSectionsAtEqualShares` — 5 + 5 kg at 25/25 and at 25/10 mm; the bottom rests whole (RED `controlAreaShare`: 7.14 / 2.86) |
+| (the carry) no whole face beside its sections | `planCarry` at open, inside adopt's edit: copies on the root's lattice pieces, reframed through core | `…testTheCarryNeverLeavesTheWholeFaceBesideItsSections` — the stamp's point on the part unmoved < 1e-6 mm, Curves where the centre is solid, no shared surface (RED `controlNoCarry`: the Top + 2 sections loaded, shared surface (1, ·)×2) |
+| depth change keeps the section | role keys ("s:f1:<prism key>#0"), never geometry | `…testASectionKeepsItsIdAndCurvesThroughADepthChange` — same id, curve kept, 1 726 mm² (RED `controlFingerprintIDs`: 2000003 → 2000010) |
+| where a tap works | `sectionTints` (violet 0.35, flagged opaque through the X-ray), the legend row | `…testTheSquishPageTintsWhereTheLatticeIs` — Face 4's 6 band triangles violet, 4 middle untinted (RED: no tint) |
+| D6 strips nest in sections | each member's container = the section holding most of its area; refusals for new picks | `…testEdgesNestInsideTheLatticeSection` — 250 mm² inside the band, band = strip + rest, Face 5's band untouched, the two-places refusal (RED `controlWholeFace`: accepted, crossing the solid middle) |
+| ruling 3: the other stages never see a Flexible sector | no `project.faceRegions =` in Flexible code except the migration's give-back | `FlexibleSectorStoreTests.testTheSurfaceStageAndTopologyNeverSeeAFlexibleSector` (RED `controlSurfaceRoute`: Surface regions 1 → 7, Topology face_regions 1 → 7) and `testOnlyTheMigrationWritesTheSurfaceStagesRegions` (RED: today's tree had 3 writes) |
+| the store, old projects byte-identical | `FlexibleStageSettings.sectors` optional, omitted when nil, not in `designInputs` | `testOldProjectsDecodeAndEncodeByteIdentical` (RED: an empty store, +33 bytes) |
+| numbers never reused | `FlexibleSectorNumbers` (session memo seeded from the store) | `testNumbersNeverShiftOrRecycle` (RED `controlRecycle`: C takes B's number) |
+| ruling 3: "move them to Flexible-only and say what moved" | `FlexibleSectorMigration` (read-through; write at open with nothing undoable, else with the next edit; the Report) | `FlexibleSectorMigrationTests` ×3 — the cuts bit for bit, the Surface regions as before the cut, Topology/stage/Stress bytes as before the cut, the Report; the next-edit route and its one undo; a chain he uses elsewhere stays (RED `controlNoMigration`) |
+
+Tests corrected after the red run (their premises, said): the curve test's middle check reads the page's own dent for the Top's
+keys (a side face's lattice section ramps the Top's EDGE, as any pressed side face does); the job test compares sends by order
+(their titles name sections); the depth test sets Shape "curves" (a stamp with no shape reads as round 3's Stamp); the
+Surface-route control runs on whole faces (I2's candidates); the other stages' bytes are compared with sorted keys (RemoteRun
+writes a dictionary).
+
+### #354 / main hooks: NONE
+`git diff f7b83031..HEAD` on WorkspacePlaceholder, ProjectModel, LatticeSettings, MetalMeshView, SelectionModel, ForceModel,
+FaceRegion.swift and core/: empty. Their public APIs are only called (FaceRegionModel's union / splitManual / splitDetached /
+revertSplit / rename / setCollapsed on a COPY, `latticeJobRegions()`, `seedUndoBaseline()`, `canUndoNow`, `sealUndoStep()`,
+`wireOutlineLoops`, `LatticeRegionMask.basis`). Core 099dcaed is unchanged and takes every byte.
+
+### The bytes: what moves and what does not
+- **Every send core runs (the run jobs) is byte-identical** for every project whose pressed faces are whole: the C1 pad, his 0004
+  (both sends), his r5, A1_0002 / A1_0003 / A1_0004 as frozen. A run declares only the Flexible sectors its entries USE; a section
+  nothing presses is never in a run.
+- **Moves 1 — a pressed face partly under a face-prism** (his img3 words + ruling 3): its one entry becomes one entry per lattice
+  section, at its position, the weight split equally (answer 7). On his live lattice: Faces 1, 2 and 4 → two sections each;
+  Faces 0, 3 and 5 byte-identical in every send. `face_regions` gains the sections used (`add [face]`, the face-prism's cuts, no
+  `parent_id`), ids 2 000 000 + n. Pinned: `testTheJobDeclaresSectionsAndEveryOtherEntryIsByteIdentical` (core parses it).
+- **Moves 2 — the SCENE job declares every section, pressed or not** (so a tap can pick it and core can frame it). The one frozen
+  golden this moves is **his 0004**: its one face-prism (under Top A, x ≥ 50) leaves Faces 0, 2 and 4 half latticed, so its
+  scene job gains three entries (2000001 "Face 0 · lattice", 2000002 "Face 2 · lattice", 2000003 "Face 4 · lattice"; nothing
+  removed) and `frames_his_0004.txt` gains their three frames plus four `exitRegions` lines. Both modes failed on exactly these
+  two files, the same lines, before the re-record. **Re-recorded in `a22c34f8`** (RECORD=1 into a scratch copy: the other 24
+  files that run wrote are byte-identical to the committed ones), attributed in `angled_press_goldens/MANIFEST.txt`. His 0004's
+  two sends: unchanged. If you want the scene to declare a section only once it is pressed, revert `a22c34f8` with that change
+  (the cost: the scene re-opens on every tap of a new section).
+- **Moves 3 — I2 strips after the move:** their declarations go from 1 000 000 + id to 2 000 000 + n with the same name, add and
+  cuts (pinned bit for bit); I2's in-between split nodes are no longer declared (leaves only); a rest's face entry changes only
+  its `face_region_id`. Strip pieces stay declared-only (no press is sent until AP9).
+- **Moves 4 — Topology, the lattice stage and the Stress solve** of a project with I2 strips: back to their bytes before the cut
+  (the leak removed).
+- **Stays:** every whole face's entry; every Surface / face region declaration; the lattice subtrees (`sectors` is nil and
+  omitted, never in `designInputs`); old projects decode and re-encode byte-identical (A1_0003, his r5); **the 16 stage-job
+  hashes: `round7/batch_m2/stage_job_hashes_r7m2.txt` is byte-identical to `round7/merge/stage_job_hashes_r7merge.txt`** (the
+  whole file: 16 rows exit 0 + the controls).
+
+### Re-pins (each attributed in the test to ruling 3 / his img3 words)
+| test | was | now |
+|---|---|---|
+| FlexibleEdgeGroupsTests.testAnEdgePickPressesAStripOnEachFaceAndTheFaceGroupKeepsTheRest | the strip's cut in `project.faceRegions`, compared with commitSurfaceCut's leaves | the Surface regions untouched; the Flexible strip + rest compared cut for cut with commitSurfaceCut's leaves; the whole-face control stores no strip area |
+| FlexibleEdgeGroupsTests.testTheStripWidthReCutsOnChangeAsOneUndoStep | a re-cut gives new strip ids | the same Flexible ids (role keys), new cuts |
+| FlexibleR7SettingsTests.testResetAllLeavesOnlyModelAndNew | "the strip is cut" = `project.faceRegions` moved | the Surface regions untouched throughout; the Flexible strip there and gone |
+| FlexibleR7SettingsTests.testTheOpenGroupNeverShiftsAfterAnyChange, its RED control | ids by region: a re-cut rest had a new id | a Flexible rest keeps its id through a re-cut — the control's failure mode is gone (said in the test) |
+| FlexibleR7M1Tests.testHisFacePrismsLatticeOnlyUnderThem | `m.stack(1)` half latticed | the Top's two sections, each latticed, 5 000 mm² together, never the whole Top |
+| FlexibleR7M1Tests.testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections, RED control | the squish prism [1] | the Top's two sections' prisms |
+| FlexibleSqueezeGroupsReviewTests.testAMainPageHandMovesWholeSoOneGroupsForceLeavesTheOtherAlone | Group 1 = [3, 5] | [3, Face 5's lattice section] (Top B in the Top group gets the group's 4 mm prism: Face 5 is latticed in its top 4 mm only) |
+| FlexibleRound5SettingsVerifyTests.testATapOnThePartStartsTheNewGroupAndTheRowsAreHands | the whole Face 5 | Face 5's lattice section (the same fixture) |
+| FlexibleRound6HostedTests.testOneLegendCardCarriesTheViewRows | the legend's source line | + `sections: FlexibleLegend.sectionRow(model)` |
+| FlexibleBatchCVerifyTests.testTheStressColourUnderAPointIsTheNumberATapReadsThere, RED control premise | every vertex of the unsubdivided overlay ~0 MPa | the box's 8 corners ~0 MPa (his 0004's sections cut the overlay at x = 50: those cut vertices read up to half the peak) |
+
+### What his project does under M2 (his simulator's copy, read-only)
+His simulator store copied READ-ONLY (`simctl get_app_container 147E56A1… data`, copied to the scratchpad; nothing written there),
+run through the migration and the open (log: `r7m2_evidence_log.txt`, the `sim` lines):
+- **No project of yours has I2 strips: nothing moves off the Surface stage.** Your Surface regions are exactly as they were.
+- "Pad 100 x 100 x 20 (Flexible)" (A1_0003): its face-prisms make 8 lattice sections (Faces 0, 1, 2, 4: lattice A and B). At the
+  open the Top's Group 2 press is carried to its two sections, 1 lb each of its 2 lb (0.454 kg); Faces 3 and 5 stay whole and
+  pressed as before; the bottom rests whole.
+- "Pad split top (Flexible)" (A1_0004): no sections (Top A's and Top B's prisms cover every face it presses whole): as before.
+- The two M2 stands are not Flexible projects: untouched.
+
+### The pictures (`round7/batch_m2/`, his pad A1_0003 with his live lattice; log `r7m2_evidence_log.txt`)
+| picture | what it shows |
+|---|---|
+| `R7M2_13p_01_img3_lattice_sections_middle_solid.png` | his img3 camera: the Top's two 25 mm lattice parts carry the heat, the solid middle stays the part's colour |
+| `R7M2_13p_02_face3_section_picked_curves_25mm_prisms.png` | "Face 1 · lattice B" picked: its curves 100 × 25 mm, its prism and dent on that part only |
+| `R7M2_13p_03_group1_two_sections_half_each.png` | Group 1 lists the two parts, 11 lb each of 22 lb |
+| `R7M2_13p_04_solid_tap_line_and_go_to_lattice.png` | a tap on the solid middle: "Solid here · only face-prisms get latticed" [Go to Lattice]; the pick stays |
+| `R7M2_13p_05_violet_where_a_tap_works_face2_unpressed.png` | Face 2's unpressed lattice bands in faint violet, the legend row "Violet = lattice · tap to pick" |
+| `R7M2_13p_06_edge14_nested_in_face2s_band.png` | Edge 14 (numbered Edge 16 here) — its strip inside Face 2's band; "Face 2 · lattice B keeps the rest" |
+| `R7M2_13p_07_face3_at_17mm_same_section_curves_kept.png` | Face 3's prism 25 → 17.26 mm: the same part and id, its curve kept, 1 726 mm² (the probe first drew a distinct curve at 6 mm deepest, so "kept" can be seen) |
+| `R7M2_13p_08_CONTROL_whole_face1_curves_100mm.png` | RED control: the whole Top pressed, curves 100 mm across the model (what he saw in img3) |
+| `R7M2_13p_09_no_face_prism_unchanged.png` | no face-prism: no sections, M1's line "Set a face to Lattice in Selections first" — unchanged |
+
+I looked at each one. The violet is faint on purpose (it must not compete with the heat); on the side faces it reads as a lilac
+band at each end.
+
+### The runs
+All raw lines: `round7/batch_m2/r7m2_runs.txt`.
+- **Red run** (tests first, `d87e97a9`): 17 tests, 16 red, 66 failures (`r7m2_red_run.txt`).
+- **The 13 touched classes** at `b8142d3e`: 106 tests, 0 failures; every RED control printed and red (the lines are in the runs file).
+- **Goldens, both modes:** before the re-record, exactly two files DIFFERED in both modes (his 0004's scene job, 79 lines; its
+  frames, 142 lines), the rest identical. After `a22c34f8`: SWIFT_DETERMINISTIC_HASHING=1 38 identical, **0 DIFFERS**; unseeded
+  32 identical, **0 DIFFERS**.
+- **The targeted suite, once** (188 classes, chunks of 12): 1 226 tests, 56 skipped, 10 failures, all known — FlexibleBatchNVerify
+  refine-line (8 asserts, one test), FlexibleRound7ViewsHosted Play ring (display asleep), LatticeSimSolveTrigger ×1. Chunk 4 hit
+  the known exit signal 11 after its tests had finished (59 run, 0 failures). LatticeStaleTypeTests 6/6.
+- **The 16 stage-job hashes:** byte-identical to `round7/merge/stage_job_hashes_r7merge.txt` (the whole file).
+- **Not run:** the iOS build and install (not asked in this run).
+
+### Not done, and deviations from the brief (said, not hidden)
+- **Not installed** (not asked in this run).
+- **Curved, bolt, non-convex or holed face-prisms do not cut sections yet (D4):** such a face stays whole and says "Curved lattice
+  here · not yet"; the img3 problem still stands on those shapes. Next step if you want it: a convex split, or core's column-mask
+  press (#361's optional queue).
+- **A Solid (exclude) face-prism inside a lattice section is not carved out of it (D5)**; its columns already read solid (the dent
+  and heat are lattice-only).
+- **The carry adds an undo step at the open** (as the open's adopt already did): after a main-page depth edit, two undos.
+- **Edge numbers follow the lattice parts** on a partly latticed part: Edge 14 is "Edge 16" on your live lattice. A stored label
+  is kept.
+- **The picked section's card says "Can't reach your curve on 924 columns"** (pictures 01–04): that is core's design verdict for
+  the fixture's 11 lb / 12 mm on that section, read as before; M2 does not change it.
+- **The goldens moved by ruling 3 and were re-recorded** (his 0004's scene job and frames, `a22c34f8`) — said above, not hidden.
+
+### Questions
+1. **D2 — rests:** a rest (Anchors, [Rests]) stays on the WHOLE face. Should rests be sectioned too?
+2. **D3 — equal shares across faces:** "an equal share per lattice part" is applied WITHIN a face (the Top's two parts: half each).
+   Across faces a group still splits by lattice area, so r5's Top A / Top B shares and the goldens stay put. Extend equal shares
+   across faces? (That moves r5's golden shares and needs a ruling.)
+3. **D4 / D5** (above): OK as follow-ups?
+4. **The one-time move of I2's strips** seeds the undo baseline when nothing is undoable (the move can't be undone; a toast and this
+   section say so). OK? (None of your projects has strips, so it changes nothing for you today.)
+5. **The scene declares every section** (re-recorded goldens, `a22c34f8`): keep, or declare a section only once pressed?
+6. I2's open Q1 / Q2 (the section and strip names) still stand: today "Face 1 · lattice B", "Edge 16 · Face 3 + Face 2".
+
+## Round 7 · batch M1 verify — with no face-prism nothing pretends to be ready; the main page never shows a squish number; [Prisms] shows every face-prism; the Export names groups by number (2026-10-14)
 
 The verify looked at batch M1 on your pad (A1_0003) with the whole main page hosted (#354's Selections card, the bottom-right
 chips, the bottom bar) and found 18 things. This section fixes the ones that are ours to fix and says plainly which two need a
