@@ -621,14 +621,23 @@ final class FlexibleRound6HostedTests: XCTestCase {
         // verify's opaque block with no lattice); he turns it off first here
         stage.xrayOn = false
         XCTAssertFalse(stage.xrayOn, "premise: X-ray off (his tap)")
+        // ★ RE-PINNED AGAIN (round 7, X1 — his Q9 answer, 2026-10-14: X-ray is HIS view, "If the user adds x-ray, we see through
+        // the solid"): [Prisms] no longer turns X-ray on (R7-V's rule reversed); it leaves X-ray and the Lattice view alone
         stage.togglePrisms()
         XCTAssertTrue(m.views.contains(.prisms))
-        XCTAssertTrue(stage.xrayOn, "[Prisms] turns X-ray on itself")
+        XCTAssertFalse(stage.xrayOn, "★ X1: [Prisms] leaves X-ray off")
         XCTAssertFalse(stage.latticeOn, "…and leaves the Lattice view as he left it")
         // off again: the Prisms view goes, X-ray stays as it is
         stage.togglePrisms()
         XCTAssertFalse(m.views.contains(.prisms))
-        XCTAssertTrue(stage.xrayOn)
+        XCTAssertFalse(stage.xrayOn)
+        // ★ RED CONTROL: R7-V's rule — [Prisms] turned X-ray on itself
+        stage.controlViewsForceXray = true
+        stage.togglePrisms()
+        let r7v = stage.xrayOn
+        stage.togglePrisms()
+        stage.controlViewsForceXray = false
+        XCTAssertTrue(r7v, "★ RED CONTROL: R7-V's [Prisms] turned X-ray on")
     }
 
     // MARK: - S1b: the main-page half of item 3 (R6-3j, R6-3k, R6-3l)
@@ -671,14 +680,15 @@ final class FlexibleRound6HostedTests: XCTestCase {
             stage.xrayOn = false
             click(h, prisms)
             XCTAssertTrue(m.views.contains(.prisms), "\(tag): [Prisms] on")
-            XCTAssertTrue(stage.xrayOn, "\(tag): …and X-ray with it (★ R7-V: no longer the Lattice view)")
+            // ★ RE-PINNED (round 7, X1 — his Q9 answer, 2026-10-14: X-ray is HIS view): [Prisms] leaves X-ray off (R7-V reversed)
+            XCTAssertFalse(stage.xrayOn, "\(tag): ★ X1 — [Prisms] leaves X-ray off")
             // ★ RE-PINNED (round 7, M1 — H15'): every face-prism of the PICKED group (none picked here: nothing), never every
             // pressed face's squish prism
             XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [],
                            "\(tag): no group picked — no face-prism in the list H15' hands the viewer")
             click(h, prisms)
             XCTAssertFalse(m.views.contains(.prisms), "\(tag): off again")
-            XCTAssertTrue(stage.xrayOn, "\(tag): X-ray stays as it is")
+            XCTAssertFalse(stage.xrayOn, "\(tag): X-ray stays as it is (off)")
             // the third is still Lattice: it never touches the Prisms view
             let before = (stage.latticeOn, opened)
             click(h, lattice)
@@ -698,7 +708,7 @@ final class FlexibleRound6HostedTests: XCTestCase {
         stage.xrayOn = false
         click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
         XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is bottom left")
-        XCTAssertTrue(stage.xrayOn, "mini: …with X-ray")
+        XCTAssertFalse(stage.xrayOn, "mini: ★ X1 — X-ray stays off")
         click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
         let before = (stage.latticeOn, opened)
         click(h, CGPoint(x: row.maxX - 20, y: row.minY + 20))

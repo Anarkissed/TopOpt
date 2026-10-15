@@ -96,7 +96,7 @@ extension FlexibleRound7ViewsHostedTests {
     // MARK: - RH2: Bend alone draws the bent part readable
 
     func testBendAloneDrawsTheBentPartReadableAtItsFullDepth() async throws {
-        addTeardownBlock { @MainActor in FlexibleStagePage.controlBendGhost = false }
+        addTeardownBlock { @MainActor in FlexibleStagePage.controlBendGhost = false; FlexibleStagePage.controlAlwaysXray = false }
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let p = r.project
@@ -133,9 +133,13 @@ extension FlexibleRound7ViewsHostedTests {
             return try XCTUnwrap(mr.renderOffscreen(size: FlexibleRound6EvidenceProbe.size, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
         }
         let alpha = FlexibleStagePage.bodyAlpha(views: views, edgePick: false, hasDent: true)
+        // ★ RE-PINNED (round 7, X1 — X-ray off by default on the Squish page too): R7-V's first build was the page ALWAYS in
+        // X-ray with Bend alone in its ghost — the control is both (`controlAlwaysXray` + `controlBendGhost`)
+        FlexibleStagePage.controlAlwaysXray = true
         FlexibleStagePage.controlBendGhost = true
         let ghost = FlexibleStagePage.bodyAlpha(views: views, edgePick: false, hasDent: true)
         FlexibleStagePage.controlBendGhost = false
+        FlexibleStagePage.controlAlwaysXray = false
         XCTAssertEqual(ghost, FlexibleStagePage.xrayBodyAlpha, "the RED CONTROL is the first build's X-ray ghost")
         XCTAssertEqual(alpha, 1, "★ Bend alone: the opaque, shaded part")
         let bent = try frame(alpha: alpha, scale: k), rest = try frame(alpha: alpha, scale: 0)
@@ -147,11 +151,14 @@ extension FlexibleRound7ViewsHostedTests {
         XCTAssertGreaterThan(seen, 5 * max(gSeen, 1), "★ …where the ghost was a smudge (\(seen) px vs the ghost's \(gSeen))")
         XCTAssertGreaterThan(reads, 2 * max(gReads, 1), "★ …and its bend reads against the rest pose (\(reads) px vs the ghost's \(gReads))")
         XCTAssertGreaterThan(reads, 1_000, "★ the full-depth pinch is plain to see (\(reads) px)")
-        // with the heat shown (or Prisms / Groups / Play) the page keeps its X-ray reading: the heat on the bent faces,
-        // what sits inside the part seen through it
-        XCTAssertEqual(FlexibleStagePage.bodyAlpha(views: [.bend], edgePick: false, hasDent: true), FlexibleStagePage.xrayBodyAlpha,
-                       "Bend with Heat: the X-ray ghost under the opaque heat")
-        XCTAssertEqual(FlexibleStagePage.bodyAlpha(views: [], edgePick: false, hasDent: true), FlexibleStagePage.xrayBodyAlpha, "editing: X-ray")
+        // ★ RE-PINNED (round 7, X1 — "X-ray is OFF by default on both pages"; his answer 12: "Turning x-ray on shows a prism view
+        // of the actual bend INTO the model"): out of X-ray the Squish page's part is OPAQUE — Bend with Heat and the editing
+        // view too; his X-ray icon gives the ghost (R7-V kept the page always in X-ray: reversed)
+        XCTAssertEqual(FlexibleStagePage.bodyAlpha(views: [.bend], edgePick: false, hasDent: true), 1,
+                       "★ X1: Bend with Heat, X-ray off: the opaque part, the heat on its bent faces")
+        XCTAssertEqual(FlexibleStagePage.bodyAlpha(views: [], edgePick: false, hasDent: true), 1, "★ X1: editing, X-ray off: opaque")
+        XCTAssertEqual(FlexibleStagePage.bodyAlpha(views: [.bend, .xray], edgePick: false, hasDent: true), FlexibleStagePage.xrayBodyAlpha,
+                       "★ X1: his X-ray icon: the ghost")
         XCTAssertGreaterThanOrEqual(FlexibleStagePage.bodyAlpha(views: [.bend, .heatOff, .prisms], edgePick: false, hasDent: true),
                                     FlexibleStagePage.dentBodyAlpha, "Bend with the heat hidden and Prisms: the body still reads, the prisms through it")
         if let dir = Self.dir {

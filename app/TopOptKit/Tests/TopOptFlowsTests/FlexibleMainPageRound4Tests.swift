@@ -121,16 +121,23 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         await m.waitForIdle()
         XCTAssertNil(m.latticeError)
         stage.refresh()
-        XCTAssertTrue(stage.latticeShown && stage.xray)
-        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha)
+        // ★ RE-PINNED (round 7, X1 — his Q9 answer, 2026-10-14: "The lattice should be visible without x-ray on as long as
+        // finish is set to something that isn't 'covered'"): Exit shows the VIEW and leaves X-ray off (R7-V turned X-ray on with
+        // it — reversed). This pad keeps the default finish, Covered: out of X-ray it is the plain model, no wall drawn
+        XCTAssertTrue(stage.latticeShown && !stage.xray, "★ X1: the view shown, X-ray off")
+        XCTAssertEqual(stage.model?.settings.finishMode, .covered, "premise: the pad's finish is Covered")
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "★ Covered, X-ray off: the plain model")
+        XCTAssertEqual(stage.layer(pm, stage: .lattice, pageUp: false)?.hidden, true, "★ Covered: no wall drawn out of X-ray")
+        stage.toggleXray(); stage.refresh()
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "his X-ray tap: the ghost")
         XCTAssertEqual(stage.layer(pm, stage: .lattice, pageUp: false)?.hidden, false, "the walls are drawn")
         // with a lattice: show / hide, never Settings
         stage.latticeButtonTapped(openSettings: { opened += 1 })
         XCTAssertFalse(stage.latticeShown, "hidden")
         // ★ RE-PINNED (R7-V — his 2026-10-14 words; M6, his round-5 img 6, reversed): the dent view no longer keeps the part
-        // a ghost — X-ray is his icon (on since Exit showed the lattice); off, the part is solid with the dent view on
+        // a ghost — X-ray is his icon (★ X1: his tap above); off, the part is solid with the dent view on
         XCTAssertTrue(stage.heat && stage.dentXray, "premise: the dent view shows a map")
-        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "his X-ray (turned on with the lattice)")
+        XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "his X-ray (his tap)")
         stage.toggleXray(); stage.refresh()
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), 1, "★ his X-ray off: the solid part, the dent view on")
         stage.toggleStress(); stage.refresh()

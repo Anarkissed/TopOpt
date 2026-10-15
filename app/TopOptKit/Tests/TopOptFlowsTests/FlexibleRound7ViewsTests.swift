@@ -316,10 +316,11 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         s.toggleXray()
         s.toggleHeat(); XCTAssertFalse(s.xrayOn, "★ Heat never turns X-ray on"); s.toggleHeat()
         XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1)
-        // a view that needs X-ray turns it on itself: [Prisms] (a prism sits inside the part)
+        // ★ RE-PINNED (round 7, X1 — his Q9 answer, 2026-10-14: X-ray is his view; R7-V's "a view that needs X-ray turns it on
+        // itself" reversed for [Prisms]): [Prisms] leaves X-ray off
         s.togglePrisms()
-        XCTAssertTrue(s.xrayOn, "★ [Prisms] turns X-ray on itself")
-        s.togglePrisms(); s.toggleXray()
+        XCTAssertFalse(s.xrayOn, "★ X1: [Prisms] leaves X-ray off")
+        s.togglePrisms()
         XCTAssertFalse(m.views.contains(.play), "nothing here touched Play")
         print("FLEX-R7V-2d xray: default body alpha 1 walls hidden (control \(controlAlpha ?? -1)) · X-ray on alpha \(FlexibleStagePage.xrayBodyAlpha)")
     }
