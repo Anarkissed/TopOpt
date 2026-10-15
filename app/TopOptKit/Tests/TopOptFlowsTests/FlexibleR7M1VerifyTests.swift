@@ -40,8 +40,11 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         let (_, _, m) = try await F.hisPad(self, live: false)
         XCTAssertFalse(m.facePrismsSet, "premise: his pad as saved sets no face-prism")
         XCTAssertFalse(m.settings.loadedFaces.isEmpty, "premise: his pressed faces")
-        XCTAssertTrue(m.designs.isEmpty, "★ no design is asked of core with no face-prism (its stack is the whole part)")
-        XCTAssertFalse(m.readiness.designing, "★ and nothing waits on one")
+        // (the red run's first expectation was "no design is asked of core"; changed after it: core's designs on a pad with no
+        // face-prism are pinned by the goldens' C1 pad, so they are still ASKED — and shown NOWHERE: the reviewer's ruling on
+        // the scene job decides whether the asks stop)
+        XCTAssertFalse(m.designs.isEmpty, "premise: core's whole-part designs are asked (scene analysis, not a send)")
+        XCTAssertNil(FlexibleFaceRows.warning(model: m, region: 1), "★ no 'Can't reach your curve on 4096 columns' from them")
         let shown = FlexibleShownValues(model: m)
         XCTAssertEqual(shown.maxDepth, 0, "★ no dent scale on the Squish page")
         XCTAssertFalse(shown.showsDent, "★ no dent drawn")
@@ -61,11 +64,13 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         let controlLine = m.readiness.oneLine
         let controlFix = FlexibleStagePage.noticeFix(m.readiness, model: m)
         let controlPops = FlexibleLatticeUnder.first(m.readiness).map { FlexibleStagePage.popsAtOnce($0, model: m) } ?? false
+        let controlWarning = FlexibleFaceRows.warning(model: m, region: 1)
         FlexibleStageModel.controlDesignsWithoutPrism = false
         XCTAssertGreaterThan(control.maxDepth, 20, "★ RED CONTROL: the whole-part designs' scale (the verify: 28.7 mm)")
         XCTAssertTrue(controlLine.hasPrefix("Ready"), "★ RED CONTROL: 'Ready · No lattice under …'")
         XCTAssertNotNil(controlFix, "★ RED CONTROL: [Fix]")
         XCTAssertTrue(controlPops, "★ RED CONTROL: the pop-up at once")
+        XCTAssertEqual(controlWarning, "Can't reach your curve on 4096 columns", "★ RED CONTROL: the verify's orange line")
         print("FLEX-R7M1V-V1 no face-prism: designs \(m.designs.count) · shown max \(shown.maxDepth) dent \(shown.showsDent) · line '\(r.oneLine)' · control max \(control.maxDepth) line '\(controlLine)'")
     }
 
@@ -116,12 +121,14 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         s.togglePrisms()
         let all = s.volumes(p, on: .lattice, drilledIn: false)
         XCTAssertEqual(Set(all.map(\.volume.faceID)), [3, 5], "★ [Prisms] with nothing picked: every group's face-prisms (Group C's)")
-        XCTAssertTrue(all.allSatisfy { !$0.selected }, "none brighter: nothing is picked")
+        XCTAssertTrue(all.allSatisfy(\.selected), "nothing picked: every face-prism in #354's active look (faint ones hid under the heat)")
         XCTAssertTrue(s.legendPrismsRow, "its row: a face-prism is drawn")
         XCTAssertTrue(s.xrayOn, "X-ray with it (a face-prism sits inside the part)")
         // the Top picked (Off in Selections): a pick alone draws nothing; [Prisms] still shows Group C's
         p.selection.setActive(top.id)
-        XCTAssertEqual(Set(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID)), [3, 5], "★ [Prisms] shows what a pick does not")
+        let withTop = s.volumes(p, on: .lattice, drilledIn: false)
+        XCTAssertEqual(Set(withTop.map(\.volume.faceID)), [3, 5], "★ [Prisms] shows what a pick does not")
+        XCTAssertTrue(withTop.allSatisfy { !$0.selected }, "another group picked: Group C's fainter (#354's look for the rest)")
         m.views.remove(.prisms)
         XCTAssertTrue(s.volumes(p, on: .lattice, drilledIn: false).isEmpty, "the Top's pick alone: no face-prism")
         m.views.insert(.prisms)

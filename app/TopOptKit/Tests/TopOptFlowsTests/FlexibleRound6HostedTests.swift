@@ -672,10 +672,12 @@ final class FlexibleRound6HostedTests: XCTestCase {
             click(h, prisms)
             XCTAssertTrue(m.views.contains(.prisms), "\(tag): [Prisms] on")
             XCTAssertTrue(stage.xrayOn, "\(tag): …and X-ray with it (★ R7-V: no longer the Lattice view)")
-            // ★ RE-PINNED (round 7, M1 — H15'): every face-prism of the PICKED group (none picked here: nothing), never every
-            // pressed face's squish prism
-            XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [],
-                           "\(tag): no group picked — no face-prism in the list H15' hands the viewer")
+            // ★ RE-PINNED (round 7, M1 — H15'): never every pressed face's squish prism. ★ RE-PINNED AGAIN (M1 verify — the verify:
+            // "[Prisms] does nothing visible on the model"; his round-6 words for the view: "ALL … prisms"): was [] (the picked
+            // group's only, none picked); now EVERY group's lattice face-prisms — on this fixture the Top's (a1Project(3) sets
+            // his Top's row to Lattice), with nothing picked
+            XCTAssertEqual(Set(stage.volumes(r.project, on: .lattice, drilledIn: false).map(\.volume.faceID)), [1],
+                           "\(tag): no group picked — [Prisms] hands the viewer every group's face-prisms")
             click(h, prisms)
             XCTAssertFalse(m.views.contains(.prisms), "\(tag): off again")
             XCTAssertTrue(stage.xrayOn, "\(tag): X-ray stays as it is")

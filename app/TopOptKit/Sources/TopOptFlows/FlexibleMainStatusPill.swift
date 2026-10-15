@@ -52,18 +52,20 @@ public struct FlexibleMainStatusPill: View {
     /// take it yet), the panel's otherwise.
     static func stroke(_ t: FlexibleMainStatus.Tone) -> RGBA {
         switch t {
-        case .fix: return DS.Color.warning
+        case .fix, .blocked: return DS.Color.warning   // ★ M1 VERIFY: blocked (no face-prism) is said in the warning colour
         case .preview: return FlexibleStageStyle.accentToken
         default: return DS.Color.strokePanel
         }
     }
 
-    static func pill(_ s: FlexibleMainStatus, action: @escaping () -> Void) -> some View {
+    /// ★ M1 VERIFY: `disabled` — ruling 4's "Export disabled with a stated reason" (no face-prism, on the main page): no tap,
+    /// greyed by the disabled style, its line the reason (no extra fade — looking found the line too faint to read at 0.7).
+    static func pill(_ s: FlexibleMainStatus, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 1) {
                 HStack(spacing: 6) {
                     if s.tone == .building { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
-                    if s.tone == .fix { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold)) }
+                    if s.tone == .fix || s.tone == .blocked { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12, weight: .bold)) }
                     Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                 }
                 Text(s.line)
@@ -80,6 +82,7 @@ public struct FlexibleMainStatusPill: View {
             .dsShadow(s.tone == .ready ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
         .accessibilityIdentifier("flexible-status-pill")
     }
 }
@@ -99,7 +102,7 @@ private struct FlexibleMainStatusPillBody: View {
     var body: some View {
         // ★ C2: while core runs the job, the pill says so (a tap shows the run)
         let s = FlexibleMainStatus.of(model: model).whileSending(run.isSending)
-        FlexibleMainStatusPill.pill(s) {
+        FlexibleMainStatusPill.pill(s, disabled: FlexibleMainStatusPill.disabled(s, visible: main.visible)) {   // ★ M1 VERIFY
             main.pillTapped(s, open: open, goToLattice: goToLattice)
         }
     }
@@ -148,17 +151,19 @@ public struct FlexibleMainViewToggles: View {
 
     // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
     private var heatButton: some View {
-        FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat) { main.toggleHeat() }
+        FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat && main.viewsAvailable) { main.toggleHeat() }
+            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — nothing to heat
             .accessibilityIdentifier("flexible-main-view-heat")
     }
     private var stressButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.stressIcon, label: main.stressRunning ? "Simulating…" : "Stress",
-                           on: main.stress) { main.toggleStress() }
+                           on: main.stress && main.viewsAvailable) { main.toggleStress() }
             .overlay {
                 if main.stressRunning, main.stress {
                     ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
                 }
             }
+            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY
             .accessibilityIdentifier("flexible-main-view-stress")
     }
     // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ R7-V: lit while its walls are seen
@@ -167,13 +172,15 @@ public struct FlexibleMainViewToggles: View {
         FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.wallsShown) {
             main.latticeButtonTapped(openSettings: openSettings)
         }
+            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — no lattice can come (the Squish page cannot make one)
             .accessibilityIdentifier("flexible-main-view-lattice")
     }
     // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
     // faint, with its mm; ★ R7-V: it turns X-ray on itself
     private var prismsButton: some View {
-        FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn,
-                           action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn))
+        FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn && main.viewsAvailable,
+                           action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn && main.viewsAvailable))
+            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism to draw
             .accessibilityIdentifier("flexible-main-view-prisms")
     }
     // ★ R7-V: X-ray — the ghost and the walls inside it; off, the opaque model
@@ -184,7 +191,8 @@ public struct FlexibleMainViewToggles: View {
     // ★ R7-V: Play — the sim plays and its bar shows; off, no bar and the model at rest. A small ring while the sims run
     // or refine (the bar's note said so)
     private var playButton: some View {
-        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn) { main.togglePlay() }
+        FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn && main.viewsAvailable) { main.togglePlay() }
+            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: nothing to play
             .overlay(alignment: .topTrailing) {
                 if Self.controlMiniSpinner {
                     if main.simsWorking {   // (the RED CONTROL only: the first build's faint grey speck)

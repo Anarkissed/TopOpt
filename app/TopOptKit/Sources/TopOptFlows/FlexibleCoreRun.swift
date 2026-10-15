@@ -282,7 +282,9 @@ public final class FlexibleCoreRun: ObservableObject {
 
 extension FlexibleMainStatus {
     /// What a tap on the big bottom button does (his answer 2).
-    public enum Tap: Equatable, Sendable { case send, openSettings, wait }
+    /// ★ M1 VERIFY: `toSelections` — no face-prism: disabled on the main page (its line the reason), and from another stage
+    /// to the Lattice stage, where Selections is. Never the Squish page.
+    public enum Tap: Equatable, Sendable { case send, openSettings, wait, toSelections }
 
     public static let sending = "Sending to core\u{2026}"
 
@@ -292,6 +294,7 @@ extension FlexibleMainStatus {
         case .ready, .preview: return .send
         case .fix, .idle: return .openSettings
         case .building: return .wait
+        case .blocked: return .toSelections   // ★ M1 VERIFY
         }
     }
 

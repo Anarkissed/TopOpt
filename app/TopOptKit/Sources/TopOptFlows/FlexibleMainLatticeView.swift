@@ -150,6 +150,10 @@ extension FlexibleMainStage {
         case .wait:
             if !visible { goToLattice() }
             note.post(.building)
+        case .toSelections:
+            // ★ M1 VERIFY (no face-prism; ruling 4): the line says where — Selections, on the Lattice stage's main page. From
+            // another stage the tap goes there; on the main page the button is disabled (FlexibleMainStatusPill.disabled)
+            if !visible { goToLattice() }
         }
     }
 }

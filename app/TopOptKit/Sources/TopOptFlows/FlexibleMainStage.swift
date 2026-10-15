@@ -335,6 +335,7 @@ public final class FlexibleMainStage: ObservableObject {
     }
 
     public init() {
+        Self.lastMade = self   // ★ M1 VERIFY: the hosted evidence probe reads the workspace's own stage (weak; tests only)
         // ★ C2 VERIFICATION: the Export step's buttons act through the stage (the model, the note,
         // the way to the Lattice stage are its)
         coreRun.onFix = { [weak self] f in self?.coreFix(f) }
@@ -517,21 +518,38 @@ public final class FlexibleMainStage: ObservableObject {
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
         guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
         if controlSquishPrismsOnMain { return squishVolumes(project, m) }
-        guard let g = pickedGroup(project) else { return [] }
-        let inputs = FacePrismInputs(group: g.id, lattice: project.lattice, selection: project.selection, force: project.force,
-                                     regions: project.faceRegions, groupView: project.groupView,
+        // ★ M1 VERIFY (the verify: "[Prisms] does nothing visible on the model" — before a pick it drew nothing, after one
+        // exactly what the pick drew): [Prisms] = EVERY group's lattice face-prisms (his round-6 words for the view: "a view
+        // that turns on/off ALL … prisms"), the picked group's brighter; without [Prisms], the picked group's only (his fixed
+        // rule: a group's prism only after a pick). RED CONTROL `controlPrismsPickedOnly`: the picked group's only.
+        let picked = pickedGroup(project)
+        let all = prismsOn && !Self.controlPrismsPickedOnly
+        guard all || picked != nil else { return [] }
+        return facePrismItems(project, picked: picked?.id, all: all)
+    }
+
+    /// ★ M1 (VERIFY): the lattice face-prisms drawn — #354's own include `LatticeDepthPlane`s at their list depth, of the picked
+    /// group (`all` false) or of every group (`all`: [Prisms]), in #354's active look (`selected`) — under [Prisms] with a pick,
+    /// only the picked group's (the others fainter, #354's look for the rest); a hidden group's never. (Looking at the first
+    /// picture: with nothing picked every face-prism drawn faint hid under the heat — nothing picked, all in the active look.)
+    /// Cached on its inputs (the workspace's body asks on every pass).
+    func facePrismItems(_ project: ProjectModel, picked: UUID?, all: Bool) -> [ClearanceRenderItem] {
+        let inputs = FacePrismInputs(group: picked, all: all, lattice: project.lattice, selection: project.selection,
+                                     force: project.force, regions: project.faceRegions, groupView: project.groupView,
                                      mesh: project.viewerMesh?.triangleCount ?? 0)
         if let c = facePrismCache, c.inputs == inputs { return c.items }
-        let items = project.groupView.isHidden(g.id) ? [] : project.latticeDepthPlanes()
-            .filter { $0.groupID == g.id && $0.role == .include }
-            .map { ClearanceRenderItem(volume: $0.volume, selected: true, tint: FlexibleStageStyle.facePrismTint) }
+        let items = project.latticeDepthPlanes()
+            .filter { $0.role == .include && !project.groupView.isHidden($0.groupID) && (all || $0.groupID == picked) }
+            .map { ClearanceRenderItem(volume: $0.volume, selected: picked == nil || $0.groupID == picked, tint: FlexibleStageStyle.facePrismTint) }
         facePrismCache = (inputs, items)
         return items
     }
 
-    /// ★ M1: what the face-prisms are built from (every input of `ProjectModel.latticeDepthPlanes` for the picked group).
+    /// ★ M1: what the face-prisms are built from (every input of `ProjectModel.latticeDepthPlanes`, the picked group, and
+    /// whether [Prisms] asks for every group's).
     struct FacePrismInputs: Equatable {
-        let group: UUID
+        let group: UUID?
+        let all: Bool
         let lattice: LatticeSettings
         let selection: SelectionModel
         let force: ForceModel
@@ -591,8 +609,15 @@ public final class FlexibleMainStage: ObservableObject {
     public var prismLegendK: Int { Int(prismK.rounded()) }
     /// ★ S1b: the Prisms view is on (the main page's [Prisms]; the model's own `views`, which Settings shares).
     public var prismsOn: Bool { model?.views.contains(.prisms) == true }
-    /// ★ S1b: the main page's ONE legend card carries the Prisms row while [Prisms] is on.
-    public var legendPrismsRow: Bool { prismsOn }
+    /// ★ S1b: the main page's ONE legend card carries the Prisms row while [Prisms] is on. ★ M1 VERIFY (the verify: the row
+    /// described violet that was not on screen): only while [Prisms] DRAWS a face-prism (the 19:45 ruling's rule: "a legend
+    /// row only where its thing is actually drawn"). RED CONTROL `controlPrismsPickedOnly`: whenever [Prisms] is on.
+    public var legendPrismsRow: Bool {
+        guard prismsOn else { return false }
+        if Self.controlPrismsPickedOnly { return true }
+        guard let p = model?.project else { return false }
+        return !facePrismItems(p, picked: pickedGroup(p)?.id, all: true).isEmpty
+    }
     /// ★ S1b (round 6 item 3 — his img3: "When a face … is highlighted, we should automatically be able to see the
     /// amount of squish it has been set to"): the main page's READ-ONLY "%.1f mm" tags, one per prism H15 draws (the
     /// active Selections group's pressed faces, or every one in the Prisms view), at the prism's FLOOR — where the
@@ -654,7 +679,8 @@ public final class FlexibleMainStage: ObservableObject {
     public func togglePrisms() {
         guard let m = model else { return }
         m.toggleView(.prisms)
-        if m.views.contains(.prisms), !xrayOn { xrayOn = true }
+        // ★ M1 VERIFY: X-ray with it only when a face-prism is drawn (nothing inside the plain model to see)
+        if m.views.contains(.prisms), !xrayOn, legendPrismsRow { xrayOn = true }
     }
 
     /// The squish player shows only when there is something to squish: a lattice that still
@@ -862,14 +888,19 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ ROUND 6 (his img1): no group colour on the main page — no frame, no digit, no tinted map-less face
         // ★ ROUND 7, M1 (1a): no face-prism — the PLAIN model (no dent heat, no dent: nothing can squish)
         let prisms = m.facePrismsSet
-        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat && prisms,
+        // ★ M1 VERIFY (the verify: after a depth edit the legend read "What you drew · 0 mm … 24.5 mm" — Face 3's SQUISH
+        // depth, beside the list's 17.3 / 25.0; his answer: "the squish number: only on the Squish page"): the drawn curve is
+        // the Squish page's — the main page wears heat and a dent only from a lattice DRAWN (or core's 3D heat). While none is
+        // drawn (building, stale, deferred) it is the plain model. RED CONTROL `controlDrawnCurveOnMain`: the drawn curve's.
+        let latticeHeat = prisms && (drawn != nil || feNow != nil || Self.controlDrawnCurveOnMain)
+        var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat && latticeHeat,
                                               depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
                                               controlColumnColours: controlColumnHeat, groupColours: false,
                                               roleMarks: controlRolesOnMain)   // ★ R7-V: no role mark on the main page's model
-        if !prisms { c.dents = nil; c.exaggeration = 0; c.mapValues = nil }
+        if !latticeHeat { c.dents = nil; c.exaggeration = 0; c.mapValues = nil }
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = prisms ? (feNow?.scaleMM ?? shown.maxDepth) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism)
+        dentMaxMM = latticeHeat ? (feNow?.scaleMM ?? shown.maxDepth) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism; ★ M1 VERIFY: none without a lattice drawn)
         heatValues = c.mapValues
         dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
         // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,
@@ -934,7 +965,8 @@ public final class FlexibleMainStage: ObservableObject {
                    String(describing: (fe.active ? nil : c.dents).map { VertexTintKey($0).hash }),   // (FE: the token below)
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
                    "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
-                   "\(fe.token)", "\(fe.sequence)", "\(fe.shownSequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)"].joined(separator: "|")
+                   "\(fe.token)", "\(fe.sequence)", "\(fe.shownSequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)",
+                   "\(prisms)"].joined(separator: "|")   // ★ M1 VERIFY: the views' availability redraws the row
         channels = c
         if channelsKey != key {
             channelsKey = key
@@ -948,7 +980,9 @@ public struct FlexibleMainStatus: Equatable, Sendable {
     /// ★ C2 VERIFICATION: `preview` — the lattice preview is built, but core can't take the job
     /// as it stands (a pinch, several squeeze groups, a calibrate-first filament —
     /// FlexibleCoreHold): never the Ready green; its tap opens the Export step on why.
-    public enum Tone: Equatable, Sendable { case ready, building, fix, idle, preview }
+    /// ★ M1 VERIFY: `blocked` — nothing can be made or sent until he does what the line says on the main page (no face-prism):
+    /// the button is disabled there with its reason (ruling 4), a tap target only from another stage (to the Lattice stage).
+    public enum Tone: Equatable, Sendable { case ready, building, fix, idle, preview, blocked }
     public let line: String
     public let tone: Tone
     /// The issue a tap opens Settings on.
@@ -992,9 +1026,15 @@ public struct FlexibleMainStatus: Equatable, Sendable {
         guard let m else { return .init(line: notOpened, tone: .idle, fix: nil) }
         if case .failed = m.sceneState { return .init(line: "The part could not be opened", tone: .fix, fix: nil) }
         // ★ ROUND 7, M1 (1a, ruling 4): no face-prism — no lattice and nothing to send: the one line, after the readiness's own
-        // blockers (a filament, a pressed face); its tap opens the one-tap fix ([Lattice under it]) on the Squish page
+        // blockers (a filament, a pressed face). ★ M1 VERIFY (the verify: the words pointed to Selections, the tap opened the
+        // Squish page's [Lattice under all N] — three new groups, the whole pad latticed again): `.blocked` — "Export disabled
+        // with a stated reason" (ruling 4): disabled on the main page, Selections beside it; on another stage its tap goes to
+        // the Lattice stage. RED CONTROL `FlexibleMainStage.controlNoPrismOpensSquishFix`: the M1 build's .fix + the fix.
         if m.sceneState == .ready, !m.facePrismsSet, m.readiness.blocking.isEmpty {
-            return .init(line: FlexibleRowCopy.noFacePrism, tone: .fix, fix: FlexibleLatticeUnder.first(m.readiness))
+            if FlexibleMainStage.controlNoPrismOpensSquishFix {
+                return .init(line: FlexibleRowCopy.noFacePrism, tone: .fix, fix: FlexibleLatticeUnder.first(m.readiness))
+            }
+            return .init(line: FlexibleRowCopy.noFacePrism, tone: .blocked, fix: nil)
         }
         // ★ ROUND 5 (S9): saved with the Lattice view off — nothing bakes until the view is on (a tap turns it on)
         if m.latticeBuildDeferred, m.lattice == nil || m.latticeIsStale, m.sceneState == .ready,

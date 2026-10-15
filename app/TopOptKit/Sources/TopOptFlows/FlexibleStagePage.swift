@@ -740,7 +740,7 @@ public struct FlexibleStagePage: View {
                 noticePill(FlexibleSettingsExit.readyLine(r.oneLine, modified: FlexibleSettingsExit.modified(model.settings, since: opened)),
                            icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
                            colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
-                           fix: r.blocking.first ?? r.advisory)
+                           fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }
             if let t = model.toast {
                 Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)

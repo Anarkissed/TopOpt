@@ -28,12 +28,16 @@ extension FlexibleMainStage {
     @MainActor static var controlPrismsPickedOnly = false
     @MainActor static var controlNoPrismOpensSquishFix = false
     @MainActor static var controlViewsAlwaysAvailable = false
+    /// Tests only (the hosted evidence probe): the stage the workspace made last (weak; nothing in the app reads it).
+    @MainActor static weak var lastMade: FlexibleMainStage?
 
     /// ★ M1 VERIFY (his img1 rule: "ONLY the face-prism creates the lattice structure"): the lattice's views (Heat, Stress,
     /// Lattice, [Prisms], Play) have something to show — false on the opened scene with no face-prism (the plain model:
     /// they are drawn unavailable, never lit). X-ray stays (it sees into the solid).
     public var viewsAvailable: Bool {
-        true   // STUB (tests first)
+        if Self.controlViewsAlwaysAvailable { return true }
+        guard let m = model, m.sceneState == .ready else { return true }
+        return m.facePrismsSet
     }
 }
 
@@ -43,7 +47,8 @@ extension FlexibleMainStatusPill {
     /// first"), and Selections is on the same screen. On another stage its tap takes him to the Lattice stage (where
     /// Selections is). RED CONTROL `FlexibleMainStage.controlNoPrismOpensSquishFix`: enabled, its tap opened the Squish page.
     @MainActor static func disabled(_ s: FlexibleMainStatus, visible: Bool) -> Bool {
-        false   // STUB (tests first)
+        if FlexibleMainStage.controlNoPrismOpensSquishFix { return false }
+        return visible && s.tap == .toSelections
     }
 }
 
@@ -52,14 +57,18 @@ extension FlexibleStagePage {
     /// no lattice under it); with NO face-prism none: the line says what to do on the main page ("Set a face to Lattice in
     /// Selections first"), and the per-face [Lattice under it] stays on each face's card.
     @MainActor static func noticeFix(_ r: FlexibleReadiness, model m: FlexibleStageModel) -> FlexibleIssue? {
-        r.blocking.first ?? r.advisory   // STUB (tests first)
+        if let b = r.blocking.first { return b }
+        if !FlexibleStageModel.controlDesignsWithoutPrism, m.sceneState == .ready, !m.facePrismsSet { return nil }
+        return r.advisory
     }
 }
 
 extension FlexibleStageModel {
-    /// Test control only (the M1 build): with no face-prism, core's designs still asked for (on its own whole-part stack)
-    /// and the drawn curve still shown — the Squish page's "What you drew · 0 mm … 28.7 mm" over faces with no lattice,
-    /// "Ready · No lattice under Face 1", and the pop-up at once.
+    /// Test control only (the M1 build): with no face-prism, core's designs (asked on its own whole-part stack) and the drawn
+    /// curve still SHOWN — the Squish page's "What you drew · 0 mm … 28.7 mm" over faces with no lattice, "Can't reach your
+    /// curve on 4096 columns", "Ready · No lattice under Face 1", its [Fix] and the pop-up at once.
+    /// ★ The designs are still ASKED for (core's scene analysis, not a send): the goldens pin core's designs on C1's pad,
+    /// which sets no face-prism; stopping the asks would move them — the reviewer's ruling on the scene job decides.
     @MainActor static var controlDesignsWithoutPrism = false
 
     /// ★ M1 VERIFY: nothing can be designed or squished — the opened scene sets no face-prism (the scene still opening
@@ -73,4 +82,11 @@ extension FlexibleCoreHold {
     /// Test control only (the M1 build): the Export line names the squeeze group by his Squish-page name ("This export makes
     /// Thumbs only.") — his answer: squish group names stay on the Squish page.
     @MainActor static var controlSquishNameInExport = false
+}
+
+extension View {
+    /// ★ M1 VERIFY: a view icon with nothing to show (no face-prism): dimmed, no tap, never lit.
+    func unavailable(_ off: Bool) -> some View {
+        self.disabled(off).opacity(off ? 0.4 : 1)
+    }
 }

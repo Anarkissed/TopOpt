@@ -65,6 +65,8 @@ struct FlexibleShownValues {
         var pinched: [FlexFaceKey: [Bool]] = [:]
         /// ★ D2 REVIEW: the pinched faces' two-segment designs (what the lattice is built from).
         var segments: [FlexFaceKey: FlexiblePinch.Segments] = [:]
+        /// ★ ROUND 7, M1 VERIFY: the opened scene sets a face-prism (false: no lattice anywhere — nothing is shown).
+        var facePrisms = true
     }
 
     static func inputs(_ m: FlexibleStageModel) -> Inputs {
@@ -81,10 +83,12 @@ struct FlexibleShownValues {
         for f in settings.loadedFaces {
             if let p = m.pinchedColumns(f.faceRegionID) { pinched[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = p }
         }
-        return Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
-                      checks: m.checks, checkStamps: settings.checkStamps, checkStampShown: m.checkStampShown,
-                      showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet,
-                      pinched: pinched, segments: m.segments)
+        var i = Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
+                       checks: m.checks, checkStamps: settings.checkStamps, checkStampShown: m.checkStampShown,
+                       showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet,
+                       pinched: pinched, segments: m.segments)
+        i.facePrisms = !m.noFacePrismKnown   // ★ M1 VERIFY
+        return i
     }
 
     init(model m: FlexibleStageModel, drawnLattice: FlexibleGeneratedLattice? = nil) {
@@ -119,6 +123,9 @@ struct FlexibleShownValues {
             exaggeration = Self.cappedExaggeration(rule: min(rule, thin), maxSafeScale: g.maxSafeScale)
             return
         }
+        // ★ ROUND 7, M1 VERIFY (the verify: with no face-prism the Squish page's scale read "What you drew · 0 mm … 28.7 mm"
+        // over faces with no lattice under them): no face-prism — nothing can squish, nothing is shown (no dent, no scale)
+        guard m.facePrisms else { return }
         let checkID = m.checkStampShown
         for f in m.loadedFaces {
             let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)

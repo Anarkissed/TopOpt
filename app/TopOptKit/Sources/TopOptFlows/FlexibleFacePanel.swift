@@ -295,6 +295,10 @@ struct FlexibleFaceRows: View {
     /// built from them) — core's whole-column design said 832 on his face 3, the halves miss 412.
     @MainActor
     static func warning(model: FlexibleStageModel, region r: Int) -> String? {
+        // ★ ROUND 7, M1 VERIFY (the verify, his pad as saved: "Can't reach your curve on 4096 columns" in orange — core's
+        // design on its own whole-part stack): no face-prism — core's designs say nothing about this page (the card's own
+        // "No lattice under it" row says what matters)
+        if model.noFacePrismKnown { return nil }
         let d = model.design(r)
         let unreached: Int
         if let k = model.key(r), let sg = model.segments[k] {

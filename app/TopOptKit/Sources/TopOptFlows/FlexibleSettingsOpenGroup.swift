@@ -338,6 +338,10 @@ extension FlexibleStagePage {
     @MainActor
     static func popsAtOnce(_ issue: FlexibleIssue, model m: FlexibleStageModel) -> Bool {
         if controlPopOnNewTab { return true }
+        // ★ ROUND 7, M1 VERIFY (the verify: with no face-prism the page opened on "Face 1 has no lattice under it" with
+        // [Lattice under all 4] — three new groups and the whole pad latticed again): not at once; the top line says what to
+        // do on the main page, and each face's card keeps its own [Lattice under it]
+        if issue.kind == .noLatticeUnder, m.noFacePrismKnown { return false }
         return !(issue.kind == .noPressedFace && m.rail == .newGroup)
     }
 

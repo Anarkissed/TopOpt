@@ -103,7 +103,12 @@ extension FlexibleBatchVHostedTests {
         // probe sees the Top's blue
         s.latticeOn = false; s.xrayOn = false; s.heat = false
         s.controlRolesOnMain = true
+        // ★ RE-PINNED (round 7, M1 verify — the verify: the main page showed the drawn curve's "What you drew … 24.5 mm" with
+        // no lattice drawn; now no lattice drawn ⇒ the plain model, no dent): with no dent the flat map hides most of the
+        // Top's part colour (44 px), so the control also restores the drawn dent it was measured with (`controlDrawnCurveOnMain`)
+        FlexibleMainStage.controlDrawnCurveOnMain = true
         let control = try mainFrame(s, p, roles: roles, device: device, name: "BVR_roles_model_heatOff_control.png")
+        FlexibleMainStage.controlDrawnCurveOnMain = false
         s.controlRolesOnMain = false
         let controlBlue = Self.hued(control, like: topInk)
         // (Flexible's own marks come back with the roles under the control, over part of the Top's map — fewer than batch V's

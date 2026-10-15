@@ -128,6 +128,9 @@ public struct FlexibleAutoFix: Equatable, Sendable {
 public struct FlexibleReadiness: Equatable, Sendable {
     public let issues: [FlexibleIssue]
     public let autoFixes: [FlexibleAutoFix]
+    /// ★ ROUND 7, M1 VERIFY: the opened scene sets no face-prism — nothing can be made (the top line says what to do, never
+    /// "Ready"). Never a blocker: Exit still leaves (his answer: an empty setup may exit).
+    public var noFacePrism = false
 
     public var blocking: [FlexibleIssue] { issues.filter(\.blocking) }
     /// ★ D2 REVIEW: what the pop-up opens on — every blocker, and separate groups that compete
@@ -151,6 +154,8 @@ public struct FlexibleReadiness: Equatable, Sendable {
         if let first = b.first {
             return "\(b.count) thing\(b.count == 1 ? "" : "s") to fix: \(first.oneLine)"
         }
+        // ★ M1 VERIFY (the verify: "Ready · No lattice under Face 1" while nothing can be built): the main page's one line
+        if noFacePrism { return FlexibleRowCopy.noFacePrism }
         if let failed = issues.first(where: { $0.kind == .buildFailed }) { return failed.oneLine }
         if let c = competing { return "Ready · \(c.pill)" }
         if let n = FlexibleLatticeUnder.first(self) { return FlexibleLatticeUnder.readyLine(n, shapeOnly: shapeOnly) }
@@ -248,6 +253,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// ★ ROUND 7 (S, 4f f): the key a face's issue ids carry — the face's ROOT (FlexibleStageModel.issueKey), so a
         /// strip's re-cut rest is the same issue and never a new pop-up. Default: the region's id (as before).
         public var issueKey: (Int) -> String = { "\($0)" }
+        /// ★ ROUND 7, M1 VERIFY: the opened scene sets a face-prism (default true: the pure tests' readiness, and a scene still
+        /// opening). False: the top line is the no-face-prism line, never "Ready".
+        public var facePrisms = true
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
@@ -392,7 +400,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      blocking: false, fixes: []))
         }
         FlexibleLatticeUnder.offerAll(&out)   // ★ batch E review: several faces — one tap for all
-        return FlexibleReadiness(issues: out, autoFixes: auto)
+        var r = FlexibleReadiness(issues: out, autoFixes: auto)
+        r.noFacePrism = !i.facePrisms   // ★ M1 VERIFY
+        return r
     }
 
     /// ★ THE FACE THAT MOST LIKELY CARRIES WEIGHT (batch B review): the face with the most
@@ -551,6 +561,7 @@ extension FlexibleStageModel {
         }
         i.canLatticeUnder = { [weak self] r in self?.latticeUnderPlan(r) != nil }   // ★ batch E
         i.issueKey = { [weak self] r in self?.issueKey(r) ?? "\(r)" }   // ★ ROUND 7 (S, 4f f)
+        i.facePrisms = !noFacePrismKnown   // ★ ROUND 7, M1 VERIFY
         if squeezeGroups.count > 1 {
             i.groupMisses = groupMisses
             let gs = squeezeGroups

@@ -180,7 +180,10 @@ final class FlexibleR7M1Tests: XCTestCase {
         let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
         s.togglePrisms()
         XCTAssertTrue(s.prismsOn)
-        XCTAssertTrue(s.volumes(p, on: .lattice, drilledIn: false).isEmpty, "★ [Prisms] before a pick: nothing (no other group's)")
+        // ★ RE-PINNED (M1 verify — the verify: "[Prisms] does nothing visible on the model"; his round-6 words for the view:
+        // "ALL … prisms"): was "[Prisms] before a pick: nothing"; now every group's face-prisms (his live lattice: Group C's),
+        // none brighter (FlexibleR7M1VerifyTests V3)
+        XCTAssertEqual(Set(s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID)), [3, 5], "★ [Prisms] before a pick: every group's")
         p.selection.setActive(c.id)
         let on = s.volumes(p, on: .lattice, drilledIn: false)
         XCTAssertEqual(Set(on.map(\.volume.faceID)), [3, 5], "★ every face-prism of the picked group")
@@ -243,8 +246,11 @@ final class FlexibleR7M1Tests: XCTestCase {
         XCTAssertEqual(st.line, FlexibleRowCopy.noFacePrism, "★ the pill says what to do")
         XCTAssertEqual(st.line, "Set a face to Lattice in Selections first")
         XCTAssertLessThanOrEqual(st.line.count, FlexibleRowCopy.maxChars)
-        XCTAssertEqual(st.tone, .fix)
-        XCTAssertEqual(st.tap, .openSettings, "its tap opens the one-tap fix ([Lattice under it]), never core")
+        // ★ RE-PINNED (M1 verify — the verify: the words pointed to Selections, the tap opened the Squish page's [Lattice under
+        // all N], three new groups and the whole pad latticed again; ruling 4: "Export disabled with a stated reason"): was
+        // `.fix` / `.openSettings`; now disabled on the main page with its reason, to the Lattice stage from another stage
+        XCTAssertEqual(st.tone, .blocked)
+        XCTAssertEqual(st.tap, .toSelections, "never core, never the Squish page's fix (FlexibleR7M1VerifyTests V4)")
         // ★ RED CONTROL: today's path — core's whole part
         m.controlWholePartWithoutPrism = true
         m.discardLattice()
@@ -366,11 +372,13 @@ final class FlexibleR7M1Tests: XCTestCase {
         guard case .ran(let rep) = run.phase else { return XCTFail("ran: \(run.phase)") }
         XCTAssertEqual(rep.scope, "Group 1 only", "★ core's line names the one group it made")
         XCTAssertEqual(run.sentJob, try m.runJobJSON(), "the job is the face group's (the edge press is not in it)")
-        // his name for the group is the one said
+        // ★ RE-PINNED (M1 verify — his answer: "Group names in squish are JUST squish groups. NOT lattice groups."): was his
+        // Squish-page name ("This export makes Thumbs only."); now the squeeze group's number, as every [Send Group N only]
+        // (FlexibleR7M1VerifyTests V6, its RED CONTROL the name)
         let g1 = try XCTUnwrap(m.squeezeGroups.first)
         m.setGroupName(g1.id, "Thumbs")
-        XCTAssertEqual(m.coreHold?.line, "This export makes Thumbs only.")
-        XCTAssertEqual(m.coreHold?.fixes.first?.title, "Send Thumbs only")
+        XCTAssertEqual(m.coreHold?.line, "This export makes Group 1 only.")
+        XCTAssertEqual(m.coreHold?.fixes.first?.title, "Send Group 1 only")
         // ★ RED CONTROL: today's rule — the edges group is not counted: no hold, sent at once, the edges dropped unsaid
         FlexibleCoreHold.controlEdgesSilentlyDropped = true
         let controlKind = m.coreHoldKind

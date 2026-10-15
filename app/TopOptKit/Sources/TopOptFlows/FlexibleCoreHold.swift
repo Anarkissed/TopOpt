@@ -167,7 +167,7 @@ extension FlexibleStageModel {
                                     fixes: with.map { [.useFilament(id: $0.id, name: $0.displayName)] } ?? [])
         case .squeezeGroups:
             // ★ M1 (5): an edges group beside them is SAID (each export makes one face group; the edges wait for core)
-            let edges = unsentEdgeGroups
+            let edges = FlexibleCoreHold.controlEdgesSilentlyDropped ? [] : unsentEdgeGroups   // (the red control drops them unsaid)
             return FlexibleCoreHold(kind: .squeezeGroups,
                                     line: edges.isEmpty ? FlexibleCoreRun.notSentLine(.squeezeGroups) : FlexibleRowCopy.exportMakesOneEach,
                                     why: FlexibleJob.EncodeError.squeezeGroups.description + edgesWhy(edges),
@@ -177,7 +177,9 @@ extension FlexibleStageModel {
             // ★ M1 (5, the reviewer's ruling 4): ONE face group beside the edges group(s) — "This export makes Group 1 only."
             // and "Edges and faces go in separate exports for now.", before anything is sent; his name for the group
             let g = sentSqueezeGroups[0]
-            let name = groupName(g)
+            // ★ M1 VERIFY (his answer: "Group names in squish are JUST squish groups. NOT lattice groups."): the squeeze group's
+            // NUMBER, as every other [Send Group N only] button — never his Squish-page name on the main page's Export step
+            let name = exportName(g)
             let p = pinches
             let fixes: [FlexibleCoreFix] = p.isEmpty
                 ? [.send(resting: [], title: "Send \(name) only", scope: "\(name) only")]
@@ -198,10 +200,15 @@ extension FlexibleStageModel {
         }
     }
 
+    /// ★ M1 VERIFY: a squeeze group as the Export step names it — "Group N" (RED CONTROL `controlSquishNameInExport`: his name).
+    func exportName(_ g: FlexibleSqueezeGroup) -> String {
+        FlexibleCoreHold.controlSquishNameInExport ? groupName(g) : FlexibleRowCopy.groupName(g.number)
+    }
+
     /// ★ M1 (5): behind the (i) — the edges groups this export leaves out, by name, and why.
     func edgesWhy(_ edges: [FlexibleSqueezeGroup]) -> String {
         guard !edges.isEmpty else { return "" }
-        let names = edges.map { groupName($0) }
+        let names = edges.map { exportName($0) }
         let who = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
         return " \(who) (edges and corners) \(names.count == 1 ? "is" : "are") not in this export: core does not take edge or corner presses yet."
     }
