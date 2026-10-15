@@ -88,7 +88,9 @@ public enum FlexibleSettingsSquish {
         for (k, vals) in shown.values where regions.contains(k.region) {
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
-        return o.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT))
+        return o.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT),
+                               still: FlexiblePageChannels.stillRule(regions: m.regions, mesh: m.project.viewerMesh, overlay: o,
+                                                                     keys: Array(depths.keys)))   // ★ ROUND 7 (M2)
     }
 
     // MARK: the player

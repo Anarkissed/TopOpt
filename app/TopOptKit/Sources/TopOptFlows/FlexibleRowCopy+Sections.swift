@@ -23,7 +23,7 @@ extension FlexibleRowCopy {
         return "\(root) · lattice \(index < letters.count ? String(letters[index]) : String(index + 1))"
     }
     /// The carry's toast: a stamp whose centre lies on solid stays stored; the section is Curves.
-    public static func stampStays(_ name: String) -> String { fit("Stamp kept off \(name) · its centre is solid") }
+    public static func stampStays(_ name: String) -> String { "Stamp on solid · the lattice part is Curves" }
     /// The carry's toast: a face pressed whole now presses its lattice only.
     public static func nowPressesLattice(_ name: String) -> String { fit("\(name) now presses its lattice only") }
     /// The one-time move of I2's strips off the Surface stage.

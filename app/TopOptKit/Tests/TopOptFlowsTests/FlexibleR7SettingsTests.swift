@@ -241,8 +241,12 @@ final class FlexibleR7SettingsTests: XCTestCase {
         FlexibleReadiness.controlIssueIdByRegion = true
         defer { FlexibleReadiness.controlIssueIdByRegion = false }
         let c = try await run()
-        XCTAssertNotEqual(c.before, c.after, "control: the rest's new id")
-        XCTAssertNotNil(c.popped, "control: the pop-up opens on it again")
+        // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3): a strip's rest is a Flexible sector keyed by its ROLE
+        // ("rest:<face>:1"), so a re-cut keeps its REGION id too — the failure this control showed (I2's Surface cut gave the
+        // rest a new sector id, a new issue, a new pop-up) cannot happen any more; even ids by region stay the same
+        print("FLEX-R7-4f control (ids by region, M2): \(c.before) → \(c.after) · popped \(c.popped?.id ?? "none")")
+        XCTAssertEqual(c.before, c.after, "control (M2): by region too — the rest keeps its id through a re-cut")
+        XCTAssertNil(c.popped, "control (M2): …so nothing pops")
     }
 
     /// The explicit picks still move the tab (testTheRailFollowsTheSelectedFaceAndThePlayingGroupIsTheTabs keeps its
@@ -328,7 +332,10 @@ final class FlexibleR7SettingsTests: XCTestCase {
         let wireBefore = m.regions.key
         let unit = m.settings.weightUnit
         try await withEdge9(m)
-        XCTAssertNotEqual(r.project.faceRegions.regions, regionsBefore.regions, "premise: the strip is cut")
+        // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3): the strip is a Flexible-only sector; the Surface stage's regions
+        // are never cut (they were I2's premise here)
+        XCTAssertEqual(r.project.faceRegions, regionsBefore, "★ M2: the Surface stage's regions untouched by the strip")
+        XCTAssertFalse((m.regions.flexible?.pieces ?? []).filter { $0.kind == .strip }.isEmpty, "premise: the strip is cut (Flexible)")
         let settingsCut = m.settings, regionsCut = r.project.faceRegions, titlesCut = titles(m)
         print("FLEX-R7-4h before: \(titlesCut)")
         m.resetAll()
@@ -338,6 +345,7 @@ final class FlexibleR7SettingsTests: XCTestCase {
         XCTAssertNil(m.settings.groupColours); XCTAssertNil(m.settings.groupNames)
         XCTAssertEqual(m.settings.weightUnit, unit, "the unit is how he reads — kept")
         XCTAssertEqual(r.project.faceRegions.regions, regionsBefore.regions, "every strip given back to its face")
+        XCTAssertTrue((m.regions.flexible?.pieces ?? []).isEmpty, "★ M2: no Flexible strip left")
         XCTAssertEqual(m.regions.key, wireBefore, "the job's regions as before the strip")
         XCTAssertEqual(m.rail, .newGroup, "[New] open")
         XCTAssertNil(m.selectedRegion); XCTAssertNil(m.selectedPress)
@@ -349,7 +357,8 @@ final class FlexibleR7SettingsTests: XCTestCase {
         FlexibleStagePage.history(undo: true, project: r.project, model: m)
         try await reopened(m)
         XCTAssertEqual(m.settings, settingsCut, "undo: the setup as it was")
-        XCTAssertEqual(r.project.faceRegions, regionsCut, "undo: the strip back")
+        XCTAssertEqual(r.project.faceRegions, regionsCut, "undo: the Surface stage's regions as they were (untouched)")
+        XCTAssertFalse((m.regions.flexible?.pieces ?? []).filter { $0.kind == .strip }.isEmpty, "★ M2: undo — the strip back")
         XCTAssertEqual(titles(m), titlesCut, "undo: every tab back")
         FlexibleStagePage.history(undo: false, project: r.project, model: m)
         try await reopened(m)
@@ -382,7 +391,7 @@ final class FlexibleR7SettingsTests: XCTestCase {
         defer { FlexibleStageModel.controlResetAdopts = false }
         m.resetAll()
         XCTAssertEqual(titles(m), ["Model", "Group 1", "Rests", "New"], "control: the main page's Top and Bottom read in again")
-        XCTAssertNotEqual(r.project.faceRegions.regions, regionsBefore.regions, "control: the strip sectors stay cut")
+        // (★ M2: "the strip sectors stay cut" was I2's Surface regions — the strips now go with their presses in both resets)
     }
 
     // MARK: - 4d a trash and a name on every group

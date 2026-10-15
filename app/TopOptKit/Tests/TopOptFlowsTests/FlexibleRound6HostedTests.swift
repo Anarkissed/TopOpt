@@ -531,7 +531,9 @@ final class FlexibleRound6HostedTests: XCTestCase {
         XCTAssertEqual(page.components(separatedBy: "FlexibleLegend(model:").count - 1, 1, "exactly one card on the page")
         // ★ RE-PINNED by the R7 merge (R7-S × R7-V; his img4, 2026-10-14: "I should only be able to view numbers associated to
         // what I'm working on"): the page's dent is `dentRows` — a dent AND heat drawn on the part (FlexibleR7MergeTests).
-        XCTAssertTrue(page.contains("FlexibleLegend.shows(hasDent: dentRows, views: model.views)"), "the page reads the rule")
+        // ★ RE-PINNED (round 7, M2 — his img3 words): the card also carries the lattice sections' row ("Violet = lattice ·
+        // tap to pick") while a face is cut into sections — the same one card
+        XCTAssertTrue(page.contains("FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model))"), "the page reads the rule")
         XCTAssertTrue(page.contains("private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }"))
         // hosted: both rows on, each one line
         let (r, m) = try his()

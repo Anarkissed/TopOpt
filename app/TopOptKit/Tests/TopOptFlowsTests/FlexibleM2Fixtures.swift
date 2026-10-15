@@ -79,8 +79,12 @@ enum FlexibleM2Fixtures {
 
     /// The Topology request's job and the lattice stage's (RemoteRun's bytes), and the Stress solve's regions.
     static func otherStages(_ app: AppModel) throws -> (topology: Data, stage: Data, stress: String) {
-        let topo = try RemoteRun.buildJobJSON(try XCTUnwrap(app.makeRunRequest(), "the Topology request"))
-        let stage = try RemoteRun.buildJobJSON(try XCTUnwrap(app.makeLatticeRunRequest(), "the lattice stage's request"))
+        // (sorted keys: RemoteRun writes a dictionary, whose order is not its bytes — the stage-hash goldens do the same)
+        func sorted(_ d: Data) throws -> Data {
+            try JSONSerialization.data(withJSONObject: try JSONSerialization.jsonObject(with: d), options: [.sortedKeys])
+        }
+        let topo = try sorted(try RemoteRun.buildJobJSON(try XCTUnwrap(app.makeRunRequest(), "the Topology request")))
+        let stage = try sorted(try RemoteRun.buildJobJSON(try XCTUnwrap(app.makeLatticeRunRequest(), "the lattice stage's request")))
         let sim = try XCTUnwrap(app.makeLatticeSimContext(), "the Stress solve's context")
         return (topo, stage, "\(sim.faceRegions)")
     }

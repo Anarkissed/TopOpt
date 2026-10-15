@@ -191,6 +191,21 @@ enum FlexibleLegendViewRows {
         .accessibilityIdentifier("flexible-legend-prisms-row")
     }
 
+    /// ★ ROUND 7 (M2, his img3 words): where a tap works on the Squish page — the lattice sections' violet.
+    static var sections: some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(FlexibleStageStyle.facePrismToken.color.opacity(0.6)).frame(width: 10, height: 12)
+            Text(FlexibleRowCopy.sectionLegend)
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["legendSectionsRow": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flexible-legend-sections-row")
+    }
+
     @MainActor
     static func groups(model: FlexibleStageModel) -> some View {
         let gs = model.squeezeGroups

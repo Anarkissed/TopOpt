@@ -86,13 +86,19 @@ extension FlexibleStageModel {
                     greyed[c.number] = FlexibleRowCopy.inGroup(name: groupName(g))   // ★ ROUND 7 (S, 4d): his name
                     continue
                 }
+                // ★ ROUND 7 (M2, D6): with a face-prism set, a member with no lattice under it cannot take a strip
+                if facePrismsSet, !FlexibleLatticeSections.controlWholeFace, let set = regions.flexible,
+                   c.members.contains(where: { r in !FlexibleRegions.isFlexible(r) && !set.wholeRoots.contains(r) && set.notYet[r] == nil }) {
+                    greyed[c.number] = FlexibleRowCopy.noLatticeAt(FlexibleRowCopy.candidateLabel(c))
+                    continue
+                }
                 var lattice: [Double?] = []
                 for m in c.members {
                     if depth[m] == nil { depth[m] = .some(await latticeDepth(m)) }
                     lattice.append(depth[m] ?? nil)
                 }
                 switch FlexibleEdgeStrips.strip(for: c, label: FlexibleRowCopy.candidateLabel(c), order: order, meet: meet,
-                                                facts: facts, faceRegions: project.faceRegions, existing: existing,
+                                                facts: facts, faceRegions: restoredFaceRegions, existing: existing,
                                                 latticeMM: lattice, name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" }) {
                 case .success(let st): strips[c.number] = st
                 case .failure(let r): greyed[c.number] = r.line
@@ -259,6 +265,17 @@ extension FlexibleStageModel {
         guard let p = settings.press(id), let st = p.strip else { return [] }
         let held = settings.pressRegions
         var out: [String] = []
+        // ★ ROUND 7 (M2): the Flexible form — each strip piece's REST is its chain's rest pieces (FlexibleSectors)
+        if let set = regions.flexible, st.members.allSatisfy({ $0.root < 0 }) {
+            for r in p.regions {
+                guard let pc = set.piece(r) else { continue }
+                let rests = set.pieces.filter { $0.kind == .rest && $0.chain == pc.chain }.map(\.wireID).filter { !held.contains($0) }
+                if let rest = rests.first(where: { settings.face($0) != nil }) {
+                    out.append(FlexibleRowCopy.keepsTheRest(name: displayName(rest), label: st.label, corner: st.kind == .corner))
+                }
+            }
+            return out
+        }
         for m in st.members where m.root >= 0 {
             let rests = FlexibleEdgeStrips.leaves(of: m.root, in: project.faceRegions)
                 .compactMap { project.faceRegions.region($0) }.map(FlexibleRegions.wireID).filter { !held.contains($0) }
@@ -284,6 +301,14 @@ extension FlexibleStageModel {
     /// together between two undo seals, and hand that scene to the page. nil when done; else one line why nothing was
     /// stored. `kg` and `colour`: the new presses' group force and the new group's colour.
     func changeStrips(_ ch: StripChange, kg: Double? = nil, colour: FlexibleGroupColour? = nil) async -> String? {
+        if FlexibleSectors.controlSurfaceRoute { return await changeStripsI2(ch, kg: kg, colour: colour) }
+        return await changeFlexibleStrips(ch, kg: kg, colour: colour)
+    }
+
+    /// ★ RED CONTROL (round 7, M2 — FlexibleSectors.controlSurfaceRoute): I2's own route, kept as it was — the strips cut
+    /// INTO the Surface stage's regions (`project.faceRegions`), the presses and rests keyed on those Surface sectors. The
+    /// migration tests make I2's saved form with it.
+    func changeStripsI2(_ ch: StripChange, kg: Double? = nil, colour: FlexibleGroupColour? = nil) async -> String? {
         guard sceneState == .ready, let opened = openedKey, opened == currentSceneKey, let mesh = project.viewerMesh else {
             return FlexibleRowCopy.edgePickOpening
         }
@@ -408,7 +433,7 @@ extension FlexibleStageModel {
                                                  faceRegions: plan.faceRegions, mesh: mesh, regions: after)
         project.sealUndoStep()
         actionSerial += 1
-        project.faceRegions = plan.faceRegions
+        FlexibleSectorMigration.assignRegions(project, plan.faceRegions)   // (I2's write — the red control only)
         let newGroup = FlexibleSqueezeGroups.nextID(s0)
         edit({ s in
             for mv in moved {
@@ -456,6 +481,187 @@ extension FlexibleStageModel {
             selectedRegion = n.flatMap { Self.controlRailFollowsSelection || admitsSelection($0) ? $0 : nil }
         }
         // ── the page's scene: the one core was asked on, when the project's key is its key now
+        if currentSceneKey == key { await frameWorker.install(scene, key: key) }
+        openScene()
+        return nil
+    }
+
+    // MARK: - the Flexible route (round 7, M2)
+
+    /// ★ ROUND 7 (M2 — the reviewer's ruling 3: "FLEXIBLE-ONLY sectors carried in the job, NOT Surface-stage sectors"):
+    /// APPLY A STRIP CHANGE AS ONE EDIT, the strips Flexible-only: the strips' areas are stored on their presses and the
+    /// pieces DERIVED (FlexibleSectors — nested inside the lattice sections, D6); a scene opened on the regions after the
+    /// change answers each new or re-cut press's halfway and re-expresses each face's settings onto its rest through core's
+    /// frames; then the faces and the presses are committed between two undo seals. `project.faceRegions` is never written.
+    func changeFlexibleStrips(_ ch: StripChange, kg: Double? = nil, colour: FlexibleGroupColour? = nil) async -> String? {
+        guard sceneState == .ready, let opened = openedKey, opened == currentSceneKey, let mesh = project.viewerMesh else {
+            return FlexibleRowCopy.edgePickOpening
+        }
+        let s0 = settings
+        let before = regions
+        var strips: [(id: UUID, strip: FlexibleStrip)] = []
+        var regionsOf: [UUID: [Int]] = [:]
+        for p in s0.presses ?? [] {
+            guard var st = p.strip, !ch.remove.contains(p.id) else { continue }
+            if let w = ch.width[p.id] { st.widthMM = w }
+            strips.append((p.id, st))
+            regionsOf[p.id] = p.regions
+        }
+        var adds = Set<UUID>()
+        for a in ch.add {
+            var st = a.strip
+            for k in st.members.indices { st.members[k].root = -1 }   // derived (FlexibleSectors)
+            strips.append((a.id, st))
+            adds.insert(a.id)
+        }
+        // the Flexible sectors after the change (the session's numbers: the same the committed settings will read)
+        var probe = s0
+        probe.presses = (s0.presses ?? []).filter { !ch.remove.contains($0.id) }.map { p in
+            var q = p
+            if let w = ch.width[p.id] { q.strip?.widthMM = w }
+            return q
+        }
+        for (id, st) in strips where adds.contains(id) {
+            probe.presses?.append(FlexiblePress(id: id, regions: [], direction: SIMD3(0, 0, -1), settings: FlexibleFaceSettings(faceRegionID: -1), strip: st))
+        }
+        let state = sectorState(for: probe, newPicks: adds)
+        var set = state.set
+        var after = state.regions
+        if FlexibleEdgeStrips.controlWholeFaces {
+            // ★ RED CONTROL: the picks press their WHOLE member faces — nothing is cut, the face groups keep them too
+            set = before.flexible ?? .empty
+            for (id, st) in strips { set.stripRegions[id] = regionsOf[id] ?? st.members.map(\.face) }
+            after = before
+        }
+        if let first = strips.first(where: { set.refused[$0.id] != nil }), let why = set.refused[first.id] { return why }
+        let key = sceneKey(regionsKey: after.key)
+        // ── core, on the regions after the change
+        let scene: FlexibleScene
+        do {
+            guard let job = try sceneJob(sectors: after.wire) else { return FlexibleRowCopy.edgePickOpening }
+            scene = try await Task.detached(priority: .userInitiated) { try FlexibleScene(jobJSON: job.json, jobDir: job.dir) }.value
+        } catch {
+            return FlexibleRowCopy.fit(text("\(error)"))
+        }
+        let build = (try? await Task.detached(priority: .userInitiated) { try scene.info() }.value)?.buildDir ?? sceneInfo?.buildDir
+        let source = FlexibleAimSource(
+            frame: { r, f in try await Task.detached(priority: .userInitiated) { try scene.regionFrame(r, face: f) }.value },
+            verdict: { fp, d in try await Task.detached(priority: .userInitiated) { try scene.pressVerdict(fp, direction: d) }.value },
+            triangleLoads: { t in try await Task.detached(priority: .userInitiated) { try scene.triangleLoads(t) }.value },
+            faces: { after.faces(of: $0, mesh: mesh) }, mesh: mesh, buildDir: build,
+            name: { after.name($0, mesh: mesh) },
+            displayName: { r in
+                let sec = after.sector(r)
+                return FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? r : after.faces(of: r, mesh: mesh).first ?? r)
+            },
+            text: { after.renamed($0, mesh: mesh) })
+        // ── each new or re-cut press's default aim: core's halfway on ITS strips
+        var aims: [UUID: FlexiblePressAim.Release] = [:]
+        for (id, st) in strips {
+            let regs = set.stripRegions[id] ?? []
+            guard regionsOf[id] == nil || regs != regionsOf[id] else { continue }
+            do {
+                let aimSet = try await Self.aimSet(regs, source: source)
+                guard let rel = aimSet.defaultRelease else {
+                    let why = aimSet.why ?? aimSet.asked.first { !$0.accepted }?.line ?? FlexibleRowCopy.coreRefuses
+                    return FlexibleRowCopy.fit("\(st.label) · \(why)")
+                }
+                aims[id] = rel
+            } catch {
+                return FlexibleRowCopy.fit("\(st.label) · \(text("\(error)"))")
+            }
+        }
+        // ── each root's settings onto its pieces after the change, re-expressed through core's frames (open scene → new)
+        func pieces(_ regs: FlexibleRegions, _ root: Int) -> [Int] {
+            let pcs = (regs.flexible?.pieces ?? []).filter { $0.rootRegion == root && $0.kind != .strip }.map(\.wireID)
+            return pcs.isEmpty ? [root] : pcs
+        }
+        let rootsTouched = Set((before.flexible?.pieces ?? []).map(\.rootRegion) + set.pieces.map(\.rootRegion))
+        var moved: [(old: [Int], new: [FlexibleFaceSettings])] = []
+        for root in rootsTouched.sorted() {
+            let was = pieces(before, root), now = pieces(after, root)
+            guard Set(was) != Set(now) else { continue }
+            let olds = was.compactMap { id in s0.face(id).map { (id: id, f: $0) } }
+            guard !olds.isEmpty else { continue }
+            var news: [FlexibleFaceSettings] = []
+            for to in now {
+                let face = after.faces(of: to, mesh: mesh).first ?? root
+                let tris = FlexibleEdgeStrips.triangles(face: face, mesh: mesh)
+                let src = olds.max { a, b in
+                    FlexibleEdgeStrips.area(tris, before.cuts(of: a.id) + after.cuts(of: to))
+                        < FlexibleEdgeStrips.area(tris, before.cuts(of: b.id) + after.cuts(of: to))
+                }!
+                // a piece no old setting overlaps (a section a strip left alone keeps its own) is not his to fill
+                guard FlexibleEdgeStrips.area(tris, before.cuts(of: src.id) + after.cuts(of: to)) > 1e-6 else { continue }
+                if src.id == to { news.append(src.f); continue }
+                do {
+                    let r = try await frameWorker.withScene { cur in
+                        try FlexiblePressReframe.reframe(src.f, from: .face(src.id), to: .face(to),
+                                                         frames: FlexibleSplitFrames(from: FlexibleSceneFrames(cur),
+                                                                                     to: FlexibleSceneFrames(scene), toRef: .face(to)))
+                    }
+                    var f = r.settings
+                    f.faceRegionID = to
+                    news.append(f)
+                } catch {
+                    return FlexibleRowCopy.fit("\(displayName(src.id)) · \(text("\(error)"))")
+                }
+            }
+            moved.append((olds.map(\.id), news))
+        }
+        // ── commit: the faces and the presses — ONE edit between two undo seals (the Surface stage's regions untouched)
+        guard sceneState == .ready, openedKey == opened, currentSceneKey == opened, settings == s0 else {
+            return FlexibleRowCopy.edgePickOpening   // the part changed while core was asked: nothing stored
+        }
+        let loads = FlexibleMainPageLoads.derive(groups: project.selection.groups, force: project.force,
+                                                 faceRegions: restoredFaceRegions, mesh: mesh, regions: after)
+        project.sealUndoStep()
+        actionSerial += 1
+        let newGroup = FlexibleSqueezeGroups.nextID(s0)
+        let stripOf = Dictionary(strips.map { ($0.id, $0.strip) }, uniquingKeysWith: { a, _ in a })
+        edit({ s in
+            for mv in moved {
+                let at = s.faces.firstIndex { mv.old.contains($0.faceRegionID) } ?? s.faces.count
+                s.faces.removeAll { mv.old.contains($0.faceRegionID) }
+                s.checkStamps.removeAll { mv.old.contains($0.faceRegionID) }
+                s.faces.insert(contentsOf: mv.new, at: Swift.min(at, s.faces.count))
+            }
+            for id in ch.remove { s.removePress(id) }
+            for (id, _) in strips {
+                guard let regs = set.stripRegions[id], !regs.isEmpty else { continue }
+                if var p = s.press(id) {
+                    p.strip = stripOf[id]
+                    if regs != p.regions {
+                        let wasHalfway = p.snapTarget == .halfway
+                        p.setMembers(regs)
+                        if wasHalfway, let rel = aims[id] { p.aim(rel.direction, snap: rel.snap?.raw) }
+                    }
+                    s.setPress(p)
+                } else if let rel = aims[id] {
+                    var f = FlexibleFaceSettings(faceRegionID: regs[0])
+                    f.weightKg = kg ?? 0
+                    f.weightFrom = nil
+                    f.squeezeGroup = newGroup
+                    // (the whole-face red control stores no strip area: its geometry would derive the strips again)
+                    s.setPress(FlexiblePress(id: id, regions: regs, direction: rel.direction, snap: rel.snap?.raw,
+                                             settings: f, strip: FlexibleEdgeStrips.controlWholeFaces ? nil : stripOf[id]))
+                }
+            }
+            FlexibleSqueezeGroups.normalise(&s)
+            _ = Self.adopt(loads, into: &s)
+            if let colour, let first = ch.add.first?.id, let g = FlexibleSqueezeGroups.group(ofPress: first, in: s) {
+                var map = s.groupColours ?? [:]
+                map[String(g.id)] = colour.rawValue
+                s.groupColours = FlexibleSqueezeGroups.canonical(map, groups: FlexibleSqueezeGroups.groups(s))
+            }
+        }, recompute: false)
+        project.sealUndoStep()
+        refreshMainPageLoads()
+        for mv in moved { for id in mv.old where settings.face(id) == nil { purgeFaceCaches(id) } }
+        if let r = selectedRegion, settings.face(r) == nil, let mv = moved.first(where: { $0.old.contains(r) }) {
+            let n = mv.new.first?.faceRegionID
+            selectedRegion = n.flatMap { Self.controlRailFollowsSelection || admitsSelection($0) ? $0 : nil }
+        }
         if currentSceneKey == key { await frameWorker.install(scene, key: key) }
         openScene()
         return nil

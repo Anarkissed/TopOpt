@@ -138,22 +138,42 @@ public struct FlexibleMainPageLoads: Equatable {
         }
         // ★ ROUND 6 ITEM 2: a sector cut again (an edge strip taken out of it) stands for its LEAVES — FlexibleMeet's
         // partition: the parent stays declared, its children cover it, and loading both loads that surface twice
+        // ★ ROUND 7 (M2): the Flexible-only sectors (lattice sections, strips, rests) are leaves too — a LOAD group presses a
+        // face's lattice pieces (his answer 7: "only on the latticed parts"); an ANCHOR group rests the WHOLE face or Surface
+        // sector (D2: a rest is a support), unless a strip cut it (its pieces less the strips, I2's rule)
+        let flex = regions.flexible
         let parents = Set(regions.sectors.map(\.parentID))
+        let ownParents = Set(regions.sectors.filter { !FlexibleRegions.isFlexible(FlexibleRegions.wireID($0)) }.map(\.parentID))
         func leaves(_ s: FaceRegion) -> [FaceRegion] {
             guard parents.contains(s.id) else { return [s] }
             return regions.sectors.filter { $0.parentID == s.id }.flatMap(leaves)
         }
-        func expand(face f: FaceID) -> [(id: Int, specific: Bool)] {
+        func anchorRoot(_ root: Int) -> [Int] {
+            let pcs = (flex?.pieces ?? []).filter { $0.rootRegion == root }
+            guard pcs.contains(where: { $0.kind == .strip }) else { return [root] }
+            return pcs.filter { $0.kind != .strip }.map(\.wireID)
+        }
+        func expand(face f: FaceID, anchor: Bool = false) -> [(id: Int, specific: Bool)] {
+            if anchor {
+                let own = (sectorsOfFace[f] ?? []).filter { !FlexibleRegions.isFlexible(FlexibleRegions.wireID($0)) && !ownParents.contains($0.id) }
+                let roots = own.isEmpty ? [Int(f)] : own.map(FlexibleRegions.wireID)
+                return roots.flatMap(anchorRoot).map { ($0, false) }
+            }
             let secs = (sectorsOfFace[f] ?? []).filter { !parents.contains($0.id) }
             return secs.isEmpty ? [(Int(f), false)] : secs.map { (FlexibleRegions.wireID($0), false) }
         }
-        func expand(region r: RegionID, depth: Int = 0) -> [(id: Int, specific: Bool)] {
+        func expand(region r: RegionID, anchor: Bool = false, depth: Int = 0) -> [(id: Int, specific: Bool)] {
             guard depth < 16, let reg = faceRegions.region(r) else { return [] }
-            if reg.isUnionOfParts { return reg.parts.flatMap { expand(region: $0, depth: depth + 1) } }
+            if reg.isUnionOfParts { return reg.parts.flatMap { expand(region: $0, anchor: anchor, depth: depth + 1) } }
             if reg.isCut, let sec = regions.sectors.first(where: { $0.id == reg.id }) {
+                if anchor {
+                    let own = leaves(sec).filter { !FlexibleRegions.isFlexible(FlexibleRegions.wireID($0)) }
+                    let roots = own.isEmpty || ownParents.contains(sec.id) == false ? [FlexibleRegions.wireID(sec)] : own.map(FlexibleRegions.wireID)
+                    return roots.flatMap(anchorRoot).map { ($0, true) }
+                }
                 return leaves(sec).map { (FlexibleRegions.wireID($0), true) }
             }
-            return FaceRegionGeometry.members(of: reg, in: mesh).flatMap { expand(face: $0) }
+            return FaceRegionGeometry.members(of: reg, in: mesh).flatMap { expand(face: $0, anchor: anchor) }
         }
         func area(_ id: Int) -> Double {
             guard let sec = regions.sector(id) else { return faceArea[FaceID(id)] ?? 0 }
@@ -189,14 +209,37 @@ public struct FlexibleMainPageLoads: Equatable {
             let kind = force.kind(for: g.id)
             guard kind.isAnchor || kind.isLoad else { continue }
             var list: [(id: Int, specific: Bool)] = []
-            for f in g.faces { list += expand(face: f) }
-            for r in g.regionIDs { list += expand(region: r) }
+            for f in g.faces { list += expand(face: f, anchor: kind.isAnchor) }
+            for r in g.regionIDs { list += expand(region: r, anchor: kind.isAnchor) }
             // one entry per region, the explicit sector winning within the group too
             var seen: [Int: Bool] = [:]
             for e in list { seen[e.id] = (seen[e.id] ?? false) || e.specific }
             let ids = seen.keys.sorted()
             let areas = Dictionary(uniqueKeysWithValues: ids.map { ($0, area($0)) })
             let total = areas.values.reduce(0, +)
+            // ★ ROUND 7 (M2, his answer 7: "an EQUAL SHARE PER LATTICE PART (two parts = 5 lb each of 10 lb, whatever their
+            // size), only on the latticed parts"): the group's force split by area per ROOT (a face only partly latticed
+            // counts its lattice area), then EQUALLY among the root's lattice sections; within a section its pieces (a
+            // strip's rest, the strip — never pressed as a face) by area, I2's rule. A root with no section: today's.
+            var shares: [Int: Double] = [:]
+            if total > 0, let flex, ids.contains(where: { flex.piece($0) != nil }), !controlAreaShare {
+                func rootOf(_ id: Int) -> (root: Int, section: String) {
+                    flex.piece(id).map { ($0.rootRegion, $0.sectionKey ?? "") } ?? (id, "")
+                }
+                var rootArea: [Int: Double] = [:], secArea: [String: Double] = [:], secsOf: [Int: Set<String>] = [:]
+                for id in ids {
+                    let (r, sk) = rootOf(id)
+                    rootArea[r, default: 0] += areas[id] ?? 0
+                    secArea["\(r)|\(sk)", default: 0] += areas[id] ?? 0
+                    secsOf[r, default: []].insert(sk)
+                }
+                for id in ids {
+                    let (r, sk) = rootOf(id)
+                    let perSection = (rootArea[r] ?? 0) / total / Double(max(1, secsOf[r]?.count ?? 1))
+                    let within = (secArea["\(r)|\(sk)"] ?? 0) > 0 ? (areas[id] ?? 0) / secArea["\(r)|\(sk)"]! : 0
+                    shares[id] = perSection * within
+                }
+            }
             let kg = kind.weightKg ?? 0
             let dir: SIMD3<Double>? = {
                 switch kind.loadDirection {
@@ -210,7 +253,7 @@ public struct FlexibleMainPageLoads: Equatable {
                 let specific = seen[id] ?? false
                 // a sector named explicitly wins over the same sector reached through its face
                 if let prior = specificity[id], prior && !specific { continue }
-                let share = total > 0 ? (areas[id] ?? 0) / total : 1 / Double(max(1, ids.count))
+                let share = shares[id] ?? (total > 0 ? (areas[id] ?? 0) / total : 1 / Double(max(1, ids.count)))
                 var role: Role = kind.isAnchor ? .rests : .ask
                 var c = 0.0, w = 0.0
                 if kind.isLoad, let d = dir, simd_length(d) > 1e-9, let l = inward(id) {

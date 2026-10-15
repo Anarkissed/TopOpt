@@ -70,7 +70,10 @@ extension FlexibleRowCopy {
         let what = corner ? "patch" : "strip"
         let long = "\(name) keeps the rest \u{00B7} \(what) taken for \(label)"
         if long.count <= maxChars { return long }
-        return fit("\(name) keeps the rest \u{00B7} \(what) for \(label)")
+        let mid = "\(name) keeps the rest \u{00B7} \(what) for \(label)"
+        if mid.count <= maxChars { return mid }
+        // ★ ROUND 7 (M2): a lattice section's longer name ("Face 2 · lattice B") — the line stays whole, the pick named
+        return fit("\(name) keeps the rest \u{00B7} \(label)")
     }
 
     // MARK: the edges group's tab

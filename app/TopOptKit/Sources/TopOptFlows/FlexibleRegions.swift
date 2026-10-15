@@ -86,8 +86,24 @@ public struct FlexibleRegions {
         return out
     }
 
-    /// The region a tap lands on: the sector holding the point, else the whole face.
+    /// The region a tap lands on: ★ ROUND 7 (M2) the Flexible sector holding the point, else the Surface sector holding it,
+    /// else the whole face.
     public func region(at point: SIMD3<Double>?, face: Int, mesh: ViewerMesh?) -> Int {
+        if let point, let mesh, let id = flexibleAt(point, face: face, mesh: mesh) { return id }
+        return ownRegion(at: point, face: face, mesh: mesh)
+    }
+
+    /// ★ M2: the Flexible sector of `face` holding `point` (its cuts closed, 1e-6 mm of grace; the lowest id on a seam).
+    func flexibleAt(_ point: SIMD3<Double>, face: Int, mesh: ViewerMesh) -> Int? {
+        guard let f = flexible, !f.pieces.isEmpty else { return nil }
+        return f.pieces.filter { pc in
+            FaceRegionGeometry.members(of: pc.region, in: mesh).contains(FaceID(face))
+                && pc.region.cuts.allSatisfy { simd_dot(point - $0.point, simd_normalize($0.normal)) >= -1e-6 }
+        }.map(\.wireID).min()
+    }
+
+    /// The root under a tap (today's rule over his own regions): the Surface sector holding the point, else the face.
+    func ownRegion(at point: SIMD3<Double>?, face: Int, mesh: ViewerMesh?) -> Int {
         guard let point, let mesh, sectors.contains(where: { FaceRegionGeometry.members(of: $0, in: mesh).contains(FaceID(face)) })
         else { return face }
         if let id = SurfaceTint.regionAt(point: point, face: FaceID(face), mesh: mesh, regions: model),
@@ -99,10 +115,16 @@ public struct FlexibleRegions {
 
     /// ★ ROUND 7 (M2, his img3 words): the region a tap on the Squish page PRESSES — the lattice section (or strip / rest)
     /// holding the point; a whole face or Surface sector when it is wholly latticed (or not latticed at all: its card says
-    /// so); nil on the solid part of a face only partly inside a face-prism. TESTS-FIRST STUB: today's `region(at:)`.
+    /// so); nil on the solid part of a face only partly inside a face-prism.
     public func pressable(at point: SIMD3<Double>?, face: Int, mesh: ViewerMesh?) -> Int? {
-        region(at: point, face: face, mesh: mesh)
+        if let point, let mesh, let id = flexibleAt(point, face: face, mesh: mesh) { return id }
+        let root = ownRegion(at: point, face: face, mesh: mesh)
+        if let f = flexible, f.partialRoots[root] != nil { return nil }
+        return root
     }
+
+    /// ★ M2: the Flexible sector `id`'s section key (a section: its own; a strip or rest in one: it), or nil.
+    public func section(of id: Int) -> String? { flexiblePiece(id)?.sectionKey }
 
     /// Does triangle `t` (face `fid`, centroid `c`) belong to region `id`?
     public func contains(_ id: Int, face fid: Int, centroid c: SIMD3<Double>, mesh: ViewerMesh?) -> Bool {

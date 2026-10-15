@@ -113,7 +113,15 @@ public struct FlexibleCoreHold: Equatable, Sendable {
         let pressed = groups.flatMap(\.regions)
         func unique(_ xs: [Int]) -> [Int] { var seen = Set<Int>(); return xs.filter { seen.insert($0).inserted } }
         func noPinchLeft(_ rest: Set<Int>) -> Bool { pinches.allSatisfy { rest.contains($0.a) || rest.contains($0.b) } }
-        func names(_ rs: [Int]) -> String { rs.map(name).joined(separator: ", ") }
+        // ★ ROUND 7 (M2): a face's lattice sections read once, by the face ("Face 2 resting", never "Face 2 · lattice B, …")
+        func names(_ rs: [Int]) -> String {
+            var seen = Set<String>(), out: [String] = []
+            for n in rs.map(name) {
+                let face = n.components(separatedBy: " \u{00B7} lattice").first ?? n
+                if seen.insert(face).inserted { out.append(face) }
+            }
+            return out.joined(separator: ", ")
+        }
         var out: [FlexibleCoreFix] = []
         if groups.count > 1 {
             for g in groups {

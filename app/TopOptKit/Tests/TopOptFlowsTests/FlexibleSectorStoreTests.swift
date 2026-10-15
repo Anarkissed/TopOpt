@@ -101,7 +101,9 @@ final class FlexibleSectorStoreTests: XCTestCase {
         XCTAssertEqual(after.stress, before.stress, "★ the Stress solve's regions: identical")
         print("FLEX-M2-SURFACE regions \(p.faceRegions.regions.count) (unchanged) · Topology face_regions \(try F.faceRegionCount(after.topology))")
 
-        // ★ RED CONTROL: I2's route — the strips written into the Surface stage's regions
+        // ★ RED CONTROL: I2's route (round 6, before sections: whole faces) — the strips written into the Surface stage's regions
+        FlexibleLatticeSections.controlWholeFace = true
+        defer { FlexibleLatticeSections.controlWholeFace = false }
         let (r2, _, m2) = try await F.pad(self)
         let topo2 = try F.otherStages(r2.app).topology
         FlexibleSectors.controlSurfaceRoute = true

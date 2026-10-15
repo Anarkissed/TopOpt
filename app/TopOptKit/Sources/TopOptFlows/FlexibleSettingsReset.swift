@@ -43,10 +43,12 @@ extension FlexibleStageModel {
         if Self.controlResetAdopts { return freshSettingsReadingTheMainPage() }
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
         s.weightUnit = settings.weightUnit
+        s.sectors = settings.sectors   // ★ ROUND 7 (M2): the numbers stay (never reused)
         if let mesh = project.viewerMesh {
-            let m = faceRegions ?? project.faceRegions
+            // ★ ROUND 7 (M2): the main page's groups read over the regions with no strip left (the Flexible sectors of `s`)
+            let m = faceRegions ?? restoredFaceRegions
             let loads = FlexibleMainPageLoads.derive(groups: project.selection.groups, force: project.force, faceRegions: m,
-                                                     mesh: mesh, regions: FlexibleRegions(model: m, mesh: mesh))
+                                                     mesh: mesh, regions: sectorState(for: s).regions)
             let held = loads.entries.keys.sorted()
             s.removedRegions = held.isEmpty ? nil : held
         }
@@ -61,28 +63,19 @@ extension FlexibleStageModel {
         return FlexibleSettingsMigration.migrated(s)
     }
 
-    /// The regions with every strip given back to its face (I2's own plan, with no pick left on any chain — an identity
-    /// region the strips made goes, unless the main page refers to it); the project's when there is no strip.
-    func regionsWithoutStrips() -> FaceRegionModel {
-        let roots = Set((settings.presses ?? []).compactMap(\.strip).flatMap { $0.members.map(\.root) }.filter { $0 >= 0 })
-        guard !roots.isEmpty, let mesh = project.viewerMesh else { return project.faceRegions }
-        let keep = Set(project.selection.groups.flatMap(\.regionIDs).map { Int($0) })
-        return FlexibleEdgeStrips.plan([], replay: roots, faceRegions: project.faceRegions, mesh: mesh, keep: keep).faceRegions
-    }
-
     /// ★ S5 / ★ ROUND 7 (S, 4h): every input back to a brand-new setup — every group gone (only [Model] and [+ New] are
     /// left on the rail), every strip given back to its face — ONE undoable step; the page's per-face copies of core's
     /// answers go with the old faces; [+ New] opens.
     public func resetAll() {
         if Self.controlResetAdopts { resetAllReadingTheMainPage(); return }
-        let regionsAfter = regionsWithoutStrips()
-        let fresh = freshSettings(faceRegions: regionsAfter)
+        // ★ ROUND 7 (M2): the strips are Flexible-only — they go with their presses; the Surface stage's regions are never
+        // touched (a project still in I2's form is moved by the edit itself, FlexibleStageModel.edit)
+        let fresh = freshSettings()
         let before = settings
-        guard fresh != before || regionsAfter != project.faceRegions else { return }
+        guard fresh != before else { return }
         actionSerial += 1
         let old = Set(before.faces.map(\.faceRegionID))
         project.sealUndoStep()   // the edits before it are their own step (their save may still be pending)
-        if regionsAfter != project.faceRegions { project.faceRegions = regionsAfter }
         edit { $0 = fresh }
         for r in old { purgeFaceCaches(r) }
         refreshMainPageLoads()
@@ -156,7 +149,9 @@ public enum FlexibleSettingsExit {
 
     /// Did anything change since the page opened (`opened` nil: the part is still opening — nothing yet)?
     public static func modified(_ now: FlexibleStageSettings, since opened: FlexibleStageSettings?) -> Bool {
-        opened.map { $0 != now } ?? false
+        // ★ ROUND 7 (M2): the Flexible sectors' numbers are labels (registered by the open's own read too) — never his change
+        func bare(_ s: FlexibleStageSettings) -> FlexibleStageSettings { var c = s; c.sectors = nil; return c }
+        return opened.map { bare($0) != bare(now) } ?? false
     }
 
     /// ★ S9: the page's top line when it is ready — it names the button he will press (round 4's

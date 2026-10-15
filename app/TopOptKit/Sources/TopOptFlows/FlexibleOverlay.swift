@@ -305,8 +305,12 @@ public struct FlexibleOverlayMesh {
     /// `joinRegions` (default on; off only as a test's red control): a quad corner that two
     /// loaded regions share — the two sectors of a split face — takes the mean over BOTH
     /// regions' columns, so their maps meet along the cut instead of stepping apart.
+    /// ★ ROUND 7 (M2): `still(key, t)` — part triangle `t` (a drawn part triangle) does not ride `key`'s ramp: the SOLID
+    /// rest of a face only partly latticed (his img3 words: "It must only be the lattice section"). nil: every part
+    /// triangle rides it, as before.
     public func displacements(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
-                              partUVT: [FlexFaceKey: [Double]], joinRegions: Bool = true) -> [Float] {
+                              partUVT: [FlexFaceKey: [Double]], joinRegions: Bool = true,
+                              still: ((FlexFaceKey, Int) -> Bool)? = nil) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 3)
         let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
@@ -353,6 +357,7 @@ public struct FlexibleOverlayMesh {
                     for j in 0..<3 { corner[3 * i + j] = ramp(src: s.source[i] * 3, s.cornerWeights[3 * i + j]).map { $0.dd * $0.r } ?? 0 }
                 }
                 for v in 0..<Swift.min(partFlatVertices, s.bary.count) {
+                    if let still, still(k, v / 3) { continue }
                     let i = s.subOf[v / 3], b = s.bary[v]
                     let x = b.x * corner[3 * i] + b.y * corner[3 * i + 1] + b.z * corner[3 * i + 2]
                     guard x != 0 else { continue }
@@ -361,6 +366,7 @@ public struct FlexibleOverlayMesh {
                 continue
             }
             for v in 0..<partFlatVertices {
+                if let still, still(k, v / 3) { continue }
                 // ★ its source triangle's corners in the ORIGINAL part's flat buffer (the uvt
                 // order), weighted by where this vertex sits in it (a clipped piece's corner
                 // lies inside its source; an uncut triangle's weights are the identity)

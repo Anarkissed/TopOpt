@@ -303,6 +303,10 @@ public enum FlexibleEdgeStrips {
         public var before: [Int: [Int]] = [:]
         /// A pick that cannot be cut: one line.
         public var refused: [UUID: String] = [:]
+        /// ★ ROUND 7 (M2): the same pieces as FaceRegionModel ids of `faceRegions` (never wire ids — the Flexible sectors
+        /// renumber them, FlexibleSectors): each press's piece per member index, and each re-cut chain's rest, by root.
+        public var pieceIDs: [UUID: [Int: Int]] = [:]
+        public var restIDs: [Int: [Int]] = [:]
     }
 
     /// ★ RE-CUT every chain in `replay` (FaceRegion ids) and every chain a new pick starts (root −1), from its root, in
@@ -354,6 +358,7 @@ public enum FlexibleEdgeStrips {
                 // nothing presses this chain any more: the face is whole again (an identity region made for strips goes)
                 if !r.isCut, r.isIdentity, !keep.contains(root), m.children(of: root).isEmpty { _ = m.dissolve(root) }
                 out.rests[root] = [base]
+                out.restIDs[root] = [root]
                 continue
             }
             var free: [Int] = [root]
@@ -397,8 +402,10 @@ public enum FlexibleEdgeStrips {
             let rest = free.sorted()
             for (i, id) in rest.enumerated() { m.rename(id, to: rest.count == 1 ? baseName : "\(baseName) · part \(i + 1)") }
             out.rests[root] = rest.compactMap { m.region($0).map(FlexibleRegions.wireID) }
+            out.restIDs[root] = rest
         }
         out.faceRegions = m
+        out.pieceIDs = pieceOf
         for e in all {
             var regs: [Int] = []
             for (k, mb) in e.strip.members.enumerated() {

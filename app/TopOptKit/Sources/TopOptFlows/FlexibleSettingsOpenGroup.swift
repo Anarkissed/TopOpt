@@ -39,8 +39,14 @@ struct FlexibleRailKeep: Equatable {
     /// Every face the settings held then (a member that vanished maps to a NEW region on its own face; a face that WAS set
     /// and is not now was removed or moved).
     var known: Set<Int>
-    /// The regions model they were read through (a vanished member's faces).
-    var faceRegions: FaceRegionModel
+    /// The regions they were read through (a vanished member's faces) — ★ ROUND 7 (M2): the whole FlexibleRegions value
+    /// (his Surface regions AND the Flexible sectors), so a Flexible piece that vanished still names its face.
+    var snapshot: FlexibleRegions
+
+    static func == (a: FlexibleRailKeep, b: FlexibleRailKeep) -> Bool {
+        a.tab == b.tab && a.rank == b.rank && a.regions == b.regions && a.presses == b.presses && a.known == b.known
+            && a.snapshot.sectors == b.snapshot.sectors && a.snapshot.model == b.snapshot.model
+    }
 }
 
 extension FlexibleStageModel {
@@ -55,7 +61,7 @@ extension FlexibleStageModel {
     func captureRail() -> FlexibleRailKeep {
         let s = settings
         var k = FlexibleRailKeep(tab: rail, rank: nil, regions: [], presses: [], known: Set(s.faces.map(\.faceRegionID)),
-                                 faceRegions: project.faceRegions)
+                                 snapshot: regions)
         switch rail {
         case .group(let id):
             if let g = railGroup(id) { k.rank = g.number; k.regions = g.regions; k.presses = Set(g.presses) }
@@ -77,7 +83,7 @@ extension FlexibleStageModel {
         guard !vanished.isEmpty, let mesh = project.viewerMesh else { return now }
         let fresh = present.subtracting(k.known)
         guard !fresh.isEmpty else { return now }
-        let before = FlexibleRegions(model: k.faceRegions, mesh: mesh), after = regions
+        let before = k.snapshot, after = regions
         for r in vanished {
             let faces = Set(before.faces(of: r, mesh: mesh))
             for n in fresh where !faces.isDisjoint(with: after.faces(of: n, mesh: mesh)) { now.insert(n) }
@@ -171,7 +177,7 @@ extension FlexibleStageModel {
     func keepSelectionInOpenTab(_ k: FlexibleRailKeep?, fillEmpty: Bool = true) {
         func replacement(for r: Int?, among members: [Int]) -> Int? {
             if let r, let k, let mesh = project.viewerMesh {
-                let faces = Set(FlexibleRegions(model: k.faceRegions, mesh: mesh).faces(of: r, mesh: mesh))
+                let faces = Set(k.snapshot.faces(of: r, mesh: mesh))
                 if let same = members.first(where: { !faces.isDisjoint(with: regions.faces(of: $0, mesh: mesh)) }) { return same }
             }
             return members.first
@@ -228,6 +234,11 @@ extension FlexibleStageModel {
     /// (or the sector a strip cut it from). A face no strip touched keeps its id as before.
     public func issueKey(_ region: Int) -> String {
         guard FlexibleRegions.isSector(region), !FlexibleReadiness.controlIssueIdByRegion else { return "\(region)" }
+        // ★ ROUND 7 (M2): a Flexible sector's issues carry its SECTION (a strip's rest, re-cut, is the same issue), else its
+        // root (a rest on a whole face reads as the face)
+        if FlexibleRegions.isFlexible(region), let pc = regions.flexiblePiece(region) {
+            return pc.sectionKey ?? "\(pc.rootRegion)"
+        }
         let m = project.faceRegions
         let strips = (settings.presses ?? []).compactMap(\.strip)
         let face = regions.faces(of: region, mesh: project.viewerMesh).first ?? region

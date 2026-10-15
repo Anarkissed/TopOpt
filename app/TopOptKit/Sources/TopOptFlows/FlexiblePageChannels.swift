@@ -33,6 +33,27 @@ public enum FlexiblePageChannels {
         return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes, maxEdgeMM: maxEdgeMM)
     }
 
+    /// ★ ROUND 7 (M2): which drawn part triangles stay still for which pressed key — the SOLID rest of a face only partly
+    /// latticed (the triangles on a Flexible sector's own face, outside its cuts). nil: none (no Flexible sector pressed).
+    static func stillRule(regions: FlexibleRegions, mesh: ViewerMesh?, overlay: FlexibleOverlayMesh,
+                          keys: [FlexFaceKey]) -> ((FlexFaceKey, Int) -> Bool)? {
+        var sections: [Int: (faces: Set<Int>, cuts: [RegionCut])] = [:]
+        if let set = regions.flexible, let mesh {
+            for k in keys { if let pc = set.piece(k.region) {
+                sections[k.region] = (Set(FaceRegionGeometry.members(of: pc.region, in: mesh).map { Int($0) }), pc.region.cuts)
+            } }
+        }
+        guard !sections.isEmpty else { return nil }
+        return { k, t in
+            guard let sec = sections[k.region], t < overlay.keptFace.count, sec.faces.contains(overlay.keptFace[t]) else { return false }
+            let c = overlay.keptCentroid[t]
+            return !sec.cuts.allSatisfy { simd_dot(c - $0.point, simd_normalize($0.normal)) >= -1e-6 }
+        }
+    }
+
+    /// ★ ROUND 7 (M2): the lattice sections' faint violet (the Squish page's "where a tap works").
+    public static let sectionTintAlpha: Float = 0.35
+
     /// Everything MetalMeshView reads for the map: per-vertex tints, the dent (mm per flat
     /// vertex, before the renderer's scale), the ONE exaggeration k, and whether it loops.
     public struct Channels {
@@ -77,6 +98,13 @@ public enum FlexiblePageChannels {
         let regions = model.regions
         let groups = model.squeezeGroups
         var regionTint: [(id: Int, tint: SIMD4<Float>)] = []   // later entries win
+        // ★ ROUND 7 (M2, his img3 words): on the Squish page, where a tap works — every lattice piece of a face only partly
+        // inside a face-prism wears the face-prism violet, faint, FIRST (a role or the selection over it wins); the solid
+        // rest of the face stays the part's colour (the overlay cuts the face at the section's planes, so it stops there)
+        if sectionTints, let set = regions.flexible, !set.partialRoots.isEmpty {
+            let c = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)
+            for p in set.pieces where set.partialRoots[p.rootRegion] != nil && p.kind != .strip { regionTint.append((p.wireID, c)) }
+        }
         // ★ BATCH V ("Role colours off" on the MAIN page — his answer of 2026-10-09, now a view setting): `roleMarks` false —
         // no pressed green, no resting cyan, no selected face or linked end on the part; only the dent heat on the maps. The
         // Settings page keeps them.
@@ -150,8 +178,18 @@ public enum FlexiblePageChannels {
         }
         // ★ R7-V (the Settings page's Heat view): only `heatRegions`' maps take the heat (nil: every pressed face's)
         let heated = heatRegions.map { only in colours.filter { only.contains($0.key.region) } } ?? colours
-        let tints = overlay.tints(partTint: tintOf, columnColours: heat ? heated : [:], vertexColour: heat ? vertexColour : nil,
+        var tints = overlay.tints(partTint: tintOf, columnColours: heat ? heated : [:], vertexColour: heat ? vertexColour : nil,
                                   ghost: xray ? FlexibleColours.ghost : nil)
+        // ★ ROUND 7 (M2): the sections' violet reads through the X-ray ghost — flagged like the map (flags.y), not ghosted
+        if sectionTints, regions.flexible?.partialRoots.isEmpty == false {
+            let violet = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)
+            for t in 0..<overlay.keptFace.count {
+                let v0 = t * 3 * 8
+                guard v0 + 23 < tints.count,
+                      SIMD4(tints[v0], tints[v0 + 1], tints[v0 + 2], tints[v0 + 3]) == violet else { continue }
+                for j in 0..<3 { tints[v0 + j * 8 + 5] = 1; tints[v0 + j * 8 + 6] = 0 }
+            }
+        }
         guard shown.showsDent else {
             return Channels(tints: tints, dents: nil, exaggeration: 0, animated: false, legendLine: "", mapValues: values, heatScaleMM: scale)
         }
@@ -162,8 +200,11 @@ public enum FlexiblePageChannels {
             if let g = drawnLattice, !g.squishedKeys.contains(k) { continue }
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
+        // ★ ROUND 7 (M2): the solid rest of a face only partly latticed stays still (its triangles on the section's own face,
+        // outside the section's cuts) — a Flexible sector only; his Surface sectors and whole faces ride their ramp as before
+        let still = stillRule(regions: regions, mesh: partMesh, overlay: overlay, keys: Array(depths.keys))
         let dents = overlay.displacements(depths: depths, stacks: model.stacks,
-                                          partUVT: model.geometry.mapValues(\.partUVT))
+                                          partUVT: model.geometry.mapValues(\.partUVT), still: still)
         // ★ one k while the depth chip is dragged (FlexibleDepthChips freezes it on the model)
         let k = model.frozenExaggeration ?? shown.exaggeration
         return Channels(tints: tints, dents: dents, exaggeration: k, animated: shown.animated,

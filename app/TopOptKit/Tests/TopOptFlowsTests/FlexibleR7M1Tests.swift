@@ -158,7 +158,7 @@ final class FlexibleR7M1Tests: XCTestCase {
     /// His img2: "What is this 12mm? … please remove whatever it is" — it was the Top's SQUISH prism (its group owns the Top's
     /// weight). The Top is Off in Selections: no face-prism, so nothing is drawn after picking the Top.
     func testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections() async throws {
-        let (r, s, _) = try await F.hisPad(self, live: true)
+        let (r, s, m) = try await F.hisPad(self, live: true)
         let p = r.project
         let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
         XCTAssertTrue(F.facePrisms(p, group: top.id).isEmpty, "premise: the Top's face is Off in Selections")
@@ -169,7 +169,11 @@ final class FlexibleR7M1Tests: XCTestCase {
         s.controlSquishPrismsOnMain = true
         let control = s.volumes(p, on: .lattice, drilledIn: false).map(\.volume.faceID)
         s.controlSquishPrismsOnMain = false
-        XCTAssertEqual(control, [1], "★ RED CONTROL: the Top's squish prism returns")
+        // ★ RE-PINNED (round 7, M2 — his img3 words, the reviewer's ruling 3): his live lattice cuts the Top into two lattice
+        // sections, so the Top's squish prisms are its two sections' (was [1], the whole Top)
+        let sections = (m.regions.flexible?.pieces ?? []).filter { m.regions.faces(of: $0.wireID, mesh: p.viewerMesh) == [1] }.map(\.wireID)
+        XCTAssertEqual(Set(control), Set(sections), "★ RED CONTROL: the Top's squish prisms return")
+        XCTAssertEqual(sections.count, 2, "premise (M2): the Top's two lattice sections")
         print("FLEX-R7M1-img2 Top picked: [] · control \(control)")
     }
 
@@ -269,13 +273,27 @@ final class FlexibleR7M1Tests: XCTestCase {
     func testHisFacePrismsLatticeOnlyUnderThem() async throws {
         let (_, _, m) = try await F.hisPad(self, live: true)
         XCTAssertTrue(m.facePrismsSet, "his live lattice sets two face-prisms")
-        let three = try XCTUnwrap(m.stack(3)), top = try XCTUnwrap(m.stack(1))
+        let three = try XCTUnwrap(m.stack(3))
         XCTAssertGreaterThan(three.latticedColumns, 0, "Face 3 has lattice under it")
         // Face 3's columns cross the pad to Face 5 (100 mm): 25 mm of lattice under each of the two prisms, none between
         // (the red run's first expectation, 25, forgot Face 5's prism at the far end of the same columns)
         XCTAssertEqual(three.latticeMMMax, 50, accuracy: 3.5, "…25 mm under each face-prism of the pair (one voxel)")
         XCTAssertLessThan(three.latticeMMMax, three.stackMMMax - 20, "★ not the whole 100 mm column")
-        XCTAssertLessThan(top.latticedColumns, top.columns.count, "★ the Top is latticed only where a face-prism reaches")
+        // ★ RE-PINNED (round 7, M2 — his img3 words: "only the places with face-prisms get latticed … one of the lattice's
+        // top faces"; the reviewer's ruling 3): the Top is pressed by its two lattice SECTIONS now (was: the whole Top, half its
+        // columns latticed) — each section's columns are latticed, and the two cover only where a face-prism reaches
+        let mesh = try XCTUnwrap(m.project.viewerMesh)
+        let sections = m.settings.loadedFaces.filter { m.regions.faces(of: $0.faceRegionID, mesh: mesh) == [1] }.map(\.faceRegionID)
+        XCTAssertEqual(sections.count, 2, "★ the Top's two lattice sections are pressed")
+        XCTAssertNil(m.settings.face(1), "★ never the whole Top")
+        var area = 0.0
+        for sec in sections {
+            let st = try XCTUnwrap(m.stack(sec), "section \(sec)'s stack")
+            XCTAssertGreaterThanOrEqual(Double(st.latticedColumns) / Double(max(1, st.columns.count)), 0.95, "★ section \(sec) is latticed")
+            area += FlexibleEdgeStrips.area(FlexibleEdgeStrips.triangles(face: 1, mesh: mesh), m.regions.cuts(of: sec))
+        }
+        XCTAssertEqual(area, 5000, accuracy: 5, "★ the Top's lattice: two 25 × 100 mm sections, half the Top")
+        let top = try XCTUnwrap(m.stack(sections[0]))
         let latticed = try XCTUnwrap(m.sceneInfo).latticeVoxels
         let lattice = try await FlexibleSquishFixture.build(m, "his live lattice")
         XCTAssertNotNil(lattice)

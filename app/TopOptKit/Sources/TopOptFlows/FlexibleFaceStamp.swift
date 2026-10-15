@@ -172,17 +172,33 @@ extension FlexibleStageModel {
 
     /// A Stamp face's footprint for its depth prism (the smoothed one, whose ½ contour the prism
     /// stands on); nil for a Curves face (the prism stands on every column).
+    /// ★ ROUND 7 (M2, his img3 words: "It must only be the lattice section - regardless of what shape it is"): a Curves
+    /// face whose stack has columns with NO lattice under them stands its prism on its latticed columns only (any shape);
+    /// every column latticed, or none: nil (every column, as before).
     public func prismFootprint(_ r: Int) -> [Double]? {
-        guard settings.face(r)?.isStampShape == true else { return nil }
+        guard settings.face(r)?.isStampShape == true else {
+            guard let st = stack(r), let mask = Self.latticedMask(st) else { return nil }
+            return mask
+        }
         return stampFootprint(r) ?? []
     }
 
     /// The columns a face's depth prism stands on: a Stamp face's footprint (at least half
-    /// pressed); nil ⇒ every column (Curves).
+    /// pressed); ★ ROUND 7 (M2): a Curves face's LATTICED columns (latticeMM > 0); nil before its stack.
     public func prismColumns(_ r: Int) -> Set<Int>? {
-        guard settings.face(r)?.isStampShape == true else { return nil }
+        guard settings.face(r)?.isStampShape == true else {
+            guard let st = stack(r) else { return nil }
+            return Set(st.columns.indices.filter { st.columns[$0].latticeMM > 0 })
+        }
         guard let foot = stampFootprint(r) else { return [] }
         return Set(foot.indices.filter { foot[$0] >= 0.5 })
+    }
+
+    /// 1 on a latticed column, 0 elsewhere — nil when every column is latticed or none is (the prism then stands on all).
+    nonisolated static func latticedMask(_ st: FlexStackInfo) -> [Double]? {
+        let mask = st.columns.map { $0.latticeMM > 0 ? 1.0 : 0.0 }
+        guard mask.contains(0), mask.contains(1) else { return nil }
+        return mask
     }
 
     /// A stamp's name: the library's, or the imported file's.

@@ -142,7 +142,13 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         m.newGroup(with: FlexibleHisProject.topB)
         XCTAssertEqual(m.squeezeGroup(of: FlexibleHisProject.topA)?.id, m.squeezeGroup(of: FlexibleHisProject.topB)?.id,
                        "top A moves with top B: one hand")
-        XCTAssertEqual(Set(m.squeezeGroups[0].regions), [3, 5])
+        // ★ RE-PINNED (round 7, M2 — his img3 words: "only the places with face-prisms get latticed"; the reviewer's ruling 3):
+        // with Top B in the Top group its face-prism is the group's 4 mm, so Face 5 has lattice only in its top 4 mm — it is
+        // pressed by that lattice SECTION (a Flexible sector), no longer the whole Face 5
+        let face5 = m.settings.loadedFaces.map(\.faceRegionID).filter { m.regions.faces(of: $0, mesh: r.project.viewerMesh) == [5] }
+        XCTAssertEqual(face5.count, 1, "Face 5's one lattice section")
+        XCTAssertTrue(face5.allSatisfy(FlexibleRegions.isFlexible))
+        XCTAssertEqual(Set(m.squeezeGroups[0].regions), Set([3] + face5))
         let two = try XCTUnwrap(m.squeezeGroup(of: FlexibleHisProject.topB))
         m.setGroupForce(two.id, kg: 4)
         try await settle(m)

@@ -153,22 +153,34 @@ final class FlexibleLatticeSectionsTests: XCTestCase {
         XCTAssertEqual(min(len(g.baselineX.points), len(g.baselineY.points)), 25, accuracy: st.pitchMM + 1e-6, "★ the curve spans 25 mm")
         let latticed = Set(st.columns.indices.filter { st.columns[$0].latticeMM > 0 })
         XCTAssertEqual(m.prismColumns(sec), latticed, "★ the prism stands on the latticed columns")
-        // the dent: nothing moves on the Top's solid middle
+        // the dent of the Top's sections: nothing of the Top's solid middle moves (the page's own dent, FlexiblePageChannels,
+        // for the Top's keys only — a side face's lattice section ramps the Top's EDGE, as every pressed side face does)
         let overlay = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
-        let ch = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: nil)
-        let dents = try XCTUnwrap(ch.dents, "a dent is drawn")
-        let (lo, hi) = F.box(p)
-        let pos = overlay.mesh.flat.positions
-        var middle = 0, moved = 0
-        for v in 0..<min(dents.count, pos.count / 3) {
-            let x = Double(pos[3 * v]), z = Double(pos[3 * v + 2])
-            guard abs(z - hi.z) < 1e-3, x > lo.x + 25 + 1e-3, x < hi.x - 25 - 1e-3 else { continue }
-            middle += 1
-            if abs(dents[v]) > 1e-9 { moved += 1 }
+        let shown = FlexibleShownValues(model: m, drawnLattice: nil)
+        let mesh = try XCTUnwrap(p.viewerMesh)
+        var depths: [FlexFaceKey: [Double?]] = [:]
+        for (key, vals) in shown.values where m.regions.faces(of: key.region, mesh: mesh) == [1] {
+            depths[key] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
-        print("FLEX-M2-CURVES the Top's middle: \(middle) vertices, \(moved) moved")
-        XCTAssertGreaterThan(middle, 0, "premise: the overlay has vertices on the Top's middle")
-        XCTAssertEqual(moved, 0, "★ the solid middle never moves")
+        XCTAssertEqual(depths.count, 2, "premise: the Top's two sections are drawn")
+        func middleMoves(_ still: ((FlexFaceKey, Int) -> Bool)?) -> (triangles: Int, moved: Int) {
+            let dents = overlay.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT), still: still)
+            let (lo, hi) = F.box(p)
+            var middle = 0, moved = 0
+            for (i, f) in overlay.keptFace.enumerated() where f == 1 {
+                let c = overlay.keptCentroid[i]
+                guard c.x > lo.x + 25, c.x < hi.x - 25 else { continue }
+                middle += 1
+                for v in (3 * i)..<(3 * i + 3) where v * 3 + 2 < dents.count && simd_length(SIMD3(dents[3 * v], dents[3 * v + 1], dents[3 * v + 2])) > 1e-9 { moved += 1 }
+            }
+            return (middle, moved)
+        }
+        let rule = FlexiblePageChannels.stillRule(regions: m.regions, mesh: mesh, overlay: overlay, keys: Array(depths.keys))
+        let held = middleMoves(rule), sag = middleMoves(nil)
+        print("FLEX-M2-CURVES the Top's middle: \(held.triangles) part triangles, \(held.moved) corners moved · without the rule \(sag.moved)")
+        XCTAssertGreaterThan(held.triangles, 0, "premise: the Top's solid middle is the part's own triangles in the overlay")
+        XCTAssertEqual(held.moved, 0, "★ the solid middle never moves")
+        XCTAssertGreaterThan(sag.moved, 0, "control: without the still rule the middle sags with the sections' edges")
 
         // ★ RED CONTROL: the whole Top pressed (today's)
         FlexibleLatticeSections.controlWholeFace = true
@@ -190,7 +202,7 @@ final class FlexibleLatticeSectionsTests: XCTestCase {
         let sec = try XCTUnwrap(m.selectedRegion)
         XCTAssertTrue(FlexibleRegions.isFlexible(sec), "the section (\(sec))")
         let drawn = FlexCurve(x: [0, 0.3, 1], y: [0.2, 0.9, 0.4])
-        m.edit { s in guard var f = s.face(sec) else { return }; f.shape = nil; f.curveX = drawn; s.setFace(f) }
+        m.edit { s in guard var f = s.face(sec) else { return }; f.shape = "curves"; f.curveX = drawn; s.setFace(f) }
         XCTAssertEqual(m.settings.face(sec)?.curveX, drawn, "premise: his curve on the section")
         p.writeLatticeDepthMM(.face(group: c.id, face: 3), mm: 17.26)
         try await F.reopen(m, "Face 3 at 17.26 mm")
@@ -347,13 +359,17 @@ final class FlexibleLatticeSectionsTests: XCTestCase {
         FlexibleLatticeSections.controlWholeFace = true
         let (_, _, m0) = try await F.pad(self)
         let before = try F.sendEntries(m0)   // the bytes before M2 (whole faces)
+        let tb = FlexibleAngledGoldens.sends(m0).map(\.title)
         FlexibleLatticeSections.controlWholeFace = false
         let (r, _, m) = try await F.pad(self)
         let after = try F.sendEntries(m)
-        XCTAssertEqual(Set(before.keys), Set(after.keys), "the same sends")
+        // the same sends, in the same order (their titles name the resting faces: a section reads by its own name)
+        let ta = FlexibleAngledGoldens.sends(m).map(\.title)
+        XCTAssertEqual(tb.count, ta.count, "the same sends: \(tb) · \(ta)")
+        print("FLEX-M2-JOB sends before \(tb) · after \(ta)")
         let mesh = try XCTUnwrap(r.project.viewerMesh)
-        for (send, b) in before {
-            let a = try XCTUnwrap(after[send])
+        for (k, send) in tb.enumerated() where k < ta.count {
+            let b = try XCTUnwrap(before[send]), a = try XCTUnwrap(after[ta[k]])
             for id in [0, 3, 5] where b.faces[id] != nil {
                 XCTAssertEqual(a.faces[id], b.faces[id], "★ \(send): face \(id)'s entry byte-identical")
             }

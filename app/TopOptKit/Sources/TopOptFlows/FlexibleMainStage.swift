@@ -380,6 +380,9 @@ public final class FlexibleMainStage: ObservableObject {
         }
         // ★ D2: another project's squeeze pick does not carry over (async: never inside an update)
         if shownSim != nil { DispatchQueue.main.async { [weak self] in self?.shownSim = nil } }
+        // ★ ROUND 7 (M2, the reviewer's ruling 3): a project I2 saved has its edge strips moved off the Surface stage once,
+        // as the loaded state when nothing is undoable (FlexibleSectorMigration) — never inside a view's init
+        DispatchQueue.main.async { [weak m] in m?.migrateSectorsAtOpen() }
         observation = m.objectWillChange
             .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.modelChanged() }

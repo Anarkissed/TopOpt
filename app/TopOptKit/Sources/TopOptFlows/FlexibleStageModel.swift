@@ -273,6 +273,10 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public internal(set) var migrationReport: FlexibleSectorMigration.Report?
     /// ★ M2 RED CONTROL: no carry at open — a face pressed whole stays beside its new sections (core refuses).
     var controlNoCarry = false
+    /// ★ M2: Selections' include specs, memoised (FlexibleStageModel+Sectors.includeSpecs).
+    var includeMemo: (key: FlexibleIncludeMemoKey, specs: [LatticeRegionSpec])?
+    /// ★ M2: the read-through of a project I2 saved (FlexibleSectorMigration.move), memoised by what it is made from.
+    var migrationMemo: (key: FlexibleSectorMigration.MemoKey, moved: FlexibleSectorMigration.Moved)?
     /// ★ BATCH B REVIEW: a design run (designs AND core's stack conflicts) is scheduled and has
     /// not landed — the pop-up waits for it before it pops a blocker that stands on opening
     /// (a calibrate-first map lands before the conflicts do).
@@ -334,8 +338,13 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ READ THROUGH THE ROUND-3 MIGRATION (FlexibleSettingsMigration): an old project
     /// shows and runs the new way (1 bead, both axes, no frame rotation, curves read "closer
     /// to the face = squishier") and its file changes only with the next edit.
+    /// ★ ROUND 7 (M2): and through the move of I2's strips off the Surface stage (FlexibleSectorMigration): a project I2
+    /// saved reads in the Flexible form at once; its file changes with the move (at open, or with his next edit).
     public var settings: FlexibleStageSettings {
-        get { FlexibleSettingsMigration.migrated(project.lattice.flexible ?? FlexibleStageSettings()) }
+        get {
+            let raw = rawSettings
+            return sectorMigration(raw)?.settings ?? raw
+        }
         set { project.lattice.flexible = newValue }
     }
 
@@ -343,6 +352,15 @@ public final class FlexibleStageModel: ObservableObject {
         var s = settings
         change(&s)
         guard s != settings else { return }
+        // ★ ROUND 7 (M2): the Flexible sectors' numbers registered in the store; a project still in I2's form is moved in
+        // this same change (one undo step: undo returns I2's bytes, which read through again)
+        if !FlexibleSectors.controlSurfaceRoute {
+            if let moved = sectorMigration(rawSettings) {
+                if migrationReport == nil { migrationReport = moved.report }
+                FlexibleSectorMigration.assignRegions(project, moved.restored)
+            }
+            registerSectors(&s)
+        }
         settings = s
         syncRail()   // ★ ROUND 5 (S8): the folder tab follows the selected face's group
         if recompute { recomputeAll() }
@@ -415,16 +433,17 @@ public final class FlexibleStageModel: ObservableObject {
         guard let file = project.importedFile else { return nil }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var s = settings
-        if let sectors {
-            // the scene's one face entry must be a region of THOSE regions (a re-cut drops the old rest's id)
-            let declared = Set(sectors.compactMap { $0["id"] as? Int })
-            s.faces = s.faces.filter { !FlexibleRegions.isSector($0.faceRegionID) || declared.contains($0.faceRegionID) }
-        }
+        // the scene's one face entry must be a region of THOSE regions (a re-cut drops the old rest's id)
+        // ★ ROUND 7 (M2): always — a Flexible piece that is gone (a face-prism moved, a section is whole again) is carried
+        // only once the scene is open (planCarry); until then its entry must not ask core for an undeclared region
+        let wire = sectors ?? regions.wire
+        let declared = Set(wire.compactMap { $0["id"] as? Int })
+        s.faces = s.faces.filter { !FlexibleRegions.isSector($0.faceRegionID) || declared.contains($0.faceRegionID) }
         var inputs = FlexibleJob.Inputs(
             modelPath: file.path, resolution: project.quality.resolution,
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
             settings: s, regions: project.latticeJobRegions().regions.map(\.wireDictionary))
-        inputs.sectorRegions = sectors ?? regions.wire
+        inputs.sectorRegions = wire
         (inputs.buildDir, inputs.plateDir) = buildDirections
         let json = try FlexibleJob.sceneJobJSON(inputs, fallbackMaterial: catalogue.first?.id ?? "flexible")
         return SceneJob(json: json, dir: (file.path as NSString).deletingLastPathComponent)
@@ -461,8 +480,9 @@ public final class FlexibleStageModel: ObservableObject {
 
     // MARK: regions (split sectors, FlexibleRegions.swift)
 
-    /// The declared regions: every face, plus the Surface stage's split sectors.
-    public var regions: FlexibleRegions { FlexibleRegions(model: project.faceRegions, mesh: project.viewerMesh) }
+    /// The declared regions: every face, plus the Surface stage's split sectors, plus ★ ROUND 7 (M2) the Flexible-only
+    /// sectors (lattice sections, edge strips, their rests — FlexibleStageModel+Sectors, memoised).
+    public var regions: FlexibleRegions { sectorState().regions }
     public func name(_ region: Int) -> String { regions.name(region, mesh: project.viewerMesh) }
     /// Core's sentence with sector ids replaced by the app's names.
     public func text(_ s: String) -> String { regions.renamed(s, mesh: project.viewerMesh) }
@@ -475,8 +495,13 @@ public final class FlexibleStageModel: ObservableObject {
         let up = buildDirections.0
         let key = "\(mesh.triangleCount)|\(mesh.faceIDs.count)|\(up)|\(regions.key)"
         if let c = suggestedCache, c.key == key { return c.region }
-        let region = FlexibleReadiness.suggestedFace(mesh: mesh, up: up).map {
-            regions.region(at: $0.centroid, face: $0.face, mesh: mesh)
+        // ★ M2: the pressable piece under the centroid, else the face's largest lattice piece, else none (solid)
+        let regs = regions
+        let region = FlexibleReadiness.suggestedFace(mesh: mesh, up: up).flatMap { s -> Int? in
+            if let r = regs.pressable(at: s.centroid, face: s.face, mesh: mesh) { return r }
+            let tris = FlexibleEdgeStrips.triangles(face: s.face, mesh: mesh)
+            return (regs.flexible?.pieces ?? []).filter { $0.kind != .strip && FaceRegionGeometry.members(of: $0.region, in: mesh).contains(FaceID(s.face)) }
+                .max { FlexibleEdgeStrips.area(tris, $0.region.cuts) < FlexibleEdgeStrips.area(tris, $1.region.cuts) }?.wireID
         }
         suggestedCache = (key, region)
         return region
@@ -515,6 +540,8 @@ public final class FlexibleStageModel: ObservableObject {
         track(Task.detached(priority: .userInitiated) {
             do {
                 let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key)
+                // ★ ROUND 7 (M2): what of his settings moves onto lattice sections, asked of core on the opened scene
+                let carry = await self.planCarry()
                 await MainActor.run {
                     self.sceneInfo = info
                     self.stacks = [:]
@@ -526,7 +553,7 @@ public final class FlexibleStageModel: ObservableObject {
                     self.openedFacePrisms = prisms   // ★ ROUND 7, M1 (1a): the scene's own answer, with its key
                     self.sceneState = .ready
                     // ★ ROUND 3 (item 1.2): the main page's loads arrive as pressed / resting faces
-                    self.adoptMainPageLoads(recompute: false)
+                    self.adoptMainPageLoads(recompute: false, carry: carry)
                     self.recomputeAll()
                 }
             } catch {
@@ -545,11 +572,26 @@ public final class FlexibleStageModel: ObservableObject {
     /// faces at 10 kg each, which made the conflicts and the '7 faces' refusal). Pressing is
     /// explicit: [Press it] / [It rests here] in the panel, or the main page's groups.
     public func tapFace(_ face: Int, point: SIMD3<Double>? = nil) {
-        // a split face resolves to the sector holding the point (the Surface stage's rule)
-        let region = regions.region(at: point, face: face, mesh: project.viewerMesh)
-        NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         // ★ ROUND 6 ITEM 2: in pick mode a tap never selects a face (the page hit-tests the edges and corners first)
         if edgePick != nil { return }
+        // a split face resolves to the sector holding the point (the Surface stage's rule)
+        // ★ ROUND 7 (M2, his img3 words: "when I tapped the top, it selected the model's top face, rather than one of the
+        // lattice's top faces"): with a face-prism set, the tap picks the LATTICE section under it; on the solid part of a
+        // face only partly latticed it selects nothing and says so, with one fix ([Go to Lattice]); the open tab stays
+        let regs = regions
+        let region: Int
+        if facePrismsSet, let pt = point {
+            guard let r = regs.pressable(at: pt, face: face, mesh: project.viewerMesh) else {
+                toast = FlexibleRowCopy.solidHere
+                toastFix = .goToLattice
+                return
+            }
+            region = r
+            if let line = regs.flexible?.notYet[r] { toast = line }
+        } else {
+            region = regs.region(at: point, face: face, mesh: project.viewerMesh)
+        }
+        NSLog("DIAG flexible tap face %d → region %d (known %d)", face, region, settings.face(region) != nil ? 1 : 0)
         curvePoint = nil
         // ★ S VERIFICATION: on the [+ New] tab ("Tap the face that starts it") a tap on a face that
         // can start a group STARTS it (with its hand) — it had only selected the face and left the tab
@@ -605,12 +647,25 @@ public final class FlexibleStageModel: ObservableObject {
     /// group's faces rest; [Rests] chosen on this page survives; a face whose group no longer
     /// holds it keeps its weight as his own. Sealed as one undo step. Called when the scene
     /// opens and after every write-back.
-    public func adoptMainPageLoads(recompute: Bool = true) {
+    public func adoptMainPageLoads(recompute: Bool = true) { adoptMainPageLoads(recompute: recompute, carry: nil) }
+
+    /// ★ ROUND 7 (M2): with the open's CARRY (FlexibleStageModel+Sectors.planCarry) applied first, in the same edit and the
+    /// same undo step — a face pressed whole is never left beside its new lattice sections.
+    func adoptMainPageLoads(recompute: Bool, carry: FlexibleSectionCarry?) {
         guard let loads = deriveMainPageLoads() else { return }
         mainPageLoads = loads
         let before = settings
         var relinked: [Int: Double] = [:]
-        edit({ s in relinked = Self.adopt(loads, into: &s) }, recompute: recompute)
+        var carried = false
+        edit({ s in
+            if let c = carry, s == c.from {
+                s.faces = c.faces
+                s.removedRegions = c.removed
+                carried = true
+            }
+            relinked = Self.adopt(loads, into: &s)
+        }, recompute: recompute)
+        if carried, let t = carry?.toast { toast = t }
         relinkedWeights.merge(relinked) { old, _ in old }
         if settings != before { project.sealUndoStep() }
         // ★ ROUND 7 (S, 4f e): the OPEN group's first face — never Group 1's (`loadedFaces.first`)
@@ -620,7 +675,7 @@ public final class FlexibleStageModel: ObservableObject {
     func deriveMainPageLoads() -> FlexibleMainPageLoads? {
         guard let mesh = project.viewerMesh else { return nil }
         return FlexibleMainPageLoads.derive(
-            groups: project.selection.groups, force: project.force, faceRegions: project.faceRegions,
+            groups: project.selection.groups, force: project.force, faceRegions: restoredFaceRegions,
             mesh: mesh, regions: regions, load: { [stacks] r in stacks[FlexFaceKey(region: r, rotation: 0)]?.load })
     }
 
@@ -1365,7 +1420,13 @@ public final class FlexibleStageModel: ObservableObject {
             beadWidthMM: project.printParams.strutLineWidthMM, faceCount: faceCount,
             settings: s, regions: project.latticeJobRegions().regions.map(\.wireDictionary),
             stampGrids: stampGrids)
-        inputs.sectorRegions = regions.wire
+        // ★ ROUND 7 (M2): the run job declares his Surface sectors and the Flexible sectors its entries USE (a lattice
+        // section pressed, a strip's rest); a section nothing presses is the scene's (taps, stacks), never a run's
+        let used = Set(s.faces.map(\.faceRegionID) + (s.presses ?? []).flatMap(\.regions))
+        inputs.sectorRegions = regions.wire.filter { e in
+            guard let id = e["id"] as? Int, FlexibleSectors.isFlexible(id) else { return true }
+            return used.contains(id)
+        }
         (inputs.buildDir, inputs.plateDir) = buildDirections
         inputs.pinches = pinches.map { [$0.a, $0.b] }
         return try FlexibleJob.runJobJSON(inputs)

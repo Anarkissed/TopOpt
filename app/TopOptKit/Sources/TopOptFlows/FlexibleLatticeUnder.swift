@@ -138,6 +138,8 @@ extension FlexibleStageModel {
     }
 
     func latticeUnderPlan(_ region: Int) -> FlexibleLatticeUnder.Plan? {
+        // ★ ROUND 7 (M2): a Flexible sector is a lattice section (or its strip / rest) — latticed by construction; no one-tap
+        if FlexibleRegions.isFlexible(region) { return nil }
         let p = project
         let rid: RegionID? = FlexibleRegions.isSector(region) ? region - FlexibleRegions.sectorBase : nil
         let face: FaceID? = rid == nil ? FaceID(region) : nil

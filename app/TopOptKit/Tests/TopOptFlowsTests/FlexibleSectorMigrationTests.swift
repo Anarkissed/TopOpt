@@ -155,6 +155,8 @@ final class FlexibleSectorMigrationTests: XCTestCase {
         print("FLEX-M2-MIG kept: \(report.kept.map { "\($0.root): \($0.line)" })")
         for k in report.kept { XCTAssertLessThanOrEqual(k.line.count, 44) }
         let mesh = try XCTUnwrap(r.project.viewerMesh)
-        XCTAssertTrue(FlexibleEdgeStrips.sharedSurface(m.settings, regions: m.regions, mesh: mesh).isEmpty, "★ no two entries share surface")
+        let shared = FlexibleEdgeStrips.sharedSurface(m.settings, regions: m.regions, mesh: mesh)
+        print("FLEX-M2-MIG kept chain: entries \(m.settings.faces.map { "\($0.faceRegionID) \($0.role)" }) · presses \(m.presses.map(\.regions)) · shared \(shared)")
+        XCTAssertTrue(shared.isEmpty, "★ no two entries share surface")
     }
 }

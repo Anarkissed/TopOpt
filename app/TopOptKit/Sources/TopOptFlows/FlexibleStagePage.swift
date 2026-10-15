@@ -200,7 +200,7 @@ public struct FlexibleStagePage: View {
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
                 // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
-                if FlexibleLegend.shows(hasDent: dentRows, views: model.views) {   // ★ R7 MERGE: heat drawn
+                if FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model)) {   // ★ R7 MERGE: heat drawn; ★ M2: the sections' row
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -268,6 +268,9 @@ public struct FlexibleStagePage: View {
             if gen != nil, dentAnimated { loop.autoPlay(reduceMotion: reduceMotion) }
         }
         .onChange(of: model.stacks.count) { _ in rebuildOverlay() }
+        // ★ ROUND 7 (M2, found by looking): a face no longer pressed (its stack kept) leaves the map — its part, violet where
+        // it is lattice, shows again
+        .onChange(of: model.loadedKeys.map(\.region)) { _ in rebuildOverlay() }
         // the legend went (no dent to show): it cannot stay drilled in
         .onChange(of: dents == nil) { gone in if gone { legendDrilled = false; reading = nil } }
         // ★ R7-V REVIEW: …nor once the heat is hidden (its rows leave the card — a tap on the part selects again)
@@ -433,7 +436,8 @@ public struct FlexibleStagePage: View {
         let v = views ?? model.views
         let filter = controlHeatAlwaysOn ? nil : FlexibleStageHeat.filter(model: model, views: v)
         var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil,
-                                              heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter)
+                                              heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter,
+                                              sectionTints: true)   // ★ ROUND 7 (M2): violet where a tap works
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
         return c
     }
@@ -743,20 +747,46 @@ public struct FlexibleStagePage: View {
                            fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }
             if let t = model.toast {
-                Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
-                    .lineLimit(1)
-                    .padding(.horizontal, DS.Space.m).padding(.vertical, 6)
-                    .background(Capsule().fill(DS.Color.chipSolid.color))
-                    .background(GeometryReader { g in   // ★ BATCH V: the toast is chrome too (chromeClip)
-                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global)])
-                    }.allowsHitTesting(false))
-                    .accessibilityIdentifier("flexible-toast")
+                HStack(spacing: DS.Space.s) {
+                    Text(t).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1)
+                    // ★ ROUND 7 (M2): the toast's ONE fix — a solid tap's [Go to Lattice] (the page's Exit, never the bake)
+                    if model.toastFix == .goToLattice {
+                        Button { leaveForLattice() } label: {
+                            Text(FlexibleRowCopy.goToLattice).font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .frame(minHeight: 32)
+                                .background(Capsule().fill(FlexibleStageStyle.facePrismToken.color.opacity(0.45)))
+                        }
+                        .buttonStyle(.plain)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toastFix": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                        .accessibilityIdentifier("flexible-toast-fix")
+                    }
+                }
+                .padding(.horizontal, DS.Space.m).padding(.vertical, 6)
+                .background(Capsule().fill(DS.Color.chipSolid.color))
+                .background(GeometryReader { g in   // ★ BATCH V: the toast is chrome too (chromeClip)
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global), "toastLine:" + t: .zero])
+                }.allowsHitTesting(false))
+                .accessibilityIdentifier("flexible-toast")
             }
         }
         .frame(width: band.width)
         .padding(.leading, band.minX)
         .padding(.top, band.minY)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ ROUND 7 (M2): [Go to Lattice] — leave for the main Lattice page, where face-prisms are set: the page's Exit; his
+    /// edits are kept (saved), the lattice is NOT baked (never Save & Exit's bake).
+    private func leaveForLattice() {
+        if FlexibleSettingsExit.modified(model.settings, since: opened) { model.save() }
+        model.exitUnchanged = true
+        model.toast = nil
+        onExit()
     }
 
     private func noticePill(_ text: String, icon: String, colour: Color, fix: FlexibleIssue?) -> some View {
@@ -1063,8 +1093,13 @@ struct FlexibleLegend: View {
     /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
     /// ★ R7-V: the dent's rows only while his Heat view shows heat; the rows only for the views that have one (Prisms,
     /// Groups — Play and Bend have none).
-    static func shows(hasDent: Bool, views: FlexibleStageViews) -> Bool {
-        (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups)
+    static func shows(hasDent: Bool, views: FlexibleStageViews, sections: Bool = false) -> Bool {
+        (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups) || sections
+    }
+
+    /// ★ ROUND 7 (M2): the card's sections row while a face is cut into lattice sections ("Violet = lattice · tap to pick").
+    @MainActor static func sectionRow(_ m: FlexibleStageModel) -> Bool {
+        !(m.regions.flexible?.partialRoots.isEmpty ?? true)
     }
 
     var body: some View {
@@ -1108,6 +1143,7 @@ struct FlexibleLegend: View {
             // ★ ROUND 6 (item 3): the views' rows — one line each
             if model.views.contains(.prisms) { FlexibleLegendViewRows.prisms(k: k) }
             if model.views.contains(.groups) { FlexibleLegendViewRows.groups(model: model) }
+            if Self.sectionRow(model) { FlexibleLegendViewRows.sections }   // ★ ROUND 7 (M2)
         }
         .frame(width: 236)
         .padding(DS.Space.ml)

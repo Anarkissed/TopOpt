@@ -286,7 +286,22 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         // ★ RED CONTROL: his pad's own triangles (every vertex read 0.000 MPa)
         XCTAssertGreaterThan(before.p99, 0.4, "control: the unsubdivided overlay paints another number than a tap reads")
         XCTAssertGreaterThan(before.mean, 0.05, "control")
-        XCTAssertEqual(before.maxVertexMPa, 0, accuracy: 1e-3, "control: every corner of his pad reads ~0 MPa — one flat blue")
+        // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3 / his img3 words): his 0004's face-prism under Top A reaches
+        // through the pad, so Faces 0, 2 and 4 are cut into lattice sections and the unsubdivided overlay is cut at x = 50 —
+        // those cut vertices read up to half the peak. The control's premise is his pad's own CORNERS (the box's 8), which
+        // still read ~0 MPa (one flat blue where nothing is cut).
+        do {
+            let pos = coarse.mesh.flat.positions
+            let b = part.bounds
+            var cornerMax = 0.0
+            for v in 0..<(coarse.partFlatVertices) {
+                let q = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+                let isCorner = [0, 1, 2].allSatisfy { i in abs(q[i] - b.min[i]) < 1e-3 || abs(q[i] - b.max[i]) < 1e-3 }
+                if isCorner { cornerMax = max(cornerMax, FlexibleProbe.stress(field, at: q) ?? 0) }
+            }
+            print(String(format: "FLEX-STRESS control (M2 re-pin): the box corners read %.4f MPa at most; every vertex %.4f", cornerMax, before.maxVertexMPa))
+            XCTAssertEqual(cornerMax, 0, accuracy: 1e-3, "control: every corner of his pad reads ~0 MPa — one flat blue")
+        }
         // the colour under 99 % of the part is within a tenth of the ramp of the number a tap
         // reads there (the worst points are the anchored corners' singularity, sharper than any
         // vertex spacing — the handoff says so)

@@ -214,18 +214,26 @@ final class FlexibleRound5SettingsVerifyTests: XCTestCase {
         XCTAssertTrue(hands.contains { Set($0) == [a, b] }, "Top A and Top B are ONE row (one hand)")
         XCTAssertEqual(hands.count, m.newGroupCandidates.count - 1, "one row fewer than the faces")
         XCTAssertEqual(FlexibleRowCopy.newGroupRow(names: [m.faceName(a), m.faceName(b)], number: 2), "Top A + Top B → Group 2")
+        // ★ RE-PINNED (round 7, M2 — his img3 words: "only the places with face-prisms get latticed"; the reviewer's ruling 3):
+        // with Top B in the Top group its face-prism is the group's 4 mm, so Face 5 has lattice only in its top 4 mm — a tap
+        // there picks that lattice SECTION (was: the whole Face 5)
+        let mesh = try XCTUnwrap(m.project.viewerMesh)
+        let f5 = try XCTUnwrap((m.regions.flexible?.pieces ?? []).first { m.regions.faces(of: $0.wireID, mesh: mesh) == [5] }?.wireID,
+                               "Face 5's lattice section")
+        let box = mesh.bounds
+        let onF5 = SIMD3<Double>(Double(box.min.x), Double(box.min.y + box.max.y) / 2, Double(box.max.z) - 1)   // 1 mm under the top
         // ★ RED CONTROL: a plain selection (round 5's tap) leaves the tab and makes nothing
-        m.select(5)
+        m.select(f5)
         XCTAssertEqual(m.squeezeGroups.count, 1, "control: selecting makes no group")
         XCTAssertNotEqual(m.rail, .newGroup, "control: …and leaves the tab")
         // the tap on the part, on the [+ New] tab
         m.rail = .newGroup
-        m.tapFace(5)
+        m.tapFace(5, point: onF5)
         XCTAssertEqual(m.squeezeGroups.count, 2, "the tap made the group")
-        let g = try XCTUnwrap(m.squeezeGroup(of: 5))
-        XCTAssertEqual(g.regions, [5])
+        let g = try XCTUnwrap(m.squeezeGroup(of: f5))
+        XCTAssertEqual(g.regions, [f5])
         XCTAssertEqual(m.rail, .group(g.id), "its tab opens")
-        XCTAssertEqual(m.selectedRegion, 5)
+        XCTAssertEqual(m.selectedRegion, f5)
         // off the tab a tap only selects
         m.tapFace(0)
         XCTAssertEqual(m.squeezeGroups.count, 2)

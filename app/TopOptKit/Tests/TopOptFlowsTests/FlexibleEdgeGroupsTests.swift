@@ -393,18 +393,25 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         XCTAssertEqual(m.presses.filter { $0.strip != nil }.count, 1, "redo: the press back")
 
         // ── the Surface tool's own cut: Face 1's strip plane through ProjectModel.commitSurfaceCut on a second copy
+        // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3: "FLEXIBLE-ONLY sectors carried in the job, NOT Surface-stage
+        // sectors"): the strip is a Flexible sector now — its cut lives in the Flexible store (derived on a scratch copy of
+        // the regions, with the Surface tool's own calls) and the Surface stage's regions are UNTOUCHED; the cuts are still
+        // the Surface tool's, compared here piece for piece (the strip and its rest on Face 1)
+        XCTAssertEqual(r.project.faceRegions, before.faceRegions, "★ the Surface stage's regions are not touched (M2)")
         let twin = try FlexiblePressFixtures.a1Project(3, self).project
         let h = FlexibleEdgeStrips.halfSpaces(press.strip!.members[0], width: w)[0]
         let leaves = twin.commitSurfaceCut(SurfaceCut(point: h.point, normal: h.normal, faceID: FaceID(press.strip!.members[0].face),
                                                       faceNormal: SIMD3(0, 0, 1)))
         XCTAssertEqual(leaves.count, 2)
-        func shape(_ m: FaceRegionModel, _ ids: [Int]) -> [[RegionCut]] { ids.compactMap { m.region($0)?.cuts }.sorted { $0.count < $1.count || ($0.count == $1.count && "\($0)" < "\($1)") } }
-        let ours = FlexibleEdgeStrips.leaves(of: press.strip!.members[0].root, in: r.project.faceRegions)
-        XCTAssertEqual(shape(r.project.faceRegions, ours), shape(twin.faceRegions, leaves), "the same cuts as the Surface tool's")
-        XCTAssertEqual(r.project.faceRegions.region(press.strip!.members[0].root)?.add, twin.faceRegions.region(twin.faceRegions.region(leaves[0])!.parentID)?.add,
-                       "the same identity region")
+        func order(_ c: [[RegionCut]]) -> [[RegionCut]] { c.sorted { $0.count < $1.count || ($0.count == $1.count && "\($0)" < "\($1)") } }
+        let face0 = press.strip!.members[0].face
+        let ours = (m.regions.flexible?.pieces ?? []).filter { m.regions.faces(of: $0.wireID, mesh: mesh) == [face0] }
+        XCTAssertEqual(order(ours.map(\.region.cuts)), order(leaves.compactMap { twin.faceRegions.region($0)?.cuts }),
+                       "the same cuts as the Surface tool's (the strip and its rest)")
+        XCTAssertEqual(ours.first?.region.add, twin.faceRegions.region(twin.faceRegions.region(leaves[0])!.parentID)?.add,
+                       "the same identity region's faces")
         let joined = twin.selection.groups.flatMap(\.regionIDs).count - selectionBefore.flatMap(\.regionIDs).count
-        print("FLEX-I2-4 parity: commitSurfaceCut's leaves \(leaves) · ours \(ours) · its Selections join added \(joined) region(s); ours 0")
+        print("FLEX-I2-4 parity: commitSurfaceCut's leaves \(leaves) · ours \(ours.map(\.wireID)) · its Selections join added \(joined) region(s); ours 0")
         var helper = before.faceRegions
         let hl = FlexibleEdgeStrips.surfaceCut(&helper, face: press.strip!.members[0].face, point: h.point, normal: h.normal, mesh: mesh)
         XCTAssertEqual(helper, twin.faceRegions, "FlexibleEdgeStrips.surfaceCut is commitSurfaceCut's region edit, exactly")
@@ -615,7 +622,10 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         await m.waitForIdle()
         let re = try XCTUnwrap(m.press(press.id))
         XCTAssertEqual(re.strip?.widthMM, w1)
-        XCTAssertNotEqual(re.regions, press.regions, "re-cut: new strips")
+        // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3): a strip is a Flexible sector keyed by its ROLE (its press and
+        // member), so a re-cut keeps its ids and moves its cuts (I2's Surface cut made new sector ids)
+        XCTAssertEqual(re.regions, press.regions, "re-cut: the same Flexible ids")
+        XCTAssertNotEqual(re.regions.map { regionsDone.cuts(of: $0) }, re.regions.map { m.regions.cuts(of: $0) }, "re-cut: new cuts")
         for (k, reg) in re.regions.enumerated() {
             let face = re.strip!.members[k].face
             XCTAssertEqual(Self.area(m, reg, face: face), 100 * w1, accuracy: 1e-3 * 100 * w1, "face \(face): L × \(w1)")
