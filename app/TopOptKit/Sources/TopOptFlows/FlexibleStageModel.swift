@@ -261,7 +261,18 @@ public final class FlexibleStageModel: ObservableObject {
     /// REVIEW: it clears ITSELF after `toastSeconds` — an auto-fix can land while the main page
     /// shows (no Settings page up to clear it), and the page's own clear only heard a change,
     /// so a toast set before it opened stayed under the line for the whole visit.
-    @Published public var toast: String? { didSet { scheduleToastClear() } }
+    @Published public var toast: String? { didSet { scheduleToastClear(); if toast == nil, toastFix != nil { toastFix = nil } } }
+    /// ★ ROUND 7 (M2): the toast's ONE fix (a solid tap's [Go to Lattice]); cleared with the toast.
+    @Published public var toastFix: FlexibleToastFix?
+    /// ★ ROUND 7 (M2): the Flexible-only sectors' numbers for this session (FlexibleSectorNumbers), seeded from the store.
+    let sectorNumbers = FlexibleSectorNumbers()
+    var sectorNumbersSeeded = false
+    /// ★ M2: the resolved Flexible sectors and the regions over them, memoised by what they are made from.
+    var sectorMemo: (key: FlexibleSectorMemoKey, set: FlexibleSectorSet, regions: FlexibleRegions)?
+    /// ★ M2: what the move of I2's strips off the Surface stage did (FlexibleSectorMigration), once it was made.
+    @Published public internal(set) var migrationReport: FlexibleSectorMigration.Report?
+    /// ★ M2 RED CONTROL: no carry at open — a face pressed whole stays beside its new sections (core refuses).
+    var controlNoCarry = false
     /// ★ BATCH B REVIEW: a design run (designs AND core's stack conflicts) is scheduled and has
     /// not landed — the pop-up waits for it before it pops a blocker that stands on opening
     /// (a calibrate-first map lands before the conflicts do).

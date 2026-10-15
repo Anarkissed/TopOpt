@@ -49,6 +49,10 @@ public struct FlexibleMainPageLoads: Equatable {
         public var oblique: Bool { role == .pressed && pressFraction < FlexibleMainPageLoads.straightCos }
     }
 
+    /// ★ ROUND 7 (M2) RED CONTROL: a Load group's weight split by AREA across a face's lattice sections (25 : 10), not his
+    /// answer 7's equal share per lattice part.
+    nonisolated(unsafe) static var controlAreaShare = false
+
     /// cos 15° — core's "same axis" angle (kSameAxisDeg).
     public static let straightCos = cos(15 * Double.pi / 180)
 

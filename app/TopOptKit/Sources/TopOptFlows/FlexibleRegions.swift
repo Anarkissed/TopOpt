@@ -24,19 +24,29 @@ public struct FlexibleRegions {
     /// The split sectors the job declares (cut regions with member faces), by FaceRegion id.
     public let sectors: [FaceRegion]
     public let model: FaceRegionModel
+    /// ★ ROUND 7 (M2): the Flexible-only sectors (FlexibleSectors) — lattice sections, edge strips and their rests —
+    /// declared after his Surface sectors; nil: none (a value built over the project's regions alone).
+    public let flexible: FlexibleSectorSet?
 
-    public init(model: FaceRegionModel, mesh: ViewerMesh?) {
+    public init(model: FaceRegionModel, mesh: ViewerMesh?, flexible: FlexibleSectorSet? = nil) {
         self.model = model
+        self.flexible = flexible
+        var own: [FaceRegion]
         if let mesh {
-            sectors = model.regions.filter {
+            own = model.regions.filter {
                 $0.isCut && !$0.isUnionOfParts && !FaceRegionGeometry.members(of: $0, in: mesh).isEmpty
             }
         } else {
-            sectors = model.regions.filter { $0.isCut && !$0.isUnionOfParts }
+            own = model.regions.filter { $0.isCut && !$0.isUnionOfParts }
         }
+        own += (flexible?.pieces ?? []).map(\.region)
+        sectors = own
     }
 
     public static func isSector(_ id: Int) -> Bool { id >= sectorBase }
+    /// ★ M2: a Flexible-only sector (never one of his Surface sectors).
+    public static func isFlexible(_ id: Int) -> Bool { FlexibleSectors.isFlexible(id) }
+    public func flexiblePiece(_ id: Int) -> FlexibleSector? { flexible?.piece(id) }
     public static func wireID(_ r: FaceRegion) -> Int { sectorBase + r.id }
 
     public func sector(_ id: Int) -> FaceRegion? {
@@ -85,6 +95,13 @@ public struct FlexibleRegions {
             return Self.wireID(r)
         }
         return face
+    }
+
+    /// ★ ROUND 7 (M2, his img3 words): the region a tap on the Squish page PRESSES — the lattice section (or strip / rest)
+    /// holding the point; a whole face or Surface sector when it is wholly latticed (or not latticed at all: its card says
+    /// so); nil on the solid part of a face only partly inside a face-prism. TESTS-FIRST STUB: today's `region(at:)`.
+    public func pressable(at point: SIMD3<Double>?, face: Int, mesh: ViewerMesh?) -> Int? {
+        region(at: point, face: face, mesh: mesh)
     }
 
     /// Does triangle `t` (face `fid`, centroid `c`) belong to region `id`?

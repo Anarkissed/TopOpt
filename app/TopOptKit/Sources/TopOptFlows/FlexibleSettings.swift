@@ -196,6 +196,14 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// main page's Selections (the two lists stay separate). OPTIONAL, omitted when nil: old projects encode
     /// byte-identical.
     public var groupNames: [String: String]?
+    /// ★ ROUND 7 (batch M2 — the reviewer's ruling 3 on the 2026-10-14 outbox: "FLEXIBLE-ONLY sectors carried in the job,
+    /// NOT Surface-stage sectors … If I2 already writes Surface sectors, move them to Flexible-only and say what moved"):
+    /// the Flexible sector store — each Flexible-only sector's NUMBER by its stable role key (FlexibleSectors: a lattice
+    /// section, an edge strip, a rest); its wire id is FlexibleSectors.base + the number. The geometry is never stored: it
+    /// is derived from the face-prisms and the strips every time. nil ⇒ none registered (with strips whose members carry a
+    /// Surface root, I2's form — FlexibleSectorMigration reads it through). OPTIONAL, omitted when nil: old projects decode
+    /// and encode byte-identical. LABELS ONLY: never part of the lattice's key (`designInputs`).
+    public var sectors: FlexibleSectorStore?
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -215,6 +223,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         var c = self
         c.groupColours = nil
         c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
+        c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
         c.weightUnit = nil
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)
@@ -245,4 +254,16 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// ★ ROUND 5 (S6): is this face deleted from the Flexible setup (a main-page group still holds it)?
     public func isRemoved(_ region: Int) -> Bool { removedRegions?.contains(region) ?? false }
 
+}
+
+/// ★ ROUND 7 (M2): the Flexible-only sectors' numbers (FlexibleSectors) — `ids` maps a sector's stable ROLE key to its
+/// number; numbers are never reused, so no stale design, stack or setting can attach to a recycled id.
+public struct FlexibleSectorStore: Codable, Equatable, Hashable, Sendable {
+    /// 1 = Flexible-only sectors (the version marker: a project with this store is never I2's Surface form).
+    public static let currentVersion = 1
+    public var version: Int
+    public var ids: [String: Int]
+    public init(version: Int = FlexibleSectorStore.currentVersion, ids: [String: Int] = [:]) {
+        self.version = version; self.ids = ids
+    }
 }
