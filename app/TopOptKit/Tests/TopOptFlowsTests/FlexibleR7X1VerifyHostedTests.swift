@@ -165,7 +165,10 @@ final class FlexibleR7X1VerifyHostedTests: XCTestCase {
         let cIns = H.differing(ctl.on, ctl.off, where: fp.strips), cOut = H.differing(ctl.on, ctl.off, where: outside)
         H.dump(ctl.on, "VH2_control_printed_heat_img5.png")
         XCTAssertLessThan(cIns.share, 0.05, "★ RED CONTROL: Heat changed nothing inside the strips (his img3)")
-        XCTAssertGreaterThan(cOut.share, 0.50, "★ RED CONTROL: …only the flat 0 mm lid on the solid part")
+        // ★ RE-PINNED (merge of X1 after M2 — ruling 3, his img3): M2 presses only the lattice sections, so even X1's first
+        // build puts no flat 0 mm lid on the solid part (was cOut > 0.50 — on M1 the whole Top was pressed); the control stays
+        // red inside the strips (Heat changed nothing there) and on the whole-Top fixture below
+        XCTAssertLessThanOrEqual(cOut.share, 0.05, "★ RED CONTROL (M2): no lid on the solid part to change")
         var lines = ["his strips: inside \(String(format: "%.1f", 100 * ins.share)) % differ (Heat on vs off), outside \(String(format: "%.2f", 100 * out.share)) % · control inside \(String(format: "%.1f", 100 * cIns.share)) %, outside \(String(format: "%.1f", 100 * cOut.share)) %"]
 
         // ★ the fixture with the whole Top latticed (a1Project(3)'s Top face-prism): the Squish row only with heat drawn

@@ -209,7 +209,10 @@ final class FlexibleR7X1HostedTests: XCTestCase {
                 Self.dump(c2f, "XH1_control_solidflags_img1.png", mark: Self.grossMask(c2f, printedHeat, where: outside))
                 Self.dump(printedHeat, "XH1_printed_heat_img1.png")
                 lines.append("control (img1): the solid flags alone, outside \(String(format: "%.2f", 100 * (1 - c2.share))) % match, \(String(format: "%.2f", 100 * c2g)) % grossly off")
-                XCTAssertGreaterThanOrEqual(c2g, 0.01, "★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)")
+                // ★ RE-PINNED (merge of X1 after M2 — ruling 3, his img3): M2's heat lid covers only the Top's lattice sections
+                // (the strips), so outside them the mis-sorted far face is clay over clay — 0.40 % grossly off in the merge's run
+                // against the good frame's 0.00 % (was ≥ 1 %, on M1's whole-Top lid). Still red: ≥ 0.2 % (the good frame measured 0.00 %)
+                XCTAssertGreaterThanOrEqual(c2g, 0.002, "★ RED CONTROL: the solid flags alone mis-sort the body (the far face over the Top)")
             }
             if n == 900, cam.name == Self.img5.name {
                 // ★ RED CONTROL 1: R7-V's rule — the walls only in X-ray: the strips are the plain skin

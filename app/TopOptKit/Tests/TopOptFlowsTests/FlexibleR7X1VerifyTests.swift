@@ -73,7 +73,10 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
         let open = try XCTUnwrap(s.printedOpen(), "premise: the printed view's open surface")
         var closedMap = 0, closedHeated = 0
         for v in map where !open[v] { closedMap += 1; if t[v * 8 + 3] > 0.01 { closedHeated += 1 } }
-        XCTAssertGreaterThan(closedMap, 20, "premise: the Top's solid middle")
+        // ★ RE-PINNED (merge of X1 after M2 — the reviewer's ruling 3 and his img3 / answer 7): M2 presses only the LATTICE
+        // SECTIONS of the Top, so its solid middle is no pressed quad at all — no closed map vertex to carry a lid (was
+        // XCTAssertGreaterThan(closedMap, 20) — X1 ran on M1, where the whole Top was pressed). The rule holds either way.
+        XCTAssertEqual(closedMap, 0, "★ M2: the Top's solid middle is not pressed (only its lattice sections are)")
         XCTAssertEqual(closedHeated, 0, "★ the solid part wears no heat — it does not squish (no flat 0 mm lid)")
         XCTAssertTrue(s.legendKinds.contains(.dent), "★ the Squish row: the heat IS drawn (on the walls)")
         XCTAssertFalse(s.legendKinds.contains(.lattice), "★ no density row: the walls are coloured by the squish")
@@ -124,7 +127,17 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
         s.refresh()
         XCTAssertFalse(s.printedView)
         XCTAssertFalse(s.heatOnWalls, "Covered out of X-ray: no walls to carry it")
+        // ★ RE-PINNED (merge of X1 after the M1 verify — his answer "the squish number: only on the Squish page"): the finish
+        // edit (no rebuild here) leaves the lattice STALE, and the main page wears heat only from a lattice drawn — the plain
+        // model until the rebuild (was: the lid's heat at once — X1 ran before the M1 verify). X1's rule — no walls drawn, the
+        // lid carries the heat — is checked with the M1 verify's gate opened (its red control `controlDrawnCurveOnMain`)
+        XCTAssertTrue(m.latticeIsStale, "premise: the finish edit leaves the lattice stale (no rebuild in this test)")
+        let ctStale = try XCTUnwrap(s.tints(p, on: .lattice, roles: [:], stress: nil))
+        XCTAssertEqual(map.filter { ctStale[$0 * 8 + 3] > 0.01 }.count, 0, "★ M1 verify: no lattice drawn — no heat on the main page")
+        FlexibleMainStage.controlDrawnCurveOnMain = true
+        s.refresh()
         let ct = try XCTUnwrap(s.tints(p, on: .lattice, roles: [:], stress: nil))
+        FlexibleMainStage.controlDrawnCurveOnMain = false
         XCTAssertGreaterThan(map.filter { ct[$0 * 8 + 5] > 0.5 && ct[$0 * 8 + 3] > 0.01 }.count, map.count / 4, "Covered: the lid's heat")
         m.edit({ $0.finish = FlexibleFinish.none.rawValue }, recompute: false)
         s.refresh()
@@ -146,7 +159,10 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
         s.refresh()
         XCTAssertFalse(cPrinted.walls, "★ RED CONTROL: no heat on the walls")
         XCTAssertFalse(cPrinted.layer)
-        XCTAssertGreaterThan(cClosedHeated, 20, "★ RED CONTROL: the solid middle's flat 0 mm lid")
+        // ★ RE-PINNED (merge, M2): no flat 0 mm lid on the solid middle even in X1's first build — M2 never presses it (was
+        // XCTAssertGreaterThan(cClosedHeated, 20)); the control stays red by its other lines (no walls' heat, the density row,
+        // X-ray's opaque lid, M6's ghost walls)
+        XCTAssertEqual(cClosedHeated, 0, "★ RED CONTROL (M2): nothing pressed on the solid middle to wear a lid")
         XCTAssertTrue(cPrinted.kinds.contains(.lattice), "★ RED CONTROL: the density row beside the Squish row")
         XCTAssertGreaterThan(cSolid, map.count / 4, "★ RED CONTROL: X-ray's opaque heat lid (the square that hid the lattice)")
         XCTAssertTrue(cGhostWalls, "★ RED CONTROL: M6's ghost walls under it")

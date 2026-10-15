@@ -117,13 +117,17 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
         let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
         XCTAssertTrue(s.volumes(p, on: .lattice, drilledIn: false).isEmpty, "nothing before a pick (his fixed rule)")
-        // (the red run's premise "X-ray off" was wrong: his None pad's X-ray starts ON with a face-prism — R7-V's stopgap)
+        // (the red run's premise "X-ray off" was wrong then: his None pad's X-ray started ON with a face-prism — R7-V's stopgap,
+        // retired by X1: X-ray now starts off for every finish)
         s.togglePrisms()
         let all = s.volumes(p, on: .lattice, drilledIn: false)
         XCTAssertEqual(Set(all.map(\.volume.faceID)), [3, 5], "★ [Prisms] with nothing picked: every group's face-prisms (Group C's)")
         XCTAssertTrue(all.allSatisfy(\.selected), "nothing picked: every face-prism in #354's active look (faint ones hid under the heat)")
         XCTAssertTrue(s.legendPrismsRow, "its row: a face-prism is drawn")
-        XCTAssertTrue(s.xrayOn, "X-ray with it (a face-prism sits inside the part)")
+        // ★ RE-PINNED (merge of X1 after M2 and F — his Q9 answer, 2026-10-14: "If the user adds x-ray, we see through the solid";
+        // X-ray is HIS view, off on open for every finish): [Prisms] no longer turns X-ray on, even with a face-prism drawn (was
+        // XCTAssertTrue — the M1 verify's "X-ray with it"; X1's `togglePrisms` taken in the merge, as X1's merge notes asked)
+        XCTAssertFalse(s.xrayOn, "★ X1: [Prisms] leaves X-ray off (his view)")
         // the Top picked (Off in Selections): a pick alone draws nothing; [Prisms] still shows Group C's
         p.selection.setActive(top.id)
         let withTop = s.volumes(p, on: .lattice, drilledIn: false)
@@ -163,9 +167,11 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         // ★ RED CONTROL: the M1 build — the row and X-ray anyway
         s.model?.views.remove(.prisms)
         FlexibleMainStage.controlPrismsPickedOnly = true
+        s.controlViewsForceXray = true   // ★ RE-PINNED (X1 merge): the M1 build turned X-ray on with [Prisms] (R7-V's rule, X1's control)
         s.togglePrisms()
         let row = s.legendPrismsRow, xray = s.xrayOn
         FlexibleMainStage.controlPrismsPickedOnly = false
+        s.controlViewsForceXray = false
         XCTAssertTrue(row && xray, "★ RED CONTROL: the row and X-ray with nothing drawn")
     }
 
