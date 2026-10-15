@@ -46,8 +46,8 @@ diff from `1c0a27be`) — the fallback MetalMeshView hook the plan held in reser
   `flx_body_gbuffer`, eye-Z pushed 0.5 mm back). #354's shade then writes its depth into the main buffer, so the see-through
   body drawn after it keeps only its nearest closed surface; the walls are marched against the same buffer, so a wall behind
   the closed body is never drawn (`spike/R7X1_spike_b_printed_bodyInGBuffer_img1.png`, `_top.png`). The pass is fed through
-  the existing map-depth hook (it notes the renderer's buffers; no new hook). Taps still pick the face under them (the body
-  mesh is unchanged).
+  the existing map-depth hook (it notes the renderer's buffers; no new hook). Taps still pick the face under them (by
+  construction: the pick pass draws the unchanged body mesh — not measured by a click here).
 - **The printed term in both twins** (MSL `flx_field` under the reserved `shape2.w`; Swift
   `FlexibleLatticeField.lattice(at:printed:)`): S = max(dPart, min(max(dRegion, −dSkin), −dRegion)), field = min(F, S).
   **One extension to the plan's term** min(F, max(dRegion, dPart, −dSkin)): the part OUTSIDE the region (−dRegion) is solid
@@ -84,7 +84,10 @@ diff from `1c0a27be`) — the fallback MetalMeshView hook the plan held in reser
   stays the one shared view.
 - **The heat in the default view shows only on the solid part of a pressed face**: over the lattice the face is open (the
   walls show), so on your pad's Top the colour that changes is seen in X-ray or under Covered. (Question 1 below.)
-- **Taps** still pick the face under them in the printed view (the mesh is unchanged; only its drawing is cut).
+- **Taps** still pick the face under them in the printed view (the mesh is unchanged; only its drawing is cut — by construction,
+  not measured by a click).
+- **Not measured as the plan wrote it:** Rim's "opaque band of rimMM at the strip edges" is measured as Rim sitting between None
+  and Covered inside the strips (91.8 % differ); the band itself is in the pictures (`R7X1_default_rim_*`).
 
 ### Re-pins (each attributed in the test to your 2026-10-14 Q9 words, naming the ruling it reverses)
 | class | what changed |
