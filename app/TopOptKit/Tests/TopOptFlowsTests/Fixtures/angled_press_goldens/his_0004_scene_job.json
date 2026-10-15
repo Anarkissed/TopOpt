@@ -170,6 +170,72 @@
         ],
         "id" : 1000104,
         "name" : "top B"
+      },
+      {
+        "add" : [
+          0
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              50,
+              100,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000001,
+        "name" : "Face 0 · lattice"
+      },
+      {
+        "add" : [
+          2
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              50,
+              100,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000002,
+        "name" : "Face 2 · lattice"
+      },
+      {
+        "add" : [
+          4
+        ],
+        "cuts" : [
+          {
+            "normal" : [
+              1,
+              0,
+              0
+            ],
+            "point" : [
+              50,
+              100,
+              20
+            ],
+            "strict" : false
+          }
+        ],
+        "id" : 2000003,
+        "name" : "Face 4 · lattice"
       }
     ]
   },

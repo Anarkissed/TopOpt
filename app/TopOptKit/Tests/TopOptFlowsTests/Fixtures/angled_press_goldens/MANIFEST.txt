@@ -31,3 +31,12 @@ fields_*.txt                      core's design of every loaded key (every colum
 probe_refusals_base.json          the BASE core's answer to the probe's control / tilt / edge documents (null = accepted), AP0's
 probe_answers.json                this core's answers, written when they differ from the base's (since S1: all accepted)
 rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (core's normal-spread flag, or its "normals cancel" refusal)
+# ROUND 7 · M2 (reviewer ruling 3, 2026-10-14: lattice sections are FLEXIBLE-ONLY sectors carried in the job): TWO goldens
+# re-recorded at b8142d3e (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1, into a scratch copy of this folder; the other 24 files that
+# run wrote equal the ones here byte for byte). Before the re-record both modes failed on exactly these two, the same lines.
+#   his_0004_scene_job.json   + three face_regions entries, nothing removed: 2000001 "Face 0 · lattice", 2000002 "Face 2 · lattice",
+#                             2000003 "Face 4 · lattice" (add [face], one cut each). His 0004's one face-prism (Top A, x >= 50)
+#                             leaves Faces 0, 2 and 4 half latticed; the SCENE declares every section so a tap can pick it and
+#                             core can frame it. A RUN declares only the sections its entries use: his 0004's two sends are unchanged.
+#   frames_his_0004.txt       the same three regions' frames (+3 blocks), the header's region list, and four exitRegions lines
+#                             that now name the section a column leaves through.
