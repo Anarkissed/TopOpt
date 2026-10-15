@@ -39,6 +39,10 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public private(set) var attached = 0
     /// The views (batch B's minimum — batch C adds Stress and the legends).
     @Published public var heat = true { didSet { if oldValue != heat { refresh() } } }
+    /// ★ ROUND 7 (F, his answer 13): every group's heat (his 3 s hold on the heat icon).
+    @Published public internal(set) var heatAll = false
+    /// ★ ROUND 7 (F): the region of the face he last tapped on the main page (its squeeze group is the "selected" one).
+    var tappedRegion: Int?
     /// ★ ROUND 4 (C2 — his img 5: "the xray and lattice view … both seem to require one another
     /// … remove the xray view selector if the lattice view is going to use the rendering
     /// anyways"): the Lattice VIEW is his one choice. Shown, the part is the X-ray ghost with the

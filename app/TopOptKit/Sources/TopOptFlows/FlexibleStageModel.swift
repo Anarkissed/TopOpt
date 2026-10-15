@@ -208,6 +208,8 @@ public final class FlexibleStageModel: ObservableObject {
     /// state: never a setting, never the lattice's key, never an action (Exit stays "Exit"); the main page
     /// reads the same model's.
     @Published public var views: FlexibleStageViews = []
+    /// ★ ROUND 7 (F, his answer 2: "Group trash should confirm deletion."): the group whose trash asks "Delete Group 2?".
+    @Published public var groupDeleteAsk: Int?
     /// Test control only (round 6): a view toggle stored in the settings (the red control of the rule above).
     var controlViewsInSettings = false
     @Published public private(set) var lastError: String?
