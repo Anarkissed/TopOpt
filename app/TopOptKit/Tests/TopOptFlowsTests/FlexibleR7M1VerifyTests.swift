@@ -36,7 +36,7 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
 
     // MARK: - V1: no face-prism — nothing designed, no dent scale, the Squish page says the one line
 
-    func testNoFacePrismDesignsNothingAndTheSquishPageSaysTheOneLine() async throws {
+    func testNoFacePrismShowsNothingOfCoresDesignsAndTheSquishPageSaysTheOneLine() async throws {
         let (_, _, m) = try await F.hisPad(self, live: false)
         XCTAssertFalse(m.facePrismsSet, "premise: his pad as saved sets no face-prism")
         XCTAssertFalse(m.settings.loadedFaces.isEmpty, "premise: his pressed faces")

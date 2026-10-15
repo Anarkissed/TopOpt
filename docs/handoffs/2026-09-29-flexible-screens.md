@@ -1,6 +1,170 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## Round 7 · batch M1 — only a face-prism makes lattice; the main page's prism is the lattice face-prism, at the list's depth; "Protect 3 mm" and "Minimize plastic" off this page; one group per export, said first (2026-10-14) (read this first)
+## Round 7 · batch M1 verify — with no face-prism nothing pretends to be ready; the main page never shows a squish number; [Prisms] shows every face-prism; the Export names groups by number (2026-10-14) (read this first)
+
+The verify looked at batch M1 on your pad (A1_0003) with the whole main page hosted (#354's Selections card, the bottom-right
+chips, the bottom bar) and found 18 things. This section fixes the ones that are ours to fix and says plainly which two need a
+line in #354's file. Branch `claude/flexible-screens` (PR #362), main worktree, commits `505c46fe` (tests first), `32f9500e` (the fixes and re-pins) and this
+section's. It corrects two lines of the M1 section below (the pill's tap, and [Prisms]).
+
+**Nothing is pushed.** **The build is ready but NOT installed:** TopOpt was open on the simulator (147E56A1, `launchctl`: UIKitApplication:com.nadim.topopt, pid 84714 — checked before installing and again at the end); installing would have closed your session. Install pending: the app is open. The app was never launched. Every picture is offscreen (the shipping renderer draws the part, the page's own
+chrome — here the WHOLE workspace — sits over it); none is a device screenshot.
+
+### What you will see, in plain words
+
+**Your pad as saved (no face is set to Lattice in Selections)**
+- **The main page:** the plain model. The big Lattice button is **greyed out** and reads "Set a face to Lattice in Selections
+  first" — the reason it can't do anything (the reviewer's ruling 4: "Export disabled with a stated reason"). Selections is right
+  beside it. From another stage (Topology, Surface) a tap on it takes you to this page. **It never opens the Squish page** any more:
+  the verify found it opened [Lattice under all 4], which made three new groups and latticed the whole pad again.
+- **The view icons** Heat, Stress, Lattice, [Prisms] and Play are greyed out (nothing to show without a face-prism); X-ray stays.
+- **The Squish page:** its top line says the same "Set a face to Lattice in Selections first" — never "Ready", no [Fix], and no
+  pop-up jumps up when it opens. No dent scale (the verify saw "What you drew · 0 mm … 28.7 mm" over faces that showed no dent) and
+  no orange "Can't reach your curve on 4096 columns". Each face's card still says "No lattice under it" with its own [Lattice under
+  it]. Exit always leaves (your answer: an empty setup may exit).
+
+**With face-prisms (your live lattice: Group C = Face 3 + Face 5 at 25 mm)**
+- **While the lattice rebuilds** (after you type a depth in Selections), the main page shows the plain model and the face-prisms —
+  no legend card. The verify saw "What you drew · 0 mm … 24.5 mm" there: that was Face 3's **squish** depth from the Squish page.
+  Your answer: the squish number is only on the Squish page. The heat comes back when the new lattice is drawn.
+- **[Prisms]** now shows **every group's face-prisms** (your round-6 words for this view: "ALL … prisms"). With nothing picked they
+  all draw in the face-prism violet; with a group picked, its face-prisms are brighter and the others fainter. Its legend row
+  ("Face-prism = where the lattice goes") and X-ray come only when a face-prism is actually drawn. Without [Prisms] the rule is
+  unchanged: a group's face-prism shows only after you pick it.
+- **Export with an edges group beside face groups** names the squeeze group by its number — "This export makes Group 1 only.", the
+  same as every [Send Group N only] button — never your Squish-page name (your answer: "Group names in squish are JUST squish groups.
+  NOT lattice groups.").
+
+**Still on screen, and why** (each needs a line in #354's file, which this batch may not write — posted to the reviewer):
+- **The small ↓ and ± dots on the model** are #354's depth and expand handles for each face-prism. Since H15' they can sit on the
+  model with no prism under them (on open, and for Group C while the Top is picked). Dragging one still changes that face-prism's
+  depth. The reviewer already approved removing them on the Flexible stage in the redesign (H20, replaced by B1's numbered
+  handles); I asked whether to bring that one line forward.
+- **Opening Selections from the greyed-out button:** the button can't open (or un-minimise) the Selections card without a #354
+  change. The redesign replaces both the button and Selections.
+- **"minimize plastic"** is still written on the Optimize button. The redesign drops Optimize from the Flexible stage (your answer).
+
+### The verify's findings → the fix → the test (each test runs its RED control inside; red run `round7/batch_m1_verify/r7m1v_red_run.txt`)
+
+| # | the verify found | what was done | pinned by (RED control) |
+|---|---|---|---|
+| 1 | major: #354's depth/expand knobs float with no prism (H15') | **NOT FIXED — needs #354's file.** Posted to the reviewer: option A = the approved H20 brought forward; option B = knobs only on drawn face-prisms | — |
+| 2 / 12 | major: the pill's words say Selections, its tap opened the Squish page's [Lattice under all 4]; minor: the Squish page said "Ready"; the Export refusal had no fix | The pill is `.blocked`: disabled on the main page with its line as the reason; from another stage its tap goes to the Lattice stage (`.toSelections`); never the Squish page. The Squish page's top line is the same words (FlexibleReadiness.noFacePrism), no [Fix], no pop-up at once (popsAtOnce). Opening Selections itself and a fix button in the Export refusal: need #354's file (posted) | `testNoFacePrismThePillIsDisabledWithItsReasonAndNeverOpensTheSquishFix` (RED `controlNoPrismOpensSquishFix`: enabled, Squish page opened on [Lattice under all N]); `testNoFacePrismShowsNothingOfCoresDesignsAndTheSquishPageSaysTheOneLine` |
+| 3 | major: "What you drew … 24.5 mm" in the main legend while it rebuilt | The main page wears heat and a dent only from a lattice drawn (or core's 3D heat); none drawn ⇒ the plain model, no dent row | `testTheMainPageNeverShowsTheDrawnCurvesNumberWhileNoLatticeIsDrawn` (RED `controlDrawnCurveOnMain`: the drawn scale, 28.6 mm before the first build) |
+| 4 / 11 | major: [Prisms] did nothing visible; minor: its row and X-ray with nothing drawn | [Prisms] = every group's lattice face-prisms (nothing picked: all bright; a pick: the picked group's bright, the rest fainter); the row and the forced X-ray only while one is drawn | `testPrismsShowsEveryGroupsFacePrismsAndItsRowOnlyWhenOneIsDrawn`, `testPrismsWithNoFacePrismDrawsNothingAndAddsNoRowNorXray` (RED `controlPrismsPickedOnly`) |
+| 5 | minor: "minimize plastic" on the Optimize button | Not changed: the redesign's approved H30 drops Optimize on Flexible. Said above | — |
+| 6 | minor: Heat lit on the plain model | Heat, Stress, Lattice, [Prisms], Play drawn unavailable with no face-prism (dimmed, no tap, never lit) | `testNoFacePrismTheLatticeViewsAreUnavailable` (RED `controlViewsAlwaysAvailable`) |
+| 7 | minor: "Edges and faces go in separate exports for now." promises an edges export that does not exist | The reviewer's own wording: asked (a ≤ 44-char variant offered) | — |
+| 8 / 14 | minor: Export names Squish groups beside Selections' "Group C"; Q5 called his answer open | The squeeze group's number ("Group 1"), as every [Send Group N only]. Q5 restated with your answer (below) | `testTheExportNamesTheSqueezeGroupByItsNumberNeverItsSquishName` (RED `controlSquishNameInExport`: "Thumbs") |
+| 9 | minor (pre-existing): 11" landscape Selections touches the iPad chip | Not changed: the redesign's chip row (H19 folded in) | — |
+| 10 | major: with no face-prism core's designs drove the Squish page's scale | Nothing they say is shown with no face-prism: no dent, no scale (FlexibleShownValues), no "Can't reach your curve …" (the face card's warning). **The designs are still asked of core** — see the note under this table | `testNoFacePrismShowsNothingOfCoresDesignsAndTheSquishPageSaysTheOneLine` (RED `controlDesignsWithoutPrism`: 28.67 mm, "Ready · …", [Fix], the pop-up, the orange line) |
+| 13 | minor: the 2+ face groups beside edges branch untested | Pinned; the red control now drops the edges in that branch too | `testTwoFaceGroupsBesideAnEdgesGroupEachExportMakesOneGroupSaidFirst` (RED `controlEdgesSilentlyDropped`) |
+| 15 | minor: the golden C1 pad's app field runs through a control flag | Reviewer to rule (unchanged). Moving it onto a real 20 mm face-prism moves the scene-job bytes | — |
+| 16 | minor: the scene job (and its design calls) still go to core with no include region | Reviewer to rule: "send" = the run job (Export / FlexibleCoreRun) as built, or the scene job too | — |
+| 17 | minor: the blast-radius count is partial | No change (said in M1) | — |
+
+**Why the designs are still asked (finding 10).** The verify proposed asking core for no design with no face-prism. Doing so
+moves the goldens: C1's pad (the AP0 baseline of the frames and goldens) sets no face-prism, and its fields golden pins core's
+designs on it (and FlexibleSqueezeGroupsPressTests / FlexiblePressSaveTests read them). So the asks stay, and nothing they produce
+reaches either page while no face-prism is set. When the reviewer rules on finding 16 (scene job included or not), the asks stop and
+the C1 section is re-recorded with attribution, or the C1 pad gets a real face-prism (finding 15).
+
+**Two of the red run's 27 failures were the TEST's own premises**, corrected before the code and said in the test: V2's control
+expected 24.5 (the verify's mid-rebuild number; before the first build the drawn scale is 28.58 — it takes core's design targets),
+and V3's "premise: X-ray off" (your None pad's X-ray starts on with a face-prism — R7-V's stopgap). V1's first expectation, "no
+design is asked of core", was changed after the red run to "nothing they say is shown" (the paragraph above).
+
+**What looking found:** the first [Prisms] picture with nothing picked drew every face-prism in #354's faint "other group" look,
+which hid under the blue heat. Now with nothing picked they draw in the active look. Pictures re-made on the final code.
+
+### Re-pins (each attributed in the test)
+| test | was | now | why |
+|---|---|---|---|
+| FlexibleR7M1Tests.testNoFacePrismMeansNoLatticeAnywhere | tone `.fix`, tap `.openSettings` | `.blocked`, `.toSelections` | the verify (finding 2), ruling 4 |
+| FlexibleR7M1Tests.testPrismsIsEveryFacePrismOfThePickedGroup | [Prisms] before a pick: nothing | every group's (Group C's) | the verify (finding 4); his round-6 "ALL … prisms" |
+| FlexibleR7M1Tests.testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst | "This export makes Thumbs only." | "This export makes Group 1 only." | his answer on squish group names |
+| FlexibleRound6HostedTests R6-3j (`testThePrismsButtonIsTheFourthAndShowsEveryPrism`) | [Prisms] with no pick: [] | [1] (the fixture's Top face-prism) | the verify (finding 4) |
+| FlexibleBatchVHostedTests (`testTheMainPageModelShowsNoSelectionsColourAtHisCamera`), its POSITIVE control only | roles composed in, the drawn dent | the same + `controlDrawnCurveOnMain` (with no dent the flat map hid the Top's colour: 44 px) | the verify (finding 3) |
+
+### The #354 / main files
+None touched in this batch: `git diff 1c0a27be..HEAD` on WorkspacePlaceholder, ProjectModel, MetalMeshView, LatticeSettings,
+SelectionModel, ForceModel and core/ is empty. H15' and H18 stay exactly as M1 wrote them. Every changed source file is a Flexible
+file on neither #354 nor main: FlexibleNoFacePrismFlow (new), FlexibleMainStage, FlexibleMainStatusPill, FlexibleMainLatticeView,
+FlexibleCoreRun, FlexibleCoreHold, FlexibleReadiness, FlexibleShownValues, FlexibleSettingsOpenGroup, FlexibleStagePage,
+FlexibleFacePanel. (FlexibleStageModel is unchanged: the design asks were left as they are — see finding 10.)
+
+### The pictures (`round7/batch_m1_verify/`, your pad A1_0003, the whole workspace hosted; logs `*_log.txt`)
+- `R7M1V_A13p_01_no_face_prism_main.png` / `R7M1V_A11l_01_…`: your pad as saved. The plain model; the big Lattice button greyed out
+  with "Set a face to Lattice in Selections first"; Heat, Stress, Lattice, [Prisms] and Play greyed; X-ray live; no ↓/± dots (no
+  face-prism, so no knob).
+- `R7M1V_A13p_02_after_pill_tap.png`: after a tap on the greyed button — nothing opened (log: Squish page up false, pendingFix nil).
+- `R7M1V_A13p_03_squish_page_no_face_prism.png`: the Squish page — the top line "Set a face to Lattice in Selections first", no
+  [Fix], no pop-up, no legend card, no orange line; the face card's "No lattice under it [Lattice under it]".
+- `R7M1V_B13p_01_live_nothing_picked.png`: your live lattice, nothing picked — no prism; **the ↓/± dots still float** (finding 1,
+  posted).
+- `R7M1V_B13p_02_prisms_nothing_picked.png`: [Prisms] with nothing picked — Group C's two face-prisms at 25.0 mm, the legend row.
+- `R7M1V_B13p_03_prisms_top_picked.png` / `_04_top_picked_no_prisms.png`: the Top picked — with [Prisms] Group C's face-prisms
+  (fainter), without it nothing (the Top is Off in Selections).
+- `R7M1V_B13p_05_groupC_picked.png`: Group C picked — its two face-prisms, bright.
+- `R7M1V_B13p_06_face3_17mm_rebuilding.png`: Face 3 typed 17.26 in the list, while it rebuilds — prisms 17.3 / 25.0, the pill
+  "Building…", **no legend card** (the verify's "What you drew … 24.5 mm" is gone). `_07_…_rebuilt.png`: after it.
+- `R7M1V_C13p_01_export_edges_beside_his_groups.png`: your three face groups + an edges group — "Each export makes one group only.",
+  the note, [Send Group 1 only] [Send Group 2 only, Face 2 resting] [Send Group 3 only, Face 5 resting]; 0 sends. Group 1 was
+  renamed "Thumbs" on the Squish page: the Export still says "Group 1". `_02_export_img4.png`: your img4 state — "This export makes
+  Group 1 only."
+- (A probe artefact: the composite draws the model under the Export step undimmed; in the app the dim covers it.)
+
+### The runs
+- **Tests first:** `505c46fe`, FlexibleR7M1VerifyTests, 8 tests, 27 failures against stubs that keep the M1 build's behaviour
+  (`r7m1v_red_run.txt`). After the fixes: FlexibleR7M1VerifyTests + FlexibleR7M1Tests 17 tests, 0 failures (twice).
+- **Targeted suite, run 1** (183 classes: every Flexible* class, every class that source-pins a touched file — WorkspacePlaceholder's
+  pins included — and the listed ones; 12 per run, 20:26 → 21:51): 1 247 tests, 57 skipped, 13 failed assertions in 5 tests:
+  - known: FlexibleBatchNVerifyTests ×8 (Xcode 27 text metrics), LatticeSimSolveTriggerTests ×1;
+  - known from M1 (environmental, the offscreen TimelineView ring): FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff
+    (ring 17 px);
+  - **caused by this batch, re-pinned** (table above): FlexibleBatchVHostedTests' positive control (44 px with no dent) and
+    FlexibleRound6HostedTests R6-3j ×2 ([1] instead of []).
+  - No xctest exit signal 11. LatticeStaleTypeTests 6/6; ProjectStoreTests 5, UndoHistoryTests 10, LatticeSettingsPersistTests 4,
+    ViewerTests 33, SmoothingPageRound2Tests 21, BottomBarMeasurementTests 8, LatticeIncludeGateTests 8, FlexibleMainPageHookTests 3 —
+    all green.
+- **Rerun** after the two re-pins and the pill's legibility change (FlexibleBatchVHostedTests, FlexibleRound6HostedTests, the two M1
+  classes, every class that source-pins FlexibleMainStatusPill.swift): 78 tests, 1 failure — the same Play-ring test.
+- **Goldens** (FlexibleAngledGoldenTests, 13/13 each), 0 DIFFERS: deterministic 38 identical; unseeded 32 identical + 1 PART-SKIP.
+- **The 16 stage-job hashes:** `round7/batch_m1_verify/stage_job_hashes_r7m1v.txt` is byte-identical to
+  `round7/merge/stage_job_hashes_r7merge.txt` (the whole file; 16 rows exit 0).
+- **iOS:** BUILD SUCCEEDED (derived data flexA1; TopOpt.debug.dylib 79 365 168 bytes, Oct 14 22:11). It carries "Set a face to
+  Lattice in Selections first", "Each export makes one group only.", `toSelections` and the symbols
+  FlexibleMainStage.facePrismItems / viewsAvailable / FlexibleStageModel.noFacePrismKnown. Not installed (above).
+- Raw: `round7/batch_m1_verify/r7m1v_runs.txt`.
+
+### Merge notes (the X1 side tree branched from `1c0a27be`)
+- FlexibleMainStage.togglePrisms: this batch gates the forced X-ray on a drawn face-prism; X1 removes the coupling — take X1's line.
+- FlexibleMainStage.refresh: one block (`latticeHeat`) around the channels call; X1 owns layer/bodyAlpha — no overlap expected.
+- FlexibleMainStage.init: one line (`Self.lastMade = self`, the evidence probe's handle).
+
+### Not done (said, not hidden)
+- The floating ↓ / ± knobs, opening Selections from the greyed-out button, and a fix button on the Export refusal: #354's file
+  (posted to the reviewer).
+- Stopping the design asks with no face-prism: waits on the reviewer (findings 15/16).
+- The Squish page's own view icons (Heat, Bend, Play) still look live with no face-prism; nothing is drawn by them. Same fix as the
+  main page's, not asked for there.
+- The face-prism's number on the model (tap to type): the redesign's B1 handles.
+
+### Questions
+1. **(Restated Q5, with your answer)** You said: "Group names in squish are JUST squish groups. NOT lattice groups." The Export step
+   now names the squeeze group by number ("This export makes Group 1 only."). Would "Squish group 1" read clearer beside Selections'
+   "Group C"?
+2. **[Prisms]** now shows every group's face-prisms (brighter for the picked group). Keep it?
+3. **With no face-prism**, each Squish-page face card still offers [Lattice under it] (it makes that face-prism as a protected
+   group, as deep as the part). Keep it, or should the only way be Selections?
+4. **A tilted one-face press alone** (not an edges group) still raises nothing at Export. Should it be said too? (M1's Q6, still open.)
+
+## Round 7 · batch M1 — only a face-prism makes lattice; the main page's prism is the lattice face-prism, at the list's depth; "Protect 3 mm" and "Minimize plastic" off this page; one group per export, said first (2026-10-14)
+
+> **Corrected by the verify section above (read it first):** with no face-prism the big Lattice button is now greyed out with its
+> reason and never opens the Squish page (this section's "Tapping it opens the Squish page on the one-tap fix" is gone); [Prisms]
+> shows every group's face-prisms (not only the picked group's); the Export names the squeeze group by its number ("Group 1"),
+> never your Squish-page name.
 
 This is round 7's step 2a: the two hooks the reviewer approved (H15' and H18), your img1 words "ONLY the face-prism creates
 the lattice structure in any area", and the reviewer's ruling 4 on exports with an edges group. Branch
