@@ -321,7 +321,9 @@ final class FlexibleRound6Tests: XCTestCase {
         let c = FlexiblePageChannels.channels(model: m, overlay: o, xray: true, drawnLattice: nil, groupColours: false)
         // ★ RE-PINNED (R7-V — his 2026-10-14 Heat view: tap = the current group's heat, hold 3 s = every group's): the page
         // composes exactly these with every group's heat shown (`heatAll`)
-        XCTAssertEqual(c.tints, FlexibleStagePage.composeTints(model: m, overlay: o, views: [.heatAll]).tints, "the page composes exactly these")
+        // ★ RE-PINNED (round 7, X1 — X-ray off by default on the Squish page too; his answer 12): these are the page's X-RAY tints,
+        // so the page composes them with his [X-ray] icon on (`.xray`); out of X-ray it adds no ghost
+        XCTAssertEqual(c.tints, FlexibleStagePage.composeTints(model: m, overlay: o, views: [.heatAll, .xray]).tints, "the page composes exactly these")
         var cache: (key: String, dents: [Float])?
         let sq = FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache)
         let sc = Scene(mesh: o.mesh, tints: c.tints, dents: sq.dents, scale: Float(sq.exaggeration), settle: settle)

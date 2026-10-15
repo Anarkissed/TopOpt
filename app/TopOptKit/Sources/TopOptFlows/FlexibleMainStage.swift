@@ -43,23 +43,18 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public internal(set) var heatAll = false
     /// ★ ROUND 7 (F): the region of the face he last tapped on the main page (its squeeze group is the "selected" one).
     var tappedRegion: Int?
-    /// ★ ROUND 4 (C2 — his img 5: "the xray and lattice view … both seem to require one another
-    /// … remove the xray view selector if the lattice view is going to use the rendering
-    /// anyways"): the Lattice VIEW is his one choice. Shown, the part is the X-ray ghost with the
-    /// walls inside; hidden, it is the solid part (Dent heat / Stress read on it). On by default.
+    /// ★ ROUND 4 (C2 — his img 5): the Lattice VIEW, on by default. ★ ROUND 7, X1: a plain show / hide — shown, the lattice
+    /// is drawn (in the printed view with X-ray off, inside the ghost with X-ray on); hidden, the solid part. It never turns
+    /// X-ray on (C2's "the Lattice view IS the X-ray" was reversed by R7-V, its last coupling by X1).
     @Published public var latticeOn = true { didSet { if oldValue != latticeOn { refresh(); if latticeOn { bakeDeferred() } } } }   // ★ S9: a bake a Save & Exit left for the view
     /// What the Lattice button shows as on, and what is drawn: his choice AND a lattice to show
     /// (one drawn, or one on its way without Settings — `latticeAvailable`).
     public var latticeShown: Bool { latticeOn && latticeAvailable }
     /// ★ ROUND 7, R7-V (his img5, 2026-10-14: "Please re-add the x-ray view icon. In the default view, we should be able to
-    /// see the model +the finish in the latticed area"): X-RAY IS ITS OWN ICON AGAIN, OFF BY DEFAULT — the default view is
-    /// the opaque model (exact for the Covered finish; the finish openings over the lattice are R7-X; ★ the review: for the
-    /// other finishes it starts ON until then — `xrayDefault`). Heat and the
-    /// lattice no longer force it. This REVERSES two rulings, by his 2026-10-14 words: C2 (commit 140c8d454, his round-4
-    /// img 5 — the Lattice view IS the X-ray) and M6 (batch M, his round-5 img 6 — the dent view turns X-ray on).
-    /// ★ R7-V REVIEW (the verify, on his pad — saved with Finish None: the page opened as an opaque block with NO lattice at
-    /// all, the Lattice icon unlit): his X-ray CHOICE is kept per project (session state); until he makes one, the DEFAULT
-    /// follows the finish (`xrayDefault`).
+    /// see the model +the finish in the latticed area"): X-RAY IS ITS OWN ICON AGAIN — heat and the lattice no longer force
+    /// it (REVERSES C2, his round-4 img 5, and M6's "the dent view turns X-ray on", his round-5 img 6). ★ R7-V REVIEW: his
+    /// choice is kept per project for the session (`xrayChoice`). ★ ROUND 7, X1: OFF by default for every finish (R7-V's
+    /// stopgap — on for None / Rim / Skin — is retired; the printed view shows the lattice with X-ray off): `xrayDefault`.
     @Published var xrayChoice: [UUID: Bool] = [:]
     public var xrayOn: Bool {
         get { xrayChoice[projectID ?? Self.noProject] ?? xrayDefault }
@@ -69,25 +64,95 @@ public final class FlexibleMainStage: ObservableObject {
             refresh()
         }
     }
-    /// ★ R7-V REVIEW — his img5: "In the default view, we should be able to see the model +the finish in the latticed area
-    /// (and pure lattice if 'off' is set)": OFF for the Covered finish (the skin hides the lattice: the opaque model IS the
-    /// print); ON for None, Rim and Skin, whose lattice shows in the print — until R7-X's printed view (step 2) draws it
-    /// through the finish's openings with X-ray off. RED CONTROL `controlXrayOffOnOpen`: R7-V's first build (off for every
-    /// finish — the opaque block on his None pad).
-    /// ★ ROUND 7, M1 (1a — looking at his pad as saved, no face-prism: the X-ray default drew an EMPTY dark ghost, nothing
-    /// inside to see): with no face-prism there is no lattice, so the default is the plain opaque model whatever the finish.
-    public var xrayDefault: Bool {
-        !controlXrayOffOnOpen && (model?.settings.finishMode ?? .covered) != .covered
+    /// ★ ROUND 7, X1 (his answer on the R7-V handoff's Q9, 2026-10-14: "X-ray mode should show the inside of the SOLID showing
+    /// the extent of the face prism/bend amount/heat map etc. The lattice should be visible without x-ray on as long as finish
+    /// is set to something that isn't 'covered'. These two things are not mutually exclusive."): X-RAY IS OFF BY DEFAULT,
+    /// WHATEVER THE FINISH. R7-V's stopgap — the default followed the finish (ON for None / Rim / Skin, so his None pad's
+    /// lattice was not hidden behind an opaque body) — is RETIRED: the PRINTED VIEW (`printedView`) now shows the lattice
+    /// with X-ray off. His tap is still kept per project for the session (`xrayChoice`).
+    /// RED CONTROL `controlXrayByFinish`: R7-V's stopgap (with M1's rule inside it: no face-prism, no X-ray).
+    var xrayDefault: Bool {
+        guard controlXrayByFinish else { return false }
+        return (model?.settings.finishMode ?? .covered) != .covered
             && (model.map { $0.sceneState != .ready || $0.facePrismsSet } ?? true)
     }
     static let noProject = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-    /// Test control only (R7-V review): X-ray off on open whatever the finish (R7-V's first build).
-    var controlXrayOffOnOpen = false
+    /// ★ X1, test controls only (each the rule it reverses): R7-V's X-ray stopgap (on by the finish); R7-V's "a view that
+    /// needs another turns it on itself" for the Lattice icon and [Prisms] (both turned X-ray on); R7-V's walls only in X-ray
+    /// (no printed view — out of X-ray an opaque body hid every wall).
+    var controlXrayByFinish = false
+    var controlViewsForceXray = false
+    var controlNoPrintedView = false
     /// The body is the ghost (his X-ray icon). RED CONTROL `controlXrayIsLatticeView`: C2 + M6's derived rule.
     public var xray: Bool { controlXrayIsLatticeView ? (latticeShown || dentXray) : xrayOn }
-    /// The walls are seen: the Lattice view on with X-ray (step 1 — out of X-ray an opaque body hides them) — what the
-    /// Lattice icon shows lit.
-    public var wallsShown: Bool { latticeShown && xray }
+    /// ★ ROUND 7, X1 — THE PRINTED VIEW (his Q9 answer: "If lattice is on without x-ray view, we see the lattice plus the
+    /// solid"): X-ray off, the Lattice view on (a lattice to show) and a finish that leaves the lattice open — None (the walls
+    /// run to the surface), Rim (bands at the edges), Skin (a perforated sheet). The page then shows the SOLID part (opaque,
+    /// correctly sorted) with the lattice where the finish leaves it open; Covered is the plain model (the print). The walls
+    /// are marched with the printed solid (FlexibleLatticeField.printedSolid — the skin, the pocket's own wall and floor),
+    /// the body is see-through with its closed surface flagged solid and written into the G-buffer by the pass
+    /// (FlexibleLatticePass.encodeBody). RED CONTROL `controlNoPrintedView`.
+    public var printedView: Bool { !controlNoPrintedView && !xray && latticeShown && finishLeavesLatticeOpen }
+    /// The finish is not Covered (core still gets only Covered as a solid skin — FlexibleFinish.jobSkinOn).
+    var finishLeavesLatticeOpen: Bool { (model?.settings.finishMode ?? .covered) != .covered }
+    /// …and DRAWN now: a fresh lattice, not building, no full-screen page up. The layer's `printed`, the body's alpha (0:
+    /// only its closed surface draws) and the tints' solid flags all read THIS one rule — a see-through body with no pass to
+    /// draw its closed surface would vanish.
+    func printedDrawn(_ m: FlexibleStageModel) -> Bool {
+        printedView && m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding && !frozen
+    }
+    /// ★ ROUND 7, X1 VERIFY (the verify: the layer read `printedDrawn && !pageUp`, the body alpha `printedDrawn` alone, the
+    /// open flags needed an overlay — with no overlay the body went see-through with nothing flagged solid, and the part
+    /// would vanish): ONE rule for the layer's `printed`, the body alpha 0 and the tints' open surface — the printed view
+    /// drawn AND its open surface known (an overlay). The layer adds `!pageUp` (its walls hide under a page at once); the
+    /// body alpha and the tints follow the page a turn later (`frozen`) — that frame is under the full-screen page, and its
+    /// closed surface still draws (flagged solid), so nothing vanishes. RED CONTROL `controlPrintedRulesApart` (X1's rules).
+    func printedReady(_ m: FlexibleStageModel) -> Bool {
+        printedDrawn(m) && (controlPrintedRulesApart || overlay != nil)
+    }
+    var controlPrintedRulesApart = false
+    /// Tests only: the overlay dropped (the state the one rule guards — no open surface to flag).
+    func dropOverlayForTests() { overlay = nil; overlayKey = nil }
+
+    /// ★ ROUND 7, X1 VERIFY — THE HEAT ON THE WALLS (FlexibleWallHeat). His Q9 answer (2026-10-14): "X-ray mode should show the
+    /// inside of the SOLID showing the extent of the face prism/bend amount/heat map etc. … If the user adds x-ray, we see
+    /// through the solid." The verify: with Heat on, X-ray kept the pressed face's heat as an OPAQUE lid — from his img5 top
+    /// camera one heat-coloured square, none of the lattice (its blocker); in the printed view the heat lay only on the solid
+    /// part, a flat 0 mm blue (his img3: "The view of the heatmap doesn't actually change anything"). Now, with Heat on and the
+    /// walls DRAWN (X-ray, or the printed view), the walls carry the squish of their column on the legend's scale, and the lid
+    /// stops hiding them (X-ray: a faint heat skin; the printed view: the solid part is the plain part). REVERSES batch M's
+    /// M6 ghost walls under the solid dent planes (his round-5 img 6) in that state, by his Q9 words. RED CONTROL
+    /// `controlHeatOnLid` (X1's first build).
+    public var heatOnWalls: Bool {
+        guard !controlHeatOnLid, heat, !stress, wallHeatTable != nil, let m = model, m.facePrismsSet, dentMaxMM > 0 else { return false }
+        return wallsDrawn(m)
+    }
+    /// The walls are DRAWN now (what `layer` hands the pass, a page aside): a fresh lattice, not building, his Lattice view on —
+    /// in X-ray, or in the printed view.
+    func wallsDrawn(_ m: FlexibleStageModel) -> Bool {
+        latticeOn && m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding && !frozen && (xray || printedReady(m))
+    }
+    /// The walls' heat for the lattice on screen (made in `refresh` — never per body pass).
+    var wallHeatTable: FlexibleWallHeat?
+    /// The lid (the pressed faces' map) carries no heat: the walls do (X-ray), or the printed view opens it over the lattice
+    /// and its solid part is the plain part (it does not squish — no flat 0 mm lid).
+    var lidWithoutHeat: Bool {
+        guard !controlHeatOnLid, heat, !stress, let m = model else { return false }
+        return heatOnWalls || printedReady(m)
+    }
+    /// The heat IS drawn somewhere — the walls, or the lid (the 19:45 ruling: the legend, TAP TO READ and the reading's
+    /// reset need heat actually drawn). Under the red control: X1's rule (no such check).
+    var heatDrawn: Bool { controlHeatOnLid || heatOnWalls || !lidWithoutHeat }
+    /// Test control only (X1 verify): X1's first build — the heat only on the lid (opaque in X-ray, M6's ghost walls under it;
+    /// the closed part's flat 0 mm in the printed view), the walls by density, the legend's rows regardless.
+    var controlHeatOnLid = false
+    /// Test control only (X1 verify): the Lattice icon under Covered says nothing (X1's first build).
+    var controlNoCoveredNote = false
+    /// The walls are SEEN: in X-ray, or (★ X1) in the printed view — the lattice legend shows then.
+    public var wallsShown: Bool { latticeShown && (xray || (finishLeavesLatticeOpen && !controlNoPrintedView)) }
+    /// ★ X1: the Lattice icon is a plain show / hide — lit by his view (and a lattice to show), never by X-ray (R7-V's handoff
+    /// Q10, answered by his Q9 words). Under Covered with X-ray off the view stays his: its walls are seen in X-ray.
+    public var latticeIconLit: Bool { controlViewsForceXray ? wallsShown : latticeShown }
     /// The dent view is on and has a map to show (kept by `refresh` — read on every body pass).
     /// (★ R7-V: no longer turns X-ray on — it decides only whether the walls are a ghost under its solid planes.)
     public var dentXray: Bool { heat && dentMapShown && !dentOnColumnFallback }
@@ -96,7 +161,8 @@ public final class FlexibleMainStage: ObservableObject {
     /// it) — kept by `refresh`.
     var dentOnColumnFallback = false
     /// The walls are drawn as a ghost under the solid dent planes (the dent view and the lattice on, in X-ray).
-    public var ghostWalls: Bool { dentXray && latticeShown && xray }
+    /// ★ X1 VERIFY: never while the walls carry the heat (they are solid then, the lid a faint skin — `heatOnWalls`).
+    public var ghostWalls: Bool { dentXray && latticeShown && xray && !heatOnWalls }
     public func toggleLattice() {
         latticeOn = !latticeShown
     }
@@ -229,6 +295,8 @@ public final class FlexibleMainStage: ObservableObject {
     var feMeshCache: [String: (key: String, mesh: [Float])] = [:]
     /// ★ BATCH M (M5): each field's dent heat at every map vertex (FlexibleMainStage+Squish.feMapValues).
     var feValueCache: [String: (key: String, values: [Float])] = [:]
+    /// ★ X1 VERIFY: each field's compression per column of its group's faces (the walls' heat — `feColumnValues`).
+    var feColumnCache: [String: (key: String, values: [FlexFaceKey: [Double?]])] = [:]
     /// ★ BATCH M (M3): each field's stress (FlexibleMainStage+Stress.feStress) — its peak and its scale's top.
     var feStressCache: [String: (key: String, field: LatticeDemandField, peak: Double, top: Double)] = [:]
     /// Test controls only (★ BATCH M VERIFICATION's red controls): batch M's Stress route (only a FRESH
@@ -249,6 +317,8 @@ public final class FlexibleMainStage: ObservableObject {
     var overlaySerial = 0
     /// ★ ROUND 6: the main page's prisms, and the state they were built for (`volumes`).
     var volumesCache: (key: String, items: [ClearanceRenderItem])?
+    /// ★ ROUND 7, X1: the printed view's open surface, and the overlay / lattice it was found for (`printedOpen`).
+    var openCache: (key: String, open: [Bool])?
     /// ★ ROUND 7, M1: the picked group's face-prisms, and what they were built from (`volumes`).
     var facePrismCache: (inputs: FacePrismInputs, items: [ClearanceRenderItem])?
     /// ★ S1b: the model's views, observed (`ensure`).
@@ -395,7 +465,7 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ BATCH G: no sim starts beside another core solve; a Stress solve it held back starts after
         m.squishSolver.busy = { [weak self] in self?.squishBusy?() ?? false }
         m.squishSolver.onIdle = { [weak self] in self?.squishIdle() }
-        fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
+        fe = FlexibleFEView(); feMeshCache = [:]; feValueCache = [:]; feColumnCache = [:]; feStressCache = [:]; fePlayedGeneration = nil
         feStartedKey = nil; fallbackKey = nil; heldForSims = false; fallbackSim = nil; feBaseTints = [:]; feTintBox.set([:])
         seenLoads = nil
         // a fresh session of picks (FlexibleMainPickSession); ★ R7-V: batch V's two view settings are gone — his kept keys too
@@ -446,8 +516,8 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ ROUND 5 (S9): "Exit" — nothing changed on Settings: the main page stays EXACTLY as it was
         if model?.takeExitUnchanged() == true { showLatticeOnExit = false; return }
         model?.retryFailedBuild()   // his Save & Exit asks for the build: a failed one is tried once more
-        // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view (★ R7-V: in X-ray, where
-        // its walls are seen)
+        // ★ C2: Settings opened by the Lattice view button (nothing to show) — Exit shows the view (★ X1: the view only; X-ray
+        // stays as he set it)
         if showLatticeOnExit { showLatticeOnExit = false; showLatticeView() }
         // ★ ROUND 5 (S9): with the Lattice view OFF, Save & Exit only STORES — the bake waits for the view
         model?.latticeBuildDeferred = !latticeOn
@@ -486,7 +556,8 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ ROUND 4 (D2): the picked squeeze's faces squish
         var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(playingSim), building: m.latticeBuilding,
                                                    latticeShows: latticeOn && fresh && !pageUp,
-                                                   loop: fresh && !pageUp ? loop : nil)
+                                                   loop: fresh && !pageUp ? loop : nil,
+                                                   printed: printedReady(m) && !pageUp)   // ★ X1: the printed view (★ verify: its one rule)
         // ★ BATCH G: the squeeze groups' fields, their meshes and the sequence the loop plays
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
@@ -496,6 +567,7 @@ public final class FlexibleMainStage: ObservableObject {
             if stress, feStressRoute, stressDrawable { inputs?.stressWalls = true }
         }
         inputs?.ghostWalls = ghostWalls   // ★ BATCH M (M6): the dent view ghosts the walls under the solid planes
+        if heatOnWalls, !pageUp { inputs?.heatWalls = wallHeatTable }   // ★ X1 VERIFY: Heat on — the walls carry it
         return inputs
     }
 
@@ -513,7 +585,12 @@ public final class FlexibleMainStage: ObservableObject {
         return Float(k * loop.held)
     }
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
-        owns(project, stage) ? (xray ? FlexibleStagePage.xrayBodyAlpha : 1) : nil
+        guard owns(project, stage) else { return nil }
+        if xray { return FlexibleStagePage.xrayBodyAlpha }
+        // ★ X1, THE PRINTED VIEW: the body see-through — only its CLOSED surface (the tints' solid flag) draws, opaque, and the
+        // pass writes it into the G-buffer with the walls (FlexibleLatticePass.encodeBody), so it is sorted
+        if let m = current(project, stage), printedReady(m) { return 0 }   // ★ X1 VERIFY: the one rule
+        return 1
     }
     /// ★ ROUND 7, M1 (hook H15' — WorkspacePlaceholder hands ONLY this to the viewer on the Flexible stage): the main page's
     /// prisms ARE the picked group's LATTICE face-prisms — #354's own `LatticeDepthPlane`s (the Selections modal's Lattice
@@ -685,11 +762,31 @@ public final class FlexibleMainStage: ObservableObject {
 
     /// ★ ROUND 6 (item 3): the main page's [Prisms] — the Prisms view, and X-ray with it (a view that needs another turns
     /// it on itself). ★ R7-V: X-ray, not the Lattice view — a prism sits under its face, inside the part.
+    /// ★ ROUND 7, X1 (his Q9 answer: X-ray is HIS view — "If the user adds x-ray, we see through the solid"): [Prisms] no longer
+    /// turns X-ray on (R7-V's rule, reversed). RED CONTROL `controlViewsForceXray`.
     public func togglePrisms() {
         guard let m = model else { return }
         m.toggleView(.prisms)
-        // ★ M1 VERIFY: X-ray with it only when a face-prism is drawn (nothing inside the plain model to see)
-        if m.views.contains(.prisms), !xrayOn, legendPrismsRow { xrayOn = true }
+        if controlViewsForceXray, m.views.contains(.prisms), !xrayOn { xrayOn = true }
+    }
+
+    /// ★ X1 VERIFY: the walls' heat table for the lattice on screen — per squish face (the pass's slots, in
+    /// `squishFaces` order), per cell, the column's squish: the 3D sim's compression on the FE route (each face by its own
+    /// group's field — `feColumnHeat`), else core's buildable depth (what the column map is coloured by); the legend's top.
+    /// nil with no squish to show.
+    func makeWallHeat(_ m: FlexibleStageModel, shown: FlexibleShownValues) -> FlexibleWallHeat? {
+        guard dentMaxMM > 0, let g = m.lattice?.showing(playingSim), g.keys.count == g.faces.count else { return nil }
+        let squished = Set(g.squishedKeys)
+        let slots = zip(g.keys, g.faces).filter { squished.contains($0.0) }
+        guard !slots.isEmpty else { return nil }
+        let perColumn: [FlexFaceKey: [Double?]] = feColumnHeat(m) ?? shown.values.mapValues { v in
+            v.map { if case .depth(let d) = $0 { return d } else { return nil } }
+        }
+        let cells = slots.map { k, face in
+            m.stacks[k].map { FlexibleWallHeat.cells(stack: $0, face: face, perColumn: perColumn[k] ?? []) }
+                ?? [Float](repeating: -1, count: face.nu * face.nv)
+        }
+        return FlexibleWallHeat(cells: cells, topMM: Float(dentMaxMM))
     }
 
     /// The squish player shows only when there is something to squish: a lattice that still
@@ -920,6 +1017,8 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ BATCH G: the field moves the ghost, the heat plane and the walls; ×k capped so the map
         // stays injective (the planes never cross)
         feBaseTints = playAllBaseTints(m, scaleMM: dentMaxMM, nextScaleMM: feNow?.nextScaleMM)
+        // ★ X1 VERIFY: the walls' heat — the same numbers the map is coloured by, per column, on the legend's scale
+        wallHeatTable = makeWallHeat(m, shown: shown)
         if fe.active {
             c.exaggeration = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: fe.safeScale)
             c.dents = feShownMesh
@@ -975,7 +1074,8 @@ public final class FlexibleMainStage: ObservableObject {
                    "\(c.exaggeration)", "\(drawn?.generation ?? -1)", "\(drawn?.facesToken ?? -1)", "\(m.latticeBuilding)",
                    "\(m.lattice?.generation ?? -1)", "\(m.latticeIsStale)", oKey, "\(latticeAvailable)",
                    "\(fe.token)", "\(fe.sequence)", "\(fe.shownSequence)", "\(fe.pending)", fe.failure ?? "", "\(xray)", "\(stress)",
-                   "\(prisms)"].joined(separator: "|")   // ★ M1 VERIFY: the views' availability redraws the row
+                   "\(prisms)", "\(printedReady(m))"].joined(separator: "|")   // ★ M1 VERIFY: the views' availability redraws the row; ★ X1: the printed view
+            + "|\(wallHeatTable?.token ?? 0)|\(heatOnWalls)"   // ★ X1 VERIFY: the walls' heat
         channels = c
         if channelsKey != key {
             channelsKey = key

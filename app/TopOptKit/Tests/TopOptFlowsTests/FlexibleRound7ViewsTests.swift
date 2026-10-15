@@ -288,9 +288,8 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         XCTAssertEqual(FlexibleMainViewToggles.buttons, 6, "★ Heat · Stress · Lattice · Prisms · X-ray · Play")
         let (r, s, m) = try await hisPad()
         let p = r.project
-        // ★ RE-PINNED (R7-V review — the verify on his pad, saved Finish None: X-ray off for every finish opened it as an opaque
-        // block with no lattice): X-ray's default follows the finish — OFF for Covered (pinned here), on for None / Rim / Skin
-        // (FlexibleRound7ViewsTests.testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered)
+        // ★ RE-PINNED (R7-V review): X-ray's default followed the finish. ★ X1 (his 2026-10-14 Q9 answer): X-ray is OFF by default
+        // for EVERY finish (FlexibleRound7ViewsReviewTests.testXrayOpensOffWhateverTheFinish); Covered is pinned here
         m.edit { $0.finish = FlexibleFinish.covered.rawValue }
         try await FlexibleSquishFixture.settle(m, "his pad, Covered")
         s.didExitSettings()
@@ -316,10 +315,11 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         s.toggleXray()
         s.toggleHeat(); XCTAssertFalse(s.xrayOn, "★ Heat never turns X-ray on"); s.toggleHeat()
         XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1)
-        // a view that needs X-ray turns it on itself: [Prisms] (a prism sits inside the part)
+        // ★ RE-PINNED (round 7, X1 — his Q9 answer, 2026-10-14: X-ray is his view; R7-V's "a view that needs X-ray turns it on
+        // itself" reversed for [Prisms]): [Prisms] leaves X-ray off
         s.togglePrisms()
-        XCTAssertTrue(s.xrayOn, "★ [Prisms] turns X-ray on itself")
-        s.togglePrisms(); s.toggleXray()
+        XCTAssertFalse(s.xrayOn, "★ X1: [Prisms] leaves X-ray off")
+        s.togglePrisms()
         XCTAssertFalse(m.views.contains(.play), "nothing here touched Play")
         print("FLEX-R7V-2d xray: default body alpha 1 walls hidden (control \(controlAlpha ?? -1)) · X-ray on alpha \(FlexibleStagePage.xrayBodyAlpha)")
     }

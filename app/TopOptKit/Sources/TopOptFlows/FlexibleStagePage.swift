@@ -66,7 +66,12 @@ public struct FlexibleStagePage: View {
     /// ★ X-RAY VISION (maintainer, 2026-09-29): the body as a ghost, the dented map opaque,
     /// the lattice seen inside. ★ ROUND 3 (item 1.4): ALWAYS on on this page — the bend reads
     /// from any angle, even edge-on (img 1); the X-ray button under the gizmo is gone.
-    private let xray = true
+    /// ★ ROUND 7, X1: his [X-ray] icon again, OFF on open (`Self.xray(views)`, `bodyAlpha(views:…)`).
+    /// ★ X1: X-ray's prism of the current group's bend into the model (FlexibleBendPrism).
+    @State private var bendPrism: [ClearanceRenderItem] = []
+    /// ★ X1 VERIFY: the prism's number (in a box, at its floor) and whether the bend is well short of the curve he drew.
+    @State private var bendTag: FlexibleBendPrism.Tag?
+    @State private var bendShort = false
     /// ★ BATCH C (item 1.4): the legend reads too — tap it ("TAP THE PART TO READ"), then the
     /// part: the dent's true mm at that spot, pinned as a callout; a tap never selects a face
     /// while it reads; a double tap anywhere (or the legend again) comes back out.
@@ -155,12 +160,35 @@ public struct FlexibleStagePage: View {
     /// Bend with the heat hidden: the bent part is drawn to READ (his img4: "showing the entire 3d model at its full squish
     /// depth") — Bend ALONE opaque (the shaded part, nothing inside it to see), with Prisms / Groups / Play at the dent's 30 %
     /// (what sits inside still shows through). Otherwise the page's X-ray ghost, the heat opaque on it.
+    /// ★ ROUND 7, X1 (his answer on the R7-V handoff's Q9 — X-ray off by default on both pages — and his answer 12: "The curve
+    /// should be viewed as nothing but the curve without any view turned on … Turning x-ray on shows a prism view of the actual
+    /// bend INTO the model"): this page is NO LONGER always in X-ray. His [X-ray] icon: the ghost (the bend's prism inside it —
+    /// `xrayItems`). Off (the default): the part OPAQUE — except while something the page draws sits INSIDE the part ([Prisms],
+    /// or Bend's full-depth ghost under Play): the part then at the dent's 30 %, so it shows through.
+    /// RED CONTROL `controlAlwaysXray`: rounds 3–7 (always the ghost; R7-V's Bend rules inside it).
     static func bodyAlpha(views: FlexibleStageViews, edgePick: Bool, hasDent: Bool) -> Float {
-        guard !controlBendGhost, hasDent, views.contains(.bend), views.heatScope == .off else { return xrayBodyAlpha }
-        return bendAlone(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
+        if controlAlwaysXray {
+            guard !controlBendGhost, hasDent, views.contains(.bend), views.heatScope == .off else { return xrayBodyAlpha }
+            return bendAlone(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
+        }
+        if views.contains(.xray) { return xrayBodyAlpha }
+        let inside = views.contains(.prisms) || (views.contains(.bend) && views.contains(.play) && hasDent)
+        return inside ? dentBodyAlpha : 1
     }
-    /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build).
+    /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build) — under `controlAlwaysXray`.
     @MainActor static var controlBendGhost = false
+    /// Test control only (X1): rounds 3–7's page — always in X-ray, no prism of the bend.
+    @MainActor static var controlAlwaysXray = false
+    /// The page is in X-ray: his icon (★ X1), or the red control's always.
+    static func xray(_ views: FlexibleStageViews) -> Bool { controlAlwaysXray || views.contains(.xray) }
+    /// ★ X1: what X-ray adds on this page — the current group's bend as a PRISM into the model (FlexibleBendPrism: its faces at
+    /// rest, the same faces bent at full depth — k × the dent at full load — and the skirt between). [] out of X-ray.
+    static func xrayItems(model: FlexibleStageModel, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double,
+                          views: FlexibleStageViews) -> [ClearanceRenderItem] {
+        guard views.contains(.xray), !controlAlwaysXray,
+              let item = FlexibleBendPrism.item(model: model, overlay: overlay, dents: dents, k: k) else { return [] }
+        return [item]
+    }
     /// ★ R7-V REVIEW (the verify: Heat hidden while the legend read left the page stuck in its reading — every tap on the
     /// part went to the reading, none selected a face): the legend can READ only while the dent's rows show — a dent, and
     /// his Heat view showing heat.
@@ -209,7 +237,8 @@ public struct FlexibleStagePage: View {
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
                 // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
-                if FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model)) {   // ★ R7 MERGE: heat drawn; ★ M2: the sections' row
+                if FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model))   // ★ R7 MERGE: heat drawn; ★ M2: the sections' row
+                    || FlexibleLegend.shows(hasDent: false, views: [], bendPrism: bendTag != nil) {   // ★ X1 VERIFY: the prism's row
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -367,12 +396,13 @@ public struct FlexibleStagePage: View {
                 clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration), part: project.viewerMesh,
                                                              heat: glassHeat, heated: FlexibleStageHeat.shown(model: model, views: model.views))
                     .posed(by: bendPose)   // ★ ROUND 7 (F): with Bend on, the prisms' faces and the glass on the bent part (floors stay)
-                    + (bendGhost.map { [$0] } ?? []),   // ★ R7-V: Bend with Play — the full-depth pose, faint
+                    + (bendGhost.map { [$0] } ?? [])   // ★ R7-V: Bend with Play — the full-depth pose, faint
+                    + bendPrism,   // ★ X1: his X-ray — the bend's prism into the model
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
                 // ★ R7-V REVIEW: Bend with the heat hidden draws the bent part to read (bodyAlpha(views:…))
-                bodyAlpha: xray ? Self.bodyAlpha(views: model.views, edgePick: model.edgePick != nil, hasDent: dents != nil)
-                    : (dents != nil ? Self.dentBodyAlpha : 1),
+                // ★ X1: X-ray is his icon — off, the part opaque (bodyAlpha(views:…))
+                bodyAlpha: Self.bodyAlpha(views: model.views, edgePick: model.edgePick != nil, hasDent: dents != nil),
                 // ★ BATCH B: the face the fix pop-up names, pulsed
                 detentPulse: pulse,
                 // ★ ROUND 4 (D1, img 6): no lattice here — it lives on the main Flexible page
@@ -385,7 +415,7 @@ public struct FlexibleStagePage: View {
             if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
                 FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
-                                      clip: clip, pose: bendPose)   // ★ ROUND 7 (F): at the full bend while Bend shows
+                                      clip: clip, pose: bendPose, bendTag: bendTag)   // ★ ROUND 7 (F): at the full bend while Bend shows; ★ X1 VERIFY: the bend prism's number
                 FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
         }
@@ -445,7 +475,7 @@ public struct FlexibleStagePage: View {
                                         views: FlexibleStageViews? = nil) -> FlexiblePageChannels.Channels {
         let v = views ?? model.views
         let filter = controlHeatAlwaysOn ? nil : FlexibleStageHeat.filter(model: model, views: v)
-        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: true, drawnLattice: nil,
+        var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray(v), drawnLattice: nil,   // ★ X1: his icon
                                               heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter,
                                               sectionTints: true)   // ★ ROUND 7 (M2): violet where a tap works
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
@@ -493,6 +523,13 @@ public struct FlexibleStagePage: View {
         // ★ ROUND 7 (F): Bend on — what is drawn on the part follows the full bend
         let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration)
         if pose?.key != bendPose?.key { bendPose = pose }
+        // ★ X1: his X-ray — the current group's bend as a prism into the model, at full depth
+        let prism = Self.xrayItems(model: model, overlay: overlay, dents: c.dents, k: c.exaggeration, views: model.views)
+        if prism != bendPrism { bendPrism = prism }
+        let tag = FlexibleBendPrism.tag(prism.first)
+        if tag != bendTag { bendTag = tag }
+        let short = tag.map { FlexibleBendPrism.shortOfDrawn(model: model, depthMM: $0.depthMM) } ?? false
+        if short != bendShort { bendShort = short }
         // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
         let r = model.readiness
         if let i = prompt.next(r, actionSerial: model.actionSerial,
@@ -701,7 +738,8 @@ public struct FlexibleStagePage: View {
             } else {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
                                reading: legendDrilled ? reading : nil, hasDent: dentRows,   // ★ R7-V; ★ R7 MERGE: heat drawn
-                               k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()))
+                               k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()),
+                               bendPrism: bendTag != nil, bendShort: bendShort)   // ★ X1 VERIFY
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
                             Color.clear
@@ -880,6 +918,8 @@ struct FlexibleStageOverlays: View {
     var clip: [CGRect]? = nil
     /// ★ ROUND 7 (F): the full-bend pose while Bend shows (nil: the part at rest).
     var pose: FlexibleBendPose? = nil
+    /// ★ X1 VERIFY: X-ray's bend prism — its number, read-only, in a box at its floor.
+    var bendTag: FlexibleBendPrism.Tag? = nil
 
     var body: some View {
         ZStack {
@@ -913,6 +953,18 @@ struct FlexibleStageOverlays: View {
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
             FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
                                        clip: clip, pose: pose)
+            // ★ X1 VERIFY (his rule: numbers are boxes): the bend prism's deepest mm, at its floor — never under the chrome
+            if let t = bendTag, let pt = proj.projection?.project(t.anchor), !keepOut.contains(where: { $0.contains(pt) }) {
+                Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
+                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color.opacity(0.7), lineWidth: 1)))
+                    .allowsHitTesting(false)
+                    .position(pt)
+                    .accessibilityLabel("Bend \(t.text)")
+                    .accessibilityIdentifier("flexible-bend-prism-tag")
+            }
         }
     }
 
@@ -1106,6 +1158,9 @@ struct FlexibleLegend: View {
     var hasDent = true
     /// The page's exaggeration (the Prisms row's "×k").
     var k = 1
+    /// ★ X1 VERIFY: X-ray's bend prism (its legend row), and whether the bend is well short of the curve he drew.
+    var bendPrism = false
+    var bendShort = false
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
     /// the "TAP TO READ" line, the line, and half the gap under it).
     static let tabHeight: CGFloat = DS.Space.ml + 16
@@ -1113,8 +1168,10 @@ struct FlexibleLegend: View {
     /// ★ ROUND 6 (item 3): the page shows the ONE card with a dent, or while a view is on (its row).
     /// ★ R7-V: the dent's rows only while his Heat view shows heat; the rows only for the views that have one (Prisms,
     /// Groups — Play and Bend have none).
-    static func shows(hasDent: Bool, views: FlexibleStageViews, sections: Bool = false) -> Bool {
+    /// ★ X1 VERIFY: …and while X-ray draws the bend's prism (its row: what the glass measures).
+    static func shows(hasDent: Bool, views: FlexibleStageViews, sections: Bool = false, bendPrism: Bool = false) -> Bool {
         (hasDent && views.heatScope != .off) || views.contains(.prisms) || views.contains(.groups) || sections
+            || (bendPrism && !FlexibleBendPrism.controlFirstBuild)
     }
 
     /// ★ ROUND 7 (M2): the card's sections row while a face is cut into lattice sections ("Violet = lattice · tap to pick").
@@ -1164,6 +1221,7 @@ struct FlexibleLegend: View {
             if model.views.contains(.prisms) { FlexibleLegendViewRows.prisms(k: k) }
             if model.views.contains(.groups) { FlexibleLegendViewRows.groups(model: model) }
             if Self.sectionRow(model) { FlexibleLegendViewRows.sections }   // ★ ROUND 7 (M2)
+            if bendPrism, !FlexibleBendPrism.controlFirstBuild { FlexibleLegendViewRows.bend(short: bendShort) }   // ★ X1 VERIFY
         }
         .frame(width: 236)
         .padding(DS.Space.ml)

@@ -161,12 +161,18 @@ public enum FlexibleLatticePreview {
     /// not drawn with.
     /// `loop`: the MAIN page's squish loop, run by the renderer (FlexibleSquishLoop); nil on
     /// the Settings page, whose own ticker moves the one flexScale.
+    /// ★ ROUND 7, X1: `printed` — the main page's PRINTED VIEW (X-ray off, a finish that leaves the lattice open): the walls
+    /// are drawn out of X-ray too, with the printed solid (hidden = building || !latticeShows || (!xray && !printed)).
     public static func inputs(xray: Bool, lattice: FlexibleGeneratedLattice?, building: Bool,
-                              latticeShows: Bool = true, loop: FlexibleSquishLoop? = nil) -> FlexibleLatticeLayerInputs? {
+                              latticeShows: Bool = true, loop: FlexibleSquishLoop? = nil,
+                              printed: Bool = false) -> FlexibleLatticeLayerInputs? {
         guard let g = lattice else { return nil }
-        return FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.squishFaces, token: g.generation,
-                                          hidden: building || !xray || !latticeShows, loop: loop,
-                                          facesToken: g.facesToken)
+        let shown = printed && !xray
+        var l = FlexibleLatticeLayerInputs(lattice: g.inputs, faces: g.squishFaces, token: g.generation,
+                                           hidden: building || !latticeShows || (!xray && !shown), loop: loop,
+                                           facesToken: g.facesToken)
+        l.printed = shown && !building && latticeShows
+        return l
     }
 
     /// The generated lattice owns the map, the dent and the walls whenever no check stamp is

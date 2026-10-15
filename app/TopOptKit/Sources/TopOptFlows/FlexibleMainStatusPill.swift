@@ -172,24 +172,25 @@ public struct FlexibleMainViewToggles: View {
             .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY
             .accessibilityIdentifier("flexible-main-view-stress")
     }
-    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ R7-V: lit while its walls are seen
-    // (in X-ray); turning it on turns X-ray on (a view that needs another turns it on itself)
+    // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ ROUND 7, X1: a plain show / hide, lit by
+    // his view; it never turns X-ray on (R7-V's "lit while its walls are seen … turns X-ray on", reversed by his Q9 answer)
     private var latticeButton: some View {
-        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.wallsShown) {
+        FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeIconLit) {
             main.latticeButtonTapped(openSettings: openSettings)
         }
             .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — no lattice can come (the Squish page cannot make one)
             .accessibilityIdentifier("flexible-main-view-lattice")
     }
     // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
-    // faint, with its mm; ★ R7-V: it turns X-ray on itself
+    // faint, with its mm; ★ ROUND 7, X1: it no longer turns X-ray on (R7-V's rule, reversed)
     private var prismsButton: some View {
         FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn && main.viewsAvailable,
                            action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn && main.viewsAvailable))
             .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism to draw
             .accessibilityIdentifier("flexible-main-view-prisms")
     }
-    // ★ R7-V: X-ray — the ghost and the walls inside it; off, the opaque model
+    // ★ R7-V: X-ray — the ghost and the walls inside it. ★ X1: off (the default), the solid part with the lattice where the
+    // finish leaves it open (the printed view); Covered, the plain model
     private var xrayButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: main.xrayOn) { main.toggleXray() }
             .accessibilityIdentifier("flexible-main-view-xray")

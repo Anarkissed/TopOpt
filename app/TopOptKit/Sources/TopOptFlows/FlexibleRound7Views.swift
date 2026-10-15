@@ -36,6 +36,10 @@ extension FlexibleStageViews {
     public static let heatAll = FlexibleStageViews(rawValue: 1 << 4)
     /// ★ R7-V: Bend — the current group bent at full depth, every face of it at once, frozen (Settings).
     public static let bend = FlexibleStageViews(rawValue: 1 << 5)
+    /// ★ ROUND 7, X1 (his answer 12, 2026-10-14: "Turning x-ray on shows a prism view of the actual bend INTO the model"): the
+    /// SQUISH page's X-ray — OFF on open (the part opaque); on: the ghost, and the current group's bend as a prism into the
+    /// model (FlexibleBendPrism). The main page keeps its own X-ray (FlexibleMainStage.xrayOn).
+    public static let xray = FlexibleStageViews(rawValue: 1 << 6)
 
     /// The Heat view's scope.
     public var heatScope: FlexibleHeatScope {

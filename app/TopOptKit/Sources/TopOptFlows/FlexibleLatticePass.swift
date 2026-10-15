@@ -219,6 +219,60 @@ final class FlexibleLatticePass {
     }()
     var mapDepthPipelineDidBuild: Bool { mapDepthPipeline != nil }
 
+    // ── ★ ROUND 7, X1: THE PRINTED VIEW ──
+    /// X-ray off, the lattice shown, a finish that leaves it open (FlexibleLatticeLayerInputs.printed): the field is
+    /// marched with the printed solid (`shape2.w`), and the CLOSED body (its tints' solid flag) goes into the G-buffer
+    /// (`encodeBody`), so #354's shade writes its depth and the see-through body drawn after it keeps only its nearest
+    /// closed fragment — the solid part, with the lattice where the finish leaves it open.
+    var printed = false
+    /// How far (mm) the closed body's G-buffer depth is pushed back along its rays, so the see-through body's own front
+    /// face (drawn after, depth-tested, no depth write) is always nearer than it, and a back face never is.
+    static let bodyDepthBiasMM: Float = 0.5
+    /// Test control only: the plan's solid-flag route alone — no closed body in the G-buffer (the spike's NO-GO: the
+    /// translucent route writes no depth, so a far face drawn later painted over a near one).
+    var controlNoBodyInGBuffer = false
+    /// The renderer's buffers for THIS frame's body (handed to `encodeMapDepth` just before `encodeGBuffer`, in the same
+    /// prepass encoder), drawn by `encodeGBuffer` with the frame's matrices.
+    private var pendingBody: (vertices: MTLBuffer, flex: MTLBuffer, tints: MTLBuffer, count: Int, squish: Float)?
+    /// How many closed-body G-buffer draws were encoded (tests).
+    private(set) var bodyEncodes = 0
+    private lazy var bodyPipeline: MTLRenderPipelineState? = {
+        guard let vf = library.makeFunction(name: "flx_body_vertex"), let ff = library.makeFunction(name: "flx_body_gbuffer") else { return nil }
+        let pd = MTLRenderPipelineDescriptor()
+        pd.label = "flx_body_gbuffer"
+        pd.vertexFunction = vf
+        pd.fragmentFunction = ff
+        pd.colorAttachments[0].pixelFormat = MeshRenderer.sceneDepthFormat
+        pd.colorAttachments[1].pixelFormat = MeshRenderer.gbufferNormalFormat
+        pd.colorAttachments[2].pixelFormat = MeshRenderer.gbufferAlbedoFormat
+        pd.depthAttachmentPixelFormat = MeshRenderer.depthFormat
+        pd.rasterSampleCount = 1
+        return try? device.makeRenderPipelineState(descriptor: pd)
+    }()
+    var bodyPipelineDidBuild: Bool { bodyPipeline != nil }
+
+    /// ★ X1: the printed view's closed body into the G-buffer (eye-Z pushed back `bodyDepthBiasMM`, the eye normal, the
+    /// albedo, the mask) — only the fragments its tints flag solid. Returns false (nothing drawn) otherwise.
+    @discardableResult
+    private func encodeBody(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, eyeModel: SIMD3<Float>,
+                            clipFromModel: simd_float4x4, eyeFromModel: simd_float4x4, eyeNormalBasis: simd_float4x4) -> Bool {
+        defer { pendingBody = nil }
+        guard printed, !controlNoBodyInGBuffer, let b = pendingBody, b.count > 0, let pipe = bodyPipeline else { return false }
+        struct BodyU { var clip: simd_float4x4; var eye: simd_float4x4; var normal: simd_float4x4; var flex: SIMD4<Float>; var eyeModel: SIMD4<Float> }
+        var u = BodyU(clip: clipFromModel, eye: eyeFromModel, normal: eyeNormalBasis, flex: SIMD4(b.squish, 0, 0, 0),
+                      eyeModel: SIMD4(eyeModel, Self.bodyDepthBiasMM))
+        enc.setRenderPipelineState(pipe)
+        enc.setDepthStencilState(depthState)
+        enc.setCullMode(.none)
+        enc.setVertexBuffer(b.vertices, offset: 0, index: 0)
+        enc.setVertexBytes(&u, length: MemoryLayout<BodyU>.stride, index: 1)
+        enc.setVertexBuffer(b.tints, offset: 0, index: 2)
+        enc.setVertexBuffer(b.flex, offset: 0, index: 3)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: b.count)
+        bodyEncodes += 1
+        return true
+    }
+
     /// ★ BATCH M VERIFICATION: the SOLID dent planes' depth into the G-buffer, before the march (the hook
     /// in MeshRenderer's prepass — MeshRenderer+FlexibleLattice.encodeFlexibleMapDepth): the renderer's own
     /// vertex, displacement and tint buffers at this frame's scale, so the depth is the plane the body
@@ -227,6 +281,14 @@ final class FlexibleLatticePass {
     func encodeMapDepth(_ enc: MTLRenderCommandEncoder, depthState: MTLDepthStencilState, vertices: MTLBuffer, flex: MTLBuffer,
                         tints: MTLBuffer, count: Int, clipFromModel: simd_float4x4, squish: Float) -> Bool {
         mapDepthThisFrame = false
+        pendingBody = nil
+        // ★ X1: the printed view draws the closed body into the G-buffer itself (`encodeBody`, from `encodeGBuffer`, which
+        // has the frame's eye matrices) — its buffers are noted here
+        if printed, isDrawable, count > 0, enc.device === device,
+           vertices.length >= count * 24, flex.length >= count * 12, tints.length >= count * 32 {
+            pendingBody = (vertices, flex, tints, count, squish)
+            return false
+        }
         guard !controlNoMapDepth, isDrawable, count > 0, enc.device === device, let pipe = mapDepthPipeline,
               vertices.length >= count * 24, flex.length >= count * 12, tints.length >= count * 32 else { return false }
         struct MapU { var clip: simd_float4x4; var flex: SIMD4<Float> }
@@ -317,6 +379,93 @@ final class FlexibleLatticePass {
 
     /// The frame uniform the last `encodeGBuffer` bound (tests read it back).
     private(set) var lastFrame: Frame?
+
+    // ── ★ ROUND 7, X1 VERIFY: THE HEAT ON THE WALLS ──
+    /// Heat on and the walls drawn (the page's FlexibleLatticeLayerInputs.heatWalls): each wall takes the squish of the
+    /// pressed face's column it stands in — FlexibleWallHeat, one r32Float table per face slot (its own nu × nv) at textures
+    /// 7…10, the frame's rhoSpan z = 2, w = 1 / the legend's top. nil: the density ramp (or Stress's rainbow).
+    private(set) var heat: FlexibleWallHeat?
+    private var heatTex: [MTLTexture] = []
+    /// The faces token the tables were built for (a pick re-uploads the faces — the tables follow them).
+    private(set) var heatFacesToken = -1
+    private(set) var heatUploadCount = 0
+    /// A 1×1 zero table for the slots no face uses (bound on every draw; the shader never reads an empty slot).
+    private lazy var emptyHeat: MTLTexture? = {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: 1, height: 1, mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        var zero: Float = 0
+        t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 4)
+        return t
+    }()
+
+    /// The walls' heat tables for the faces uploaded now (nil, or no face: none). Once per (table, faces) —
+    /// MeshRenderer.applyFlexibleLattice.
+    func applyHeat(_ h: FlexibleWallHeat?) {
+        heatFacesToken = facesToken
+        guard let h, h.topMM > 0, !faces.isEmpty else { heat = nil; heatTex = []; return }
+        let tables = faces.enumerated().compactMap { i, f in makeHeatTable(f, i < h.cells.count ? h.cells[i] : []) }
+        guard tables.count == faces.count else { heat = nil; heatTex = []; return }
+        heat = h
+        heatTex = tables
+        heatUploadCount += 1
+    }
+
+    private func makeHeatTable(_ f: FlexibleSquishFace, _ cells: [Float]) -> MTLTexture? {
+        guard f.nu > 0, f.nv > 0 else { return emptyHeat }   // (an empty slot: never read)
+        let n = f.nu * f.nv
+        var v = (0..<n).map { k -> Float in k < cells.count && cells[k].isFinite ? Swift.max(0, cells[k]) : 0 }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: f.nu, height: f.nv, mipmapped: false)
+        d.usage = [.shaderRead]; d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        v.withUnsafeMutableBytes { raw in
+            tex.replace(region: MTLRegionMake2D(0, 0, f.nu, f.nv), mipmapLevel: 0, withBytes: raw.baseAddress!, bytesPerRow: f.nu * 4)
+        }
+        return tex
+    }
+
+    /// Every declared heat slot bound: the faces' tables, the 1×1 placeholder elsewhere.
+    private func boundHeat() -> [MTLTexture?] {
+        var t: [MTLTexture?] = heatTex
+        while t.count < FlexibleLatticeShader.maxFaces { t.append(emptyHeat) }
+        return t
+    }
+
+    /// The walls' colour for this frame, the frame's `rhoSpan`: x, y = the in-mask ρ span; z = 0 the density ramp, 1 Stress
+    /// (w = 1: the FE texture is the fraction), ★ X1 verify: 2 the heat of their column (w = 1 / the legend's top).
+    func wallColourMode() -> SIMD4<Float> {
+        if stressWalls && feActive { return SIMD4(rhoSpan.x, rhoSpan.y, 1, 1) }
+        if let h = heat, h.topMM > 0, !heatTex.isEmpty, heatTex.count == faces.count {
+            return SIMD4(rhoSpan.x, rhoSpan.y, 2, 1 / h.topMM)
+        }
+        return SIMD4(rhoSpan.x, rhoSpan.y, 0, 1)
+    }
+
+    /// `flx_wall_heat` at each REST point (the tables bound now) — compare with `FlexibleWallHeat.value` on `faces`.
+    func probeHeat(_ points: [SIMD3<Float>]) -> [Float]? {
+        guard let pipe = try? computePipeline("flx_heat_probe"), !points.isEmpty, var u = frameUniforms(squish: 0),
+              heat != nil, let queue else { return nil }
+        let pts = points.map { SIMD4<Float>($0, 0) }
+        var n = UInt32(points.count)
+        guard let inBuf = device.makeBuffer(bytes: pts, length: pts.count * 16, options: .storageModeShared),
+              let outBuf = device.makeBuffer(length: points.count * 4, options: .storageModeShared),
+              let cmd = queue.makeCommandBuffer(), let enc = cmd.makeComputeCommandEncoder() else { return nil }
+        enc.setComputePipelineState(pipe)
+        enc.setBuffer(inBuf, offset: 0, index: 0)
+        enc.setBuffer(outBuf, offset: 0, index: 1)
+        enc.setBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 2)
+        enc.setBytes(&n, length: 4, index: 3)
+        enc.setTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
+        enc.setTextures(boundHeat(), range: FlexibleLatticeShader.heatSlot..<(FlexibleLatticeShader.heatSlot + FlexibleLatticeShader.maxFaces))
+        let w = Swift.max(1, Swift.min(64, pipe.maxTotalThreadsPerThreadgroup))
+        enc.dispatchThreadgroups(MTLSize(width: (points.count + w - 1) / w, height: 1, depth: 1),
+                                 threadsPerThreadgroup: MTLSize(width: w, height: 1, depth: 1))
+        enc.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        guard cmd.status == .completed else { return nil }
+        let ptr = outBuf.contents().bindMemory(to: Float.self, capacity: points.count)
+        return Array(UnsafeBufferPointer(start: ptr, count: points.count))
+    }
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -683,6 +832,7 @@ final class FlexibleLatticePass {
         u.squish = SIMD4(sq, Float(faces.count), ignoresColumnWalls ? 1 : 0, 0)
         u.march = SIMD4(stepFactor, stepCapCells, minStepMM, earlyOut ? 1 : 0)
         u.shape2.z = stepBudget
+        u.shape2.w = printed ? 1 : 0   // ★ X1: the printed view's gate (flx_field: min(F, S))
         var dil = SIMD3<Float>(repeating: sq * maxDepthMM)
         if feActive {
             // ★ BATCH G: the FE field moves everything — no column faces; the box dilates by how
@@ -739,7 +889,10 @@ final class FlexibleLatticePass {
         let pale = LatticeStructureColour.pale, dense = FlexibleLatticePass.denseWall
         f.sparse = SIMD4(Float(pale.r), Float(pale.g), Float(pale.b), 1)
         f.dense = SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1)
-        f.rhoSpan = SIMD4(rhoSpan.x, rhoSpan.y, stressWalls && feActive ? 1 : 0, 1)   // ★ batch M (M3): w = 1, the texture is the fraction
+        f.rhoSpan = wallColourMode()   // ★ batch M (M3): z = 1 Stress (w = 1, the texture is the fraction)
+        // ★ X1: the printed view's closed body first (its depth then culls every wall behind it, as the dent planes' does)
+        if encodeBody(enc, depthState: depthState, eyeModel: b.eye, clipFromModel: clipFromModel, eyeFromModel: eyeFromModel,
+                      eyeNormalBasis: eyeNormalBasis) { mapDepthThisFrame = true }
         enc.setRenderPipelineState(gbufferPipeline)
         enc.setDepthStencilState(depthState)
         enc.setCullMode(.none)
@@ -753,6 +906,7 @@ final class FlexibleLatticePass {
         enc.setFragmentTexture(ds, index: 1)
         enc.setFragmentTextures(boundColumns(), range: FlexibleLatticeShader.columnSlot..<(FlexibleLatticeShader.columnSlot + FlexibleLatticeShader.maxFaces))
         enc.setFragmentTexture(boundFE, index: FlexibleLatticeShader.feSlot)
+        enc.setFragmentTextures(boundHeat(), range: FlexibleLatticeShader.heatSlot..<(FlexibleLatticeShader.heatSlot + FlexibleLatticeShader.maxFaces))   // ★ X1 verify
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         lastFrame = f
         return true

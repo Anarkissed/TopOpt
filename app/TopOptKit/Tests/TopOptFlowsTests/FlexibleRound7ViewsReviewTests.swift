@@ -3,6 +3,8 @@
 // inside. Part of FlexibleRound7ViewsTests (its fixtures: HIS pad, A1_0003 as he saved it — Finish None).
 //   RV1 (major) his None pad opened as an opaque block with NO lattice (X-ray off for every finish): X-ray's DEFAULT follows
 //       the finish — on for None / Rim / Skin, off for Covered — and his choice wins once made. RED `controlXrayOffOnOpen`.
+//       ★ RE-PINNED by round 7 batch X1 (his Q9 answer): X-ray off for every finish, the lattice seen out of X-ray (the
+//       printed view); RED `controlXrayByFinish`.
 //   RV3 (major) a pick of the Top drew "12.0 mm" — his img2: "this 12mm is completely worthless … please remove whatever it
 //       is", and his answer: "The squish number: only on the Squish page". RED `controlSquishTagsOnMain`.
 //   RV5 (minor) his paused pose still JUMPED after an edit (held 0.38 → 1.00 → 0.00): it looked like the sim restarting
@@ -20,48 +22,52 @@ import simd
 
 extension FlexibleRound7ViewsTests {
 
-    // MARK: - RV1: X-ray's default follows the finish; his choice wins
+    // MARK: - RV1 (★ RE-PINNED by X1): X-ray off by default whatever the finish; the lattice seen out of X-ray; his choice wins
 
-    func testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered() async throws {
+    /// ★ RE-PINNED, round 7 batch X1 — his answer on the R7-V handoff's Q9 (2026-10-14): "No. X-ray mode should show the inside
+    /// of the SOLID … The lattice should be visible without x-ray on as long as finish is set to something that isn't
+    /// 'covered'." R7-V's review made X-ray's DEFAULT follow the finish (on for None / Rim / Skin — the stopgap); X1 retires
+    /// it: off for every finish, and the walls are drawn out of X-ray (the printed view) unless the finish is Covered.
+    /// RED CONTROL `controlXrayByFinish` (the stopgap: X-ray on for his None pad).
+    /// ★ X1 VERIFY: renamed (was `testXrayOpensOnForAFinishThatShowsTheLatticeAndOffForCovered` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testXrayOpensOffWhateverTheFinish() async throws {
         let (r, s, m) = try await hisPad()
         let p = r.project
         XCTAssertEqual(m.settings.finishMode, .none, "premise: his pad is saved with Finish None (pure lattice)")
         s.didExitSettings()
         try await FlexibleHisProject.waitFor(240, "the lattice") { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
         s.refresh()
-        XCTAssertTrue(s.xrayOn, "★ Finish None: X-ray ON as the page opens — his lattice shows (until R7-X's printed view)")
-        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "★ the ghost")
-        XCTAssertEqual(s.layer(p, stage: .lattice, pageUp: false)?.hidden, false, "★ the walls are drawn")
-        XCTAssertTrue(s.wallsShown, "★ the Lattice icon is lit: the lattice is on and seen")
-        // ★ RED CONTROL: R7-V's first build — X-ray off for every finish: the opaque block, no wall, the Lattice icon unlit
-        s.controlXrayOffOnOpen = true
-        s.refresh()
-        let control = (xray: s.xrayOn, hidden: s.layer(p, stage: .lattice, pageUp: false)?.hidden, lit: s.wallsShown)
-        s.controlXrayOffOnOpen = false
-        s.refresh()
-        XCTAssertFalse(control.xray, "★ RED CONTROL: X-ray off on his None pad")
-        XCTAssertEqual(control.hidden, true, "★ RED CONTROL: …no wall drawn (the verify's opaque block)")
-        XCTAssertFalse(control.lit, "★ RED CONTROL: …and the Lattice icon unlit")
+        XCTAssertFalse(s.xrayOn, "★ X1: Finish None — X-ray OFF as the page opens")
+        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 0, "★ the printed view: only the closed surface of the body draws")
+        XCTAssertEqual(s.layer(p, stage: .lattice, pageUp: false)?.hidden, false, "★ the walls are drawn out of X-ray")
+        XCTAssertTrue(s.wallsShown, "★ …and seen")
+        XCTAssertTrue(s.latticeIconLit, "★ the Lattice icon is lit (his view)")
+        // ★ RED CONTROL: R7-V's stopgap — X-ray on for his None pad
+        s.controlXrayByFinish = true
+        let control = s.xrayOn
+        s.controlXrayByFinish = false
+        XCTAssertTrue(control, "★ RED CONTROL: R7-V's stopgap opened his None pad in X-ray")
         // his tap wins
         s.toggleXray()
-        XCTAssertFalse(s.xrayOn, "his X-ray tap: off")
-        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1, "the opaque model")
-        // Covered: the opaque model IS the print — X-ray off by default
+        XCTAssertTrue(s.xrayOn, "his X-ray tap: on")
+        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), FlexibleStagePage.xrayBodyAlpha, "the ghost")
+        s.toggleXray()
+        // Covered: the plain model — X-ray off, no wall drawn
         s.xrayChoice = [:]
         m.edit({ $0.finish = FlexibleFinish.covered.rawValue }, recompute: false)
-        XCTAssertFalse(s.xrayOn, "★ Finish Covered: X-ray OFF by default (the skin hides the lattice)")
-        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1, "★ …the opaque model")
-        // Rim and Skin show their lattice in the print: on
+        XCTAssertFalse(s.xrayOn, "★ Finish Covered: X-ray off")
+        XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1, "★ …the opaque model (the print)")
+        // Rim and Skin: X-ray off too (their lattice shows through the finish in the printed view)
         for f in [FlexibleFinish.rim, .skin] {
             m.edit({ $0.finish = f.rawValue }, recompute: false)
-            XCTAssertTrue(s.xrayOn, "★ Finish \(f.rawValue): X-ray on by default")
+            XCTAssertFalse(s.xrayOn, "★ Finish \(f.rawValue): X-ray off by default")
         }
         // his choice outlives a finish change
         s.toggleXray()
-        XCTAssertFalse(s.xrayOn)
+        XCTAssertTrue(s.xrayOn)
         m.edit({ $0.finish = FlexibleFinish.none.rawValue }, recompute: false)
-        XCTAssertFalse(s.xrayOn, "★ his X-ray choice, not the finish's default")
-        print("FLEX-R7V-RV1 xray on open: None \(true) walls drawn · control (first build) xray \(control.xray) hidden \(control.hidden ?? false) lit \(control.lit) · Covered off · Rim/Skin on · his choice kept")
+        XCTAssertTrue(s.xrayOn, "★ his X-ray choice, kept for the session")
+        print("FLEX-R7V-RV1 (re-pinned by X1) X-ray on open: false for every finish · None: walls drawn out of X-ray · control (stopgap) \(control) · his choice kept")
     }
 
     // MARK: - RV3: no squish number on the main page

@@ -387,6 +387,11 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         }
         XCTAssertNotNil(stage.overlay?.subdivision, "the main page draws the overlay subdivided for colour")
         stage.xrayOn = true   // ★ RE-PINNED (R7-V): batch C's default view was the X-ray — now his X-ray icon (off by default)
+        // ★ RE-PINNED (round 7, X1 verify — his 2026-10-14 Q9 answer, "If the user adds x-ray, we see through the solid"): with a
+        // lattice drawn, X-ray's heat is on the WALLS and the map a faint skin; this test is about the MAP's colouring (Heat or
+        // Stress) and renders no walls, so it runs with the Lattice view off — where the map carries the heat, as batch C drew it
+        stage.latticeOn = false
+        XCTAssertFalse(stage.heatOnWalls, "premise: no walls drawn — the map carries the heat")
         XCTAssertTrue(stage.xray && stage.heat && !stage.stress, "premise: the default view (his X-ray on)")
         let base = try render("v1_default_xray_heat.png")
         // ★ RED CONTROL: batch C's mix — Heat keeps the map, Stress the ghosted part

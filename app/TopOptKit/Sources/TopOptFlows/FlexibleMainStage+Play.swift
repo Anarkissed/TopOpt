@@ -36,17 +36,25 @@ extension FlexibleMainStage {
     /// His X-ray icon (on ⇄ off).
     public func toggleXray() { xrayOn.toggle() }
 
-    /// The lattice SHOWN: the Lattice view on, in X-ray (step 1 — out of X-ray an opaque body hides the walls). A view
-    /// that needs another turns it on itself (his rule): the Lattice icon turning on, the note's [Show], Settings' Exit
-    /// after the Lattice icon opened it, the bottom pill's "View off · tap to build".
+    /// The lattice SHOWN: the Lattice view on — the Lattice icon turning on, the note's [Show], Settings' Exit after the
+    /// Lattice icon opened it, the bottom pill's "View off · tap to build". ★ ROUND 7, X1 (his Q9 answer, 2026-10-14: "The
+    /// lattice should be visible without x-ray on as long as finish is set to something that isn't 'covered'"): never X-ray
+    /// as well — the printed view shows the walls out of X-ray (R7-V turned X-ray on here; reversed). RED CONTROL
+    /// `controlViewsForceXray`.
     public func showLatticeView() {
         latticeOn = true
-        if !xrayOn { xrayOn = true }
+        if controlViewsForceXray, !xrayOn { xrayOn = true }
     }
 
-    /// His Lattice icon (lit while the walls are seen — `wallsShown`): seen → hidden; else shown (with X-ray).
+    /// His Lattice icon — ★ X1: a plain show / hide (lit = `latticeIconLit`, his view). RED CONTROL: R7-V's (lit while the
+    /// walls are seen; turning on turned X-ray on).
     public func toggleLatticeView() {
-        if wallsShown { latticeOn = false } else { showLatticeView() }
+        if controlViewsForceXray { if wallsShown { latticeOn = false } else { showLatticeView() }; return }
+        latticeOn = !latticeShown
+        // ★ X1 VERIFY (the verify: under Covered — every new project's finish — the icon lit and unlit with no visible change):
+        // Covered hides the lattice out of X-ray (the print) — say so at once, with the one-tap fix (X-ray). Never X-ray by
+        // itself. RED CONTROL `controlNoCoveredNote`.
+        if latticeShown, !xrayOn, !finishLeavesLatticeOpen, !controlNoCoveredNote { note.post(.coveredHidesLattice) }
     }
 
     /// The sims are running or refining — the Play icon carries a small ring, so the status the hidden bar's note gave is

@@ -37,6 +37,11 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; M6 and C2 reversed): X-ray is
         // his own icon again, off by default — these renders are of HIS X-ray (the ghost body, the solid planes over the walls)
         stage.xrayOn = true
+        // ★ RE-PINNED (round 7, X1 verify — his 2026-10-14 Q9 answer, "If the user adds x-ray, we see through the solid"): in X-ray
+        // with Heat on the walls now carry the heat and the lid is a faint skin (heatOnWalls), which REVERSES M6's ghost walls
+        // under the solid dent planes; batch M's machinery (the ghost composite, the planes' depth, the card with both rows) is
+        // kept under the red control `controlHeatOnLid` and pinned here through it
+        stage.controlHeatOnLid = true
         try await FlexibleHisProject.waitFor(300, "his round 5: the sims") {
             stage.refresh()
             return m.lattice != nil && !m.squish.isEmpty && !m.squish.values.contains(.pending)
@@ -54,6 +59,13 @@ final class FlexibleBatchMXrayTests: XCTestCase {
         XCTAssertTrue(stage.heat && stage.latticeShown)
         XCTAssertTrue(stage.xray && stage.ghostWalls)
         XCTAssertEqual(layer()?.ghostWalls, true)
+        // ★ X1 VERIFY: the rule now (the control off) — the walls solid and wearing the heat, the lid a faint skin, one Squish row
+        stage.controlHeatOnLid = false; stage.refresh()
+        XCTAssertTrue(stage.heatOnWalls, "★ X1 verify: Heat in X-ray is on the walls")
+        XCTAssertFalse(stage.ghostWalls, "★ X1 verify: no ghost walls under an opaque lid (M6 reversed by his Q9 answer)")
+        XCTAssertNotNil(layer()?.heatWalls)
+        XCTAssertEqual(stage.legendKinds, [.dent], "★ X1 verify: the walls wear the squish — no density row")
+        stage.controlHeatOnLid = true; stage.refresh()
         XCTAssertEqual(stage.bodyAlpha(pm, on: .lattice), FlexibleStagePage.xrayBodyAlpha)
         // the lattice hidden: X-ray stays — ★ R7-V: because it is HIS icon (the dent view no longer turns it on: M6 reversed)
         stage.toggleLattice(); stage.refresh()

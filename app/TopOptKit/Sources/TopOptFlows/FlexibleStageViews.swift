@@ -34,6 +34,8 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
         (.groups, "circle.grid.2x2", "Groups", "flexible-settings-view-groups"),
         (.heatOff, "thermometer.medium", "Heat", "flexible-settings-view-heat"),
         (.bend, "rectangle.compress.vertical", "Bend", "flexible-settings-view-bend"),
+        // ★ ROUND 7, X1: [X-ray] (the main page's glyph) — the ghost and the bend's prism into the model
+        (.xray, FlexibleMainViewToggles.xrayIcon, "X-ray", "flexible-settings-view-xray"),
         (.play, "play.fill", "Play", "flexible-settings-view-play"),
     ]
     static let buttonSize: CGFloat = 40
@@ -74,7 +76,7 @@ extension FlexibleStageModel {
     }
 }
 
-/// [Prisms] [Groups] [Heat] [Bend] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
+/// [Prisms] [Groups] [Heat] [Bend] [X-ray] [Play], under the gizmo (FlexibleViewColumn mounts it). Icons only.
 struct FlexibleStageViewButtons: View {
     @ObservedObject var model: FlexibleStageModel
     /// Test control only (R7-V review): no "every group" mark on [Heat] (R7-V's first build — the glyph alone).
@@ -141,20 +143,27 @@ struct FlexibleStageViewButtons: View {
             var next = model.views
             next.heatTapped()
             model.views = next
-            if next.heatScope != .off { sayEdgesPending(FlexibleRowCopy.noHeatYet) }
+            if let line = Self.edgesPendingLine(v, views: next, model: model) { model.toast = line }
             return
         }
         model.toggleView(v)
-        if v == .bend, model.views.contains(.bend) { sayEdgesPending(FlexibleRowCopy.noBendYet) }
+        if let line = Self.edgesPendingLine(v, views: model.views, model: model) { model.toast = line }
+    }
+    /// The line a view's tap says on an edges/corners group (nothing to heat or bend until core builds press stacks — AP9),
+    /// or nil. `views`: the page's views after the tap.
+    static func edgesPendingLine(_ v: FlexibleStageViews, views: FlexibleStageViews, model: FlexibleStageModel) -> String? {
+        guard model.playingGroup?.kind == .edges else { return nil }
+        if v == .heatOff { return views.heatScope != .off ? FlexibleRowCopy.noHeatYet : nil }
+        if v == .bend { return views.contains(.bend) ? FlexibleRowCopy.noBendYet : nil }
+        // ★ X1 VERIFY: X-ray's prism is the bend — none yet on an edges group, said as Bend says it
+        if v == .xray { return views.contains(.xray) ? FlexibleRowCopy.noBendYet : nil }
+        return nil
     }
     /// His 3 s hold on [Heat]: every group's heat.
     private func held() {
         var next = model.views
         next.heatHeld()
         model.views = next
-    }
-    private func sayEdgesPending(_ line: String) {
-        if model.playingGroup?.kind == .edges { model.toast = line }
     }
 
     /// ★ R6 REVIEW: what each button shows — the prisms' purple arrow down to a line; his groups' three colours.
@@ -207,6 +216,23 @@ enum FlexibleLegendViewRows {
         }.allowsHitTesting(false))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("flexible-legend-sections-row")
+    }
+
+    /// ★ X1 VERIFY: X-ray's bend prism — "▮ Prism = bend at full load" (the swatch is the prism's own glass), "…, less than
+    /// drawn" when the sim's bend is well short of his curve.
+    @MainActor
+    static func bend(short: Bool) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(Color(red: Double(FlexibleBendPrism.tint.x), green: Double(FlexibleBendPrism.tint.y),
+                                                         blue: Double(FlexibleBendPrism.tint.z)).opacity(0.85))
+                .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(DS.Color.textPrimary.color, lineWidth: 1))
+                .frame(width: 10, height: 12)
+            Text(FlexibleRowCopy.legendBendRow(short: short))
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flexible-legend-bend-row")
     }
 
     @MainActor

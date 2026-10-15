@@ -246,6 +246,27 @@ public enum FlexibleLatticeField {
     public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         Swift.max(Swift.max(wall(p, f), dRegion(p, f)), Swift.max(dPart(p, f), dSkin(p, f)))
     }
+
+    /// ★ ROUND 7, X1 — THE PRINTED SOLID (the MSL's `flx_printed_solid`, the twin): what the print keeps solid around the
+    /// walls — inside the part AND (inside the region within the finish's skin, OR outside the region: the pocket's own
+    /// wall and floor). His words (2026-10-14): "If lattice is on without x-ray view, we see the lattice plus the solid."
+    public static func printedSolid(dRegion: Float, dPart: Float, dSkin: Float) -> Float {
+        Swift.max(dPart, Swift.min(Swift.max(dRegion, -dSkin), -dRegion))
+    }
+
+    /// The walls and the printed solid at `p` (the MSL's `flx_terms`).
+    public static func terms(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (walls: Float, printed: Float) {
+        let r = dRegion(p, f), pa = dPart(p, f), sk = dSkin(p, f)
+        return (Swift.max(Swift.max(wall(p, f), r), Swift.max(pa, sk)), printedSolid(dRegion: r, dPart: pa, dSkin: sk))
+    }
+
+    /// ★ X1: the field with the PRINTED view's gate (the MSL's `flx_field` under `shape2.w`) — min(F, S) with X-ray off and
+    /// a finish that leaves the lattice open; exactly `lattice(at:)` otherwise.
+    public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs, printed: Bool) -> Float {
+        guard printed else { return lattice(at: p, f) }
+        let t = terms(at: p, f)
+        return Swift.min(t.walls, t.printed)
+    }
     /// The part's distance: the SDF — and beyond its grid's box never less than the distance
     /// to that box. Inside the box the SDF stands as it is (a max with 0 would erase every wall).
     public static func dPart(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {

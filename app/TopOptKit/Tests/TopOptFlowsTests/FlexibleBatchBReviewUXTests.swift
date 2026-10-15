@@ -237,25 +237,43 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
     }
 
     /// ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2, his round-4 img 5, reversed):
-    /// X-ray is its own icon again, OFF by default (the opaque model). The Lattice icon still shows what is SEEN — lit while
-    /// its walls are drawn (in X-ray) — and turning it on turns X-ray on (a view that needs another turns it on itself);
-    /// turning it off leaves his X-ray alone.
+    /// X-ray is its own icon again, OFF by default (the opaque model).
+    /// ★ RE-PINNED AGAIN (round 7, X1 — his Q9 answer, 2026-10-14: "The lattice should be visible without x-ray on as long as
+    /// finish is set to something that isn't 'covered' … These two things are not mutually exclusive"): the Lattice icon is a
+    /// PLAIN show / hide — lit by his view (and a lattice to show), and it NEVER turns X-ray on (R7-V's "lit while its walls
+    /// are seen … turning it on turns X-ray on", reversed). RED CONTROL `controlViewsForceXray` (R7-V's rule).
     @MainActor
-    func testTheLatticeViewTurnsXRayOn() {
+    /// ★ X1 VERIFY: renamed (was `testTheLatticeViewTurnsXRayOn` — the name stated the rule his 2026-10-14 Q9 answer reversed).
+    func testTheLatticeViewNeverTurnsXRayOn() {
         let stage = FlexibleMainStage()
-        XCTAssertTrue(stage.latticeShown && !stage.xray, "the default: the lattice view on, X-ray off (the opaque model)")
-        XCTAssertFalse(stage.wallsShown, "…its walls not seen: the Lattice icon not lit")
+        XCTAssertTrue(stage.latticeShown && !stage.xray, "the default: the lattice view on, X-ray off")
+        XCTAssertTrue(stage.latticeIconLit, "★ X1: the Lattice icon is lit by his view")
         stage.toggleLatticeView()
-        XCTAssertTrue(stage.xray && stage.wallsShown, "turning the lattice on turns X-ray on")
+        XCTAssertFalse(stage.latticeShown)
+        XCTAssertFalse(stage.latticeIconLit)
+        XCTAssertFalse(stage.xray, "hiding the lattice: X-ray stays off")
+        stage.toggleLatticeView()
+        XCTAssertTrue(stage.latticeShown)
+        XCTAssertFalse(stage.xray, "★ X1: showing the lattice never turns X-ray on")
+        stage.toggleXray()
         stage.toggleLatticeView()
         XCTAssertFalse(stage.latticeShown)
         XCTAssertTrue(stage.xray, "the lattice hidden: his X-ray stays")
         stage.toggleLatticeView()
-        XCTAssertTrue(stage.xray && stage.latticeShown)
+        stage.toggleXray()
+        // ★ RED CONTROL: R7-V's rule — the Lattice icon turned X-ray on to show its walls
+        stage.latticeOn = false
+        stage.controlViewsForceXray = true
+        stage.toggleLatticeView()
+        let r7v = stage.xray
+        stage.controlViewsForceXray = false
+        XCTAssertTrue(r7v, "★ RED CONTROL: R7-V's Lattice icon turned X-ray on")
+        stage.toggleXray()
         // ★ CONTROL: the button shows what is drawn — with nothing to show it is not lit, even on
         stage.latticeAvailable = false
         XCTAssertTrue(stage.latticeOn)
         XCTAssertNotEqual(stage.latticeOn, stage.latticeShown)
+        XCTAssertFalse(stage.latticeIconLit, "nothing to show: not lit")
         XCTAssertEqual(FlexibleMainViewToggles.heatIcon, "thermometer.medium")
     }
 
@@ -275,7 +293,8 @@ final class FlexibleBatchBReviewUXTests: XCTestCase {
         XCTAssertTrue(page.contains("loop.exaggeration = c.exaggeration"), "the renderer's scale is k × amount")
         // ★ CONTROL: the main page does the same (the mechanism FlexibleSquishPlayerTests measures)
         let main = try FlexibleSource.code("FlexibleMainStage.swift")
-        XCTAssertTrue(main.contains("loop: fresh && !pageUp ? loop : nil)"))
+        // (★ RE-PINNED, round 7 X1: the printed view's argument follows on the next line — his Q9 answer)
+        XCTAssertTrue(main.contains("loop: fresh && !pageUp ? loop : nil,"))
     }
 
     func testTheMainPlayerClearsTheChipColumn() throws {

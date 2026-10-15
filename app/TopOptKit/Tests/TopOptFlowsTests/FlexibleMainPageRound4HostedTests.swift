@@ -102,12 +102,18 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
         pump(0.3)
         let row = FlexibleMainViewToggles.rowFrame(viewport: size)
         let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)   // the third button (★ S1b re-pin: [Prisms] trails it now)
-        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2 reversed): the Lattice
-        // icon is lit while its walls are SEEN (in X-ray, off by default) — the first click shows them (X-ray on with them, a
-        // view that needs another turns it on itself), the next hides them, the next shows them again
-        XCTAssertTrue(stage.latticeShown && !stage.wallsShown, "premise: the view on, its walls not seen (X-ray off)")
+        // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2 reversed).
+        // ★ RE-PINNED AGAIN (round 7, X1 — his Q9 answer, 2026-10-14: "The lattice should be visible without x-ray on … These
+        // two things are not mutually exclusive"): the Lattice icon is a PLAIN show / hide, lit by his view — the first click
+        // hides the lattice, the next shows it, and X-ray is never turned on (R7-V's "the first click shows them in X-ray",
+        // reversed)
+        XCTAssertTrue(stage.latticeShown && stage.latticeIconLit && !stage.xrayOn, "premise: the view on and lit, X-ray off")
         click(h, lattice)
-        XCTAssertTrue(stage.wallsShown && stage.xrayOn, "clicked: shown, in X-ray")
+        XCTAssertFalse(stage.latticeShown, "clicked: hidden")
+        XCTAssertFalse(stage.xrayOn, "★ X-ray untouched")
+        click(h, lattice)
+        XCTAssertTrue(stage.latticeShown && stage.latticeIconLit, "clicked again: shown, lit")
+        XCTAssertFalse(stage.xrayOn, "★ …and never X-ray")
         click(h, lattice)
         XCTAssertFalse(stage.latticeShown, "clicked: hidden")
         click(h, lattice)

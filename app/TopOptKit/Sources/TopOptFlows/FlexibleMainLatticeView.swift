@@ -61,7 +61,8 @@ public enum FlexibleLatticeView {
 /// The one-line note under the view row (his "notification … when it is ready").
 @MainActor
 public final class FlexibleMainNote: ObservableObject {
-    public enum Kind: Equatable, Sendable { case ready, building }
+    /// ★ X1 VERIFY: `coveredHidesLattice` — the Lattice icon turned on under Covered with X-ray off (FlexibleRowCopy).
+    public enum Kind: Equatable, Sendable { case ready, building, coveredHidesLattice }
     @Published public private(set) var kind: Kind?
     /// How many notes were posted (tests).
     var posts = 0
@@ -91,6 +92,7 @@ public final class FlexibleMainNote: ObservableObject {
         switch k {
         case .ready: return "Lattice ready"
         case .building: return "Still building \u{2014} it shows here when ready"
+        case .coveredHidesLattice: return FlexibleRowCopy.coveredHidesLattice
         }
     }
     /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is
@@ -109,16 +111,22 @@ extension FlexibleMainStage {
         if let m = model { latticeAvailable = FlexibleLatticeView.available(model: m) }
         switch FlexibleLatticeView.tap(available: latticeAvailable) {
         case .toggle:
-            toggleLatticeView()   // ★ R7-V: shown = in X-ray (step 1); FlexibleMainStage+Play
+            toggleLatticeView()   // ★ X1: a plain show / hide (FlexibleMainStage+Play)
         case .openSettings:
             showLatticeOnExit = true
             openSettings()
         }
     }
 
+    /// ★ X1 VERIFY: the Covered note's one tap — X-ray on (the lattice inside the skin), the note gone.
+    public func coveredNoteTapped() {
+        note.clear()
+        if !xrayOn { xrayOn = true }
+    }
+
     /// The note's [Show]: the view on, the note gone.
     public func showFromNote() {
-        showLatticeView()   // ★ R7-V: in X-ray, where its walls are seen
+        showLatticeView()   // ★ X1: the view on (X-ray stays as he set it)
         note.clear()
     }
 
@@ -182,9 +190,14 @@ struct FlexibleMainNoteView: View {
 
     var body: some View {
         if let k = note.kind {
-            let showable = k == .ready && !main.wallsShown   // ★ R7-V: [Show] while its walls are not seen (X-ray off too)
+            let showable = k == .ready && !main.latticeIconLit   // ★ X1: [Show] while his Lattice view is off
             Group {
-                if showable {
+                if k == .coveredHidesLattice {
+                    // ★ X1 VERIFY: the whole note is the fix — X-ray
+                    Button { main.coveredNoteTapped() } label: { capsule(k, showable: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-main-note-xray")
+                } else if showable {
                     // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)
                     Button { main.showFromNote() } label: { capsule(k, showable: true) }
                         .buttonStyle(.plain)
@@ -201,7 +214,7 @@ struct FlexibleMainNoteView: View {
 
     private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
         HStack(spacing: DS.Space.s) {
-            Image(systemName: k == .ready ? "checkmark.circle.fill" : "hourglass")
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : (k == .coveredHidesLattice ? FlexibleMainViewToggles.xrayIcon : "hourglass"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
             Text(FlexibleMainNote.line(k))
@@ -210,7 +223,7 @@ struct FlexibleMainNoteView: View {
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityIdentifier("flexible-main-note")
             if showable {
-                Text("Show")
+                Text(k == .coveredHidesLattice ? FlexibleRowCopy.coveredHidesLatticeAction : "Show")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DS.Color.accent.color)
             }

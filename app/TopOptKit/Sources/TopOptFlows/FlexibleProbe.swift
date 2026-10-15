@@ -404,11 +404,33 @@ public enum FlexibleProbe {
 /// opaque. (★ Batch C verification: the stage never asks for Heat AND Stress — they are the two
 /// colourings of the map, one at a time; `heat: true` with a stress field stays defined here.)
 public enum FlexibleMainTints {
+    /// ★ ROUND 7, X1: per flat vertex of `mesh`, its surface lies OVER the lattice region — the region's mask, sampled a
+    /// little to either side of the face (a face region begins ON the face, where a sampled mask reads ½), is ≥ ½. The
+    /// printed view leaves the body open there (the walls show), and closed everywhere else.
+    public static func overLattice(mesh: ViewerMesh, lattice f: FlexibleLatticeInputs) -> [Bool] {
+        let n = mesh.flat.vertexCount
+        let pos = mesh.flat.positions, nor = mesh.flat.normals
+        guard pos.count >= n * 3, nor.count >= n * 3 else { return [Bool](repeating: false, count: n) }
+        let d = nudgeVoxels * f.mask.spacing
+        return (0..<n).map { v in
+            let p = SIMD3<Float>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2])
+            let nn = SIMD3<Float>(nor[3 * v], nor[3 * v + 1], nor[3 * v + 2])
+            return Swift.max(f.mask.sample(p - nn * d), f.mask.sample(p + nn * d)) >= 0.5
+        }
+    }
+    /// How far (in mask voxels) `overLattice` samples to either side of the face.
+    static let nudgeVoxels: Float = 0.75
+
     /// `roles`: a role colour wherever Flexible leaves the part clay (★ R7-V: the main page hands none — its model wears no
     /// role colour; batch V review's `rolesOverMarks`, for its "Role colours" toggle unticked, went with the toggle).
+    /// ★ X1 VERIFY: `lidWithoutHeat` — the walls carry the heat (FlexibleMainStage.lidWithoutHeat): the map's closed part
+    /// plain in the printed view, the map unflagged (a faint ghost skin) in X-ray.
+    /// ★ ROUND 7, X1: `open` — the PRINTED VIEW (one flag per flat vertex, `overLattice`): the body's CLOSED surface flagged
+    /// solid (it draws opaque through the see-through body and goes into the G-buffer — FlexibleLatticePass.encodeBody), the
+    /// surface over the lattice region left open (the walls show), and no ghost anywhere.
     public static func compose(base: [Float]?, overlay: FlexibleOverlayMesh?, part: ViewerMesh?, heat: Bool,
                                roles: [FaceID: SIMD4<Float>], stress: (field: LatticeDemandField, peak: Double)?,
-                               ghost: SIMD4<Float>?) -> [Float]? {
+                               ghost: SIMD4<Float>?, open: [Bool]? = nil, lidWithoutHeat: Bool = false) -> [Float]? {
         guard let mesh = overlay?.mesh ?? part else { return nil }
         let n = mesh.flat.vertexCount
         guard n > 0 else { return nil }
@@ -441,7 +463,19 @@ public enum FlexibleMainTints {
                 out[v * 8 + 5] = 1
             }
         }
+        // ★ X1 VERIFY: the lid carries no heat — the printed view's solid part (its closed map) is the plain part; in X-ray
+        // the map is a faint skin in its heat colours (the walls wear the heat — FlexibleWallHeat), never an opaque lid
+        if lidWithoutHeat {
+            if let o = open, o.count == n {
+                for v in partVerts..<n where !o[v] { out[v * 8] = 0; out[v * 8 + 1] = 0; out[v * 8 + 2] = 0; out[v * 8 + 3] = 0 }
+            } else if ghost != nil {
+                for v in partVerts..<n { out[v * 8 + 5] = 0 }
+            }
+        }
         if let g = ghost { FlexibleOverlayMesh.markGhost(&out, colour: g) }
+        if let o = open, o.count == n {
+            for v in 0..<n { out[v * 8 + 5] = o[v] ? 0 : 1; out[v * 8 + 6] = 0 }
+        }
         return out
     }
 }
