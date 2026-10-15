@@ -228,7 +228,8 @@ public struct FlexibleStagePage: View {
                 // placed by FlexibleLegendPlacement.legend against the gizmo and the top line
                 // (batch B review: the placement the tests measure is the one the page calls)
                 // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
-                if FlexibleLegend.shows(hasDent: dentRows, views: model.views, bendPrism: bendTag != nil) {   // ★ R7 MERGE: heat drawn; ★ X1 VERIFY: the prism's row
+                if FlexibleLegend.shows(hasDent: dentRows, views: model.views)   // ★ R7 MERGE: heat drawn
+                    || FlexibleLegend.shows(hasDent: false, views: [], bendPrism: bendTag != nil) {   // ★ X1 VERIFY: the prism's row
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -400,8 +401,8 @@ public struct FlexibleStagePage: View {
             // the player whole) — they kept out of the panel, the legend, the view buttons and the player's parts only
             if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
-                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), bendTag: bendTag, keepOut: clip ?? keepOut,
-                                      clip: clip)
+                FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
+                                      clip: clip, bendTag: bendTag)   // ★ X1 VERIFY: the bend prism's number
                 FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
         }
@@ -862,13 +863,13 @@ struct FlexibleStageOverlays: View {
     @ObservedObject var proj: FlexibleProjectionBox
     /// The page's exaggeration (the dent's and the prism's k).
     var exaggeration: Double = 1
-    /// ★ X1 VERIFY: X-ray's bend prism — its number, read-only, in a box at its floor.
-    var bendTag: FlexibleBendPrism.Tag? = nil
     /// Where a chip cannot be reached (the panel, the legend), in stage points.
     var keepOut: [CGRect] = []
     /// ★ BATCH V (m19): what the lines drawn on the part are cut out of — the whole chrome (`FlexibleStagePage.chromeClip`);
     /// nil: the curves and the stamp clip to `keepOut` and the dashed outlines to nothing (the red control).
     var clip: [CGRect]? = nil
+    /// ★ X1 VERIFY: X-ray's bend prism — its number, read-only, in a box at its floor.
+    var bendTag: FlexibleBendPrism.Tag? = nil
 
     var body: some View {
         ZStack {

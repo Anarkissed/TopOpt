@@ -186,8 +186,12 @@ final class FlexibleR7X1HostedTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(ins.share, 0.60, "★ \(cam.name) n \(n): inside the strips the lattice (the walls and the voids)")
             if cam.name == r7x1Img1.name {
                 // ★ RED CONTROL 2: the plan's solid-flag route alone (no closed body in the G-buffer — no depth to sort it),
-                // as the spike drew it: Heat ON (the Top's heat quads)
+                // as the spike drew it: Heat ON (the Top's heat quads). ★ RE-PINNED (round 7, X1 verify — his 2026-10-14 Q9 answer
+                // and his img3): the printed view's solid part no longer wears the heat (the walls do), so the far face painted
+                // over the Top would now be clay over clay; the mis-sort is shown on X1's heat lid (`controlHeatOnLid`), the
+                // condition the spike measured — the good frame and the control frame alike
                 s.heat = true
+                s.controlHeatOnLid = true
                 let printedHeat = try frame(s, p, cam: cam, n: n, device: device)
                 var flagOnly = s.layer(p, stage: .lattice, pageUp: false)
                 flagOnly?.printed = true
@@ -199,6 +203,7 @@ final class FlexibleR7X1HostedTests: XCTestCase {
                 mr.flexibleLattice?.controlNoBodyInGBuffer = true
                 let bg = DS.Color.background
                 let c2f = Frame(px: try XCTUnwrap(mr.renderOffscreen(size: n, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1))), n: n)
+                s.controlHeatOnLid = false
                 s.heat = false
                 let c2 = Self.differing(c2f, printedHeat, where: outside), c2g = Self.grossly(c2f, printedHeat, where: outside)
                 Self.dump(c2f, "XH1_control_solidflags_img1.png", mark: Self.grossMask(c2f, printedHeat, where: outside))
