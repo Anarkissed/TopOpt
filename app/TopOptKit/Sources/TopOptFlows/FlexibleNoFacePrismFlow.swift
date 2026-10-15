@@ -57,6 +57,8 @@ extension FlexibleStagePage {
     /// no lattice under it); with NO face-prism none: the line says what to do on the main page ("Set a face to Lattice in
     /// Selections first"), and the per-face [Lattice under it] stays on each face's card.
     @MainActor static func noticeFix(_ r: FlexibleReadiness, model m: FlexibleStageModel) -> FlexibleIssue? {
+        // ★ ROUND 7 (F, his answers: an empty setup is allowed after Reset all; the line suggests no face): no [Fix]
+        if FlexibleSettingsExit.emptyLeaves(r, empty: m.isEmptySetup) { return nil }
         if let b = r.blocking.first { return b }
         if !FlexibleStageModel.controlDesignsWithoutPrism, m.sceneState == .ready, !m.facePrismsSet { return nil }
         return r.advisory

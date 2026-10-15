@@ -30,7 +30,7 @@ extension FlexibleMainStage {
         // something to play now: a drawn lattice whose squish is not still being simulated (pending: held at rest, it
         // plays from rest when the sims land — the gate is open)
         if drawn != nil, !fe.pending { loop.playByHim() } else { loop.forgetHisPause() }
-        m.views.insert(.play)
+        m.views.toggle(.play)   // ★ ROUND 7 (F): Play on turns Bend off ("Bend view and Play cannot be viewed simultaneously")
     }
 
     /// His X-ray icon (on ⇄ off).

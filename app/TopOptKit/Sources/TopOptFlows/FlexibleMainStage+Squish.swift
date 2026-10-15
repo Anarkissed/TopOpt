@@ -162,7 +162,7 @@ extension FlexibleMainStage {
     }
 
     /// ★ BATCH N: the sim the loop names as playing (Play all's turn), else the pick.
-    private var playingSimID: String? { loop.playingSimID ?? shownSim }
+    private var playingSimID: String? { loop.playingSimID ?? selectedSim }   // ★ ROUND 7 (F)
 
     /// A field's mesh displacements on the current overlay (cached per overlay and field).
     func feMesh(for f: FlexibleFEField) -> [Float] {

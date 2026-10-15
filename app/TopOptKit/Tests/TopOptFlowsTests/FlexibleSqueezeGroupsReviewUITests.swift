@@ -151,7 +151,13 @@ final class FlexibleSqueezeGroupsReviewUITests: XCTestCase {
             XCTAssertEqual(FlexibleFaceList.sections(model: m).compactMap(\.group).count, 2, "control: D2's list had both headers")
             if local(host, "groupRow-1") == nil { oneHeader += 1 }
             click(host, CGPoint(x: x2.midX, y: x2.midY))
-            XCTAssertTrue(pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): a click on group 2's × removes it")
+            // ★ RE-PINNED (round 7 batch F, his answer: "Group trash should confirm deletion."): the trash asks in one line
+            // first — "Delete Group 2? [Delete] [Keep]" — and [Delete] deletes it
+            XCTAssertTrue(pumpUntil(5) { self.local(host, "groupDeleteConfirm") != nil }, "\(tag): the trash asks first")
+            XCTAssertEqual(m.squeezeGroups.count, 2, "\(tag): …deleting nothing yet")
+            let del = try XCTUnwrap(local(host, "groupDeleteConfirm"))
+            click(host, CGPoint(x: del.midX, y: del.midY))
+            XCTAssertTrue(pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): [Delete] removes group 2")
             XCTAssertEqual(m.groupForce(m.squeezeGroups[0]), 10...10)
             report.append(line)
             host.window.orderOut(nil); host.window.contentView = nil

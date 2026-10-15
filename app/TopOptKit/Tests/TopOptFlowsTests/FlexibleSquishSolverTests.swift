@@ -152,6 +152,9 @@ final class FlexibleSquishSolverTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "his split")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (round 7 batch F, his answer 13: "first group as default. Hold for 3 seconds to view all."): "Play all"
+        // is his 3 s hold now, no longer the main page's default — this file pins Play all, so the fixture picks it
+        stage.pick(FlexibleSim.allID)
         try await FlexibleHisProject.waitFor(300, "the sims") { stage.refresh(); return !m.squish.isEmpty && !m.squish.values.contains(.pending) }
         stage.refresh()
         return (r, stage, m)

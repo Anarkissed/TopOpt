@@ -189,10 +189,13 @@ enum FlexibleStageViewTags {
 
     /// The Groups view's discs on screen (none under a keep-out).
     @MainActor
-    static func discs(model m: FlexibleStageModel, projection: CameraProjection?, keepOut: [CGRect]) -> [PlacedDisc] {
+    static func discs(model m: FlexibleStageModel, projection: CameraProjection?, keepOut: [CGRect],
+                      pose: FlexibleBendPose? = nil) -> [PlacedDisc] {
         guard let proj = projection else { return [] }
         return FlexibleGroupWalls.discs(model: m, views: m.views, mesh: m.project.viewerMesh).compactMap { d in
-            guard let p = proj.project(d.anchor), FlexibleDepthChipLayout.visible(p, keepOut: keepOut, viewport: proj.viewportSize)
+            // ★ ROUND 7 (F): on the bent face while Bend shows
+            guard let p = proj.project(pose?.apply(d.anchor) ?? d.anchor),
+                  FlexibleDepthChipLayout.visible(p, keepOut: keepOut, viewport: proj.viewportSize)
             else { return nil }
             let away = proj.ray(throughViewPoint: p).map { simd_dot($0.dir, d.normal) > 0 } ?? false
             return PlacedDisc(disc: d, point: p, facesAway: away)
@@ -233,13 +236,13 @@ extension FlexibleStageViewTags {
     /// Every shown member that faces away from the camera, its outline loops projected (a loop with a point
     /// behind the camera is left out).
     @MainActor
-    static func hidden(model m: FlexibleStageModel, projection: CameraProjection?) -> [Hidden] {
+    static func hidden(model m: FlexibleStageModel, projection: CameraProjection?, pose: FlexibleBendPose? = nil) -> [Hidden] {
         guard let proj = projection else { return [] }
         return FlexibleGroupWalls.outlines(model: m, views: m.views, mesh: m.project.viewerMesh).compactMap { o in
-            guard let p = proj.project(o.point), let ray = proj.ray(throughViewPoint: p), simd_dot(ray.dir, o.normal) > awayDot
+            guard let p = proj.project(pose?.apply(o.point) ?? o.point), let ray = proj.ray(throughViewPoint: p), simd_dot(ray.dir, o.normal) > awayDot
             else { return nil }
             let paths = o.loops.compactMap { loop -> [CGPoint]? in
-                let ps = loop.compactMap { proj.project($0) }
+                let ps = loop.compactMap { proj.project(pose?.apply($0) ?? $0) }   // ★ ROUND 7 (F): the bent outline
                 return ps.count == loop.count && ps.count >= 3 ? ps : nil
             }
             return paths.isEmpty ? nil : Hidden(key: o.key, region: o.region, colour: o.colour, paths: paths)
@@ -255,13 +258,15 @@ struct FlexibleStageViewTagsLayer: View {
     let keepOut: [CGRect]
     /// ★ BATCH V (m19): what the dashed outlines are cut out of — the whole chrome; nil: nothing (the red control).
     var clip: [CGRect]? = nil
+    /// ★ ROUND 7 (F): the full-bend pose while Bend shows (the discs and outlines on the bent faces; the floor tags stay).
+    var pose: FlexibleBendPose? = nil
 
     static let discSize: CGFloat = 22
 
     var body: some View {
         let tags = FlexibleStageViewTags.tags(model: model, k: k, projection: projection, keepOut: keepOut)
-        let discs = FlexibleStageViewTags.discs(model: model, projection: projection, keepOut: keepOut)
-        let hidden = FlexibleStageViewTags.hidden(model: model, projection: projection)
+        let discs = FlexibleStageViewTags.discs(model: model, projection: projection, keepOut: keepOut, pose: pose)
+        let hidden = FlexibleStageViewTags.hidden(model: model, projection: projection, pose: pose)
         ZStack {
             // ★ R6 REVIEW: the shown members that face away, dashed in their colour (under the tags and discs)
             // ★ BATCH V (m19): cut out of the chrome — they ran across the Settings panel and through the legend

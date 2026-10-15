@@ -62,8 +62,10 @@ final class FlexibleMainPageHookTests: XCTestCase {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         // ★ RE-PINNED (round 5, S9): the button reads "Exit" until something changed, "Save & Exit" after,
         // "Fix 1 thing" only when changed AND blocked — FlexibleSettingsExit wraps the same readiness rule
-        XCTAssertTrue(page.contains("switch FlexibleSettingsExit.decide(model.readiness, modified: modified) {"), "Exit consults the readiness")
-        XCTAssertTrue(page.contains("Text(FlexibleSettingsExit.title(r, modified: modified))"), "Exit says \"Fix 1 thing\" while blocked")
+        // ★ RE-PINNED (round 7 batch F, his answer 3: "Allow an *empty* setup after reset all."): the same readiness rule, with
+        // whether the setup is empty (FlexibleSettingsExit.emptyLeaves)
+        XCTAssertTrue(page.contains("switch FlexibleSettingsExit.decide(model.readiness, modified: modified, empty: empty) {"), "Exit consults the readiness")
+        XCTAssertTrue(page.contains("Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))"), "Exit says \"Fix 1 thing\" while blocked")
         XCTAssertTrue(page.contains("let modified = FlexibleSettingsExit.modified(model.settings, since: opened)"), "…and whether anything changed")
         XCTAssertTrue(page.contains("settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),"),
                       "a new blocking issue opens the pop-up at once (settled: the scene open, nothing in flight)")

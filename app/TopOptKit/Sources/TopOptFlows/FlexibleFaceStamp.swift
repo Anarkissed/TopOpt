@@ -343,6 +343,8 @@ struct FlexibleFaceStampHandle: View {
     var k: Double = 1
     /// ★ BATCH V (m19): what the outline is cut out of — the whole chrome; nil: `keepOut`.
     var clip: [CGRect]? = nil
+    /// ★ ROUND 7 (F): the full-bend pose while Bend shows — the stamp and its handle sit on the bent face.
+    var pose: FlexibleBendPose? = nil
     /// The stamp's centre when the drag began (nil: not dragging).
     @State private var dragging: SIMD2<Double>?
 
@@ -375,7 +377,7 @@ struct FlexibleFaceStampHandle: View {
         return g.corner + st.xAxis * u + st.yAxis * v - st.load * 0.5
     }
     private func screen(_ w: SIMD3<Double>?) -> CGPoint? {
-        w.flatMap { projection?.project(SIMD3<Float>(Float($0.x), Float($0.y), Float($0.z))) }
+        w.flatMap { q in projection?.project(pose?.apply(SIMD3<Float>(q)) ?? SIMD3<Float>(q)) }
     }
 
     var body: some View {

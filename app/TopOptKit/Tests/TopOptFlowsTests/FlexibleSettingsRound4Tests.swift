@@ -210,7 +210,8 @@ final class FlexibleSettingsRound4Tests: XCTestCase {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         // ★ RE-PINNED (D1 verification): the handle also reads the page's k — it keeps clear of the depth chip
         // ★ RE-PINNED (round 6 batch V, m19): …and the page's chrome clip
-        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip)"))
+        // ★ RE-PINNED (round 7 batch F, his answer: "If bend is on, all views move to the furthest bend."): …and the bend's pose
+        XCTAssertTrue(page.contains("FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip, pose: pose)"))
     }
 
     /// The Stamp shape's job: flat curves + its one stamp, at the face's weight. Read back

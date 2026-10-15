@@ -542,7 +542,7 @@ final class FlexibleRound6Tests: XCTestCase {
             m.toggleView(.prisms)
             let on = m.views
             m.toggleView(.prisms)
-            XCTAssertEqual(on, [.prisms], "the toggle turns a view on and off")
+            XCTAssertEqual(on, FlexibleStageModel.openingViews.union(.prisms), "the toggle turns a view on and off")   // ★ F: beside the opening Heat-off bit
             return (m.settings == before, FlexibleSettingsExit.modified(m.settings, since: before),
                     m.settings.designInputs.hashValue == key, m.actionSerial == serial)
         }

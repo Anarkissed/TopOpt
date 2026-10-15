@@ -109,7 +109,7 @@ extension FlexibleRound7ViewsHostedTests {
         try await FlexibleSquishFixture.solve(m, first: FlexibleSim.groupID(g2.number), "his pad")
         let views: FlexibleStageViews = [.bend, .heatOff]
         m.views = views
-        XCTAssertTrue(FlexibleStagePage.overlaysHidden(views: views, edgePick: false), "premise: Bend alone")
+        XCTAssertTrue(FlexibleStagePage.bendAlone(views: views, edgePick: false), "premise: Bend alone")   // ★ F: the predicate's own name (overlaysHidden is R7-V's control now)
         let edge = try XCTUnwrap(FlexibleSettingsSquish.overlayEdge(model: m), "premise: Group 2's field is current")
         let overlay = try XCTUnwrap(FlexiblePageChannels.overlay(model: m, maxEdgeMM: edge))
         var cache: (key: String, dents: [Float])?
@@ -179,6 +179,7 @@ extension FlexibleRound7ViewsHostedTests {
         let (r, m) = try hisPad()
         m.rail = .group(m.squeezeGroups[0].id)
         m.select(1)
+        m.views = []   // ★ F: the page opens with the heat off (his answer 12) — his tap on [Heat] shows it
         let loop = FlexibleSquishLoop()
         let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.his13p.1)
         pump(2.5)

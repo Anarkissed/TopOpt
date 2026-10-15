@@ -95,6 +95,9 @@ public struct FlexibleStagePage: View {
     @State private var playingFE = false
     /// ★ R7-V: Bend with Play — the full-depth pose's faint ghost (FlexibleBendGhost).
     @State private var bendGhost: ClearanceRenderItem?
+    /// ★ ROUND 7 (F, his answer: "If bend is on, all views move to the furthest bend. Always."): the full-bend pose of what
+    /// is drawn on the part (FlexibleBendPose), while Bend shows.
+    @State private var bendPose: FlexibleBendPose?
     private var keepOut: [CGRect] { Self.stageKeepOut(frames) }
     /// ★ R7 MERGE: the dent's rows (the legend's scale, TAP TO READ, the reading) — a dent AND heat drawn on the part.
     private var dentRows: Bool { dents != nil && Self.heatDrawn(model: model, views: model.views) }
@@ -137,7 +140,13 @@ public struct FlexibleStagePage: View {
     /// ★ R7-V: Bend ALONE — no Heat, no Prisms or Groups, no Play — shows only the bent model: the layer drawn on the part
     /// (the curves, the depth chip, the stamp's handle, the tags) is left out. Bend with Heat or Prisms brings it back;
     /// pick mode keeps its overlay.
+    /// ★ ROUND 7 (F, his answer: "If bend is on, all views move to the furthest bend. Always."): REVERSED — nothing drawn on
+    /// the part hides under Bend; it is drawn at the full bend (FlexibleBendPose). R7-V's rule is the red control's.
     static func overlaysHidden(views: FlexibleStageViews, edgePick: Bool) -> Bool {
+        controlBendRestPose && bendAlone(views: views, edgePick: edgePick)
+    }
+    /// Bend ALONE — no Heat, no Prisms or Groups, no Play (the body is drawn opaque to read the bent part).
+    static func bendAlone(views: FlexibleStageViews, edgePick: Bool) -> Bool {
         views.contains(.bend) && views.heatScope == .off && !views.contains(.prisms) && !views.contains(.groups)
             && !views.contains(.play) && !edgePick
     }
@@ -148,7 +157,7 @@ public struct FlexibleStagePage: View {
     /// (what sits inside still shows through). Otherwise the page's X-ray ghost, the heat opaque on it.
     static func bodyAlpha(views: FlexibleStageViews, edgePick: Bool, hasDent: Bool) -> Float {
         guard !controlBendGhost, hasDent, views.contains(.bend), views.heatScope == .off else { return xrayBodyAlpha }
-        return overlaysHidden(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
+        return bendAlone(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
     }
     /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build).
     @MainActor static var controlBendGhost = false
@@ -357,6 +366,7 @@ public struct FlexibleStagePage: View {
                 // over the page's own heat
                 clearanceVolumes: FlexibleStageVolumes.items(model: model, k: FlexibleStageVolumes.prismK(dentExaggeration), part: project.viewerMesh,
                                                              heat: glassHeat, heated: FlexibleStageHeat.shown(model: model, views: model.views))
+                    .posed(by: bendPose)   // ★ ROUND 7 (F): with Bend on, the prisms' faces and the glass on the bent part (floors stay)
                     + (bendGhost.map { [$0] } ?? []),   // ★ R7-V: Bend with Play — the full-depth pose, faint
                 // ★ THE DENT READS THROUGH THE PART (maintainer, 2026-09-29): while a dent is
                 // shown the body drops to 30 % and the dented map stays at 100 %.
@@ -375,7 +385,7 @@ public struct FlexibleStagePage: View {
             if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
                 FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
-                                      clip: clip)
+                                      clip: clip, pose: bendPose)   // ★ ROUND 7 (F): at the full bend while Bend shows
                 FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
         }
@@ -480,6 +490,9 @@ public struct FlexibleStagePage: View {
         let ghost = model.views.contains(.bend) && model.views.contains(.play)
             ? FlexibleBendGhost.item(overlay: overlay, dents: c.dents, k: c.exaggeration) : nil
         if ghost != bendGhost { bendGhost = ghost }
+        // ★ ROUND 7 (F): Bend on — what is drawn on the part follows the full bend
+        let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration)
+        if pose?.key != bendPose?.key { bendPose = pose }
         // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
         let r = model.readiness
         if let i = prompt.next(r, actionSerial: model.actionSerial,
@@ -569,8 +582,10 @@ public struct FlexibleStagePage: View {
                     // ★ ROUND 5 (S9): "Exit" until something differs from how the page opened (a value —
                     // undoing back reads "Exit" again); "Save & Exit" after; "Fix 1 thing" while blocked
                     let modified = FlexibleSettingsExit.modified(model.settings, since: opened)
+                    // ★ ROUND 7 (F, his answer: "Allow an *empty* setup after reset all."): nothing set to squish leaves
+                    let empty = model.isEmptySetup
                     Button {
-                        switch FlexibleSettingsExit.decide(model.readiness, modified: modified) {
+                        switch FlexibleSettingsExit.decide(model.readiness, modified: modified, empty: empty) {
                         case .exit:
                             if modified {
                                 model.save()                  // Save & Exit: the main page bakes (Lattice view on)
@@ -582,18 +597,18 @@ public struct FlexibleStagePage: View {
                             present(issue)
                         }
                     } label: {
-                        Text(FlexibleSettingsExit.title(r, modified: modified))
+                        Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))
                             .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                             .foregroundStyle(DS.Color.textPrimary.color)
                             .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                            .background(Capsule().fill((r.isReady || !modified ? DS.Color.accent : DS.Color.warning).color))
+                            .background(Capsule().fill((r.isReady || !modified || FlexibleSettingsExit.emptyLeaves(r, empty: empty) ? DS.Color.accent : DS.Color.warning).color))
                     }
                     .buttonStyle(.plain)
                     .background(GeometryReader { g in
                         // (and what it says, for the hosted test: "exitTitle:Save & Exit")
                         Color.clear.preference(key: FlexibleKeepOutKey.self,
                                                value: ["exitButton": g.frame(in: .global),
-                                                       "exitTitle:" + FlexibleSettingsExit.title(r, modified: modified): .zero])
+                                                       "exitTitle:" + FlexibleSettingsExit.title(r, modified: modified, empty: empty): .zero])
                     }.allowsHitTesting(false))
                     .accessibilityIdentifier("flexible-exit")
                     // the project's own snapshot history: every Flexible setting is undoable (S5)
@@ -740,10 +755,13 @@ public struct FlexibleStagePage: View {
                 let r = model.readiness
                 // a failed build, and ★ (D2 review) separate groups that compete, in warning colour
                 let good = r.isReady && !r.buildFailed && r.advisory == nil   // ★ batch E: competing, or no lattice under a face
+                // ★ ROUND 7 (F, his answers: an empty setup after Reset all; "Do not." keep suggesting the Top): one plain line
+                let empty = FlexibleSettingsExit.emptyLeaves(r, empty: model.isEmptySetup)
                 // ★ ROUND 5 (S9): it names the button — "Save & Exit builds…" only once something changed
-                noticePill(FlexibleSettingsExit.readyLine(r.oneLine, modified: FlexibleSettingsExit.modified(model.settings, since: opened)),
-                           icon: good ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
-                           colour: (good ? FlexibleStageStyle.accentToken : DS.Color.warning).color,
+                noticePill(FlexibleSettingsExit.topLine(r, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                                                        empty: model.isEmptySetup),
+                           icon: empty ? "info.circle.fill" : (good ? "checkmark.circle.fill" : "exclamationmark.circle.fill"),
+                           colour: (empty ? DS.Color.textSecondary : (good ? FlexibleStageStyle.accentToken : DS.Color.warning)).color,
                            fix: Self.noticeFix(r, model: model))   // ★ M1 VERIFY: no [Fix] with no face-prism
             }
             if let t = model.toast {
@@ -860,6 +878,8 @@ struct FlexibleStageOverlays: View {
     /// ★ BATCH V (m19): what the lines drawn on the part are cut out of — the whole chrome (`FlexibleStagePage.chromeClip`);
     /// nil: the curves and the stamp clip to `keepOut` and the dashed outlines to nothing (the red control).
     var clip: [CGRect]? = nil
+    /// ★ ROUND 7 (F): the full-bend pose while Bend shows (nil: the part at rest).
+    var pose: FlexibleBendPose? = nil
 
     var body: some View {
         ZStack {
@@ -872,7 +892,7 @@ struct FlexibleStageOverlays: View {
                 // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
                 ForEach(Self.curveAxes(f), id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
-                                        baseline: axis == "x" ? g.baselineX : g.baselineY,
+                                        baseline: (axis == "x" ? g.baselineX : g.baselineY).posed(pose),   // ★ F: from the bent face
                                         curve: axis == "x" ? f.curveX : f.curveY,
                                         label: axis.uppercased(), tint: FlexibleStageStyle.onPart,
                                         selected: selection(r, axis),
@@ -886,13 +906,13 @@ struct FlexibleStageOverlays: View {
                 FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
                 // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
-                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip)
+                FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip, pose: pose)
             }
             // ★ ROUND 6 ITEM 2: pick mode — every edge and corner, coloured and numbered as the list
             if model.edgePick != nil { FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip) }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
             FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
-                                       clip: clip)
+                                       clip: clip, pose: pose)
         }
     }
 

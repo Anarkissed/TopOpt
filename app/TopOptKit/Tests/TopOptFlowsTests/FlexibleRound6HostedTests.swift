@@ -157,6 +157,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
         try await FlexibleSquishFixture.settle(m, "A1_0003")
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (round 7 batch F, his answer 13: "Heat follows whatever group is selected, first group as default. Hold
+        // for 3 seconds to view all."): "Play all" is no longer the main page's default — it is his 3 s hold; this file's
+        // premise (every group's turn) picks it, as the hold does
+        stage.pick(FlexibleSim.allID)
         let start = Date()
         while Date().timeIntervalSince(start) < 600 {
             if m.lattice != nil, !m.squish.isEmpty, !m.squish.values.contains(.pending), m.squishSolver.isIdle { break }
@@ -810,7 +814,7 @@ final class FlexibleRound6HostedTests: XCTestCase {
                 XCTAssertEqual(tag.point.y, p.y, accuracy: 1e-3)
                 lines.append("\(name) → face \(tag.region) \(tag.text) at \(tag.point)")
             }
-            XCTAssertEqual(m.views, [], "\(name): selecting never switches views")
+            XCTAssertEqual(m.views, FlexibleStageModel.openingViews, "\(name): selecting never switches views")   // ★ F: the page opens with Heat off
         }
         // the Prisms view: a tag per uncovered prism, never overlapping, each his deepest
         m.views = [.prisms]

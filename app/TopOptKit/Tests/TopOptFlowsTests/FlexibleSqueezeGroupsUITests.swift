@@ -104,7 +104,8 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             XCTAssertTrue(h.pumpUntil(3) { self.h.local(host, "groupChips") != nil }, "\(tag): face 3's card has its group row")
             h.pump(0.5)
             let chips = try XCTUnwrap(h.local(host, "groupChips"))
-            XCTAssertEqual(FlexibleFaceGroupRow.options(model: m, region: 3).map(\.label), ["1", FlexibleRowCopy.newGroupChip])
+            // ★ RE-PINNED (round 7 batch F, his answer: the face card's group chips show the group NAMES)
+            XCTAssertEqual(FlexibleFaceGroupRow.options(model: m, region: 3).map(\.label), ["Group 1", FlexibleRowCopy.newGroupChip])
             // "+ New" is the last chip
             h.click(host, CGPoint(x: chips.maxX - 22, y: chips.midY))
             XCTAssertTrue(h.pumpUntil(5) { m.squeezeGroups.count == 2 }, "\(tag): a click on + New makes group 2")
@@ -141,7 +142,12 @@ final class FlexibleSqueezeGroupsUITests: XCTestCase {
             let x = try XCTUnwrap(h.local(host, "groupRemove-2"))
             if let v = h.local(host, "panelScroll"), x.minY >= v.minY, x.maxY <= v.maxY {
                 h.click(host, CGPoint(x: x.midX, y: x.midY))
-                XCTAssertTrue(h.pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): a click on × removes group 2")
+                // ★ RE-PINNED (round 7 batch F, his answer: "Group trash should confirm deletion."): it asks, [Delete] deletes
+                XCTAssertTrue(h.pumpUntil(5) { self.h.local(host, "groupDeleteConfirm") != nil }, "\(tag): the trash asks first")
+                XCTAssertEqual(m.squeezeGroups.count, 2, "\(tag): …deleting nothing yet")
+                let del = try XCTUnwrap(h.local(host, "groupDeleteConfirm"))
+                h.click(host, CGPoint(x: del.midX, y: del.midY))
+                XCTAssertTrue(h.pumpUntil(5) { m.squeezeGroups.count == 1 }, "\(tag): [Delete] removes group 2")
                 report.append("\(tag): × clicked → \(m.squeezeGroups.count) group")
             } else {
                 m.removeGroup(try XCTUnwrap(m.squeezeGroup(of: 3)).id)

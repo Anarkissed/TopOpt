@@ -186,15 +186,18 @@ struct FlexibleFaceRows: View {
             // ★ ROUND 5 (S6, img 3: "All faces should be deletable"): the trash on EVERY face — a
             // split sector, a face a main-page group holds (it leaves the Flexible setup; the main
             // page's group is untouched and its re-sync no longer brings it back)
+            // ★ ROUND 7 (F, his answer: the face row's trash looks different from the group's): a smaller TAKE-OUT glyph
+            // (it only takes this face out of the squish; the group's trash deletes a group)
             Button { model.removeFace(r) } label: {
-                Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
+                Image(systemName: FlexibleTrashGlyphs.face).font(.system(size: FlexibleTrashGlyphs.faceSize))
+                    .foregroundStyle(DS.Color.textTertiary.color)
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceRemove-\(r)": g.frame(in: .global)])
             }.allowsHitTesting(false))
-            .accessibilityLabel("Delete \(name(r))")
+            .accessibilityLabel(FlexibleRowCopy.takeFaceOut(name(r)))
             .accessibilityIdentifier("flexible-face-remove")
         }
         .background(askAnchor(r))

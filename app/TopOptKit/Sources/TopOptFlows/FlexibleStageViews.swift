@@ -62,7 +62,10 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
 extension FlexibleStageModel {
     /// A view button: on ⇄ off. (★ R7-V: [Heat]'s button is `heatTapped` / `heatHeld` — its bit means hidden.)
     public func toggleView(_ v: FlexibleStageViews) {
-        if views.contains(v) { views.remove(v) } else { views.insert(v) }
+        // ★ ROUND 7 (F, his answer: "Bend view and Play cannot be viewed simultaneously."): the one toggle rule
+        var next = views
+        next.toggle(v)
+        views = next
         // RED CONTROL: the views written into the settings (an action, a modified page)
         if controlViewsInSettings {
             edit({ s in var c = s.groupColours ?? [:]; c["views"] = String(views.rawValue); s.groupColours = c }, recompute: false)

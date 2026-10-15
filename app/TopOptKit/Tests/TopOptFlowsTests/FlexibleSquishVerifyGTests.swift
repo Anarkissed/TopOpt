@@ -66,6 +66,9 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
         }
         stage.didExitSettings()
         stage.apply(r.project, owned: true, pageUp: false)
+        // ★ RE-PINNED (round 7 batch F, his answer 13: "first group as default. Hold for 3 seconds to view all."): "Play all"
+        // is his 3 s hold now, no longer the main page's default — this file pins Play all, so the fixture picks it
+        stage.pick(FlexibleSim.allID)
         let start = Date()
         while Date().timeIntervalSince(start) < 400 {
             sample?(stage, m)
@@ -236,7 +239,7 @@ final class FlexibleSquishVerifyGTests: XCTestCase {
     func testPlayAllPlaysEachGroupAlone() async throws {
         let (r, s, m) = try await stage(split: true)
         let o = try XCTUnwrap(s.overlay)
-        XCTAssertEqual(s.shownSimInfo?.kind, .playAll, "Play all is the default")
+        XCTAssertEqual(s.shownSimInfo?.kind, .playAll, "Play all (picked: his 3 s hold since batch F)")
         XCTAssertTrue(s.playAllLive)
         let seq = s.fe.sequence
         XCTAssertEqual(seq.map { s.fe.fields[$0].simID }, ["group-1", "group-2"])

@@ -33,10 +33,14 @@ extension FlexibleMainStage {
         requestStressIfNeeded()
     }
     /// The Dent heat button — the other colouring of the map (see toggleStress).
+    /// ★ ROUND 7 (F, his answer 13 + clarification): a tap shows the SELECTED group's heat (the squeeze group of the face he
+    /// last tapped, the first by default) or hides it; his 3 s hold is every group's (`heatHeld`).
     public func toggleHeat() {
-        if heat { heat = false; return }
+        heatAll = false
+        if heat { heat = false; followHeatGroup(); return }
         if stress { stress = false }
         heat = true
+        followHeatGroup()
     }
 
     /// Ask the workspace's solver — it runs only when there is no field for these inputs (or the
@@ -388,6 +392,8 @@ extension FlexibleMainStage {
     /// face) and read at the tap's rest point: the drilled kind first, else the first other view
     /// that has a value there (the key follows — "switching colours if needed").
     public func read(_ project: ProjectModel, mode: LatticeLegendMode, face: FaceID, point: SIMD3<Float>?) -> Bool {
+        // ★ ROUND 7 (F): every tap on the main Flexible page's part names the selected squeeze group (the heat follows it)
+        if visible, !frozen, model?.project === project { noteMainTap(face: Int(face), point: point) }
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
         guard let p = point else { return true }
         let order = [kind] + legendKinds.filter { $0 != kind }

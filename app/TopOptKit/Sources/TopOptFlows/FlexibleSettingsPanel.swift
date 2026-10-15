@@ -39,7 +39,10 @@ struct FlexibleSettingsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            if confirmingReset { resetConfirm } else { header }
+            // ★ ROUND 7 (F): a group's trash asks here too, in the header's place
+            if confirmingReset { resetConfirm }
+            else if let id = model.groupDeleteAsk, let g = model.railGroup(id) { groupDeleteConfirm(g) }
+            else { header }
             if !minimized {
                 // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
                 ScrollViewReader { proxy in
@@ -157,6 +160,43 @@ struct FlexibleSettingsPanel: View {
 }
 
 extension FlexibleSettingsPanel {
+    /// ★ ROUND 7 (F, his answer: "Group trash should confirm deletion."): "Delete Group 2? [Delete] [Keep]", one line in
+    /// the header's place, as Reset all asks.
+    func groupDeleteConfirm(_ g: FlexibleSqueezeGroup) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: FlexibleTrashGlyphs.group).font(.system(size: 13, weight: .bold))
+                .foregroundStyle(DS.Color.warning.color)
+            Text(FlexibleRowCopy.deleteGroupAsk(model.groupName(g))).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .accessibilityIdentifier("flexible-group-delete-ask")
+            Spacer(minLength: DS.Space.xs)
+            Button { model.confirmDeleteGroup() } label: {
+                Text(FlexibleRowCopy.deleteGroupConfirm).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
+            }
+            .buttonStyle(.plain)
+            .background(GeometryReader { gr in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupDeleteConfirm": gr.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-group-delete-confirm")
+            Button { model.keepGroup() } label: {
+                Text(FlexibleRowCopy.deleteGroupKeep).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.fillSubtle.color))
+            }
+            .buttonStyle(.plain)
+            .background(GeometryReader { gr in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupDeleteKeep": gr.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityIdentifier("flexible-group-delete-keep")
+        }
+        .frame(minHeight: 36)
+    }
+
     /// ★ S5: the one-line confirm, in the header's place: "Reset every setting here? [Reset] [Cancel]".
     var resetConfirm: some View {
         HStack(spacing: DS.Space.s) {

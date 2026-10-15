@@ -206,6 +206,8 @@ struct FlexibleGroupNameField: View {
 }
 
 /// ★ 4d: the trash on a group's header — 44 pt, always there; it deletes the group (one undo step).
+/// ★ ROUND 7 (F, his answer: "Group trash should confirm deletion."): it ASKS first — one line in the panel's header,
+/// "Delete Group 2? · [Delete] [Keep]" (FlexibleSettingsPanel.groupDeleteConfirm).
 struct FlexibleGroupTrashButton: View {
     @ObservedObject var model: FlexibleStageModel
     let groupID: Int
@@ -213,8 +215,8 @@ struct FlexibleGroupTrashButton: View {
     let name: String
 
     var body: some View {
-        Button { model.removeGroup(groupID) } label: {
-            Image(systemName: "trash").font(.system(size: 14, weight: .semibold))
+        Button { model.askDeleteGroup(groupID) } label: {
+            Image(systemName: FlexibleTrashGlyphs.group).font(.system(size: FlexibleTrashGlyphs.groupSize, weight: .semibold))
                 .foregroundStyle(DS.Color.textTertiary.color)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }

@@ -348,11 +348,13 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
         let h = host(FlexibleStageViewButtons(model: m), size: size)
         pump(0.4)
         let p = try heatPoint()
-        XCTAssertEqual(m.views.heatScope, .group, "the page opens with the current group's heat")
-        press(h, p)
-        XCTAssertEqual(m.views.heatScope, .off, "★ a tap hides it")
+        // ★ RE-PINNED (round 7 batch F, his answer 12: "The curve should be viewed as nothing but the curve without any view
+        // turned on. Turning heat map on shows colour."): the page opens with the heat OFF
+        XCTAssertEqual(m.views.heatScope, .off, "★ F: the page opens with no colour")
         press(h, p)
         XCTAssertEqual(m.views.heatScope, .group, "★ a tap shows the current group's")
+        press(h, p)
+        XCTAssertEqual(m.views.heatScope, .off, "★ a tap hides it")
         press(h, p, hold: 3.4)
         pump(0.4)
         XCTAssertEqual(m.views.heatScope, .all, "★ a 3 s hold: every group's — and its release tap did not undo it")
@@ -369,10 +371,11 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
         print("FLEX-R7V-H4 heat: tap off → tap group → hold all · control (release not swallowed): \(control)")
     }
 
-    // MARK: - H5: Bend alone — only the bent model
+    // MARK: - H5: Bend alone — ★ RE-PINNED (round 7 batch F, his answer: "If bend is on, all views move to the furthest bend.
+    // Always."): what is drawn on the part STAYS under Bend, at the full bend (R7-V hid it: `controlBendRestPose`)
 
-    func testBendAloneShowsOnlyTheBentModelAndHeatBringsTheOverlaysBack() throws {
-        addTeardownBlock { @MainActor in FlexibleStagePage.controlNoOverlays = false }
+    func testBendAloneKeepsWhatIsDrawnOnThePartAtTheFullBend() throws {
+        addTeardownBlock { @MainActor in FlexibleStagePage.controlNoOverlays = false; FlexibleStagePage.controlBendRestPose = false }
         let (r, m) = try hisPad()
         m.rail = .group(m.squeezeGroups[0].id)
         m.select(1)
@@ -394,23 +397,39 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
         let editing = try overlayPixels()
         XCTAssertGreaterThan(editing, 200, "premise: Face 1's curves and chip are drawn on the part")
         m.views = [.bend, .heatOff]
-        XCTAssertTrue(FlexibleStagePage.overlaysHidden(views: m.views, edgePick: false), "★ Bend alone hides the overlays")
+        XCTAssertFalse(FlexibleStagePage.overlaysHidden(views: m.views, edgePick: false), "★ F: Bend alone keeps the overlays")
+        XCTAssertTrue(FlexibleStagePage.posesOverlays(views: m.views), "★ F: …at the full bend")
         let alone = try overlayPixels()
         snapshot(h, "R7V_13p_settings_bend_alone.png")
-        XCTAssertEqual(alone, 0, "★ Bend alone: no curve, chip or tag on the bent model (\(alone) px)")
+
+        XCTAssertGreaterThan(alone, 200, "★ F: Bend alone: the curves and chip on the bent model (\(alone) px)")
         m.views = [.bend]
         let withHeat = try overlayPixels()
-        XCTAssertGreaterThan(withHeat, 200, "★ Bend with Heat: the curves and chips come back")
+        XCTAssertGreaterThan(withHeat, 200, "★ Bend with Heat: the curves and chips")
         snapshot(h, "R7V_13p_settings_bend_heat.png")
-        m.views = [.bend, .heatOff, .prisms]
-        XCTAssertFalse(FlexibleStagePage.overlaysHidden(views: m.views, edgePick: false), "Bend with Prisms adds them too")
-        // …and the prisms and the glass, which stand at the rest pose, leave the bent model alone too (the page's one list)
+        // ★ F: what is drawn on the part is drawn where the BENT part puts it — the page at the full bend against the same page
+        // with the overlays at the rest pose (R7-V's `controlBendRestPose`; the body and the heat are the same in both)
+        m.objectWillChange.send(); pump(1.0)
+        let posedShot = try shot(h)
+        FlexibleStagePage.controlBendRestPose = true
+        m.objectWillChange.send(); pump(1.0)
+        let restShot = try shot(h)
+        FlexibleStagePage.controlBendRestPose = false
+        m.objectWillChange.send(); pump(1.0)
+        let moved = Self.differing(posedShot, restShot)
+        XCTAssertGreaterThan(moved, 200, "★ F: Bend moves what is drawn on the part (\(moved) px between the bent and the rest pose)")
         m.views = [.bend, .heatOff]
-        XCTAssertEqual(FlexibleStageVolumes.items(model: m, k: 1, part: r.project.viewerMesh), [], "★ Bend alone: no prism or glass at the rest pose")
-        m.views = [.heatOff]
-        XCTAssertFalse(FlexibleStageVolumes.items(model: m, k: 1, part: r.project.viewerMesh).isEmpty, "positive control: Face 1's prism and its group's glass")
+        XCTAssertFalse(FlexibleStageVolumes.items(model: m, k: 1, part: r.project.viewerMesh).isEmpty, "★ F: Bend alone: Face 1's prism and glass stay")
+        // ★ RED CONTROL: R7-V's rule — Bend alone hides them all
+        FlexibleStagePage.controlBendRestPose = true
+        XCTAssertTrue(FlexibleStagePage.overlaysHidden(views: m.views, edgePick: false), "control: hidden")
+        let control = try overlayPixels()
+        XCTAssertEqual(control, 0, "control: no curve, chip or tag on the bent model (\(control) px)")
+
+        XCTAssertEqual(FlexibleStageVolumes.items(model: m, k: 1, part: r.project.viewerMesh), [], "control: no prism or glass")
+        FlexibleStagePage.controlBendRestPose = false
         m.views = []
-        print("FLEX-R7V-H5 overlay px: editing \(editing) · Bend alone \(alone) · Bend + Heat \(withHeat)")
+        print("FLEX-R7V-H5 overlay px: editing \(editing) · Bend alone \(alone) · Bend + Heat \(withHeat) · control (R7-V) \(control) · bent vs rest pose \(moved) px")
     }
 
     // MARK: - H6: X-ray off, Finish Covered = the plain model (the shipping renderer)

@@ -185,7 +185,7 @@ public final class FlexibleMainStage: ObservableObject {
     public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(playingSim) }
     /// ★ BATCH G VERIFICATION: the squeeze on screen — the pick, or, when EVERY sim of "Play all"
     /// failed, the first group (its column squish plays; never every group's faces at once).
-    var playingSim: String? { fallbackSim ?? shownSim }
+    var playingSim: String? { fallbackSim ?? selectedSim }   // ★ ROUND 7 (F): the selected group (first by default)
     /// The sim on screen (nil: one group — nothing to pick).
     public var shownSimInfo: FlexibleSim? { sims.count > 1 ? shownLattice?.shownSim : nil }
     /// ★ ONE LINE when the shown group squishes less than it was designed for (another group's
@@ -384,6 +384,8 @@ public final class FlexibleMainStage: ObservableObject {
         }
         // ★ D2: another project's squeeze pick does not carry over (async: never inside an update)
         if shownSim != nil { DispatchQueue.main.async { [weak self] in self?.shownSim = nil } }
+        tappedRegion = nil   // ★ ROUND 7 (F): nor the face he last tapped there, nor his 3 s hold
+        if heatAll { DispatchQueue.main.async { [weak self] in self?.heatAll = false } }
         // ★ ROUND 7 (M2, the reviewer's ruling 3): a project I2 saved has its edge strips moved off the Surface stage once,
         // as the loaded state when nothing is undoable (FlexibleSectorMigration) — never inside a view's init
         DispatchQueue.main.async { [weak m] in m?.migrateSectorsAtOpen() }
@@ -872,7 +874,7 @@ public final class FlexibleMainStage: ObservableObject {
             feMeshCache = [:]
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
-        var drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(shownSim), xray: true, building: m.latticeBuilding,
+        var drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,   // ★ ROUND 7 (F)
                                                  checkStampShown: nil, stale: m.latticeIsStale)
         // ★ BATCH G: the squeeze groups' 3D sims (started here — the shown sim first)
         fe = feView(m, drawn: drawn)

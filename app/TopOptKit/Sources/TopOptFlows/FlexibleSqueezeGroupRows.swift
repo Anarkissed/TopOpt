@@ -136,7 +136,8 @@ struct FlexibleFaceGroupRow: View {
         let mine = model.squeezeGroup(of: region)
         let hand = Set(model.hand(of: region))
         // ★ ROUND 6 ITEM 2: a face moves only between FACES groups (an edges/corners group holds no face)
-        var out = gs.filter { $0.kind == .faces }.map { (id: "\($0.id)", label: "\($0.number)") }
+        // ★ ROUND 7 (F, his answer: the face card's group chips show the group NAMES — Squish-only names)
+        var out = gs.filter { $0.kind == .faces }.map { (id: "\($0.id)", label: controlChipsByNumber ? "\($0.number)" : model.groupName($0)) }
         if mine?.regions.contains(where: { !hand.contains($0) }) == true {
             out.append((id: "new", label: FlexibleRowCopy.newGroupChip))
         }
@@ -200,6 +201,8 @@ struct FlexibleFaceGroupRow: View {
 
     /// A menu line: "Group 3", or "+ New".
     static func menuTitle(_ o: (id: String, label: String), model: FlexibleStageModel) -> String {
-        Int(o.label).map { model.groupName(number: $0) } ?? o.label
+        // ★ ROUND 7 (F): the chips carry the names; a group by its stored id, "+ New" as it is
+        guard o.id != "new", let id = Int(o.id), let g = model.squeezeGroups.first(where: { $0.id == id }) else { return o.label }
+        return model.groupName(g)
     }
 }

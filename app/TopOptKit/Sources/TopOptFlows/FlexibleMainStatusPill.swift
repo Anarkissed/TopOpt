@@ -151,7 +151,13 @@ public struct FlexibleMainViewToggles: View {
 
     // ★ a thermometer reads "heat" (the stacked-layers glyph did not — batch B review)
     private var heatButton: some View {
-        FlexibleViewButton(icon: FlexibleMainViewToggles.heatIcon, label: "Dent heat", on: main.heat && main.viewsAvailable) { main.toggleHeat() }
+        // ★ ROUND 7 (F, his answer 13): a tap = the selected group's heat or none; a 3 s HOLD = every group's (the mark of
+        // his groups' colours on it, as on the Squish page)
+        FlexibleViewButton(icon: main.heat && main.heatAll ? "thermometer.high" : FlexibleMainViewToggles.heatIcon, label: "Dent heat",
+                           on: main.heat && main.viewsAvailable, action: { main.toggleHeat() }, onLongPress: { main.heatHeld() })
+            .overlay(alignment: .topTrailing) {
+                if main.heat, main.heatAll, let m = main.model { FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: m)) }
+            }
             .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — nothing to heat
             .accessibilityIdentifier("flexible-main-view-heat")
     }
@@ -323,14 +329,14 @@ public struct FlexibleMainPlayerSlot: View {
     static func frame(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> CGRect? {
         guard main.playerShown else { return nil }
         return place(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
-                     size: FlexibleSquishPlayer.size(picker: main.sims.count > 1, note: main.simNote != nil))
+                     size: FlexibleSquishPlayer.size(picker: pickerSims(main.sims).count > 1, note: main.simNote != nil))
     }
 
     public var body: some View {
         GeometryReader { g in
             // ★ ROUND 4 (D2): the group picker widens it, a group's miss line heightens it — the
             // placement keeps the whole of it clear of every button and legend
-            let sims = main.sims, note = main.simNote
+            let sims = Self.pickerSims(main.sims), note = main.simNote   // ★ ROUND 7 (F): no group picker in the bar
             let size = FlexibleSquishPlayer.size(picker: sims.count > 1, note: note != nil)
             if main.playerShown,
                let r = Self.place(main: main, viewport: g.size, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,

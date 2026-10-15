@@ -571,9 +571,15 @@ final class FlexibleR7SettingsTests: XCTestCase {
         m.tapFace(3)
         XCTAssertEqual(m.newGroupAsk, 3)
         XCTAssertFalse(prompt.next(m.readiness, actionSerial: m.actionSerial, settled: true).map { FlexibleStagePage.popsAtOnce($0, model: m) } ?? false)
-        // another tab open: the rule is [+ New]'s only
+        // another tab open — ★ RE-PINNED (round 7 batch F, his answers 3 "Allow an *empty* setup after reset all." and 9
+        // "Do not." keep suggesting the Top): over the EMPTY setup nothing pops on any tab; R7-S's rule (it popped on [Model])
+        // is `controlEmptyBlocks`
         m.rail = .model
-        XCTAssertTrue(FlexibleStagePage.popsAtOnce(i, model: m), "[Model] open: a blocker pops at once as always")
+        XCTAssertTrue(m.isEmptySetup, "premise: nothing set to squish")
+        XCTAssertFalse(FlexibleStagePage.popsAtOnce(i, model: m), "★ F: [Model] open over the empty setup: nothing pops")
+        FlexibleSettingsExit.controlEmptyBlocks = true
+        XCTAssertTrue(FlexibleStagePage.popsAtOnce(i, model: m), "R7-S's rule: [Model] open, a blocker pops at once")
+        FlexibleSettingsExit.controlEmptyBlocks = false
         // ★ RED CONTROL: today's — the [Press Face 1] pop-up over [Model] [New]
         FlexibleStagePage.controlPopOnNewTab = true
         defer { FlexibleStagePage.controlPopOnNewTab = false }

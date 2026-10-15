@@ -421,7 +421,8 @@ final class FlexibleR7SettingsHostedTests: XCTestCase {
         try resetByHand()
         XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).map(\.title), ["Model", "New"])
         XCTAssertEqual(fixes(), [], "no pop-up over [Model] [New]")
-        XCTAssertEqual(exitTitle(), "Fix 1 thing", "Exit still names it (asked of him)")
+        // ★ RE-PINNED (round 7 batch F, his answer 3: "Yes. Allow an *empty* setup after reset all."): Exit leaves
+        XCTAssertEqual(exitTitle(), FlexibleSettingsExit.saveAndExit, "★ F: the empty setup may leave (was \"Fix 1 thing\")")
         composite(h, "R7S_verify_reset_1_page_model_and_new_no_popup.png")
         m.tapFace(3)
         pump(1.2)

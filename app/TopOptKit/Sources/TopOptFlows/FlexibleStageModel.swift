@@ -207,7 +207,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 6 (item 3): the page's views — [Prisms] and [Groups] (FlexibleStageViews). Session DISPLAY
     /// state: never a setting, never the lattice's key, never an action (Exit stays "Exit"); the main page
     /// reads the same model's.
-    @Published public var views: FlexibleStageViews = []
+    /// ★ ROUND 7 (F, his answer: "The curve should be viewed as nothing but the curve without any view turned on. Turning
+    /// heat map on shows colour."): the page opens with no view on — Heat off (`openingViews`).
+    @Published public var views: FlexibleStageViews = FlexibleStageModel.openingViews
     /// ★ ROUND 7 (F, his answer 2: "Group trash should confirm deletion."): the group whose trash asks "Delete Group 2?".
     @Published public var groupDeleteAsk: Int?
     /// Test control only (round 6): a view toggle stored in the settings (the red control of the rule above).

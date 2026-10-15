@@ -248,11 +248,12 @@ final class FlexibleR7FTests: XCTestCase {
     func testNoViewOnIsTheCurveOnly() async throws {
         let (_, _, m) = try await hisPad()
         XCTAssertEqual(m.views.heatScope, .off, "★ the page opens with no colour (Heat off)")
-        // his Face 1 (the top), which draws Curves in his img3
+        // his Face 1 (the top) on Curves, as in his img3 (this copy of his pad saves every face on Stamp)
         let g1 = try XCTUnwrap(m.squeezeGroups.first { $0.regions == [1] })
         m.rail = .group(g1.id)
         m.select(1)
         m.tab = .face
+        m.setShape(1, "curves")
         XCTAssertTrue(FlexibleStageHeat.shown(model: m, views: m.views).isEmpty, "★ no heat drawn")
         XCTAssertNotNil(FlexibleStageOverlays.curveEditors(model: m), "★ the curve")
         XCTAssertFalse(FlexibleStagePage.overlaysHidden(views: m.views, edgePick: false))

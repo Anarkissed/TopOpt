@@ -193,7 +193,9 @@ final class FlexibleSqueezeGroupsModelTests: XCTestCase {
         XCTAssertEqual(stage.sims.map(\.id), ["group-1", "group-2", "all"])
         // ★ RE-PINNED (round 5 batch G, his "a way to play the different sims"): the default is
         // "Play all" (D2's was group 1) — group 1 is picked here to pin its faces
-        XCTAssertEqual(stage.shownLattice?.shownSim?.kind, .playAll, "the default: Play all")
+        // ★ RE-PINNED (round 7 batch F, his answer 13: "Heat follows whatever group is selected, first group as default."):
+        // the main page's default is group 1 again ("Play all" is his 3 s hold on Heat)
+        XCTAssertEqual(stage.shownLattice?.shownSim?.kind, .group(1), "the default: the first group")
         stage.pick("group-1")
         stage.refresh()
         let first = try XCTUnwrap(stage.layer(r.project, stage: .lattice, pageUp: false))
