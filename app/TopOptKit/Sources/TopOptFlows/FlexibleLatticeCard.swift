@@ -30,6 +30,16 @@ public enum FlexibleLatticeCard {
 
     /// Core's step is still waiting for the preview.
     public static let waits = "Waits for the preview"
+    /// Stubs (tests first).
+    public static let sendAgainTitle = "Send again"
+    public static let waitsForTheFix = "waits for the fix"
+    @MainActor static func jobSummary(model m: FlexibleStageModel) -> String? { nil }
+    static func previewLine(includes inc: [LatticeRegionSpec]) -> String {
+        guard !inc.isEmpty else { return "built" }
+        let depths = Array(Set(inc.map { String(format: "%.1f", $0.depthMM) })).sorted()
+        let n = inc.count == 1 ? "1 face-prism" : "\(inc.count) face-prisms"
+        return "built \u{00B7} \(n) \u{00B7} \(depths.joined(separator: " / ")) mm"
+    }
     /// Test control only (the reviewer's condition (a)): a card that drops the hold's second line.
     @MainActor static var controlDropsHoldNote = false
 
@@ -103,6 +113,9 @@ struct FlexibleLatticeCardView: View {
     var close: () -> Void = {}
     var send: () -> Void = {}
     var showFix: () -> Void = {}
+    /// Stubs (tests first).
+    var summary: String? = nil
+    var sendAgain: () -> Void = {}
     /// ★ R7-D1 look-and-fix 3: the mini's 336 pt card puts each step's body UNDER its title (nil: from `width`). Beside a
     /// 64 pt title column the body had 194 pt and the mini cut "Send Group 2 only, Face 2 re…" and broke "Export G-code".
     var narrow: Bool? = nil

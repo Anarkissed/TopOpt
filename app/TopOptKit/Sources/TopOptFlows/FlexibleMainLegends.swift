@@ -121,6 +121,12 @@ public enum FlexibleMainLegendLayout {
         return nil
     }
 
+    /// Stub (tests first): the main page's one card.
+    public static func placeMainCard(rows: Int, minimized: Bool, viewport v: CGSize, keepOut: [CGRect], viewRows: Int = 0) -> Placed? {
+        placeCard(rows: rows, minimized: minimized, viewport: v, keepOut: keepOut,
+                  edge: minimized ? foldedEdge : PageChrome.edge, viewRows: viewRows)
+    }
+
     public static func place(_ kinds: [FlexibleReadKind], minimized: Set<FlexibleReadKind>, viewport v: CGSize,
                              keepOut: [CGRect], priority: FlexibleReadKind? = nil,
                              edge: CGFloat = PageChrome.edge) -> [FlexibleReadKind: Placed] {

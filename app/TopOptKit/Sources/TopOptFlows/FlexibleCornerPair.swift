@@ -22,8 +22,11 @@ import TopOptDesign
 @MainActor
 public final class FlexibleChromeGeometry: ObservableObject {
     @Published public internal(set) var viewport: CGSize = .zero
+    /// The open panel's drawn height (stub: tests first).
+    @Published public internal(set) var panelHeight: CGFloat = 0
     public init() {}
     func note(_ v: CGSize) { if v != viewport, v.width > 0, v.height > 0 { viewport = v } }
+    func notePanel(_ h: CGFloat) { if abs(h - panelHeight) > 0.5 { panelHeight = h } }
 }
 
 public struct FlexibleCornerPair: View {
@@ -248,6 +251,10 @@ enum FlexibleCornerPairStyle {
         .saidWhole(title, minScale: 0.8)
         .accessibilityIdentifier(id)
     }
+
+    /// Stub (tests first): a secondary button's hairline.
+    static let secondaryEdgeWidth: CGFloat = 1
+    static func secondaryEdge(_ primary: Bool) -> some View { Capsule().strokeBorder(Color.clear, lineWidth: 0) }
 
     /// The frame a view publishes for the hosted tests and the Squish page's keep-outs (FlexibleKeepOutKey, global).
     static func publish(_ key: String) -> some View {

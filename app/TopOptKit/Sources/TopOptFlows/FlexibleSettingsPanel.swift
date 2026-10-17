@@ -115,6 +115,9 @@ struct FlexibleSettingsPanel: View {
         return max(viewport.height * 0.62, viewport.height - edge - top - DS.Space.m)
     }
 
+    /// Stub (tests first).
+    static let title = "Flexible"
+
     private var header: some View {
         HStack(spacing: DS.Space.xs) {
             Circle().fill(FlexibleStageStyle.accent).frame(width: 8, height: 8)

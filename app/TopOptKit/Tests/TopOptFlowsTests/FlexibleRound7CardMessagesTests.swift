@@ -130,6 +130,29 @@ final class FlexibleRound7CardMessagesTests: XCTestCase {
         XCTAssertFalse(card.contains(FlexibleRowCopy.edgesExportSeparately), "★ RED CONTROL: without the notice the check goes red")
     }
 
+    /// ★ ROUND 7, the review of R7-D1 (condition (a), the reviewer's note: the test fixed the card's state — with a blocker
+    /// the card hid core's row): core's last answer stays in the card while a blocker shows, and an answer for an older job
+    /// (not current) is still said. RED at 999c6025: the .fix card drew the issue alone.
+    func testCoresAnswerStaysInTheCardWithABlockerOrAnOlderAnswer() {
+        let fix = FlexibleMainStatus(line: "Fix: the weight on Face 1", tone: .fix, fix: FlexibleStageCapsuleTests.weightIssue)
+        var lines: [String] = []
+        for sc in Self.scenarios where sc.phase != .sending {
+            let run = FlexibleCoreRun()
+            run.setForTests(phase: sc.phase, hold: sc.hold, sentJob: nil)
+            let core = sc.messages.filter { $0 == FlexibleCoreRun.line(sc.phase) || $0 == "#flexible-export-core-info" }
+            for (what, status, current) in [("a blocker", fix, true), ("an older answer", sc.status, false)] {
+                let state = FlexibleLatticeButton.state(status, phase: sc.phase, answerIsCurrent: current)
+                let card = texts(FlexibleLatticeCardView(run: run, status: status, state: state, preview: "built", width: 420, maxHeight: 900),
+                                 size: CGSize(width: 420, height: 900))
+                for m in core {
+                    XCTAssertTrue(card.contains(m), "★ \(sc.name), \(what) (\(state)): core's '\(m)' stays in the card")
+                }
+            }
+            lines.append("\(sc.name): core's \(core.count) kept with a blocker and as an older answer")
+        }
+        print("FLEX-R7D1R-CARD-CORE\n" + lines.joined(separator: "\n"))
+    }
+
     /// The (i)'s text is the run's own (`info`), shared by the two: the card draws FlexibleExportRows' core row.
     func testTheInfoBehindTheCardsCoreLineIsCoresWholeSentence() throws {
         let run = FlexibleCoreRun()

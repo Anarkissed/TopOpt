@@ -45,11 +45,11 @@ final class FlexibleCornerPairTests: XCTestCase {
         let gone: Set<SettingsChipID> = [.faceProtectDepth, .minimizePlastic, .cadFaces, .designBox, .paint, .bandChips]
         XCTAssertTrue(Set(FlexibleSetupRow.allCases.compactMap(\.chip)).isDisjoint(with: gone),
                       "★ no Protect N mm, Minimize plastic, CAD surfaces (his answers) — nor the compute chip")
-        // RED CONTROL: today's chip column on the Flexible stage of his pad (img1: Fast · 64³, Protect 3 mm, Minimize
-        // plastic, Plate up +Z, Gravity set), which H24 stops drawing there
-        let todays: [SettingsChipID] = [.quality, .faceProtectDepth, .minimizePlastic, .buildOrientation, .gravity]
-        XCTAssertEqual(todays.count, 5)
-        XCTAssertFalse(Set(todays).isDisjoint(with: gone), "★ RED CONTROL: today's column carries Protect and Minimize plastic")
+        // ★ RE-PINNED (round 7, the review of R7-D1: "Two 'red controls' for the chip column are hard-coded sets that can never
+        // go red"): the control is now MEASURED — FlexibleRound7D1ReviewHostedTests.testTheChipColumnH24TakesOffIsTodaysColumn
+        // MeasuredOnHisPad hosts his pad's whole page and reads #354's own chip-width reader: Topology draws today's column
+        // (Protect and Minimize plastic among it), the Flexible stage none of it; H24's text pin (FlexibleRound7ScreenHookTests)
+        // goes red by mutation. Was: a literal list of today's chips compared with a literal set.
         XCTAssertTrue(Set(SettingsChipID.allCases).isSuperset(of: gone), "(the ids are #354's, untouched)")
     }
 
@@ -70,7 +70,7 @@ final class FlexibleCornerPairTests: XCTestCase {
         XCTAssertNil(chrome.open)
         XCTAssertEqual(tray.page, .rows)
         FlexibleSetupActions.plateUp(tray: tray)
-        XCTAssertEqual(tray.page, .plate, "Plate up [Change] → BuildOrientationView in the tray")
+        XCTAssertEqual(tray.page, .plate, "Plate up [Change] → the Flexible plate page in the tray (★ the review of R7-D1: FlexiblePlatePage, not #354's BuildOrientationView)")
         FlexibleSetupActions.back(tray: tray)
         XCTAssertEqual(tray.page, .rows, "‹ goes back to the rows")
         FlexibleSetupActions.quality(.fine, project: p)

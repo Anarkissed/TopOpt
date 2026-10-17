@@ -88,11 +88,11 @@ final class FlexibleR7M1Tests: XCTestCase {
             XCTAssertTrue(rows.contains(kept), "\(kept) stays: a live Flexible input (the Setup tray's row)")
         }
         XCTAssertEqual(SettingsChipID.allCases.count, 9, "every other stage: #354's chips, untouched")
-        // ★ RED CONTROL: today's column on his pad (img1: Fast · 64³, Protect 3 mm, Minimize plastic, Plate up, Gravity)
-        let control: Set<SettingsChipID> = [.quality, .faceProtectDepth, .minimizePlastic, .buildOrientation, .gravity]
-        XCTAssertTrue(control.contains(.faceProtectDepth) && control.contains(.minimizePlastic), "★ RED CONTROL: today's column")
-        XCTAssertFalse(control.isSubset(of: rows), "★ RED CONTROL: the column is not the tray")
-        print("FLEX-R7M1-H18 (H24) tray \(FlexibleSetupRow.allCases.map(\.title)) · control \(control.count) chips")
+        // ★ RE-PINNED (round 7, the review of R7-D1: this "red control" compared a literal set with a literal set and could
+        // never go red): the column is MEASURED on his pad in FlexibleRound7D1ReviewHostedTests.testTheChipColumnH24TakesOff
+        // IsTodaysColumnMeasuredOnHisPad (Topology draws Protect and Minimize plastic; the Flexible stage no chip of it), and
+        // H24's text pin goes red by mutation (FlexibleRound7ScreenHookTests). Was: `control` = a literal Set.
+        print("FLEX-R7M1-H18 (H24) tray \(FlexibleSetupRow.allCases.map(\.title))")
     }
 
     /// The two approved hooks, each a stage switch at its anchor in #354's WorkspacePlaceholder (and nothing else of the

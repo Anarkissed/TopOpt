@@ -115,6 +115,20 @@ public enum FlexibleChromeLayout {
         return (CGRect(x: v.width - PageChrome.edge - w, y: bottom - h, width: w, height: h), contentHeight > maxH)
     }
 
+    // MARK: ★ the review of R7-D1 (stubs: tests first)
+
+    /// The bar's clearance on this stage: the corner pair (64) and its 24 pt inset (#354's bottomBarClearance).
+    public static let barClearance: CGFloat = PageChrome.actionButton + PageChrome.edge
+    /// The name row and the capsule under it (top-left, up to the gizmo's clearance).
+    public static func topLeftChrome(_ v: CGSize) -> CGRect {
+        CGRect(x: 0, y: 0, width: max(0, v.width - PageChrome.gizmoClearance), height: capsuleTop + capsuleHeight)
+    }
+    public static func panelTopLimit(_ v: CGSize, legend: CGRect?) -> CGFloat { panelTopLimit(v) }
+    public static func panelMaxHeight(_ v: CGSize, legend: CGRect?) -> CGFloat { panelMaxHeight(v) }
+    public static func panelFrame(viewport v: CGSize, contentHeight: CGFloat, legend: CGRect?) -> CGRect {
+        panel(viewport: v, setupWidth: 0, contentHeight: contentHeight).frame
+    }
+
     // MARK: the minimised Selections pill (#354's PageLeftModal: bottom-left, on `edge`)
 
     public static let selectionsPillHeight: CGFloat = 44

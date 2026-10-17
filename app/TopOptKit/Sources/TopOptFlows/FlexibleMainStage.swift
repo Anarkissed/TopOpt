@@ -894,6 +894,9 @@ public final class FlexibleMainStage: ObservableObject {
         coreRun.close()
     }
 
+    /// Stub (tests first).
+    public func resendFromCard() { sendFromCard() }
+
     /// What the split button's zones act through.
     func cornerHooks(openSquish: @escaping () -> Void) -> FlexibleLatticeButton.Hooks {
         FlexibleLatticeButton.Hooks(send: { [weak self] in self?.sendFromCard() },

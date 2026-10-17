@@ -132,12 +132,65 @@ final class FlexibleRound7FitHostedTests: XCTestCase {
             }
             lines.append("\(name) \(Int(w)) pt: \(1 + FlexibleRound7CardMessagesTests.scenarios.count) scenarios, \(total) measured, none cut")
         }
+        // ★ RE-PINNED, extended (round 7, the review of R7-D1 — his rule, one visible line per setting; the review: "Core runs
+        // one squeeze group at / a time" wrapped at EVERY size): the hold's line is ONE line, measured whole, at 420 and 336;
+        // and the Ready card's job summary (the mockup's "Group 1 · 22 lb · 1 face · bead 0.45 mm") reads whole too.
+        // Was: the hold's line could take two lines (`said`, never measured).
+        let holdLine = FlexibleLatticeCard.lookLine(Self.threeSends.line)
+        let readySummary = "Group 1 \u{00B7} 22 lb \u{00B7} 1 face \u{00B7} bead 0.45 mm"
+        for (name, v) in [("mini", Self.mini), ("13p", Self.pad13), ("11p", CGSize(width: 834, height: 1194))] {
+            let w = FlexibleChromeLayout.panelWidth(v)
+            let got = card(mini, idle: true, width: w, narrow: nil)
+            XCTAssertTrue(got.fits.contains { $0.text == holdLine }, "★ \(name): the hold's line '\(holdLine)' is drawn as ONE line, measured")
+            XCTAssertEqual(Self.cut(got.fits), [], "★ \(name) (\(Int(w)) pt): the hold's line reads whole on one line")
+            let run = FlexibleCoreRun()
+            let ready = FlexibleMainStatus(line: FlexibleMainStatus.ready, tone: .ready, fix: nil)
+            let rc = fits(FlexibleLatticeCardView(run: run, status: ready, state: .ready, preview: "built \u{00B7} Face 1 \u{00B7} 20.0 mm",
+                                                  width: w, maxHeight: 2000, summary: readySummary), size: CGSize(width: w, height: 1000))
+            XCTAssertTrue(rc.fits.contains { $0.text == readySummary }, "★ \(name): Ready says what goes to core ('\(readySummary)')")
+            XCTAssertEqual(Self.cut(rc.fits), [], "★ \(name): the Ready card reads whole")
+            lines.append("\(name) \(Int(w)) pt: the hold's line and the Ready summary on one line, whole")
+        }
         // RED CONTROL: the first drawing at the mini's 336 — the body beside a 64 pt title column
         let red = card(mini, idle: true, width: 336, narrow: false)
         let cut = Self.cut(red.fits)
         lines.append("RED (the body beside the titles at 336): cut \(cut)")
         print("FLEX-R7D1-FIT card\n" + lines.joined(separator: "\n"))
         XCTAssertFalse(cut.isEmpty, "★ RED CONTROL: the side-by-side card cuts a send or an export at 336")
+    }
+
+    // MARK: the plate page (the review of R7-D1)
+
+    /// ★ ROUND 7, the review of R7-D1 (his rules: visual over text, one line per setting, 44 pt targets — the review found
+    /// #354's BuildOrientationView in the tray: paragraphs, 40 × 28 pt chips): the Flexible plate page is the mockup's — ONE
+    /// question line and six buttons, each at least 44 × 44, in two rows of three. RED at 999c6025: no such page.
+    func testThePlatePageIsOneLineAndSixBigButtonsOnTheMiniAndTheThirteen() throws {
+        final class F { var frames: [String: CGRect] = [:] }
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        var out: [String] = []
+        for (name, v) in [("mini", Self.mini), ("13p", Self.pad13)] {
+            let w = FlexibleChromeLayout.panelWidth(v)
+            let tray = FlexibleSetupTrayState()
+            tray.page = .plate
+            let f = F()
+            let view = FlexibleCornerPairStyle.panel(width: w, maxHeight: 900) {
+                FlexibleSetupTray(project: r.project, tray: tray, chrome: FlexibleChromeState(), app: r.app, changeGravity: {},
+                                  narrow: FlexibleChromeLayout.panelIsNarrow(w))
+            }
+            .onPreferenceChange(FlexibleKeepOutKey.self) { f.frames = $0 }
+            let got = fits(view, size: CGSize(width: w, height: 500))
+            XCTAssertTrue(got.fits.contains { $0.text == FlexiblePlatePage.question }, "★ \(name): the one question line, measured")
+            XCTAssertEqual(Self.cut(got.fits), [], "★ \(name) (\(Int(w)) pt): every word on the plate page reads whole")
+            let buttons = f.frames.filter { $0.key.hasPrefix("plateAxis-") }
+            XCTAssertEqual(buttons.count, 6, "★ \(name): six axis buttons (\(buttons.keys.sorted()))")
+            for (k, b) in buttons {
+                XCTAssertGreaterThanOrEqual(b.width, 44, "★ \(name): \(k) at least 44 wide (\(b.integral))")
+                XCTAssertGreaterThanOrEqual(b.height, 44, "★ \(name): \(k) at least 44 tall (\(b.integral))")
+            }
+            XCTAssertEqual(Set(buttons.values.map { Int($0.minY.rounded()) }).count, 2, "★ \(name): two rows of three")
+            out.append("\(name) \(Int(w)) pt: \(buttons.count) buttons \(buttons.values.map { "\(Int($0.width))x\(Int($0.height))" }.sorted().first ?? "-") … · words whole")
+        }
+        print("FLEX-R7D1R-FIT plate\n" + out.joined(separator: "\n"))
     }
 
     // MARK: the button
