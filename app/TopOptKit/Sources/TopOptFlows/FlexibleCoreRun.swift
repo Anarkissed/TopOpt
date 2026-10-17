@@ -255,6 +255,15 @@ public final class FlexibleCoreRun: ObservableObject {
     /// The Export step's close (the run, if any, carries on and its answer stays).
     public func close() { shown = false }
 
+    // MARK: ★ ROUND 7, R7-D1 — STUB (tests first)
+
+    /// Tests only: a phase / hold / sent job as the step would hold them.
+    func setForTests(phase: Phase, hold: FlexibleCoreHold?, sentJob: String?) {}
+    /// The card looks at the hold without sending (STUB).
+    public func showHold(_ h: FlexibleCoreHold?) {}
+    /// The one line for a phase (STUB).
+    public nonisolated static func line(_ phase: Phase) -> String { "" }
+
     /// The Export step's one line about core.
     public var line: String {
         switch phase {

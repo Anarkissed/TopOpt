@@ -129,6 +129,15 @@ public struct FlexibleStagePage: View {
         self.model = model
         self.onExit = onExit
     }
+    /// ★ R7-D1 STUB: the capsule's closures.
+    public init(project: ProjectModel, model: FlexibleStageModel, onLeave: @escaping (WorkspaceStage) -> Void = { _ in },
+                onAbout: @escaping () -> Void = {}, onExit: @escaping () -> Void) {
+        self.project = project
+        self.model = model
+        self.onExit = onExit
+    }
+    /// Test control only (R7-D1 STUB).
+    @MainActor static var controlExitRowOnlyKeepOut = false
     /// ★ R7-V: tests hand the page its squish loop, to watch it (the pause latch, Play, Bend).
     init(project: ProjectModel, model: FlexibleStageModel, loop: FlexibleSquishLoop, onExit: @escaping () -> Void) {
         self.project = project

@@ -182,6 +182,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// export path"): core's Flexible runner and the Export step (its own object, observed only
     /// by the pill and the Export mount).
     public let coreRun = FlexibleCoreRun()
+    /// ★ ROUND 7, R7-D1 (the redesign's step 0): ONE card at a time on the main page — the Setup tray, the Lattice card, the
+    /// blocker callout (D1), D2's face chip and a keypad (FlexibleChromeState).
+    public let chrome = FlexibleChromeState()
     /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each
     /// tap) — builds start only there.
     var goToLattice: (() -> Void)?

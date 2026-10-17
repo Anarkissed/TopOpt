@@ -62,7 +62,7 @@ public enum FlexibleLatticeView {
 @MainActor
 public final class FlexibleMainNote: ObservableObject {
     /// ★ X1 VERIFY: `coveredHidesLattice` — the Lattice icon turned on under Covered with X-ray off (FlexibleRowCopy).
-    public enum Kind: Equatable, Sendable { case ready, building, coveredHidesLattice }
+    public enum Kind: Equatable, Sendable { case ready, building, coveredHidesLattice, opening }
     @Published public private(set) var kind: Kind?
     /// How many notes were posted (tests).
     var posts = 0
@@ -93,6 +93,7 @@ public final class FlexibleMainNote: ObservableObject {
         case .ready: return "Lattice ready"
         case .building: return "Still building \u{2014} it shows here when ready"
         case .coveredHidesLattice: return FlexibleRowCopy.coveredHidesLattice
+        case .opening: return "Still opening the part"   // ★ R7-D1: the Lattice button's main zone while the part opens
         }
     }
     /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is

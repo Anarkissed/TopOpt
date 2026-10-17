@@ -145,6 +145,10 @@ public struct FlexibleMainViewToggles: View {
     /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph);
     /// ★ R7-V: X-ray and Play.
     static let buttons = 6
+    /// ★ R7-D1 STUB: the views row's order.
+    public enum Kind: Equatable, Sendable { case heat, stress, xray, lattice, prisms, play }
+    @MainActor static var controlR7VOrder = false
+    @MainActor static var order: [Kind] { [.heat, .stress, .lattice, .prisms, .xray, .play] }
     /// Test control only (R7-V review): the first build's Play status — a mini spinner while the sims work, nothing for a
     /// failure.
     @MainActor static var controlMiniSpinner = false
