@@ -1,6 +1,206 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · the review of M2 and F — what it found, what is fixed, and your three answers of 2026-10-15 (2026-10-17) (read this first)
+## ★ Round 7 · R7-D1 — the redesign's SCREEN on the Flexible stage: A2's capsule + A1's corner pair (your pick 1) (2026-10-17) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, from `cb388365` (the review of M2 and F). Commits: `be30a031` (tests
+FIRST, against stubs — `round7/batch_d1/d1_red_run.txt`), `ae90a2fb` (the code, the hooks, the re-pins), `973c0467` (the
+suite's blast radius re-pinned), `8f8d6af4`, `6bd54919` and `184927ab` (what looking at the pictures found, fixed), and this
+section's. **Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1) at `184927ab` and not launched** — the
+app was not running; the installed `TopOpt.debug.dylib` is the built one (cmp; 83 745 376 bytes, sha256 ff64c158a80a6694, 13:25).
+App only: no core file. #354 / main files: **only the reviewed hooks** (table below), all in WorkspacePlaceholder.swift;
+ProjectModel.swift is not touched (its H35 belongs to batch D2).
+
+### What you will see now, in plain words
+
+**At the top of the Lattice page**
+- Under the project name, **one capsule: "● Flexible ⌄ | Lattice | Squish"**. Tap **● Flexible** for a menu: **‹ Topology**
+  (with its anchors and loads), **● Flexible ✓** (you are here), **Surface ›**, and **About Flexible…** (the limits and the
+  delete, as before). **Squish** opens the Squish page (today's Settings page). **Lattice** is the page you are on.
+- Gone from this page: the [‹ Topology] [Surface] buttons, the **Settings** button and the big green **Flexible** title (all now
+  in the capsule), and the **Regions** popover (your img6). Topology, Structural/Aesthetic and Surface look exactly as before.
+- The view icons are **Heat, Stress, X-ray, Lattice, Prisms, Play**, in that order (the mockup's), a little bigger (44 pt), on
+  one line — three over three on the mini in portrait. They behave as before: nothing turns X-ray on by itself (X1); the heat
+  follows the group of the face you last tapped, and a 3 s hold shows every group (F). At 11" portrait the short "Lattice ready"
+  note now appears under the icons instead of beside them (they fill the line).
+
+**At the bottom right — the corner pair, and nothing else**
+- **The Setup chip "▦ Fast · ↑ +Z · ↓ −Z ⌃"** reads the three settings without opening anything. Tap it: one row each —
+  **Quality** [Fast 64³ | Balanced | Fine], **Plate up** [Change] (the plate picker opens in the same card, ‹ back), **Gravity**
+  [Change] (today's gravity setup), **Print parameters ›** (today's sheet). No Protect 3 mm, no Minimize plastic, no CAD surfaces
+  (your img1 words and your answers) — Topology keeps every one of them.
+- **The Lattice button**: "Lattice" over ONE line that says where it stands ("Preview · core runs one group at a time", "Ready
+  · tap to send", "Building…", "Fix: the weight on Face 3", "Nothing to squish yet", "Set a face to Lattice in Selections
+  first"). **A tap does the next step:** Ready sends to core once (an unchanged job is never sent twice) and opens the card;
+  Preview opens the card and sends **nothing**; a fix pops the fix card; "View off" turns the Lattice view on; "Nothing to squish
+  yet" opens the Squish page. **The ⌃ beside it opens or closes the card and never sends.**
+- **The card: ① Preview ② Core ③ Export — nothing else** (no Optimize, no iPad/Mac chip: your answer). ① says what was built
+  ("built · 2 face-prisms · 25.0 mm"); ② shows [Send to core] when it is ready, the 1–3 "Send Group 1 only" buttons when core
+  can't take the whole job, core's answer when it comes back (its whole sentence behind the (i)), and the "This export makes Group
+  2 only. / Edges and faces go in separate exports for now." lines; ③ shows the two exports, greyed, with "Waits on core's
+  Flexible exporter". No dark scrim: the model stays live. **The full-screen Export step no longer opens on this stage** —
+  everything it said is in this card (the reviewer's condition (a), tested). On Topology and Surface a Flexible project still has
+  the old bottom bar, its Lattice pill, Optimize and the full-screen Export step.
+- **A blocker pops at once above the pair** ("Fix 1 thing · How much weight presses Face 3?") with its fixes: a weight to type is
+  one button, **"Fix in Squish ›"**, which opens the Squish page on it; a rest or a filament applies right there. It pops once per
+  new problem; dismissed, it stays away until you tap the Lattice button. A small amber dot sits on **Squish** in the capsule
+  while that fix waits there.
+- **One card at a time:** opening the Setup card folds the Lattice card and the other way round; a tap on the part, leaving the
+  stage, opening the Squish page and gravity setup fold them all. The squish player steps aside while a card is open.
+- The minimised Selections pill keeps a clear gap from the Setup chip at every size (your img5: it touched the iPad chip) — on the
+  mini, the closest, 65.5 pt.
+- **On the mini every word reads whole.** Its cards are narrower (336 pt, so they stay clear of the Selections panel): the Setup
+  rows' names take their own width and the card puts each step's words under its name. The first pictures showed "Fa… Bal…",
+  "Print paramet…", "Send Group 2 only, Face 2 re…", "Export G-/code" broken over two lines and "Preview · core runs one group
+  at a ti…" on the button. Those are fixed and now measured by a test, on the mini and the 13". The Lattice button is 260 pt on
+  every iPad and its ⌃ is 44 pt, your target size; at 52 pt it cut core's "Core designed it · Gyroid · 230 °C · 3 faces".
+
+**On the Squish page**
+- The same capsule under the Exit row, with **Squish** lit (a small white dot on it while the page has unsaved changes). **Lattice**
+  in the capsule, and Topology / Surface in its menu, leave the page **through Save & Exit's own check**: if something blocks, the
+  fix opens and you stay; otherwise it saves (or leaves unchanged) and goes. About Flexible… opens the limits sheet over the page.
+- The top line and the fix pop-up open below the capsule, never on it, and the pop-up ends before the view icons (at 11" portrait
+  and on the mini it reached over two of them before this was fixed).
+- The view icons there are 44 pt too.
+
+**Opening the stage**
+- **The Squish page never opens by itself** (your answer): choosing Flexible, or arriving on the stage, lands on the Lattice page.
+- "On the Flexible screen you can't move a Topology piece by tapping it." — the reviewer asked me to say this in plain words. It
+  becomes true with the Selections half of the redesign (batch D2, its tap router H22), **not with this batch**: today a tap on
+  the Flexible screen still does what it did.
+
+### The pictures (`round7/batch_d1/look/`: your pad restored through the app, `a1Project(3)` (Bottom anchors, Top 22 lb, Group C's
+Face 3 + Face 5 face-prisms), the whole page hosted, the shipping renderer drawn under the chrome; `sides/`: ours beside the mockup
+you picked; `mockup/`: the mockup's ● Flexible menu at four sizes — the app's is the iPad's own menu, which no offscreen picture
+can hold)
+- **13" portrait** (`D1_13p_*`), **13" landscape** (`D1_13l_*`), **11" portrait** (`D1_11p_*`), **11" landscape** (`D1_11l_*`) and the
+  **mini portrait** (`D1_minip_*`), each: M01 the page at rest · M02 the Setup card · M03 the Lattice card on Preview (the log says
+  "sent 0") · M04 Selections minimised next to the Setup chip (the log gives the gap) · M05 Face 3's weight set to 0: the blocker
+  callout, by itself · S01 the Squish page through the capsule's Squish, its fix pop-up open.
+- **Ready** at 13" portrait and 11" landscape (`D1_13p_ready_*`, `D1_11l_ready_*`): M10 the button reads "Ready · tap to send", M11
+  the card on ② with [Send to core].
+- Every run's log (`D1_<size>_log.txt`) says where each piece landed and "the Squish page opened by itself: false".
+- **Side by side** (`sides/SIDE_*`): 13" portrait at rest, Setup, Preview card, Ready card, callout, Squish page; 11" portrait at rest
+  and the Squish page; 11" landscape at rest and the card; 13" landscape at rest and the callout; and `MINI_before_after_fix3`: the
+  mini's Setup card and Lattice card before look-and-fix 3 (cut) and after (whole).
+- What looking found, and fixed (`8f8d6af4`, `6bd54919`, `184927ab`): the callout never popped by itself (a stale value in the
+  pair's change handler; now pinned by a hosted test on your pad); on the Squish page the fix pop-up sat on the capsule, then over
+  two view icons at 11" portrait and on the mini; the button's line was cut; the mini's cards cut five of your lines (above).
+
+### The hooks (#354's WorkspacePlaceholder.swift — the reviewer's approved list of 2026-10-14 19:45; each with its gate and a `// Flexible (PR #362) Hnn:` comment)
+| hook | anchor (line today) | ± | gate |
+|---|---|---|---|
+| H24 | `if force.gravityIsSet { bottomRightControls }` (:1289) | 1 edited | `, !flexibleMain.owns(project, stage)` — the chip column is not drawn on the Flexible stage; Topology keeps it |
+| H18 removed | the first statement of `visibleSettingsChips`'s filter (:6002) | −1 | condition (b): in the SAME commit as H24 (`ae90a2fb`); `FlexibleMainChips.swift` deleted with it |
+| H26 | `if viewerMesh != nil, regionsOpen { regionsPanelOverlay }` (:1297) | 1 edited | `, !owns` |
+| H27 | `if viewerMesh != nil { stageNavigationButtonOverlay }` (:1302) | +1 −1 | `, owns` → `FlexibleStageCapsule` with #354's own `StageNavPlacement`; the next line `else if viewerMesh != nil { stageNavigationButtonOverlay }` is today's (H9 inside) |
+| H28 | `if viewerMesh != nil { latticeSettingsButtonOverlay }` (:1304) | 1 edited | `, !owns` |
+| H29 | our own `FlexibleStageChip` branch of the identity row (:2808–2810) | −3 | its own condition was exactly `owns`; #354's `LatticeStageModeChip` branch byte-identical; the `FlexibleStageChip` type deleted |
+| H30 | `bottomBar`: after `Spacer()` (:11762) and after `optimizeButton` (:11768) | +2 | `owns` → `FlexibleCornerPair`; the else is today's bar; the four lines between byte-identical, not re-indented (H10 once) |
+| H31 | our own C2 line, `FlexibleExportMount` (:1411) | 1 edited | `, !owns` |
+| H33 | our own H6 legend line (:1343) | 1 edited | already inside `owns`; `chipColumnWidth: 0` |
+| H34 | our own P player line (:1373) | 1 edited | already inside `owns`; `chipColumnWidth: 0` |
+| H36 | our own FlexibleStagePage mount, between the two H2 lines (:1407/:1408) | +1 | mounted only for `showFlexiblePage, project.lattice.flexible != nil`; both H2 pins keep their text |
+| H37 | the first line of #354's `openLatticeSettingsIfUnconfigured()` (~:3880) | +1 | `project.lattice.flexible != nil` → return (Structural/Aesthetic keep the once-per-session wizard; #354's guard stays in FlexibleSurfaceNavTests' 900-character window) |
+| H38 | our own `onChooseFlexible` line (:1391) | 1 edited | `showLatticeWizard = false` without `showFlexiblePage = true` |
+
+`git diff cb388365 -- app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift`: 13 insertions, 12 deletions — exactly these
+lines, nothing else. `FlexibleRound7ScreenHookTests` pins each once at its anchor with its gate and today's else (RED control
+inside: any one gate removed from a copy of the source fails the check; H29's branch or H18's line put back fails).
+
+### Your words → the fix → the test (tests FIRST at `be30a031`: 8 classes against stubs, red run `round7/batch_d1/d1_red_run.txt`; RED control inside each)
+| your words | the fix | pinned by (RED control) |
+|---|---|---|
+| img5 (2026-10-14): "We also really need to clean up the menu at the top. Having Setting/Topology/Flexible/Surfaces all in different places, feels like it wasn't pre-planned" + pick 1: "I like A2 … everything from A2 is great!" | `FlexibleStageCapsule` (H27, H28, H29; on the Squish page H36) | `FlexibleStageCapsuleTests` — the menu's four rows and actions, the segments, the dots, the Squish page's leave through Save & Exit's check (RED `FlexibleSquishLeave.controlSkipsDecide`: a hop that skips the check leaves while blocked) · `FlexibleChromeLayoutTests` (the capsule at 24/76 = #354's StageNavPlacement formula, a source pin) · hosted S1/S3 on your pad |
+| pick 1: "the corner pair from A1 on the main Lattice screen"; img1: "Remove the 'Protect 3mm' chip … Is there any need for 'Minimize Plastic'"; your CAD answer | `FlexibleSetupTray` + H24 (H18 removed) | `FlexibleCornerPairTests` Setup: the live chip, exactly four rows, each row's one action (RED: today's column on your pad — Fast · 64³, Protect 3 mm, Minimize plastic, Plate up, Gravity) · `FlexibleR7M1Tests` (re-pinned) |
+| pick 1: "main = the next step in one tap … its ⌃ opens the card with Preview → Core → Export"; your answer "DROP both the muted Optimize row and the iPad/Mac compute chip" | `FlexibleLatticeButton`, `FlexibleLatticeCard` + H30, H31 | the split's table (eleven states → line, action); Ready sends once and opens ②, Preview and ⌃ never send, `showHold` never changes what was sent (RED: today's pill sent on Preview, Ready could only send) · the card's three steps; nothing on it says Optimize (hosted, his pad) |
+| the reviewer's condition (a): "EVERY warning, refusal and answer from core that the full-screen step shows today must appear in the corner card" | the step's rows lifted into `FlexibleExportRows`, drawn by both | `FlexibleRound7CardMessagesTests`: 14 core-run scenarios (sending, designed, refused, the three holds incl. the edges notice, no face-prism, core couldn't run it, every "Not sent"), 5–8 listed messages each — all on the sheet, all in the card (RED `controlDropsHoldNote`) |
+| pick 1: "Blockers pop at once above the pair" | `FlexibleBlockerCallout` + `FlexibleCalloutRule` | `FlexibleCornerPairTests` callout: once per new issue, never an advisory, the buttons (RED `controlEveryRecompute`: one issue pops twice) · `FlexibleRound7CalloutHostedTests` on your pad (RED `controlCapturedStatus`: no pop — the first build, found by looking) |
+| your rules: one card per page; blockers at once | `FlexibleChromeState` (the plan's step 0, its exact API, shared with D2); the panels are overlays | `FlexibleChromeStateTests` (one card at a time; a tap, a stage change, the Squish page fold; the bar measures 64 pt with a panel open or not — RED `controlPanelInLayout`: 316 pt) |
+| img5: "When 'Selections' is minimized it touches the 'iPad' chip. Please ensure that the all chips are separated by equal padding" | the pair replaces the old bar | `FlexibleChromeLayoutTests` (≥ 12 pt at six pad sizes; RED: img5's bar, −8 pt) · the pictures: 65.5 pt (mini) … 697.5 pt (13" landscape) |
+| img6: "Remove regions as it is no longer necessary thanks to the Surface stage" | H26 | the hook pins |
+| your answer: "The Settings page is renamed 'Squish'" | the copy | `FlexibleSquishCopyTests` (RED: "as you set it in Settings") |
+| your answer: the Squish page "NEVER opens by itself" | H37, H38 | the hook pins · hosted S1 · every picture run logs "the Squish page opened by itself: false" |
+| your rules: icons only; 44 pt targets; A2's views row | the order and 44 pt (both pages) | hosted S5 (RED `controlR7VOrder`) · the layout's row 304 (148 × 96 on the mini) |
+| pick 1: the Squish page shares the top | `FlexibleStagePage` (the capsule, `leave(then:)`, the keep-outs) | hosted S4 at 11" portrait (RED `controlExitRowOnlyKeepOut`: the top line lands on the capsule, y 80) · the fix pop-up below the capsule and left of the views at six sizes (RED: y 78, on the capsule) |
+| your rule (2026-09-29): "one visible line per setting", whole — the mini's pictures cut five | the tray's narrow rows, the card's stacked steps, the 260 pt split with a 44 pt ⌃ (`184927ab`) | `FlexibleRound7FitHostedTests`: every one-line word and every Setup row measured, drawn width against needed width: the tray on your pad, the card in all 14 core-run scenarios plus the mini's three-send preview, the button's 14 lines, on the mini, 11" and 13": none cut, no row spilling. RED controls: the first drawing at 336 spills all four Setup rows (353 in 308); the side-by-side card cuts "Send Group 2 only, Face 2 resting" (201 of 206), the Group 3 send and "Export G-code"; the first button's main zone cuts the Preview line (170 of 172) |
+
+### Rules this batch reverses or does not follow (and why)
+- **The plan's "DEFAULT TAKEN: the Squish page still opens by itself once per session"** → it never opens by itself (your later
+  answer; H37/H38).
+- **The plan's views-row need-rules** (Stress → X-ray + Lattice, Prisms → X-ray, …) are **not built**: X1 (your Q9 answer: the
+  Lattice icon and [Prisms] never turn X-ray on) came after the plan. Only the order and the 44 pt size changed.
+- **The plan's "Main-page Heat is a plain on/off"** → F's rule stays (your clarification of answer 13: the 3 s hold for every group
+  works on the main page too).
+
+### Re-pins (our own tests only; each attributed in the test)
+- `FlexibleBatchCHookTests` H6 → H33 (`chipColumnWidth: 0`).
+- `FlexibleMainPageHookTests` P → H34; the Squish page's Exit pin → `leave(then:)`; the notice band gains the capsule.
+- `FlexibleMainPageRound4Tests` the C2 mount → H31; the Export step's strings → `FlexibleExportRows` (moved, unchanged); the note
+  under the views row at 11" portrait.
+- `FlexibleR7M1Tests` H18 → H24 (the whole column off the stage; the Setup tray's rows pinned instead).
+- `FlexibleLegendPlacementTests` (the capsule is chrome the Squish page's player keeps clear of), `FlexibleMainPageRound4HostedTests`
+  and `FlexibleMainPageRound4VerifyTests` (44 pt icons; the Lattice icon the fourth; the note under the row at 11" portrait and on an
+  820 pt pad — it still costs the legends nothing; the step's rows), `FlexibleRound6HostedTests` (six 44 pt icons on one line but on
+  the mini; [Prisms] the fifth, Lattice the fourth), `FlexibleRound7ViewsHostedTests` (the worded-chip control goes where the note's
+  band is not), `FlexibleRound7ViewsReviewHostedTests` (the Play icon is 44 pt).
+- `FlexibleChromeLayoutTests` (this batch's own, look-and-fix 3): the split is 260 on the mini too (was 240), the ⌃ 44 (was 52);
+  a new check pins why the mini's panels stay 336 (wider would cover the Selections panel).
+- Two expectations of this batch's own `FlexibleCornerPairTests` moved after the red run: the button's Refused / Not sent line is one
+  short line (core's whole sentence is the card's), and the Print parameters test opens your pad (the sheet needs an open project).
+- **Every #354 test stays green unchanged** (no #354 test file touched).
+
+### The bytes and the other stages
+- **Goldens (FlexibleAngledGoldenTests):** 0 DIFFERS in both modes — SWIFT_DETERMINISTIC_HASHING=1: 38 identical; unseeded: 32
+  identical, 1 PART-SKIP (`973c0467`; again at `6bd54919`: the same; and at `184927ab`: the same — 38 / 0 and 32 / 0 + 1 PART-SKIP).
+- **The 16 stage-job hashes:** `round7/batch_d1/stage_job_hashes_d1.txt` is byte-identical to `round7/review_fix/stage_job_hashes_r7r.txt`
+  (16 rows exit 0, the controls as before; at `973c0467` — the later commits touch only Flexible views).
+- **Topology, Structural, Aesthetic, Surface (condition e):** `FlexibleRound7OtherStagesProbe` hosted the whole app page and drew each
+  stage's chrome, reached by its own buttons, BEFORE any hook (two runs, pixel-identical) and after: 13 frames — Topology / the
+  Structural lattice stage / Surface of your structural stand (13" portrait and 11" landscape), the Aesthetic lattice stage and
+  Topology of the aesthetic stand, Topology of 'shelvesb' (no lattice), and **your Flexible pad on Topology and Surface (the old bar
+  with its Lattice pill and Optimize)**. Identical but for the structural Topology frame's load arrow, whose edge anti-aliasing
+  flickers between runs of the same code (11–19 px; a third run matched the before frames exactly) —
+  `round7/batch_d1/other_stages/compare.txt`, the frames in `before/`, `after/`, `after_run3/`, `final_184927ab/` — at the last commit all 13 frames are pixel-identical to `before/`, the arrow included (at `6bd54919` too).
+
+### The runs (raw: `round7/batch_d1/d1_runs.txt`)
+- **Red run** (`be30a031`, the stubs, one class per process): every new test red but the step-0 state's own (FlexibleChromeState is the
+  plan's exact text), the owns pin and the ids pin; two stub classes crashed on an empty stub list (red).
+- **The targeted suite, once** (`ae90a2fb`, 205 classes: every Flexible class, every class that source-pins a touched file —
+  WorkspacePlaceholder's and ProjectModel's 60 included — the goldens, LatticeStaleTypeTests, ProjectStoreTests, UndoHistoryTests,
+  LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, LatticeSimSolveTriggerTests, BottomBarMeasurementTests,
+  LatticeIncludeGateTests, LatticeBarrierModelTests, LatticeSeparationTests, LatticeLegendColourTests,
+  LatticeStructuralViewStateTests, LatticePageRound2Tests, GroupViewStateTests; SurfaceStageGesturesTests does not exist): 1 370 tests,
+  1 290 passed, 68 skipped, 12 failed = the two known (BatchNVerify refine line, SimSolveTrigger), one stale binary (the Exit pin was
+  re-pinned before the commit but built after) and nine of ours measuring the 40 pt row, R7-V's order, the note beside the row at 11"
+  portrait or the sheet's own rows — re-pinned (`973c0467`) and re-run with every D1 class: 96/96. No exit signal 11.
+  LatticeStaleTypeTests 6/6.
+- **After looking** (`8f8d6af4`, `6bd54919`): the touched classes 39/39; a second targeted pass over every class reading
+  FlexibleStagePage, FlexibleLegendPlacement, FlexibleCornerPair or FlexibleLatticeButton (64 classes, 369 tests): 341 passed, 27
+  skipped, 1 failed — the known refine line.
+- **Look-and-fix 3** (`184927ab`, the mini's words): the new fit test and the layout pins 9/9; pass 3 over every class reading a file
+  it touched, plus pass 2's (59 classes, 372 tests): 357 passed, 14 skipped, 1 failed — the same known refine line, the same eight
+  numbers as in the suite and pass 2 (pre-existing: Xcode 27 text metrics, in every round-7 handoff). The commit message says
+  370 / 355: that count missed two end lines that a print had run into; the raw file has the right count.
+
+### Not done
+- The Selections half (batch D2: the face chip, the B1 list, the (i), the filled join button, the lattice-only role, the main-page
+  trash; hooks H15', H20, H22, H23, H25, H32, H35 — condition (d)'s decode and Topology-run tests belong there) and the integration
+  (D3).
+- The capsule's ● Flexible menu is the iPad's own menu: no offscreen picture can hold it (it draws in its own window); its rows are
+  pinned by FlexibleStageCapsuleTests.
+- The card's ② does not yet say WHAT goes to core when it is Ready. The mockup shows "Group 1 · 22 lb · 1 face · bead 0.45 mm"
+  there; ours shows only [Send to core]. Seen in the side-by-side picture, not built: it needs a summary of the job, and that
+  belongs with D2's Selections work or its own small step. Say if you want it.
+
+### Questions
+1. **(Reviewer, condition (a))** the full-screen Flexible Export step has no "drawer's background confirmation" and no "Save & Exit
+   sealed-pocket check" — no such string or check in FlexibleExportSheet or anything it reads; they live in #354's lattice run
+   (RunScreen / RelatticeRunner), which the Flexible stage never mounts. The test lists everything the Flexible step does show. Did
+   you mean something else?
+2. At 11" portrait the "Lattice ready" note now drops under the view icons (they fill the line at 44 pt). OK?
+3. The Lattice card sits over the right-hand legend while it is open (as in the mockup). OK, or should the legend move aside?
+
+## ★ Round 7 · the review of M2 and F — what it found, what is fixed, and your three answers of 2026-10-15 (2026-10-17) (the step before R7-D1 above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, on `a870cad4` (M1 + M2 + F + X1). Commits: `c7f16bac` (tests first,
 against stubs), `95fb60f1` (the fixes and the re-pins) and this section's (the runs, the pictures). **Nothing is pushed.**
