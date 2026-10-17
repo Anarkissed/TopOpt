@@ -1,6 +1,180 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-D1 — the redesign's SCREEN on the Flexible stage: A2's capsule + A1's corner pair (your pick 1) (2026-10-17) (read this first)
+## ★ Round 7 · the review of R7-D1 — what the two-angle review found on the new screen, what is fixed, and what waits for the reviewer (2026-10-17) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, on top of `999c6025` (R7-D1). Commits:
+- `185fcc10`: tests FIRST, against stubs. The red run is `round7/batch_d1_review/d1r_red_run.txt`.
+- `ca2de52d`: the fixes.
+- `7d8ab7be`: the Setup chip's clip, one re-pin, and the LOOK probe.
+- This section's commit.
+
+**Nothing is pushed.** **Not installed: the app is open on the iPad Pro 13" simulator (147E56A1).** `launchctl list` shows
+`UIKitApplication:com.nadim.topopt` with PID 9200, so the install rule held it back: install pending until the app is closed.
+The Debug build of `7d8ab7be` succeeded in DerivedData/flexA1. The simulator still has `184927ab`, from R7-D1.
+
+App only: no core file. **No #354 or main file is touched by this step.** WorkspacePlaceholder.swift and ProjectModel.swift are
+byte-identical to `999c6025`, so the hook table is still R7-D1's (below). Every change is in Flexible files.
+
+### What you will see now, in plain words
+- **The squish player no longer hides under the orientation cube.** Before, with Play on, opening the Setup card or the Lattice
+  card in portrait sent the player to the top of the screen, half under the cube. At 13" it covered the weight label; at 11"
+  half the scrubber and its line were hidden. Now:
+  - in portrait it sits **right above the open card**. There is no room beside the card, because the Selections panel takes
+    the left side;
+  - in landscape it stays on **its own row, to the left of the card**, as in the mockup.
+- **The colour key (the legend card) sits right under the view icons, as in the mockup, at every size.** The open card stops
+  below it.
+  - Before, in landscape, the card covered the key. At 11" landscape it covered all of it, so the heat colours had no key.
+  - At 11" landscape the tall Preview card now scrolls a little: 306 of its 412 pt show, and Export is a short scroll away.
+- **Plate up › Change** now opens a page with ONE question, "Which side faces up, away from the plate?", and six big buttons
+  (+Z −Z +X / −X +Y −Y, 48 pt tall). The current direction is lit.
+  - Under the buttons: "+Z · assumed from gravity", or "−X · you chose this" with [Assume from gravity].
+  - A tap goes back to the rows.
+  - Before, it showed Topology's whole orientation panel: paragraphs, small chips, and "Down in service +Z" above a chip that
+    says gravity is −Z. Topology keeps its own panel, unchanged.
+- **The Lattice card**:
+  - ② says "Core runs one squeeze group at a time" on ONE line. Its (i) moved under the word "Core".
+  - The second and third "Send Group N only" buttons, and the callout's second fix, have an outline now, so they read as buttons.
+  - On Ready, ② says what goes to core, above [Send to core]: "Group 1 · 22 lb · 1 face · bead 0.45 mm".
+  - When something needs fixing, ② holds the fix buttons themselves ("Fix in Squish ›", "Face 3 rests"), so it is one tap.
+    ① says "waits for the fix". Before, ① said "built" with a green check while the model had dropped the lattice.
+  - ① names the faces: "built · Face 3 + Face 5 · 25.0 mm".
+  - If core couldn't run the job, the card offers **[Send again]**.
+- **The Lattice button can always send what is on screen.** If the job changed since core answered, or the thing that blocked
+  it cleared, the button says "Ready · tap to send" again and a tap sends. An unchanged job is still never sent twice.
+- **The Squish page's panel says "Flexible · Squish".** Before, it said "● Flexible" right under the capsule that already says
+  Flexible.
+- The Setup chip no longer shows two faint vertical lines at its sides.
+- **The Selections card on the left is still the old one.** The Selections half of the redesign is batch D2. Until then:
+  - you still see "Keep clear", kg/lbs, the None/All chips, and Group C labelled "Protect";
+  - there is no trash on group lines, no (i), no draggable face chip, and no filled "Add to Group C as lattice" button;
+  - on 11" portrait the ↓ handle on the part can sit on the Bottom row's eye button;
+  - with Play on, a ± handle on the part can be drawn over the player's slider.
+  All of that is D2's work.
+- **The Regions icon (the dashed squares in the Selections header) is still on this stage. Tapping it only turns it blue.** If
+  you then go to Topology, its Regions panel opens there.
+  - Removing it needs one more line in #354's file, and that line is not on the reviewer's approved list. So it is asked of the
+    reviewer (Questions, 1). D2's new Selections list replaces that header anyway.
+  - Until then, please don't tap it on the Flexible stage.
+- **On the mini in portrait, with the tall Lattice card open, the player steps away and comes back when the card folds.** There
+  is no free spot that covers nothing: the card takes the right side and the Selections panel the left. With the Setup card it
+  shows above the card. Questions, 3.
+- "On the Flexible screen you can't move a Topology piece by tapping it." This is the reviewer's sentence. It becomes true with
+  the Selections half (D2, its tap router H22), not yet. Today a tap on the Flexible screen still does what it did.
+
+**Corrections to the R7-D1 section below:**
+- Its "Gone from this page: … the Regions popover" is true of the popover, but the icon that opened it is still there and does
+  nothing (above).
+- Its question 3 said the card covered the legend "as in the mockup". That was wrong: in the mockup the legend sits under the
+  views row and no panel covers it. That is how it is now.
+
+### What the review found → the fix → the test
+Tests came FIRST at `185fcc10`, red run `d1r_red_run.txt`, with a RED control inside each.
+
+| the review found | the fix | pinned by (RED) |
+|---|---|---|
+| **BLOCKER**: in portrait, Play on, Setup or Lattice card open, the player climbed under the cube. 13" (526,174) on the cube (808,14 210×210); 11" (427,176). The cause: R7-D1 reserved the panels' WHOLE possible column, and nothing kept the player off the cube. His rule: nothing covering a button | the player keeps clear of the open panel's REAL frame: its drawn height, measured by the pair (`FlexibleChromeGeometry.notePanel`), reading the open card live, re-measured per card. It also keeps clear of the cube and of the name row with the capsule (`FlexibleMainPlayerSlot.keepOut`/`openPanel`) | `FlexibleRound7D1ReviewTests` P1 (pure, 4 sizes × 3 panels: above the panel in portrait, on its row in landscape; RED control: R7-D1's column keep-out lands on the cube) · `FlexibleRound7D1ReviewHostedTests` P1 on his pad (RED at 999c6025: 13p/11p bar on the cube ×4) |
+| landscape: the cards sat on the legend card (13l over the ramp, 11l over the whole key, 11l tray/plate/Ready close or over it), "which the mockup never does" | the main page's ONE legend card sits right under the views row (`FlexibleMainLegendLayout.placeMainCard`: the mockup's top 292, below the note band at 11" portrait). A panel's top never rises above the legend's foot + 12 (`FlexibleChromeLayout.panelTopLimit(_:legend:)`); past that it scrolls. The legend never moves when a card opens | L1 (pure, 5 sizes × rows × folded × 3 panels; RED control: R7-D1's centred legend under R7-D1's 11l card) · hosted L1 on his pad (RED: 11l tray and card on the legend) |
+| Plate up opened #354's BuildOrientationView: paragraphs, ~40×28 pt chips, none lit for +Z, a caption "Assume from gravity", "Down in service +Z" over a −Z gravity | `FlexiblePlatePage`: one question line, six 48 pt buttons in the mockup's 2×3 order, the resolved one lit, one state line with [Assume from gravity]; a pick goes back to the rows. #354's view untouched | PL (the choices, the lit one, the lines, a pick, assume; the tray no longer embeds BuildOrientationView — RED at 999c6025) · `FlexibleRound7FitHostedTests` plate page (six ≥ 44 × 44 in two rows, the words whole, mini and 13") |
+| the card's Core line wrapped at every size ("Core runs one squeeze group at / a time"); the fit test counted a wrap as fine | the hold's line is ONE line (`lineLimit(1)`, measured `saidWhole`); its (i) rides the Core step's title | `FlexibleRound7FitHostedTests` (re-pinned, extended): the hold's line measured whole at 336 (mini), 420 (13") and 11" (RED at 999c6025: not measured, two lines) |
+| the secondary sends and the callout's second fix read as text, not buttons (his B1(c) words) | the strong hairline on secondary buttons: the card's FixRow (compact only, so the full-screen step on Topology/Surface keeps its look) and `FlexibleCornerPairStyle.big` | ST (source pins; RED at 999c6025) · the pictures |
+| the Lattice button could not send again after core failed, after a "Not sent" cleared with no rebuild, or after a job-only change: it showed a stale answer and nothing could send | an answer is current only for the job on screen: `FlexibleMainStage.answerIsCurrent` + `FlexibleCoreJobMemo` (what Send would do now, decided as `FlexibleCoreRun.send` decides it, memoised by the settings, the stamps' grids and the lattice). A failed run offers [Send again] (`resendFromCard`) | `FlexibleRound7D1ResendTests` on the pad with a stand-in core (RED at 999c6025: no Send again; a changed job stayed "Sent" and the main zone only opened the card; a cleared Not sent stayed "Not sent"). Also: a unit change keeps "Sent" (no false Ready), and an unchanged job never re-sends |
+| with a fix pending, the card added a tap ("Show the fix") and ① kept a green "built" | the callout's own buttons in the card's Core row (`FlexibleCalloutButtons`, shared); ① "waits for the fix" | hosted FX on his pad (RED at 999c6025: only "Show the fix"; no "waits for the fix") |
+| condition (a): the message test fixed the card's state; with a blocker the card hid core's row | core's row stays in the card under a blocker (and as an older answer) | `FlexibleRound7CardMessagesTests.testCoresAnswerStaysInTheCardWithABlockerOrAnOlderAnswer` (RED at 999c6025: the .fix card drew the issue alone) |
+| (minor) Ready did not say what goes to core | "Group 1 · 22 lb · 1 face · bead 0.45 mm" above [Send to core] (`FlexibleLatticeCard.jobSummary`) | the resend test (the pad: "Group 1 · 10 kg · 1 face · bead …") · the fit test (whole at 336/420) · R11 pictures (his pad: "Group 1 · 22 lb · 1 face · bead 0.45 mm") |
+| (minor) ① said "2 face-prisms"; the mockup names them | "built · Face 3 + Face 5 · 25.0 mm" (two at most, else the count; a split piece by count) | PV |
+| (minor) the Squish panel said "● Flexible" under the capsule | "Flexible · Squish" (the mockup's words) | PV |
+| (minor) hairlines at the Setup chip's sides | the chip clips to its capsule (they showed in a key window and in a non-key one, so they were not a focus ring) | the probe's chip test: brightness 0.14 at (20,32) before, 0.03 (the background) after |
+| (minor) two "red controls" for the chip column compared hard-coded sets | the control is now MEASURED: his pad's whole page, #354's own chip-width reader. Topology draws Quality, Minimize plastic, Plate up, Gravity, Design box and Paint; the Flexible stage draws none | `FlexibleRound7D1ReviewHostedTests.testTheChipColumnH24TakesOffIsTodaysColumnMeasuredOnHisPad`; the two old ones re-pinned to point at it |
+
+### Not fixed here, and why
+- **The Regions icon**: it needs a #354 line that is not on the approved list. STOPPED and posted to the reviewer (Questions,
+  1); the plain words above say so.
+- **The Selections card** (Keep clear, kg/lbs, None/All, no trash, no (i), the ↓ handle over the eye button, the ± handle over
+  the player): batch D2 (H15', H20, H22, H23, H25, H32, H35).
+- **Earlier batches' Squish-page copy**, routed to their owner (not D1's):
+  - the face header is cut to "Face 1 · latti…" at all four sizes;
+  - the top notice "Ready · Group 1 squishes ~1.6 of 2.7 mm · firmer wins [Fix]" is 53 characters, with an amber "!" that pairs
+    "Ready" with "Fix".
+- **"Face 2 resting" in "Send Group 2 only, Face 2 resting"**: core's hold copy, shared with the full-screen step and its tests.
+  Left as it is: Questions, 4.
+
+### Re-pins (our own tests only; each attributed in the test)
+- `FlexibleCornerPairTests` and `FlexibleR7M1Tests`: the chip column's hard-coded "red controls" now point at the measured one.
+  The Plate up message names the Flexible page.
+- `FlexibleRound7FitHostedTests`: the card test also measures the hold's line (one line) and the Ready summary. It has a new
+  plate-page test.
+- `FlexibleRound7CardMessagesTests`: a new case keeps core's row under a blocker or as an older answer.
+- `FlexibleBatchMVerifyTests.testTheFoldedCardIsTheOctetsMinimisedKeyOnTheVeryEdge`: the folded edge is taken by
+  `placeMainCard` (it was legendCard's argument to placeCard). The suite found it.
+- `FlexibleRound7D1ReviewTests` (this step's own): the plate pin names the view (`FlexiblePlatePageView`).
+- **Every #354 test stays green unchanged** (no #354 test file touched).
+
+### The bytes and the other stages (condition e)
+- **Goldens (FlexibleAngledGoldenTests), 0 DIFFERS in both modes**, at `ca2de52d` and again at `7d8ab7be`:
+  - SWIFT_DETERMINISTIC_HASHING=1: 38 identical;
+  - unseeded: 32 identical, 1 PART-SKIP.
+- **The 16 stage-job hashes:** `round7/batch_d1_review/stage_job_hashes_d1r.txt` (7d8ab7be) is byte-identical to
+  `review_fix/stage_job_hashes_r7r.txt` and to `batch_d1/stage_job_hashes_d1.txt`.
+- **Topology, Structural, Aesthetic, Surface:** `FlexibleRound7OtherStagesProbe` drew 13 frames, compared against
+  `batch_d1/other_stages/before/` (`other_stages_compare.txt`):
+  - at `7d8ab7be`: all 13 pixel-identical;
+  - one earlier run: 8 px on the structural Topology load arrow at 11" landscape. That is the anti-aliasing flicker R7-D1
+    recorded, in the same box; the next run was identical.
+- **The hook table is R7-D1's, unchanged** (this step writes no line in WorkspacePlaceholder.swift). `FlexibleRound7ScreenHookTests`
+  is green.
+
+### The pictures (`round7/batch_d1_review/`)
+- `look/`: your pad, restored through the app (`a1Project(3)`): the whole page hosted, with the shipping renderer drawn under
+  the chrome. Sizes: 13" and 11" in both orientations, and the mini in portrait. The steps:
+  - R01 at rest;
+  - R02 the Setup card;
+  - R03 the plate page;
+  - R04 the Lattice card on Preview;
+  - R05 Play on with the card;
+  - R06 Play on with the Setup card;
+  - R07 a blocker by itself;
+  - R08 the card with that blocker;
+  - R09 the Squish page;
+  - R10/R11 Ready at 13" portrait and 11" landscape.
+  Each `R_<size>_log.txt` says where the player, the legend and the open panel landed, and "nothing touches" at every step of
+  every run. `R_chip_*` are the Setup chip before and after its clip.
+- `sides/`:
+  - `SIDE_*`: ours beside the mockup's "Your pick" at the same size and state;
+  - `BA_*`: the review's own frames (before) beside ours (after), for the player at 13p/11p, the card and the legend at
+    13l/11l, the plate page, the blocker card, the callout and the Squish page.
+
+### The runs (raw: `round7/batch_d1_review/d1r_runs.txt`)
+- **Red** (`185fcc10`, stubs): every new test was red where it should be (the file lists each failure). The measured chip-column
+  control passed: it is a control, not a fix.
+- **The targeted suite, once, at `ca2de52d`**: 257 classes, run in 22 chunks of 12. It covered:
+  - every Flexible class;
+  - every class that names a touched file (the D1 and review files, WorkspacePlaceholder and ProjectModel included);
+  - the goldens, LatticeStaleTypeTests and the listed #354 classes. SurfaceStageGesturesTests does not exist.
+  Result: **1 587 tests, 1 496 passed, 85 skipped, 6 failed**. No exit signal 11. The 6:
+  - AppModelTests 3MF ×3 (known);
+  - FlexibleBatchNVerifyTests refine line (known);
+  - LatticeSimSolveTriggerTests (known);
+  - ours: FlexibleBatchMVerifyTests' folded-card source pin, re-pinned at `7d8ab7be` and re-run green.
+  Afterwards, the four evidence files #354's probes rewrite (plane-extents ×2, smoothing ×2) were restored with git checkout.
+- **After the chip clip** (`7d8ab7be`): every class that reads the Setup chip or hosts the pair is green
+  (CornerPair, D1Review, Fit, SquishCopy, ScreenHosted, ChromeLayout, D1ReviewHosted, ChromeState).
+- **The LOOK probe**: 8 tests passed (7 page runs and the chip test); 0 touches. The `7d8ab7be` message says "9 runs"; it is 7.
+
+### Questions
+1. **(Reviewer) the Regions icon:**
+   - either one more gated hook, so the toggle at ~:9708 is drawn only when `!flexibleMain.owns(project, stage)` (or
+     `regionsOpen` is forced false on Flexible);
+   - or leave it to D2's H25, which replaces that header on Flexible.
+   Until then the icon lights up and does nothing on Flexible, and the Regions panel then pops up on Topology.
+2. **(Reviewer, condition a, still open)** the Flexible full-screen Export step has no "drawer's background confirmation" and no
+   "Save & Exit sealed-pocket check": they belong to #354's RunScreen/RelatticeRunner. Did you mean something else?
+3. **(You) the mini in portrait with the tall Lattice card open:** the player steps away until the card folds. Is that OK until
+   D2? D2's list will let it sit under the Selections card, as in the mockup.
+4. **(You)** "Send Group 2 only, Face 2 resting": the review found "resting" unclear. Would "Send Group 2 only (Face 2 stays
+   still)" be better? It is core's hold copy, used in both places, so I have not changed it without your word.
+
+## ★ Round 7 · R7-D1 — the redesign's SCREEN on the Flexible stage: A2's capsule + A1's corner pair (your pick 1) (2026-10-17) (the step before the review above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, from `cb388365` (the review of M2 and F). Commits: `be30a031` (tests
 FIRST, against stubs — `round7/batch_d1/d1_red_run.txt`), `ae90a2fb` (the code, the hooks, the re-pins), `973c0467` (the
