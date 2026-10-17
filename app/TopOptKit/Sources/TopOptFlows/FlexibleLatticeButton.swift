@@ -13,7 +13,7 @@
 //     Ready → sends to core ONCE (an unchanged job never re-sends: FlexibleCoreRun) and opens the card on ②
 //     Sending / Sent / Refused / Exports → the card      No face-prism → disabled, its line the reason (ruling 4)
 //     Nothing to squish yet → the Squish page (it never opens by itself)
-// ★ THE ⌃ ZONE (52 wide): opens or closes the card and NEVER runs anything.
+// ★ THE ⌃ ZONE (44 wide — 52 until look-and-fix 3): opens or closes the card and NEVER runs anything.
 // The tones are today's pill's (FlexibleMainStatusPill.fill / .stroke). FlexibleMainStage.pillTapped stays the decider
 // for the old pill on the other stages (H10); this button is the Flexible stage's.
 
@@ -158,6 +158,7 @@ struct FlexibleLatticeButtonView: View {
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(DS.Color.textPrimary.opacity(ready ? 0.88 : 0.62).color)
                         .lineLimit(1).minimumScaleFactor(0.78).truncationMode(.tail)   // (his ≤ 44-character lines read whole)
+                        .saidWhole(line, minScale: 0.78)
                         .accessibilityIdentifier("flexible-lattice-line")
                 }
                 .foregroundStyle(DS.Color.textPrimary.color)

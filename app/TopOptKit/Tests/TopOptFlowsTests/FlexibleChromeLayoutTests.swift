@@ -5,6 +5,9 @@
 // that the all chips are separated by equal padding between them."): even spacing, 44 pt targets, icons only for views,
 // one card at a time above the pair. The mockup he picked ("Your pick", config pk) is the reference: the capsule at
 // (24, 76), the views 44 pt and 8 apart under the gizmo, the pair on 24/24, panels 420 wide (336 on the mini) 12 above it.
+// RE-PINNED (R7-D1 look-and-fix 3, 2026-10-17, this batch's own test): the mini's split was 240 until its pictures showed
+// its line cut ("Preview · core runs one group at a ti…"); it is 260 on every pad now. The panels keep 336 there — the new
+// check says why: wider would cover the Selections panel (FlexibleRound7FitHostedTests checks the rows read whole in it).
 import XCTest
 import SwiftUI
 import TopOptDesign
@@ -65,7 +68,7 @@ final class FlexibleChromeLayoutTests: XCTestCase {
             let mini = name.hasPrefix("mini")
             XCTAssertEqual(FlexibleChromeLayout.isMini(v), mini, name)
             let size = FlexibleChromeLayout.latticeButtonSize(v)
-            XCTAssertEqual(size, CGSize(width: mini ? 240 : 260, height: 64), "\(name): the Lattice split")
+            XCTAssertEqual(size, CGSize(width: 260, height: 64), "\(name): the Lattice split (the mini too: 240 cut its line)")
             let p = FlexibleChromeLayout.pair(viewport: v, setupWidth: 210)
             XCTAssertEqual(p.lattice.maxX, v.width - 24, name)
             XCTAssertEqual(p.lattice.maxY, v.height - 24, name)
@@ -74,13 +77,18 @@ final class FlexibleChromeLayoutTests: XCTestCase {
             XCTAssertEqual(p.setup.height, 48, name)
             XCTAssertEqual(FlexibleChromeLayout.pair(viewport: v, setupWidth: 400).setup.width, 240, "\(name): the Setup chip is at most 240")
         }
-        XCTAssertEqual(FlexibleChromeLayout.latticeCaretWidth, 52)
+        // RE-PINNED (look-and-fix 3): 52 → 44, still his 44 pt target; at 52 the main zone cut core's 44-character line
+        XCTAssertEqual(FlexibleChromeLayout.latticeCaretWidth, 44)
     }
 
     func testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow() {
         for (name, v) in Self.pads {
             let mini = name.hasPrefix("mini")
             XCTAssertEqual(FlexibleChromeLayout.panelWidth(v), mini ? 336 : 420, name)
+            XCTAssertEqual(FlexibleChromeLayout.panelIsNarrow(FlexibleChromeLayout.panelWidth(v)), mini, "\(name): the narrow rows on the mini only")
+            let panelLeft = v.width - 24 - FlexibleChromeLayout.panelWidth(v)
+            XCTAssertGreaterThanOrEqual(panelLeft - (PageChrome.edge + PageChrome.panelWidth), 12,
+                                        "\(name): the panel clears the Selections panel")
             let limit = FlexibleChromeLayout.panelTopLimit(v)
             XCTAssertEqual(limit, FlexibleChromeLayout.viewsRow(viewport: v).maxY + 12, "\(name): the views row's foot + 12")
             let pair = FlexibleChromeLayout.pair(viewport: v, setupWidth: 210)

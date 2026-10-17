@@ -7,9 +7,15 @@
 //     stage (x 24, top 22 + 42 + 12 = 76; H27 applies that modifier, a source pin keeps the two equal), 44 tall;
 //   * the VIEWS row under the gizmo: six 44 pt icons 8 apart, one line (304) — three over three on the mini in portrait;
 //   * the CORNER PAIR on the bottom-right corner, on 24/24: the Setup chip (48 tall, at most 240) and 12 pt right of it the
-//     Lattice split (64 tall, 260 wide; 240 on the mini);
-//   * its PANELS (the tray, the card, the callout) 12 above the pair, right-aligned on 24, 420 wide (336 on the mini), as
-//     tall as their content but never above the views row's foot + 12 — past that the body scrolls.
+//     Lattice split (64 tall, 260 wide);
+//   * its PANELS (the tray, the card, the callout) 12 above the pair, right-aligned on 24, 420 wide (336 on the mini: 12 pt
+//     clear of the Selections panel's 24 + 348), as tall as their content but never above the views row's foot + 12 —
+//     past that the body scrolls.
+//   ★ LOOKED AT on the mini (2026-10-17): the 240 split and the 336 panels as first drawn cut his words — "Fa… Bal…" for
+//     Quality, "+Z · assu…", "Print paramet…", "Send Group 2 only, Face 2 re…", "Export G-/code" on two lines, "Preview ·
+//     core runs one group at a ti…" — against his rule (one line per setting, whole). The split takes 260 there too (the
+//     Setup chip keeps 46 pt from the minimised pill); the panels keep 336 (wider would cover the Selections panel) and lay
+//     their rows out for it: the tray's titles take their own width, the card's step bodies go under their titles.
 // His img5 (2026-10-14): "When 'Selections' is minimized it touches the 'iPad' chip. Please ensure that the all chips are
 // separated by equal padding between them." — the minimised Selections pill keeps ≥ 12 from the Setup chip everywhere.
 
@@ -59,7 +65,9 @@ public enum FlexibleChromeLayout {
 
     public static let setupHeight: CGFloat = PageChrome.compactButton
     public static let setupMaxWidth: CGFloat = 240
-    public static let latticeCaretWidth: CGFloat = 52
+    /// ★ LOOKED AT (measured: FlexibleRound7FitHostedTests): 44, his target size — at 52 the main zone cut core's 44-character
+    /// "Core designed it · Gyroid · 230 °C · 3 faces" by 3 pt.
+    public static let latticeCaretWidth: CGFloat = 44
     public static let pairGap: CGFloat = PageChrome.gap
     /// The panels' gap above the pair.
     public static let panelGap: CGFloat = PageChrome.gap
@@ -67,8 +75,9 @@ public enum FlexibleChromeLayout {
     /// The mini (744 × 1133): its shorter side is under 800 pt.
     public static func isMini(_ v: CGSize) -> Bool { min(v.width, v.height) < 800 }
 
+    /// ★ LOOKED AT: 260 on every pad, the mini too (240 cut its line).
     public static func latticeButtonSize(_ v: CGSize) -> CGSize {
-        CGSize(width: isMini(v) ? 240 : 260, height: PageChrome.actionButton)
+        CGSize(width: 260, height: PageChrome.actionButton)
     }
 
     /// The pair on the corner, bottoms aligned (#354's bar: an HStack aligned .bottom, 24 in from the trailing and bottom
@@ -85,6 +94,8 @@ public enum FlexibleChromeLayout {
     // MARK: the panels above it
 
     public static func panelWidth(_ v: CGSize) -> CGFloat { isMini(v) ? 336 : PageChrome.receiptDrawerWidth }
+    /// A panel this narrow lays its rows out for it (the tray's titles their own width, the card's bodies under the titles).
+    public static func panelIsNarrow(_ width: CGFloat) -> Bool { width < PageChrome.receiptDrawerWidth }
 
     /// A panel never rises above the views row's foot + 12.
     public static func panelTopLimit(_ v: CGSize) -> CGFloat { viewsRow(viewport: v).maxY + panelGap }

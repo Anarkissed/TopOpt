@@ -103,6 +103,10 @@ struct FlexibleLatticeCardView: View {
     var close: () -> Void = {}
     var send: () -> Void = {}
     var showFix: () -> Void = {}
+    /// ★ R7-D1 look-and-fix 3: the mini's 336 pt card puts each step's body UNDER its title (nil: from `width`). Beside a
+    /// 64 pt title column the body had 194 pt and the mini cut "Send Group 2 only, Face 2 re…" and broke "Export G-code".
+    var narrow: Bool? = nil
+    private var stacked: Bool { narrow ?? FlexibleChromeLayout.panelIsNarrow(width) }
 
     var body: some View {
         let steps = FlexibleLatticeCard.steps(state: state, status: status, run: run, preview: preview)
@@ -133,21 +137,25 @@ struct FlexibleLatticeCardView: View {
         .accessibilityIdentifier("flexible-lattice-card")
     }
 
-    private func stepRow(_ n: Int, _ s: FlexibleLatticeCard.Step) -> some View {
-        HStack(alignment: .top, spacing: DS.Space.s) {
-            FlexibleStepMarker(n: n, marker: s.marker).padding(.top, 11)
-            Text(s.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                .frame(width: 64, alignment: .leading).padding(.top, 13)
-                .said(s.title)
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                switch s.id {
-                case "preview": previewBody(s)
-                case "core": coreBody(s)
-                default: FlexibleExportRows.Exports(run: run, compact: true)
+    @ViewBuilder private func stepRow(_ n: Int, _ s: FlexibleLatticeCard.Step) -> some View {
+        Group {
+            if stacked {
+                // the mini: the title on its own line, the body under it (indented to the title's text)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: DS.Space.s) {
+                        FlexibleStepMarker(n: n, marker: s.marker)
+                        stepTitle(s)
+                    }
+                    .padding(.top, 11)
+                    stepBody(s).padding(.leading, 22 + DS.Space.s)
+                }
+            } else {
+                HStack(alignment: .top, spacing: DS.Space.s) {
+                    FlexibleStepMarker(n: n, marker: s.marker).padding(.top, 11)
+                    stepTitle(s).frame(width: 64, alignment: .leading).padding(.top, 13)
+                    stepBody(s)
                 }
             }
-            .padding(.vertical, DS.Space.s)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
         .background(FlexibleCornerPairStyle.publish("cardStep-\(s.id)"))
@@ -155,12 +163,30 @@ struct FlexibleLatticeCardView: View {
         .accessibilityIdentifier("flexible-card-step-\(s.id)")
     }
 
+    private func stepTitle(_ s: FlexibleLatticeCard.Step) -> some View {
+        Text(s.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+            .lineLimit(1)
+            .saidWhole(s.title)
+    }
+
+    private func stepBody(_ s: FlexibleLatticeCard.Step) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            switch s.id {
+            case "preview": previewBody(s)
+            case "core": coreBody(s)
+            default: FlexibleExportRows.Exports(run: run, compact: true)
+            }
+        }
+        .padding(.vertical, DS.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder private func previewBody(_ s: FlexibleLatticeCard.Step) -> some View {
         HStack(spacing: DS.Space.s) {
             if s.marker == .current { ProgressView().controlSize(.mini).tint(DS.Color.textPrimary.color) }
             Text(s.line ?? "").font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1).minimumScaleFactor(0.8)
-                .said(s.line ?? "")
+                .saidWhole(s.line ?? "", minScale: 0.8)
         }
         .frame(minHeight: 28)
     }
@@ -178,7 +204,7 @@ struct FlexibleLatticeCardView: View {
                 .said(s.line ?? "")
         case .blocked:
             if run.phase != .idle {
-                FlexibleExportRows.CoreRow(run: run, size: 13.5)
+                FlexibleExportRows.CoreRow(run: run, size: 13.5, wraps: true)
             } else {
                 Text(FlexibleRowCopy.noFacePrism).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
                     .fixedSize(horizontal: false, vertical: true)
@@ -187,7 +213,7 @@ struct FlexibleLatticeCardView: View {
             }
         default:
             if run.phase != .idle {
-                FlexibleExportRows.CoreRow(run: run, size: 13.5)
+                FlexibleExportRows.CoreRow(run: run, size: 13.5, wraps: true)
             } else if state == .preview, let h = run.hold {
                 // looked at, nothing sent: the hold's sentence, its (i)
                 HStack(spacing: DS.Space.s) {

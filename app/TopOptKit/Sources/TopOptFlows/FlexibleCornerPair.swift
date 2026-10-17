@@ -82,7 +82,8 @@ public struct FlexibleCornerPair: View {
         switch chrome.open {
         case .setup:
             FlexibleCornerPairStyle.panel(width: w, maxHeight: maxH) {
-                FlexibleSetupTray(project: project, tray: tray, chrome: chrome, app: app, changeGravity: changeGravity)
+                FlexibleSetupTray(project: project, tray: tray, chrome: chrome, app: app, changeGravity: changeGravity,
+                                  narrow: FlexibleChromeLayout.panelIsNarrow(w))
             }
             .background(FlexibleCornerPairStyle.publish("setupTray"))
             .accessibilityIdentifier("flexible-setup-tray")
@@ -228,7 +229,7 @@ enum FlexibleCornerPairStyle {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .said(title)
+        .saidWhole(title)
         .accessibilityIdentifier(id)
     }
 
@@ -244,7 +245,7 @@ enum FlexibleCornerPairStyle {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .said(title)
+        .saidWhole(title, minScale: 0.8)
         .accessibilityIdentifier(id)
     }
 

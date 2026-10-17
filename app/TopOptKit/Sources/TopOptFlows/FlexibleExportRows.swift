@@ -18,6 +18,9 @@ enum FlexibleExportRows {
     struct CoreRow: View {
         @ObservedObject var run: FlexibleCoreRun
         var size: CGFloat = 15
+        /// ★ R7-D1 look-and-fix 3: the corner card's narrower column lets core's line take two lines rather than cut it
+        /// ("Core refused it: no squish data for this filament yet" needs ~340 pt).
+        var wraps = false
 
         var body: some View {
             HStack(spacing: DS.Space.s) {
@@ -35,7 +38,8 @@ enum FlexibleExportRows {
                 }
                 Text(run.line)
                     .font(.system(size: size, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(wraps ? 2 : 1).truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: wraps)
                     .said(run.line)
                     .accessibilityIdentifier("flexible-export-core-line")
                 Spacer(minLength: 0)
@@ -87,7 +91,7 @@ enum FlexibleExportRows {
                     }
                     .buttonStyle(.plain)
                     .disabled(run.isSending)
-                    .said(f.title)
+                    .saidWhole(f.title, minScale: 0.8)
                     .accessibilityIdentifier("flexible-export-fix-\(f.id)")
                 }
                 if compact {
@@ -113,7 +117,7 @@ enum FlexibleExportRows {
                 Text(wait)
                     .font(.system(size: compact ? 13 : 14)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
-                    .said(wait)
+                    .saidWhole(wait, minScale: 0.85)
                     .accessibilityIdentifier("flexible-export-wait")
                 HStack(spacing: DS.Space.m) {
                     card("Export STL", id: "flexible-export-stl-disabled")
@@ -129,7 +133,7 @@ enum FlexibleExportRows {
                 .frame(maxWidth: .infinity).padding(.vertical, compact ? DS.Space.s + 4 : DS.Space.s + 6)
                 .frame(minHeight: compact ? 44 : nil)
                 .background(Capsule().fill(DS.Color.fillDisabled.color))
-                .said(button)
+                .saidWhole(button)
                 .accessibilityIdentifier(id)
         }
     }

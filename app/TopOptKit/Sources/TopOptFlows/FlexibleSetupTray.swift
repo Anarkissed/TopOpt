@@ -150,6 +150,10 @@ struct FlexibleSetupTray: View {
     let chrome: FlexibleChromeState
     let app: AppModel
     let changeGravity: () -> Void
+    /// ★ R7-D1 look-and-fix 3: the mini's 336 pt tray (FlexibleChromeLayout.panelIsNarrow). Its titles take their own width
+    /// (no 130 pt column) and the Quality segments sit closer, so every row reads whole — at the 130 pt column the mini cut
+    /// them to "Fa… Bal…", "+Z · assu…" and "Print paramet…".
+    var narrow = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -180,31 +184,41 @@ struct FlexibleSetupTray: View {
                     .foregroundStyle((r == .plateUp || r == .printParameters ? DS.Color.textSecondary : DS.Color.accent).color)
                     .frame(width: 18)
                 Text(r.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize()   // the title never gives way (it did to a Spacer at the mini's width)
+                    .saidWhole(r.title)
             }
-            .frame(minWidth: 130, alignment: .leading)
+            .frame(minWidth: narrow ? 0 : 130, alignment: .leading)
+            .layoutPriority(1)
             switch r {
             case .quality:
                 Spacer(minLength: 0)
-                qualitySegments
+                qualitySegments.layoutPriority(1)
             case .plateUp:
-                Text(parts.plate + (project.buildOrientation.isInferredFromGravity ? " \u{00B7} assumed" : ""))
+                let plate = parts.plate + (project.buildOrientation.isInferredFromGravity ? " \u{00B7} assumed" : "")
+                Text(plate)
                     .font(.system(size: 13.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    .saidWhole(plate)
                 Spacer(minLength: 0)
                 FlexibleCornerPairStyle.small("Change", id: "flexible-setup-plate-change") { FlexibleSetupActions.plateUp(tray: tray) }
             case .gravity:
                 Text(parts.gravity).font(.system(size: 13.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    .saidWhole(parts.gravity)
                 Spacer(minLength: 0)
                 FlexibleCornerPairStyle.small("Change", id: "flexible-setup-gravity-change") {
                     FlexibleSetupActions.changeGravity(chrome: chrome, tray: tray, changeGravity: changeGravity)
                 }
             case .printParameters:
-                Text(String(format: "bead %.2f mm", project.printParams.strutLineWidthMM))
+                let bead = String(format: "bead %.2f mm", project.printParams.strutLineWidthMM)
+                Text(bead)
                     .font(.system(size: 13.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    .saidWhole(bead)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
             }
         }
         .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .saidWhole("Setup row \u{00B7} \(r.title)")   // the whole row fits its tray: drawn as wide as the tray, needing no more
         .frame(minHeight: 52)
         .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
         .background(FlexibleCornerPairStyle.publish("setupRow-\(r.rawValue)"))
@@ -221,11 +235,14 @@ struct FlexibleSetupTray: View {
         HStack(spacing: 2) {
             ForEach(RunQuality.allCases, id: \.self) { q in
                 let lit = project.quality == q
+                let title = q == .fast ? "\(q.title) \(q.resolution)\u{00B3}" : q.title
                 Button { FlexibleSetupActions.quality(q, project: project) } label: {
-                    Text(q == .fast ? "\(q.title) \(q.resolution)\u{00B3}" : q.title)
+                    Text(title)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle((lit ? DS.Color.textPrimary : DS.Color.textTertiary).color)
-                        .padding(.horizontal, DS.Space.sm)
+                        .fixedSize()
+                        .saidWhole(title)
+                        .padding(.horizontal, narrow ? DS.Space.s : DS.Space.sm)
                         .frame(height: 34)
                         .background(RoundedRectangle(cornerRadius: 9).fill(lit ? DS.Color.fillSelected.color : Color.clear))
                         .frame(height: 44)
