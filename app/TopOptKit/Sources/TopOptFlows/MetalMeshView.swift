@@ -4082,7 +4082,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // ★ LATTICE ONLY ⇒ THE LATTICE'S OWN SHADOW, AND NONE WHILE NOTHING IS DRAWN (his
         // 2026-09-21 03:26: "It should only show the shadow of the lattice — and only when
         // it shows up on screen"). The body is hidden; its footprint must not stay behind.
-        let latticeOnly = bodyAlpha <= 0.5
+        let latticeOnly = bodyAlpha <= 0.5 && !flexibleBodyPrinted   // Flexible (PR #362) H40: the printed view's see-through body is the solid part, not "lattice only" — it casts its footprint (MeshRenderer+FlexibleLattice.swift)
         var vbuf: MTLBuffer, fbuf: MTLBuffer, drawCount: Int
         var key = ShadowKey(mesh: mesh.map(meshSignature),
                             rotation: SIMD4<Float>(modelRotation.vector),

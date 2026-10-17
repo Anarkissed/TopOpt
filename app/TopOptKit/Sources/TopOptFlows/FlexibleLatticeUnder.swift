@@ -132,6 +132,8 @@ extension FlexibleStageModel {
 
     /// The share of `region`'s columns with lattice under them (core's count); nil before its stack.
     func latticedShare(_ region: Int) -> Double? {
+        // ★ ROUND 7, RULING 6: no face-prism — no lattice under any face, by his rule; nothing was asked of core
+        if heldWithoutFacePrism, settings.face(region)?.isLoaded == true { return 0 }
         guard let st = stacks[FlexFaceKey(region: region, rotation: settings.face(region)?.rotationDeg ?? 0)],
               !st.columns.isEmpty else { return nil }
         return Double(st.latticedColumns) / Double(st.columns.count)

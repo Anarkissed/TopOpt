@@ -133,6 +133,10 @@ enum FlexiblePressFixtures {
                                 faceCount: m.faceCount, watertight: m.watertight, pseudoFaces: m.pseudoFaces)
         let pm = ProjectModel(id: UUID(), name: name, material: "ABS", process: .fdm, importedFile: file, importedMesh: m)
         pm.lattice.flexible = FlexibleStageSettings(materialID: "varioshore_tpu")
+        // ★ ROUND 7, the H39 hotfix (ruling 6: the Flexible stage asks core NOTHING without a face-prism): these synthetic
+        // parts set no face-prism, and the tests on them pin CORE's own frames, stacks, aims and verdicts — so their stage
+        // models ask core as before ruling 6 (a test control; the fresh id keeps it to this project)
+        FlexibleStageModel.controlAskCoreWithoutPrismFor.insert(pm.id)
         return pm
     }
 
@@ -189,7 +193,11 @@ enum FlexiblePressFixtures {
     /// C1's pad, nothing pressed — ★ M1: and no face-prism (the AP0 baseline the goldens and frames were recorded on, byte
     /// for byte; FlexibleHisProject.padProject's default sets one).
     static func padProject() throws -> ProjectModel {
-        try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"), facePrism: false)
+        let pm = try FlexibleHisProject.padProject(FlexibleStageSettings(materialID: "varioshore_tpu"), facePrism: false)
+        // ★ ROUND 7, the H39 hotfix (ruling 6): the goldens and frames pin CORE's answers on this pad, which sets no face-prism
+        // — its stage models ask core as before ruling 6 (a test control; the fresh id keeps it to this project)
+        FlexibleStageModel.controlAskCoreWithoutPrismFor.insert(pm.id)
+        return pm
     }
 
     /// His round-5 pad AS SAVED (no [Lattice under it] taps), through the app's own restore.

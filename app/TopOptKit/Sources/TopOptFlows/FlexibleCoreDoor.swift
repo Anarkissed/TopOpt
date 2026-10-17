@@ -41,6 +41,10 @@ final class FlexibleCoreDoor: @unchecked Sendable {
     /// Open core's scene for `jobJSON` — only when its regions hold a face-prism (`facePrism`: the caller's
     /// `FlexibleStageModel.mayAskCore`, read from the very regions the job carries). Throws `Refusal.noFacePrism` otherwise.
     func open(jobJSON: String, jobDir: String, facePrism: Bool) throws -> FlexibleScene {
+        guard facePrism else {
+            lock.withLock { refusedCount += 1 }
+            throw Refusal.noFacePrism
+        }
         lock.withLock { openedCount += 1 }
         return try FlexibleScene(jobJSON: jobJSON, jobDir: jobDir)
     }

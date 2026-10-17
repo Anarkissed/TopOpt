@@ -343,7 +343,9 @@ extension FlexibleStageModel {
         let scene: FlexibleScene
         do {
             guard let job = try sceneJob(sectors: after.wire) else { return FlexibleRowCopy.edgePickOpening }
-            scene = try await Task.detached(priority: .userInitiated) { try FlexibleScene(jobJSON: job.json, jobDir: job.dir) }.value
+            // ★ ROUND 7, RULING 6 (FlexibleCoreDoor): through the door — no face-prism, no scene asked of core
+            let door = frameWorker.door, prisms = mayAskCore(facePrism: facePrismsNow)
+            scene = try await Task.detached(priority: .userInitiated) { try door.open(jobJSON: job.json, jobDir: job.dir, facePrism: prisms) }.value
         } catch {
             return FlexibleRowCopy.fit(text("\(error)"))
         }
@@ -539,7 +541,9 @@ extension FlexibleStageModel {
         let scene: FlexibleScene
         do {
             guard let job = try sceneJob(sectors: after.wire) else { return FlexibleRowCopy.edgePickOpening }
-            scene = try await Task.detached(priority: .userInitiated) { try FlexibleScene(jobJSON: job.json, jobDir: job.dir) }.value
+            // ★ ROUND 7, RULING 6 (FlexibleCoreDoor): through the door — no face-prism, no scene asked of core
+            let door = frameWorker.door, prisms = mayAskCore(facePrism: facePrismsNow)
+            scene = try await Task.detached(priority: .userInitiated) { try door.open(jobJSON: job.json, jobDir: job.dir, facePrism: prisms) }.value
         } catch {
             return FlexibleRowCopy.fit(text("\(error)"))
         }

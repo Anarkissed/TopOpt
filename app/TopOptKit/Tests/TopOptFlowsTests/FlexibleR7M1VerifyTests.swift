@@ -41,9 +41,12 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         XCTAssertFalse(m.facePrismsSet, "premise: his pad as saved sets no face-prism")
         XCTAssertFalse(m.settings.loadedFaces.isEmpty, "premise: his pressed faces")
         // (the red run's first expectation was "no design is asked of core"; changed after it: core's designs on a pad with no
-        // face-prism are pinned by the goldens' C1 pad, so they are still ASKED — and shown NOWHERE: the reviewer's ruling on
-        // the scene job decides whether the asks stop)
-        XCTAssertFalse(m.designs.isEmpty, "premise: core's whole-part designs are asked (scene analysis, not a send)")
+        // face-prism are pinned by the goldens' C1 pad, so they were still ASKED — and shown NOWHERE.)
+        // ★ RE-PINNED (round 7, the H39 hotfix — the reviewer's ruling 6 of 2026-10-17: "NO request of ANY kind (design,
+        // preview or run) goes to core from Flexible without a face-prism"): back to the red run's first expectation — no design
+        // is asked (FlexibleRuling6NoCoreTests counts it at the door); the goldens' C1 pad asks on the pre-ruling path
+        XCTAssertTrue(m.designs.isEmpty, "★ no design asked of core (ruling 6)")
+        XCTAssertEqual(m.workerForTests.door.opened, 0, "★ core's scene never opened")
         XCTAssertNil(FlexibleFaceRows.warning(model: m, region: 1), "★ no 'Can't reach your curve on 4096 columns' from them")
         let shown = FlexibleShownValues(model: m)
         XCTAssertEqual(shown.maxDepth, 0, "★ no dent scale on the Squish page")
@@ -56,15 +59,17 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         XCTAssertFalse(FlexibleStagePage.popsAtOnce(under, model: m), "★ no pop-up at once with [Lattice under all N]")
         XCTAssertTrue(r.isReady, "nothing BLOCKS: Exit still leaves (his answer: an empty setup may exit)")
         // ★ RED CONTROL: the M1 build — core's whole-part designs, the drawn curve's scale, "Ready · …", the [Fix] and pop-up
+        // (★ RE-PINNED, ruling 6: on a stage that asks core as before the ruling, `mc` — this one asks nothing)
+        let (_, _, mc) = try await F.hisPad(self, live: false, askCoreControl: true)
         FlexibleStageModel.controlDesignsWithoutPrism = true
-        m.recomputeAll()
-        try await FlexibleHisProject.waitFor(120, "the control's designs") { !m.designs.isEmpty && !m.designsInFlight }
-        await m.waitForIdle()
-        let control = FlexibleShownValues(model: m)
-        let controlLine = m.readiness.oneLine
-        let controlFix = FlexibleStagePage.noticeFix(m.readiness, model: m)
-        let controlPops = FlexibleLatticeUnder.first(m.readiness).map { FlexibleStagePage.popsAtOnce($0, model: m) } ?? false
-        let controlWarning = FlexibleFaceRows.warning(model: m, region: 1)
+        mc.recomputeAll()
+        try await FlexibleHisProject.waitFor(120, "the control's designs") { !mc.designs.isEmpty && !mc.designsInFlight }
+        await mc.waitForIdle()
+        let control = FlexibleShownValues(model: mc)
+        let controlLine = mc.readiness.oneLine
+        let controlFix = FlexibleStagePage.noticeFix(mc.readiness, model: mc)
+        let controlPops = FlexibleLatticeUnder.first(mc.readiness).map { FlexibleStagePage.popsAtOnce($0, model: mc) } ?? false
+        let controlWarning = FlexibleFaceRows.warning(model: mc, region: 1)
         FlexibleStageModel.controlDesignsWithoutPrism = false
         XCTAssertGreaterThan(control.maxDepth, 20, "★ RED CONTROL: the whole-part designs' scale (the verify: 28.7 mm)")
         XCTAssertTrue(controlLine.hasPrefix("Ready"), "★ RED CONTROL: 'Ready · No lattice under …'")

@@ -508,6 +508,11 @@ enum FlexibleAngledGoldens {
         let m = FlexibleStageModel(project: r.project, materialsPath: FlexibleHisProject.materialsPath,
                                    stampsPath: FlexibleHisProject.stampsPath, persist: {})
         test.addTeardownBlock { @MainActor in await m.waitForIdle() }
+        // ★ ROUND 7, the H39 hotfix (the reviewer's ruling 6 of 2026-10-17: the Flexible stage asks core NOTHING without a
+        // face-prism): a project saved with none (A1_0003 as saved) is opened the way it was before the ruling, so these
+        // goldens keep pinning the ENCODER's bytes over core's stacks (F15's pattern; the gate itself is
+        // FlexibleRuling6NoCoreTests'). A project with a face-prism is untouched.
+        if !m.facePrismsNow { m.controlAskCoreWithoutPrism = true; print("FLEX-AP \(label): no face-prism — opened as before ruling 6") }
         m.openScene()
         try await settleAllowingRefusedStacks(m, label)
         return (rootToken(r), m)

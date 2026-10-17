@@ -88,6 +88,20 @@ final class FlexibleH39HostedTests: XCTestCase {
         return Shot(px: buf, w: cg.width, h: cg.height, scale: CGFloat(cg.width) / h.size.width)
     }
 
+    /// Opt-in (FLEX_H39_DIR=<dir>): the page's pixels as a PNG (the evidence pictures).
+    func write(_ s: Shot, _ name: String) throws {
+        guard let dir = ProcessInfo.processInfo.environment["FLEX_H39_DIR"].map({ URL(fileURLWithPath: $0, isDirectory: true) }) else { return }
+        var px = s.px
+        let ctx = try XCTUnwrap(CGContext(data: &px, width: s.w, height: s.h, bitsPerComponent: 8, bytesPerRow: s.w * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let img = try XCTUnwrap(ctx.makeImage())
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+    }
+
     /// The page's ground (a pixel no chrome covers: the left edge, half way down).
     static func ground(_ s: Shot, _ size: CGSize) -> (Int, Int, Int) { s.at(4, size.height * 0.55) }
 
@@ -119,6 +133,32 @@ final class FlexibleH39HostedTests: XCTestCase {
         }
         guard xs.count >= 8 else { return nil }
         return CGPoint(x: (xs.min()! + xs.max()!) / 2, y: (ys.min()! + ys.max()!) / 2)
+    }
+
+    /// The toggle's picture as Topology draws it: 22 × 22 pt around its ink, one sample per pt.
+    static func patch(_ s: Shot, at c: CGPoint) -> [(Int, Int, Int)] {
+        var out: [(Int, Int, Int)] = []
+        for dy in -11...10 { for dx in -11...10 { out.append(s.at(c.x + CGFloat(dx), c.y + CGFloat(dy))) } }
+        return out
+    }
+    /// Where `tpl` best matches inside the band (centres every 1 pt), and its mean difference there (0 = the same picture).
+    static func find(_ tpl: [(Int, Int, Int)], in s: Shot, x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) -> (at: CGPoint, diff: Double) {
+        var best = (at: CGPoint.zero, diff: Double.infinity)
+        var cy = y.lowerBound
+        while cy <= y.upperBound {
+            var cx = x.lowerBound
+            while cx <= x.upperBound {
+                var sum = 0, i = 0
+                for dy in -11...10 { for dx in -11...10 {
+                    sum += Shot.diff(s.at(cx + CGFloat(dx), cy + CGFloat(dy)), tpl[i]); i += 1
+                } }
+                let d = Double(sum) / Double(tpl.count)
+                if d < best.diff { best = (CGPoint(x: cx, y: cy), d) }
+                cx += 1
+            }
+            cy += 1
+        }
+        return best
     }
 
     /// The share of #354's Regions panel's place that is off the ground: the panel's foot (320 pt from the left, 96 pt above
@@ -170,8 +210,11 @@ final class FlexibleH39HostedTests: XCTestCase {
         let ink = try XCTUnwrap(Self.toggleInk(t0, top: topT), "★ POSITIVE CONTROL: Topology draws the Regions toggle in the Selections header")
         let base = Self.panelCover(t0, size)
         XCTAssertLessThan(base, 0.1, "Topology at open: no Regions panel (\(base))")
+        try write(t0, "H39_R1_1_topology_at_open.png")
         click(h, ink)
-        let opened = Self.panelCover(try shot(h), size)
+        let openedShot = try shot(h)
+        try write(openedShot, "H39_R1_2_topology_his_tap_opens_regions.png")
+        let opened = Self.panelCover(openedShot, size)
         XCTAssertGreaterThan(opened, 0.6, "★ POSITIVE CONTROL: on Topology the toggle opens #354's Regions panel and the probe sees it (\(opened))")
         click(h, ink)
         let closed = Self.panelCover(try shot(h), size)
@@ -184,17 +227,27 @@ final class FlexibleH39HostedTests: XCTestCase {
         if let s = FlexibleMainStage.lastMade { addTeardownBlock { @MainActor in await s.model?.waitForIdle() } }
         XCTAssertNotNil(h.frames.all["capsule"], "premise: the Flexible stage (its capsule)")
         let f0 = try shot(h)
+        try write(f0, "H39_R1_3_flexible_no_regions_toggle.png")
         let topF = try XCTUnwrap(Self.cardTop(f0, size), "the Flexible stage: the Selections card (still #354's until D2)")
-        let inkF = Self.toggleInk(f0, top: topF)
-        XCTAssertNil(inkF, "★ H39: the Flexible stage draws no Regions toggle in the Selections header (ink at \(inkF.map { "\($0)" } ?? "-"))")
-        // a tap where the toggle sits on Topology (the same place in the card's header)
-        click(h, CGPoint(x: ink.x, y: topF + (ink.y - topT)))
-        log.append("Flexible: card top \(topF) · toggle ink \(inkF.map { "\($0)" } ?? "none") · tapped \(CGPoint(x: ink.x, y: topF + (ink.y - topT)))")
+        // the toggle's own picture, searched for along the Flexible card's header (the Keep clear pill may take its room: with the
+        // toggle gone the pill's words fit on one line — the red run's first check, "no ink between Selections and the pill",
+        // saw the wider pill; corrected after the code, said in the handoff)
+        let at = CGPoint(x: ink.x.rounded(), y: ink.y.rounded())   // whole points: the search's own grid
+        let tpl = Self.patch(t0, at: at)
+        let selfMatch = Self.find(tpl, in: t0, x: 140...330, y: (topT + 15).rounded()...(topT + 50).rounded())
+        XCTAssertLessThan(selfMatch.diff, 1, "★ POSITIVE CONTROL: the matcher finds the toggle on Topology (\(selfMatch))")
+        let onFlexible = Self.find(tpl, in: f0, x: 140...330, y: (topF + 15).rounded()...(topF + 50).rounded())
+        let drawn = onFlexible.diff < 8
+        XCTAssertFalse(drawn, "★ H39: the Flexible stage draws no Regions toggle in the Selections header (best match \(onFlexible))")
+        // ★ today's carry-over (the red run): where the toggle IS drawn on the Flexible stage, he taps it
+        if drawn { click(h, onFlexible.at) }
+        log.append("Flexible: card top \(topF) · the toggle's best match \(onFlexible.at) diff \(String(format: "%.1f", onFlexible.diff)) (Topology's own \(String(format: "%.1f", selfMatch.diff))) · tapped \(drawn)")
 
         // ── back to Topology through the capsule's own menu: no Regions panel
         try pickTopologyFromTheCapsule(h)
         XCTAssertNil(h.frames.all["capsule"], "premise: back on Topology (no capsule)")
         let t1 = try shot(h)
+        try write(t1, "H39_R1_4_topology_after_flexible_no_panel.png")
         let carried = Self.panelCover(t1, size)
         XCTAssertLessThan(carried, 0.1, "★ after a Flexible session Topology shows no Regions panel he did not open there (cover \(carried))")
         // …and he can still open it there himself

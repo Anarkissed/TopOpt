@@ -9713,6 +9713,7 @@ public struct WorkspacePlaceholder: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Regions")
+                    .flexibleDrawn(when: !flexibleMain.owns(project, stage))   // Flexible (PR #362) H39: no Regions toggle on the Flexible stage, so nothing there can open #354's Regions panel for Topology (H26 hides the panel; FlexibleDrawnWhen.swift)
                     keepClearQuickAction
                     unitToggle
                 }

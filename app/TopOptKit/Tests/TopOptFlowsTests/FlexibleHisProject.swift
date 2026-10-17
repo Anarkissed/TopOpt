@@ -97,8 +97,9 @@ enum FlexibleHisProject {
         let m = FlexibleStageModel(project: project, materialsPath: materialsPath, stampsPath: stampsPath, persist: {})
         test.addTeardownBlock { @MainActor in await m.waitForIdle() }
         m.openScene()
+        // ★ RE-PINNED (round 7, the H39 hotfix — ruling 6): with no face-prism nothing is asked of core (no stack to wait for)
         try await waitFor(timeout, "the scene and every loaded stack") {
-            m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil }
+            m.sceneState == .ready && (m.heldWithoutFacePrism || m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil })
         }
         return m
     }

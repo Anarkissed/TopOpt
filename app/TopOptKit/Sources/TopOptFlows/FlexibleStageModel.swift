@@ -23,17 +23,26 @@ actor FlexibleWorker {
     private(set) var sceneKey: String?
     /// ★ ROUND 7, RULING 6 (FlexibleCoreDoor): every scene this worker opens goes through its door.
     nonisolated let door = FlexibleCoreDoor()
+    /// ★ RULING 6: let go of core's scene for want of a face-prism (`hold`) — every ask is refused in his words until a
+    /// scene opens again.
+    private(set) var held = false
 
     func open(jobJSON: String, jobDir: String, key: String, facePrism: Bool) throws -> FlexibleScene.Info {
         if sceneKey != key || scene == nil {
             scene = nil
             scene = try door.open(jobJSON: jobJSON, jobDir: jobDir, facePrism: facePrism)
             sceneKey = key
+            held = false
         }
         return try scene!.info()
     }
+    /// ★ RULING 6: no face-prism — core's scene is let go; nothing can be asked on it any more.
+    func hold() { scene = nil; sceneKey = nil; held = true }
     func withScene<T>(_ body: (FlexibleScene) throws -> T) throws -> T {
-        guard let s = scene else { throw TopOptError(message: "The part is still opening.") }
+        guard let s = scene else {
+            if held { throw FlexibleCoreDoor.Refusal.noFacePrism }
+            throw TopOptError(message: "The part is still opening.")
+        }
         door.noteAsk()
         return try body(s)
     }
@@ -45,7 +54,7 @@ actor FlexibleWorker {
     }
     /// ★ ROUND 6 ITEM 2: a scene already opened on the regions the stage is about to hold (the strips' [Done]: core
     /// was asked about the strips on it before the cut was committed) — the next `open` with its key reuses it.
-    func install(_ s: FlexibleScene, key: String) { scene = s; sceneKey = key }
+    func install(_ s: FlexibleScene, key: String) { scene = s; sceneKey = key; held = false }
 }
 
 /// One control point of one face's X or Y curve (the × on the model, round 3 item 8).
@@ -538,25 +547,31 @@ public final class FlexibleStageModel: ObservableObject {
     public func openScene() {
         guard sceneState != .opening else { return }
         let key = sceneKey()
+        let prisms = lastKeyFacePrisms.map { $0.key == key && $0.has } ?? false   // ★ M1: read with the key above
+        // ★ ROUND 7, RULING 6 (FlexibleCoreDoor): no face-prism, no request of any kind — the stage does not knock
+        guard mayAskCore(facePrism: prisms) else {
+            holdWithoutFacePrism(key: key)
+            return
+        }
         // ★ THE SHARED MODEL (batch B): Settings re-opens over the main page's model — the same
         // part, the same scene: keep its stacks (and the overlay the main page draws) and only
         // re-read the main page's groups
-        if sceneState == .ready, openedKey == key {
+        if sceneState == .ready, openedKey == key, !heldWithoutFacePrism {
             adoptMainPageLoads(recompute: false)
             recomputeAll()
             return
         }
         openAttemptKey = key
-        let prisms = lastKeyFacePrisms.map { $0.key == key && $0.has } ?? false   // ★ M1: read with the key above
         guard let job = try? sceneJob() else {
             sceneState = .failed("This project has no imported part to open.")
             return
         }
         sceneState = .opening
+        heldWithoutFacePrism = false
         let worker = self.worker
         track(Task.detached(priority: .userInitiated) {
             do {
-                let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key, facePrism: true)
+                let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key, facePrism: true)   // (mayAskCore, above)
                 // ★ ROUND 7 (M2): what of his settings moves onto lattice sections, asked of core on the opened scene
                 let carry = await self.planCarry()
                 await MainActor.run {
@@ -577,6 +592,39 @@ public final class FlexibleStageModel: ObservableObject {
                 await MainActor.run { self.sceneState = .failed("\(error)") }
             }
         })
+    }
+
+    /// ★ ROUND 7, RULING 6 (FlexibleCoreDoor): no face-prism — nothing is asked of core. The stage is READY on the plain
+    /// part (every rule keyed on "the opened scene sets no face-prism" holds: the one line, no [Fix], the views unavailable,
+    /// the button disabled with its reason, each face's [Lattice under it]); core's old scene is let go, so nothing can be
+    /// asked on it; no stack, design, drawn map, Auto or lattice is kept (none of them came from a scene with a face-prism).
+    /// Again with the same key: only the main page's groups are re-read.
+    private func holdWithoutFacePrism(key: String) {
+        openAttemptKey = key
+        if sceneState == .ready, heldWithoutFacePrism, openedKey == key {
+            adoptMainPageLoads(recompute: false)
+            recomputeAll()
+            return
+        }
+        designTask?.cancel()
+        autoTask?.cancel()
+        let worker = self.worker
+        track(Task { await worker.hold() })
+        sceneInfo = nil
+        stacks = [:]
+        geometry = [:]
+        liveS = [:]
+        pendingStacks = []
+        stackErrors = [:]
+        designErrors = [:]
+        recommendation = nil
+        openedKey = key
+        openedFacePrisms = false
+        heldWithoutFacePrism = true
+        sceneState = .ready
+        if lattice != nil { discardLattice() }
+        adoptMainPageLoads(recompute: false)
+        recomputeAll()
     }
 
     // MARK: faces (S2)
@@ -848,7 +896,8 @@ public final class FlexibleStageModel: ObservableObject {
     public func design(_ region: Int) -> FlexFaceDesignInfo? { key(region).flatMap { designs[$0] } }
 
     private func ensureStack(_ region: Int) {
-        guard sceneState == .ready, let k = key(region), stacks[k] == nil, !pendingStacks.contains(k),
+        guard sceneState == .ready, !heldWithoutFacePrism,   // ★ RULING 6: no face-prism, no stack asked
+              let k = key(region), stacks[k] == nil, !pendingStacks.contains(k),
               stackErrors[k] == nil else { return }   // ★ no blind retry of a face core refused to stack
         pendingStacks.insert(k)
         let partFlat = project.viewerMesh?.flat.positions ?? []
@@ -957,7 +1006,8 @@ public final class FlexibleStageModel: ObservableObject {
         designGeneration += 1
         let gen = designGeneration
         designTask?.cancel()
-        guard let path = materialsPath, let mat = settings.materialID else {
+        // ★ ROUND 7, RULING 6: no face-prism — no design, no conflict, no stamp check is asked of core
+        guard !heldWithoutFacePrism, let path = materialsPath, let mat = settings.materialID else {
             designs = [:]
             designErrors = [:]
             segments = [:]

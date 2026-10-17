@@ -371,7 +371,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
             if !f.stacked { return true }
             return i.calibrateFirst ? !f.drawn : f.design == .pending
         }
-        if stillDesigning, i.materialID != nil {
+        if stillDesigning, i.materialID != nil, i.facePrisms {   // ★ ROUND 7, RULING 6: no face-prism, nothing is designed
             out.append(FlexibleIssue(id: "stillDesigning", kind: .stillDesigning, region: nil,
                                      oneLine: "Still designing — Exit builds it when it lands",
                                      blocking: false, fixes: []))

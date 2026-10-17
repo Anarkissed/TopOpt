@@ -12,8 +12,10 @@ enum FlexibleSquishFixture {
     /// The model's designs settled and ready to build.
     static func settle(_ m: FlexibleStageModel, _ what: String) async throws {
         await m.waitForIdle()
+        // ★ RE-PINNED (round 7, the H39 hotfix — the reviewer's ruling 6 of 2026-10-17): with no face-prism the stage asks
+        // core for nothing, so there is no stack to wait for (it is ready on the plain part)
         try await FlexibleHisProject.waitFor(120, "\(what): designs") {
-            m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } && !m.readiness.designing
+            m.sceneState == .ready && (m.heldWithoutFacePrism || m.loadedKeys.allSatisfy { m.stacks[$0] != nil }) && !m.readiness.designing
         }
         await m.waitForIdle()
     }

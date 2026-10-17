@@ -49,13 +49,16 @@ enum FlexibleR7M1Fixtures {
 
     /// His pad on a main stage (the shared model), settled; `live`: with his live lattice.
     /// `wholePartControl`: the RED CONTROL from the scene's first open (core's stacks kept as they come — the whole part).
-    static func hisPad(_ test: XCTestCase, live: Bool, wholePartControl: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
+    /// `askCoreControl` (round 7, the H39 hotfix): the stage before ruling 6 — core's scene opened and asked with no face-prism.
+    static func hisPad(_ test: XCTestCase, live: Bool, wholePartControl: Bool = false,
+                       askCoreControl: Bool = false) async throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel) {
         let r = try FlexiblePressFixtures.a1Project(3, test, facePrism: false)   // as he saved it: no face-prism
         if live { try hisLiveLattice(r.project) }
         let s = FlexibleMainStage()
         s.reduceMotion = { true }
         let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
         m.controlWholePartWithoutPrism = wholePartControl
+        m.controlAskCoreWithoutPrism = askCoreControl
         test.addTeardownBlock { @MainActor in await m.waitForIdle() }
         m.openScene()
         try await FlexibleSquishFixture.settle(m, "his pad")
@@ -220,17 +223,17 @@ final class FlexibleR7M1Tests: XCTestCase {
         XCTAssertFalse(LatticeJobIncludeGate.hasIncludeWall(p.latticeJobRegions().regions), "premise: his pad as saved sets no face-prism")
         XCTAssertFalse(m.facePrismsSet)
         XCTAssertFalse(m.facePrismsNow)
-        // core itself lattices the whole part (its rule for no include region): the override is the app's
-        let k1 = try XCTUnwrap(m.key(1))
-        let coreTop = try await m.workerForTests.withScene { try $0.stack(face: k1.region, rotation: k1.rotation) }
+        // core itself lattices the whole part (its rule for no include region): the override is the app's.
+        // ★ RE-PINNED (round 7, the H39 hotfix — the reviewer's ruling 6 of 2026-10-17: "NO request of ANY kind … goes to core
+        // from Flexible without a face-prism"): core's premise is read from a stage on the pre-ruling path (`whole`: the RED
+        // CONTROL's whole part, opened as before), never from this one, which asks core nothing
+        let (_, _, whole) = try await F.hisPad(self, live: false, wholePartControl: true)
+        let k1 = try XCTUnwrap(whole.key(1))
+        let coreTop = try await whole.workerForTests.withScene { try $0.stack(face: k1.region, rotation: k1.rotation) }
         XCTAssertGreaterThan(coreTop.latticedColumns, 0, "premise: core's own stack of the Top is latticed (whole part)")
-        // ★ every stack the stage keeps: no lattice on any column's path
-        for k in m.loadedKeys {
-            let st = try XCTUnwrap(m.stacks[k], "Face \(k.region)'s stack")
-            XCTAssertEqual(st.latticedColumns, 0, "★ Face \(k.region): no latticed column")
-            XCTAssertEqual(st.latticeMMMax, 0, "★ Face \(k.region): no lattice depth")
-            XCTAssertTrue(st.columns.allSatisfy { $0.latticeMM == 0 })
-        }
+        // ★ the stage keeps no stack at all: nothing was asked of core (was: every stack kept with no lattice on its path)
+        XCTAssertTrue(m.stacks.isEmpty, "★ no stack asked of core")
+        XCTAssertEqual(m.workerForTests.door.opened, 0, "★ core's scene never opened")
         // ★ the readiness says it of every pressed face, with the one-tap fix
         let under = m.readiness.issues.filter { $0.kind == .noLatticeUnder }
         XCTAssertEqual(Set(under.compactMap(\.region)), Set(m.settings.loadedFaces.map(\.faceRegionID)), "★ \"No lattice under\" every pressed face")
@@ -263,16 +266,13 @@ final class FlexibleR7M1Tests: XCTestCase {
         // `.fix` / `.openSettings`; now disabled on the main page with its reason, to the Lattice stage from another stage
         XCTAssertEqual(st.tone, .blocked)
         XCTAssertEqual(st.tap, .toSelections, "never core, never the Squish page's fix (FlexibleR7M1VerifyTests V4)")
-        // ★ RED CONTROL: today's path — core's whole part
-        m.controlWholePartWithoutPrism = true
-        m.discardLattice()
-        m.generateLattice()
-        try await FlexibleHisProject.waitFor(240, "the control's lattice") { (m.lattice != nil && !m.latticeBuilding) || m.latticeError != nil }
-        let controlBuilt = m.lattice != nil
-        m.controlWholePartWithoutPrism = false
-        await m.waitForIdle()
+        // ★ RED CONTROL: today's path — core's whole part (★ RE-PINNED, ruling 6: on the stage opened that way, `whole`)
+        whole.generateLattice()
+        try await FlexibleHisProject.waitFor(240, "the control's lattice") { (whole.lattice != nil && !whole.latticeBuilding) || whole.latticeError != nil }
+        let controlBuilt = whole.lattice != nil
+        await whole.waitForIdle()
         XCTAssertTrue(controlBuilt, "★ RED CONTROL: without the gate the whole part is latticed")
-        print("FLEX-R7M1-1a his pad as saved: facePrisms \(m.facePrismsSet) · stacks latticed \(m.loadedKeys.map { m.stacks[$0]?.latticedColumns ?? -1 }) (core's Top \(coreTop.latticedColumns)) · issues \(under.map(\.pill)) · pill '\(st.line)' · control built \(controlBuilt)")
+        print("FLEX-R7M1-1a his pad as saved: facePrisms \(m.facePrismsSet) · stacks kept \(m.stacks.count) (core's Top \(coreTop.latticedColumns)) · issues \(under.map(\.pill)) · pill '\(st.line)' · control built \(controlBuilt)")
     }
 
     /// The positive control: one face-prism lattices only under it. His live lattice (Face 3 + Face 5 at 25 mm): a lattice
@@ -305,8 +305,9 @@ final class FlexibleR7M1Tests: XCTestCase {
         let latticed = try XCTUnwrap(m.sceneInfo).latticeVoxels
         let lattice = try await FlexibleSquishFixture.build(m, "his live lattice")
         XCTAssertNotNil(lattice)
-        // the whole part's count, from the same pad as saved (core's rule with no include region)
-        let (_, _, whole) = try await F.hisPad(self, live: false)
+        // the whole part's count, from the same pad as saved (core's rule with no include region) — ★ RE-PINNED (round 7, the
+        // H39 hotfix, ruling 6: the stage asks core nothing without a face-prism): opened on the pre-ruling path
+        let (_, _, whole) = try await F.hisPad(self, live: false, wholePartControl: true)
         let all = try XCTUnwrap(whole.sceneInfo).latticeVoxels
         XCTAssertLessThan(Double(latticed), 0.8 * Double(all), "★ the prisms' lattice is a part of the whole")
         print("FLEX-R7M1-1a+ his live lattice: Face 3 latticed \(three.latticedColumns)/\(three.columns.count) max \(three.latticeMMMax) · Top \(top.latticedColumns)/\(top.columns.count) · voxels \(latticed) of the whole part's \(all)")
