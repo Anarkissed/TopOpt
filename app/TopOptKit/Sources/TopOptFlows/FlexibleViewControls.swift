@@ -46,8 +46,8 @@ struct FlexibleViewColumn: View {
 /// release that ends the hold is also delivered as a tap and is swallowed by the PRESS it ends (ViewModeHold.swallowsTap).
 /// Icon only — the label is the accessibility text (his rule: view buttons are icons, never words).
 struct FlexibleViewButton: View {
-    /// ★ R7-D1 STUB: the icon's side.
-    static let side: CGFloat = 40
+    /// ★ ROUND 7, R7-D1 (his rule: 44 pt targets): the icon's side, on both Flexible pages (it was 40).
+    static let side: CGFloat = 44
     let icon: String
     let label: String
     let on: Bool
@@ -78,7 +78,7 @@ struct FlexibleViewButton: View {
                         .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
                 }
             }
-                .frame(width: 40, height: 40)
+                .frame(width: Self.side, height: Self.side)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
                         .fill(on ? DS.Color.accentDeep.opacity(0.55).color : DS.Surface.bar.color)

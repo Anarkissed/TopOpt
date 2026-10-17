@@ -18,6 +18,9 @@
 //
 // Mounted by one #354 line in WorkspacePlaceholder (FlexibleExportMount — on any stage, since
 // the pill is on every stage's bottom bar).
+// ★ ROUND 7, R7-D1 (H31): NOT on the Flexible stage — there core's answer and the exports are the corner card
+// (FlexibleLatticeCard); Topology and Surface keep this step. Its rows moved to FlexibleExportRows, which the card draws
+// too, so nothing it says can be dropped there.
 
 import SwiftUI
 import TopOptDesign
@@ -51,7 +54,7 @@ public struct FlexibleExportSheet: View {
                 .onTapGesture { onClose() }
             VStack(alignment: .leading, spacing: DS.Space.l) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("Export").font(.system(size: 27, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    Text("Export").font(.system(size: 27, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).said("Export")
                     Spacer()
                     Button { onClose() } label: {
                         Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
@@ -61,28 +64,10 @@ public struct FlexibleExportSheet: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("flexible-export-close")
                 }
-                coreRow
-                // ★ ROUND 7, M1 (5 — the reviewer's ruling 4): an edges group beside the face groups is SAID under core's
-                // line, before anything is sent ("Edges and faces go in separate exports for now.")
-                if let note = run.hold?.note {
-                    Text(note)
-                        .font(.system(size: 14)).foregroundStyle(DS.Color.textSecondary.color)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityIdentifier("flexible-export-hold-note")
-                }
-                if let fixes = run.hold?.fixes, !fixes.isEmpty {
-                    fixRow(fixes)
-                }
-                VStack(alignment: .leading, spacing: DS.Space.s) {
-                    Text(FlexibleCoreRun.exportsWait)
-                        .font(.system(size: 14)).foregroundStyle(DS.Color.textSecondary.color)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityIdentifier("flexible-export-wait")
-                    HStack(spacing: DS.Space.m) {
-                        card("Export STL", id: "flexible-export-stl-disabled")
-                        card("Export G-code", id: "flexible-export-gcode-disabled")
-                    }
-                }
+                FlexibleExportRows.CoreRow(run: run)   // ★ R7-D1: the rows the corner card draws too (FlexibleExportRows)
+                FlexibleExportRows.HoldNote(run: run)
+                FlexibleExportRows.FixRow(run: run)
+                FlexibleExportRows.Exports(run: run)
             }
             .padding(DS.Space.xl4)
             .frame(maxWidth: 820)
@@ -93,63 +78,5 @@ public struct FlexibleExportSheet: View {
             .padding(.horizontal, PageChrome.edge)
         }
         .accessibilityIdentifier("flexible-export-sheet")
-    }
-
-    /// Core's answer, ONE line, its sentence behind the (i).
-    private var coreRow: some View {
-        HStack(spacing: DS.Space.s) {
-            switch run.phase {
-            case .sending:
-                ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color)
-            case .ran(let r) where r.refusal == nil:
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(FlexibleStageStyle.accentToken.color)
-            case .idle:
-                EmptyView()
-            default:
-                Image(systemName: "exclamationmark.circle.fill").font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(DS.Color.warning.color)
-            }
-            Text(run.line)
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).truncationMode(.tail)
-                .accessibilityIdentifier("flexible-export-core-line")
-            Spacer(minLength: 0)
-            if let info = run.info {
-                FlexInfoButton(title: "Core", text: info, id: "flexible-export-core-info")
-            }
-        }
-        .frame(minHeight: FlexInfoButton<EmptyView>.target)
-    }
-
-    /// ★ C2 VERIFICATION: what core CAN run (or the filament with data), 1–3 big buttons.
-    private func fixRow(_ fixes: [FlexibleCoreFix]) -> some View {
-        HStack(spacing: DS.Space.s) {
-            ForEach(Array(fixes.prefix(3).enumerated()), id: \.offset) { i, f in
-                let sent = run.sentFix == f
-                Button { run.onFix?(f) } label: {
-                    Text(f.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.vertical, 12).padding(.horizontal, DS.Space.l)
-                        .frame(minWidth: 120)
-                        .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
-                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color, lineWidth: 1.5).opacity(sent ? 1 : 0))
-                }
-                .buttonStyle(.plain)
-                .disabled(run.isSending)
-                .accessibilityIdentifier("flexible-export-fix-\(f.id)")
-            }
-        }
-    }
-
-    /// A disabled export (core writes no printable file yet): the G-code button's disabled look.
-    private func card(_ button: String, id: String) -> some View {
-        Text(button)
-            .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.textDisabled.color)
-            .frame(maxWidth: .infinity).padding(.vertical, DS.Space.s + 6)
-            .background(Capsule().fill(DS.Color.fillDisabled.color))
-            .accessibilityIdentifier(id)
     }
 }

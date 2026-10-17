@@ -1286,7 +1286,7 @@ public struct WorkspacePlaceholder: View {
             } else if !fullScreenPageUp {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
                 // is no longer placed separately here.
-                if force.gravityIsSet { bottomRightControls }
+                if force.gravityIsSet, !flexibleMain.owns(project, stage) { bottomRightControls }   // Flexible (PR #362) H24: on this stage the Setup chip holds Quality, Plate up, Gravity and Print parameters; Protect, Minimize plastic and CAD surfaces leave it
                 if viewerMesh != nil { selectionsPanel }
                 // ★ The Regions surface, beside the Selections panel it edits
                 // (task 2026-08-14-face-regions). Union, split and grid-split are
@@ -1294,14 +1294,15 @@ public struct WorkspacePlaceholder: View {
                 // stages — the lattice page needs the same regions the TO page
                 // authored, and PR 331's own parent/child collapse is the ONE
                 // disclosure mechanism in that panel (bar R12).
-                if viewerMesh != nil, regionsOpen { regionsPanelOverlay }
+                if viewerMesh != nil, regionsOpen, !flexibleMain.owns(project, stage) { regionsPanelOverlay }   // Flexible (PR #362) H26: no Regions on the Flexible stage (his img6: the Surface stage does it)
                 // The lattice preview legend + the Struts toggle are LATTICE
                 // affordances (§1a): they left the TO page with everything else.
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
-                if viewerMesh != nil { stageNavigationButtonOverlay }
+                if viewerMesh != nil, flexibleMain.owns(project, stage) { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu
+                else if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeStageModeOverlay }
-                if viewerMesh != nil { latticeSettingsButtonOverlay }
+                if viewerMesh != nil, !flexibleMain.owns(project, stage) { latticeSettingsButtonOverlay }   // Flexible (PR #362) H28: Settings is the capsule's 'Squish' on the Flexible stage
                 // ★ SAVE, in the slot the greyed-out "Lattice" button vacated.
                 surfaceSaveButtonOverlay
                 // ★ §6 — THE SURFACE STAGE'S TOOLS, on the right BELOW THE GIZMO
@@ -1340,7 +1341,7 @@ public struct WorkspacePlaceholder: View {
                     latticeDensityLegend
                     latticeProbeCallout
                 }
-                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift)
+                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance)
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
@@ -1370,7 +1371,7 @@ public struct WorkspacePlaceholder: View {
                             bottomBarHeight = ok
                         }
                     }
-                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }   // Flexible (PR #362): the squish player, clear of the bottom-right chip column
+                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) P + H34: the squish player (no chip column on this stage; the corner pair rides the bar's clearance)
             }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
@@ -1388,7 +1389,7 @@ public struct WorkspacePlaceholder: View {
                     model.persistCurrentProject()
                 }, onChooseFlexible: {
                     project.lattice.flexible = FlexibleStageSettings()
-                    showLatticeWizard = false; showFlexiblePage = true
+                    showLatticeWizard = false   // Flexible (PR #362) H38: choosing Flexible lands on the Lattice page; the Squish page never opens by itself (his answer)
                     model.persistCurrentProject()
                 })
                 .transition(.opacity)
@@ -1405,10 +1406,11 @@ public struct WorkspacePlaceholder: View {
             if showFlexiblePage, project.lattice.flexible != nil {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
+                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible…
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
-            if project.lattice.flexible != nil { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }   // Flexible (PR #362) C2: the big Lattice button's Export step — core's answer + the exports (FlexibleExportSheet.swift)
+            if project.lattice.flexible != nil, !flexibleMain.owns(project, stage) { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }   // Flexible (PR #362) C2 + H31: on the Flexible stage core's answer and the exports are the corner card (FlexibleLatticeCard); Topology and Surface keep the Export step
             if showLatticeModeSheet, let mode = project.lattice.stageMode {
                 LatticeStageModeSheet(
                     mode: mode,
@@ -2805,9 +2807,6 @@ public struct WorkspacePlaceholder: View {
             if stage == .lattice, let mode = project.lattice.stageMode {
                 LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }
                     .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
-            } else if stage == .lattice, project.lattice.flexible != nil {
-                FlexibleStageChip { showLatticeModeSheet = true }
-                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
             }
         }
         // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
@@ -3878,6 +3877,7 @@ public struct WorkspacePlaceholder: View {
     /// would be in the way rather than helpful, which is why this is gated on
     /// `enabled` rather than firing unconditionally.
     private func openLatticeSettingsIfUnconfigured() {
+        if project.lattice.flexible != nil { return }   // Flexible (PR #362) H37: the Squish page never opens by itself (his answer); Structural and Aesthetic keep the once-per-session wizard
         // ★★ ONCE PER SESSION (maintainer, 2026-08-19: "Make it open up as soon as
         // you click the button if it hasn't already saved this session").
         //
@@ -5999,7 +5999,6 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
-            if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }   // Flexible (PR #362) H18: Topology's "Protect 3 mm" and "Minimize plastic" chips off the Flexible stage (FlexibleMainChips.swift)
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
@@ -11761,12 +11760,14 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             }
             Spacer()
+            if flexibleMain.owns(project, stage) { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup
             ComputeLocationControl(compute: compute)
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
             if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }   // Flexible (PR #362) H10: from any stage the pill lands on the Lattice stage, so Exit shows the lattice (C2 verification: "Building…" there goes to the Lattice stage only, where builds start)
             optimizeButton
+            }   // Flexible (PR #362) H30 end
         }
         // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows
         // a second line when it is DISABLED (it says what is missing), and the

@@ -176,6 +176,12 @@ extension FlexibleMainViewToggles {
         let row = rowFrame(viewport: viewport)
         let right = row.minX
         let room = right - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        // ★ R7-D1: one line of six 44 pt icons leaves too little beside it on a narrow pad (11" portrait) — the note goes
+        // UNDER the row's right end there, whole, instead of squeezed beside it
+        if room < FlexibleMainNote.minWidth {
+            let w = min(FlexibleMainNote.width, viewport.width - 2 * PageChrome.edge)
+            return CGRect(x: row.maxX - w, y: row.maxY + DS.Space.s, width: w, height: FlexibleMainNote.height)
+        }
         let w = max(0, min(FlexibleMainNote.width, room))
         return CGRect(x: right - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
                       width: w, height: FlexibleMainNote.height)

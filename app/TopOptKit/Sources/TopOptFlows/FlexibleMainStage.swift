@@ -185,6 +185,10 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ ROUND 7, R7-D1 (the redesign's step 0): ONE card at a time on the main page — the Setup tray, the Lattice card, the
     /// blocker callout (D1), D2's face chip and a keypad (FlexibleChromeState).
     public let chrome = FlexibleChromeState()
+    /// ★ R7-D1: the main page's viewport (the views row measures it; the corner pair, inside #354's bar, cannot).
+    public let chromeGeometry = FlexibleChromeGeometry()
+    /// ★ R7-D1: which blockers already popped above the pair this session (each new one pops once).
+    var calloutRule = FlexibleCalloutRule()
     /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each
     /// tap) — builds start only there.
     var goToLattice: (() -> Void)?
@@ -869,6 +873,41 @@ public final class FlexibleMainStage: ObservableObject {
             coreRun.close()
             rebuildFirst()
         }
+        if visible { coreRun.close() }   // ★ R7-D1 (H31): on the Flexible stage the card shows the answer, never the full-screen step
+    }
+
+    // MARK: ★ ROUND 7, R7-D1 — the corner pair (FlexibleCornerPair)
+
+    /// The corner pair's status (the old pill's, on the Flexible stage).
+    func cornerStatus(_ m: FlexibleStageModel) -> FlexibleMainStatus { FlexibleMainStatus.of(model: m) }
+
+    /// Core's last answer is for the lattice on screen.
+    func answerIsCurrent(_ m: FlexibleStageModel) -> Bool {
+        guard let g = m.lattice, !m.latticeIsStale else { return false }
+        return coreRun.sentFor == g.generation
+    }
+
+    /// The card's [Send to core] and Ready's tap: send (an unchanged job never re-sends) — the answer shows in the card,
+    /// never the full-screen step.
+    public func sendFromCard() {
+        sendToCore()
+        coreRun.close()
+    }
+
+    /// What the split button's zones act through.
+    func cornerHooks(openSquish: @escaping () -> Void) -> FlexibleLatticeButton.Hooks {
+        FlexibleLatticeButton.Hooks(send: { [weak self] in self?.sendFromCard() },
+                                    showCard: { [weak self] in if let s = self, let m = s.model { s.coreRun.showHold(m.coreHold) } },
+                                    showLattice: { [weak self] in self?.showLatticeView() },
+                                    note: { [weak self] k in self?.note.post(k) },
+                                    openSquish: openSquish,
+                                    callout: {})
+    }
+
+    /// A blocker the status names pops above the pair — once per issue (the card, when open, shows it instead).
+    func noteCallout(_ s: FlexibleMainStatus) {
+        guard visible, calloutRule.next(s) != nil else { return }
+        if chrome.open != .latticeCard { chrome.show(.callout) }
     }
 
     // MARK: reacting (never inside a view update)
@@ -884,6 +923,7 @@ public final class FlexibleMainStage: ObservableObject {
     }
 
     func apply(_ project: ProjectModel, owned: Bool, pageUp: Bool) {
+        if !owned || pageUp { chrome.foldAll() }   // ★ R7-D1: a stage change or the Squish page folds every card
         frozen = pageUp
         visible = owned && !pageUp
         guard owned else { return }

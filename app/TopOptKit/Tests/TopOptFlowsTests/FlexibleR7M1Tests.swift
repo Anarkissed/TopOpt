@@ -3,8 +3,9 @@
 // inside. His pad is A1_0003 as he saved it (frozen; NO face-prism set), and — where the subject is the face-prism — the
 // same pad with HIS LIVE LATTICE (his simulator's copy of 2026-10-14, read only: Group C = Face 3 + Face 5, protected,
 // Lattice at 25 mm each; the Top's face Off), applied through the main page's own setters (`hisLiveLattice`).
-//   M1-H18  "Remove the "Protect 3mm" chip" / Minimize plastic (his answer: remove it): FlexibleMainChips.hidden, and hook
-//           H18 as the first statement of the chips' filter. NOT .cadFaces (the reviewer's ruling). RED controlNothingHidden.
+//   M1-H18  "Remove the "Protect 3mm" chip" / Minimize plastic (his answer: remove it). ★ RE-PINNED at R7-D1: H24 (the
+//           whole chip column off the Flexible stage) superseded H18 and removed its line (condition b); the test now pins
+//           the Setup tray's rows and H24. RED: today's column.
 //   M1-H15' "The face-prism depth in the modal and on the face-prism are not equal? … they should *always* be equal" and
 //           img2's "What is this 12mm?": the main page's prism IS the picked group's LATTICE face-prism (#354's own
 //           LatticeDepthPlane, at its depth — the list's number), never a squish prism; [Prisms] = every face-prism of the
@@ -73,23 +74,25 @@ final class FlexibleR7M1Tests: XCTestCase {
 
     // MARK: - M1-H18: Topology's two chips are off the Flexible stage
 
+    /// ★ RE-PINNED (round 7, R7-D1 — the reviewer's 19:45 ruling, condition (b): "H24 supersedes H18: remove H18's line in
+    /// the same commit"; his pick 1, A1's Setup chip): the WHOLE bottom-right chip column is off the Flexible stage (H24), so
+    /// FlexibleMainChips and its filter are gone. What stays on this stage is the Setup tray's four rows — Quality, Plate up,
+    /// Gravity, Print parameters — with no Protect, Minimize plastic or CAD surfaces (his img1 words and his CAD answer).
+    /// Was: FlexibleMainChips.visible hid Protect and Minimize plastic from the column, CAD surfaces kept.
     func testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs() throws {
-        let all = SettingsChipID.allCases
-        let owned = FlexibleMainChips.visible(all, owned: true)
-        XCTAssertFalse(owned.contains(.faceProtectDepth), "★ \"Protect 3 mm\" is off the Flexible stage (his img1)")
-        XCTAssertFalse(owned.contains(.minimizePlastic), "★ \"Minimize plastic\" is off the Flexible stage (his answer)")
+        let rows = Set(FlexibleSetupRow.allCases.compactMap(\.chip))
+        XCTAssertFalse(rows.contains(.faceProtectDepth), "★ \"Protect 3 mm\" is off the Flexible stage (his img1)")
+        XCTAssertFalse(rows.contains(.minimizePlastic), "★ \"Minimize plastic\" is off the Flexible stage (his answer)")
+        XCTAssertFalse(rows.contains(.cadFaces), "★ CAD surfaces too (his answer of 2026-10-14; H24)")
         for kept in [SettingsChipID.quality, .buildOrientation, .gravity] {
-            XCTAssertTrue(owned.contains(kept), "\(kept) stays: a live Flexible input")
+            XCTAssertTrue(rows.contains(kept), "\(kept) stays: a live Flexible input (the Setup tray's row)")
         }
-        XCTAssertTrue(owned.contains(.cadFaces), "★ the reviewer's ruling: H18 does NOT hide CAD surfaces (the redesign's H24)")
-        XCTAssertEqual(FlexibleMainChips.hidden, [.faceProtectDepth, .minimizePlastic], "exactly the two approved chips")
-        XCTAssertEqual(FlexibleMainChips.visible(all, owned: false), all, "every other stage: every chip, as today")
-        // ★ RED CONTROL: nothing hidden — his img1 column ("Protect 3 mm", "Minimize plastic")
-        FlexibleMainChips.controlNothingHidden = true
-        let control = FlexibleMainChips.visible(all, owned: true)
-        FlexibleMainChips.controlNothingHidden = false
+        XCTAssertEqual(SettingsChipID.allCases.count, 9, "every other stage: #354's chips, untouched")
+        // ★ RED CONTROL: today's column on his pad (img1: Fast · 64³, Protect 3 mm, Minimize plastic, Plate up, Gravity)
+        let control: Set<SettingsChipID> = [.quality, .faceProtectDepth, .minimizePlastic, .buildOrientation, .gravity]
         XCTAssertTrue(control.contains(.faceProtectDepth) && control.contains(.minimizePlastic), "★ RED CONTROL: today's column")
-        print("FLEX-R7M1-H18 owned \(owned) · control \(control)")
+        XCTAssertFalse(control.isSubset(of: rows), "★ RED CONTROL: the column is not the tray")
+        print("FLEX-R7M1-H18 (H24) tray \(FlexibleSetupRow.allCases.map(\.title)) · control \(control.count) chips")
     }
 
     /// The two approved hooks, each a stage switch at its anchor in #354's WorkspacePlaceholder (and nothing else of the
@@ -102,12 +105,16 @@ final class FlexibleR7M1Tests: XCTestCase {
         XCTAssertEqual(ws.components(separatedBy: h15p).count - 1, 1, "★ H15' is one line at H15's anchor")
         XCTAssertFalse(code.contains("? stageVolumeItems + flexibleMain.volumes("), "★ H15's old line is gone (+1 −1)")
         XCTAssertEqual(code.components(separatedBy: "flexibleMain.volumes(").count - 1, 2, "volumes( is asked only on H15's line")
-        // H18: the first statement of the filter; #354's own cases untouched
-        let h18 = "SettingsChipID.allCases.filter { id in\n            if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }   // Flexible (PR #362) H18:"
-        XCTAssertEqual(ws.components(separatedBy: h18).count - 1, 1, "★ H18 is the first statement inside the chips' filter")
+        // ★ RE-PINNED (round 7, R7-D1 — condition (b): H24 supersedes H18, removed in the same commit): the chips' filter is
+        // #354's own again (its first statement is #354's switch) and the column is not drawn on the Flexible stage (H24).
+        // Was: H18 as the filter's first statement.
+        XCTAssertEqual(ws.components(separatedBy: "SettingsChipID.allCases.filter { id in\n            switch id {").count - 1, 1,
+                       "★ H18 is gone: the filter's first statement is #354's switch")
+        XCTAssertTrue(ws.contains("if force.gravityIsSet, !flexibleMain.owns(project, stage) { bottomRightControls }   // Flexible (PR #362) H24:"),
+                      "★ H24: the column is off the Flexible stage")
         XCTAssertTrue(code.contains("case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0"), "#354's rule stays")
-        XCTAssertTrue(code.contains("case .cadFaces: return isStepPart"), "CAD surfaces: #354's rule, untouched (not in H18)")
-        XCTAssertEqual(code.components(separatedBy: "FlexibleMainChips").count - 1, 1, "H18 is the only line that reads FlexibleMainChips")
+        XCTAssertTrue(code.contains("case .cadFaces: return isStepPart"), "CAD surfaces: #354's rule, untouched")
+        XCTAssertEqual(code.components(separatedBy: "FlexibleMainChips").count - 1, 0, "nothing reads FlexibleMainChips (it is gone with H18)")
     }
 
     // MARK: - M1-H15': the main page's prism IS the lattice face-prism, at the list's depth

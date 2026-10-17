@@ -156,6 +156,7 @@ public final class FlexibleCoreRun: ObservableObject {
     public func send(_ m: FlexibleStageModel) {
         shown = true
         guard !isSending else { return }
+        sentFor = m.lattice?.generation   // ★ R7-D1: the answer that follows is for this lattice
         // ★ ROUND 7, M1 (ruling 4: "The Flexible job builder must NEVER send a job with no include region"): with no
         // face-prism core would lattice the whole part — not sent, the reason said (asked fresh: an edit on another stage)
         if Self.noFacePrismFirst(m) { refuseNoFacePrism(); return }
@@ -188,6 +189,7 @@ public final class FlexibleCoreRun: ObservableObject {
     public func send(_ m: FlexibleStageModel, fix: FlexibleCoreFix) {
         guard case .send = fix, !isSending else { return }
         shown = true
+        sentFor = m.lattice?.generation   // ★ R7-D1
         if Self.noFacePrismFirst(m) { refuseNoFacePrism(); return }   // ★ M1 (ruling 4): the step's buttons too
         let job: String
         do {
@@ -255,25 +257,36 @@ public final class FlexibleCoreRun: ObservableObject {
     /// The Export step's close (the run, if any, carries on and its answer stays).
     public func close() { shown = false }
 
-    // MARK: ★ ROUND 7, R7-D1 — STUB (tests first)
+    // MARK: ★ ROUND 7, R7-D1 — the corner card (H31: no full-screen step on the Flexible stage)
+
+    /// The lattice (its generation) the last answer is for: the corner pair says "Sent" only for the lattice on screen.
+    public internal(set) var sentFor: Int?
 
     /// Tests only: a phase / hold / sent job as the step would hold them.
-    func setForTests(phase: Phase, hold: FlexibleCoreHold?, sentJob: String?) {}
-    /// The card looks at the hold without sending (STUB).
-    public func showHold(_ h: FlexibleCoreHold?) {}
-    /// The one line for a phase (STUB).
-    public nonisolated static func line(_ phase: Phase) -> String { "" }
+    func setForTests(phase: Phase, hold: FlexibleCoreHold?, sentJob: String?) {
+        self.phase = phase; self.hold = hold; self.sentJob = sentJob
+    }
 
-    /// The Export step's one line about core.
-    public var line: String {
+    /// ★ R7-D1: the corner card LOOKS at what core can't take as it stands (the hold's line and its 1–3 sends) — nothing
+    /// is sent; what was sent, core's answer and the full-screen step (closed) stay as they are.
+    public func showHold(_ h: FlexibleCoreHold?) {
+        guard !isSending else { return }
+        hold = h
+    }
+
+    /// The step's one line for `phase` (the card and the split button read it too).
+    public static func line(_ phase: Phase) -> String {
         switch phase {
         case .idle: return ""
-        case .sending: return Self.sendingLine
+        case .sending: return sendingLine
         case .ran(let r): return r.line
         case .notSent(let line, _): return line
         case .failed: return "Core couldn\u{2019}t run it"
         }
     }
+
+    /// The Export step's one line about core.
+    public var line: String { Self.line(phase) }
 
     /// Behind the (i): core's whole sentence, or where its receipt and heat maps are.
     public var info: String? {

@@ -415,7 +415,7 @@ extension FlexibleMainStage {
     /// that has a value there (the key follows — "switching colours if needed").
     public func read(_ project: ProjectModel, mode: LatticeLegendMode, face: FaceID, point: SIMD3<Float>?) -> Bool {
         // ★ ROUND 7 (F): every tap on the main Flexible page's part names the selected squeeze group (the heat follows it)
-        if visible, !frozen, model?.project === project { noteMainTap(face: Int(face), point: point) }
+        if visible, !frozen, model?.project === project { chrome.foldAll(); noteMainTap(face: Int(face), point: point) }   // ★ R7-D1: a tap on the part folds every card
         guard let kind = FlexibleReadKind(mode: mode) else { return false }
         guard let p = point else { return true }
         let order = [kind] + legendKinds.filter { $0 != kind }

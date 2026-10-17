@@ -1,5 +1,5 @@
-// FlexibleStageChrome — the Flexible stage's entry card, stage title chip and its
-// "delete and choose again" sheet (task 2026-09-29-flexible-screens S1; M10: Flexible
+// FlexibleStageChrome — the Flexible stage's entry card and its "delete and choose again" sheet (★ ROUND 7, R7-D1: the
+// stage title chip went with H29 — "● Flexible" is the capsule's, FlexibleStageCapsule) (task 2026-09-29-flexible-screens S1; M10: Flexible
 // "looks exactly like" Structural and Aesthetic).
 //
 // ★ THE SAME SHAPES, FONTS AND SPACING AS LatticeStageModeModal / LatticeStageModeSheet —
@@ -101,25 +101,6 @@ public struct FlexibleStageCard: View {
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
             .stroke(FlexibleStageStyle.accent.opacity(focused ? 0.9 : 0.35),
                     lineWidth: focused ? 2 : 1))
-    }
-}
-
-/// The stage's title pill under Flexible (LatticeStageModeChip's shape).
-public struct FlexibleStageChip: View {
-    public let onTap: () -> Void
-    public init(onTap: @escaping () -> Void) { self.onTap = onTap }
-    public var body: some View {
-        Button(action: onTap) {
-            Text(FlexibleStageStyle.title)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(FlexibleStageStyle.accent)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DS.Space.s)
-                .background(Capsule().fill(FlexibleStageStyle.accent.opacity(0.14)))
-                .overlay(Capsule().stroke(FlexibleStageStyle.accent.opacity(0.45), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("lattice-mode-chip")
     }
 }
 

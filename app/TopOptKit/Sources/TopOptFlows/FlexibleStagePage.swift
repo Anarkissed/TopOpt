@@ -42,6 +42,10 @@ public struct FlexibleStagePage: View {
     @StateObject private var camera = OrbitCameraModel()
     @StateObject private var proj = FlexibleProjectionBox()
     let onExit: () -> Void
+    /// ★ ROUND 7, R7-D1 (H36): the capsule's ways off the page — to Topology or Surface (after Save & Exit's own check),
+    /// and About Flexible… (the limits sheet).
+    let onLeave: (WorkspaceStage) -> Void
+    let onAbout: () -> Void
 
     // the overlay mesh and its per-vertex channels, rebuilt only when their inputs change
     @State private var overlay: FlexibleOverlayMesh?
@@ -124,25 +128,24 @@ public struct FlexibleStagePage: View {
     static let squishPeriodS = 2.4
 
     /// ★ BATCH B: over the main page's shared model (FlexibleMainStage.model(for:)).
-    public init(project: ProjectModel, model: FlexibleStageModel, onExit: @escaping () -> Void) {
-        self.project = project
-        self.model = model
-        self.onExit = onExit
-    }
-    /// ★ R7-D1 STUB: the capsule's closures.
+    /// ★ R7-D1 (H36): `onLeave` / `onAbout` — the capsule's hops (every existing construction compiles unchanged).
     public init(project: ProjectModel, model: FlexibleStageModel, onLeave: @escaping (WorkspaceStage) -> Void = { _ in },
                 onAbout: @escaping () -> Void = {}, onExit: @escaping () -> Void) {
         self.project = project
         self.model = model
+        self.onLeave = onLeave
+        self.onAbout = onAbout
         self.onExit = onExit
     }
-    /// Test control only (R7-D1 STUB).
+    /// Test control only (R7-D1): the top line's band from the Exit row alone (it lands on the capsule at 11" portrait).
     @MainActor static var controlExitRowOnlyKeepOut = false
     /// ★ R7-V: tests hand the page its squish loop, to watch it (the pause latch, Play, Bend).
     init(project: ProjectModel, model: FlexibleStageModel, loop: FlexibleSquishLoop, onExit: @escaping () -> Void) {
         self.project = project
         self.model = model
         self._loop = StateObject(wrappedValue: loop)
+        self.onLeave = { _ in }
+        self.onAbout = {}
         self.onExit = onExit
     }
     /// ★ R7-V (his img4: "a 'bend' icon view … the entire group's bend at the full depth - all together", and his answer:
@@ -230,6 +233,7 @@ public struct FlexibleStagePage: View {
                 DS.Color.background.color.ignoresSafeArea()
                 stage
                 exitButton
+                capsule   // ★ R7-D1: A2's capsule, the main page's own, with Squish lit
                 notice(in: geo.size)
                 FlexibleSettingsPanel(model: model, padTarget: $padTarget, minimized: $panelMinimized)
                     .background(GeometryReader { g in
@@ -468,7 +472,7 @@ public struct FlexibleStagePage: View {
     static func chromeClip(_ frames: [String: CGRect], viewport: CGSize) -> [CGRect] {
         guard let st = frames["stage"] else { return [] }
         var out = stageKeepOut(frames)
-        out += ["player", "popup", "notice", "toast", "exitRow"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        out += ["player", "popup", "notice", "toast", "exitRow", "capsule"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
         let page = frames["page"] ?? st
         out.append(FlexibleLegendPlacement.gizmoFrame(viewport: viewport).offsetBy(dx: page.minX - st.minX, dy: page.minY - st.minY))
         return out
@@ -603,7 +607,7 @@ public struct FlexibleStagePage: View {
     /// redo), the readiness line — so the player never covers a button or a legend.
     static func playerKeepOut(_ frames: [String: CGRect]) -> [CGRect] {
         guard let page = frames["page"] else { return [] }
-        return ["panel", "legend", "exitRow", "notice"].compactMap { frames[$0]?.offsetBy(dx: -page.minX, dy: -page.minY) }
+        return ["panel", "legend", "exitRow", "capsule", "notice"].compactMap { frames[$0]?.offsetBy(dx: -page.minX, dy: -page.minY) }
     }
 
     private func playerFrame(_ size: CGSize) -> CGRect? {
@@ -631,17 +635,7 @@ public struct FlexibleStagePage: View {
                     // ★ ROUND 7 (F, his answer: "Allow an *empty* setup after reset all."): nothing set to squish leaves
                     let empty = model.isEmptySetup
                     Button {
-                        switch FlexibleSettingsExit.decide(model.readiness, modified: modified, empty: empty) {
-                        case .exit:
-                            if modified {
-                                model.save()                  // Save & Exit: the main page bakes (Lattice view on)
-                            } else {
-                                model.exitUnchanged = true    // Exit: nothing moves on the main page
-                            }
-                            onExit()
-                        case .fix(let issue):
-                            present(issue)
-                        }
+                        leave(then: nil)   // ★ R7-D1: the ONE way off the page (Save & Exit's check first)
                     } label: {
                         Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))
                             .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
@@ -682,6 +676,25 @@ public struct FlexibleStagePage: View {
         .padding(PageChrome.edge)
     }
 
+    /// ★ ROUND 7, R7-D1 (his pick 1: A2's capsule on BOTH pages): "● Flexible ⌄ | Lattice | Squish" under the Exit row, at
+    /// the main page's place (24, 76), Squish lit; its white dot while this page holds unsaved changes.
+    private var capsule: some View {
+        FlexibleStageCapsule(main: nil, model: model, project: project, page: .squish,
+                             go: { dest in leave(then: { onLeave(dest) }) }, lattice: { leave(then: nil) }, squish: {},
+                             about: onAbout, modified: FlexibleSettingsExit.modified(model.settings, since: opened))
+            .padding(.leading, FlexibleChromeLayout.capsuleLeft)
+            .padding(.top, FlexibleChromeLayout.capsuleTop)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ ROUND 7, R7-D1: the ONE way off the Squish page — Exit / Save & Exit, the capsule's Lattice, and its menu's Topology
+    /// or Surface (`then`): Save & Exit's own check first (FlexibleSquishLeave). Blocked, the fix opens and nothing leaves.
+    private func leave(then follow: (() -> Void)?) {
+        _ = FlexibleSquishLeave.run(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
+                                    empty: model.isEmptySetup, save: { model.save() }, exitUnchanged: { model.exitUnchanged = true },
+                                    onExit: onExit, present: { present($0) }, then: follow)
+    }
+
     /// ★ THE PAGE'S UNDO / REDO: the project's own snapshot history, then — ★ D2 REVIEW — the
     /// main page's loads re-read (no edit, no undo step: the redo stack survives) before the
     /// designs re-run. The cached loads had kept the undone weight: a group line read
@@ -704,7 +717,7 @@ public struct FlexibleStagePage: View {
     private func panelMaxHeight(_ size: CGSize) -> CGFloat {
         var band = noticeBand(size)
         if model.toast != nil { band.size.height += Self.toastRowHeight }
-        var top = [exitRowLocal(), band]
+        var top = [exitRowLocal(), band] + (capsuleLocal().map { [$0] } ?? [])   // ★ R7-D1: the capsule
         if fixShown != nil, let p = frames["popup"], let page = frames["page"] {
             top.append(p.offsetBy(dx: -page.minX, dy: -page.minY))
         }
@@ -721,10 +734,21 @@ public struct FlexibleStagePage: View {
     }
 
     /// ★ THE TOP LINE'S BAND (batch B review): right of the Exit row, left of the gizmo —
-    /// or its own row under Exit when that is too narrow (11" portrait).
+    /// or its own row under Exit when that is too narrow (11" portrait). ★ R7-D1: never onto the capsule — beside the Exit
+    /// row when it misses it, else its own row below the capsule.
     private func noticeBand(_ size: CGSize) -> CGRect {
-        FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal())
+        FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),
+                                           capsule: Self.controlExitRowOnlyKeepOut ? nil : (capsuleLocal() ?? Self.nominalCapsule))
     }
+
+    /// ★ R7-D1: the capsule in the page's frame (measured), nil before the first layout.
+    private func capsuleLocal() -> CGRect? {
+        guard let c = frames["capsule"] else { return nil }
+        guard let page = frames["page"] else { return c }
+        return c.offsetBy(dx: -page.minX, dy: -page.minY)
+    }
+    /// The capsule before it is measured (its place and its widest).
+    static let nominalCapsule = FlexibleChromeLayout.capsuleFrame(width: FlexibleChromeLayout.capsuleMaxWidth)
 
     /// The legend, placed by FlexibleLegendPlacement.legend against the gizmo and the top line
     /// (its own size measured; trailing-centred until the first measurement).

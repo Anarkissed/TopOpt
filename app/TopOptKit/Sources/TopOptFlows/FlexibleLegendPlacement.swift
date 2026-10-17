@@ -65,13 +65,16 @@ public enum FlexibleLegendPlacement {
     /// and put [Fix] half under the gizmo, which orbits on its whole square). The band right of
     /// the Exit row and left of the gizmo's clearance; narrower than `noticeMinWidth`, its own
     /// row under the Exit row, from the edge to the gizmo's clearance.
-    public static func noticeBand(viewport: CGSize, exitRow: CGRect, edge: CGFloat = PageChrome.edge) -> CGRect {
+    /// ★ ROUND 7, R7-D1: `capsule` — the Squish page's capsule under the Exit row ("● Flexible ⌄ | Lattice | Squish"): the
+    /// band beside the Exit row stays when it misses the capsule; its own row goes BELOW the capsule, never onto it.
+    public static func noticeBand(viewport: CGSize, exitRow: CGRect, capsule: CGRect? = nil, edge: CGFloat = PageChrome.edge) -> CGRect {
         let right = viewport.width - PageChrome.gizmoClearance
         let left = exitRow.maxX + gap
         if right - left >= noticeMinWidth {
-            return CGRect(x: left, y: exitRow.midY - noticeHeight / 2, width: right - left, height: noticeHeight)
+            let beside = CGRect(x: left, y: exitRow.midY - noticeHeight / 2, width: right - left, height: noticeHeight)
+            if capsule.map({ !$0.intersects(beside) }) ?? true { return beside }
         }
-        return CGRect(x: edge, y: exitRow.maxY + gap, width: max(0, right - edge), height: noticeHeight)
+        return CGRect(x: edge, y: max(exitRow.maxY, capsule?.maxY ?? 0) + gap, width: max(0, right - edge), height: noticeHeight)
     }
 
     /// The fix pop-up's frame (its height is its content's): under the top line (and the

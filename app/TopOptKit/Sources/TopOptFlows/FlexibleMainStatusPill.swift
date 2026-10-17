@@ -145,10 +145,14 @@ public struct FlexibleMainViewToggles: View {
     /// ★ S1b (round 6 item 3): Dent heat, Stress, Lattice and [Prisms] (the Settings page's own button and glyph);
     /// ★ R7-V: X-ray and Play.
     static let buttons = 6
-    /// ★ R7-D1 STUB: the views row's order.
+    /// ★ ROUND 7, R7-D1 (his pick 1: "everything from A2 is great" — A2's views row): Heat, Stress, X-ray, Lattice, Prisms,
+    /// Play, 44 pt each (his rule: 44 pt targets), 8 apart. X1's rules stay: no view turns X-ray on.
     public enum Kind: Equatable, Sendable { case heat, stress, xray, lattice, prisms, play }
+    /// Test control only: R7-V's order.
     @MainActor static var controlR7VOrder = false
-    @MainActor static var order: [Kind] { [.heat, .stress, .lattice, .prisms, .xray, .play] }
+    @MainActor static var order: [Kind] {
+        controlR7VOrder ? [.heat, .stress, .lattice, .prisms, .xray, .play] : [.heat, .stress, .xray, .lattice, .prisms, .play]
+    }
     /// Test control only (R7-V review): the first build's Play status — a mini spinner while the sims work, nothing for a
     /// failure.
     @MainActor static var controlMiniSpinner = false
@@ -234,25 +238,59 @@ public struct FlexibleMainViewToggles: View {
         // the workspace's solver (no publish: its sim's phase arrives on the next run-loop turn)
         let _ = solver.map { main.attach($0) }
         GeometryReader { g in
-            HStack(spacing: DS.Space.s) {
-                // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds
-                FlexibleMainNoteView(note: main.note, main: main, maxWidth: Self.noteFrame(viewport: g.size).width)
-                // ★ R7-V: one line of six — or, on a pad too narrow for the note beside six, three over three
-                Group {
-                    if Self.columns(viewport: g.size) >= Self.buttons {
-                        HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton; prismsButton; xrayButton; playButton }
-                    } else {
-                        VStack(alignment: .trailing, spacing: DS.Space.s) {
-                            HStack(spacing: DS.Space.s) { heatButton; stressButton; latticeButton }
-                            HStack(spacing: DS.Space.s) { prismsButton; xrayButton; playButton }
-                        }
+            // ★ C2: "Lattice ready" — ★ C2 VERIFICATION: beside the row, in the band `frame` holds; ★ R7-D1: under the row
+            // where one line of six 44 pt icons leaves too little beside it (noteFrame)
+            let note = Self.noteFrame(viewport: g.size), under = note.minY >= Self.rowFrame(viewport: g.size).maxY
+            Group {
+                if under {
+                    VStack(alignment: .trailing, spacing: DS.Space.s) {
+                        row(g.size)
+                        FlexibleMainNoteView(note: main.note, main: main, maxWidth: note.width)
+                    }
+                } else {
+                    HStack(spacing: DS.Space.s) {
+                        FlexibleMainNoteView(note: main.note, main: main, maxWidth: note.width)
+                        row(g.size)
                     }
                 }
-                .latticeBandChipKeepOut()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .padding(.top, PageChrome.belowGizmo)
             .padding(.trailing, PageChrome.edge)
+            .onAppear { main.chromeGeometry.note(g.size) }   // ★ R7-D1: the corner pair sizes its panels to this viewport
+            .onChange(of: g.size) { main.chromeGeometry.note($0) }
+        }
+    }
+
+    /// ★ R7-D1 (his pick 1, A2's views row): the mockup's order, one line of six 44 pt icons — three over three below
+    /// 800 pt (the mini in portrait). X1's rules stay as they are (no view turns X-ray on).
+    private func row(_ v: CGSize) -> some View {
+        let order = Self.order, c = Self.columns(viewport: v)
+        return Group {
+            if c >= Self.buttons {
+                HStack(spacing: DS.Space.s) { ForEach(0..<order.count, id: \.self) { button(order[$0]) } }
+            } else {
+                VStack(alignment: .trailing, spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.s) { ForEach(0..<c, id: \.self) { button(order[$0]) } }
+                    HStack(spacing: DS.Space.s) { ForEach(c..<order.count, id: \.self) { button(order[$0]) } }
+                }
+            }
+        }
+        .background(GeometryReader { r in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainViews": r.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .latticeBandChipKeepOut()
+    }
+
+    /// ★ R7-D1: one view button by its kind.
+    @ViewBuilder private func button(_ k: Kind) -> some View {
+        switch k {
+        case .heat: heatButton
+        case .stress: stressButton
+        case .xray: xrayButton
+        case .lattice: latticeButton
+        case .prisms: prismsButton
+        case .play: playButton
         }
     }
 
@@ -265,18 +303,14 @@ public struct FlexibleMainViewToggles: View {
     }
     /// The buttons alone (★ R7-V: one line of six, or three over three — `columns`).
     static func rowFrame(viewport: CGSize) -> CGRect {
-        let c = columns(viewport: viewport), r = (buttons + c - 1) / c
-        let w = CGFloat(c) * 40 + CGFloat(c - 1) * DS.Space.s
-        let h = CGFloat(r) * 40 + CGFloat(r - 1) * DS.Space.s
-        return CGRect(x: viewport.width - PageChrome.edge - w, y: PageChrome.belowGizmo, width: w, height: h)
+        FlexibleChromeLayout.viewsRow(viewport: viewport)   // ★ R7-D1: 44 pt icons (the layout's one row)
     }
     /// ★ S1b: the buttons per line — all of them, unless one line would leave the "Lattice ready · Show" note less than
     /// its `minWidth` beside them, clear of the left panel; then half (★ R7-V: three over three).
     static func columns(viewport: CGSize) -> Int {
-        let line = CGFloat(buttons) * 40 + CGFloat(buttons - 1) * DS.Space.s
-        let room = viewport.width - PageChrome.edge - line - DS.Space.s
-            - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
-        return room >= FlexibleMainNote.minWidth ? buttons : (buttons + 1) / 2
+        // ★ R7-D1 (the mockup he picked): one line of six, three over three below 800 pt (the mini in portrait) — the note
+        // goes under the row where it does not fit beside it (noteFrame)
+        FlexibleChromeLayout.viewsColumns(viewport: viewport)
     }
 }
 
@@ -290,11 +324,22 @@ public struct FlexibleMainPlayerSlot: View {
     /// sits in the player's row (0 when the column is not shown). Its widest chip is the
     /// bottom one (BottomChipOrder), the one beside the player.
     let chipColumnWidth: CGFloat
+    /// ★ R7-D1: the corner pair's open panel moves the player left (one card at a time; the player is not a card).
+    @ObservedObject var chrome: FlexibleChromeState
 
     public init(main: FlexibleMainStage, bottomClearance: CGFloat, chipColumnWidth: CGFloat = 0) {
         self.main = main
         self.bottomClearance = bottomClearance
         self.chipColumnWidth = chipColumnWidth
+        self._chrome = ObservedObject(wrappedValue: main.chrome)
+    }
+
+    /// ★ R7-D1: the column an open panel of the corner pair may take (right-aligned on 24, from the views row's foot + 12
+    /// down to 12 above the pair), or nil while none is open.
+    static func panelColumn(_ open: FlexibleChromeState.Card?, viewport v: CGSize) -> CGRect? {
+        guard let open, [.setup, .latticeCard, .callout].contains(open) else { return nil }
+        let w = FlexibleChromeLayout.panelWidth(v), top = FlexibleChromeLayout.panelTopLimit(v)
+        return CGRect(x: v.width - PageChrome.edge - w, y: top, width: w, height: FlexibleChromeLayout.panelMaxHeight(v))
     }
 
     /// The trailing legend slot the main page's legends take (batch C) — kept clear now.
@@ -327,7 +372,8 @@ public struct FlexibleMainPlayerSlot: View {
         FlexibleLegendPlacement.player(viewport: v, bottomClearance: bottomClearance,
                                        keepOut: keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
                                                         legends: main.legendCard(viewport: v, bottomClearance: bottomClearance,
-                                                                                 chipColumnWidth: chipColumnWidth).map { [$0.frame] } ?? []),
+                                                                                 chipColumnWidth: chipColumnWidth).map { [$0.frame] } ?? [])
+                                           + (panelColumn(main.chrome.open, viewport: v).map { [$0] } ?? []),   // ★ R7-D1
                                        size: size)
     }
     /// ★ S1b: where the player is now (nil while it does not show) — the main page's mm tags keep clear of it.

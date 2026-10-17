@@ -37,7 +37,9 @@ final class FlexibleMainPageHookTests: XCTestCase {
             // ★ re-pinned (round 4 C2 verification): "Building…" on another stage goes to the Lattice stage only
             ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }"),
             // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row
-            ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
+            // ★ RE-PINNED (round 7, R7-D1 — H34, approved 2026-10-14 19:45): no chip column on the Flexible stage (H24), the
+            // corner pair rides the bar's clearance: chipColumnWidth 0. Was: the column's width.
+            ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
         ]
         for (h, pin) in pins {
             XCTAssertEqual(ws.components(separatedBy: pin).count - 1, 1, "\(h) must appear exactly once: \(pin)")
@@ -64,7 +66,12 @@ final class FlexibleMainPageHookTests: XCTestCase {
         // "Fix 1 thing" only when changed AND blocked — FlexibleSettingsExit wraps the same readiness rule
         // ★ RE-PINNED (round 7 batch F, his answer 3: "Allow an *empty* setup after reset all."): the same readiness rule, with
         // whether the setup is empty (FlexibleSettingsExit.emptyLeaves)
-        XCTAssertTrue(page.contains("switch FlexibleSettingsExit.decide(model.readiness, modified: modified, empty: empty) {"), "Exit consults the readiness")
+        // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's capsule on the Squish page too): Exit, the capsule's Lattice and its
+        // menu's Topology / Surface are ONE way off the page, leave(then:), which runs Save & Exit's own check
+        // (FlexibleSquishLeave.run → FlexibleSettingsExit.decide). Was: the switch inline in the Exit button.
+        XCTAssertTrue(page.contains("Button {\n                        leave(then: nil)"), "Exit consults the readiness")
+        XCTAssertTrue(page.contains("_ = FlexibleSquishLeave.run(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),"))
+        XCTAssertTrue(try FlexibleSource.code("FlexibleStageCapsule.swift").contains("FlexibleSettingsExit.decide(r, modified: modified, empty: empty)"))
         XCTAssertTrue(page.contains("Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))"), "Exit says \"Fix 1 thing\" while blocked")
         XCTAssertTrue(page.contains("let modified = FlexibleSettingsExit.modified(model.settings, since: opened)"), "…and whether anything changed")
         XCTAssertTrue(page.contains("settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),"),
@@ -74,7 +81,8 @@ final class FlexibleMainPageHookTests: XCTestCase {
         // functions FlexibleLegendPlacementTests measure (not by 180 pt of padding)
         XCTAssertTrue(page.contains("prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)"))
         XCTAssertTrue(page.contains("if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {"))
-        XCTAssertTrue(page.contains("FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal())"))
+        // ★ RE-PINNED (round 7, R7-D1): the band also clears the Squish page's capsule. Was: the Exit row alone.
+        XCTAssertTrue(page.contains("FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),"))
         XCTAssertTrue(page.contains("FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),"))
         XCTAssertTrue(page.contains("let r = FlexibleLegendPlacement.legend(size: measured, viewport: size,"))
         XCTAssertFalse(page.contains(".padding(.horizontal, 180)"), "no line or pop-up laid out by blind padding")

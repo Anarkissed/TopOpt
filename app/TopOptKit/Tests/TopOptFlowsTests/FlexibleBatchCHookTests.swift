@@ -29,7 +29,9 @@ final class FlexibleBatchCHookTests: XCTestCase {
             ("H2'", "flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"),
             // ★ #354's "grading your lattice" banner stands down under Flexible (it grades nothing there)
             ("B1", "if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }"),
-            ("H6", "if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: force.gravityIsSet ? (settingsChipWidths.values.max() ?? 0) : 0) }"),
+            // ★ RE-PINNED (round 7, R7-D1 — H33, approved 2026-10-14 19:45): no chip column on the Flexible stage (H24 stops
+            // drawing it there), so the legend keeps out no stale Topology chip widths: chipColumnWidth 0. Was: the column's width.
+            ("H6", "if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
             ("H7", "if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }"),
             // ★ RE-PINNED (S1, the #361 sync — the reviewer's ruling of 2026-10-08 19:13 (i)): H7/H8 ride #354's
             // `legendDrilledIn` (the key's drill-in only counts while the key is on screen), never a raw

@@ -38,7 +38,7 @@ public struct FlexibleStageViews: OptionSet, Hashable, Sendable {
         (.xray, FlexibleMainViewToggles.xrayIcon, "X-ray", "flexible-settings-view-xray"),
         (.play, "play.fill", "Play", "flexible-settings-view-play"),
     ]
-    static let buttonSize: CGFloat = 40
+    static let buttonSize: CGFloat = FlexibleViewButton.side   // ★ R7-D1: 44 pt, the main page's row geometry
     /// [Prisms]' SF symbol (its glyph's, and the accessibility fallback) — ★ S1b: the main page's [Prisms] too.
     static let prismsIcon = "arrow.down.to.line"
     /// ★ S1b: [Prisms]' glyph, ONE for both pages — "down to a depth" in the prisms' own purple when on.

@@ -53,9 +53,10 @@ final class FlexibleCornerPairTests: XCTestCase {
         XCTAssertTrue(Set(SettingsChipID.allCases).isSuperset(of: gone), "(the ids are #354's, untouched)")
     }
 
-    func testTheTraysRowsDoOneThingEach() {
-        let p = project()
-        let app = AppModel(materialsPath: nil)
+    func testTheTraysRowsDoOneThingEach() throws {
+        // his pad through the app's own restore (the sheet opens over the open project — AppModel.openPrintParams)
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        let p = r.project, app = r.app
         let chrome = FlexibleChromeState()
         let tray = FlexibleSetupTrayState()
         var gravity = 0
@@ -94,7 +95,9 @@ final class FlexibleCornerPairTests: XCTestCase {
             ("ready", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .idle, false, .ready, "Ready \u{00B7} tap to send", .sendAndCard),
             ("sending", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .sending, false, .sending, "Sending to core\u{2026}", .card),
             ("sent", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .ran(ran), true, .sent, ran.line, .card),
-            ("refused", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .ran(refused), true, .refused, refused.line, .card),
+            ("refused", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .ran(refused), true, .refused, B.refusedLine, .card),
+            ("not sent", .init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), .notSent(line: FlexibleCoreRun.notSentLine(.squeezeGroups), why: "w"), true,
+             .refused, B.notSentLine, .card),
             ("no prism", .init(line: FlexibleRowCopy.noFacePrism, tone: .blocked, fix: nil), .idle, false, .blocked, FlexibleRowCopy.noFacePrism, .none),
             ("nothing to squish", .init(line: "Nothing to squish yet", tone: .idle, fix: nil), .idle, false, .idle, "Nothing to squish yet", .openSquish),
         ]
@@ -106,6 +109,11 @@ final class FlexibleCornerPairTests: XCTestCase {
             XCTAssertEqual(B.title, "Lattice", "\(name): the title never changes")
             XCTAssertLessThanOrEqual(line.count, 44, "\(name): one line")
         }
+        // core's whole line is the card's (the button's line is one line, ≤ 44: his rule)
+        XCTAssertGreaterThan(refused.line.count, 44, "premise: core's refusal line is longer than one line")
+        let long = FlexibleCoreRunReport(refusal: nil, scope: "Group 1 only, Face 5 resting", faces: 3, topology: "gyroid", tempC: 230, outDir: "/tmp/x", files: [], seconds: 1)
+        XCTAssertLessThanOrEqual(B.line(.init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), state: .sent, runLine: long.line).count, 44,
+                                 "a long 'Core designed it' line is shortened on the button")
         // an answer for an older lattice is not "sent": the button is Ready again
         XCTAssertEqual(B.state(.init(line: FlexibleMainStatus.ready, tone: .ready, fix: nil), phase: .ran(ran), answerIsCurrent: false), .ready)
         XCTAssertEqual(B.action(.exports), .card, "Exports: the card")

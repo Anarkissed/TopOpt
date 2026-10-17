@@ -346,11 +346,16 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
 
     // MARK: the export step
 
+    /// ★ RE-PINNED (round 7, R7-D1 — H31 and the reviewer's condition (a)): the step's rows moved, unchanged, to
+    /// FlexibleExportRows, which the sheet (Topology, Surface) and the Flexible stage's corner card both draw. Was: the
+    /// rows inside FlexibleExportSheet.
     func testTheExportStepSaysTheExportsWaitOnCoreInOneLine() throws {
         let code = try FlexibleSource.code("FlexibleExportSheet.swift")
-        XCTAssertTrue(code.contains("Text(FlexibleCoreRun.exportsWait)"), "the exports' one line (C2 verification: once, not per card)")
-        XCTAssertTrue(code.contains("Text(run.line)"), "core's answer in one line")
-        XCTAssertFalse(code.contains("The part with its lattice, one closed solid"), "no second line on a card")
+        let rows = try FlexibleSource.code("FlexibleExportRows.swift")
+        XCTAssertTrue(rows.contains("let wait = FlexibleCoreRun.exportsWait") && rows.contains("Text(wait)"), "the exports' one line (C2 verification: once, not per card)")
+        XCTAssertTrue(rows.contains("Text(run.line)"), "core's answer in one line")
+        XCTAssertTrue(code.contains("FlexibleExportRows.CoreRow(run: run)") && code.contains("FlexibleExportRows.Exports(run: run)"), "the sheet draws them")
+        XCTAssertFalse(code.contains("The part with its lattice, one closed solid") || rows.contains("The part with its lattice, one closed solid"), "no second line on a card")
         XCTAssertTrue(code.contains("public struct FlexibleExportMount: View"))
     }
 
@@ -368,8 +373,15 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
             XCTAssertTrue(f.contains(n), "the note band is inside the reserved frame at \(name)")
             // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's settings left the
             // row's line — the note is beside the row again, left of it
-            let right = FlexibleMainViewToggles.rowFrame(viewport: v).minX
-            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
+            let row = FlexibleMainViewToggles.rowFrame(viewport: v), right = row.minX
+            if name == "11p" {
+                // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the
+                // row leaves too little beside it, so the note sits UNDER the row's right end, whole. Was: beside it.
+                XCTAssertEqual(n.minY, row.maxY + DS.Space.s, accuracy: 0.5, "11p: under the row")
+                XCTAssertEqual(n.maxX, row.maxX, accuracy: 0.5, "11p: on the row's right edge")
+            } else {
+                XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
+            }
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }
@@ -386,7 +398,9 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
         let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
         let pins = [
             "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }",
-            "if project.lattice.flexible != nil { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }",
+            // ★ RE-PINNED (round 7, R7-D1 — H31, approved 2026-10-14 19:45): not on the Flexible stage (the corner card says
+            // it); Topology and Surface keep the Export step. Was: mounted for every stage of a Flexible project.
+            "if project.lattice.flexible != nil, !flexibleMain.owns(project, stage) { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }",
         ]
         for p in pins { XCTAssertEqual(ws.components(separatedBy: p).count - 1, 1, "exactly once: \(p)") }
         // H10: the pill's own body decides (send / Settings / wait) — ★ RE-PINNED (C2 verification):
