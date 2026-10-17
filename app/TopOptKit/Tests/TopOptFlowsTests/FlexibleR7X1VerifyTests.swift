@@ -77,7 +77,7 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
         // SECTIONS of the Top, so its solid middle is no pressed quad at all — no closed map vertex to carry a lid (was
         // XCTAssertGreaterThan(closedMap, 20) — X1 ran on M1, where the whole Top was pressed). The rule holds either way.
         XCTAssertEqual(closedMap, 0, "★ M2: the Top's solid middle is not pressed (only its lattice sections are)")
-        XCTAssertEqual(closedHeated, 0, "★ the solid part wears no heat — it does not squish (no flat 0 mm lid)")
+        XCTAssertEqual(closedHeated, 0, "★ the solid part wears no heat — it does not squish (no flat 0 mm lid)")   // (measured on a pressed solid middle by V1b)
         XCTAssertTrue(s.legendKinds.contains(.dent), "★ the Squish row: the heat IS drawn (on the walls)")
         XCTAssertFalse(s.legendKinds.contains(.lattice), "★ no density row: the walls are coloured by the squish")
 
@@ -162,11 +162,45 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
         // ★ RE-PINNED (merge, M2): no flat 0 mm lid on the solid middle even in X1's first build — M2 never presses it (was
         // XCTAssertGreaterThan(cClosedHeated, 20)); the control stays red by its other lines (no walls' heat, the density row,
         // X-ray's opaque lid, M6's ghost walls)
-        XCTAssertEqual(cClosedHeated, 0, "★ RED CONTROL (M2): nothing pressed on the solid middle to wear a lid")
+        XCTAssertEqual(cClosedHeated, 0, "★ RED CONTROL (M2): nothing pressed on the solid middle to wear a lid")   // (V1b: the lid's control on a pressed solid middle)
         XCTAssertTrue(cPrinted.kinds.contains(.lattice), "★ RED CONTROL: the density row beside the Squish row")
         XCTAssertGreaterThan(cSolid, map.count / 4, "★ RED CONTROL: X-ray's opaque heat lid (the square that hid the lattice)")
         XCTAssertTrue(cGhostWalls, "★ RED CONTROL: M6's ghost walls under it")
         print("FLEX-R7X1V-1 heat on the walls: top \(String(format: "%.2f", s.dentMaxMM)) mm, hottest column \(cellMax) · printed closed \(closedMap) heated \(closedHeated) · X-ray solid lid \(solidMap), ghost skin \(ghostHeated)/\(map.count) · control: closed heated \(cClosedHeated), X-ray solid \(cSolid), ghost walls \(cGhostWalls)")
+    }
+
+    // MARK: - V1b: the printed view's solid part wears no lid — measured on a pressed, partly solid face
+
+    /// ★ ROUND 7 REVIEW (R — the review of M2 and F, finding "the X1-merge re-pin leaves V1's no-lid check and its red-control
+    /// line vacuous"): M2 presses only the Top's LATTICE PARTS, so on the live fixture no pressed quad lies on the solid middle
+    /// and V1's `closedHeated == 0` (and its control's) measured nothing. Here the Top is pressed WHOLE though only partly
+    /// latticed — M2's own red control `FlexibleLatticeSections.controlWholeFace`, for this fixture only (a pressed, partly
+    /// solid face, as X1 measured it on M1) — so the rule and its red control measure something again.
+    func testThePrintedViewsSolidPartWearsNoLidOnAWholePressedFace() async throws {
+        FlexibleLatticeSections.controlWholeFace = true
+        defer { FlexibleLatticeSections.controlWholeFace = false }
+        let (r, s, m) = try await hisStrips()
+        let p = r.project
+        XCTAssertTrue(m.settings.face(1)?.isLoaded ?? false, "premise: the Top pressed whole (no lattice parts)")
+        XCTAssertTrue(s.printedView, "premise: Finish None — the printed view")
+        XCTAssertTrue(s.heatOnWalls, "premise: the walls carry the heat")
+        let map = try mapRange(s)
+        let t = try XCTUnwrap(s.tints(p, on: .lattice, roles: [:], stress: nil))
+        let open = try XCTUnwrap(s.printedOpen())
+        var closed = 0, heated = 0
+        for v in map where !open[v] { closed += 1; if t[v * 8 + 3] > 0.01 { heated += 1 } }
+        XCTAssertGreaterThan(closed, 20, "premise: the Top's solid middle is pressed quads (\(closed))")
+        XCTAssertEqual(heated, 0, "★ the solid part wears no heat — no flat 0 mm lid (\(heated) of \(closed))")
+        // ★ RED CONTROL: X1's first build — the heat on the lid, the solid middle a flat 0 mm lid
+        s.controlHeatOnLid = true
+        s.refresh()
+        let ct = try XCTUnwrap(s.tints(p, on: .lattice, roles: [:], stress: nil))
+        let cOpen = try XCTUnwrap(s.printedOpen())
+        let cHeated = map.filter { !cOpen[$0] && ct[$0 * 8 + 3] > 0.01 }.count
+        s.controlHeatOnLid = false
+        s.refresh()
+        print("FLEX-R7X1V-1b whole Top: printed closed \(closed) heated \(heated) · control heated \(cHeated)")
+        XCTAssertGreaterThan(cHeated, 20, "★ RED CONTROL: the flat 0 mm lid on the solid middle (\(cHeated))")
     }
 
     // MARK: - V2: a wall reads its column's squish
