@@ -146,6 +146,38 @@ struct FlexibleFaceGroupRow: View {
 
     var body: some View {
         if let mine = model.squeezeGroup(of: region), model.settings.loadedFaces.count > 1 {
+            if Self.controlMenuFallback { besideOrMenu(mine) } else { namedChips(mine) }
+        }
+    }
+
+    /// ★ ROUND 7 REVIEW (R — the review of F: "Face card group chips never appear on his pad: a one-chip menu shows
+    /// instead"; his answer 10: the chips show the group NAMES): the named chips beside the words where they fit, else on
+    /// their own line under the words (the whole card's width), else that line scrolls — never F's one menu chip, which
+    /// every one of his groups fell back to at 13" portrait and 11" landscape.
+    @ViewBuilder private func namedChips(_ mine: FlexibleSqueezeGroup) -> some View {
+        let chips = FlexChips(options: Self.options(model: model, region: region), selection: "\(mine.id)",
+                              id: "flexible-group", equalWidths: false) { v in pick(v) }
+            .fixedSize()
+        let words = FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-row-group")
+            .background(frame("groupWords"))
+        ViewThatFits(in: .horizontal) {
+            FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-row-group") {
+                chips.background(frame("groupChips"))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                words
+                chips.background(frame("groupChips"))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                words
+                // (the drawn control is the scrolling line — its frame, inside the card)
+                ScrollView(.horizontal, showsIndicators: false) { chips }.background(frame("groupChips"))
+            }
+        }
+    }
+
+    /// F's row (the red control): the chips beside the words, else one menu chip.
+    @ViewBuilder private func besideOrMenu(_ mine: FlexibleSqueezeGroup) -> some View {
             FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-row-group") {
                 // ★ C5: the chips while they fit beside the row's words; past that (his ninth group on
                 // the C5 render pushed "Squeeze group" off its own row) ONE menu chip, "● Group 9 ▾"
@@ -161,7 +193,6 @@ struct FlexibleFaceGroupRow: View {
                 // groups; six chips need ≈ 186 pt, a few more than the row leaves)
                 .layoutPriority(0.5)
             }
-        }
     }
 
     private func pick(_ v: String) {

@@ -203,7 +203,14 @@ final class FlexibleR7FTests: XCTestCase {
         let posed = pose.pose(item)
         guard case .shell(let s) = posed.volume.shape else { return XCTFail("a shell") }
         XCTAssertEqual(s.base[0].z, -1.2, accuracy: 1e-5, "★ the prism's face sits on the bent face")
-        XCTAssertEqual(s.offset, shell.offset, "its floor stays")
+        // ★ RE-PINNED (round 7 review, R — his answer of 2026-10-15: "With Bend on, the depth chip and depth labels MOVE with
+        // the bend (everything goes to the full-bend pose)"): the floor moves with its face (was XCTAssertEqual(s.offset,
+        // shell.offset, "its floor stays") — F's rule, now `FlexibleBendPose.controlInsideStays`)
+        XCTAssertEqual(s.offset[0].z, -41.2, accuracy: 1e-5, "★ R: its floor moves with its face")
+        FlexibleBendPose.controlInsideStays = true
+        guard case .shell(let fs) = pose.pose(item).volume.shape else { return XCTFail("a shell") }
+        FlexibleBendPose.controlInsideStays = false
+        XCTAssertEqual(fs.offset, shell.offset, "F's rule (the red control): its floor stays")
         XCTAssertEqual(posed.volume.faceID, 7); XCTAssertEqual(posed.tint, item.tint); XCTAssertEqual(posed.faceAlpha, 0.2)
         XCTAssertTrue(posed.selected)
         // the page's gates: Bend poses the overlays and no longer hides them

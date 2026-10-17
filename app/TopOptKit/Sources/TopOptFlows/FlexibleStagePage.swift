@@ -943,7 +943,7 @@ struct FlexibleStageOverlays: View {
                                         keepOut: keepOut, clip: clip)
                 }
                 // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
-                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut)
+                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose)   // ★ R: with the bend
                 // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
                 FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip, pose: pose)
@@ -1175,8 +1175,15 @@ struct FlexibleLegend: View {
     }
 
     /// ★ ROUND 7 (M2): the card's sections row while a face is cut into lattice sections ("Violet = lattice · tap to pick").
+    /// ★ ROUND 7 REVIEW (R): …only while something IS violet — a lattice part with no setting of its own nor on its face
+    /// (a pressed or resting part, or a face resting whole, wears its role's colour over the violet).
     @MainActor static func sectionRow(_ m: FlexibleStageModel) -> Bool {
-        !(m.regions.flexible?.partialRoots.isEmpty ?? true)
+        guard let set = m.regions.flexible, !set.partialRoots.isEmpty else { return false }
+        if controlVioletRowAlways { return true }
+        return set.pieces.contains { p in
+            set.partialRoots[p.rootRegion] != nil && p.kind != .strip && m.settings.face(p.wireID) == nil
+                && m.settings.face(p.rootRegion) == nil
+        }
     }
 
     var body: some View {

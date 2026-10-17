@@ -136,6 +136,8 @@ struct FlexibleSettingsPanel: View {
                         .background(Capsule().fill(DS.Color.fillSubtle.color)
                             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
                         .contentShape(Capsule())
+                        .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background(GeometryReader { g in
@@ -176,6 +178,8 @@ extension FlexibleSettingsPanel {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .padding(.horizontal, 12).frame(height: 32)
                     .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(GeometryReader { gr in
@@ -187,6 +191,8 @@ extension FlexibleSettingsPanel {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .padding(.horizontal, 12).frame(height: 32)
                     .background(Capsule().fill(DS.Color.fillSubtle.color))
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(GeometryReader { gr in
@@ -212,6 +218,8 @@ extension FlexibleSettingsPanel {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .padding(.horizontal, 12).frame(height: 32)
                     .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(GeometryReader { g in
@@ -223,6 +231,8 @@ extension FlexibleSettingsPanel {
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .padding(.horizontal, 12).frame(height: 32)
                     .background(Capsule().fill(DS.Color.fillSubtle.color))
+                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("flexible-reset-cancel")

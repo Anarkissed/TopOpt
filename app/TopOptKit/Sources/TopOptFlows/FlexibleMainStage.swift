@@ -800,8 +800,12 @@ public final class FlexibleMainStage: ObservableObject {
     public var fullLabel: String {
         guard let m = model else { return "Full load" }
         let shown = Set(shownLattice?.squishedKeys.map(\.region) ?? [])
-        return FlexibleSquishLoop.fullLabel(weightsKg: m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) }.map(\.weightKg),
-                                            shapeOnly: m.lattice?.shapeOnly == true, unit: m.weightUnit)   // ★ S4
+        // ★ ROUND 7 REVIEW (R): each HAND's force — a face's lattice parts together (each part is an equal share of it)
+        let own = m.squeezeGroups.flatMap { m.groupHands($0) }.filter { $0.mainGroup == nil && $0.regions.count > 1 }
+        let parts = Set(own.flatMap(\.regions))
+        let weights = m.settings.loadedFaces.filter { shown.contains($0.faceRegionID) && !parts.contains($0.faceRegionID) }.map(\.weightKg)
+            + own.filter { $0.regions.contains(where: shown.contains) }.map(\.kg)
+        return FlexibleSquishLoop.fullLabel(weightsKg: weights, shapeOnly: m.lattice?.shapeOnly == true, unit: m.weightUnit)   // ★ S4
     }
 
     /// The bottom pill (H10).
@@ -1145,6 +1149,10 @@ public struct FlexibleMainStatus: Equatable, Sendable {
             }
             return .init(line: FlexibleRowCopy.noFacePrism, tone: .blocked, fix: nil)
         }
+        // ★ ROUND 7 REVIEW (R, his answer of 2026-10-15: "After Reset all, the main page's status line also says 'Nothing to
+        // squish yet'"; his answer 3: "Allow an *empty* setup after reset all"): nothing set to squish is no fault — the line
+        // says so, neutral, no Fix (the readiness's "press the face that carries weight" was F's leftover here)
+        if let empty = FlexibleMainStatus.emptySetup(m) { return empty }
         // ★ ROUND 5 (S9): saved with the Lattice view off — nothing bakes until the view is on (a tap turns it on)
         if m.latticeBuildDeferred, m.lattice == nil || m.latticeIsStale, m.sceneState == .ready,
            m.readiness.blocking.isEmpty, !m.latticeBuilding { return .init(line: deferred, tone: .idle, fix: nil) }

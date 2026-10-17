@@ -199,8 +199,13 @@ extension FlexibleStageModel {
             faces.removeAll { e in g.olds.contains { $0.faceRegionID == e.faceRegionID } }
             let existing = Set(faces.map(\.faceRegionID))
             let src = g.olds[0]
+            // ★ ROUND 7 REVIEW (R, his answer 7 clarified: "an EQUAL SHARE PER LATTICE PART (two parts = 5 lb each of 10 lb,
+            // whatever their size)"): the face's weight — the old entries' together — shared equally by its parts. M2 COPIED
+            // it onto each (a face of his own then pressed twice its weight; a linked face is re-shared by the adopt anyway)
+            let tg = targets(g.root)
+            let share = FlexibleSectionShares.share(g.olds.map(\.weightKg).reduce(0, +), parts: tg.count)
             var news: [FlexibleFaceSettings] = []
-            for t in targets(g.root) where !existing.contains(t) {
+            for t in tg where !existing.contains(t) {
                 var f = src
                 let declared = !FlexibleSectors.isFlexible(src.faceRegionID) || set.piece(src.faceRegionID) != nil
                 if declared, src.faceRegionID != t {
@@ -210,6 +215,7 @@ extension FlexibleStageModel {
                     }
                 }
                 f.faceRegionID = t
+                f.weightKg = FlexibleSectionShares.controlCopyWeight ? src.weightKg : share
                 // a stamp whose centre is not on the piece's lattice: Curves (the stamp stays stored, for a switch back)
                 if f.isStampShape, let st = f.designStamp {
                     let holds = (try? await frameWorker.withScene { scene -> Bool in

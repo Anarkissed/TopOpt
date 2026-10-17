@@ -11,7 +11,8 @@
 //       simultaneously." — one toggle rule for both pages (Bend on turns Play off and back); with Bend on, everything drawn
 //       ON the part sits where the bent part puts it (FlexibleBendPose): the curves, the stamp's handle, the group discs and
 //       outlines, the prisms' faces and the glass. What stands INSIDE the part (a prism's floor and its depth chip, the
-//       Prisms view's floor tags) stays: the bent face comes down to meet it.
+//       Prisms view's floor tags) stays: the bent face comes down to meet it. ★ ROUND 7 REVIEW (R, his answer of
+//       2026-10-15): REVERSED — the floors, the depth chip and the floor tags move with the bend too (FlexibleR7ReviewFixes).
 //   (5) Q12 "The curve should be viewed as nothing but the curve without any view turned on. Turning heat map on shows
 //       colour." — the page opens with Heat off (FlexibleStageModel.openingViews).
 //   (6) Q13 "Heat follows whatever group is selected, first group as default. Hold for 3 seconds to view all. No picker
@@ -168,8 +169,8 @@ struct FlexibleBendPose {
         return SIMD3<Int32>(Int32(c.x.rounded(.down)), Int32(c.y.rounded(.down)), Int32(c.z.rounded(.down)))
     }
 
-    /// `p` at the full bend.
-    func apply(_ p: SIMD3<Float>) -> SIMD3<Float> {
+    /// The bend at `p`: the nearest overlay vertex's displacement × k, within `reach` of the part's surface; else none.
+    func displacement(at p: SIMD3<Float>) -> SIMD3<Float> {
         let c = Self.bucket(p, lo: lo, cell: cell)
         var best: Int32 = -1
         var bestD = reach * reach
@@ -180,18 +181,29 @@ struct FlexibleBendPose {
                 if e <= bestD { bestD = e; best = i }
             }
         } } }
-        return best >= 0 ? p + moves[Int(best)] : p
+        return best >= 0 ? moves[Int(best)] : .zero
     }
+    /// `p` at the full bend.
+    func apply(_ p: SIMD3<Float>) -> SIMD3<Float> { p + displacement(at: p) }
     func apply(_ p: SIMD3<Double>) -> SIMD3<Double> { SIMD3<Double>(apply(SIMD3<Float>(p))) }
 
-    /// A 3D item at the full bend: a shell's FACE (its base) follows the bend; its floor (offset) stays.
+    /// A 3D item at the full bend: a shell's FACE (its base) follows the bend — ★ ROUND 7 REVIEW (R, his answer of
+    /// 2026-10-15: "With Bend on, the depth chip and depth labels MOVE with the bend (everything goes to the full-bend
+    /// pose)") and so does its floor: each floor point by the bend of its own face point (F kept the floor at rest:
+    /// `controlInsideStays`). The depth chip and the floor tags sit on the floor, so they move with it.
     func pose(_ item: ClearanceRenderItem) -> ClearanceRenderItem {
-        guard case .shell(let s) = item.volume.shape else { return item }
-        let shell = FaceOffsetShell(base: s.base.map { apply($0) }, offset: s.offset, indices: s.indices,
+        guard case .shell = item.volume.shape else { return item }
+        return ClearanceRenderItem(volume: pose(item.volume), selected: item.selected, tint: item.tint, faceAlpha: item.faceAlpha,
+                                   edgeAlpha: item.edgeAlpha, surfaceOnly: item.surfaceOnly)
+    }
+    /// A prism volume at the full bend (its face and, ★ R, its floor — the depth chip's handle is read from it).
+    func pose(_ v: ClearanceVolume) -> ClearanceVolume {
+        guard case .shell(let s) = v.shape else { return v }
+        let floor = Self.controlInsideStays ? s.offset
+            : zip(s.offset, s.base).map { o, b in o + displacement(at: b) }
+        let shell = FaceOffsetShell(base: s.base.map { apply($0) }, offset: floor, indices: s.indices,
                                     reachedDepthMM: s.reachedDepthMM, clampedFromMM: s.clampedFromMM)
-        return ClearanceRenderItem(volume: ClearanceVolume(faceID: item.volume.faceID, kind: item.volume.kind, shape: .shell(shell)),
-                                   selected: item.selected, tint: item.tint, faceAlpha: item.faceAlpha, edgeAlpha: item.edgeAlpha,
-                                   surfaceOnly: item.surfaceOnly)
+        return ClearanceVolume(faceID: v.faceID, kind: v.kind, shape: .shell(shell))
     }
 
     // the page asks on every body pass: one pose per (mesh, dents, k), one posed list per (pose, items)
@@ -199,16 +211,27 @@ struct FlexibleBendPose {
     @MainActor private static var itemsCache: (key: String, items: [ClearanceRenderItem], posed: [ClearanceRenderItem])?
 
     @MainActor static func cached(positions: [Float], dents: [Float], k: Double, signature: UInt64) -> FlexibleBendPose? {
-        var h = Hasher()
-        h.combine(dents.count); h.combine(k); h.combine(signature)
-        let step = Swift.max(1, dents.count / 256)
-        var i = 0
-        while i < dents.count { h.combine(dents[i]); i += step }
-        let key = "\(positions.count)|\(h.finalize())"
+        let key = Self.key(positions: positions, dents: dents, k: k, signature: signature)
         if let c = poseCache, c.key == key { return c.pose }
         let pose = FlexibleBendPose(positions: positions, dents: dents, k: k, key: key)
         poseCache = (key, pose)
         return pose
+    }
+    /// ★ ROUND 7 REVIEW (R — the review of F: "the Bend pose cache key collides across groups and dents"): the pose's key
+    /// is the WHOLE bend — every dent's bytes — with the overlay and k. F hashed every count/256-th dent: on his pad
+    /// (133 650 values, a step of 522, a multiple of 3) every sample was a vertex's x, zero for a press along y or z, so
+    /// every group's bend had ONE key and the page (and the next test in the process) kept the first pose it made.
+    @MainActor static func key(positions: [Float], dents: [Float], k: Double, signature: UInt64) -> String {
+        var h = Hasher()
+        h.combine(dents.count); h.combine(k); h.combine(signature)
+        if controlSampledKey {
+            let step = Swift.max(1, dents.count / 256)
+            var i = 0
+            while i < dents.count { h.combine(dents[i]); i += step }
+        } else {
+            dents.withUnsafeBytes { h.combine(bytes: $0) }
+        }
+        return "\(positions.count)|\(h.finalize())"
     }
     /// `items` at the full bend (`pose` nil: as they are).
     @MainActor static func posed(_ items: [ClearanceRenderItem], by pose: FlexibleBendPose?) -> [ClearanceRenderItem] {
@@ -264,7 +287,10 @@ extension FlexibleMainStage {
         let pt = point.map { SIMD3<Double>($0) }
         var region: Int?
         if m.facePrismsSet, let p = pt { region = m.regions.pressable(at: p, face: face, mesh: mesh) }
-        let r = region ?? m.regions.region(at: pt, face: face, mesh: mesh)
+        var r = region ?? m.regions.region(at: pt, face: face, mesh: mesh)
+        // ★ ROUND 7 REVIEW (R): a tap on a face's SOLID middle (its root, in no group) picks its lattice parts' group when
+        // they all press in one (F kept the last group, with no cue)
+        if m.squeezeGroup(of: r) == nil, !Self.controlTapRootIgnored, let part = Self.onePartsGroup(of: r, model: m) { r = part }
         guard m.squeezeGroup(of: r) != nil else { return }
         tappedRegion = r
         followHeatGroup()

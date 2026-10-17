@@ -90,6 +90,7 @@ extension FlexibleStageModel {
 
     func railChanged() {
         switch rail { case .group, .rests: lastWorkTab = rail; default: break }   // ★ verify of R7-S: [Model]'s fallback
+        dropDeleteAskOffItsTab()   // ★ ROUND 7 REVIEW (R): another tab — the trash's question goes
         let t: Tab = rail == .model ? .more : .face
         if tab != t { tab = t }
         if rail != .newGroup, edgePick != nil { edgePick = nil }   // ★ ROUND 6 ITEM 2: leaving [+ New] ends pick mode
@@ -218,7 +219,7 @@ struct FlexibleSettingsRailView: View {
             let detail = g.kind == .edges
                 ? FlexibleRowCopy.edgesDetail(edges: g.presses.filter { model.press($0)?.kind == .edge }.count,
                                               corners: g.presses.filter { model.press($0)?.kind == .corner }.count)
-                : FlexibleRowCopy.faceCount(g.regions.count)
+                : FlexibleRowCopy.faceCount(faceCount(g, model: model))   // ★ R: faces, not lattice parts
             out.append(Tab(tab: .group(g.id), title: model.groupName(g), detail: detail))   // ★ ROUND 7 (S, 4d): his name
         }
         let rests = model.settings.faces.filter { !$0.isLoaded }.count

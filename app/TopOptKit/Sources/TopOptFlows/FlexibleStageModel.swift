@@ -716,6 +716,7 @@ public final class FlexibleStageModel: ObservableObject {
         let joinKg = inherited == nil && kg == nil ? firstGroupForce : nil
         guard inherited != nil || (kg ?? joinKg ?? 0) > 0 else { return false }
         actionSerial += 1
+        let root = rootOf, loads = mainPageLoads
         edit { s in
             // ★ ROUND 5 (S6): pressing a deleted face brings it back — as a NEW face
             if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
@@ -726,6 +727,12 @@ public final class FlexibleStageModel: ObservableObject {
             else if let w = kg ?? joinKg { f.weightKg = w; f.weightFrom = nil }
             s.setFace(f)
             FlexibleSqueezeGroups.normalise(&s)
+            // ★ ROUND 7 REVIEW (R, his answer 7 clarified): a lattice part joining its face's other parts in the group —
+            // the face's weight is shared equally between them (one hand)
+            if f.weightFrom == nil, inherited == nil || kg != nil, let w = kg ?? joinKg {
+                let parts = FlexibleSqueezeGroups.hand(of: region, settings: s, loads: loads, root: root)
+                if parts.count > 1 { FlexibleSectionShares.spread(w, over: parts, in: &s) }
+            }
         }
         relinkedWeights[region] = nil
         selectIfAdmitted(region)   // ★ ROUND 7 (S, 4f): a face that left the open tab is not selected (the tab never shifts)
@@ -737,6 +744,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// and no re-sync presses it again — not a write-back, not a re-open (`adopt(into:)`).
     public func rest(_ region: Int) {
         actionSerial += 1
+        let left = partsLeft(without: region)
         edit { s in
             if s.isRemoved(region) { s.removedRegions?.removeAll { $0 == region }; if s.removedRegions?.isEmpty == true { s.removedRegions = nil } }
             var f = s.face(region) ?? FlexibleFaceSettings(faceRegionID: region, role: "resting")
@@ -744,6 +752,7 @@ public final class FlexibleStageModel: ObservableObject {
             f.weightFrom = nil
             s.setFace(f)
             FlexibleSqueezeGroups.normalise(&s)   // ★ D2: a resting face is in no squeeze group
+            if let l = left { FlexibleSectionShares.spread(l.kg, over: l.parts, in: &s) }   // ★ R: the face's force on its other parts
         }
         relinkedWeights[region] = nil
         selectIfAdmitted(region)   // ★ ROUND 7 (S, 4f): the tab stays; the face is selected only where it is shown
@@ -791,10 +800,12 @@ public final class FlexibleStageModel: ObservableObject {
     public func removeFace(_ region: Int) -> Bool {
         actionSerial += 1
         let held = !mainPageLoads.canRemove(region)
+        let left = partsLeft(without: region)
         edit { s in
             s.removeFace(region)
             if held, !s.isRemoved(region) { s.removedRegions = (s.removedRegions ?? []) + [region] }
             FlexibleSqueezeGroups.normalise(&s)
+            if let l = left { FlexibleSectionShares.spread(l.kg, over: l.parts, in: &s) }   // ★ R: the face's force on its other parts
         }
         purgeFaceCaches(region)
         // ★ ROUND 7 (S, 4f d): the OPEN group's first face, else none — never Group 1's

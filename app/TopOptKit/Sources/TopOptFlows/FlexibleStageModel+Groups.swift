@@ -25,15 +25,16 @@ extension FlexibleStageModel {
     /// A group's ONE squeeze force (a range only for faces of their own weights from before groups).
     /// ★ D2 REVIEW: a main-page hand's weight is read from the project, live (one source of truth).
     public func groupForce(_ g: FlexibleSqueezeGroup) -> ClosedRange<Double>? {
-        FlexibleSqueezeGroups.force(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg)
+        FlexibleSqueezeGroups.force(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg, root: rootOf)   // ★ R: a face's parts, one hand
     }
 
     /// The main page's Load group's weight now (nil: not a Load group).
     var liveMainKg: (UUID) -> Double? { { [project] id in project.force.kind(for: id).weightKg } }
 
     /// ★ D2 REVIEW: the faces that move with `region` (its main-page Load group's faces).
+    /// ★ ROUND 7 REVIEW (R): a face of his own moves with all its lattice parts (one hand).
     public func hand(of region: Int) -> [Int] {
-        FlexibleSqueezeGroups.hand(of: region, settings: settings, loads: mainPageLoads)
+        FlexibleSqueezeGroups.hand(of: region, settings: settings, loads: mainPageLoads, root: rootOf)
     }
 
     /// The group's one line: "Group 1 · Face 3 + Face 5 · Squeeze 10 kg".
@@ -172,22 +173,24 @@ extension FlexibleStageModel {
         guard squeezeGroup(of: region)?.id != groupID else { return }
         let force = squeezeGroups.first { $0.id == groupID }.flatMap { groupForce($0) }
         let hand = hand(of: region)
+        let root = rootOf
         actionSerial += 1
         edit { s in
             FlexibleSqueezeGroups.move(region, to: groupID, hand: hand, in: &s)
-            Self.takeForce(force, regions: hand, in: &s)
+            Self.takeForce(force, regions: hand, in: &s, root: root)   // ★ R: a face's parts share it equally
         }
     }
 
     /// A face of his own that joins a group takes the group's ONE force (a face a main-page Load
     /// group presses keeps the main page's weight — the main page is its one truth).
+    /// ★ ROUND 7 REVIEW (R, his answer 7 clarified): `root` — the lattice parts of one face share the force equally (one
+    /// hand); M2 gave each part the whole force.
     nonisolated static func takeForce(_ force: ClosedRange<Double>?, regions: [Int], presses: [UUID] = [],
-                                      in s: inout FlexibleStageSettings) {
+                                      in s: inout FlexibleStageSettings, root: ((Int) -> Int)? = nil) {
         guard let f = force, f.upperBound - f.lowerBound < 0.05, f.upperBound > 0 else { return }
-        for r in regions {
-            guard var face = s.face(r), face.isLoaded, face.weightFrom == nil else { continue }
-            face.weightKg = f.upperBound
-            s.setFace(face)
+        for parts in FlexibleSectionShares.byRoot(regions, root: root) {
+            let own = parts.filter { r in s.face(r).map { $0.isLoaded && $0.weightFrom == nil } ?? false }
+            if !own.isEmpty { FlexibleSectionShares.spread(f.upperBound, over: own, in: &s) }
         }
         // ★ AP1: a press of his own takes it too (a linked press keeps its main-page group's force)
         for id in presses {
@@ -243,10 +246,11 @@ extension FlexibleStageModel {
               let into = gs.first(where: { $0.id != groupID && $0.kind == from.kind && (target == nil || $0.id == target) })
         else { return }   // ★ ROUND 6 ITEM 2: into a group of its own kind
         let force = groupForce(into)
+        let root = rootOf
         actionSerial += 1
         edit { s in
             FlexibleSqueezeGroups.remove(group: groupID, into: into.id, in: &s)
-            Self.takeForce(force, regions: from.regions, presses: from.presses, in: &s)
+            Self.takeForce(force, regions: from.regions, presses: from.presses, in: &s, root: root)   // ★ R
         }
     }
 
@@ -256,22 +260,19 @@ extension FlexibleStageModel {
     public func setGroupForce(_ groupID: Int, kg: Double) {
         guard kg > 0, kg.isFinite, let g = squeezeGroups.first(where: { $0.id == groupID }) else { return }
         actionSerial += 1
-        let hands = FlexibleSqueezeGroups.hands(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg)
+        let hands = FlexibleSqueezeGroups.hands(g, settings: settings, loads: mainPageLoads, liveKg: liveMainKg, root: rootOf)
         var wroteMain = false
         for h in hands {
             guard let main = h.mainGroup else { continue }
             project.force.setWeight(main, kg: kg)
             wroteMain = true
         }
-        let own = hands.filter { $0.mainGroup == nil }.flatMap(\.regions)
+        let own = hands.filter { $0.mainGroup == nil }.map(\.regions)
         let ownPresses = hands.filter { $0.mainGroup == nil }.flatMap(\.presses)   // ★ AP1
         for r in g.regions { relinkedWeights[r] = nil }
         edit { s in
-            for r in own {
-                guard var f = s.face(r) else { continue }
-                f.weightKg = kg; f.weightFrom = nil
-                s.setFace(f)
-            }
+            // ★ ROUND 7 REVIEW (R): each hand presses with `kg` — a face's lattice parts share it equally
+            for parts in own where !parts.isEmpty { FlexibleSectionShares.spread(kg, over: parts, in: &s) }
             for id in ownPresses {
                 guard var p = s.press(id) else { continue }
                 p.settings.weightKg = kg; p.settings.weightFrom = nil

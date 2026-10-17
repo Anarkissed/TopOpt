@@ -66,6 +66,9 @@ struct FlexibleDepthChips: View {
     /// The page's exaggeration (FlexibleShownValues.exaggeration).
     let k: Double
     let keepOut: [CGRect]
+    /// ★ ROUND 7 REVIEW (R, his answer of 2026-10-15: "With Bend on, the depth chip and depth labels MOVE with the bend"): the
+    /// full-bend pose while Bend shows — the chip sits on its prism's floor at the full bend (nil: at rest).
+    var pose: FlexibleBendPose? = nil
     @State private var held: LatticeDepthDetent.Candidate?
     @State private var scrub: Scrub?
     /// True for exactly as long as the drag lives — reset by SwiftUI on end AND on cancel.
@@ -80,7 +83,7 @@ struct FlexibleDepthChips: View {
                let st = model.stacks[key], let proj = projection,
                // ★ batch E review: no lattice under the face — nothing to drag into (the row says why)
                !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
-               let h = Self.handle(model: model, k: k), let p = proj.project(h.anchor),
+               let h = Self.handle(model: model, k: k, pose: pose), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
                 chip(f.deepestMM, arrow: arrowAngle(proj, h, at: p))
@@ -101,13 +104,20 @@ struct FlexibleDepthChips: View {
     /// The selected pressed face's prism handle (its anchor is where the chip sits): the one
     /// rule the chip and the stamp handle (which keeps clear of it) both read.
     @MainActor
-    static func handle(model: FlexibleStageModel, k: Double) -> ClearanceHandle? {
+    static func handle(model: FlexibleStageModel, k: Double) -> ClearanceHandle? { handle(model: model, k: k, pose: nil) }
+
+    /// ★ ROUND 7 REVIEW (R): the handle on the prism at the full bend (`pose`; nil: at rest) — the chip and the drag read
+    /// the same bent prism.
+    @MainActor
+    static func handle(model: FlexibleStageModel, k: Double, pose: FlexibleBendPose?) -> ClearanceHandle? {
         guard let r = FlexibleStageOverlays.workingRegion(model: model), let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
               let st = model.stacks[key], let g = model.geometry[key],
               let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
                                                 k: model.frozenExaggeration ?? k, footprint: model.prismFootprint(r))
         else { return nil }
-        return FlexibleDepthPrism.handle(v)
+        // (the red control: F's chip, read from the prism at rest)
+        let pose = FlexibleBendPose.controlInsideStays ? nil : pose
+        return FlexibleDepthPrism.handle(pose.map { $0.pose(v) } ?? v)
     }
 
     /// Release: k thaws, the designs re-run, the file is written. Idempotent (onEnded and the

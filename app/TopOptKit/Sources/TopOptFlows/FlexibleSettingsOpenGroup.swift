@@ -121,6 +121,7 @@ extension FlexibleStageModel {
     /// ★ After every edit (FlexibleStageModel.edit) and every restore (the page's undo / redo): the open tab is the group
     /// that holds its members (a), and the selection stays inside it (c)–(e).
     func syncRail() {
+        reviewAfterEdit()   // ★ ROUND 7 REVIEW (R): a stale trash question, an "every group" heat with no group (FlexibleR7ReviewFixes)
         if Self.controlRailFollowsSelection {   // ★ RED CONTROL: today's rule
             if rail == .model || rail == .newGroup { return }
             let t = railTab(for: selectedRegion)

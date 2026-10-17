@@ -189,9 +189,12 @@ struct FlexibleFaceRows: View {
             // ★ ROUND 7 (F, his answer: the face row's trash looks different from the group's): a smaller TAKE-OUT glyph
             // (it only takes this face out of the squish; the group's trash deletes a group)
             Button { model.removeFace(r) } label: {
+                // ★ ROUND 7 REVIEW (R, his rule: 44 pt targets): the glyph as F drew it, a 44 pt target round it (F: 32), and
+                // in the secondary grey (the tertiary read faint beside "Rests")
                 Image(systemName: FlexibleTrashGlyphs.face).font(.system(size: FlexibleTrashGlyphs.faceSize))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .frame(width: 32, height: 32)
+                    .foregroundStyle((FlexibleTargets.controlSmall ? DS.Color.textTertiary : DS.Color.textSecondary).color)
+                    .frame(width: FlexibleTargets.side(32), height: FlexibleTargets.side(32))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(GeometryReader { g in
@@ -210,10 +213,10 @@ struct FlexibleFaceRows: View {
         }
         // ★ ROUND 4 (D2): two faces of one group on one stack are a PINCH — never a warning
         // (round 3 said "Shares a stack with …" and blocked Exit): each half is its own face's
-        if f.isLoaded, let other = model.pinchPartners(r).first {
+        if f.isLoaded, let line = FlexibleFacePanel.pinchLine(model: model, region: r) {
             // ★ D2 REVIEW: a face whose two-segment design threw keeps core's one profile — said
-            let oneProfile = model.key(r).map { model.segmentErrors[$0] != nil } ?? false
-            Text(oneProfile ? FlexibleRowCopy.pinchedOneProfile(with: name(other)) : FlexibleRowCopy.pinched(with: name(other)))
+            // ★ ROUND 7 REVIEW (R): the partner's FACE by name, whole ("Face 2"; M2's part name was cut to "Face 2 · lattic…")
+            Text(line)
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textSecondary.color)
                 .lineLimit(1)
                 .accessibilityIdentifier("flexible-row-pinch")
@@ -319,8 +322,11 @@ struct FlexibleFaceRows: View {
     @MainActor
     static func weightLine(model: FlexibleStageModel, region r: Int) -> String? {
         guard let f = model.settings.face(r), f.isLoaded else { return nil }
+        // ★ ROUND 7 REVIEW (R): a lattice part of a face of his own carries an equal share — its hand (the face) is what the
+        // group's force says
+        let kg = model.ownPartsHand(r)?.kg ?? f.weightKg
         if let g = model.squeezeGroup(of: r), let force = model.groupForce(g), force.upperBound - force.lowerBound < 0.05,
-           abs(force.upperBound - f.weightKg) < 0.05 { return nil }
+           abs(force.upperBound - kg) < 0.05 { return nil }
         return FlexibleRowCopy.weight(face: f, entry: model.mainPageLoads.entry(r), unit: model.weightUnit)
     }
 

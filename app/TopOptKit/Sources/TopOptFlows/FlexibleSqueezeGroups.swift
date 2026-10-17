@@ -188,9 +188,12 @@ public enum FlexibleSqueezeGroups {
     /// ★ D2 REVIEW: the faces of `region`'s HAND — every pressed face linked to the same
     /// main-page Load group (the main page presses them with one weight, split by area); a face
     /// of his own is its own hand.
-    public static func hand(of region: Int, settings s: FlexibleStageSettings, loads: FlexibleMainPageLoads) -> [Int] {
+    /// ★ ROUND 7 REVIEW (R, his answer 7 clarified: "an EQUAL SHARE PER LATTICE PART"): with `root`, a face of his own is
+    /// ALL its lattice parts pressing in its squeeze group — one hand (FlexibleSectionShares).
+    public static func hand(of region: Int, settings s: FlexibleStageSettings, loads: FlexibleMainPageLoads,
+                            root: ((Int) -> Int)? = nil) -> [Int] {
         guard let f = s.face(region), let from = f.weightFrom, let e = loads.entry(region), e.groupID == from,
-              e.role == .pressed else { return [region] }
+              e.role == .pressed else { return FlexibleSectionShares.parts(of: region, settings: s, loads: loads, root: root) }
         return s.loadedFaces.filter { g in
             g.weightFrom == from && loads.entry(g.faceRegionID).map { $0.groupID == from && $0.role == .pressed } == true
         }.map(\.faceRegionID)
@@ -289,10 +292,15 @@ public enum FlexibleSqueezeGroups {
     /// still pressed by it) is that group's hand; any other pressed face is its own.
     /// ★ D2 REVIEW: `liveKg` reads a main-page group's weight from the PROJECT (the one source of
     /// truth) — the cached entry went stale when the Settings page's undo restored the project.
+    /// ★ ROUND 7 REVIEW (R): with `root`, the lattice parts of one face of his own are ONE hand — its force their sum (each
+    /// part an equal share — FlexibleSectionShares); M2 made each part a hand at the face's whole force.
     public static func hands(_ g: FlexibleSqueezeGroup, settings s: FlexibleStageSettings,
-                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil) -> [Hand] {
+                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil,
+                             root: ((Int) -> Int)? = nil) -> [Hand] {
         var out: [Hand] = []
         var byGroup: [UUID: Int] = [:]
+        var byRoot: [Int: Int] = [:]
+        let root = FlexibleSectionShares.controlCopyWeight ? nil : root
         for r in g.regions {
             guard let f = s.face(r) else { continue }
             if let from = f.weightFrom, let e = loads.entry(r), e.groupID == from, e.role == .pressed {
@@ -301,6 +309,14 @@ public enum FlexibleSqueezeGroups {
                 } else {
                     byGroup[from] = out.count
                     out.append(Hand(mainGroup: from, kg: liveKg?(from) ?? e.groupKg, regions: [r]))
+                }
+            } else if let rt = root?(r), rt != r {
+                // ★ R: a lattice part — its face's other parts in this group are the same hand
+                if let i = byRoot[rt] {
+                    out[i] = Hand(mainGroup: nil, kg: out[i].kg + f.weightKg, regions: out[i].regions + [r])
+                } else {
+                    byRoot[rt] = out.count
+                    out.append(Hand(mainGroup: nil, kg: f.weightKg, regions: [r]))
                 }
             } else {
                 out.append(Hand(mainGroup: nil, kg: f.weightKg, regions: [r]))
@@ -329,8 +345,9 @@ public enum FlexibleSqueezeGroups {
     /// The group's squeeze force: one number when every hand agrees (within 0.05 kg), else the
     /// range (a project from before groups, whose faces had their own weights). nil: no hand.
     public static func force(_ g: FlexibleSqueezeGroup, settings s: FlexibleStageSettings,
-                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil) -> ClosedRange<Double>? {
-        let kg = hands(g, settings: s, loads: loads, liveKg: liveKg).map(\.kg)
+                             loads: FlexibleMainPageLoads, liveKg: ((UUID) -> Double?)? = nil,
+                             root: ((Int) -> Int)? = nil) -> ClosedRange<Double>? {
+        let kg = hands(g, settings: s, loads: loads, liveKg: liveKg, root: root).map(\.kg)
         guard let lo = kg.min(), let hi = kg.max() else { return nil }
         return hi - lo < 0.05 ? hi...hi : lo...hi
     }

@@ -140,7 +140,18 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
             let card = try XCTUnwrap(local(h, "faceCard"), "\(tag): the selected face's card")
             let control = try XCTUnwrap(local(h, "groupChips") ?? local(h, "groupMenu"), "\(tag): the group row's control")
             let groupWords = ("Squeeze group" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width
-            XCTAssertGreaterThanOrEqual(control.minX - card.minX, groupWords, "\(tag): \"Squeeze group\" keeps its room")
+            // ★ RE-PINNED (round 7 review, R — his answer 10: "Face card group chips: show the group NAMES", and the review of
+            // F: "a one-chip menu shows instead" on his pad): the named chips beside the words where they fit, else on their
+            // own line UNDER the words (scrolling when they overflow it) — never the "● Group 6 ▾" menu chip. The words keep
+            // their room on their own line (was: XCTAssertGreaterThanOrEqual(control.minX - card.minX, groupWords) — the chips
+            // or the menu beside the words)
+            XCTAssertNil(local(h, "groupMenu"), "\(tag): ★ R: never the one-chip menu")
+            if let words = local(h, "groupWords") {
+                XCTAssertGreaterThanOrEqual(control.minY, words.maxY - 0.5, "\(tag): ★ R: the chips under \"Squeeze group\"")
+                XCTAssertGreaterThanOrEqual(words.width, groupWords, "\(tag): \"Squeeze group\" keeps its room on its line")
+            } else {
+                XCTAssertGreaterThanOrEqual(control.minX - card.minX, groupWords, "\(tag): \"Squeeze group\" keeps its room")
+            }
             XCTAssertLessThanOrEqual(control.maxX, card.maxX, "\(tag): inside the card")
             XCTAssertLessThanOrEqual(control.height, 36, "\(tag): one line")
             report.append("\(tag) group row: \(local(h, "groupChips") != nil ? "chips" : "menu") x \(Int(control.minX))–\(Int(control.maxX))")
@@ -239,7 +250,7 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
         XCTAssertEqual(m.squeezeGroups.compactMap { FlexibleGroupNumbers.railNumber($0, in: m.settings) }, [], "control: no rail number")
         m.edit({ $0 = before }, recompute: false)
         // the page itself, hosted (the panel's pixels; the discs follow the Metal view's projection)
-        // the face card's "Squeeze group" row: nine chips no longer fit beside its words — one menu chip
+        // the face card's "Squeeze group" row: nine chips no longer fit beside its words — ★ R: their own scrolling line
         let label = ("Squeeze group" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).width
         for (tag, size) in [Self.sizes[0], Self.sizes[2]] {
             m.select(pressed[8])
@@ -248,9 +259,14 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
             XCTAssertNotNil(local(h, "flexible-rail-group-9"), "\(tag): group 9's tab is on the rail")
             let card = try XCTUnwrap(local(h, "faceCard"), "\(tag): group 9's face card")
             let control = try XCTUnwrap(local(h, "groupMenu") ?? local(h, "groupChips"), "\(tag): the group row's control")
-            XCTAssertNotNil(local(h, "groupMenu"), "\(tag): nine groups → the menu chip")
-            XCTAssertNil(local(h, "groupChips"), "\(tag): …not nine chips")
-            XCTAssertGreaterThanOrEqual(control.minX - card.minX, label, "\(tag): \"Squeeze group\" keeps its room (\(label) pt)")
+            // ★ RE-PINNED (round 7 review, R — his answer 10 and the review of F: the named chips, never the one-chip menu):
+            // nine groups' chips on their own line under the words, scrolling inside the card (was: "nine groups → the menu
+            // chip", "…not nine chips", and the menu beside the words)
+            XCTAssertNil(local(h, "groupMenu"), "\(tag): ★ R: nine groups → still the named chips, never the menu chip")
+            XCTAssertNotNil(local(h, "groupChips"), "\(tag): ★ R: …the chips, on their own (scrolling) line")
+            let words = try XCTUnwrap(local(h, "groupWords"), "\(tag): \"Squeeze group\" on its own line")
+            XCTAssertGreaterThanOrEqual(control.minY, words.maxY - 0.5, "\(tag): ★ R: the chips under the words")
+            XCTAssertGreaterThanOrEqual(words.width, label, "\(tag): \"Squeeze group\" keeps its room (\(label) pt)")
             XCTAssertLessThanOrEqual(control.maxX, card.maxX, "\(tag): inside the card")
             print(String(format: "FLEX-C5-HOSTED %@ group row: control x %.0f–%.0f in card %.0f–%.0f · words need %.0f pt", tag,
                          control.minX, control.maxX, card.minX, card.maxX, label))

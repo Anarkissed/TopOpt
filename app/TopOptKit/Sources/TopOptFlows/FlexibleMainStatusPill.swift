@@ -154,11 +154,11 @@ public struct FlexibleMainViewToggles: View {
         // ★ ROUND 7 (F, his answer 13): a tap = the selected group's heat or none; a 3 s HOLD = every group's (the mark of
         // his groups' colours on it, as on the Squish page)
         FlexibleViewButton(icon: main.heat && main.heatAll ? "thermometer.high" : FlexibleMainViewToggles.heatIcon, label: "Dent heat",
-                           on: main.heat && main.viewsAvailable, action: { main.toggleHeat() }, onLongPress: { main.heatHeld() })
+                           on: main.heatIconLit, action: { main.toggleHeat() }, onLongPress: { main.heatHeld() })   // ★ R: lit only with something to heat
             .overlay(alignment: .topTrailing) {
-                if main.heat, main.heatAll, let m = main.model { FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: m)) }
+                if main.heatAllBadgeShown, let m = main.model { FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: m)) }
             }
-            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — nothing to heat
+            .unavailable(!main.heatAvailable)   // ★ M1 VERIFY: no face-prism — nothing to heat; ★ R: …nor with no squeeze group
             .accessibilityIdentifier("flexible-main-view-heat")
     }
     private var stressButton: some View {

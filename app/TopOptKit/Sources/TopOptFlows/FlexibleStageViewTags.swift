@@ -112,10 +112,12 @@ enum FlexibleStageViewTags {
 
     /// The Prisms view's tags on screen: every pressed face but the selected one (its chip), greedy against
     /// overlaps (the larger face first), none under a keep-out or off screen.
+    /// ★ ROUND 7 REVIEW (R, his answer of 2026-10-15): `pose` — with Bend on the tags sit on the floors at the full bend.
     @MainActor
-    static func tags(model m: FlexibleStageModel, k: Double, projection: CameraProjection?, keepOut: [CGRect]) -> [Tag] {
+    static func tags(model m: FlexibleStageModel, k: Double, projection: CameraProjection?, keepOut: [CGRect],
+                     pose: FlexibleBendPose? = nil) -> [Tag] {
         guard m.views.contains(.prisms), let proj = projection, k > 0 else { return [] }
-        let cands: [(columns: Int, tag: Tag)] = floors(model: m, k: k).compactMap { f in
+        let cands: [(columns: Int, tag: Tag)] = floors(model: m, k: k, pose: pose).compactMap { f in
             proj.project(f.anchor).map { (f.columns, Tag(region: f.region, text: f.text, point: $0)) }
         }
         return greedy(cands, keepOut: keepOut, viewport: proj.viewportSize)
@@ -143,11 +145,11 @@ enum FlexibleStageViewTags {
     struct Floor { let region: Int; let columns: Int; let text: String; let anchor: SIMD3<Float> }
     @MainActor private static var floorCache: (key: String, floors: [Floor])?
     @MainActor
-    static func floors(model m: FlexibleStageModel, k: Double) -> [Floor] {
+    static func floors(model m: FlexibleStageModel, k: Double, pose: FlexibleBendPose? = nil) -> [Floor] {
         let open = openMembers(m)
         let working = FlexibleStageOverlays.workingRegion(model: m)
         let key = "\(k)|\(working ?? -1)|\(m.settings.hashValue)|\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)|\(m.rail)"
-            + "|\(FlexibleStageOverlays.controlGateOnSelectionOnly)"
+            + "|\(FlexibleStageOverlays.controlGateOnSelectionOnly)|\(pose?.key ?? "rest")|\(FlexibleBendPose.controlInsideStays)"
         if let c = floorCache, c.key == key { return c.floors }
         var out: [Floor] = []
         for f in m.settings.loadedFaces where f.faceRegionID != working && open.map({ $0.contains(f.faceRegionID) }) ?? true {
@@ -155,7 +157,8 @@ enum FlexibleStageViewTags {
             guard let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
                   let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
                                                     footprint: m.prismFootprint(r)),
-                  let h = FlexibleDepthPrism.handle(v) else { continue }
+                  let h = FlexibleDepthPrism.handle((FlexibleBendPose.controlInsideStays ? nil : pose).map { $0.pose(v) } ?? v)
+            else { continue }   // ★ R: at the full bend (the red control: F's tags, at rest)
             out.append(Floor(region: r, columns: st.columns.count, text: String(format: "%.1f mm", f.deepestMM), anchor: h.anchor))
         }
         floorCache = (key, out)
@@ -258,13 +261,14 @@ struct FlexibleStageViewTagsLayer: View {
     let keepOut: [CGRect]
     /// ★ BATCH V (m19): what the dashed outlines are cut out of — the whole chrome; nil: nothing (the red control).
     var clip: [CGRect]? = nil
-    /// ★ ROUND 7 (F): the full-bend pose while Bend shows (the discs and outlines on the bent faces; the floor tags stay).
+    /// ★ ROUND 7 (F): the full-bend pose while Bend shows (the discs and outlines on the bent faces). ★ R (his answer of
+    /// 2026-10-15): the floor tags move with it too.
     var pose: FlexibleBendPose? = nil
 
     static let discSize: CGFloat = 22
 
     var body: some View {
-        let tags = FlexibleStageViewTags.tags(model: model, k: k, projection: projection, keepOut: keepOut)
+        let tags = FlexibleStageViewTags.tags(model: model, k: k, projection: projection, keepOut: keepOut, pose: pose)   // ★ R: with the bend
         let discs = FlexibleStageViewTags.discs(model: model, projection: projection, keepOut: keepOut, pose: pose)
         let hidden = FlexibleStageViewTags.hidden(model: model, projection: projection, pose: pose)
         ZStack {
