@@ -80,10 +80,11 @@ public enum FlexibleLegendPlacement {
     /// The fix pop-up's frame (its height is its content's): under the top line (and the
     /// toast line when one shows), centred in the span left of the gizmo's clearance.
     /// ★ ROUND 7, R7-D1 (looking at the Squish page at 11" landscape: the pop-up lay on the capsule): `clear` — chrome the
-    /// pop-up must open BELOW too (the capsule under the Exit row).
+    /// pop-up must open BELOW too (the capsule under the Exit row); `rightLimit` — where it must end on the right (the view
+    /// buttons' left edge: one gap below the capsule, on the mini and at 11" portrait it reached over two of them).
     public static func popUp(viewport: CGSize, notice: CGRect, below extra: CGFloat = 0, clear: [CGRect] = [],
-                             edge: CGFloat = PageChrome.edge) -> CGRect {
-        let right = viewport.width - PageChrome.gizmoClearance
+                             rightLimit: CGFloat? = nil, edge: CGFloat = PageChrome.edge) -> CGRect {
+        let right = min(viewport.width - PageChrome.gizmoClearance, rightLimit.map { $0 - gap } ?? .greatestFiniteMagnitude)
         let w = max(0, min(popUpMaxWidth, right - edge))
         let top = max(notice.maxY + extra, clear.map(\.maxY).max() ?? 0) + gap
         return CGRect(x: edge + (right - edge - w) / 2, y: top, width: w, height: 0)

@@ -157,11 +157,11 @@ struct FlexibleLatticeButtonView: View {
                     Text(line)
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(DS.Color.textPrimary.opacity(ready ? 0.88 : 0.62).color)
-                        .lineLimit(1).minimumScaleFactor(0.85).truncationMode(.tail)   // (his ≤ 44-character lines read whole)
+                        .lineLimit(1).minimumScaleFactor(0.78).truncationMode(.tail)   // (his ≤ 44-character lines read whole)
                         .accessibilityIdentifier("flexible-lattice-line")
                 }
                 .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.horizontal, DS.Space.m)
+                .padding(.horizontal, DS.Space.s)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
             }

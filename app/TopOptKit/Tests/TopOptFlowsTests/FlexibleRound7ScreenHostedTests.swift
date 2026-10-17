@@ -194,8 +194,11 @@ final class FlexibleRound7ScreenHostedTests: XCTestCase {
         for (tag, v) in FlexibleChromeLayoutTests.pads {
             let exitRow = CGRect(x: PageChrome.edge, y: PageChrome.edge, width: 226, height: 44)
             let band = FlexibleLegendPlacement.noticeBand(viewport: v, exitRow: exitRow, capsule: cap)
-            let pop = FlexibleLegendPlacement.popUp(viewport: v, notice: band, clear: [cap])
+            let views = FlexibleStageViews.frame(viewport: v)
+            let pop = FlexibleLegendPlacement.popUp(viewport: v, notice: band, clear: [cap], rightLimit: views.minX)
             XCTAssertGreaterThanOrEqual(pop.minY, cap.maxY + 12 - 0.5, "★ \(tag): the fix pop-up opens below the capsule")
+            XCTAssertLessThanOrEqual(pop.maxX, views.minX - 12 + 0.5, "★ \(tag): …and ends left of the Squish page's view buttons")
+            XCTAssertGreaterThanOrEqual(pop.width, 340, "\(tag): still room for its 1–3 fixes")
             let control = FlexibleLegendPlacement.popUp(viewport: v, notice: band)
             if band.minY < cap.minY { XCTAssertLessThan(control.minY, cap.maxY, "★ RED CONTROL (\(tag)): from the top line alone it lands on the capsule") }
             report.append("\(tag) pop-up y \(pop.minY) (control \(control.minY))")
