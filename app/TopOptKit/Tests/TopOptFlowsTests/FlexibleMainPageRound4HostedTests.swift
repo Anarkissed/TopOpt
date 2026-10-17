@@ -80,16 +80,25 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
                 let got = h.frames.all.filter { $0.width > 1 }
                 print("FLEX-HOSTED \(name) \(kind): drawn \(got.map(\.integral)) · row slot \(row.integral) · note band \(band.integral)")
                 XCTAssertEqual(got.count, 2, "the row and the note at \(name)")
-                let drawnRow = got.max { $0.minX < $1.minX } ?? .zero, note = got.min { $0.minX < $1.minX } ?? .zero
+                // (★ R7-D1: told apart by the row's own line — at 11" portrait the note sits under the row)
+                let drawnRow = got.min { abs($0.minY - row.minY) < abs($1.minY - row.minY) } ?? .zero
+                let note = got.first { $0 != drawnRow } ?? .zero
                 XCTAssertTrue(row.insetBy(dx: -1, dy: -1).contains(drawnRow), "the three buttons fill their slot at \(name): \(drawnRow) in \(row)")
                 XCTAssertEqual(drawnRow.width, row.width, accuracy: 1, "the row's 40 pt buttons fill their slot (★ R7-V: X-ray and Play among them)")
                 XCTAssertTrue(band.insetBy(dx: -1, dy: -1).contains(note), "the \(kind) note inside its band at \(name): \(note) in \(band)")
-                XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
-                XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
+                // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the
+                // note sits UNDER the row's right end (too little room beside it). Was: beside the row at every size.
+                if name == "11p" {
+                    XCTAssertGreaterThanOrEqual(note.minY, drawnRow.maxY, "under the buttons at \(name)")
+                    XCTAssertEqual(note.maxX, drawnRow.maxX, accuracy: 1, "on the row's right edge at \(name)")
+                } else {
+                    XCTAssertLessThanOrEqual(note.maxX, drawnRow.minX, "left of the buttons at \(name)")
+                    XCTAssertEqual(note.midY, drawnRow.midY, accuracy: 1, "on the row's line at \(name)")
+                }
                 XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: size)), "clear of the left panel at \(name)")
                 // ★ RED CONTROL: C2's band under the row does not hold the note any more
                 let c2Band = CGRect(x: size.width - PageChrome.edge - 300, y: row.maxY + DS.Space.s, width: 300, height: 34)
-                XCTAssertFalse(c2Band.insetBy(dx: -1, dy: -1).contains(note), "control: not in C2's band under the row")
+                if name != "11p" { XCTAssertFalse(c2Band.insetBy(dx: -1, dy: -1).contains(note), "control: not in C2's band under the row") }
             }
         }
     }
@@ -101,7 +110,10 @@ final class FlexibleMainPageRound4HostedTests: XCTestCase {
         let h = host(FlexibleMainViewToggles(main: stage, openSettings: { opened += 1 }), size: size)
         pump(0.3)
         let row = FlexibleMainViewToggles.rowFrame(viewport: size)
-        let lattice = CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)   // the third button (★ S1b re-pin: [Prisms] trails it now)
+        // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: Heat, Stress, X-ray, Lattice, Prisms, Play, 44 pt): the
+        // fourth button. Was: the third of 40 pt buttons (★ S1b re-pin: [Prisms] trails it now).
+        let side = FlexibleViewButton.side
+        let lattice = CGPoint(x: row.minX + 3 * (side + DS.Space.s) + side / 2, y: row.midY)
         // ★ RE-PINNED (R7-V — his 2026-10-14 words, img5: "Please re-add the x-ray view icon"; C2 reversed).
         // ★ RE-PINNED AGAIN (round 7, X1 — his Q9 answer, 2026-10-14: "The lattice should be visible without x-ray on … These
         // two things are not mutually exclusive"): the Lattice icon is a PLAIN show / hide, lit by his view — the first click

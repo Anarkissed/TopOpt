@@ -290,7 +290,10 @@ extension FlexibleRound7ViewsHostedTests {
         let cols = FlexibleMainViewToggles.columns(viewport: size)
         // the Play icon: the sixth (the last of one line, or of the second line of three)
         let col = (FlexibleMainViewToggles.buttons - 1) % cols, line = (FlexibleMainViewToggles.buttons - 1) / cols
-        let play = CGRect(x: row.minX + CGFloat(col) * (40 + DS.Space.s) - 4, y: row.minY + CGFloat(line) * (40 + DS.Space.s) - 4, width: 48, height: 48)
+        // ★ RE-PINNED (round 7, R7-D1 — his rule: 44 pt targets): the icons are 44 pt. Was: 40.
+        let side = FlexibleViewButton.side
+        let play = CGRect(x: row.minX + CGFloat(col) * (side + DS.Space.s) - 4, y: row.minY + CGFloat(line) * (side + DS.Space.s) - 4,
+                          width: side + 8, height: side + 8)
         func count(_ fe: FlexibleFEView, like c: RGBA, shot name: String? = nil) throws -> Int {
             s.fe = fe
             let h = host(FlexibleMainViewToggles(main: s), size: size)

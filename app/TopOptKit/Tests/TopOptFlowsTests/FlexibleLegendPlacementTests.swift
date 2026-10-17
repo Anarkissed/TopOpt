@@ -112,8 +112,10 @@ final class FlexibleLegendPlacementTests: XCTestCase {
         let page = try FlexibleSource.code("FlexibleStagePage.swift")
         XCTAssertTrue(page.contains("FlexibleLegendPlacement.player(viewport: size, bottomClearance: PageChrome.edge,"),
                       "the Settings page computes the player's frame")
-        XCTAssertTrue(page.contains("return [\"panel\", \"legend\", \"exitRow\", \"notice\"].compactMap"),
-                      "…against the panel, the legend, the top row and the readiness line")
+        // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's capsule on the Squish page too): the capsule under the Exit row is
+        // chrome the player keeps clear of. Was: the panel, the legend, the top row and the readiness line.
+        XCTAssertTrue(page.contains("return [\"panel\", \"legend\", \"exitRow\", \"capsule\", \"notice\"].compactMap"),
+                      "…against the panel, the legend, the top row, the capsule and the readiness line")
         XCTAssertFalse(page.contains("latticeControls"), "no bottom-right buttons on the Settings page")
         let pill = try FlexibleSource.code("FlexibleMainStatusPill.swift")
         // ★ RE-PINNED (S1b): the slot's placement is lifted into `place` (the main page's mm tags keep clear of the same

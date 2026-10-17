@@ -168,6 +168,9 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
     /// "Role colours off" chip put in the row).
     struct WordedRow: View {
         let main: FlexibleMainStage
+        static func underRow(_ v: CGSize) -> Bool {
+            FlexibleMainViewToggles.noteFrame(viewport: v).minY >= FlexibleMainViewToggles.rowFrame(viewport: v).maxY
+        }
         var body: some View {
             ZStack(alignment: .topTrailing) {
                 FlexibleMainViewToggles(main: main, openSettings: {})
@@ -178,7 +181,10 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
                             .padding(.horizontal, 12).frame(height: 40).background(Capsule().fill(DS.Surface.bar.color))
                     }
                     .buttonStyle(.plain)
-                    .position(x: row.maxX - 75, y: row.maxY + DS.Space.s + 20)
+                    // ★ RE-PINNED (round 7, R7-D1): the control chip goes where the note's band is NOT — under the row, or,
+                    // where the note now sits under the row (11" portrait: one line of six 44 pt icons), left of it
+                    .position(x: Self.underRow(g.size) ? row.minX - DS.Space.s - 75 : row.maxX - 75,
+                              y: Self.underRow(g.size) ? row.midY : row.maxY + DS.Space.s + 20)
                 }
             }
         }

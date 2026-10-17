@@ -904,9 +904,10 @@ public final class FlexibleMainStage: ObservableObject {
                                     callout: {})
     }
 
-    /// A blocker the status names pops above the pair — once per issue (the card, when open, shows it instead).
+    /// A blocker the status names pops above the pair — once per issue (the card, when open, shows it instead). Asked only
+    /// by the pair, which shows only on the Flexible stage with no page up (H30, inside #354's `!fullScreenPageUp` scope).
     func noteCallout(_ s: FlexibleMainStatus) {
-        guard visible, calloutRule.next(s) != nil else { return }
+        guard calloutRule.next(s) != nil else { return }
         if chrome.open != .latticeCard { chrome.show(.callout) }
     }
 

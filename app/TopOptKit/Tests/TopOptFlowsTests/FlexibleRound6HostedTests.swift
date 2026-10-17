@@ -593,10 +593,14 @@ final class FlexibleRound6HostedTests: XCTestCase {
     func testTheFourMainButtonsClearTheNoteLegendAndPlayer() throws {
         XCTAssertTrue(try FlexibleSource.code("WorkspacePlaceholder.swift").contains("legendDrilledIn"), "premise: the S1 base")
         XCTAssertEqual(FlexibleMainViewToggles.buttons, 6, "Dent heat, Stress, Lattice, Prisms, X-ray, Play")
+        // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row; his rule: 44 pt targets): six 44 pt icons on ONE line on
+        // every pad but the mini in portrait (the mockup's rule: three over three below 800 pt); at 11" portrait the note goes
+        // under the row (FlexibleMainViewToggles.noteFrame). Was: 40 pt, three over three at 11" portrait too.
+        let side = FlexibleViewButton.side
         for (tag, size) in Self.sizes {
             let row = FlexibleMainViewToggles.rowFrame(viewport: size)
-            let c = tag == "11p" ? 3 : 6
-            XCTAssertEqual(row.width, CGFloat(c) * 40 + CGFloat(c - 1) * DS.Space.s, tag)
+            let c = 6
+            XCTAssertEqual(row.width, CGFloat(c) * side + CGFloat(c - 1) * DS.Space.s, tag)
             XCTAssertGreaterThanOrEqual(FlexibleMainViewToggles.noteFrame(viewport: size).width, FlexibleMainNote.minWidth, "\(tag): the note keeps its room")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: size, bottomClearance: 120, chipColumnWidth: 180)
             XCTAssertTrue(keep.contains { $0.contains(row) }, "\(tag): the legends keep out of the four buttons")
@@ -608,11 +612,11 @@ final class FlexibleRound6HostedTests: XCTestCase {
         let mini = CGSize(width: 744, height: 1133)
         let row = FlexibleMainViewToggles.rowFrame(viewport: mini), note = FlexibleMainViewToggles.noteFrame(viewport: mini)
         XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: mini), 3, "mini: three over three")
-        XCTAssertEqual(row.width, 3 * 40 + 2 * DS.Space.s, "mini: three 40 pt buttons across")
-        XCTAssertEqual(row.height, 2 * 40 + DS.Space.s, "mini: two lines")
+        XCTAssertEqual(row.width, 3 * side + 2 * DS.Space.s, "mini: three 44 pt buttons across")
+        XCTAssertEqual(row.height, 2 * side + DS.Space.s, "mini: two lines")
         XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "mini: the note keeps its room")
         XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: mini)), "mini: clear of the left panel")
-        for (tag, size) in Self.sizes { XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: size), tag == "11p" ? 3 : 6, "\(tag): one line of six, or three over three") }
+        for (tag, size) in Self.sizes { XCTAssertEqual(FlexibleMainViewToggles.columns(viewport: size), 6, "\(tag): one line of six (three over three on the mini only)") }
         print("FLEX-R6-3g mini row \(row.integral) · note \(note.integral)")
     }
 
@@ -677,11 +681,14 @@ final class FlexibleRound6HostedTests: XCTestCase {
             pump(0.3)
             let row = FlexibleMainViewToggles.rowFrame(viewport: size)
             // ★ RE-PINNED (R7-V): six icons — Heat · Stress · Lattice · Prisms · X-ray · Play; one line, or three over three
+            // ★ RE-PINNED AGAIN (round 7, R7-D1 — his pick 1, A2's views row): Heat · Stress · X-ray · Lattice · Prisms · Play,
+            // 44 pt: [Prisms] is the fifth, Lattice the fourth (on the mini: the second line's middle and first)
+            let side = FlexibleViewButton.side, step = side + DS.Space.s
             let oneLine = FlexibleMainViewToggles.columns(viewport: size) == FlexibleMainViewToggles.buttons
-            let prisms = oneLine ? CGPoint(x: row.minX + 3 * (40 + DS.Space.s) + 20, y: row.midY)   // the fourth
-                : CGPoint(x: row.minX + 20, y: row.maxY - 20)                                     // the second line's first
-            let lattice = oneLine ? CGPoint(x: row.minX + 2 * (40 + DS.Space.s) + 20, y: row.midY)  // the third
-                : CGPoint(x: row.maxX - 20, y: row.minY + 20)                                     // the first line's last
+            let prisms = oneLine ? CGPoint(x: row.minX + 4 * step + side / 2, y: row.midY)
+                : CGPoint(x: row.minX + step + side / 2, y: row.maxY - side / 2)
+            let lattice = oneLine ? CGPoint(x: row.minX + 3 * step + side / 2, y: row.midY)
+                : CGPoint(x: row.minX + side / 2, y: row.maxY - side / 2)
             m.views = []
             stage.latticeOn = false
             stage.xrayOn = false
@@ -702,7 +709,7 @@ final class FlexibleRound6HostedTests: XCTestCase {
             let before = (stage.latticeOn, opened)
             click(h, lattice)
             XCTAssertFalse(m.views.contains(.prisms), "\(tag): Lattice is not Prisms")
-            XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "\(tag): the third button is Lattice (hides it, or opens Settings)")
+            XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "\(tag): the fourth button is Lattice (hides it, or opens Settings)")
             lines.append("\(tag) row \(row.integral)")
             snapshot(h, "R6_S1b_\(tag)_main_four_buttons.png")
         }
@@ -715,14 +722,19 @@ final class FlexibleRound6HostedTests: XCTestCase {
         m.views = []
         stage.latticeOn = false
         stage.xrayOn = false
-        click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
-        XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is bottom left")
+        // ★ RE-PINNED (round 7, R7-D1 — the mockup's order, 44 pt): on the mini [Prisms] is the second line's middle, Lattice
+        // its first. Was: [Prisms] bottom left, Lattice top right (R7-V's order).
+        let side = FlexibleViewButton.side
+        let miniPrisms = CGPoint(x: row.minX + side + DS.Space.s + side / 2, y: row.maxY - side / 2)
+        let miniLattice = CGPoint(x: row.minX + side / 2, y: row.maxY - side / 2)
+        click(h, miniPrisms)
+        XCTAssertTrue(m.views.contains(.prisms), "mini: [Prisms] is the second line's middle")
         XCTAssertFalse(stage.xrayOn, "mini: ★ X1 — X-ray stays off")
-        click(h, CGPoint(x: row.minX + 20, y: row.maxY - 20))
+        click(h, miniPrisms)
         let before = (stage.latticeOn, opened)
-        click(h, CGPoint(x: row.maxX - 20, y: row.minY + 20))
-        XCTAssertFalse(m.views.contains(.prisms), "mini: top right is not Prisms")
-        XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "mini: top right is Lattice")
+        click(h, miniLattice)
+        XCTAssertFalse(m.views.contains(.prisms), "mini: the second line's first is not Prisms")
+        XCTAssertTrue(stage.latticeOn != before.0 || opened == before.1 + 1, "mini: the second line's first is Lattice")
         snapshot(h, "R6_S1b_mini_main_buttons_two_over_two.png")
         lines.append("mini row \(row.integral)")
         m.views = []

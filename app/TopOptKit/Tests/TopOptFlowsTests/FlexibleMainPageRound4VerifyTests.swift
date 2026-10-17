@@ -363,8 +363,17 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
         for (name, v) in sizes {
             let row = FlexibleMainViewToggles.rowFrame(viewport: v), note = FlexibleMainViewToggles.noteFrame(viewport: v)
             let frame = FlexibleMainViewToggles.frame(viewport: v)
-            XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
-            XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
+            // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row of six 44 pt icons on one line): where the row leaves
+            // less than the note's 180 pt beside it (11" portrait, and the 820 pt pad), the note sits UNDER the row's right end,
+            // whole; it still costs the legends nothing (below). Was: beside the row at every size.
+            let under = name == "11p" || name == "11p820"
+            if under {
+                XCTAssertEqual(note.minY, row.maxY + DS.Space.s, accuracy: 0.5, "under the row at \(name)")
+                XCTAssertEqual(note.maxX, row.maxX, accuracy: 0.5, "on the row's right edge at \(name)")
+            } else {
+                XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
+                XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
+            }
             XCTAssertGreaterThanOrEqual(note.width, 180, "room for 'Lattice ready · Show' at \(name)")
             XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)), "clear of the left panel at \(name)")
             XCTAssertTrue(frame.contains(note))
@@ -372,7 +381,7 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             // gone — the NOTE costs the legends nothing again: the keep-out ends where the row ends, and the legends are
             // compared with the row alone held out.
             let held = row
-            XCTAssertEqual(frame.maxY, held.maxY, accuracy: 0.5, "the keep-out ends where the row ends at \(name)")
+            if !under { XCTAssertEqual(frame.maxY, held.maxY, accuracy: 0.5, "the keep-out ends where the row ends at \(name)") }
             for chip: CGFloat in [0, 222] {
                 let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: chip)
                 let placed = FlexibleMainLegendLayout.place(kinds, minimized: [], viewport: v, keepOut: keep)
@@ -406,8 +415,11 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
 
     // MARK: the Export step
 
+    /// ★ RE-PINNED (round 7, R7-D1 — H31 and the reviewer's condition (a)): the step's rows moved, unchanged, to
+    /// FlexibleExportRows (the sheet and the Flexible stage's corner card draw the same rows). Was: inside the sheet.
     func testTheExportStepSaysTheWaitOnceAndUsesDSTokens() throws {
-        let code = try FlexibleSource.code("FlexibleExportSheet.swift")
+        let sheet = try FlexibleSource.code("FlexibleExportSheet.swift")
+        let code = sheet + (try FlexibleSource.code("FlexibleExportRows.swift"))
         XCTAssertEqual(code.components(separatedBy: "FlexibleCoreRun.exportsWait").count - 1, 1, "one line")
         let card = try XCTUnwrap(code.range(of: "private func card("))
         XCTAssertFalse(code[card.lowerBound...].contains("exportsWait"), "not once per card")
