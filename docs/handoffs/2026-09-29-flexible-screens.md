@@ -1,6 +1,138 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 so far — what you will see now (M1, M2, F and X1 together, installed 2026-10-15) (read this first)
+## ★ Round 7 · the review of M2 and F — what it found, what is fixed, and your three answers of 2026-10-15 (2026-10-17) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, on `a870cad4` (M1 + M2 + F + X1). Commits: `c7f16bac` (tests first,
+against stubs), `95fb60f1` (the fixes and the re-pins) and this section's (the runs, the pictures). **Nothing is pushed.**
+**Installed on the iPad Pro 13" simulator (147E56A1) and not launched** — the app was not running; the installed
+`TopOpt.debug.dylib` is the built one (cmp; 81 206 448 bytes, sha256 d2a199092228ea56, 06:46). App only: no #354, main or core file, and **no hook** in this step.
+
+### What you will see now, in plain words
+
+**On the Squish page**
+- **A face's own weight is shared equally between its lattice parts** (your answer 7: "5 lb each of 10 lb"). Face 4 and
+  Face 2 at your 10 lb now press 10 lb each in all: 5 lb on each of their two parts. Before this fix each PART pressed
+  10 lb, so each face pressed 20 lb and Group 2 pressed 40 lb, while its box still said "Squeeze 10 lb". The box still says
+  10 lb; each part's row says 5 lb. (The Top, linked to the main page, was already right: 11 + 11 of 22 lb.)
+- **The parts of one face go together.** A group chip or "+ New" on one part moves the whole face; the Squeeze box gives
+  each face its force, shared by its parts; taking one part out (⊖) puts the face's whole force on the part that is left.
+- **The face card's group chips show the names on your pad** — on their own line under "Squeeze group" when they don't fit
+  beside it. With your three groups they had always fallen back to one "● Group 2 ⌄" menu.
+- **With Bend on, everything goes to the full bend** (your answer 1 of 2026-10-15): the depth chip ("↓ 22.5 mm") and the
+  Prisms view's depth labels move with the bend now, and so do the prisms' floors.
+- **Bend always shows the open group's own bend.** The page kept the first bend it drew in a session (two groups' bends
+  looked the same to its memory), so with Bend on, switching groups or editing a curve could leave the curves, stamp and
+  prisms at the wrong pose. This was also why one of F's tests failed only when other tests ran before it.
+- The rail counts **faces** ("Group 2 · 2 faces", not 4), and the pinch line names the face whole ("Pinched with Face 2 ·
+  two halves", not "Face 2 · lattic…").
+- "Violet = lattice · tap to pick" shows only while something on the part IS violet.
+- The take-out ⊖, [Delete], [Keep], [Reset all] and [Reset] are 44 pt targets now (drawn as before; the ⊖ a little
+  darker so it reads beside "Rests").
+- "Delete Group 3?" no longer stays up for a group that has gone, or when you open another tab (a new group reusing the
+  number could have been deleted by it).
+- After Reset all, Heat no longer wears the "every group" mark with no group left.
+
+**On the main Lattice page**
+- **After Reset all and an empty Exit, the pill says "Lattice · Nothing to squish yet"** (your answer 3 of 2026-10-15), in
+  the neutral style — no orange "Fix: press the face that carries weight". A tap opens the Squish page (it still never
+  opens by itself). The heat icon is dimmed: there is nothing to heat.
+- **A tap on a face's solid middle picks the group of that face's lattice parts** (it kept the last group, with no cue).
+- **Heat starts on the first group every session** (your answer 2 — already so; now pinned by a test).
+- Not changed yet: after the empty Exit the main page shows the plain pad (question 1 below).
+- When the redesign lands (not yet true): "On the Flexible screen you can't move a Topology piece by tapping it."
+
+### The review's findings → the fix → the test (tests FIRST: 12 tests, 11 red on the stubs, R4 a pin — `round7/review_fix/r7r_red_run.txt`)
+| finding (the review of M2 and F) | confirmed by | the fix | pinned by (RED control inside) |
+|---|---|---|---|
+| M2's carry copies a face's OWN weight onto every lattice part (Group 2: 40 lb under "Squeeze 10 lb"; ux + correctness, major) | R1 on the stubs: Face 4's parts 4.536 + 4.536 kg; the run job 88.96 N for Face 4 (saved 44.48 N); 4 hands | `planCarry` shares the face's weight equally (`FlexibleSectionShares.share`); a face's parts are ONE hand (`FlexibleSqueezeGroups.hands/hand(of:)` with the parts' root); `setGroupForce`, `takeForce` (moves, merges), `press` (a part joining its face), `removeFace` / `rest` (a part leaving) share the face's force; the face card's weight line and the main bar's end read the hand | `FlexibleR7RTests.testAFacesOwnWeightIsAnEqualSharePerLatticePartAndOneHand` (RED `FlexibleSectionShares.controlCopyWeight`) |
+| F's Bend pose key collides across groups (correctness, major — the order-dependent H5 failure) | R2 on the stubs: one key `133650|…` for Group 1 and Group 2; Group 1 asked after Group 2 got Group 2's pose (0 mm on Face 1 against 11.98) | `FlexibleBendPose.key` hashes every dent's bytes (F: every 522nd value — always a vertex's x on his pad) | `FlexibleR7RTests.testTheBendPoseKeyIsTheWholeBendSoEachGroupGetsItsOwnPose` (RED `controlSampledKey`); the review's failing sequence `FlexibleR7FTests` + H5 in ONE process now passes (H5: bent vs rest 8700 px) — fixed at the root, not isolated |
+| Empty Exit after Reset all: plain pad + orange Fix pill; heat lit (ux, major + minor) | R5 on the stubs: "Fix: press the face that carries weight", tone fix | `FlexibleMainStatus.emptySetup` ("Nothing to squish yet", idle tone, no Fix; only with a face-prism and nothing else blocking); `heatAvailable` / `heatIconLit` / `heatAllBadgeShown`; the Squish page drops "every group" with no group | `testAfterResetAllTheMainPageSaysNothingToSquishYetAndHeatsNothing` (RED `FlexibleMainStage.controlEmptyMainFix`) |
+| Face card chips never appear on his pad (ux, major) | RH1 on the stubs: no chips at 13p and 11l, the menu | `FlexibleFaceGroupRow.namedChips`: beside the words → their own line → that line scrolls; never the one-chip menu | `FlexibleR7RHostedTests.testTheFaceCardsNamedChipsAreDrawnOnHisPad` at 13p and 11l (RED `controlMenuFallback`) |
+| Bend on Group 1 bends 1.1 mm at ×1 (ux, major) | the review's numbers (Group 1's 3D sim 1.1 mm vs 12 mm drawn) | **not changed — question 2** (what Bend should show is his call) | — |
+| Rail counts parts; names overflow (minor) | R9 on the stubs: "4 faces"; "Pinched with Face 2 · lattic… · two halves" | rail counts roots; the pinch line names the root face | `testTheRailCountsFacesAndThePinchLineNamesTheFaceWhole` (RED `controlRailCountsParts`, `controlPinchPartName`) |
+| Main tap on a face's solid middle keeps the old group (minor) | R7 on the stubs: stayed Group 1 | `FlexibleMainStage.onePartsGroup` — the face's parts' one group | `testATapOnAFacesSolidMiddlePicksItsLatticePartsGroup` (RED `controlTapRootIgnored`) |
+| Violet row with nothing violet (minor) | R8 on the stubs | `FlexibleLegend.sectionRow`: a part with no setting of its own nor on its face | `testTheVioletRowOnlyWhileSomethingIsViolet` (RED `controlVioletRowAlways`) |
+| F's new controls under 44 pt (minor) | RH2 on the stubs: 32×32, 70×30, 60×32, 65×32, 56×32 | 44 pt targets (`FlexibleTargets`), drawn as before | `testFsNewControlsAreFingerTargets` (RED `FlexibleTargets.controlSmall`) |
+| Heat's "every group" after Reset all (minor) | R5 | `reviewAfterEdit` | R5 |
+| The trash question outlives its group (correctness, minor) | R6 on the stubs: asked 3, then shown for the NEW Group 3 | `reviewAfterEdit` (after every edit and restore) and `dropDeleteAskOffItsTab` | `testTheTrashQuestionNeverOutlivesItsGroup` (RED `controlAskOutlivesGroup`) |
+| The X1-merge re-pin left V1's no-lid check vacuous (correctness, minor) | read: `closedMap == 0` | V1b measures it on a pressed, partly solid Top (M2's `controlWholeFace` for the fixture): closed 16 740, heated 0; control 11 904 | `FlexibleR7X1VerifyTests.testThePrintedViewsSolidPartWearsNoLidOnAWholePressedFace` |
+| 10-15 answers (1) chip and labels move with the bend, (2) first group each session, (3) the main line | — | (1) `FlexibleBendPose.pose` moves floors; the chip and the tags read the bent prism; (2) kept; (3) above | R3 (RED `controlInsideStays`) + RH3 (the chip moves 107 pt at 13p; control 0); R4 (RED `controlPlayAllDefault`); R5 |
+| The I2 migration's restore in two corner cases (correctness, minor, read only) | read | **not changed** — see question 4 | — |
+| Too many numbers; the panel and legend over the curves; the pale fill and the player's picker (ux, minor) | the pictures | passed to the redesign; question 3 | — |
+
+### Rules this step reverses (your words win)
+- **F: "what stands inside the part (a prism's floor, its depth chip, the floor tags) stays"** → they move with the bend
+  (your answer 1 of 2026-10-15).
+- **M2: a face's own weight copied onto each lattice part; each part its own hand** → an equal share per part, one hand
+  per face (your answer 7, clarified).
+
+### The re-pins (each attributed in the test)
+- `FlexibleR7FTests.testTheBendPoseMovesWhatIsDrawnOnThePart`: a prism's floor moves with its face (was "its floor
+  stays"); F's rule is now the red control `FlexibleBendPose.controlInsideStays`, run inside. Your answer 1 of 2026-10-15.
+- `FlexibleGroupPaletteHostedTests` (batch C5), two tests: with six and with nine groups the face card shows the named chips
+  on their own line under "Squeeze group" (scrolling inside the card when they overflow it), never the "● Group 6 ▾" menu
+  chip; "Squeeze group" keeps its room on its own line. Was: the menu chip past the words. Your answer 10 and the review.
+- `FlexibleR7X1VerifyTests` V1: two comments point to the new V1b (no assertion changed).
+
+### #354 hooks
+None. Every change is in Flexible files (`FlexibleR7ReviewFixes.swift` is new; the others are call sites in our own files).
+
+### The bytes
+- **Which job bytes move:** only the Flexible jobs' `weight_n` of a face of HIS OWN weight that a
+  face-prism cuts into lattice parts — on his pad with his live lattice, Face 4's and Face 2's parts: 44.48 N each (the
+  copy) → 22.24 N each, so each face is back to its saved 44.48 N. Your answer 7 (clarified) is the reason. No golden holds
+  his live lattice.
+- **Goldens (FlexibleAngledGoldenTests):** 0 DIFFERS in both modes (SWIFT_DETERMINISTIC_HASHING=1: 38 identical; unseeded:
+  32 identical, 1 PART-SKIP) — the same counts as the X1 merge.
+- **The 16 stage-job hashes:** `round7/review_fix/stage_job_hashes_r7r.txt` is byte-identical to
+  `round7/merge_x1/stage_job_hashes_mx1.txt` (Topology's and the lattice stage's jobs carry no Flexible weight).
+
+### The runs (raw: `round7/review_fix/r7r_runs.txt`)
+- **Red run** (`c7f16bac`, the stubs): 12 tests, 11 red; R4 green by design (a pin of your answer 2, its red control
+  inside); X1's V1b green with its control red (11 904 heated vs 0).
+- **The new tests on the code:** 12/12. **The review's failing sequence in one process** (FlexibleR7FTests, then F's
+  hosted Bend check): the Bend check passes (bent vs rest 8 700 px).
+- **The targeted suite, once:** 201 classes (the X1 merge's 196, my two new classes and the probe, LatticeBarrierModelTests
+  and LatticeSeparationTests; SurfaceStageGesturesTests does not exist): 1 348 tests started, 1 280 passed, 64 skipped, 4
+  failed — the known refine line (8 asserts, one test) and sim-solve trigger, and batch C5's two chip-row tests, re-pinned
+  (above) and re-run with the other chip classes: 19/19. No exit signal 11. LatticeStaleTypeTests 6/6. The Play ring passed,
+  and so did F's Bend check, which ran after FlexibleR7FTests in the same process.
+- The WorkspacePlaceholder and ProjectModel pinners were not added: neither file is touched in this step.
+
+### Pictures (`round7/review_fix/`, his pad with his live lattice, the whole app page hosted, the shipping renderer)
+- `R7R_13p_S09_group2_face_card_named_chips.png` (and 11l): the named chips under "Squeeze group", 10 lb in the box, 5 lb
+  per part, the darker ⊖, "Pinched with Face 2 · two halves", the rail's "2 faces".
+- `R7R_SIDE_13p_group2_bend_off_vs_on.png`: Group 2, Bend off and on — the curves, the prism and the "↓ 22.5 mm" chip on
+  the bent part.
+- `R7R_13p_M06_main_after_empty_exit.png` (and 11l): "Lattice · Nothing to squish yet", neutral; the heat icon dimmed.
+- `R7R_13p_S10_group2_trash_asks.png`, `R7R_13p_S11_after_reset_all_empty_img3cam.png`, `R7R_13p_S06a_group1_bend_on_img3cam.png`.
+
+### Not done
+- Bend on Group 1 (question 2), the main page with face-prisms and nothing squished (question 1), the I2 migration's
+  corner cases (question 4).
+- Part names are still cut in the face card's title ("Face 4 · latti…") — they wait for your answer to M2's question 6
+  (the part names).
+- The review's "too many numbers" and "the panel over the curves" go to the redesign (they predate M2 and F).
+- A group number in the main legend's title (the review: "consider") — not done.
+
+### Questions
+1. **After an empty Exit, with face-prisms set but nothing squished, what should the main page draw?** (a) the last lattice,
+   unsquished; (b) a lattice made from the face-prisms alone, with no squish (needs a core path); (c) the plain pad, as
+   now, with "Nothing to squish yet".
+2. **Bend on Group 1 bends 1.1 mm at your 22 lb (you drew 12 mm), so nothing visibly moves.** Should Bend (a) show the
+   drawn depth, (b) exaggerate with the ×k said on screen, or (c) keep the true bend and add one line, "Bends 1.1 mm at
+   22 lb · drawn 12 mm"?
+3. With no view on, the open group's lattice parts still wear a pale group colour, and the Squish page's player keeps its
+   group picker (F kept it on purpose: your "no picker needed" was about the main page). Keep both?
+4. (Reviewer) The I2 migration: its restore dissolves a childless identity region that may have existed before I2 cut it,
+   and forces "collapsed" on cut roots. The file holds no mark of which identity regions I2 made: an id-gap test fails for
+   any chain I2 re-cut (its children get fresh ids). Options: (a) never dissolve an identity root (safe for his regions;
+   an I2-made "Face N" region then stays in the Surface list and Topology's face_regions); (b) leave it (today; nobody has
+   I2 strips — his simulator projects have none). I recommend (b) until a project with I2 strips exists.
+5. Taking one lattice part out (⊖) puts the face's whole force on the part left (one force per group, each face pressing
+   with it). Or should the part left keep its half?
+
+## ★ Round 7 so far — what you will see now (M1, M2, F and X1 together, installed 2026-10-15) (the summary before the review below)
 
 Branch `claude/flexible-screens` (PR #362): `22745f3d` "Merge X1 (the X-ray rule) after M2 and F", the re-pins `1e66c1b2` and
 this section's commit. **Installed on the iPad Pro 13" simulator and not launched. Nothing is pushed.** The sections below (X1,
