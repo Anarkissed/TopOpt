@@ -133,6 +133,9 @@ struct FlexibleSetupChipView: View {
             .frame(maxWidth: FlexibleChromeLayout.setupMaxWidth)
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            // ★ the review of R7-D1 (minor d: thin vertical hairlines at the chip's frame edges, outside its capsule — drawn in a
+            // key window and in one that is not, so not a focus ring): nothing is drawn outside the capsule
+            .clipShape(Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

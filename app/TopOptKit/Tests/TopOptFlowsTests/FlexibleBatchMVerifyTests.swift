@@ -556,9 +556,19 @@ final class FlexibleBatchMVerifyTests: XCTestCase {
         // the stage places it so (folded ⇒ the edge)
         stage.legendMinimized = true
         _ = stage.legendCard(viewport: CGSize(width: 1032, height: 1376), bottomClearance: 94, chipColumnWidth: 222)   // (no kinds: nil)
+        // ★ RE-PINNED (round 7, the review of R7-D1 — the review: "In landscape the cards sit on the legend card … in the
+        // mockup the legend sits directly under the views row"): the main page's card is placed from the top
+        // (FlexibleMainLegendLayout.placeMainCard), which takes the folded edge itself — folded ⇒ the very edge, as before.
+        // Was: legendCard handed placeCard `edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge`.
         let src = (try? FlexibleSource.code("FlexibleMainStage+Views.swift")) ?? ""
-        XCTAssertTrue(src.contains("edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge"))
+        XCTAssertTrue(src.contains("FlexibleMainLegendLayout.placeMainCard(rows: kinds.count, minimized: legendMinimized"))
         let legends = (try? FlexibleSource.code("FlexibleMainLegends.swift")) ?? ""
+        XCTAssertTrue(legends.contains("let edge = minimized ? foldedEdge : PageChrome.edge"), "folded ⇒ the very edge")
+        if let top = FlexibleMainLegendLayout.placeMainCard(rows: 1, minimized: true, viewport: CGSize(width: 1032, height: 1376),
+                                                            keepOut: FlexibleMainLegendLayout.keepOut(viewport: CGSize(width: 1032, height: 1376),
+                                                                                                      bottomClearance: 94, chipColumnWidth: 0)) {
+            XCTAssertEqual(top.frame.maxX, 1032, accuracy: 0.5, "the main page's folded card: on the very edge")
+        } else { XCTFail("the main page's folded card is placed") }
         XCTAssertTrue(legends.contains("HStack(alignment: .center, spacing: FlexibleMainLegendLayout.foldedSpacing)"))
         XCTAssertTrue(legends.contains(".overlay(alignment: .top) { foldedArrow(k) }"), "the reading's arrow on its bar")
     }
