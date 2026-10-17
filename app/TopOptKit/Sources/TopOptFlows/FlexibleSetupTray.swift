@@ -9,7 +9,7 @@
 // ★ THE CHIP reads what the three live inputs are — the quality (the scene's grid), which way is up on the plate
 // (`build_direction`) and which way gravity points (the loads' `build_dir`) — so nothing needs opening to read them.
 // ★ THE TRAY unfolds into one-line rows: Quality [Fast 64³ | Balanced | Fine], Plate up [Change] (the tray's body becomes
-// #354's BuildOrientationView, with ‹ back), Gravity [Change] (H30's closure: #354's own gravity setup; every card folds),
+// the Flexible plate page — FlexiblePlatePage, ★ the review of R7-D1: one question, six big buttons — with ‹ back), Gravity [Change] (H30's closure: #354's own gravity setup; every card folds),
 // Print parameters › (today's sheet). NOTHING ELSE: Protect N mm, Minimize plastic, CAD surfaces and the compute chip are
 // his removals, and the Flexible stage reads none of them. Topology keeps them all (H24 leaves its column untouched).
 
@@ -168,8 +168,9 @@ struct FlexibleSetupTray: View {
             }
             .frame(minHeight: 44)
             if tray.page == .plate {
-                BuildOrientationView(orientation: Binding(get: { project.buildOrientation }, set: { project.buildOrientation = $0 }),
-                                     gravity: project.force.gravity, ranking: project.orientationRanking)
+                // ★ ROUND 7, the review of R7-D1: the Flexible plate page — one question, six big buttons, the current one lit
+                // (it was #354's BuildOrientationView: paragraphs, 40 × 28 pt chips, "Down in service +Z" over a −Z gravity)
+                FlexiblePlatePageView(project: project, done: { FlexibleSetupActions.back(tray: tray) })
             } else {
                 ForEach(FlexibleSetupRow.allCases, id: \.self) { row($0) }
             }

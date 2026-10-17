@@ -115,13 +115,14 @@ struct FlexibleSettingsPanel: View {
         return max(viewport.height * 0.62, viewport.height - edge - top - DS.Space.m)
     }
 
-    /// Stub (tests first).
-    static let title = "Flexible"
+    /// ★ ROUND 7, the review of R7-D1: the panel names the page — "Flexible · Squish", the mockup's words — under a capsule
+    /// that already says Flexible (it said "● Flexible" twice, one under the other).
+    static let title = "Flexible \u{00B7} Squish"
 
     private var header: some View {
         HStack(spacing: DS.Space.xs) {
             Circle().fill(FlexibleStageStyle.accent).frame(width: 8, height: 8)
-            Text("Flexible").font(.system(size: 15, weight: .semibold))
+            Text(Self.title).font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(DS.Color.textPrimary.color)
             // folded: which face the page is on, so the header still says it
             if minimized, let r = model.selectedRegion {

@@ -326,20 +326,29 @@ public struct FlexibleMainPlayerSlot: View {
     let chipColumnWidth: CGFloat
     /// ★ R7-D1: the corner pair's open panel moves the player left (one card at a time; the player is not a card).
     @ObservedObject var chrome: FlexibleChromeState
+    /// ★ ROUND 7, the review of R7-D1: the open panel's drawn height (the pair measures it).
+    @ObservedObject var geometry: FlexibleChromeGeometry
 
     public init(main: FlexibleMainStage, bottomClearance: CGFloat, chipColumnWidth: CGFloat = 0) {
         self.main = main
         self.bottomClearance = bottomClearance
         self.chipColumnWidth = chipColumnWidth
         self._chrome = ObservedObject(wrappedValue: main.chrome)
+        self._geometry = ObservedObject(wrappedValue: main.chromeGeometry)
     }
 
-    /// ★ R7-D1: the column an open panel of the corner pair may take (right-aligned on 24, from the views row's foot + 12
-    /// down to 12 above the pair), or nil while none is open.
-    static func panelColumn(_ open: FlexibleChromeState.Card?, viewport v: CGSize) -> CGRect? {
-        guard let open, [.setup, .latticeCard, .callout].contains(open) else { return nil }
-        let w = FlexibleChromeLayout.panelWidth(v), top = FlexibleChromeLayout.panelTopLimit(v)
-        return CGRect(x: v.width - PageChrome.edge - w, y: top, width: w, height: FlexibleChromeLayout.panelMaxHeight(v))
+    /// ★ ROUND 7, the review of R7-D1 (the blocker: "In portrait, the squish player slides under the orientation cube
+    /// whenever the Setup tray or the Lattice card is open with Play on … Cause: place() adds R7-D1's panelColumn() as a
+    /// keep-out. That reserves the whole maximum column … not the open panel's real frame"): the open panel's REAL frame — its
+    /// drawn height as the pair measured it, right-aligned on 24, 12 above the pair, under the legend — or nil while none is
+    /// open, and for the one pass before the pair's measure of a panel lands (the player then moves once; never onto the cube
+    /// or the name row: they are keep-outs too).
+    static func openPanel(main: FlexibleMainStage, viewport v: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> CGRect? {
+        guard let open = main.chrome.open, [.setup, .latticeCard, .callout].contains(open) else { return nil }
+        let g = main.chromeGeometry
+        guard g.panelHeight > 0, g.panelCard == nil || g.panelCard == open else { return nil }
+        let legend = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth)?.frame
+        return FlexibleChromeLayout.panelFrame(viewport: v, contentHeight: g.panelHeight, legend: legend)
     }
 
     /// The trailing legend slot the main page's legends take (batch C) — kept clear now.
@@ -352,7 +361,10 @@ public struct FlexibleMainPlayerSlot: View {
         var k = [FlexibleMainViewToggles.frame(viewport: viewport),
                  // ★ BATCH C VERIFICATION: the left panel strip (Selections, the stage buttons) —
                  // at 11" portrait the player sat inside the Selections column
-                 FlexibleMainLegendLayout.leftStrip(viewport: viewport)]
+                 FlexibleMainLegendLayout.leftStrip(viewport: viewport),
+                 // ★ ROUND 7, the review of R7-D1: the cube and the name row with the capsule — a player that must climb never
+                 // lands on them (at 13" portrait it sat on the cube with the Lattice card open)
+                 FlexibleLegendPlacement.gizmoFrame(viewport: viewport), FlexibleChromeLayout.topLeftChrome(viewport)]
         // ★ BATCH C: the legends' real frames (FlexibleMainLegendLayout); the reserved slot
         // only when none are handed over
         if let legends { k += legends } else if let l = FlexibleLegendPlacement.legend(size: legendSize, viewport: viewport) { k.append(l) }
@@ -373,7 +385,8 @@ public struct FlexibleMainPlayerSlot: View {
                                        keepOut: keepOut(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: chipColumnWidth,
                                                         legends: main.legendCard(viewport: v, bottomClearance: bottomClearance,
                                                                                  chipColumnWidth: chipColumnWidth).map { [$0.frame] } ?? [])
-                                           + (panelColumn(main.chrome.open, viewport: v).map { [$0] } ?? []),   // ★ R7-D1
+                                           + (openPanel(main: main, viewport: v, bottomClearance: bottomClearance,
+                                                        chipColumnWidth: chipColumnWidth).map { [$0] } ?? []),   // ★ R7-D1 (review: the real frame)
                                        size: size)
     }
     /// ★ S1b: where the player is now (nil while it does not show) — the main page's mm tags keep clear of it.

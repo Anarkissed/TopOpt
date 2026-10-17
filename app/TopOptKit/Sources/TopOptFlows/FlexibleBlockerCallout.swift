@@ -74,7 +74,6 @@ struct FlexibleBlockerCalloutView: View {
     let squish: () -> Void
 
     var body: some View {
-        let buttons = FlexibleBlockerCallout.buttons(issue, pressNeedsWeight: { model.pressNeedsWeight($0) })
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "exclamationmark.circle.fill").font(.system(size: 15, weight: .semibold))
@@ -89,20 +88,8 @@ struct FlexibleBlockerCalloutView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .said(issue.oneLine)
                 .accessibilityIdentifier("flexible-callout-line")
-            HStack(spacing: DS.Space.s) {
-                ForEach(Array(buttons.enumerated()), id: \.offset) { i, b in
-                    switch b {
-                    case .squish:
-                        FlexibleCornerPairStyle.big(FlexibleBlockerCallout.squishTitle, primary: i == 0, id: "flexible-callout-squish", action: squish)
-                    case .apply(let f):
-                        FlexibleCornerPairStyle.big(f.title { model.displayName($0) }, primary: i == 0, id: "flexible-callout-\(FlexibleFixPopup.id(f))") {
-                            FlexibleFixPopup.apply(f, to: model)
-                            close()
-                        }
-                    }
-                }
-            }
-            .padding(.bottom, DS.Space.xs)
+            FlexibleCalloutButtons(model: model, issue: issue, close: close, squish: squish)
+                .padding(.bottom, DS.Space.xs)
         }
         .padding(.horizontal, DS.Space.ml).padding(.vertical, DS.Space.m)
         .frame(width: width, alignment: .leading)
@@ -113,5 +100,32 @@ struct FlexibleBlockerCalloutView: View {
         .dsShadow(DS.Shadow.panel)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-blocker-callout")
+    }
+}
+
+/// ★ ROUND 7, the review of R7-D1: the callout's 1–3 fix buttons, shared with the Lattice card's Core row (the review: "With
+/// a fix pending, the card adds a tap … 'Show the fix' only opens the callout, so fixing takes two taps; his rule is 1–3
+/// fixes shown at once") — the same buttons, applied the same way (FlexibleFixPopup.apply), "Fix in Squish ›" for a weight.
+struct FlexibleCalloutButtons: View {
+    @ObservedObject var model: FlexibleStageModel
+    let issue: FlexibleIssue
+    let close: () -> Void
+    let squish: () -> Void
+
+    var body: some View {
+        let buttons = FlexibleBlockerCallout.buttons(issue, pressNeedsWeight: { model.pressNeedsWeight($0) })
+        HStack(spacing: DS.Space.s) {
+            ForEach(Array(buttons.enumerated()), id: \.offset) { i, b in
+                switch b {
+                case .squish:
+                    FlexibleCornerPairStyle.big(FlexibleBlockerCallout.squishTitle, primary: i == 0, id: "flexible-callout-squish", action: squish)
+                case .apply(let f):
+                    FlexibleCornerPairStyle.big(f.title { model.displayName($0) }, primary: i == 0, id: "flexible-callout-\(FlexibleFixPopup.id(f))") {
+                        FlexibleFixPopup.apply(f, to: model)
+                        close()
+                    }
+                }
+            }
+        }
     }
 }

@@ -115,18 +115,41 @@ public enum FlexibleChromeLayout {
         return (CGRect(x: v.width - PageChrome.edge - w, y: bottom - h, width: w, height: h), contentHeight > maxH)
     }
 
-    // MARK: ★ the review of R7-D1 (stubs: tests first)
+    // MARK: ★ ROUND 7, the review of R7-D1 — the panels keep clear of the ONE legend; the chrome the player keeps clear of
+    // The review (2026-10-17): in landscape the open card sat on the legend card ("At 11l the card covers the whole legend, so
+    // the heat colours have no key while the card is open"); the mockup he picked puts the legend under the views row (top
+    // 292) and every panel below it. So the main page's legend sits right under the views row (FlexibleMainLegendLayout.
+    // placeMainCard) and a panel's top never rises above the legend's foot + 12 where the two share the right column — past
+    // that its body scrolls (as it already did above the views row).
 
-    /// The bar's clearance on this stage: the corner pair (64) and its 24 pt inset (#354's bottomBarClearance).
+    /// The bar's clearance on this stage: the corner pair (64) and its 24 pt inset — #354's bottomBarClearance with the pair
+    /// measured (64 + DS.Space.xl4).
     public static let barClearance: CGFloat = PageChrome.actionButton + PageChrome.edge
-    /// The name row and the capsule under it (top-left, up to the gizmo's clearance).
+    /// The name row and the capsule under it (top-left, up to the gizmo's clearance): the squish player never goes there.
     public static func topLeftChrome(_ v: CGSize) -> CGRect {
         CGRect(x: 0, y: 0, width: max(0, v.width - PageChrome.gizmoClearance), height: capsuleTop + capsuleHeight)
     }
-    public static func panelTopLimit(_ v: CGSize, legend: CGRect?) -> CGFloat { panelTopLimit(v) }
-    public static func panelMaxHeight(_ v: CGSize, legend: CGRect?) -> CGFloat { panelMaxHeight(v) }
+    /// The highest a panel may rise: the views row's foot + 12, and the legend's foot + 12 when the legend shares the
+    /// panels' right-hand column.
+    public static func panelTopLimit(_ v: CGSize, legend: CGRect?) -> CGFloat {
+        var top = panelTopLimit(v)
+        if let l = legend {
+            let w = panelWidth(v), x = v.width - PageChrome.edge - w
+            if l.minX < x + w && l.maxX > x { top = max(top, l.maxY + panelGap) }
+        }
+        return top
+    }
+    /// The tallest a panel may be under that limit.
+    public static func panelMaxHeight(_ v: CGSize, legend: CGRect?) -> CGFloat {
+        max(0, v.height - PageChrome.edge - PageChrome.actionButton - panelGap - panelTopLimit(v, legend: legend))
+    }
+    /// An open panel's frame (its drawn height — the pair measures it — capped by the limit): right-aligned on 24, its foot
+    /// 12 above the pair.
     public static func panelFrame(viewport v: CGSize, contentHeight: CGFloat, legend: CGRect?) -> CGRect {
-        panel(viewport: v, setupWidth: 0, contentHeight: contentHeight).frame
+        let bottom = v.height - PageChrome.edge - PageChrome.actionButton - panelGap
+        let h = min(contentHeight, panelMaxHeight(v, legend: legend))
+        let w = panelWidth(v)
+        return CGRect(x: v.width - PageChrome.edge - w, y: bottom - h, width: w, height: h)
     }
 
     // MARK: the minimised Selections pill (#354's PageLeftModal: bottom-left, on `edge`)

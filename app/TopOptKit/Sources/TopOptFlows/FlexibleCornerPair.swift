@@ -22,11 +22,16 @@ import TopOptDesign
 @MainActor
 public final class FlexibleChromeGeometry: ObservableObject {
     @Published public internal(set) var viewport: CGSize = .zero
-    /// The open panel's drawn height (stub: tests first).
+    /// ★ ROUND 7, the review of R7-D1: the open panel's drawn height and which panel it is (the squish player keeps clear of
+    /// the panel's REAL frame, not of the whole column a panel might take — FlexibleMainPlayerSlot.openPanel).
     @Published public internal(set) var panelHeight: CGFloat = 0
+    @Published public internal(set) var panelCard: FlexibleChromeState.Card?
     public init() {}
     func note(_ v: CGSize) { if v != viewport, v.width > 0, v.height > 0 { viewport = v } }
-    func notePanel(_ h: CGFloat) { if abs(h - panelHeight) > 0.5 { panelHeight = h } }
+    func notePanel(_ h: CGFloat, for card: FlexibleChromeState.Card? = nil) {
+        if abs(h - panelHeight) > 0.5 { panelHeight = h }
+        if card != panelCard { panelCard = card }
+    }
 }
 
 public struct FlexibleCornerPair: View {
@@ -79,9 +84,23 @@ public struct FlexibleCornerPair: View {
         }
     }
 
+    /// ★ ROUND 7, the review of R7-D1: the panel measured (its drawn height, for the squish player's keep-out).
+    /// (Which panel is read from the chrome when the measure lands — an onChange closure may hold the update before the
+    /// change — and the reader is re-made for each panel, so a new panel measures at once.)
     @ViewBuilder private var panel: some View {
+        let chrome = self.chrome, geometry = self.geometry
+        panelBody.background(GeometryReader { g in
+            Color.clear
+                .onAppear { geometry.notePanel(g.size.height, for: chrome.open) }
+                .onChange(of: g.size.height) { geometry.notePanel($0, for: chrome.open) }
+        }.id(chrome.open).allowsHitTesting(false))
+    }
+
+    @ViewBuilder private var panelBody: some View {
         let w = FlexibleChromeLayout.panelWidth(viewport)
-        let maxH = FlexibleChromeLayout.panelMaxHeight(viewport)
+        // ★ ROUND 7, the review of R7-D1: never over the ONE legend (under the views row, as the mockup) — past it the body scrolls
+        let legend = main.legendCard(viewport: viewport, bottomClearance: FlexibleChromeLayout.barClearance, chipColumnWidth: 0)?.frame
+        let maxH = FlexibleChromeLayout.panelMaxHeight(viewport, legend: legend)
         switch chrome.open {
         case .setup:
             FlexibleCornerPairStyle.panel(width: w, maxHeight: maxH) {
@@ -92,7 +111,8 @@ public struct FlexibleCornerPair: View {
             .accessibilityIdentifier("flexible-setup-tray")
         case .latticeCard:
             if let m = main.model {
-                FlexibleLatticeCardMount(model: m, run: main.coreRun, main: main, chrome: chrome, project: project, width: w, maxHeight: maxH)
+                FlexibleLatticeCardMount(model: m, run: main.coreRun, main: main, chrome: chrome, project: project, width: w, maxHeight: maxH,
+                                         openSquish: openSquish)
                     .background(FlexibleCornerPairStyle.publish("latticeCard"))
             } else {
                 // before the stage's model arrives (the first frames): the steps, nothing to send yet
@@ -148,15 +168,27 @@ private struct FlexibleLatticeCardMount: View {
     let project: ProjectModel
     let width: CGFloat
     let maxHeight: CGFloat
+    let openSquish: () -> Void
 
     var body: some View {
         let s = main.cornerStatus(model)
         let st = FlexibleLatticeButton.state(s, phase: run.phase, answerIsCurrent: main.answerIsCurrent(model))
+        // ★ ROUND 7, the review of R7-D1: a blocker's 1–3 fixes in the card's Core row (the callout's own buttons — one tap,
+        // not "Show the fix" then the fix); Ready says what goes to core; a failed run can be sent again
+        let fixes: AnyView? = (st == .fix ? s.fix : nil).map { issue in
+            AnyView(FlexibleCalloutButtons(model: model, issue: issue, close: {}, squish: {
+                chrome.foldAll()
+                FlexibleBlockerCallout.goToSquish(openFix: { main.openFix() }, openSquish: openSquish)
+            }))
+        }
         FlexibleLatticeCardView(run: run, status: s, state: st, preview: FlexibleLatticeCard.previewLine(state: st, project: project),
                                 width: width, maxHeight: maxHeight,
                                 close: { chrome.close(.latticeCard) },
                                 send: { main.sendFromCard() },
-                                showFix: { chrome.show(.callout) })
+                                showFix: { chrome.show(.callout) },
+                                summary: st == .ready ? FlexibleLatticeCard.jobSummary(model: model) : nil,
+                                sendAgain: { main.resendFromCard() },
+                                fixButtons: fixes)
     }
 }
 
@@ -245,6 +277,7 @@ enum FlexibleCornerPairStyle {
                 .padding(.horizontal, DS.Space.l)
                 .frame(minWidth: 44, minHeight: 44)
                 .background(Capsule().fill(primary ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                .overlay(FlexibleCornerPairStyle.secondaryEdge(primary))   // ★ the review of R7-D1: a secondary fix reads as a button
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -252,9 +285,14 @@ enum FlexibleCornerPairStyle {
         .accessibilityIdentifier(id)
     }
 
-    /// Stub (tests first): a secondary button's hairline.
+    /// ★ ROUND 7, the review of R7-D1 ("The card's secondary send buttons and the callout's second fix read as text, not
+    /// buttons … drawn with a chipSolid fill and no border on Surface.panel" — his B1(c) words: "looks like it is just
+    /// *noting* … when in fact it's a button"): a secondary button wears the strong hairline (FlexibleCornerPairStyle.small's,
+    /// the mockup's outlined buttons); the first, filled one needs none.
     static let secondaryEdgeWidth: CGFloat = 1
-    static func secondaryEdge(_ primary: Bool) -> some View { Capsule().strokeBorder(Color.clear, lineWidth: 0) }
+    @ViewBuilder static func secondaryEdge(_ primary: Bool) -> some View {
+        if !primary { Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: secondaryEdgeWidth) }
+    }
 
     /// The frame a view publishes for the hosted tests and the Squish page's keep-outs (FlexibleKeepOutKey, global).
     static func publish(_ key: String) -> some View {

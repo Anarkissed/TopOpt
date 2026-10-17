@@ -142,7 +142,7 @@ final class FlexibleRound7D1ReviewTests: XCTestCase {
         // ★ the tray no longer embeds #354's BuildOrientationView (Topology keeps it, untouched)
         let tray = try FlexibleSource.code("FlexibleSetupTray.swift")
         XCTAssertFalse(tray.contains("BuildOrientationView("), "★ the Flexible plate page is its own (RED at D1: #354's view in the tray)")
-        XCTAssertTrue(tray.contains("FlexiblePlatePage("), "the tray draws the Flexible plate page")
+        XCTAssertTrue(tray.contains("FlexiblePlatePageView("), "the tray draws the Flexible plate page")
         let orient = try FlexibleSource.code("BuildOrientationView.swift")
         XCTAssertTrue(orient.contains("Text(\"Down in service\")") || orient.contains("title: \"Down in service\""), "(#354's view is untouched)")
     }

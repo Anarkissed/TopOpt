@@ -244,9 +244,9 @@ extension FlexibleMainStage {
         // ★ BATCH M VERIFICATION: folded, on the screen's very edge — the octet's minimised key (a column of the scales'
         // bars: with no scale there is nothing to fold, so the card stays open for its row)
         let legendMinimized = self.legendMinimized && !kinds.isEmpty
-        return FlexibleMainLegendLayout.placeCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep,
-                                                  edge: legendMinimized ? FlexibleMainLegendLayout.foldedEdge : PageChrome.edge,
-                                                  viewRows: legendMinimized ? 0 : views)
+        // ★ ROUND 7, the review of R7-D1: under the views row, as the mockup he picked (the corner pair's panels stay below it)
+        return FlexibleMainLegendLayout.placeMainCard(rows: kinds.count, minimized: legendMinimized, viewport: viewport, keepOut: keep,
+                                                      viewRows: legendMinimized ? 0 : views)
     }
 
     /// Where the legend is, per kind (the player keeps clear of these): ★ BATCH M (M4) every kind

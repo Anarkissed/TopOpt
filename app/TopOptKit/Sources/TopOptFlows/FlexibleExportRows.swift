@@ -87,6 +87,9 @@ enum FlexibleExportRows {
                             .padding(.vertical, compact ? 0 : 12).padding(.horizontal, DS.Space.l)
                             .frame(minWidth: compact ? 44 : 120, minHeight: compact ? 44 : nil)
                             .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                            // ★ ROUND 7, the review of R7-D1: in the corner card a secondary send wears the hairline (it read as
+                            // text); the full-screen step (Topology, Surface) keeps its look
+                            .overlay { if compact { FlexibleCornerPairStyle.secondaryEdge(i == 0) } }
                             .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color, lineWidth: 1.5).opacity(sent ? 1 : 0))
                     }
                     .buttonStyle(.plain)

@@ -30,14 +30,39 @@ public enum FlexibleLatticeCard {
 
     /// Core's step is still waiting for the preview.
     public static let waits = "Waits for the preview"
-    /// Stubs (tests first).
+    /// ★ ROUND 7, the review of R7-D1: core couldn't run it (it threw) — the card sends the same job again (the review: "The
+    /// Lattice button cannot re-send after a core failure … today's pill re-sent on Ready").
     public static let sendAgainTitle = "Send again"
+    /// ★ the review: ① while a blocker waits (the model has dropped the lattice; D1 kept a green "built" over it).
     public static let waitsForTheFix = "waits for the fix"
-    @MainActor static func jobSummary(model m: FlexibleStageModel) -> String? { nil }
+
+    /// ★ ROUND 7, the review of R7-D1 (the mockup's Ready card: "Group 1 · 22 lb · 1 face · bead 0.45 mm" above [Send to
+    /// core] — "so he can see what he is sending"): the ONE squeeze group the job sends, its weight in his unit, its faces
+    /// (a face's lattice parts are one face — its hand), the bead. nil when core can't take the job as it stands.
+    @MainActor static func jobSummary(model m: FlexibleStageModel) -> String? {
+        let groups = m.sentSqueezeGroups
+        guard groups.count == 1, let g = groups.first else { return nil }
+        let hands = m.groupHands(g).count, n = hands > 0 ? hands : g.regions.count
+        let parts = [FlexibleRowCopy.groupName(g.number), FlexibleRowCopy.squeezeValue(m.groupForce(g), unit: m.weightUnit),
+                     n == 1 ? "1 face" : "\(n) faces"]
+        let all = parts + [String(format: "bead %.2f mm", m.project.printParams.strutLineWidthMM)]
+        let line = all.joined(separator: " \u{00B7} ")
+        return line.count <= 44 ? line : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// ① Preview's line from the face-prisms the job sends: ★ the review of R7-D1 — named as Selections names them ("Face 3 +
+    /// Face 5", the mockup's), the count past two (one line), a split piece by count.
     static func previewLine(includes inc: [LatticeRegionSpec]) -> String {
         guard !inc.isEmpty else { return "built" }
         let depths = Array(Set(inc.map { String(format: "%.1f", $0.depthMM) })).sorted()
-        let n = inc.count == 1 ? "1 face-prism" : "\(inc.count) face-prisms"
+        let faces = inc.compactMap { $0.sectorPiece ? nil : $0.faceID }
+        let names = Array(Set(faces)).sorted().map { "Face \($0)" }
+        let n: String
+        if faces.count == inc.count, (1...2).contains(names.count) {
+            n = names.joined(separator: " + ")
+        } else {
+            n = inc.count == 1 ? "1 face-prism" : "\(inc.count) face-prisms"
+        }
         return "built \u{00B7} \(n) \u{00B7} \(depths.joined(separator: " / ")) mm"
     }
     /// Test control only (the reviewer's condition (a)): a card that drops the hold's second line.
@@ -46,7 +71,9 @@ public enum FlexibleLatticeCard {
     /// The three steps, as values.
     @MainActor static func steps(state: FlexibleLatticeButton.State, status: FlexibleMainStatus, run: FlexibleCoreRun, preview: String) -> [Step] {
         let early = state == .opening || state == .building
-        let previewStep = Step(id: "preview", title: "Preview", marker: early ? .current : (state == .viewOff || state == .idle ? .future : .done),
+        // ★ the review of R7-D1: with a blocker the preview is not "done" (the model has dropped the lattice)
+        let previewStep = Step(id: "preview", title: "Preview",
+                               marker: early ? .current : (state == .viewOff || state == .idle || state == .fix ? .future : .done),
                                line: preview)
         let core: Step
         switch state {
@@ -92,12 +119,9 @@ public enum FlexibleLatticeCard {
         case .viewOff: return "waits for the Lattice view"
         case .blocked: return "no face-prism yet"
         case .idle: return "nothing to squish yet"
+        case .fix: return waitsForTheFix   // ★ the review of R7-D1
         default:
-            let inc = project.latticeJobRegions().regions.filter { $0.role == .include }
-            guard !inc.isEmpty else { return "built" }
-            let depths = Array(Set(inc.map { String(format: "%.1f", $0.depthMM) })).sorted()
-            let n = inc.count == 1 ? "1 face-prism" : "\(inc.count) face-prisms"
-            return "built \u{00B7} \(n) \u{00B7} \(depths.joined(separator: " / ")) mm"
+            return previewLine(includes: project.latticeJobRegions().regions.filter { $0.role == .include })
         }
     }
 }
@@ -113,9 +137,11 @@ struct FlexibleLatticeCardView: View {
     var close: () -> Void = {}
     var send: () -> Void = {}
     var showFix: () -> Void = {}
-    /// Stubs (tests first).
+    /// ★ ROUND 7, the review of R7-D1: Ready's job summary (what goes to core), the failed run's [Send again], and a
+    /// blocker's 1–3 fixes (the callout's buttons, FlexibleCalloutButtons — nil: [Show the fix]).
     var summary: String? = nil
     var sendAgain: () -> Void = {}
+    var fixButtons: AnyView? = nil
     /// ★ R7-D1 look-and-fix 3: the mini's 336 pt card puts each step's body UNDER its title (nil: from `width`). Beside a
     /// 64 pt title column the body had 194 pt and the mini cut "Send Group 2 only, Face 2 re…" and broke "Export G-code".
     var narrow: Bool? = nil
@@ -158,6 +184,8 @@ struct FlexibleLatticeCardView: View {
                     HStack(spacing: DS.Space.s) {
                         FlexibleStepMarker(n: n, marker: s.marker)
                         stepTitle(s)
+                        Spacer(minLength: 0)
+                        holdInfo(s)
                     }
                     .padding(.top, 11)
                     stepBody(s).padding(.leading, 22 + DS.Space.s)
@@ -165,7 +193,12 @@ struct FlexibleLatticeCardView: View {
             } else {
                 HStack(alignment: .top, spacing: DS.Space.s) {
                     FlexibleStepMarker(n: n, marker: s.marker).padding(.top, 11)
-                    stepTitle(s).frame(width: 64, alignment: .leading).padding(.top, 13)
+                    // ★ the review of R7-D1: the hold's (i) under the step's title, so its line has the body's whole width
+                    VStack(alignment: .leading, spacing: 0) {
+                        stepTitle(s)
+                        holdInfo(s)
+                    }
+                    .frame(width: 64, alignment: .leading).padding(.top, 13)
                     stepBody(s)
                 }
             }
@@ -180,6 +213,20 @@ struct FlexibleLatticeCardView: View {
         Text(s.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
             .lineLimit(1)
             .saidWhole(s.title)
+    }
+
+    /// ★ ROUND 7, the review of R7-D1 ("The card's Core line wraps to two lines at every size … beside a 64 pt step-title
+    /// column and the 44 pt (i)"): while he only LOOKS at a hold, its (i) rides the Core step's title, and the hold's line
+    /// keeps the body's whole width — one line.
+    @ViewBuilder private func holdInfo(_ s: FlexibleLatticeCard.Step) -> some View {
+        if s.id == "core", let h = lookedAtHold {
+            FlexInfoButton(title: "Core", text: h.why, id: "flexible-card-hold-info")
+        }
+    }
+    /// The hold he looks at (nothing sent): its line and its (i) show.
+    private var lookedAtHold: FlexibleCoreHold? {
+        guard state == .preview, run.phase == .idle else { return nil }
+        return run.hold
     }
 
     private func stepBody(_ s: FlexibleLatticeCard.Step) -> some View {
@@ -211,7 +258,12 @@ struct FlexibleLatticeCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .said(s.line ?? status.line)
                 .accessibilityIdentifier("flexible-card-fix-line")
-            FlexibleCornerPairStyle.small("Show the fix", id: "flexible-card-show-fix", action: showFix)
+            // ★ the review of R7-D1: the fixes themselves, here (one tap); [Show the fix] only when none can be drawn
+            if let fixButtons { fixButtons } else {
+                FlexibleCornerPairStyle.small("Show the fix", id: "flexible-card-show-fix", action: showFix)
+            }
+            // ★ the review (condition (a)): core's last answer stays said under the blocker
+            if run.phase != .idle { FlexibleExportRows.CoreRow(run: run, size: 13.5, wraps: true) }
         case .opening, .building, .viewOff, .idle:
             Text(s.line ?? "").font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).frame(minHeight: 28)
                 .said(s.line ?? "")
@@ -227,16 +279,14 @@ struct FlexibleLatticeCardView: View {
         default:
             if run.phase != .idle {
                 FlexibleExportRows.CoreRow(run: run, size: 13.5, wraps: true)
-            } else if state == .preview, let h = run.hold {
-                // looked at, nothing sent: the hold's sentence, its (i)
-                HStack(spacing: DS.Space.s) {
-                    Text(FlexibleLatticeCard.lookLine(h.line)).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                        .said(FlexibleLatticeCard.lookLine(h.line))
-                        .accessibilityIdentifier("flexible-card-hold-line")
-                    Spacer(minLength: 0)
-                    FlexInfoButton(title: "Core", text: h.why, id: "flexible-card-hold-info")
-                }
+            } else if let h = lookedAtHold {
+                // looked at, nothing sent: the hold's sentence on ONE line (★ the review of R7-D1: its (i) is the step title's)
+                let look = FlexibleLatticeCard.lookLine(h.line)
+                Text(look).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .saidWhole(look, minScale: 0.85)
+                    .frame(minHeight: 28)
+                    .accessibilityIdentifier("flexible-card-hold-line")
             } else if state == .preview, let f = status.fix {
                 // ★ batch E's advisory (a pressed face with no lattice under it): said, and the send still offered
                 Text(f.oneLine).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
@@ -245,6 +295,26 @@ struct FlexibleLatticeCardView: View {
             }
             if !FlexibleLatticeCard.controlDropsHoldNote { FlexibleExportRows.HoldNote(run: run, size: 13) }
             FlexibleExportRows.FixRow(run: run, compact: true)
+            // ★ the review of R7-D1: Ready says what goes to core, above [Send to core] (the mockup's line)
+            if state == .ready, let summary, !run.isSending {
+                Text(summary).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .saidWhole(summary, minScale: 0.85)
+                    .accessibilityIdentifier("flexible-card-job")
+            }
+            // ★ the review of R7-D1: core couldn't run it (it threw) — the same job, once more
+            if state == .refused, case .failed = run.phase {
+                Button(action: sendAgain) {
+                    Text(FlexibleLatticeCard.sendAgainTitle).font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(FlexibleStageStyle.onAccent)
+                        .frame(maxWidth: .infinity).frame(height: 48)
+                        .background(Capsule().fill(FlexibleStageStyle.accent))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .said(FlexibleLatticeCard.sendAgainTitle)
+                .accessibilityIdentifier("flexible-card-send-again")
+            }
             if (state == .ready || (state == .preview && run.hold == nil)) && !run.isSending {
                 Button(action: send) {
                     Text("Send to core").font(.system(size: 15, weight: .semibold))

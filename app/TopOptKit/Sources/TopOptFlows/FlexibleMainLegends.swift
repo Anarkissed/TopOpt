@@ -121,10 +121,27 @@ public enum FlexibleMainLegendLayout {
         return nil
     }
 
-    /// Stub (tests first): the main page's one card.
+    /// ★ ROUND 7, the review of R7-D1 (the review: "In landscape the cards sit on the legend card, which the mockup never
+    /// does … in the mockup the legend sits directly under the views row and every panel stays clear of it"): the main page's
+    /// ONE card sits right under the views row — the first clear place from the TOP of the trailing edge (the mockup's top
+    /// 292; under the note band where it is reserved under the row, 11" portrait), then a column to its left. The corner
+    /// pair's panels stay below it (FlexibleChromeLayout.panelTopLimit(_:legend:)). It never moves when a card opens.
+    /// (Batch M's `placeCard` — from the vertical centre out — stays as it was for its own callers.)
     public static func placeMainCard(rows: Int, minimized: Bool, viewport v: CGSize, keepOut: [CGRect], viewRows: Int = 0) -> Placed? {
-        placeCard(rows: rows, minimized: minimized, viewport: v, keepOut: keepOut,
-                  edge: minimized ? foldedEdge : PageChrome.edge, viewRows: viewRows)
+        let size = cardSize(rows: rows, minimized: minimized, viewRows: minimized ? 0 : viewRows)
+        let edge = minimized ? foldedEdge : PageChrome.edge
+        let gap = FlexibleLegendPlacement.gap
+        let blockers = keepOut.map { $0.insetBy(dx: -gap, dy: -gap) }
+        for c in 0..<columns {
+            let x = v.width - edge - size.width - CGFloat(c) * (width + gap)
+            var y = PageChrome.edge
+            while y + size.height <= v.height - PageChrome.edge {
+                let r = CGRect(x: x, y: y, width: size.width, height: size.height)
+                if r.minX >= edge, !blockers.contains(where: { $0.intersects(r) }) { return Placed(frame: r, expanded: !minimized) }
+                y += step
+            }
+        }
+        return nil
     }
 
     public static func place(_ kinds: [FlexibleReadKind], minimized: Set<FlexibleReadKind>, viewport v: CGSize,

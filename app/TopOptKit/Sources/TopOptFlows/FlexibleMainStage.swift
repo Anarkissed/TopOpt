@@ -189,6 +189,8 @@ public final class FlexibleMainStage: ObservableObject {
     public let chromeGeometry = FlexibleChromeGeometry()
     /// ★ R7-D1: which blockers already popped above the pair this session (each new one pops once).
     var calloutRule = FlexibleCalloutRule()
+    /// ★ the review of R7-D1: what Send would do now, memoised (answerIsCurrent asks it on every pass of the split).
+    let coreJobMemo = FlexibleCoreJobMemo()
     /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each
     /// tap) — builds start only there.
     var goToLattice: (() -> Void)?
@@ -881,10 +883,37 @@ public final class FlexibleMainStage: ObservableObject {
     /// The corner pair's status (the old pill's, on the Flexible stage).
     func cornerStatus(_ m: FlexibleStageModel) -> FlexibleMainStatus { FlexibleMainStatus.of(model: m) }
 
-    /// Core's last answer is for the lattice on screen.
+    /// Core's last answer is for the lattice on screen — ★ ROUND 7, the review of R7-D1 — AND for the job on screen (the
+    /// review: "FlexibleLatticeButton.state treats core's last answer as current when coreRun.sentFor == lattice.generation …
+    /// It does not check whether the job itself is unchanged"; with H31 the full-screen step is gone from this stage, so a
+    /// stale answer left nothing that could send): an answer core gave is current only while the job it answered is the job
+    /// Send would send now; a "Not sent" only while Send would still say the same. Otherwise the button is Ready (or Preview)
+    /// again, and its main zone sends (an unchanged job still never re-sends — FlexibleCoreRun.send).
     func answerIsCurrent(_ m: FlexibleStageModel) -> Bool {
         guard let g = m.lattice, !m.latticeIsStale else { return false }
-        return coreRun.sentFor == g.generation
+        guard coreRun.sentFor == g.generation else { return false }
+        if Self.controlAnswerByLatticeOnly { return true }
+        switch coreRun.phase {
+        case .idle, .sending:
+            return true
+        case .notSent(let line, _):
+            if case .notSent(let now) = coreJobNow(m, resting: []).now { return now == line }
+            return false
+        case .ran, .failed:
+            guard let sent = coreRun.sentJob else { return false }
+            if let f = coreRun.sentFix {
+                let r = coreJobNow(m, resting: Set(f.resting))
+                return r.holdFixes.contains(f) && r.now == .job(sent)
+            }
+            return coreJobNow(m, resting: []).now == .job(sent)
+        }
+    }
+    /// Test control only: D1's rule (current = the same lattice, whatever the job).
+    @MainActor static var controlAnswerByLatticeOnly = false
+
+    /// What Send would do NOW (★ the review of R7-D1 — FlexibleCoreJobMemo, memoised by what the job reads).
+    func coreJobNow(_ m: FlexibleStageModel, resting: Set<Int>) -> (now: FlexibleCoreJobMemo.Now, holdFixes: [FlexibleCoreFix]) {
+        coreJobMemo.now(m, resting: resting)
     }
 
     /// The card's [Send to core] and Ready's tap: send (an unchanged job never re-sends) — the answer shows in the card,
@@ -894,8 +923,11 @@ public final class FlexibleMainStage: ObservableObject {
         coreRun.close()
     }
 
-    /// Stub (tests first).
-    public func resendFromCard() { sendFromCard() }
+    /// ★ ROUND 7, the review of R7-D1: the card's [Send again] after core couldn't run it — the same job (or the same hold
+    /// send) once more; the answer shows in the card.
+    public func resendFromCard() {
+        if let f = coreRun.sentFix { coreFix(f) } else { sendFromCard() }
+    }
 
     /// What the split button's zones act through.
     func cornerHooks(openSquish: @escaping () -> Void) -> FlexibleLatticeButton.Hooks {
