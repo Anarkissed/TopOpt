@@ -231,6 +231,9 @@ final class FlexibleLatticePass {
     /// Test control only: the plan's solid-flag route alone — no closed body in the G-buffer (the spike's NO-GO: the
     /// translucent route writes no depth, so a far face drawn later painted over a near one).
     var controlNoBodyInGBuffer = false
+    /// Test control only (ROUND 7, H40 — MeshRenderer.flexibleBodyPrinted): the printed view casts no contact shadow (the
+    /// frame before H40).
+    var controlNoPrintedShadow = false
     /// The renderer's buffers for THIS frame's body (handed to `encodeMapDepth` just before `encodeGBuffer`, in the same
     /// prepass encoder), drawn by `encodeGBuffer` with the frame's matrices.
     private var pendingBody: (vertices: MTLBuffer, flex: MTLBuffer, tints: MTLBuffer, count: Int, squish: Float)?

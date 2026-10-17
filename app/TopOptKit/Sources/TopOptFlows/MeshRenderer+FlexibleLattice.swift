@@ -35,6 +35,17 @@ extension MeshRenderer {
     /// the ghost and the map. Every gate below keys on this, so they all fall back together.
     var flexibleLatticeInFrame: Bool { flexibleLattice?.isDrawable == true && latticePipelinesDidBuild }
 
+    /// ★ ROUND 7, H40 (X1's printed view, the reviewer's ruling 4 of 2026-10-17): the Flexible pass draws THE PRINTED VIEW —
+    /// the body see-through (alpha 0), its closed surface drawn solid by the pass. #354's contact shadow reads a body at
+    /// alpha ≤ 0.5 as "lattice only" and casts the octet layer's walls — which the Flexible stage never has — so the solid
+    /// part floated with no shadow in None / Rim / Skin. True ⇒ the hook in `contactShadowTexture` casts the body's own
+    /// footprint, as for an opaque part. False on every other stage (no Flexible pass): #354's expression, byte for byte.
+    /// RED CONTROL `FlexibleLatticePass.controlNoPrintedShadow`: today's frame (no shadow under the printed part).
+    var flexibleBodyPrinted: Bool {
+        guard flexibleLatticeInFrame, let fx = flexibleLattice, !fx.controlNoPrintedShadow else { return false }
+        return fx.printed
+    }
+
     /// A see-through body stays OUT of the G-buffer while the Flexible pass draws, so the
     /// ghost cannot occlude the walls it is meant to show (rule 1 above).
     var flexibleGhostOutOfGBuffer: Bool {

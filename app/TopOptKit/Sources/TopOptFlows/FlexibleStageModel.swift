@@ -21,22 +21,28 @@ import TopOptKit
 actor FlexibleWorker {
     private(set) var scene: FlexibleScene?
     private(set) var sceneKey: String?
+    /// ★ ROUND 7, RULING 6 (FlexibleCoreDoor): every scene this worker opens goes through its door.
+    nonisolated let door = FlexibleCoreDoor()
 
-    func open(jobJSON: String, jobDir: String, key: String) throws -> FlexibleScene.Info {
+    func open(jobJSON: String, jobDir: String, key: String, facePrism: Bool) throws -> FlexibleScene.Info {
         if sceneKey != key || scene == nil {
             scene = nil
-            scene = try FlexibleScene(jobJSON: jobJSON, jobDir: jobDir)
+            scene = try door.open(jobJSON: jobJSON, jobDir: jobDir, facePrism: facePrism)
             sceneKey = key
         }
         return try scene!.info()
     }
     func withScene<T>(_ body: (FlexibleScene) throws -> T) throws -> T {
         guard let s = scene else { throw TopOptError(message: "The part is still opening.") }
+        door.noteAsk()
         return try body(s)
     }
     /// ★ BATCH G: the scene itself, fetched in one quick hop — the squish sims run OFF this actor
     /// (it serialises the design calls and must never wait seconds on a solve).
-    func sceneRef() -> FlexibleScene? { scene }
+    func sceneRef() -> FlexibleScene? {
+        if scene != nil { door.noteAsk() }
+        return scene
+    }
     /// ★ ROUND 6 ITEM 2: a scene already opened on the regions the stage is about to hold (the strips' [Done]: core
     /// was asked about the strips on it before the cut was committed) — the next `open` with its key reuses it.
     func install(_ s: FlexibleScene, key: String) { scene = s; sceneKey = key }
@@ -519,6 +525,13 @@ public final class FlexibleStageModel: ObservableObject {
     var lastKeyFacePrisms: (key: String, has: Bool)?
     /// Test control only (M1): the stage as it was before ruling 4 — no include region lattices the WHOLE part (core's rule).
     var controlWholePartWithoutPrism = false
+    /// Test control only (ROUND 7, RULING 6 — FlexibleCoreDoor): the stage as it was before ruling 6 — with no face-prism core's
+    /// scene is still opened on the whole part and asked for stacks and designs (nothing they say is shown: M1 verify).
+    /// The RED CONTROL of FlexibleRuling6NoCoreTests, and the fixtures that pin CORE's own bytes on parts that set no
+    /// face-prism (`controlAskCoreWithoutPrismFor`: the synthetic parts, the goldens' C1 pad).
+    var controlAskCoreWithoutPrism = false
+    /// ★ RULING 6: no face-prism — the stage is ready on the plain part and holds NO core scene (nothing is asked of core).
+    private(set) var heldWithoutFacePrism = false
     /// The key the last open was ATTEMPTED with (a failed open is retried only on a new one).
     private(set) var openAttemptKey: String?
 
@@ -543,7 +556,7 @@ public final class FlexibleStageModel: ObservableObject {
         let worker = self.worker
         track(Task.detached(priority: .userInitiated) {
             do {
-                let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key)
+                let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key, facePrism: true)
                 // ★ ROUND 7 (M2): what of his settings moves onto lattice sections, asked of core on the opened scene
                 let carry = await self.planCarry()
                 await MainActor.run {
