@@ -258,7 +258,8 @@ public struct FlexibleStagePage: View {
                 // top line, clear of the gizmo (it covered its left 36 pt at 11" portrait)
                 if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {
                     let pop = FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),
-                                                            below: model.toast == nil ? 0 : Self.toastRowHeight)
+                                                            below: model.toast == nil ? 0 : Self.toastRowHeight,
+                                                            clear: [capsuleLocal() ?? Self.nominalCapsule])   // ★ R7-D1: below the capsule
                     FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil }
                         .frame(width: pop.width)
                         .background(GeometryReader { g in

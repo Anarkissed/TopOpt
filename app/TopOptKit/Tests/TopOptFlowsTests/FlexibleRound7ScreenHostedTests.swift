@@ -188,6 +188,18 @@ final class FlexibleRound7ScreenHostedTests: XCTestCase {
             }
             h.window.orderOut(nil)
         }
+        // ★ found by LOOKING (round7/batch_d1, the Squish page at 11" landscape): the fix pop-up lay on the capsule. It opens
+        // below the capsule now, at every size. RED CONTROL: the pop-up placed from the top line alone (today's call).
+        let cap = FlexibleChromeLayout.capsuleFrame(width: FlexibleChromeLayout.capsuleMaxWidth)
+        for (tag, v) in FlexibleChromeLayoutTests.pads {
+            let exitRow = CGRect(x: PageChrome.edge, y: PageChrome.edge, width: 226, height: 44)
+            let band = FlexibleLegendPlacement.noticeBand(viewport: v, exitRow: exitRow, capsule: cap)
+            let pop = FlexibleLegendPlacement.popUp(viewport: v, notice: band, clear: [cap])
+            XCTAssertGreaterThanOrEqual(pop.minY, cap.maxY + 12 - 0.5, "★ \(tag): the fix pop-up opens below the capsule")
+            let control = FlexibleLegendPlacement.popUp(viewport: v, notice: band)
+            if band.minY < cap.minY { XCTAssertLessThan(control.minY, cap.maxY, "★ RED CONTROL (\(tag)): from the top line alone it lands on the capsule") }
+            report.append("\(tag) pop-up y \(pop.minY) (control \(control.minY))")
+        }
         print("FLEX-R7D1-HOSTED-S4 " + report.joined(separator: " | "))
     }
 

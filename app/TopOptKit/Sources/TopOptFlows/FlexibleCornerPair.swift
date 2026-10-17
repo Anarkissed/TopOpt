@@ -45,6 +45,8 @@ public struct FlexibleCornerPair: View {
 
     /// Test control only: the panels placed IN layout (the bar would measure them — the defect the overlay avoids).
     @MainActor static var controlPanelInLayout = false
+    /// Test control only: the blocker rule fed the status its onChange closure captured (the first build: no pop on his pad).
+    @MainActor static var controlCapturedStatus = false
 
     private var viewport: CGSize { geometry.viewport == .zero ? CGSize(width: 1032, height: 1376) : geometry.viewport }
 
@@ -125,9 +127,11 @@ private struct FlexibleLatticeSplit: View {
                                   main: { FlexibleLatticeButton.perform(FlexibleLatticeButton.action(st), chrome: chrome, hooks: main.cornerHooks(openSquish: openSquish)) },
                                   caret: { FlexibleLatticeButton.caret(chrome: chrome, hooks: main.cornerHooks(openSquish: openSquish)) })
             .background(FlexibleCornerPairStyle.publish("latticeSplit"))
-            .onAppear { main.noteCallout(s) }
-            .onChange(of: s.fix?.id) { _ in main.noteCallout(s) }
-            .onChange(of: s.tone) { _ in main.noteCallout(s) }
+            // (the status asked afresh in each: an onChange closure may hold the update before the change — the hosted test's
+            // red control, `controlCapturedStatus`, is the closure's own `s`)
+            .onAppear { main.noteCallout(main.cornerStatus(model)) }
+            .onChange(of: s.fix?.id) { _ in main.noteCallout(FlexibleCornerPair.controlCapturedStatus ? s : main.cornerStatus(model)) }
+            .onChange(of: s.tone) { _ in main.noteCallout(FlexibleCornerPair.controlCapturedStatus ? s : main.cornerStatus(model)) }
     }
 }
 
