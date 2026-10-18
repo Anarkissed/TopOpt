@@ -336,7 +336,8 @@ public enum FlexibleLatticeBuilder {
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
                               finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
-                              sdfMaxDim: Int = 128) throws -> FlexibleLatticeInputs {
+                              sdfMaxDim: Int = 128,
+                              maskToSurface: Bool = true) throws -> FlexibleLatticeInputs {
         guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
         else { throw Refusal(description: "The density field is empty — design a face first.") }
         let n = field.density.count
