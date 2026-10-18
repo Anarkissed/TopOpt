@@ -117,6 +117,8 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     public var skinDist: FlexGrid     // mm, unsigned distance to the skinned surfaces
     public var boundsMin: SIMD3<Float>
     public var boundsMax: SIMD3<Float>
+    /// ★ R7-E1 STUB: the mask voxels whose centre core's own rule (coreEncloses) puts OUTSIDE the part.
+    public var coreOutside: Set<Int> = []
 }
 
 public enum FlexibleLatticeField {
@@ -385,7 +387,8 @@ public enum FlexibleLatticeBuilder {
                               finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
                               sdfMaxDim: Int = 128,
-                              maskToSurface: Bool = true) throws -> FlexibleLatticeInputs {
+                              maskToSurface: Bool = true,
+                              cornerRule: Bool = true) throws -> FlexibleLatticeInputs {
         guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
         else { throw Refusal(description: "The density field is empty — design a face first.") }
         let n = field.density.count

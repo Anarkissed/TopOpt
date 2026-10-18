@@ -251,6 +251,7 @@ struct FlexibleFaceChip: View {
                         if b == .load, !wasLoad, !hadWeight, let kg = project.force.kind(for: g.id).weightKg { ui.unweighed[g.id] = kg }
                         cardsChanged()
                     case .refused: ui.roleOpen = nil
+                    case .locked: break   // ★ R7-E1 STUB
                     }
                 }
             }

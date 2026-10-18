@@ -32,7 +32,7 @@ public enum FlexibleGroupRoleButton: String, CaseIterable, Sendable { case ancho
 public enum FlexibleJoinAlso: Equatable, Sendable { case none, load, anchor }
 
 /// A role tap's answer: done, or "Keep clear removes this lattice" must be asked first.
-public enum FlexibleRoleAnswer: Equatable, Sendable { case done, asksFirst, refused }
+public enum FlexibleRoleAnswer: Equatable, Sendable { case done, asksFirst, refused, locked }
 
 /// Every word the Selections half says (his rule: one visible line per setting, ≤ 44 characters).
 public enum FlexibleSelectionsCopy {
@@ -85,6 +85,8 @@ public enum FlexibleSelectionsCopy {
     public static let depthCaption = "Depth mm"
     public static let expandCaption = "Expand mm"
     public static let setRole = "Set role"
+    /// ★ R7-E1 STUB (his answer 2026-10-18 ~15:50): Protect is locked on while a face of the group is Lattice.
+    public static let protectLocked = "Protect stays on while a face is Lattice"
     public static func allFaces(_ n: Int) -> String { "All \(n)" }
     public static func kindWord(_ k: FlexibleNewFaceKind) -> String {
         switch k {
@@ -102,6 +104,11 @@ enum FlexibleFaceCommits {
 
     /// ★ RED CONTROL only (FlexibleLatticeIsProtectedTests): R7-D2's hold put back — `newGroup(.lattice, …)` refuses.
     static var controlLatticeHeld = false
+    /// ★ R7-E1 STUB — RED CONTROL only: Protect toggles off on a Lattice group (the rule before his 2026-10-18 answer).
+    static var controlProtectUnlocked = false
+
+    /// ★ R7-E1 STUB: is Protect locked on for this group (it reads Lattice)?
+    static func protectLocked(_ id: UUID, _ p: ProjectModel) -> Bool { false }
 
     /// ★ HIS RULING 2026-10-18 ("These two things should behave the same way"): a group reads "Lattice" — in the chip's role
     /// capsule and on the list's line, the shield beside it — when it is Protected (no Anchor, no Load, no Keep clear) and

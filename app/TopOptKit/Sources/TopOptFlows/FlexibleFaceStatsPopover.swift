@@ -36,7 +36,7 @@ public enum FlexibleFaceStats {
     /// ★ ROUND 7: a voxel whose centre is outside the part is not counted (the mask now reaches past the surface);
     /// `countOutside` is a test's control only (the rule before).
     public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double,
-                            countOutside: Bool = false) -> Rows? {
+                            countOutside: Bool = false, outsideBySDF: Bool = false) -> Rows? {
         guard !regions.isEmpty else { return nil }
         let m = f.mask
         let same = m.nx == f.rho.nx && m.ny == f.rho.ny && m.nz == f.rho.nz
