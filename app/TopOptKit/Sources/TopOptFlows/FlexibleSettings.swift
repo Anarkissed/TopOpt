@@ -230,6 +230,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.groupColours = nil
         c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
+        c.latticeOnlyGroups = nil   // ★ ROUND 7 (R7-D2): main-page roles — the face-prisms reach the lattice through the scene
         c.weightUnit = nil
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)

@@ -408,11 +408,9 @@ public final class FlexibleMainStage: ObservableObject {
     /// Test control only: a failed sim holds the loop at rest (no column fallback — the red control).
     var controlNoFallback = false
     /// ★ ROUND 7, R7-D2, test controls only (each the rule it reverses): the prisms follow the ACTIVE Selections group (R7-V /
-    /// M1), not the pick; the lattice drawn over an empty setup (his answer 1 of 2026-10-17 evening: the plain part); X-ray
-    /// shows a group's face-prisms only after a pick (X1 — his answer 2); #354's own glass over the open lattice (M1 — his
-    /// answer 4: fainter glass).
+    /// M1), not the pick; X-ray shows a group's face-prisms only after a pick (X1 — his answer 2 of 2026-10-17 evening); #354's
+    /// own glass over the open lattice (M1 — his answer 4: fainter glass).
     @MainActor static var controlPrismsFollowActiveGroup = false
-    @MainActor static var controlLatticeOverEmptySetup = false
     @MainActor static var controlXrayPickedOnly = false
     @MainActor static var controlPrismGlassOverLattice = false
     /// ★ R7-D2 (his answer 2): the faint face-prisms' alphas (every face-prism in X-ray before a pick, the rest after one).
@@ -486,6 +484,10 @@ public final class FlexibleMainStage: ObservableObject {
         // ★ D2: another project's squeeze pick does not carry over (async: never inside an update)
         if shownSim != nil { DispatchQueue.main.async { [weak self] in self?.shownSim = nil } }
         tappedRegion = nil   // ★ ROUND 7 (F): nor the face he last tapped there, nor his 3 s hold
+        // ★ R7-D2: nor his pick, nor his chip's moved spots (async: never inside a view's init)
+        if facePick != FlexibleFacePickSession() || !faceUI.spots.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.facePick = FlexibleFacePickSession(); self?.faceUI.spots = [:]; self?.faceUI.closeTransient() }
+        }
         if heatAll { DispatchQueue.main.async { [weak self] in self?.heatAll = false } }
         // ★ ROUND 7 (M2, the reviewer's ruling 3): a project I2 saved has its edge strips moved off the Surface stage once,
         // as the loaded state when nothing is undoable (FlexibleSectorMigration) — never inside a view's init
@@ -639,10 +641,19 @@ public final class FlexibleMainStage: ObservableObject {
         // exactly what the pick drew): [Prisms] = EVERY group's lattice face-prisms (his round-6 words for the view: "a view
         // that turns on/off ALL … prisms"), the picked group's brighter; without [Prisms], the picked group's only (his fixed
         // rule: a group's prism only after a pick). RED CONTROL `controlPrismsPickedOnly`: the picked group's only.
-        let picked = pickedGroup(project)
-        let all = prismsOn && !Self.controlPrismsPickedOnly
-        guard all || picked != nil else { return [] }
-        return facePrismItems(project, picked: picked?.id, all: all)
+        // ★ ROUND 7, R7-D2 (B1, his pick 2): the prisms follow the PICK — FACE scope that face's, GROUP scope every face of the
+        // group, a new face none (FlexibleMainStage+Selections.pickedPlaneKeys). RED CONTROL `controlPrismsFollowActiveGroup`:
+        // R7-V / M1's rule (the active Selections group, once picked in this session).
+        let picked: Set<String>? = Self.controlPrismsFollowActiveGroup
+            ? pickedGroup(project).map { g in Set(project.latticeSelectableRefs(g).map(\.key)) }
+            : pickedPlaneKeys(project)
+        let prisms = prismsOn && !Self.controlPrismsPickedOnly
+        // ★ R7-D2 — his answer 2 of 2026-10-17 evening: "X-ray on the main page shows EVERY face-prism faint, the picked group's
+        // bright (even before a pick)". RED CONTROL `controlXrayPickedOnly`: X1's — in X-ray too, a group's only after a pick.
+        let xrayAll = xrayOn && !Self.controlXrayPickedOnly
+        guard prisms || xrayAll || picked != nil else { return [] }
+        // ★ R7-D2 — his answer 4: over the open lattice (its walls drawn — X-ray or the printed view) the glass is FAINTER
+        return facePrismItems(project, picked: picked, all: prisms || xrayAll, faintUnpicked: xrayAll && !prisms, overLattice: wallsDrawn(m))
     }
 
     /// ★ M1 (VERIFY): the lattice face-prisms drawn — #354's own include `LatticeDepthPlane`s at their list depth, of the picked
@@ -650,17 +661,52 @@ public final class FlexibleMainStage: ObservableObject {
     /// only the picked group's (the others fainter, #354's look for the rest); a hidden group's never. (Looking at the first
     /// picture: with nothing picked every face-prism drawn faint hid under the heat — nothing picked, all in the active look.)
     /// Cached on its inputs (the workspace's body asks on every pass).
-    func facePrismItems(_ project: ProjectModel, picked: UUID?, all: Bool) -> [ClearanceRenderItem] {
-        let inputs = FacePrismInputs(group: picked, all: all, lattice: project.lattice, selection: project.selection,
+    /// ★ ROUND 7, R7-D2: `picked` is the pick's face-prism keys (FACE scope one, GROUP scope every face of the group); a Solid
+    /// face-prism of the pick draws too, in white; `faintUnpicked` (his answer 2: X-ray before or beside a pick) draws the rest
+    /// faint; `overLattice` (his answer 4) makes the glass fainter over the open lattice — never outline-only.
+    func facePrismItems(_ project: ProjectModel, picked: Set<String>?, all: Bool, faintUnpicked: Bool = false,
+                        overLattice: Bool = false) -> [ClearanceRenderItem] {
+        let inputs = FacePrismInputs(group: nil, all: all, lattice: project.lattice, selection: project.selection,
                                      force: project.force, regions: project.faceRegions, groupView: project.groupView,
-                                     mesh: project.viewerMesh?.triangleCount ?? 0)
+                                     mesh: project.viewerMesh?.triangleCount ?? 0, picked: picked, faint: faintUnpicked,
+                                     over: overLattice && !Self.controlPrismGlassOverLattice)
         if let c = facePrismCache, c.inputs == inputs { return c.items }
-        let items = project.latticeDepthPlanes()
-            .filter { $0.role == .include && !project.groupView.isHidden($0.groupID) && (all || $0.groupID == picked) }
-            .map { ClearanceRenderItem(volume: $0.volume, selected: picked == nil || $0.groupID == picked, tint: FlexibleStageStyle.facePrismTint) }
+        let items: [ClearanceRenderItem] = project.latticeDepthPlanes()
+            .filter { p in
+                guard !project.groupView.isHidden(p.groupID) else { return false }
+                let mine = picked?.contains(p.ref.key) == true
+                return p.role == .include ? (all || mine) : mine
+            }
+            .map { p in
+                let mine = picked?.contains(p.ref.key) == true
+                if p.role == .exclude {
+                    let a = Self.prismAlphas(bright: true, faint: false, overLattice: overLattice)
+                    return ClearanceRenderItem(volume: p.volume, selected: true, tint: Self.solidPrismTint,
+                                               faceAlpha: a.face.map { $0 * 0.6 } ?? Self.solidFaceAlpha, edgeAlpha: Self.solidEdgeAlpha)
+                }
+                let bright = picked == nil ? !faintUnpicked : mine
+                let a = Self.prismAlphas(bright: bright, faint: faintUnpicked && !bright, overLattice: overLattice)
+                return ClearanceRenderItem(volume: p.volume, selected: bright, tint: FlexibleStageStyle.facePrismTint,
+                                           faceAlpha: a.face, edgeAlpha: a.edge)
+            }
         facePrismCache = (inputs, items)
         return items
     }
+
+    /// ★ R7-D2: a face-prism's alphas — nil, nil = #354's own look (selected 0.60 / 0.98, the rest 0.42 / 0.80, as M1 drew it);
+    /// faint (his answer 2): 0.06 / 0.40; over the open lattice (his answer 4: "FAINTER GLASS (not outline-only)"): 0.12 / 0.80
+    /// for the picked, 0.05 / 0.45 for the rest — the wall tops no longer streak through. RED CONTROL
+    /// `controlPrismGlassOverLattice`: #354's glass over the lattice (M1's).
+    static func prismAlphas(bright: Bool, faint: Bool, overLattice: Bool) -> (face: Float?, edge: Float?) {
+        let glass = overLattice && !controlPrismGlassOverLattice
+        if faint { return (glass ? 0.04 : faintFaceAlpha, faintEdgeAlpha) }
+        if glass { return bright ? (0.12, 0.80) : (0.05, 0.45) }
+        return (nil, nil)
+    }
+    /// ★ R7-D2 (the plan: "Solid: white #F2F2F5, 12% / 45%"): a Solid face-prism of the pick.
+    static let solidPrismTint = SIMD3<Float>(0.949, 0.949, 0.961)
+    static let solidFaceAlpha: Float = 0.12
+    static let solidEdgeAlpha: Float = 0.45
 
     /// ★ M1: what the face-prisms are built from (every input of `ProjectModel.latticeDepthPlanes`, the picked group, and
     /// whether [Prisms] asks for every group's).
@@ -673,6 +719,10 @@ public final class FlexibleMainStage: ObservableObject {
         let regions: FaceRegionModel
         let groupView: GroupViewState
         let mesh: Int
+        // ★ R7-D2: the pick's keys, the faint rest (X-ray), the glass over the open lattice
+        var picked: Set<String>? = nil
+        var faint = false
+        var over = false
     }
 
     /// The RED CONTROL's prisms: round 6 (item 3, hook H15) — the main page's SQUISH prisms, faint (FlexibleDepthPrism's,
@@ -733,7 +783,7 @@ public final class FlexibleMainStage: ObservableObject {
         guard prismsOn else { return false }
         if Self.controlPrismsPickedOnly { return true }
         guard let p = model?.project else { return false }
-        return !facePrismItems(p, picked: pickedGroup(p)?.id, all: true).isEmpty
+        return !facePrismItems(p, picked: pickedPlaneKeys(p), all: true).isEmpty
     }
     /// ★ S1b (round 6 item 3 — his img3: "When a face … is highlighted, we should automatically be able to see the
     /// amount of squish it has been set to"): the main page's READ-ONLY "%.1f mm" tags, one per prism H15 draws (the
@@ -1025,6 +1075,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// key re-reads the groups and re-runs the designs), and the lattice rebuilds when they
     /// land. Debounced, only while the stage shows, never under Settings.
     func projectChanged() {
+        if !frozen, let p = model?.project { revalidatePick(p) }   // ★ R7-D2: a pick whose group an Undo removed reads as none
         guard !frozen, visible, let m = model, m.sceneState != .opening else { return }
         if mainPageMoved(m) {
             noteLoads()

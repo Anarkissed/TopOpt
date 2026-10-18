@@ -61,6 +61,7 @@ final class FlexibleFaceCommitTests: XCTestCase {
         let (_, p, c) = try hisPad()
         p.writeLatticeExpandMM(.face(group: c, face: 3), mm: 2)
         p.writeLatticeExpandMM(.face(group: c, face: 5), mm: 2)
+        p.sealUndoStep()   // (premise corrected after the red run: the two expand writes above are their own step)
         var s = FlexibleFacePickSession(scope: .pending([.face(4)]), lastGroup: c)
         XCTAssertTrue(FlexibleFaceCommits.canJoin(c, p), "Group C (Protect) may carry a lattice role")
         let v = FlexibleFaceCommits.joinValues(c, p, session: s)
@@ -150,7 +151,8 @@ final class FlexibleFaceCommitTests: XCTestCase {
         let r3 = LatticeSelectableRef.face(group: c, face: 3)
         let snap = p.editSnapshot
         let past = p.undo.past.count
-        XCTAssertEqual(FlexibleFaceCommits.delete(c, project: p), "Group C")
+        let taken = FlexibleFaceCommits.delete(c, project: p)
+        XCTAssertEqual(taken?.group.name, "Group C")
         XCTAssertNil(p.selection.groups.first { $0.id == c }, "★ gone (here and for Topology: one selection model)")
         XCTAssertNil(p.lattice.groupRoles[c]); XCTAssertNil(p.lattice.selectableDepthMM[r3.key]); XCTAssertFalse(p.force.isProtected(c))
         XCTAssertEqual(p.undo.past.count, past + 1, "★ ONE undo step")
@@ -159,6 +161,21 @@ final class FlexibleFaceCommitTests: XCTestCase {
         p.performUndo()
         XCTAssertEqual(p.editSnapshot, snap, "★ Undo: the group, its faces, its role, its depths — everything back")
         XCTAssertEqual(p.latticeSlabDepthMM(r3, in: c), 25, accuracy: 1e-9)
+        // ★ the message's [Undo] puts it back EXACTLY even after a background write landed in between (a re-opened scene's
+        // section numbers are an undo step too — the hosted run found that performUndo then took that step instead)
+        let again = try XCTUnwrap(FlexibleFaceCommits.delete(c, project: p))
+        p.lattice.flexible?.sectors = FlexibleSectorStore(ids: ["probe": 9])   // a background write
+        p.sealUndoStep()
+        FlexibleFaceCommits.restore(again, project: p)
+        var expect = snap
+        expect.lattice.flexible?.sectors = FlexibleSectorStore(ids: ["probe": 9])
+        XCTAssertEqual(p.editSnapshot, expect, "★ restore: Group C back as it was; the later write kept")
+        // ★ RED CONTROL: performUndo after that write takes the write back, not the delete
+        _ = FlexibleFaceCommits.delete(c, project: p)
+        p.lattice.flexible?.sectors = FlexibleSectorStore(ids: ["probe": 10])
+        p.sealUndoStep()
+        p.performUndo()
+        XCTAssertNil(p.selection.groups.first { $0.id == c }, "★ RED CONTROL: performUndo undid the write — Group C still gone")
     }
 
     /// His rule: one visible line per setting, ≤ 44 characters.

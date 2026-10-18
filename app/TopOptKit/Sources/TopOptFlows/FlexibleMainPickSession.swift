@@ -39,7 +39,10 @@ extension FlexibleMainStage {
             if !controlUndoIsAPick { return }
         }
         guard !frozen, let a = new.activeGroupID else { return }
-        if a != lastSelection?.activeGroupID || new == lastSelection { sessionPicked = true }
+        if a != lastSelection?.activeGroupID || new == lastSelection {
+            sessionPicked = true
+            noteActiveGroupFromOutside(a)   // ★ R7-D2: the pick follows (the router's own writes excepted)
+        }
     }
 
     /// The undo history as ProjectModel moved it: an Undo or a Redo (never a commit, a reset or a no-op) marks the selection

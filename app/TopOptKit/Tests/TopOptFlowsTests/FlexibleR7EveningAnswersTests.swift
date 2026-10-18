@@ -14,7 +14,6 @@ import XCTest
 final class FlexibleR7EveningAnswersTests: XCTestCase {
 
     override func tearDown() {
-        FlexibleMainStage.controlLatticeOverEmptySetup = false
         FlexibleMainStage.controlXrayPickedOnly = false
         FlexibleMainStage.controlPrismGlassOverLattice = false
         FlexibleStagePage.controlPrismsSeeThrough = false
@@ -27,6 +26,12 @@ final class FlexibleR7EveningAnswersTests: XCTestCase {
         let (r, s, m) = try await FlexibleR7M1Fixtures.hisPad(self, live: true)
         let p = r.project
         s.apply(p, owned: true, pageUp: false)
+        s.refresh()
+        // ★ POSITIVE CONTROL (re-pinned after the red run, which found the answer ALREADY TRUE at HEAD — the R review's
+        // emptySetup line and the readiness keep the lattice off an empty setup; the red run's control flag was dropped with the
+        // code it would have guarded): before Reset all, with something to squish, a lattice IS there to show
+        XCTAssertTrue(FlexibleLatticeView.available(model: m), "★ POSITIVE CONTROL: his live pad has a lattice to show")
+        XCTAssertFalse(m.isEmptySetup, "premise: something squished before Reset all")
         m.resetAll()
         try await FlexibleSquishFixture.settle(m, "after Reset all")
         s.refresh()
@@ -36,10 +41,6 @@ final class FlexibleR7EveningAnswersTests: XCTestCase {
         XCTAssertEqual(s.bodyAlpha(p, on: .lattice), 1, "★ the solid, opaque part")
         XCTAssertEqual(s.status.line, FlexibleSettingsExit.emptyLine, "★ one line: 'Nothing to squish yet'")
         XCTAssertEqual(FlexibleSettingsExit.emptyLine, "Nothing to squish yet")
-        // ★ RED CONTROL: the lattice over an empty setup (the face-prisms' lattice drawn although nothing squishes)
-        FlexibleMainStage.controlLatticeOverEmptySetup = true
-        s.refresh()
-        XCTAssertTrue(FlexibleLatticeView.available(model: m), "★ RED CONTROL: a lattice to show over nothing to squish")
     }
 
     // MARK: 2 — X-ray shows every face-prism faint, the picked group's bright

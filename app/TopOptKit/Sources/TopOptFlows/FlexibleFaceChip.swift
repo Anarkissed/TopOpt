@@ -1,8 +1,436 @@
-// FlexibleFaceChip — STUB (round 7, batch R7-D2: tests first).
+// FlexibleFaceChip — the chip AT THE FACE on the main Flexible page (task 2026-09-29-flexible-screens, round 7, batch R7-D2:
+// his mockup pick 2, B1 "on the face", with his three changes, 2026-10-14). The on-model layer (H32) places it, draws its
+// leader and moves it when he drags it (FlexibleFaceChipLayout).
+//
+//   N — a NEW face (or faces): "Face 4 · new" ✕; when a group was picked earlier this session, his change (c): a FILLED
+//       button "Add to Group C as lattice" (the DS accent, white semibold label, the group's swatch, 48 tall — it reads and
+//       looks like a button, never an outlined title row: his image 2) with the depth it will take under it; then
+//       "Or start a new group:" and five 64 × 56 buttons [▦ Lattice] [Anchor] [Load] [Protect] [Keep clear].
+//       (★ HELD: [▦ Lattice] waits for the reviewer's ruling on condition (d) — greyed, one line under the row.)
+//   M — a face of a group: swatch, the name (tap to rename), the role capsule (a Load shows its weight, set on the Squish
+//       page), the trash (it CONFIRMS — his answer), ✕; then "Face 3", its (i) (his change b), and the segment
+//       [▦ Lattice | ■ Solid | ⬚ Off]. No grams (his answer: hidden until core reports the real per-face lattice weight).
+//   G — the whole group: "All N" and the segment (nothing lit and "mixed" when the faces disagree).
+//   B — Keep clear blocks lattice: one line and [▦ Lattice instead].
+//   L — locked on Topology: one line and [Unlock].
+// His change (a): the whole chip outside its buttons is a drag handle (the grip on top says so) — the layer moves it.
+
 import SwiftUI
 import TopOptDesign
 
-struct FlexibleJoinButton {
-    static let height: CGFloat = 0
-    static let fill = DS.Color.fillSubtle
+struct FlexibleFaceChip: View {
+    @ObservedObject var main: FlexibleMainStage
+    @ObservedObject var project: ProjectModel
+    @ObservedObject var ui: FlexibleFaceChipState
+    let scope: FlexibleFaceScope
+    let cardsChanged: () -> Void
+
+    static let protectTint = RGBA(hex: 0x2EE0C7)
+    static let segmentWidth: CGFloat = 80
+
+    /// A Load group's weight, read-only ("22 lbs") — set on the Squish page.
+    @MainActor
+    static func loadWeight(_ p: ProjectModel, _ g: UUID) -> String? {
+        p.force.kind(for: g).weightKg.map { p.force.formattedWeight(kg: $0) }
+    }
+
+    /// The chip's kind (its placement height).
+    @MainActor
+    static func kind(_ scope: FlexibleFaceScope, project p: ProjectModel, lastGroup: UUID?) -> FlexibleFaceChipLayout.Kind {
+        switch scope {
+        case .pending: return .new(join: FlexibleFaceCommits.canJoin(lastGroup, p), held: !FlexibleFaceCommits.latticeOnlyRoleLanded)
+        case let .face(g, _), let .group(g):
+            if FlexibleFaceCommits.isLocked(g, p) { return .locked }
+            if FlexibleFaceCommits.blockedByKeepClear(g, p) { return .blocked }
+            if case .group = scope { return .group }
+            return .member
+        case .none: return .member
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            Capsule().fill(DS.Color.textTertiary.color).frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity).padding(.top, -4)
+                .accessibilityHidden(true)
+            switch scope {
+            case let .pending(faces): newFace(faces)
+            case let .face(g, ref): member(g, ref: ref)
+            case let .group(g): member(g, ref: nil)
+            case .none: EmptyView()
+            }
+        }
+        .padding(FlexibleFaceChipLayout.padding)
+        .frame(width: FlexibleFaceChipLayout.width, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: FlexibleFaceChipLayout.radius, style: .continuous)
+            .fill(DS.Color.chipSolid.color.opacity(0.94))
+            .overlay(RoundedRectangle(cornerRadius: FlexibleFaceChipLayout.radius, style: .continuous)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("flexible-face-chip")
+    }
+
+    // MARK: N — a new face
+
+    @ViewBuilder private func newFace(_ faces: [FlexibleFreeFace]) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text(FlexibleFacePick.pendingTitle(faces, project: project))
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                .accessibilityIdentifier("flexible-chip-title")
+            Spacer(minLength: DS.Space.xs)
+            closeButton
+        }
+        .frame(minHeight: 32)
+        if let gid = main.facePick.lastGroup, FlexibleFaceCommits.canJoin(gid, project), let g = FlexibleFaceCommits.group(gid, project) {
+            let v = FlexibleFaceCommits.joinValues(gid, project, session: main.facePick)
+            FlexibleJoinButton(group: g, note: FlexibleSelectionsCopy.joinNote(depthMM: v.depth, like: v.like)) {
+                main.commitJoin(project: project, cardsChanged: cardsChanged)
+            }
+            Text(FlexibleSelectionsCopy.orNew).font(.system(size: 12, weight: .medium))
+                .foregroundStyle(DS.Color.textTertiary.color)
+        }
+        HStack(spacing: DS.Space.s) {
+            ForEach(FlexibleNewFaceKind.allCases, id: \.self) { k in
+                FlexibleNewFaceButton(kind: k, held: k == .lattice && !FlexibleFaceCommits.latticeOnlyRoleLanded) {
+                    main.commitNew(k, project: project, cardsChanged: cardsChanged)
+                }
+            }
+        }
+        if !FlexibleFaceCommits.latticeOnlyRoleLanded {
+            Text(FlexibleSelectionsCopy.latticeHeld).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color)
+                .lineLimit(1)
+                .accessibilityIdentifier("flexible-chip-lattice-held")
+        }
+    }
+
+    // MARK: M / G — a face of a group, or the whole group
+
+    @ViewBuilder private func member(_ gid: UUID, ref: LatticeSelectableRef?) -> some View {
+        if let g = FlexibleFaceCommits.group(gid, project) {
+            if ui.roleOpen == gid { roleLine(g) } else { titleLine(g) }
+            if ui.deleteAsk == gid, ui.deleteAskInChip {
+                FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
+                                      cancel: { ui.deleteAsk = nil })
+            } else if ui.keepClearAsk == gid {
+                askLine(FlexibleSelectionsCopy.keepClearAsk, yes: FlexibleSelectionsCopy.keepClear, id: "flexible-chip-keepclear-ask") {
+                    ui.keepClearAsk = nil
+                    FlexibleFaceCommits.confirmKeepClear(group: gid, project: project)
+                    cardsChanged()
+                }
+            } else if FlexibleFaceCommits.isLocked(gid, project) {
+                actionLine(FlexibleSelectionsCopy.locked, button: FlexibleSelectionsCopy.unlock, symbol: "lock.open", id: "flexible-chip-unlock") {
+                    project.groupView.toggleLocked(gid)
+                }
+            } else if FlexibleFaceCommits.blockedByKeepClear(gid, project) {
+                actionLine(FlexibleSelectionsCopy.keepClearBlocks, button: FlexibleSelectionsCopy.latticeInstead,
+                           symbol: "square.grid.3x3.fill", id: "flexible-chip-lattice-instead") {
+                    FlexibleFaceCommits.latticeInstead(group: gid, project: project)
+                    cardsChanged()
+                }
+            } else if let ref {
+                faceLine(g, ref)
+            } else {
+                allLine(g)
+            }
+        }
+    }
+
+    private func titleLine(_ g: SelectionGroup) -> some View {
+        HStack(spacing: DS.Space.s) {
+            RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 14, height: 14)
+            if ui.renaming == g.id {
+                TextField("Group name", text: $ui.renameDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(maxWidth: 150)
+                    .onSubmit {
+                        FlexibleFaceCommits.rename(g.id, to: ui.renameDraft, project: project)
+                        ui.renaming = nil
+                    }
+                    .accessibilityIdentifier("flexible-chip-rename")
+            } else {
+                Button {
+                    ui.renameDraft = g.name
+                    ui.renaming = g.id
+                } label: {
+                    Text(g.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rename \(g.name)")
+                .accessibilityIdentifier("flexible-chip-name")
+            }
+            roleCapsule(g)
+            Spacer(minLength: DS.Space.xs)
+            if !FlexibleFaceCommits.isLocked(g.id, project) {
+                Button { main.askDelete(g.id, inChip: true) } label: {
+                    Image(systemName: "trash").font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(publish("chipTrash"))
+                .accessibilityLabel("Delete \(g.name), here and in Topology")
+                .accessibilityIdentifier("flexible-chip-trash")
+            }
+            closeButton
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func roleCapsule(_ g: SelectionGroup) -> some View {
+        let k = project.force.kind(for: g.id)
+        let word: String
+        let symbol: String
+        let tint: RGBA
+        if k.isLoad {
+            word = "Load" + (Self.loadWeight(project, g.id).map { " " + $0 } ?? ""); symbol = "arrow.down"; tint = DS.Color.accent
+        } else if k.isAnchor { word = "Anchor"; symbol = "lock.fill"; tint = DS.Color.okGreen
+        } else if project.force.keepClearAffix(for: g.id) == .on { word = "Keep clear"; symbol = "nosign"; tint = DS.Color.clearance
+        } else if project.force.isProtected(g.id) { word = "Protect"; symbol = "shield.lefthalf.filled"; tint = Self.protectTint
+        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g.id) == true {
+            word = FlexibleSelectionsCopy.latticeOnly; symbol = "square.grid.3x3.fill"; tint = FlexibleStageStyle.facePrismToken
+        } else { word = FlexibleSelectionsCopy.setRole; symbol = "plus"; tint = DS.Color.textSecondary }
+        return Button {
+            ui.info = nil
+            ui.roleOpen = ui.roleOpen == g.id ? nil : g.id
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(tint.color)
+                Text(word).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+            }
+            .padding(.horizontal, DS.Space.s).frame(height: 28)
+            .background(Capsule().fill(tint.opacity(0.18).color))
+            .frame(height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(k.isLoad ? "\(word), \(FlexibleSelectionsCopy.weightOnSquish). Tap to change the role" : "\(word). Tap to change the role")
+        .accessibilityIdentifier("flexible-chip-role")
+    }
+
+    /// The role line (the capsule opened): Anchor and Load exclusive, Protect and Keep clear toggle.
+    private func roleLine(_ g: SelectionGroup) -> some View {
+        let k = project.force.kind(for: g.id)
+        let lit: [FlexibleGroupRoleButton: Bool] = [.anchor: k.isAnchor, .load: k.isLoad, .protect: project.force.isProtected(g.id),
+                                                    .keepClear: project.force.keepClearAffix(for: g.id) == .on]
+        return HStack(spacing: DS.Space.s) {
+            ForEach(FlexibleGroupRoleButton.allCases, id: \.self) { b in
+                let kind = FlexibleNewFaceKind(rawValue: b.rawValue) ?? .anchor
+                FlexibleNewFaceButton(kind: kind, held: false, lit: lit[b] ?? false) {
+                    switch FlexibleFaceCommits.setRole(b, group: g.id, project: project) {
+                    case .asksFirst: ui.roleOpen = nil; ui.keepClearAsk = g.id
+                    case .done: ui.roleOpen = nil; cardsChanged()
+                    case .refused: ui.roleOpen = nil
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            closeButton
+        }
+    }
+
+    private func faceLine(_ g: SelectionGroup, _ ref: LatticeSelectableRef) -> some View {
+        let role = project.latticeSelectableRole(ref, in: g.id)
+        return HStack(spacing: DS.Space.s) {
+            Text(project.latticeSelectableName(ref)).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+            if role != nil { FlexibleInfoButton(main: main, key: "c-" + ref.key, group: g.id, ref: ref) }
+            Spacer(minLength: 0)
+            segment(current: role.map(LatticeSelectableRole.init) ?? .off, mixed: false) { r in
+                FlexibleFaceCommits.setState(r, ref: ref, group: g.id, project: project)
+                cardsChanged()
+            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func allLine(_ g: SelectionGroup) -> some View {
+        let roles = Set(project.latticeSelectableRefs(g).map { project.latticeSelectableRole($0, in: g.id).map(LatticeSelectableRole.init) ?? .off })
+        let one = roles.count == 1 ? roles.first : nil
+        return HStack(spacing: DS.Space.s) {
+            Text(FlexibleSelectionsCopy.allFaces(project.latticeSelectableRefs(g).count)).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+            if one == nil {
+                Text(FlexibleSelectionsCopy.mixed).font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
+                    .accessibilityIdentifier("flexible-chip-mixed")
+            }
+            Spacer(minLength: 0)
+            segment(current: one, mixed: one == nil) { r in
+                FlexibleFaceCommits.setAll(r, group: g.id, project: project)
+                cardsChanged()
+            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    /// [▦ Lattice | ■ Solid | ⬚ Off]: 3 × 80, 36 tall, in a 44 pt target.
+    private func segment(current: LatticeSelectableRole?, mixed: Bool, set: @escaping (LatticeSelectableRole) -> Void) -> some View {
+        HStack(spacing: 2) {
+            ForEach([LatticeSelectableRole.include, .exclude, .off], id: \.self) { r in
+                let on = !mixed && current == r
+                Button { set(r) } label: {
+                    HStack(spacing: 4) {
+                        FlexibleStateGlyph(role: r.regionRole)
+                        Text(r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                    }
+                    .frame(width: Self.segmentWidth, height: 36)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? DS.Color.fillSelected.color : Color.clear))
+                    .frame(height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel((r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off") + (on ? ", selected" : ""))
+                .accessibilityIdentifier("flexible-chip-seg-\(r.rawValue)")
+                .background(publish("chipSeg-\(r.rawValue)"))
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(DS.Color.fillSubtle.color))
+    }
+
+    private func actionLine(_ text: String, button: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text(text).font(.system(size: 13.5, weight: .medium)).foregroundStyle(DS.Color.warning.color).lineLimit(1)
+            Spacer(minLength: DS.Space.xs)
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    Image(systemName: symbol).font(.system(size: 12, weight: .bold))
+                    Text(button).font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.horizontal, DS.Space.m).frame(height: 36)
+                .background(Capsule().fill(DS.Color.fillSelected.color)
+                    .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+                .frame(height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(id)
+        }
+    }
+
+    private func askLine(_ text: String, yes: String, id: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Text(text).font(.system(size: 13.5, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+            Spacer(minLength: DS.Space.xs)
+            Button { ui.keepClearAsk = nil } label: {
+                Text(FlexibleSelectionsCopy.cancel).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                    .padding(.horizontal, DS.Space.s).frame(height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button(action: action) {
+                Text(yes).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, DS.Space.m).frame(height: 36)
+                    .background(Capsule().fill(DS.Color.clearance.color))
+                    .frame(height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(id)
+        }
+    }
+
+    private var closeButton: some View {
+        Button { main.missTap() } label: {
+            Image(systemName: "xmark").font(.system(size: 14, weight: .bold))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, -6).padding(.trailing, -8)
+        .accessibilityLabel("Close. Nothing is created")
+        .accessibilityIdentifier("flexible-chip-close")
+    }
+
+    private func publish(_ key: String) -> some View {
+        GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }
+            .allowsHitTesting(false)
+    }
+}
+
+/// His change (c): "Add to Group C as lattice" — a FILLED button (the DS accent, white semibold label, the group's swatch
+/// with a white ring, 48 tall, radius 14, the accent glow, 85 % when pressed, the button trait), the depth it takes under it.
+struct FlexibleJoinButton: View {
+    let group: SelectionGroup
+    let note: String
+    let action: () -> Void
+    static let height: CGFloat = 48
+    static let fill = DS.Color.accent
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "plus.circle.fill").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
+                Circle().fill(group.color.color).frame(width: 12, height: 12)
+                    .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(FlexibleSelectionsCopy.joinLabel(group.name))
+                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        .accessibilityIdentifier("flexible-chip-join-label")
+                    Text(note).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.white.opacity(0.82)).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, DS.Space.m)
+            .frame(maxWidth: .infinity, minHeight: Self.height)
+        }
+        .buttonStyle(FlexibleJoinButtonStyle())
+        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipJoin": g.frame(in: .global)]) }
+            .allowsHitTesting(false))
+        .accessibilityLabel(FlexibleSelectionsCopy.joinLabel(group.name))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("flexible-chip-join")
+    }
+}
+
+struct FlexibleJoinButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(FlexibleJoinButton.fill.color))
+            .dsShadow(DS.Shadow.accentGlow)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
+/// One of chip N's five buttons (and the role line's four): an 18 pt glyph over an 11.5 pt bold word, 64 × 56.
+struct FlexibleNewFaceButton: View {
+    let kind: FlexibleNewFaceKind
+    let held: Bool
+    var lit: Bool = false
+    let action: () -> Void
+    static let size = CGSize(width: 64, height: 56)
+
+    static func style(_ k: FlexibleNewFaceKind) -> (symbol: String, tint: RGBA, fill: Double) {
+        switch k {
+        case .lattice: return ("square.grid.3x3.fill", FlexibleStageStyle.facePrismToken, 0)
+        case .anchor: return ("lock.fill", DS.Color.okGreen, 0.20)
+        case .load: return ("arrow.down", DS.Color.accent, 0.18)
+        case .protect: return ("shield.lefthalf.filled", FlexibleFaceChip.protectTint, 0.16)
+        case .keepClear: return ("nosign", DS.Color.clearance, 0.16)
+        }
+    }
+
+    var body: some View {
+        let s = Self.style(kind)
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: s.symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(s.tint.color)
+                Text(FlexibleSelectionsCopy.kindWord(kind)).font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(width: Self.size.width, height: Self.size.height)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(s.fill > 0 ? s.tint.opacity(s.fill).color : DS.Color.fillSubtle.color)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder((lit ? s.tint : RGBA(0, 0, 0, 0)).color, lineWidth: 2)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(held)
+        .opacity(held ? 0.38 : 1)
+        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipNew-\(kind.rawValue)": g.frame(in: .global)]) }
+            .allowsHitTesting(false))
+        .accessibilityLabel(held ? "\(FlexibleSelectionsCopy.kindWord(kind)). \(FlexibleSelectionsCopy.latticeHeld)" : FlexibleSelectionsCopy.kindWord(kind))
+        .accessibilityIdentifier("flexible-chip-new-\(kind.rawValue)")
+    }
 }

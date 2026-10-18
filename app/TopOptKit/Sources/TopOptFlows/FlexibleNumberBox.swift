@@ -161,6 +161,8 @@ struct FlexNumberBox: View {
     var shownOverride: String? = nil
     /// ★ R7-D2: the list's narrower box (12.5 pt, tighter).
     var compact = false
+    /// ★ R7-D2: the unit beside the number (not beside "mixed").
+    var unitShown = true
     /// Commit (the unit it shows): once per keypad close, once per drag release.
     let onCommit: (Double) -> Void
 
@@ -175,18 +177,19 @@ struct FlexNumberBox: View {
     static let height: CGFloat = 32
 
     var body: some View {
-        let shown = scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? spec.text
+        let shown = scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? (shownOverride ?? spec.text)
+        let lit = padTarget == key || scrub != nil || (twin != nil && padTarget == twin)   // ★ R7-D2: the twin wears the accent too
         HStack(spacing: 4) {
             // the number (and the up / down hint): a TAP opens the keypad, a vertical DRAG scrubs
             Button { padTarget = key } label: {
                 HStack(spacing: 4) {
                     Text(shown)
-                        .font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                        .font(.system(size: compact ? 12.5 : 14, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1).fixedSize()
                         .frame(minWidth: 26, alignment: .trailing)
                         .accessibilityIdentifier("flexible-number-\(key)-value")
-                    if units.count <= 1 { unitView }
+                    if units.count <= 1, unitShown { unitView }
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(DS.Color.textTertiary.color)
@@ -203,12 +206,12 @@ struct FlexNumberBox: View {
                 unitView
             }
         }
-        .padding(.horizontal, 9)
+        .padding(.horizontal, compact ? 7 : 9)
         .frame(height: Self.height)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DS.Color.fillSubtle.color)
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder((padTarget == key || scrub != nil ? DS.Color.accent : DS.Color.strokeStrong).color,
-                              lineWidth: padTarget == key || scrub != nil ? 1.5 : 1)))
+                .strokeBorder((lit ? DS.Color.accent : DS.Color.strokeStrong).color,
+                              lineWidth: lit ? 1.5 : 1)))
         .fixedSize()
         // its frame reaches the page (the hosted tests click it)
         .background(GeometryReader { g in
@@ -217,7 +220,7 @@ struct FlexNumberBox: View {
                                        .merging(padTarget == key ? ["numberBoxKeypad-\(key)": g.frame(in: .global)] : [:]) { $1 })
         }.allowsHitTesting(false))
         .numberPad(Binding(get: { padTarget == key }, set: { if !$0, padTarget == key { padTarget = nil } }),
-                   config: .init(title: title, unit: spec.unit, allowsDecimal: true), seed: spec.value) { buffer.typed($0) }
+                   config: .init(title: title, unit: spec.unit, allowsDecimal: true, allowsNegative: allowsNegative), seed: spec.value) { buffer.typed($0) }
         .onChange(of: padTarget == key) { open in
             guard !open else { return }
             let typed = buffer.pending

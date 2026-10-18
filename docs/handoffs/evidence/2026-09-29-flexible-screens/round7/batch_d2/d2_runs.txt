@@ -1,0 +1,42 @@
+# R7-D2 — the runs, raw counts. swift test --skip-build --scratch-path /tmp/r7d-build; counts from Test Case lines.
+
+## 1. RED (87c9e3cd, stubs) — d2_red_run.txt
+=== exit 1 FlexibleRound7SelectionsHookTests 23:11:57
+=== exit 1 FlexibleFacePickTests 23:11:59
+=== exit 1 FlexibleFaceCommitTests 23:12:01
+=== exit 1 FlexibleLatticeOnlyGateTests 23:12:05
+=== exit 1 FlexibleMainPrismEqualityTests 23:12:07
+=== exit 1 FlexibleLatticeHandlesTests 23:12:09
+=== exit 1 FlexibleFaceChipTests 23:12:11
+=== exit 1 FlexibleSelectionsListTests 23:12:13
+=== exit 1 FlexibleR7EveningAnswersTests 23:12:22
+=== exit 1 FlexibleRound7SelectionsHostedTests 23:13:11
+DONE
+
+## 2. GREEN — the ten new classes against the code (after the look-and-fix passes, 2026-10-18 00:12–00:15)
+=== exit 0 FlexibleRound7SelectionsHookTests 00:12:55
+=== exit 0 FlexibleFacePickTests 00:12:57
+=== exit 0 FlexibleFaceCommitTests 00:12:59
+=== exit 0 FlexibleLatticeOnlyGateTests 00:13:03
+=== exit 0 FlexibleMainPrismEqualityTests 00:13:05
+=== exit 0 FlexibleLatticeHandlesTests 00:13:09
+=== exit 0 FlexibleFaceChipTests 00:13:11
+=== exit 0 FlexibleSelectionsListTests 00:13:13
+=== exit 0 FlexibleR7EveningAnswersTests 00:13:22
+=== exit 0 FlexibleRound7SelectionsHostedTests 00:15:19
+DONE
+FlexibleFaceChipTests: 	 Executed 5 tests, with 0 failures (0 unexpected) in 0.014 (0.016) seconds
+FlexibleFaceCommitTests: 	 Executed 9 tests, with 0 failures (0 unexpected) in 0.104 (0.106) seconds
+FlexibleFacePickTests: 	 Executed 7 tests, with 0 failures (0 unexpected) in 0.113 (0.114) seconds
+FlexibleLatticeHandlesTests: 	 Executed 6 tests, with 0 failures (0 unexpected) in 1.717 (1.719) seconds
+FlexibleLatticeOnlyGateTests: 	 Executed 3 tests, with 0 failures (0 unexpected) in 1.859 (1.861) seconds
+FlexibleMainPrismEqualityTests: 	 Executed 2 tests, with 0 failures (0 unexpected) in 0.067 (0.068) seconds
+FlexibleR7EveningAnswersTests: 	 Executed 5 tests, with 0 failures (0 unexpected) in 7.124 (7.126) seconds
+FlexibleRound7SelectionsHookTests: 	 Executed 4 tests, with 0 failures (0 unexpected) in 1.313 (1.314) seconds
+FlexibleRound7SelectionsHostedTests: 	 Executed 5 tests, with 0 failures (0 unexpected) in 115.229 (115.231) seconds
+FlexibleSelectionsListTests: 	 Executed 3 tests, with 0 failures (0 unexpected) in 0.062 (0.064) seconds
+FLEX-R7D2-S5 auto (553.1361083984375, 350.43194580078125, 404.0, 150.0) · moved (433.1361083984375, 510.43194580078125, 404.0, 150.0) · Face 3's (612.0, 903.2901611328125, 404.0, 132.0) · Face 4 again (433.1361083984375, 510.43194580078125, 404.0, 229.0)
+FLEX-R7D2-S1 13p chip M (612.0, 903.2901611328125, 404.0, 132.0) · chip N (553.1361083984375, 624.4319458007812, 404.0, 229.0) · join (565.1361083984375, 684.4319458007812, 380.0, 48.0)
+FLEX-R7D2-S1 11p chip M (414.0, 791.4794921875, 404.0, 132.0) · chip N (414.0, 549.2468872070312, 404.0, 229.0) · join (426.0, 609.2468872070312, 380.0, 48.0)
+
+Test premises corrected after the red run (said in the tests): the join's ONE undo step (the two expand writes before it are their own step — sealed first); answer 1 of 2026-10-17 evening was ALREADY TRUE at HEAD (the red run passed its plain-part assertions; its control flag was dropped with the code it would have guarded — a POSITIVE control now: before Reset all the lattice is there to show); the hosted drag (an offscreen test cannot drive a SwiftUI drag — drag_probe.txt) became 'a moved chip stays where he left it for that face' + a source pin of the gesture; delete returns what it took (the [Undo] restores exactly).

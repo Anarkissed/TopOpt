@@ -184,7 +184,9 @@ public struct FlexibleStagePage: View {
             return bendAlone(views: views, edgePick: edgePick) ? 1 : dentBodyAlpha
         }
         if views.contains(.xray) { return xrayBodyAlpha }
-        let inside = views.contains(.prisms) || (views.contains(.bend) && views.contains(.play) && hasDent)
+        // ★ ROUND 7, R7-D2 — his answer 3 of 2026-10-17 evening: [Prisms] with X-ray off keeps the part SOLID (no 30 %);
+        // RED CONTROL `controlPrismsSeeThrough`: X1's 30 % with [Prisms]
+        let inside = (Self.controlPrismsSeeThrough && views.contains(.prisms)) || (views.contains(.bend) && views.contains(.play) && hasDent)
         return inside ? dentBodyAlpha : 1
     }
     /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build) — under `controlAlwaysXray`.

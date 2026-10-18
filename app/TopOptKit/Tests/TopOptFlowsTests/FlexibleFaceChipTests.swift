@@ -62,6 +62,24 @@ final class FlexibleFaceChipTests: XCTestCase {
         XCTAssertNotEqual(autoSpot.origin, r.origin, "★ RED CONTROL: auto alone would move his chip back")
     }
 
+    /// The drag's wiring (an offscreen test cannot drive a SwiftUI drag — round7/batch_d2/drag_probe.txt): the chip's own
+    /// gesture, in the screen's space (the chip moves under the finger), writes its spot every frame and lets it go to the
+    /// nearest clear spot; the gesture wins over the camera's orbit and its buttons keep their taps.
+    func testTheDragGestureWritesTheSpotLiveAndLetsGoClear() throws {
+        let src = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleOnModelLayer.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("DragGesture(minimumDistance: 8, coordinateSpace: .global)"), "★ the screen's space, 8 pt before it drags")
+        XCTAssertTrue(src.contains(".highPriorityGesture(chipDragGesture("), "★ the chip's drag wins (it never orbits the camera)")
+        XCTAssertTrue(src.contains("ui.spots[key] = FlexibleFaceChipLayout.dragged(anchor: dragAnchor ?? placed.origin, translation: d.translation,"),
+                      "★ the spot is written every frame (a cancelled drag keeps where it got to)")
+        XCTAssertTrue(src.contains("ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, keepOut: keepOut).origin"),
+                      "★ let go: the nearest clear spot")
+        let r = FlexibleFaceChipLayout.dragged(anchor: CGPoint(x: 500, y: 600), translation: CGSize(width: -120, height: 160),
+                                               size: CGSize(width: 404, height: 150), viewport: Self.pad13p)
+        XCTAssertEqual(r.origin, CGPoint(x: 380, y: 760))
+        XCTAssertEqual(FlexibleFaceChipLayout.dragged(anchor: CGPoint(x: 500, y: 600), translation: CGSize(width: -900, height: 0),
+                                                      size: CGSize(width: 404, height: 150), viewport: Self.pad13p).minX, 16, "clamped inside")
+    }
+
     func testAutoPlacementOrderAndTheKeepOuts() {
         let size = FlexibleFaceChipLayout.size(.new(join: true, held: true))
         let v = Self.pad13p
@@ -77,7 +95,7 @@ final class FlexibleFaceChipTests: XCTestCase {
                                                    panel: nil, player: nil)
         XCTAssertTrue(keep.contains(sel))
         XCTAssertTrue(keep.contains(FlexibleLegendPlacement.gizmoFrame(viewport: v)))
-        XCTAssertTrue(keep.contains(FlexibleChromeLayout.viewsRow(viewport: v)))
+        XCTAssertTrue(keep.contains(FlexibleMainViewToggles.frame(viewport: v)), "the views row and its note")
         let pair = FlexibleChromeLayout.pair(viewport: v, setupWidth: FlexibleChromeLayout.setupMaxWidth)
         XCTAssertTrue(keep.contains(pair.lattice))
         for anchor in [CGPoint(x: 200, y: 600), CGPoint(x: 900, y: 300), CGPoint(x: 516, y: 1300), CGPoint(x: 516, y: 688)] {

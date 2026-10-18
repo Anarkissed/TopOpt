@@ -171,19 +171,36 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
         XCTAssertNotNil(h.frames.all["statsCard"], "★ his four numbers' card")
     }
 
-    // MARK: S5
+    // MARK: S5 (an offscreen test cannot drive a SwiftUI drag — round7/batch_d2/drag_probe.txt; the gesture writes the chip's spot
+    // into `faceUI.spots` exactly as below, every frame — FlexibleFaceChipTests pins that wiring and its math)
 
-    func testADraggedChipStaysWhereHeLetsGo() throws {
-        let (r, h, s, _) = try flexibleStage(Self.sizes[0].1)
+    func testAMovedChipStaysWhereHeLeftItForThatFace() throws {
+        let (r, h, s, c) = try flexibleStage(Self.sizes[0].1)
         let p = r.project
-        s.tapFace(p, face: 4, point: nil, mesh: try XCTUnwrap(p.viewerMesh))
+        let mesh = try XCTUnwrap(p.viewerMesh)
+        s.tapFace(p, face: 4, point: nil, mesh: mesh)
         pump(1.2)
         let before = try XCTUnwrap(h.frames.all["faceChip"])
-        let grip = CGPoint(x: before.midX, y: before.minY + 8)
-        drag(h, from: grip, to: CGPoint(x: grip.x - 120, y: grip.y + 160))
+        let key = try XCTUnwrap(s.facePick.scope.chipKey)
+        let to = FlexibleFaceChipLayout.dragged(anchor: before.origin, translation: CGSize(width: -120, height: 160),
+                                                size: before.size, viewport: h.size)
+        s.faceUI.spots[key] = to.origin   // what the drag's onChanged writes
+        pump(0.8)
         let after = try XCTUnwrap(h.frames.all["faceChip"])
-        XCTAssertGreaterThan(hypot(after.minX - before.minX, after.minY - before.minY), 60, "★ the chip moved with the drag")
-        XCTAssertNotNil(s.faceUI.spots[s.facePick.scope.chipKey ?? ""], "★ its spot is kept for that face")
+        XCTAssertEqual(after.minX, to.minX, accuracy: 1); XCTAssertEqual(after.minY, to.minY, accuracy: 1)
+        // another face, then Face 4 again: its spot is kept for it (the session)
+        s.tapFace(p, face: 3, point: nil, mesh: mesh)
+        pump(1.0)
+        let other = try XCTUnwrap(h.frames.all["faceChip"])
+        XCTAssertFalse(abs(other.minX - to.minX) < 1 && abs(other.minY - to.minY) < 1, "a different face: its own spot (auto)")
+        s.missTap(); pump(0.5)
+        s.tapFace(p, face: 4, point: nil, mesh: mesh)
+        pump(1.0)
+        let again = try XCTUnwrap(h.frames.all["faceChip"])
+        XCTAssertEqual(again.minX, to.minX, accuracy: 1, "★ Face 4's chip back where he left it")
+        XCTAssertEqual(again.minY, to.minY, accuracy: 1)
+        _ = c
+        print("FLEX-R7D2-S5 auto \(before) · moved \(after) · Face 3's \(other) · Face 4 again \(again)")
     }
 
     // MARK: S6

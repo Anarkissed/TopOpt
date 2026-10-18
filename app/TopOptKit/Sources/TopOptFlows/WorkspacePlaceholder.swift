@@ -818,6 +818,7 @@ public struct WorkspacePlaceholder: View {
                               if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend
                               if legendDrilledIn { return true }
                               guard let m = viewerMesh else { return false }
+                              if flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: every tap on the Flexible stage goes to the face chip's router; it never joins, moves or removes a face by itself (FlexibleFacePick)
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
                                   return true
@@ -882,6 +883,7 @@ public struct WorkspacePlaceholder: View {
                           // user has visibly moved on makes the next action apply
                           // somewhere they are no longer looking.
                           onMiss: {
+                              if flexibleMain.owns(project, stage), !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: a tap on empty canvas closes the face chip; a pending face is dropped and nothing is created
                               guard visible.surfaceEditing else { return }
                               // ★ CLEARING THE SELECTION IS NOT THE SAME AS THROWING
                               // AWAY WORK IN PROGRESS. A tap on the ground clears
@@ -1246,7 +1248,7 @@ public struct WorkspacePlaceholder: View {
                     clearanceHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.
-                if visible.latticeDepthPlanes, !legendDrilledIn {
+                if visible.latticeDepthPlanes, !legendDrilledIn, !flexibleMain.owns(project, stage) {   // Flexible (PR #362) H20: the Flexible prism's own numbered handles replace #354's knobs here (FlexibleLatticeHandles)
                     latticeDepthHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §6(g) — THE HOVERED CUT LINE, the surface stage's own tool.
@@ -1324,6 +1326,7 @@ public struct WorkspacePlaceholder: View {
                 }
                 latticeOnlyBadge
                 latticeEdgeLight
+                if flexibleMain.owns(project, stage) { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
@@ -9604,7 +9607,7 @@ public struct WorkspacePlaceholder: View {
             // selections modal when it is in the bottom left corner"). Below it
             // when the panel is open, where "under the modal" is what reads.
             if selectionsCollapsed { latticePreviewNotice }
-            selectionsLibraryCard
+            if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) } else { selectionsLibraryCard }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i))
             if !selectionsCollapsed { latticePreviewNotice }
         }
         .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips

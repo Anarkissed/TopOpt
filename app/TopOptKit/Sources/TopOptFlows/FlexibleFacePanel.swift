@@ -221,6 +221,14 @@ struct FlexibleFaceRows: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("flexible-row-pinch")
         }
+        // ★ ROUND 7, R7-D2 (the reviewer's ruling 5 on M2's D4): a face-prism that cannot cut this face's lattice section (curved,
+        // hand-placed, non-convex) is SAID on the card, always — before, only a tap's toast said it
+        if let line = Self.curvedLine(model: model, region: r) {
+            Text(line)
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.warning.color)
+                .lineLimit(1)
+                .accessibilityIdentifier("flexible-row-curved-not-yet")
+        }
         if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
@@ -300,7 +308,7 @@ struct FlexibleFaceRows: View {
     /// applies"): the face's one line when a curved, hand-placed or non-convex face-prism meets it and cannot cut its lattice
     /// section — nil otherwise.
     @MainActor
-    static func curvedLine(model: FlexibleStageModel, region r: Int) -> String? { nil }
+    static func curvedLine(model: FlexibleStageModel, region r: Int) -> String? { model.regions.flexible?.notYet[r] }
 
     /// The selected face's one warning line (FlexibleRowCopy.faceWarning), or nil.
     /// ★ D2 REVIEW: a PINCHED face counts the columns its two HALVES cannot reach (the lattice is
