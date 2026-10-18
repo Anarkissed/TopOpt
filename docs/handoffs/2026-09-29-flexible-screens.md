@@ -1,6 +1,124 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · your ruling of 2026-10-18 — a lattice face is always protected from Topology; [▦ Lattice] on a new face works (2026-10-18) (read this first)
+## ★ Round 7 · your report of 2026-10-18 — the Top over each pocket opens with Finish None, at every quality (2026-10-18) (read this first)
+
+Your words: "For some reason, the top isn't being bent or removed when I have set the finish to 'none'. Can you look into
+this? The top layer just doesn't seem affected by anything..." Your follow-up: expanding the face-prism over the Top
+"keeps the top layer."
+
+Branch `claude/flexible-screens` (PR #362), on top of `3199301a` (your ruling on lattice ⇒ protect). Commits:
+- `14e256bb`: the tests FIRST, against a stub (red run `round7/batch_tl/tl_red_run.txt`; `tl_stubs.diff.txt` is the stub). It
+  also commits your live pad as your simulator held it at 15:06 (`round7/batch_tl/his_live_A1_0003`, with its sums).
+- `62e654d6`: the fix, and one re-pin of our own test.
+- This section's commit (with `tl_runs.txt`, `tl_suite_classes.txt`, `stage_job_hashes_tl.txt` and the pictures in `look/`).
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched** (17:04). The app
+**was running**, so it was terminated first, as the install rule says. The installed `TopOpt.debug.dylib` is the built one
+(cmp; sha256 `5b9860c453895048…`, 87 565 600 bytes) and carries `coreEncloses` and `maskToSurface`.
+
+**App only, two Flexible files.** `FlexibleLatticeField.swift` (the builder) and `FlexibleFaceStatsPopover.swift` (the (i)).
+No core file, no shader (MSL) change, no #354 / main file, no job bytes, no change to the squish sims.
+
+### What you will see now, in plain words
+- **With Finish None, the Top over each pocket is open, at Fast, Balanced and Fine.** The lattice runs right up to the top
+  surface there, the same way it already ran out to the sides and the Bottom. Before, at Balanced, a thin solid sheet
+  (about 0.2 mm) sat over both pockets: that was the "lid" in your img_top_3.
+- **The middle of the Top stays solid.** Only the part over the pockets opens.
+- **X-ray**: the walls now reach the top surface. Before, they stopped about 0.2 mm under it.
+- **Covered, Rim and Skin keep their look.** Covered is still a solid skin over the pockets. Rim still has its 2 mm solid
+  band along the Top's edge, and now its middle opens. Skin still has solid between the holes, and now the holes go all the
+  way through. Before, at Balanced, the sheet closed the Rim's middle and the Skin's holes too.
+- **Fast and Fine look exactly as before.** Nothing in them changes (checked byte for byte on your pad).
+- **A tap on the Top over a pocket** now reads the lattice there, not "solid here" (by the code: the tap reads "solid" only
+  outside the lattice region; not tested here).
+- **The (i) numbers and the legend** are unchanged on your pad.
+- **Bending**: what you see over the pockets is now the lattice itself, and the lattice moves with the squish once it is
+  built (the main page, and the Squish page once the lattice is current). There is no lid left that the sim ignores. This
+  was not re-tested in this step. The Squish page's quick preview before the lattice is built still moves only the pressed
+  face; that is question 2 below.
+
+**Why it happened, in one sentence:** at Balanced your 20 mm pad is 19.2 of core's 1.04 mm cubes tall, core drops the top
+row of cubes because its centre sits above the part, and the app drew the leftover 0.2 mm between that row and the real top
+as solid.
+
+The pictures (`round7/batch_tl/look/`, offscreen frames by the shipping renderer, not device screenshots): your pad at
+Balanced, Finish None, Heat off, from img_top_3's angle (matched by eye: azimuth 45°, elevation 0.62 rad), before and after,
+at 900 and 1600 px, plus close-ups and the X-ray pair. "Before" is today's mask, built from the same core field.
+
+### Why, in a little more detail
+- Core voxelizes the part from its bounding box's corner, 96 cubes along the longest side at Balanced (1.0417 mm each). It
+  keeps a cube only when the part encloses the cube's centre (voxelize.cpp's +Z winding rule).
+- Your pad is 100 × 100 × 20. That is 96 × 96 × 19.2 cubes, so core makes 20 layers, and the top layer's centre is at
+  z = 20.31, above the part. That layer is Empty.
+- The app reads the lattice region from core's mask, smoothly between cube centres. The region therefore ended halfway
+  between the last kept layer (z = 19.27) and the dropped one: at z = 19.79.
+- With Finish None, the printed view draws as solid everything inside the part and outside the region. So the band from
+  19.79 to 20 was drawn as a solid sheet over each pocket, and the walls stopped at 19.79.
+- At Fast (64) and Fine (128) the top layer's centre is inside the part (19.53 and 19.92), so there was no sheet.
+- The same gap could appear on any face of any part whose last cube centre falls outside it (on a tilted or curved face, as
+  patches up to half a cube thick).
+
+### The fix
+- `FlexibleLatticeBuilder.inputs`: each cube core left Empty that touches a lattice cube face-to-face now joins the lattice
+  region, with that neighbour's density. Those cubes lie outside the part, where the part's own surface cuts everything off,
+  so the region simply runs out past the surface, as it already did at the sides.
+- "Outside" means core's own rule (`coreEncloses`: the same arithmetic as voxelize.cpp, in the app). **This differs from the
+  plan**, which said "the app's SDF > 0". The SDF version went red on Fine (T2). The app's distance field is made from
+  voxels, and near an edge it reads part of the outermost voxel as outside. It called four cubes under the Top's edge
+  "outside" although core had kept them, so the region would have grown sideways there.
+- The density of each added cube copies its neighbour's, so the legend's range does not move.
+- The (i) skips cubes whose centre is outside the part (the app's distance field), as the plan asked.
+- Nothing else reads the mask: the squish sims read density only at core's own lattice cubes, so their requests are the
+  same. `overLattice` (which part of the body is left open in the printed view) only gets firmer: on your pad 12 of 36
+  vertices gained, none lost.
+
+### The tests → the code (RED first; raw: `tl_red_run.txt`, `tl_runs.txt`)
+| what | test | RED at the stub (`14e256bb`) |
+|---|---|---|
+| Your live pad at Balanced: S at (95, 50, 19.9) is open. The whole Top over each pocket is open from 0.15 to 0.01 mm under it (17 436 points × 4 heights). The walls reach z = 19.9 at 15.1 % of those points (X-ray). The middle of the Top is solid (18 424 points). One cube is added above each lattice cube of the last kept layer (4 604), each with the density of the cube below it. Below that layer the field is bit-identical (9 000 points). The legend's span, Face 3's and Face 5's (i), and the sims' density are unchanged. `overLattice` loses nothing. **RED CONTROL**: today's mask (`maskToSurface: false`) draws the sheet at every pocket point and no wall above 19.79 | `FlexibleTopLayerTests.testHisBalancedPadTheTopOverEachPocketIsOpen` | red: S = −0.0999 mm, 69 744 points shut, no walls, 0 cubes added |
+| Fast and Fine: the inputs are byte-identical to today's, and the (i) reads what it read before | `…testFastAndFineAreUnchanged` | passes at the stub by design (nothing to add). **It went red on the first build of the fix** (the SDF version: 4 cubes added at Fine), which is why "outside" is core's rule |
+| Covered, Rim, Skin keep their kind over the pockets, 0.15 to 0.05 mm under the Top. Where the finish keeps solid, it is solid before and after (Covered 52 308 points, Rim 3 339, Skin 34 464). Where it leaves the lattice open, it is open now (Rim 48 969, Skin 15 586) and was shut by the sheet. Covered over the whole Top band, edges included (240 000 points): nothing changes side, in the printed view or in X-ray | `…testCoveredRimAndSkinKeepTheirKindOverThePocket` | red: Rim and Skin shut by the sheet |
+| The (i) counts only cubes inside the part. **RED CONTROL**: counting them (the rule before) moves the median from 15 % to 50 % | `…testTheInfoSkipsVoxelsOutsideThePart` | written with the code; red at the stub by construction (its control is the stub's rule) |
+| The shader and the Swift field agree on your pad's own inputs: within 0.0033 mm wherever a surface can be drawn, in the printed view and in X-ray (bar 0.005). Anywhere, no worse than today (0.0081 mm, at points 1.6 to 3.9 mm outside the part's top edge, where the half-float distance rounds; the same before and after) | `…testThePrintedTwinsAgreeOnHisPadsTopBand` | passes at the stub (it guards the fix) |
+| The shipping renderer's frame of your pad at Balanced, Finish None, img_top_3's angle: the Top over the pockets changes at 100 % of its 4 260 sampled pixels (the sheet → the walls and the gaps); the middle at 0.00 % of 4 508. X-ray pair written for looking (2.5 % of the frame changes: the walls' tops) | `FlexibleTopLayerHostedTests.testHisTopOverThePocketsRendersOpen` | red: 0.0 % changed |
+
+### Re-pins (our own test only, attributed to your 2026-10-18 words inside it)
+- `FlexibleR7D2ReviewTests.testTheInfoReadsTheFlexibleLatticeDrawnInsideThatFace`: its fixture's part distance field was the
+  density grid, which is positive ("outside the part") everywhere. The (i) now counts only cubes inside the part, so the
+  fixture gets a part: the 40 × 40 × 20 box's own distance field. The numbers it checks are unchanged.
+- No #354 test was touched.
+
+### The bytes and the runs (raw: `round7/batch_tl/tl_runs.txt`)
+- **Goldens, 0 DIFFERS in both modes** at `62e654d6`: with SWIFT_DETERMINISTIC_HASHING=1, 38 identical; unseeded, 32
+  identical + 1 PART-SKIP (13 tests, 0 failures each). These are the counts of every round-7 step.
+- **The 16 stage-job hashes**: `stage_job_hashes_tl.txt` is byte-identical (cmp, whole file) to `stage_job_hashes_lp.txt`.
+  Nothing here reaches a job.
+- **The targeted run** at `62e654d6`: **35 classes** (`tl_suite_classes.txt`): every class whose source names the field, the
+  builder, the probe, the tints, the pass or the (i); the two new classes; the printed-view and views classes on your pad
+  (X1, X1 verify, Round 7 views, M1); and LatticeStaleTypeTests. Result: **220 cases — 217 passed, 3 skipped (env-gated
+  probes), 0 failed**, no signal. The MSL/Swift parity tests (`FlexibleLatticePassTests`, 5e-3 mm) are green.
+  LatticeStaleTypeTests 6/6. No tracked file was rewritten.
+- One honest note on the red run: the T4 line in the new test file's header comment was reworded after the red run (comment
+  only), and `testTheInfoSkipsVoxelsOutsideThePart` was written with the code.
+
+### Not done, and why
+- The full 276-class suite was not re-run. This step changes two Flexible files; the targeted classes above are every class
+  whose source names them or their types, plus the printed-view and views classes on your pad, the goldens and the 16 hashes.
+- No device screenshots: the pictures are the shipping renderer's offscreen frames.
+- Only your pad was checked by eye. On a part with tilted or curved faces the same fix closes the half-cube patches the
+  diagnosis predicted, but no such part was rendered here.
+- Carried from before: F12 (one toolbar Undo after a trash), the hold sends' weight and bead, the chip on the mini in
+  portrait, the two questions of the previous section (Protect on a "Lattice" group; the new lattice face's depth).
+
+### Questions
+1. **(You)** Two cubes that both touch the surface only along an edge or a corner (not face-to-face with a lattice cube) are
+   not added. On your pad there are none. On a part where two faces both end between cube centres, a thin solid line could
+   remain along that edge. Leave it (the face-to-face rule the plan set), or add those edge cubes too?
+2. **(You)** Before the lattice is built, the Squish page's quick preview moves only the pressed face, so the Top's edge over
+   the pocket does not follow the dent there. Should it? That needs a small new rule (each point of the Top takes its own
+   ramp), not just a finer mesh.
+
+## ★ Round 7 · your ruling of 2026-10-18 — a lattice face is always protected from Topology; [▦ Lattice] on a new face works (2026-10-18) (the step before your top-layer report above)
 
 Your words: "We do not want any lattices to be affected by topology optimization. This is why I set it within 'protect' in
 the first place. These two things should behave the same way." They replace your 2026-10-14 answer "Lattice on a new face
