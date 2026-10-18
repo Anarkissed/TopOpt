@@ -110,6 +110,12 @@ enum FlexibleFaceCommits {
     /// role's tests re-pinned) only on the reviewer's word.
     static let latticeOnlyRoleLanded = false
 
+    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the red control that puts the held [Lattice] back.
+    static var controlLatticeHeld = false
+
+    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the group reads "Lattice".
+    static func readsLattice(_ id: UUID, _ p: ProjectModel) -> Bool { false }
+
     // MARK: reads
 
     static func group(_ id: UUID, _ p: ProjectModel) -> SelectionGroup? { p.selection.groups.first { $0.id == id } }

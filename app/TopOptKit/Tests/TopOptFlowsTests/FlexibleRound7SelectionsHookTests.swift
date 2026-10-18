@@ -10,8 +10,10 @@
 //   H25  the selections panel: on the Flexible stage, no page up, the B1 list replaces #354's card (the slot, the placement
 //        and the minimise rule stay #354's; the panel's declaration string still counts 1).
 //   H32  the on-model layer (the chip, its leader, the numbered handles) mounted on the Flexible stage only.
-//   H35  ★ HELD — STOPPED on the reviewer's condition (d): a lattice-only group changes a Topology run either way (measured:
-//        round7/batch_d2/conditionD/). ProjectModel.swift carries NO H35 line until the reviewer rules.
+//   H35  ★ WITHDRAWN — his ruling of 2026-10-18 ("We do not want any lattices to be affected by topology optimization. This is
+//        why I set it within 'protect' in the first place. These two things should behave the same way."): a lattice face is
+//        always protected, so the lattice-only role is never built. ProjectModel.swift carries NO H35 line (it was HELD on
+//        the reviewer's condition (d) — round7/batch_d2/conditionD/ — which is moot now).
 //   H39  kept (the ruling: "keep H39 if the card can still draw on Flexible in any state") — #354's card still draws on the
 //        variant lattice page's library mount (showLatticePage, a full-screen page that H25's `!fullScreenPageUp` leaves alone).
 import XCTest
@@ -108,24 +110,31 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
         XCTAssertEqual(ws.components(separatedBy: "flexibleMain.volumes(").count - 1, 2)
     }
 
-    /// ★ H35 HELD (condition d): the reviewer's words — "if it does change a Topology run, STOP and tell the reviewer". It does
-    /// (FlexibleLatticeOnlyGateTests.testConditionDALatticeOnlyGroupAndATopologyRun), so ProjectModel carries no H35 line and
-    /// chip N's [Lattice] is held. RED CONTROL: the hold check run on a copy with the approved H35 line put back goes red.
-    /// ★ RE-PINNED (round 7, the review of R7-D2 — our own test): its red control inserted the H35 line into a copy and then
-    /// asserted the copy contained it, which can never fail. Now the SAME hold check (`held`) runs on that copy and must say
-    /// "not held". Was: `XCTAssertTrue(withH35.contains(h35))`.
-    func testH35IsHeldProjectModelHasNoLatticeOnlyLine() throws {
+    /// ★ H35 WITHDRAWN (his ruling 2026-10-18: "We do not want any lattices to be affected by topology optimization. This is
+    /// why I set it within 'protect' in the first place. These two things should behave the same way."): the lattice-only role
+    /// is never built — ProjectModel carries no H35 line, and no TopOptFlows source names the lattice-only set, the hold, or
+    /// chip N's greyed route line. RED CONTROLS: the approved H35 line put back into a copy is caught; its comment alone too.
+    /// ★ RE-PINNED (our own test, his ruling of 2026-10-18): was `testH35IsHeldProjectModelHasNoLatticeOnlyLine` — the HOLD
+    /// (no H35 line while the reviewer ruled on condition (d); chip N's [Lattice] greyed, `latticeOnlyRoleLanded == false`).
+    func testH35IsWithdrawnNoLatticeOnlyRoleAnywhere() throws {
         let pm = try Self.text("ProjectModel.swift")
         let h35 = "lattice.flexible?.latticeOnlyGroups"
-        func held(_ text: String) -> Bool { !text.contains(h35) && !text.contains("Flexible (PR #362) H35") }
-        XCTAssertTrue(held(pm), "★ H35 is not landed (STOPPED on condition d): no H35 line, no H35 comment")
-        XCTAssertFalse(FlexibleFaceCommits.latticeOnlyRoleLanded, "★ chip N's [Lattice] waits for the reviewer")
+        func clean(_ text: String) -> Bool { !text.contains("latticeOnlyGroups") && !text.contains("Flexible (PR #362) H35") }
+        XCTAssertTrue(clean(pm), "★ ProjectModel: no H35 line, no H35 comment")
+        let files = try FileManager.default.contentsOfDirectory(atPath: Self.sources.path).filter { $0.hasSuffix(".swift") }
+        XCTAssertGreaterThan(files.count, 100, "premise: every TopOptFlows source is read")
+        for f in files {
+            let t = try Self.text(f)
+            XCTAssertFalse(t.contains("latticeOnlyGroups"), "★ \(f): the withdrawn lattice-only set")
+            XCTAssertFalse(t.contains("latticeOnlyRoleLanded"), "★ \(f): the hold")
+            XCTAssertFalse(t.contains("For lattice now"), "★ \(f): chip N's greyed route line")
+        }
         let anchor = "                keepClearOn: force.keepClearAffix(for: id) == .on)\n"
-        XCTAssertEqual(pm.components(separatedBy: anchor).count - 1, 1, "H35's anchor is still there for the day it lands")
+        XCTAssertEqual(pm.components(separatedBy: anchor).count - 1, 1, "premise: the line H35 would have followed")
         let withH35 = pm.replacingOccurrences(of: anchor, with: anchor + "                || (\(h35)?.contains(id) == true && force.keepClearAffix(for: id) != .on)   // Flexible (PR #362) H35: x\n")
         XCTAssertNotEqual(withH35, pm, "premise: the copy carries the approved line")
-        XCTAssertFalse(held(withH35), "★ RED CONTROL: with the approved H35 line put back, the hold check says it landed")
-        XCTAssertFalse(held(pm.replacingOccurrences(of: anchor, with: anchor + "                // Flexible (PR #362) H35: x\n")),
+        XCTAssertFalse(clean(withH35), "★ RED CONTROL: the approved H35 line put back is caught")
+        XCTAssertFalse(clean(pm.replacingOccurrences(of: anchor, with: anchor + "                // Flexible (PR #362) H35: x\n")),
                        "★ RED CONTROL: the H35 comment alone is caught too")
     }
 

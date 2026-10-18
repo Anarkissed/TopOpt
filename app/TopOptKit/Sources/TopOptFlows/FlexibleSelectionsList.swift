@@ -370,13 +370,24 @@ struct FlexibleRoleGlyphs: View {
     @ObservedObject var project: ProjectModel
     let group: UUID
     let size: CGFloat
-    var body: some View {
+
+    /// The group line's role glyphs, in order (symbol, tint).
+    @MainActor
+    static func glyphs(_ project: ProjectModel, _ group: UUID) -> [(symbol: String, tint: RGBA)] {
         let k = project.force.kind(for: group)
+        var out: [(symbol: String, tint: RGBA)] = []
+        if k.isAnchor { out.append(("lock.fill", DS.Color.okGreen)) }
+        if k.isLoad { out.append(("arrow.down", DS.Color.accent)) }
+        if project.force.isProtected(group) { out.append(("shield.lefthalf.filled", FlexibleFaceChip.protectTint)) }
+        if project.force.keepClearAffix(for: group) == .on { out.append(("nosign", DS.Color.clearance)) }
+        return out
+    }
+
+    var body: some View {
         HStack(spacing: 4) {
-            if k.isAnchor { Image(systemName: "lock.fill").foregroundStyle(DS.Color.okGreen.color) }
-            if k.isLoad { Image(systemName: "arrow.down").foregroundStyle(DS.Color.accent.color) }
-            if project.force.isProtected(group) { Image(systemName: "shield.lefthalf.filled").foregroundStyle(FlexibleFaceChip.protectTint.color) }
-            if project.force.keepClearAffix(for: group) == .on { Image(systemName: "nosign").foregroundStyle(DS.Color.clearance.color) }
+            ForEach(Array(Self.glyphs(project, group).enumerated()), id: \.offset) { _, g in
+                Image(systemName: g.symbol).foregroundStyle(g.tint.color)
+            }
         }
         .font(.system(size: size, weight: .semibold))
     }

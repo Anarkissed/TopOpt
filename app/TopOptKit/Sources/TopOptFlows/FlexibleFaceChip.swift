@@ -186,22 +186,36 @@ struct FlexibleFaceChip: View {
         .frame(minHeight: 44)
     }
 
-    private func roleCapsule(_ g: SelectionGroup) -> some View {
-        let k = project.force.kind(for: g.id)
+    /// What the role capsule reads for a group: its word, its glyph, its tint, and a shield beside it.
+    struct RoleReading: Equatable {
         let word: String
         let symbol: String
         let tint: RGBA
+        let shield: Bool
+    }
+
+    @MainActor
+    static func roleReading(_ project: ProjectModel, _ g: UUID, ui: FlexibleFaceChipState?) -> RoleReading {
+        let k = project.force.kind(for: g)
         if k.isLoad {
             // ★ the review of R7-D2: an unset weight reads as the list does — "↓ weight: Squish page" (with "Load" in front it was
             // cut to "Load weight: Squish p…")
-            let w = Self.loadWeight(project, g.id, ui: ui)
-            word = w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""); symbol = "arrow.down"; tint = DS.Color.accent
-        } else if k.isAnchor { word = "Anchor"; symbol = "lock.fill"; tint = DS.Color.okGreen
-        } else if project.force.keepClearAffix(for: g.id) == .on { word = "Keep clear"; symbol = "nosign"; tint = DS.Color.clearance
-        } else if project.force.isProtected(g.id) { word = "Protect"; symbol = "shield.lefthalf.filled"; tint = Self.protectTint
-        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g.id) == true {
-            word = FlexibleSelectionsCopy.latticeOnly; symbol = "square.grid.3x3.fill"; tint = FlexibleStageStyle.facePrismToken
-        } else { word = FlexibleSelectionsCopy.setRole; symbol = "plus"; tint = DS.Color.textSecondary }
+            let w = loadWeight(project, g, ui: ui)
+            return RoleReading(word: w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""),
+                               symbol: "arrow.down", tint: DS.Color.accent, shield: false)
+        } else if k.isAnchor { return RoleReading(word: "Anchor", symbol: "lock.fill", tint: DS.Color.okGreen, shield: false)
+        } else if project.force.keepClearAffix(for: g) == .on { return RoleReading(word: "Keep clear", symbol: "nosign", tint: DS.Color.clearance, shield: false)
+        } else if project.force.isProtected(g) { return RoleReading(word: "Protect", symbol: "shield.lefthalf.filled", tint: protectTint, shield: false)
+        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g) == true {
+            return RoleReading(word: FlexibleSelectionsCopy.latticeOnly, symbol: "square.grid.3x3.fill", tint: FlexibleStageStyle.facePrismToken, shield: false)
+        }
+        return RoleReading(word: FlexibleSelectionsCopy.setRole, symbol: "plus", tint: DS.Color.textSecondary, shield: false)
+    }
+
+    private func roleCapsule(_ g: SelectionGroup) -> some View {
+        let k = project.force.kind(for: g.id)
+        let reading = Self.roleReading(project, g.id, ui: ui)
+        let word = reading.word, symbol = reading.symbol, tint = reading.tint
         return Button {
             ui.info = nil
             ui.roleOpen = ui.roleOpen == g.id ? nil : g.id

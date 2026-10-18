@@ -25,7 +25,7 @@ public enum FlexibleFaceChipLayout {
     public static let clearance: CGFloat = 8
 
     /// The chip's kinds (the plan's N / M / G / B / L) — their drawn heights, for placement before the first measure.
-    public enum Kind: Equatable, Sendable { case new(join: Bool, held: Bool), member, group, blocked, locked }
+    public enum Kind: Equatable, Sendable { case new(join: Bool, held: Bool = false), member, group, blocked, locked }
 
     public static func size(_ k: Kind) -> CGSize {
         switch k {
