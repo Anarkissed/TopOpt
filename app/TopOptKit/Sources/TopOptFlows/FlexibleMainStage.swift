@@ -300,6 +300,8 @@ public final class FlexibleMainStage: ObservableObject {
     private var persistHook: () -> Void = {}
     /// What the page last told `layer` (so a change is acted on once, off the view update).
     private var seen: (owned: Bool, pageUp: Bool, project: UUID?)?
+    /// ★ R7-D2: whether the page last said this stage shows (nil: never told).
+    var seenOwned: Bool? { seen?.owned }
 
     // the picture, cached (rebuilt on a model change, never per body evaluation)
     private(set) var overlay: FlexibleOverlayMesh?
@@ -1032,6 +1034,8 @@ public final class FlexibleMainStage: ObservableObject {
 
     func apply(_ project: ProjectModel, owned: Bool, pageUp: Bool) {
         if !owned || pageUp { chrome.foldAll() }   // ★ R7-D1: a stage change or the Squish page folds every card
+        // ★ R7-D2: leaving the stage drops the pick (its chip never waits to pop up on the way back); the join's group stays
+        if !owned, !facePick.scope.isNone { var s = facePick; s.scope = .none; facePick = s; faceUI.closeTransient() }
         frozen = pageUp
         visible = owned && !pageUp
         guard owned else { return }

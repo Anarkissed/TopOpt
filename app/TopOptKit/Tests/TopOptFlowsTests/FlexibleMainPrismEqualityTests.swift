@@ -53,6 +53,29 @@ final class FlexibleMainPrismEqualityTests: XCTestCase {
                                   projector: { _ in CGPoint(x: 500, y: 500) }).isEmpty, "★ no squish number on the main page")
     }
 
+    /// ★ R7-D2 follow-up (the suite's review of the pick's life): leaving the stage drops the pick, and a group picked on
+    /// Topology does not open the chip on the way back. RED: run against 1c9ecdad first (the pick survived; the Topology pick became
+    /// the stage's — round7/batch_d2/d2_followup_red_run.txt).
+    func testAPickNeverOutlivesTheStage() throws {
+        let (_, p, s, c) = try stage()
+        let mesh = try XCTUnwrap(p.viewerMesh)
+        s.apply(p, owned: true, pageUp: false)
+        s.tapFace(p, face: 3, point: nil, mesh: mesh)
+        XCTAssertFalse(s.facePick.scope.isNone, "premise: Face 3 picked")
+        _ = s.layer(p, stage: .topology, pageUp: false)   // the page says: another stage
+        s.apply(p, owned: false, pageUp: false)
+        XCTAssertTrue(s.facePick.scope.isNone, "★ leaving the stage drops the pick")
+        XCTAssertEqual(s.facePick.lastGroup, c, "the join's group is remembered")
+        let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" })
+        p.selection.setActive(top.id)   // a pick on Topology
+        XCTAssertTrue(s.facePick.scope.isNone, "★ a group picked on Topology is not the stage's pick")
+        // ★ POSITIVE CONTROL: a stage never told where it is (a test's bare model) counts as showing — an outside pick is its pick
+        let bare = FlexibleMainStage()
+        _ = bare.model(for: p, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        p.selection.setActive(c)
+        XCTAssertEqual(bare.facePick.scope, .group(c), "★ POSITIVE CONTROL: never told, an outside write is a group pick")
+    }
+
     /// Nothing before a pick; a pending (free) face draws no prism; picking the Top (Off in Selections) draws nothing (img2).
     func testNothingBeforeAPickAndNo12mmOnTheTop() throws {
         let (_, p, s, _) = try stage()

@@ -96,6 +96,9 @@ extension FlexibleMainStage {
     /// R7-V defined a pick ("the active Selections group changing"). An Undo / Redo's re-write never is (`restoreWritePending`).
     func noteActiveGroupFromOutside(_ g: UUID?) {
         guard !routerWritesSelection, let g, !frozen else { return }
+        // ★ R7-D2 follow-up: not while another stage shows (a group picked on Topology is Topology's — the chip must not pop
+        // open when he comes back); a stage never told where it is (a test's bare model) counts as showing
+        if let shown = seenOwned, !shown { return }
         var s = facePick
         s.scope = .group(g)
         s.lastGroup = g
