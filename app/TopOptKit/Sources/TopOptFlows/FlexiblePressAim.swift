@@ -469,27 +469,3 @@ public enum FlexiblePressAim {
             + "Squish data were measured pressing straight down; angled presses are estimates until they're measured."
     }
 }
-
-// MARK: - the camera across the arrow (D-AP-13)
-
-extension FlexibleFixPopup {
-    /// The least angle, degrees, between the chosen view and the arrow's line.
-    static let acrossMinDeg: Float = 50
-
-    /// ★ AP3: the gizmo view that looks ACROSS a press's arrow `arrow` (model frame), with the part drawn under
-    /// `settle`: among the views at least 50° off the arrow's line, the one nearest the members' mean OUTWARD normal
-    /// (−Σ core's loads). The home view sits within a few degrees of a near-top box corner's arrow, and
-    /// `cameraRegion(load:)` looks straight along it — the arrow collapses to a dot.
-    static func cameraAcross(arrow: SIMD3<Double>, memberLoads: [SIMD3<Double>], settle: simd_quatf) -> GizmoRegion? {
-        func f(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3<Float>(Float(v.x), Float(v.y), Float(v.z)) }
-        let a = settle.act(f(arrow))
-        guard simd_length(a) > 1e-6 else { return nil }
-        let line = simd_normalize(a)
-        var out = SIMD3<Float>.zero
-        for l in memberLoads { out -= settle.act(f(l)) }
-        let mean = simd_length(out) > 1e-6 ? simd_normalize(out) : -line
-        let cosMin = cos(acrossMinDeg * .pi / 180)
-        let across = OrientationGizmo.regions.filter { abs(simd_dot($0.direction, line)) <= cosMin }
-        return across.max { simd_dot($0.direction, mean) < simd_dot($1.direction, mean) }
-    }
-}

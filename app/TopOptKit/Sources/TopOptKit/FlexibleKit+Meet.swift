@@ -135,11 +135,17 @@ extension FlexibleScene {
                                 buildAngleDeg: r.build_angle_deg, side: r.side, columns: Int(r.columns))
     }
 
-    /// ★ R7-E1 STUB: register a press (footprint + direction) on the open scene; its synthetic id.
+    /// ★ R7-E1 — THE PRESS SEAM: register a press over declared regions `footprint` (in order) along `direction` on this open
+    /// scene. Core builds its press stack at once (fx::build_press_stack); a refusal throws core's words, nothing registered.
+    /// Accepted: a synthetic id ≤ −1000 that `stack`, `fromUV`, `toUVT`, … take in place of a face region (core's press stack
+    /// then). New for every call, never reused; an id this scene never registered is "not declared".
     public func registerPress(_ footprint: [Int], direction: SIMD3<Double>) throws -> Int {
-        throw TopOptError(message: "R7-E1 stub: no press registration yet")
+        var err = topoptbridge.BridgeError()
+        let id = topoptbridge.flexible_scene_register_press(handle, FlexConv.i(footprint), FlexConv.d([direction.x, direction.y, direction.z]), &err)
+        try FlexConv.check(err)
+        return Int(id)
     }
 
-    /// ★ R7-E1 STUB: core's press API version.
-    public static var pressApiVersion: Int { 0 }
+    /// ★ R7-E1: core's press API version (fx::kPressApiVersion).
+    public static var pressApiVersion: Int { Int(topoptbridge.flexible_press_api_version()) }
 }

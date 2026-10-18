@@ -20,9 +20,15 @@
 // free pieces (core refuses two sectors of one face in one press) or none is refused, with one line. So no region is
 // ever in two presses and no press holds two sectors of one face.
 // ★ RE-CUT. A strip remembers what it was picked as (`FlexibleStrip`: its faces, the edge's line or the corner, its
-// width, its pick order) — so a width change, a removal or a later pick on the same face re-cuts every CHAIN it touches
-// from the chain's ROOT (the face's identity region, or his own Surface sector), in the same order. The stage model
-// applies a plan as one edit and one undo step.
+// pick order, core's halfway) — so a depth or angle change, a removal or a later pick on the same face re-cuts every
+// CHAIN it touches from the chain's ROOT (the face's identity region, or his own Surface sector), in the same order. The
+// stage model applies a plan as one edit and one undo step.
+// ★ ROUND 7, R7-E1 — THE FLAT PRISM (his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that
+// gets wider as it gets dragged further towards the centre of the model from the edge."): a pick's area on each face is the
+// face ∩ {dot(p − A, d) ≤ h} — one flat plane across the edge or corner, cut IN each member's own face (FlexibleFlatPrism;
+// the plane is the press's direction d and its deepest squish h). There is no width: the reach on each face is implied. A
+// corner's rest is ONE piece now (the face less a triangle). A strip saved with M2's width keeps its half-spaces
+// (`legacyHalfSpaces`) until his next edit of it.
 // ★ ONE SOURCE: CORE for every frame and normal used here (the inward loads the in-face directions come from, the
 // flatness, the centroid that says which side is the face). The cut planes are the Surface tool's own geometry
 // (half-spaces), as every Surface cut is. No column, design or frame of a press is computed here.
@@ -30,8 +36,9 @@
 import Foundation
 import simd
 
-/// The AREA of one edge or corner press, saved on it (`FlexiblePress.strip`): what it was picked as, how wide it is,
-/// and where on each member face its strip or patch lies — so a width change or a removal can re-cut it.
+/// The AREA of one edge or corner press, saved on it (`FlexiblePress.strip`): what it was picked as, where it lies on each
+/// member face, and core's halfway over its whole faces — so a depth or angle change or a removal can re-cut it. ★ R7-E1:
+/// no width — the press's flat prism (its direction and deepest squish) implies the footprint (FlexibleFlatPrism).
 public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case edge, corner }
 
@@ -51,7 +58,8 @@ public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
         public var span: [Double]?
         /// Half the face's extent across the edge (each edge, for a corner): the width's cap on this face.
         public var capMM: Double
-        /// ★ R7-E1 STUB: a corner face's two edge directions from the corner.
+        /// ★ R7-E1: a corner face's two edge directions from the corner (strip(for:)'s, from core's normals) — the flat cut's
+        /// legs and its convexity rule. nil: an edge, or a corner saved before (FlexibleFlatPrism.edges derives them).
         public var edges: [SIMD3<Double>]?
 
         public init(face: Int, root: Int, origin: SIMD3<Double>, away: [SIMD3<Double>], along: SIMD3<Double>? = nil,
@@ -64,12 +72,15 @@ public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
     public var kind: Kind
     /// "Edge 3" / "Corner 1" — its number in the list it was picked from (the list renumbers after a cut).
     public var label: String
-    /// The strip's width / the patch's side (mm). ★ R7-E1 STUB: optional.
+    /// ★ R7-E1 — M2's strip width / patch side (mm), READ THROUGH ONLY (FlexibleFlatPrism.depth(of:)): never written again; his
+    /// next edit of the press clears it (omitted from the file when nil).
     public var widthMM: Double?
     /// Pick order, across every edges/corners group (the first pick keeps a shared corner square).
     public var order: Int
     public var members: [Member]
-    /// ★ R7-E1 STUB: core's halfway over the whole members at pick time.
+    /// ★ R7-E1: core's halfway over the WHOLE member faces at pick time (loadEdgePick's pressAim(members), bit for bit) — where
+    /// the arrow starts and snaps back to. nil: a strip saved before it (its press's direction stands in while its snap is
+    /// "halfway", FlexibleFlatPrism.halfway(of:)). Omitted from the file when nil.
     public var halfway: SIMD3<Double>?
 
     public init(kind: Kind, label: String, widthMM: Double? = nil, order: Int, members: [Member], halfway: SIMD3<Double>? = nil) {
@@ -77,14 +88,13 @@ public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
         self.halfway = halfway
     }
 
-    /// The width's cap: half the narrowest member face's extent across its edge — a face group always keeps a rest.
+    /// Half the narrowest member face's extent across its edge (M2's width cap; kept for the read-through and the narrow-face
+    /// refusal — the flat prism's own stop is each face keeping some of itself, FlexibleFlatPrism.keepsRest).
     public var capMM: Double { members.map(\.capMM).min() ?? 0 }
 }
 
 public enum FlexibleEdgeStrips {
 
-    /// The narrowest strip the width box takes.
-    public static let minWidthMM = 0.5
     /// A seam this far off its straight line is curved (no straight cut follows it).
     static let straightMM = 1e-3
     /// A member flatter than this (core's normal spread) is flat.
@@ -96,23 +106,24 @@ public enum FlexibleEdgeStrips {
 
     // MARK: - a pick's area, from its candidate
 
-    /// ★ THE DEFAULT WIDTH: the lattice depth under the members — core's stack `latticeMMMax`, the smaller member's —
-    /// capped at half of each member face's extent across the edge, so a face group always keeps a rest. A member core
-    /// gives no lattice depth for (no stack, or none) does not lower it; nothing at all: the cap.
-    public static func defaultWidth(capMM: Double, latticeMM: [Double?]) -> Double {
+    /// ★ R7-E1: I2'S OWN DEFAULT WIDTH, kept ONLY for the I2 red-control route (FlexibleStageModel.changeStripsI2 — it makes I2's
+    /// saved form for the migration tests): the lattice depth under the members capped at half each face across the edge. Nothing
+    /// else has a width.
+    static func legacyDefaultWidth(capMM: Double, latticeMM: [Double?]) -> Double {
         let depths = latticeMM.compactMap { $0 }.filter { $0.isFinite && $0 > 0 }
         let w = depths.min().map { Swift.min($0, capMM) } ?? capMM
-        return Swift.max(Swift.min(minWidthMM, capMM), w)
+        return Swift.max(Swift.min(0.5, capMM), w)
     }
 
     /// ★ A PICK'S AREA from its candidate (`label`: "Edge 3"): for each member piece, its face, the chain's root, the
-    /// edge's line (or the corner) and the in-face directions away from it, from CORE's inward normal and centroid of
-    /// the piece (`facts`). The width is the default's (`latticeMM`: core's lattice depth under each member). A
-    /// candidate this area cannot cut — a fillet, a curved member or edge, a member over two faces, a corner whose face
-    /// is bounded by more than two edges there — is refused with one line (≤ 44 characters).
+    /// edge's line (or the corner and its two edges) and the in-face directions away from it, from CORE's inward normal and
+    /// centroid of the piece (`facts`). ★ R7-E1: no width (the flat prism implies the footprint); an INSIDE edge or corner —
+    /// the halfway of core's normals not pointing into every face along it — has no flat prism (its half-space would swallow
+    /// the face). A candidate this area cannot cut — a fillet, a curved member or edge, a member over two faces, a corner whose
+    /// face is bounded by more than two edges there, an inside edge or corner — is refused with one line (≤ 44 characters).
     public static func strip(for c: FlexibleEdgeCandidates.Candidate, label: String, order: Int, meet: FlexibleMeet,
                              facts: FlexibleMeetFacts, faceRegions: FaceRegionModel, existing: [FlexibleStrip],
-                             latticeMM: [Double?] = [], name: (Int) -> String) -> Result<FlexibleStrip, Refusal> {
+                             name: (Int) -> String) -> Result<FlexibleStrip, Refusal> {
         guard c.kind != .blend else { return .failure(Refusal(line: FlexibleRowCopy.stripFillet)) }
         var members: [FlexibleStrip.Member] = []
         for p in c.members {
@@ -158,14 +169,18 @@ public enum FlexibleEdgeStrips {
                 }
                 let vs = poly.flatMap { $0 }
                 let caps = aw.map { u in (vs.map { simd_dot($0 - c.point, u) }.max() ?? 0) / 2 }
-                members.append(.init(face: face, root: root, origin: c.point, away: aw, capMM: caps.min() ?? 0))
+                members.append(.init(face: face, root: root, origin: c.point, away: aw, capMM: caps.min() ?? 0, edges: dirs))
             case .blend:
                 break
             }
         }
-        var s = FlexibleStrip(kind: c.kind == .corner ? .corner : .edge, label: label, widthMM: 0, order: order, members: members)
-        s.widthMM = defaultWidth(capMM: s.capMM, latticeMM: latticeMM)
-        guard s.capMM >= minWidthMM else { return .failure(Refusal(line: FlexibleRowCopy.fit("\(label) · the face is too narrow"))) }
+        let s = FlexibleStrip(kind: c.kind == .corner ? .corner : .edge, label: label, order: order, members: members)
+        guard s.capMM >= FlexibleFlatPrism.minDepthMM else { return .failure(Refusal(line: FlexibleRowCopy.fit("\(label) · the face is too narrow"))) }
+        // ★ R7-E1: an inside edge or corner has no flat prism (the halfway of core's normals, as core's pressAim makes it)
+        if let d0 = FlexiblePressAim.halfway(c.members.compactMap { facts.frames[$0]?.load }),
+           let line = FlexibleFlatPrism.convexityLine(s, d0: d0) {
+            return .failure(Refusal(line: line))
+        }
         return .success(s)
     }
 
@@ -237,8 +252,9 @@ public enum FlexibleEdgeStrips {
 
     // MARK: - the half-spaces
 
-    /// ★ A member's AREA as half-spaces (each kept where dot(p − point, normal) ≥ 0, as a RegionCut): within `w` of
-    /// each edge (its plane parallel to the edge, its normal in the face), and an edge's start and end along it.
+    /// ★ R7-E1 — M2'S AREA as half-spaces (each kept where dot(p − point, normal) ≥ 0, as a RegionCut): within `w` of each edge
+    /// (its plane parallel to the edge, its normal in the face), and an edge's start and end along it. Used ONLY for a strip
+    /// still saved with M2's width (its pieces bit for bit until his next edit) and by the I2 red-control route.
     public static func legacyHalfSpaces(_ m: FlexibleStrip.Member, width w: Double) -> [RegionCut] {
         var out = m.away.map { u in RegionCut(point: m.origin + u * w, normal: -u) }
         if let e = m.along, let s = m.span, s.count == 2 {
@@ -287,7 +303,7 @@ public enum FlexibleEdgeStrips {
         public let id: UUID
         public var strip: FlexibleStrip
         public var regions: [Int]?
-        /// ★ R7-E1 STUB: the flat prism's plane (nil: M2's width).
+        /// ★ R7-E1: the press's flat prism (FlexibleFlatPrism.planCut) — nil: a strip saved with M2's width (its half-spaces).
         public var cut: FlexibleFlatPrism.Cut?
         public init(id: UUID, strip: FlexibleStrip, regions: [Int]?, cut: FlexibleFlatPrism.Cut? = nil) {
             self.id = id; self.strip = strip; self.regions = regions; self.cut = cut
@@ -357,8 +373,8 @@ public enum FlexibleEdgeStrips {
             let faceArea = area(tris, [])
             let eps = Swift.max(1e-6, 1e-7 * faceArea)
             // the picks on this chain, in the one order
-            var picks: [(id: UUID, k: Int, strip: FlexibleStrip)] = []
-            for e in all { for (k, mb) in e.strip.members.enumerated() where mb.root == root { picks.append((e.id, k, e.strip)) } }
+            var picks: [(id: UUID, k: Int, strip: FlexibleStrip, cut: FlexibleFlatPrism.Cut?)] = []
+            for e in all { for (k, mb) in e.strip.members.enumerated() where mb.root == root { picks.append((e.id, k, e.strip, e.cut)) } }
             picks.sort { a, b in
                 if (a.strip.kind == .corner) != (b.strip.kind == .corner) { return a.strip.kind == .corner }
                 return a.strip.order < b.strip.order
@@ -372,7 +388,8 @@ public enum FlexibleEdgeStrips {
             }
             var free: [Int] = [root]
             for p in picks {
-                let h = legacyHalfSpaces(p.strip.members[p.k], width: p.strip.widthMM ?? 0)
+                // ★ R7-E1: the flat prism's in-face cut (and span caps) — M2's half-spaces for a strip still saved with a width
+                let h = FlexibleFlatPrism.pieceCuts(p.strip, cut: p.cut)[p.k]
                 // the free piece the pick's area lies in; where it reaches two (a strip wider than the corner patch
                 // beside it: the strip less the patch is an L, and a sector is one convex piece — core refuses two
                 // sectors of one face in a press), it takes the piece holding most of it and the sliver stays the rest

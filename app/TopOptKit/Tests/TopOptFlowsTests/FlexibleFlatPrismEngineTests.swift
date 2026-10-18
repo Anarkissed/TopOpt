@@ -60,29 +60,43 @@ final class FlexibleFlatPrismSeamTests: XCTestCase {
         XCTAssertTrue(body.contains("kSyntheticPressMax") && body.contains("fx::build_press_stack("), "★ stack_of dispatches ids ≤ −1000 to build_press_stack")
     }
 
-    /// His live pad (Face 3's face-prism at 25 mm): Edge 16's lattice cap from core's columns is 25/√2 within one column pitch; a
-    /// release at 20 mm stores nothing and says "Stops at 17.7 mm · the lattice ends there" with [Set N mm], N from core. RED: the
-    /// members' own stacks (the width's old default source) would let it go to 25 mm.
+    /// His live pad (Face 3's face-prism at 25 mm): a release at 20 mm stores nothing and says "Stops at N mm · the lattice ends
+    /// there" with [Set N mm], N from core's columns over the 20 mm footprint — 25/√2 within one column pitch (the flat prism's
+    /// wedge reaches the 25 mm slab's far side at h = 25/√2 on Face 2's rim). The cap read from the press's CURRENT stack (3 mm
+    /// deep) is an upper bound (deeper adds rim columns) — the drag's stop; the release's check is exact. N reads each column's
+    /// latticed run from its entry (FlexStackInfo.latticeRunMM). RED: the members' own stacks (the width's old default source)
+    /// would let it go to 25 mm; core's whole-column lattice_mm (Face 5's prism far down the diagonal too) much further.
+    /// (Corrected after the green run, our own new test: it asserted the CURRENT stack's cap == 25/√2, which holds only on the
+    /// footprint at that depth.)
     func testTheDepthStopsWhereTheLatticeEnds() async throws {
         let (r, m) = try await F.hisLivePad(self)
         let (_, c, _) = try await F.edge16(m)
         let press = try await F.commit(m, c)
         try await FlexibleHisProject.waitFor(120, "registered") { m.pressStack(press.id) != nil }
         let st = try XCTUnwrap(m.pressStack(press.id))
-        let cap = try XCTUnwrap(m.flatLatticeCap(press.id), "★ the cap from core's columns")
-        print("FLEX-E1-S his live pad: Edge 16's lattice cap \(cap) mm (25/√2 = \(25 / 2.0.squareRoot())) · pitch \(st.pitchMM)")
-        XCTAssertEqual(cap, 25 / 2.0.squareRoot(), accuracy: st.pitchMM, "★ 25/√2 within one pitch")
+        let upper = try XCTUnwrap(m.flatLatticeCap(press.id), "the cap from core's columns under the current footprint")
         let before = r.project.lattice.flexible, past = r.project.undo.past.count
         let why = await m.setFlatCut(press.id, depthMM: 20, direction: press.direction, snap: press.snap)
-        print("FLEX-E1-S release at 20 mm: \(why ?? "stored") · fix \(m.lastFlatStop?.setMM ?? -1)")
-        XCTAssertEqual(why, FlexibleRowCopy.flatLatticeEnds(cap), "★ one line from core's number")
+        let n = try XCTUnwrap(m.lastFlatStop?.setMM, "★ [Set N mm], N from core")
+        let total = (st.columns.map { $0.latticeMM + $0.entryT }.min() ?? 0) - (m.pressRegistrations[press.id]?.apexT ?? 0)
+        print("FLEX-E1-S his live pad, Edge 16: release at 20 mm → \(why ?? "stored") · N \(n) (25/√2 = \(25 / 2.0.squareRoot())) · pitch \(st.pitchMM) · the 3 mm stack's cap \(upper) · with core's whole-column lattice_mm \(total)")
+        XCTAssertEqual(n, 25 / 2.0.squareRoot(), accuracy: st.pitchMM, "★ the lattice ends at 25/√2, within one pitch")
+        XCTAssertEqual(why, FlexibleRowCopy.flatLatticeEnds(n), "★ one line from core's number")
         XCTAssertEqual(why.map { $0.count <= 44 }, true)
         XCTAssertEqual(r.project.lattice.flexible, before, "★ nothing stored")
         XCTAssertEqual(r.project.undo.past.count, past, "★ no undo step")
-        XCTAssertEqual(try XCTUnwrap(m.lastFlatStop?.setMM), cap, accuracy: 1e-9, "★ [Set N mm], N from core")
-        // ★ RED CONTROL: the members' own stacks (I2's width default) — Face 3's lattice is 25 mm deep
-        let member = try XCTUnwrap(m.stack(3)?.latticeMMMax)
-        XCTAssertGreaterThan(member, cap + 1, "★ RED CONTROL: a member's latticeMMMax lets the wedge leave the lattice")
+        XCTAssertGreaterThanOrEqual(upper, n - 1e-9, "the current stack's cap is an upper bound")
+        // [Set N mm] stores N
+        let set = await m.setFlatCut(press.id, depthMM: n, direction: press.direction, snap: press.snap)
+        XCTAssertNil(set, "★ [Set N mm] stores N")
+        try await F.M2.reopen(m, "set N")
+        XCTAssertEqual(try XCTUnwrap(m.press(press.id)).settings.deepestMM, n, accuracy: 1e-9)
+        // ★ RED CONTROLS: the members' own stacks (I2's width default) — Face 3's lattice is 25 mm deep; and core's whole-column
+        // lattice_mm (another face-prism far down the column) is no stop at all here
+        let groupC = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Group C" })
+        let member = r.project.latticeSlabDepthMM(.face(group: groupC.id, face: 3), in: groupC.id)
+        XCTAssertGreaterThan(member, n + 1, "★ RED CONTROL: the lattice depth under a member (25 mm) lets the wedge leave the lattice")
+        XCTAssertGreaterThan(total, n + 5, "★ RED CONTROL: the whole column's lattice_mm runs on into Face 5's prism")
     }
 }
 
@@ -178,11 +192,15 @@ final class FlexibleFlatPrismEngineTests: XCTestCase {
             XCTAssertEqual(p.snap, "halfway")
             XCTAssertEqual(p.settings.deepestMM, h, accuracy: 1e-12)
         }
-        // ★ RED CONTROL: core's halfway on the strips (the old engine's re-aim) moves the bits
+        // ★ the engine asks core for NO halfway of the pieces (it never re-aims): the Flexible route's source has no aimSet call.
+        // (Corrected after the green run, our own new test: its first control — "core's halfway on the strips has other bits" —
+        // does not hold on his box pad, where a strip of a flat face has the face's own normal bit for bit; printed below. The red
+        // is the engine before R7-E1, whose changeFlexibleStrips re-aimed every re-cut press on its strips.)
         let onStrips = try await m.pressAim(try XCTUnwrap(m.press(press.id)).regions)
-        let strips = try XCTUnwrap(onStrips.halfway)
-        print("FLEX-E1-E halfway whole faces \(halfway) · on the strips \(strips)")
-        XCTAssertNotEqual(F.bits(strips), F.bits(halfway), "★ RED CONTROL: re-aiming on the strips moves the arrow")
+        print("FLEX-E1-E halfway whole faces \(halfway) · on the strips \(onStrips.halfway.map { "\($0)" } ?? "-") (bit-equal \(onStrips.halfway.map { F.bits($0) == F.bits(halfway) } ?? false))")
+        let src = try FlexibleSource.code("FlexibleStageModel+EdgePick.swift")
+        let route = try XCTUnwrap(src.range(of: "func changeFlexibleStrips(").map { String(src[$0.lowerBound...]) })
+        XCTAssertFalse(route.contains("aimSet("), "★ the Flexible route never re-aims a press from its pieces")
     }
 
     /// HIS strips saved with M2's width (Edge 16 and Edge 18 at 15 mm — his img_edges_1018's Group 3, rebuilt in M2's saved form on
@@ -271,10 +289,14 @@ final class FlexibleFlatPrismEngineTests: XCTestCase {
         }
         m.previewFlatCut(press.id, depthMM: 5.5, direction: A.compose(f, theta: 12, phi: 0))
         try check("mid-drag")
-        _ = await m.commitFlatPreview(press.id)
+        let rel = await m.commitFlatPreview(press.id)
+        XCTAssertNil(rel, "the release stored")
         try await F.M2.reopen(m, "released")
         try check("released")
-        _ = await m.setFlatCut(press.id, depthMM: 7.25, direction: A.compose(f, theta: 12, phi: 6), snap: nil)
+        // (corrected after the green run, our own new test: 7.25 mm twisted 6° reaches past his 20 mm pad's Top at the deep end —
+        // core's columns leave the lattice at 4.9 mm there, and the engine rightly refused it; the typed edit is untwisted)
+        let typed = await m.setFlatCut(press.id, depthMM: 7.25, direction: A.compose(f, theta: 12, phi: 0), snap: nil)
+        XCTAssertNil(typed, "the typed values stored")
         try await F.M2.reopen(m, "typed")
         try check("typed")
         r.project.performUndo()
@@ -282,7 +304,8 @@ final class FlexibleFlatPrismEngineTests: XCTestCase {
         try check("undone")
         XCTAssertEqual(try XCTUnwrap(m.press(press.id)).settings.deepestMM, 5.5, accuracy: 1e-12)
         // a TYPED 2° stays 2° (the snap is for drags only)
-        _ = await m.setFlatCut(press.id, depthMM: 5.5, direction: A.compose(f, theta: 2, phi: 0), snap: nil)
+        let typed2 = await m.setFlatCut(press.id, depthMM: 5.5, direction: A.compose(f, theta: 2, phi: 0), snap: nil)
+        XCTAssertNil(typed2, "the typed 2° stored")
         try await F.M2.reopen(m, "typed 2°")
         XCTAssertEqual(A.decompose(f, try XCTUnwrap(m.press(press.id)).direction).theta, 2, accuracy: 1e-9, "★ a typed 2° stays 2°")
     }

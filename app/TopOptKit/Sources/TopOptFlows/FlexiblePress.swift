@@ -71,9 +71,10 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// (clamped), so tilt + straighten leave `faces` — its order is the run job's face order and part of
     /// the lattice's key — as they were. nil: not a tilted face. OPTIONAL, omitted when nil.
     public var faceIndex: Int?
-    /// ★ ROUND 6 ITEM 2: an EDGE or CORNER pick's AREA (FlexibleEdgeStrips) — what it was picked as, its width, and
-    /// where its strip or patch lies on each member face — so a width change or a removal re-cuts it. nil: a press
-    /// made another way (a tilt, AP1's own). OPTIONAL, omitted when nil.
+    /// ★ ROUND 6 ITEM 2: an EDGE or CORNER pick's AREA (FlexibleEdgeStrips) — what it was picked as, where it lies on each
+    /// member face, core's halfway over its whole faces — so a depth or angle change or a removal re-cuts it (★ R7-E1: its
+    /// flat prism is this press's direction and deepest squish, FlexibleFlatPrism). nil: a press made another way (a tilt,
+    /// AP1's own). OPTIONAL, omitted when nil.
     public var strip: FlexibleStrip?
 
     public init(id: UUID = UUID(), regions: [Int], direction: SIMD3<Double>, snap: String? = nil,
@@ -184,6 +185,26 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
         if drawnIn == nil, FlexiblePressFrame.bits(d) != FlexiblePressFrame.bits(direction) { drawnIn = .press(frame) }
         direction = d
         self.snap = snap
+        return true
+    }
+
+    /// ★ R7-E1 — THE ONE MUTATOR OF A STRIP PRESS'S FLAT PRISM (setMembers drops the halfway snap and sets a frame of record; a
+    /// flat press's curves will live in fold coordinates, E4): its pieces, its direction (bit for bit), its deepest squish, its
+    /// snap kind — "halfway" exactly while the direction's bits are its strip's halfway's — and M2's width cleared (the flat
+    /// form written). drawnIn stays nil. false (nothing changes): no strip, no piece, a direction that cannot be stored, or a
+    /// depth that is not a positive number.
+    @discardableResult
+    public mutating func setFlatCut(regions members: [Int], direction d: SIMD3<Double>, snap: String?, depthMM h: Double) -> Bool {
+        guard var st = strip, let first = members.first, Self.isAimable(d), h.isFinite, h > 0 else { return false }
+        regions = members
+        settings.faceRegionID = first
+        direction = d
+        let onHalfway = st.halfway.map { FlexiblePressFrame.bits($0) == FlexiblePressFrame.bits(d) } ?? false
+        if onHalfway { self.snap = Snap.halfway.raw } else if Snap(snap) == .halfway { self.snap = nil } else { self.snap = snap }
+        settings.deepestMM = h
+        st.widthMM = nil
+        strip = st
+        drawnIn = nil
         return true
     }
 

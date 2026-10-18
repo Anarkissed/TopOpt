@@ -85,29 +85,60 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
         return out
     }
 
-    /// His pad, Edge 16 picked and [Done]; its tab open.
-    func edge16() async throws -> (FlexibleHisProject.Restored, FlexibleStageModel, FlexiblePress) {
-        let (r, m) = try await F.hisPad(self)
-        let press = try await F.commit(m, try await F.edge16(m).c)
-        try await FlexibleHisProject.waitFor(120, "registered") { m.pressStack(press.id) != nil }
+    /// His pad, Edge 16 picked and [Done]; its tab open — SYNCHRONOUS, the run loop pumped (the page's Metal view publishes its
+    /// projection only so: an async test draws no overlay at all — FlexibleR7SettingsHostedTests' note).
+    /// (Corrected after the green run, our own new test: it was async, and the page drew no overlay.)
+    func edge16() throws -> (FlexibleHisProject.Restored, FlexibleStageModel, FlexiblePress) {
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        let stage = FlexibleMainStage()
+        stage.reduceMotion = { true }
+        let m = stage.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath,
+                            stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        XCTAssertTrue(pumpUntil(120) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } },
+                      "the scene and stacks")
+        m.rail = .newGroup
+        m.startEdgePick()
+        XCTAssertTrue(pumpUntil(240) { m.edgePick.map { !$0.loading && !$0.checking } ?? false }, "the edges and corners listed")
+        let pick = try XCTUnwrap(m.edgePick)
+        let c = try XCTUnwrap(FlexibleM2Fixtures.edge(m, pick, faces: [3, 2]), "Edge 16: Face 3 + Face 2")
+        m.toggleEdgePick(c.number)
+        m.setEdgePickWeight(5)
+        var done = false
+        var why: String?
+        Task { @MainActor in why = await m.finishEdgePick(); done = true }
+        XCTAssertTrue(pumpUntil(240) { done && m.sceneState == .ready && m.openedKey == m.currentSceneKey
+            && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } }, "the part open on the flat prism")
+        XCTAssertNil(why)
+        let press = try XCTUnwrap(m.presses.last { $0.strip?.label == FlexibleRowCopy.candidateLabel(c) })
+        XCTAssertTrue(pumpUntil(120) { m.pressStack(press.id) != nil }, "registered")
+        pump(0.5)
         return (r, m, press)
+    }
+    @discardableResult
+    func pumpUntil(_ t: Double, _ c: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(t)
+        while !c() { if Date() > end { return false }; _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05)) }
+        return true
     }
 
     // MARK: - H1
 
-    func testTheEdgesTabHasNoStripWidth() async throws {
-        let (_, m, press) = try await edge16()
+    func testTheEdgesTabHasNoStripWidth() throws {
+        let (_, m, press) = try edge16()
         let h = host(FlexibleEdgeGroupsHostedTests.PanelHost(model: m).frame(width: FlexibleSettingsPanel.width, height: 1300, alignment: .top)
             .background(DS.Color.background.color), size: CGSize(width: FlexibleSettingsPanel.width, height: 1300))
         pump(1.5)
+        let label = try XCTUnwrap(press.strip?.label)
         let all = axAll(h)
         let ids = Set(all.map(\.id)), labels = all.map(\.label)
         print("FLEX-E1-H1 press \(press.strip?.label ?? "") rows: \(all.filter { $0.id.hasPrefix("flexible-row-") }.map { "\($0.id) \(Int($0.frame.height))pt" })")
         XCTAssertFalse(ids.contains("flexible-row-strip-width"), "★ no Strip width row")
         XCTAssertFalse(labels.contains { $0.contains("Strip width") || $0.contains("Patch size") }, "★ no Strip width / Patch size words")
-        for row in ["flexible-row-deepest", "flexible-row-tilt", "flexible-row-twist"] {
-            let f = try XCTUnwrap(all.first { $0.id == row }?.frame, "★ \(row) is on the tab")
-            XCTAssertLessThanOrEqual(f.height, 44, "★ \(row): one line")
+        for row in ["deepest", "tilt", "twist"] {
+            let f = try XCTUnwrap(h.frames.all["flatRow-\(row)-\(label)"], "★ the \(row) row is on the tab")
+            XCTAssertLessThanOrEqual(f.height, 44, "★ the \(row) row: one line")
         }
         for line in [FlexibleRowCopy.flatDeepestRow, FlexibleRowCopy.flatTiltRow(toward: "Face 3"), FlexibleRowCopy.flatTwistRow(end: "top end"),
                      FlexibleRowCopy.flatUpDownRow(into: "Face 1"), FlexibleRowCopy.flatLeftRightRow(toward: "Face 2"),
@@ -119,21 +150,26 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
 
     // MARK: - H2
 
-    func testTheHandlesAreOnTheArrow() async throws {
-        let (r, m, press) = try await edge16()
+    func testTheHandlesAreOnTheArrow() throws {
+        let (r, m, press) = try edge16()
         let label = try XCTUnwrap(press.strip?.label)
         var report: [String] = []
         for (tag, size) in Self.sizes {
             m.selectedPress = press.id
+            m.flatCameraRequest = press.id   // as [Done] or a selected press asks: the page turns to it (D-AP-13)
             let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: size)
             pump(3)
+            pumpUntil(15) { h.frames.marks["flatArrow-\(label)"] != nil }   // (the renderer publishes the projection on its first frame)
+            pump(1.5)   // (the camera's turn to the press settles)
             let mk = h.frames.marks
+            print("FLEX-E1-H2 \(tag): rail \(m.rail) · open edges \(FlexibleFlatPrismUI.openEdgesGroup(m)?.number ?? -1) · working \(FlexibleFlatPrismUI.workingPress(m) == press.id) · cut \(m.flatCut(press.id) != nil) · marks \(mk.keys.sorted()) · overlay \(FlexibleFlatPrismOverlay.lastWhy) · ends \(FlexibleFlatPrismUI.lastArrowEnds.map { "\($0.head) \($0.tail)" } ?? "-")")
             for name in ["flatPrism-\(label)", "flatArrow-\(label)", "flatDepthChip-\(label)", "flatKnob-\(label)",
                          "flatTiltBox-\(label)", "flatTwistBox-\(label)"] {
                 XCTAssertNotNil(mk[name], "★ \(tag): \(name) is drawn")
             }
             let targets = ["flatDepthChip-\(label)", "flatKnob-\(label)", "flatTiltBox-\(label)", "flatTwistBox-\(label)"].compactMap { mk[$0] }
             let chrome = FlexibleStagePage.playerKeepOut(h.frames.all) + ["panel", "viewButtons", "legend", "exitRow", "capsule"].compactMap { h.frames.all[$0] }
+            print("FLEX-E1-H2 \(tag) targets \(targets.map { $0.integral }) · chrome \(["panel", "viewButtons", "legend", "exitRow", "capsule"].map { "\($0) \(h.frames.all[$0]?.integral ?? .zero)" })")
             for (i, t) in targets.enumerated() {
                 XCTAssertGreaterThanOrEqual(Swift.min(t.width, t.height), 44 - 0.5, "★ \(tag): a 44 pt target \(t.integral)")
                 for c in chrome { XCTAssertFalse(t.intersects(c.insetBy(dx: 1, dy: 1)), "★ \(tag): \(t.integral) clear of the chrome \(c.integral)") }
@@ -159,10 +195,9 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
 
     /// The camera on [Done] — D-AP-13 as ruled (the gizmo view nearest down the arrow); until the reviewer amends it, the knob is
     /// drawn ≥ 56 pt from the head so the two handles stay apart.
-    func testTheCameraOnDone() async throws {
-        let (r, m) = try await F.hisPad(self)
+    func testTheCameraOnDone() throws {
+        let (r, m, press) = try edge16()
         let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-        let press = try await F.commit(m, try await F.edge16(m).c)
         let g = try XCTUnwrap(FlexibleFlatPrismUI.camera(press: press, settle: settle), "★ a view on [Done]")
         let along = settle.act(SIMD3<Float>(-press.direction))
         XCTAssertGreaterThan(simd_dot(g.direction, simd_normalize(along)), 0.99, "★ D-AP-13: down the arrow (the view nearest −d)")

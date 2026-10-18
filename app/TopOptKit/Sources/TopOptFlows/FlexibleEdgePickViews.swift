@@ -1,7 +1,8 @@
 // FlexibleEdgePickViews — round 6 item 2 on the Settings page (task 2026-10-08): [+ New] asks [Faces] [Edges/corners]
 // on one line; Edges/corners turns the tab into the PICK CARD (the list: one numbered row per edge and corner, its dot
 // in its colour on the model; the group's one squeeze force; the "keeps the rest" lines; [Done · N picked] [Cancel]);
-// an edges/corners group's tab lists its presses with their "Strip width" boxes; and on the model the candidates are
+// an edges/corners group's tab lists its presses with their flat prism's boxes (★ R7-E1: no Strip width); and on the model
+// the candidates are
 // drawn — 6 pt strokes and 14 pt dots in their colours, a numbered tag on each (≥ 44 pt to hit), picked ones in the
 // group's colour, thicker, with ✓; faint and untagged when they face away. One line per setting (≤ 44 characters).
 
@@ -11,9 +12,14 @@ import TopOptDesign
 import TopOptKit
 
 extension FlexibleRowCopy.Info {
-    public static let newKind = "Faces: a group of faces pressed straight in, as before. Edges/corners: pick where faces meet — each edge presses a strip along it on both its faces, each corner a square patch on every face there; the faces' own groups keep the rest. A group holds one or the other, never both."
+    public static let newKind = "Faces: a group of faces pressed straight in, as before. Edges/corners: pick where faces meet; each gets a flat prism you drag in from the edge. The faces' own groups keep the rest. A group holds one or the other."
     public static let edgePick = "Every edge and corner of the part, in colours that never repeat on touching ones, numbered as here. Tap a row or tap the part; tap the same spot again to reach the next one there. Grey rows can't be pressed — the line says why."
-    public static let stripWidth = "How far the strip reaches from the edge into each face (a corner: the patch's side). It starts at the lattice depth under the faces, never more than half the face, so the face's own group keeps the rest. Changing it re-cuts this strip and any that meet it."
+    /// ★ R7-E1: the flat prism's rows.
+    public static let flatDepth = "How deep the flat prism presses in along its arrow at the edge (the corner). Deeper reaches wider on every face. It stops where the lattice ends (core's columns) and where a face would keep none of itself."
+    public static let flatTilt = "Tips the arrow toward one face or the other. 0° is core's halfway; a drag snaps back to it within 3°."
+    public static let flatTwist = "Twists the flat prism along the edge: one end presses deeper. It stops when the shallow end reaches 0 mm."
+    public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is core's halfway."
+    public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is core's halfway."
 }
 
 // MARK: - [+ New]: which kind
@@ -151,8 +157,9 @@ struct FlexibleEdgeCandidateRow: View {
 
 // MARK: - an edges/corners group's tab
 
-/// The group's presses: each one's name and trash, its "Strip width" box, its not-sent line, and the faces that keep
-/// the rest.
+/// The group's presses: each one's name and trash, its one warning line, its flat prism's Deepest squish, Tilt and Twist (a
+/// corner: Up/down, Left/right) boxes, [Back to halfway] when off it, and the faces that keep the rest. ★ R7-E1 (his 2026-10-18
+/// words: "There shouldn't be a strip width."): no Strip width / Patch size row. One line per setting (≤ 44).
 struct FlexibleEdgeGroupRows: View {
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
@@ -187,19 +194,30 @@ struct FlexibleEdgeGroupRows: View {
             .frame(minHeight: FlexibleFaceList.rowHeight)
             .contentShape(Rectangle())
             .onTapGesture { model.selectedPress = p.id }
-            if let st = p.strip {
-                FlexRow(st.kind == .corner ? FlexibleRowCopy.patchSizeRow : FlexibleRowCopy.stripWidthRow,
-                        info: FlexibleRowCopy.Info.stripWidth, id: "flexible-row-strip-width") {
-                    FlexNumberBox(key: "strip-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.stripWidthRow,
-                                  spec: FlexNumberSpec(value: st.widthMM ?? 0, unit: "mm", step: 0.5,
-                                                       range: FlexibleEdgeStrips.minWidthMM...max(FlexibleEdgeStrips.minWidthMM, st.capMM),
-                                                       decimals: 1),
-                                  padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
-                        Task { @MainActor in if let why = await model.setStripWidth(p.id, mm: v) { model.toast = why } }
+            // ★ R7-E1: ONE warning line, the first that applies — core refused it › a lattice stop (with its fix) › not sent yet
+            if let why = model.pressRefusals[p.id] {
+                FlexWarningLine(text: why, id: "flexible-edge-press-refused")
+            } else if let stop = model.lastFlatStop, stop.press == p.id {
+                HStack(spacing: DS.Space.s) {
+                    FlexWarningLine(text: stop.line, id: "flexible-flat-stop-line")
+                    if let mm = stop.setMM, mm >= FlexibleFlatPrism.minDepthMM {
+                        Button {
+                            Task { @MainActor in if let why = await model.setFlatCut(p.id, depthMM: mm, direction: p.direction, snap: p.snap) { model.toast = why } }
+                        } label: {
+                            Text(FlexibleRowCopy.flatSetMM(mm)).font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(Capsule().fill(FlexibleStageStyle.accent))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-flat-set-mm")
                     }
                 }
+            } else {
+                FlexCaption(text: FlexibleRowCopy.pressNotSent)
             }
-            FlexCaption(text: FlexibleRowCopy.pressNotSent)
+            if let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: p.id) {
+                flatRows(p, st, shown)
+            }
             ForEach(model.keepsTheRest(press: p.id), id: \.self) { line in
                 Text(line).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
@@ -216,6 +234,63 @@ struct FlexibleEdgeGroupRows: View {
         }.allowsHitTesting(false))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-edge-press-\(p.strip?.label ?? "")")
+    }
+
+    /// ★ R7-E1: the flat prism's rows — the same numbers as the chip and the knob's boxes on the model (one store: the press).
+    @ViewBuilder private func flatRows(_ p: FlexiblePress, _ st: FlexibleStrip, _ shown: FlexibleFlatPrismUI.Shown) -> some View {
+        let corner = st.kind == .corner
+        let range = model.press(p.id).map { _ in
+            FlexibleFlatPrismAngles.depthRange(st, d: model.flatCut(p.id)?.direction ?? p.direction, limits: model.flatLimits(p.id, withLattice: true))
+        }
+        let f = FlexibleFlatPrismUI.frame(model, p.id)
+        let name: (Int) -> String = { FlexibleFlatPrismUI.memberName(model, st, $0) }
+        FlexRow(FlexibleRowCopy.flatDeepestRow, info: FlexibleRowCopy.Info.flatDepth, id: "flexible-row-deepest") {
+            FlexNumberBox(key: "flat-depth-card-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.flatDeepestRow,
+                          spec: FlexNumberSpec(value: shown.depthMM, unit: "mm", step: 0.5,
+                                               range: (range?.min ?? FlexibleFlatPrism.minDepthMM)...max(range?.min ?? 0.5, range?.max ?? 100), decimals: 1),
+                          padTarget: $padTarget, onNote: { model.toast = $0 }, twin: "flat-depth-\(p.id.uuidString)") { v in
+                Task { @MainActor in if let why = await model.setFlatCut(p.id, depthMM: v, direction: model.flatCut(p.id)?.direction ?? p.direction, snap: p.snap) { model.toast = why } }
+            }
+        }
+        .background(publish("flatRow-deepest-\(st.label)"))
+        FlexRow(corner ? FlexibleRowCopy.flatUpDownRow(into: f.map { name($0.tiltMember) } ?? "the top")
+                       : FlexibleRowCopy.flatTiltRow(toward: name(0)),
+                info: corner ? FlexibleRowCopy.Info.flatUpDown : FlexibleRowCopy.Info.flatTilt, id: "flexible-row-tilt") {
+            angleBox(p, st, tilt: true, value: shown.tilt)
+        }
+        .background(publish("flatRow-tilt-\(st.label)"))
+        FlexRow(corner ? FlexibleRowCopy.flatLeftRightRow(toward: f.flatMap { $0.twistMember }.map(name) ?? "a side")
+                       : FlexibleRowCopy.flatTwistRow(end: f?.namedEnd ?? "one end"),
+                info: corner ? FlexibleRowCopy.Info.flatLeftRight : FlexibleRowCopy.Info.flatTwist, id: "flexible-row-twist") {
+            angleBox(p, st, tilt: false, value: shown.twist)
+        }
+        .background(publish("flatRow-twist-\(st.label)"))
+        if let d0 = FlexibleFlatPrism.halfway(of: p), FlexiblePressAim.bits(model.flatCut(p.id)?.direction ?? p.direction) != FlexiblePressAim.bits(d0) {
+            Button {
+                Task { @MainActor in if let why = await model.flatBackToHalfway(p.id) { model.toast = why } }
+            } label: {
+                Text(FlexibleRowCopy.flatBackToHalfway).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color).padding(.horizontal, 12).frame(minHeight: 44)
+                    .background(Capsule().fill(DS.Color.chipSolid.color))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("flexible-flat-back-to-halfway")
+        }
+    }
+
+    /// Its frame reaches the page (the hosted tests read it): "flatRow-<row>-<label>".
+    private func publish(_ key: String) -> some View {
+        GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }.allowsHitTesting(false)
+    }
+
+    private func angleBox(_ p: FlexiblePress, _ st: FlexibleStrip, tilt: Bool, value: Double) -> some View {
+        let key = (tilt ? "flat-tilt-" : "flat-twist-") + p.id.uuidString
+        return FlexNumberBox(key: key + "-card", title: st.label + " \u{00B7} " + (tilt ? FlexibleRowCopy.flatTiltWord(corner: st.kind == .corner)
+                                                                                         : FlexibleRowCopy.flatTwistWord(corner: st.kind == .corner)),
+                             spec: FlexNumberSpec(value: (value * 10).rounded() / 10, unit: "\u{00B0}", step: 1, range: -89...89, decimals: 1),
+                             padTarget: $padTarget, allowsNegative: true, twin: key) { v in
+            Task { @MainActor in if let why = await model.setFlatAngle(p.id, degrees: v, tilt: tilt) { model.toast = why } }
+        }
     }
 }
 

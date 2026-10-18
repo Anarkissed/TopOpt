@@ -264,6 +264,13 @@ struct FlexStack {
   double grid_spacing = 0.0;
   int32_t grid_nx = 0, grid_ny = 0, grid_nz = 0;
   std::vector<int32_t> sector_refused;
+  // ★ R7-E1: the regions whose union is the footprint (core's Stack.footprint_region_ids — one for a face, 2+ for a press).
+  std::vector<int32_t> footprint_region_ids;
+  // ★ R7-E1 (a registered PRESS's stack only; empty for a face's): per column, the latticed run CONTIGUOUS FROM ITS ENTRY —
+  // core's own lattice_mm samples (faces.cpp: n = ⌈len / ¼ voxel⌉ points at entry + (k + ½)·step along the load, against the
+  // scene's mask), counted until the first sample off the lattice. core's lattice_mm counts every latticed sample of the column
+  // (another face-prism's lattice far down it too); the flat prism's wedge must stay in the lattice it starts in.
+  std::vector<double> col_lattice_run_mm;
 };
 FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t rotation_deg,
                                BridgeError& err);
@@ -718,6 +725,19 @@ struct FlexPressVerdict {
 FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<int32_t>& footprint,
                                               bool has_direction, const std::vector<double>& direction,
                                               BridgeError& err);
+
+// ★ R7-E1 — THE PRESS SEAM (AP9's first half; the bridge is the app track's own). Register a PRESS on the open scene: its
+// footprint (declared regions, in order) along `direction` (3 components, any length > 0 — core's press_unit normalises it).
+// Core builds its press stack NOW (fx::build_press_stack): a refusal (core's FlexibleError — a direction not into every
+// footprint triangle, regions not adjacent, two sectors of one face, no column…) is returned as the error, and nothing is
+// registered. Accepted: a SYNTHETIC id ≤ −1000, new for every registration and never reused in the process, that every
+// stack-based call of this scene (flexible_scene_stack, from_uv, to_uvt, squish_fraction, …) takes in place of a face region
+// id — stack_of hands it to fx::build_press_stack (cached per rotation). An id not registered on THIS scene is "not declared".
+int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>& footprint,
+                                      const std::vector<double>& direction, BridgeError& err);
+
+// ★ R7-E1: core's press API version (fx::kPressApiVersion; 2 at #361 099dcaed).
+int32_t flexible_press_api_version();
 
 // ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
 // The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated

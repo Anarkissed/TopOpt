@@ -58,22 +58,18 @@ extension FlexibleRowCopy {
     public static func inGroup(_ number: Int) -> String { inGroup(name: groupName(number)) }
     /// ★ ROUND 7 (S, 4d): naming the group by his name ("In Thumbs").
     public static func inGroup(name: String) -> String { fit("In \(name)") }
-    /// A fillet: the area needs a sharp, straight edge.
-    public static let stripFillet = "A fillet · strips need a sharp edge"
+    /// A fillet: the area needs a sharp, straight edge. ★ R7-E1: no strips any more — "A fillet · needs a sharp edge".
+    public static let stripFillet = "A fillet \u{00B7} needs a sharp edge"
     /// An edge that is not one straight line.
     public static let stripCurvedEdge = "A curved edge · no straight strip"
 
     // MARK: the face keeps the rest
 
-    /// ★ "Top keeps the rest · strip taken for Edge 3" (a corner: "patch"); the short form when the name is long.
+    /// ★ "Top keeps the rest · Edge 3"; "Top keeps the rest" when the name is long. ★ R7-E1 (his 2026-10-18 words: "There
+    /// shouldn't be a strip width."): no strip / patch words.
     public static func keepsTheRest(name: String, label: String, corner: Bool) -> String {
-        let what = corner ? "patch" : "strip"
-        let long = "\(name) keeps the rest \u{00B7} \(what) taken for \(label)"
-        if long.count <= maxChars { return long }
-        let mid = "\(name) keeps the rest \u{00B7} \(what) for \(label)"
-        if mid.count <= maxChars { return mid }
-        // ★ ROUND 7 (M2): a lattice section's longer name ("Face 2 · lattice B") — the line stays whole, the pick named
-        return fit("\(name) keeps the rest \u{00B7} \(label)")
+        let long = "\(name) keeps the rest \u{00B7} \(label)"
+        return long.count <= maxChars ? long : fit("\(name) keeps the rest")
     }
 
     // MARK: the edges group's tab
@@ -89,13 +85,10 @@ extension FlexibleRowCopy {
     public static func edgesGroupMade(_ number: Int, edges: Int, corners: Int) -> String {
         fit("\(groupName(number)) \u{00B7} " + edgesDetail(edges: edges, corners: corners))
     }
-    /// The press's width row.
-    public static let stripWidthRow = "Strip width"
-    public static let patchSizeRow = "Patch size"
     /// A press is saved, never sent until core builds press stacks (AP9).
     public static let pressNotSent = "Set up \u{00B7} core support pending"
 
-    // MARK: ★ R7-E1 STUB — the flat prism's words
+    // MARK: ★ R7-E1 — the flat prism's words (his rule: one line, ≤ 44 characters)
     public static let insideEdge = "An inside edge \u{00B7} no flat prism"
     public static let insideCorner = "An inside corner \u{00B7} no flat prism"
     public static let flatFarEnd = "Stops here \u{00B7} the far end reaches 0 mm"
@@ -108,4 +101,8 @@ extension FlexibleRowCopy {
     public static func flatTwistRow(end: String) -> String { fit("Twist \(end) deeper") }
     public static func flatUpDownRow(into face: String) -> String { fit("Up/down more into \(face)") }
     public static func flatLeftRightRow(toward face: String) -> String { fit("Left/right toward \(face)") }
+    public static func flatTiltWord(corner: Bool) -> String { corner ? "Up/down" : "Tilt" }
+    public static func flatTwistWord(corner: Bool) -> String { corner ? "Left/right" : "Twist" }
+    public static let flatBackToHalfway = "Back to halfway"
+    public static func flatSetMM(_ mm: Double) -> String { "Set " + String(format: "%.1f", mm) + " mm" }
 }

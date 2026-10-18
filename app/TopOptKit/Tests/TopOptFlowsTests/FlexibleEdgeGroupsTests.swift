@@ -340,8 +340,9 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             XCTAssertLessThanOrEqual(l.count, 44, "'\(l)' is one line")
             XCTAssertTrue(l.contains("keeps the rest") && l.contains("Edge \(c.number)"), l)
         }
-        XCTAssertTrue(lines.contains("Face 1 keeps the rest \u{00B7} strip taken for Edge \(c.number)") ||
-                      lines.contains("Face 1 keeps the rest \u{00B7} strip for Edge \(c.number)"), "the line names the face and the edge")
+        // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width."): no strip / patch words;
+        // was "Face 1 keeps the rest · strip taken for Edge N"
+        XCTAssertTrue(lines.contains("Face 1 keeps the rest \u{00B7} Edge \(c.number)"), "the line names the face and the edge")
         // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that
         // gets wider as it gets dragged further towards the centre of the model from the edge."): was the DEFAULT WIDTH (core's
         // lattice depth under the members, capped at half the face). A pick carries no width now: it carries core's halfway
@@ -529,8 +530,14 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         XCTAssertNil(why4)
         let press = try XCTUnwrap(m.presses.first { $0.strip != nil })
         let aim = try await m.pressAim(press.regions)
-        let rel = try XCTUnwrap(aim.defaultRelease, "core builds the halfway on the strips")
-        XCTAssertEqual(Self.bits(press.direction), Self.bits(rel.direction), "★ the direction IS core's halfway on its strips, bit for bit")
+        // ★ RE-PINNED (round 7, R7-E1 — the flat prism: the arrow starts at core's halfway over the WHOLE member faces, stored on
+        // the area at pick time, and is never re-aimed from its pieces — else d would depend on the cut that depends on d): was
+        // "the direction IS core's halfway on its strips". On this edge the two differ by one ulp (printed).
+        let whole = try await m.pressAim(c.members)
+        let rel = try XCTUnwrap(whole.defaultRelease, "core builds the halfway over the whole faces")
+        XCTAssertEqual(Self.bits(press.direction), Self.bits(rel.direction), "★ the direction IS core's halfway over its whole faces, bit for bit")
+        XCTAssertEqual(Self.bits(press.direction), Self.bits(try XCTUnwrap(press.strip?.halfway)), "★ stored on its area")
+        print("FLEX-I2-6 halfway over the whole faces \(Self.bits(rel.direction)) · on its strips \(aim.defaultRelease.map { Self.bits($0.direction) } ?? [])")
         XCTAssertEqual(press.snap, "halfway")
         let deg = aim.memberLoads.map { FlexiblePressAim.degrees(press.direction, $0) }
         print("FLEX-I2-6 direction \(press.direction) · from each face \(deg) · kg \(press.settings.weightKg)")
@@ -572,9 +579,9 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         let why6b = try await done(wedge.m)
         XCTAssertNil(why6b)
         let wpress = try XCTUnwrap(wedge.m.presses.first { $0.strip != nil })
-        let wset = try await wedge.m.pressAim(wpress.regions)
+        let wset = try await wedge.m.pressAim(slanted.members)   // ★ RE-PINNED (R7-E1): over its whole faces (was: on its strips)
         let wrel = try XCTUnwrap(wset.defaultRelease)
-        XCTAssertEqual(Self.bits(wpress.direction), Self.bits(wrel.direction), "the wedge: core's halfway on its strips, bit for bit")
+        XCTAssertEqual(Self.bits(wpress.direction), Self.bits(wrel.direction), "the wedge: core's halfway over its whole faces, bit for bit")
         let wm = try XCTUnwrap(wedge.m.project.viewerMesh)
         var normals: [SIMD3<Double>] = []
         for f in slanted.members {

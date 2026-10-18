@@ -32,10 +32,12 @@ enum FlexibleStageVolumes {
         if FlexibleStagePage.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) { return [] }
         let k = prismK(k)
         let key = "\(k)|\(model.frozenExaggeration ?? -1)|\(model.views.rawValue)|\(model.selectedRegion ?? -1)|\(model.rail)|"
+            + "\(model.selectedPress?.uuidString ?? "-")|\(model.flatPreview.map { "\($0.depthMM)\($0.direction)" } ?? "-")|"
             + "\(model.settings.hashValue)|\(model.stacks.count)|\(model.geometry.count)|\(model.stampGrids.count)|"
             + "\(part?.signature.contentHash ?? 0)|\(model.regions.key)|" + FlexibleGroupWalls.signature(heat) + "|\(heated.sorted())"
         if let c = cache, c.key == key { return c.items }
         let items = FlexibleDepthPrism.renderItems(model: model, k: k, views: model.views)
+            + FlexibleFlatPrismRender.items(model: model, k: k)   // ★ R7-E1: the flat prism, true size
             + FlexibleGroupWalls.items(model: model, views: model.views, mesh: part, heat: heat)
                 .filter { !($0.surfaceOnly && heated.contains($0.volume.faceID)) }
         cache = (key, items)

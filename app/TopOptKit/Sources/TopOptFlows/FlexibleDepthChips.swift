@@ -69,6 +69,8 @@ struct FlexibleDepthChips: View {
     /// ★ ROUND 7 REVIEW (R, his answer of 2026-10-15: "With Bend on, the depth chip and depth labels MOVE with the bend"): the
     /// full-bend pose while Bend shows — the chip sits on its prism's floor at the full bend (nil: at rest).
     var pose: FlexibleBendPose? = nil
+    /// ★ R7-E1: the page's keypad slot — a TAP on the chip opens the keypad (his rule: numbers are boxes); nil: drag only.
+    var padTarget: Binding<String?>? = nil
     @State private var held: LatticeDepthDetent.Candidate?
     @State private var scrub: Scrub?
     /// True for exactly as long as the drag lives — reset by SwiftUI on end AND on cancel.
@@ -91,6 +93,18 @@ struct FlexibleDepthChips: View {
                     .background(GeometryReader { g in
                         Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["depthChip-\(r)": g.frame(in: .global)])
                     }.allowsHitTesting(false))
+                    // ★ R7-E1: tap-to-type (the keypad; the value held to the lattice, as the row's box holds it)
+                    .modifier(FlexPadCommit(key: "chip-deepest-\(r)", padTarget: padTarget ?? .constant(nil),
+                                            config: .init(title: FlexibleRowCopy.deepestTitle, unit: "mm", allowsDecimal: true),
+                                            seed: f.deepestMM) { v in
+                        let lattice = FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))
+                        model.edit { s in
+                            guard var g = s.face(r) else { return }
+                            g.deepestMM = FlexibleDepthPrism.clamp(v, latticeMM: lattice)
+                            s.setFace(g)
+                        }
+                    })
+                    .onTapGesture { padTarget?.wrappedValue = "chip-deepest-\(r)" }
                     .position(p)
                     .gesture(drag(region: r, handle: h, stack: st, proj: proj, startMM: f.deepestMM)
                         .updating($dragging) { _, state, _ in state = true })

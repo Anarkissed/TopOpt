@@ -351,6 +351,10 @@ public struct FlexibleStagePage: View {
             refreshChannels()
         }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
+        // ★ R7-E1: the camera on [Done] and on selecting a flat press — D-AP-13 as ruled (down the arrow; the reviewer is asked)
+        .onChange(of: model.flatCameraRequest) { id in turnToFlatPress(id) }
+        .onAppear { turnToFlatPress(model.flatCameraRequest) }   // (a [Done] made before the page showed)
+        .onChange(of: model.selectedPress) { id in if FlexibleFlatPrismUI.openEdgesGroup(model) != nil { turnToFlatPress(id) } }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
@@ -435,7 +439,8 @@ public struct FlexibleStagePage: View {
             if !Self.controlNoOverlays, !Self.overlaysHidden(views: model.views, edgePick: model.edgePick != nil) {   // ★ R7-V: Bend alone
                 let clip = Self.controlOverlaysOverChrome ? nil : Self.chromeClip(frames, viewport: frames["page"]?.size ?? .zero)
                 FlexibleStageOverlays(model: model, proj: proj, exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,
-                                      clip: clip, pose: bendPose, bendTag: bendTag)   // ★ ROUND 7 (F): at the full bend while Bend shows; ★ X1 VERIFY: the bend prism's number
+                                      clip: clip, pose: bendPose, bendTag: bendTag,   // ★ ROUND 7 (F): at the full bend while Bend shows; ★ X1 VERIFY: the bend prism's number
+                                      padTarget: $padTarget)   // ★ R7-E1: tap-to-type on the model
                 FlexibleReadingCallout(proj: proj, reading: legendDrilled ? reading : nil, clip: clip ?? [])
             }
         }
@@ -588,6 +593,13 @@ public struct FlexibleStagePage: View {
     }
 
     private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }
+
+    /// ★ R7-E1: turn to a flat press (the gizmo view down its arrow, D-AP-13 as ruled), once.
+    private func turnToFlatPress(_ id: UUID?) {
+        guard let id, let p = model.press(id), p.strip != nil, let g = FlexibleFlatPrismUI.camera(press: p, settle: settle) else { return }
+        camera.snap(to: g, animated: !reduceMotion)
+        if model.flatCameraRequest == id { model.flatCameraRequest = nil }
+    }
 
     // MARK: the squish player (bottom-centre, its frame computed against the page's keep-outs)
 
@@ -960,6 +972,8 @@ struct FlexibleStageOverlays: View {
     var pose: FlexibleBendPose? = nil
     /// ★ X1 VERIFY: X-ray's bend prism — its number, read-only, in a box at its floor.
     var bendTag: FlexibleBendPrism.Tag? = nil
+    /// ★ R7-E1: the page's one keypad slot — the depth chips (a face's and the flat prism's) and the knob's boxes are tap-to-type.
+    var padTarget: Binding<String?>? = nil
 
     var body: some View {
         ZStack {
@@ -983,13 +997,18 @@ struct FlexibleStageOverlays: View {
                                         keepOut: keepOut, clip: clip)
                 }
                 // ★ ROUND 3 (item 1.1): the deepest squish, dragged out as a prism
-                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose)   // ★ R: with the bend
+                FlexibleDepthChips(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose,   // ★ R: with the bend
+                                   padTarget: padTarget)   // ★ R7-E1: tap-to-type
                 // ★ ROUND 4 (D1): a Stamp face's ONE stamp — never under the panel or the legend,
                 // and never on the depth chip (it keeps clear of the chip's place: `k`)
                 FlexibleFaceStampHandle(model: model, projection: proj.projection, keepOut: keepOut, k: exaggeration, clip: clip, pose: pose)
             }
             // ★ ROUND 6 ITEM 2: pick mode — every edge and corner, coloured and numbered as the list
             if model.edgePick != nil { FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip) }
+            // ★ R7-E1: the open edges tab's flat prisms — traces, arrows, the chip at the head, the knob at the tail
+            if FlexibleFlatPrismUI.openEdgesGroup(model) != nil {
+                FlexibleFlatPrismOverlay(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, padTarget: padTarget ?? .constant(nil))
+            }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
             FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
                                        clip: clip, pose: pose)

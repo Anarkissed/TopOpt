@@ -681,12 +681,15 @@ final class FlexiblePressAimTests: XCTestCase {
                      Self.deg(knob, d), Self.deg(moved.direction, d)))
     }
 
-    // MARK: - (11) the camera across the arrow
+    // MARK: - (11) the camera (D-AP-13: down the arrow)
 
-    /// ★ D-AP-13. His r5 corner (Top A + 3 + 2) seen from the home view (azimuth 45°, elevation 30°) is nearly
-    /// end-on; cameraAcross picks a view at least 50° off the arrow's line, nearest the members' outward side, and
-    /// the arrow keeps 60 pt (it grows up to 2×). RED: cameraRegion(load:) looks straight along the arrow (under 10°).
-    func testTheCameraLooksAcrossTheArrow() async throws {
+    /// ★ RE-PINNED (round 7, R7-E1 — the reviewer's ruling of 2026-10-10, 4, approved by the maintainer: "D-AP-13, the camera
+    /// when a press is made / presented: the view DOWN THE ARROW, so every pressed face is visible (replace cameraAcross's ≥
+    /// 50-degree rule)"): was testTheCameraLooksAcrossTheArrow, which pinned AP3's cameraAcross (≥ 50° off the arrow). The
+    /// ruled view is FlexibleFlatPrismUI.camera — the gizmo view nearest down the arrow (FlexibleFixPopup.cameraRegion(load:));
+    /// cameraAcross is gone. (R7-E1 asked the reviewer to amend D-AP-13 for edges and corners — a view 25–50° off the arrow —
+    /// and draws the knob ≥ 56 pt from the head until a ruling.) The arrow keeps 60 pt (it grows up to 2×), as before.
+    func testTheCameraLooksDownTheArrow() async throws {
         let r5 = try FlexiblePressFixtures.hisRound5(self)
         let rm = try await G.openModel(self, r5.project, "his r5")
         let corner = [FlexibleHisProject.topA, 3, 2]
@@ -695,16 +698,12 @@ final class FlexiblePressAimTests: XCTestCase {
         let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))   // gravity −Z → down
         let line = simd_normalize(settle.act(SIMD3<Float>(Float(h.x), Float(h.y), Float(h.z))))
         func off(_ v: SIMD3<Float>) -> Float { acos(min(1, abs(simd_dot(simd_normalize(v), line)))) * 180 / .pi }
-        let home = SIMD3<Float>(cos(Float.pi / 6) * sin(Float.pi / 4), sin(Float.pi / 6), cos(Float.pi / 6) * cos(Float.pi / 4))
-        let across = try XCTUnwrap(FlexibleFixPopup.cameraAcross(arrow: h, memberLoads: aim.memberLoads, settle: settle))
-        let naive = try XCTUnwrap(FlexibleFixPopup.cameraRegion(load: h, settle: settle))
-        Self.say(String(format: "FLEX-AP3 CAMERA r5 corner: home %.1f° off the arrow · cameraAcross %@ %.1f° · cameraRegion(load:) %@ %.1f°",
-                     off(home), across.id, off(across.direction), naive.id, off(naive.direction)))
-        XCTAssertGreaterThanOrEqual(off(across.direction), 50 - 1e-4, "★ across the arrow")
-        var out = SIMD3<Float>.zero
-        for l in aim.memberLoads { out -= settle.act(SIMD3<Float>(Float(l.x), Float(l.y), Float(l.z))) }
-        XCTAssertGreaterThan(simd_dot(across.direction, simd_normalize(out)), 0, "it sees the members' outside")
-        XCTAssertLessThan(off(naive.direction), 10, "control: the face-on rule looks along it")
+        let press = FlexiblePress(regions: corner, direction: h, settings: FlexibleFaceSettings(faceRegionID: corner[0]),
+                                  strip: FlexibleStrip(kind: .corner, label: "Corner 1", order: 1, members: []))
+        let down = try XCTUnwrap(FlexibleFlatPrismUI.camera(press: press, settle: settle))
+        Self.say(String(format: "FLEX-AP3 CAMERA r5 corner: D-AP-13 %@ %.1f° off the arrow", down.id, off(down.direction)))
+        XCTAssertLessThan(off(down.direction), 30, "★ D-AP-13: the gizmo view nearest down the arrow")
+        XCTAssertEqual(down, try XCTUnwrap(FlexibleFixPopup.cameraRegion(load: h, settle: settle)), "the face-on rule along the arrow")
         // 60 pt on screen
         XCTAssertEqual(A.arrowLength(boundsDiagonalMM: 100), 25)
         XCTAssertEqual(A.arrowLength(boundsDiagonalMM: 20), 15)

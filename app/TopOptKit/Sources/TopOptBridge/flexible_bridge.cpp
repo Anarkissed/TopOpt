@@ -10,6 +10,7 @@
 #include "bridge_guard.hpp"        // ★ AP2: bridge.cpp's one guard, for the pass-throughs below
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -135,7 +136,17 @@ struct Scene {
   std::unique_ptr<fx::DensityField> field;
   std::vector<std::tuple<int, int, const fx::FaceDesign*>> field_key;
   std::string field_build_key;
+  // ★ R7-E1: the presses registered on this scene (flexible_scene_register_press), by synthetic id ≤ −1000
+  struct PressDef {
+    std::vector<int> footprint;
+    topopt::Vec3 direction{0, 0, 0};
+  };
+  std::map<int, PressDef> presses;
 };
+
+// ★ R7-E1: synthetic press ids start here and go down — new for every registration, never reused in the process.
+constexpr int kSyntheticPressMax = -1000;
+std::atomic<int32_t> g_next_press{kSyntheticPressMax};
 
 std::mutex g_scene_mu;
 std::map<int64_t, std::shared_ptr<Scene>> g_scenes;
@@ -154,13 +165,25 @@ const topopt::ResolvedFaceRegion& region_of(const Scene& s, int id) {
   throw std::invalid_argument("face region " + std::to_string(id) + " is not declared in the job");
 }
 
-// Caller holds s.mu.
+// Caller holds s.mu. ★ R7-E1: an id ≤ kSyntheticPressMax is a registered PRESS — core's press stack over its footprint
+// along its stated direction (fx::build_press_stack), cached per (id, rotation) like a face's.
 const fx::Stack& stack_of(Scene& s, int face, int rot) {
   auto key = std::make_pair(face, rot);
   auto it = s.stacks.find(key);
   if (it != s.stacks.end()) return *it->second;
-  auto st = std::make_unique<fx::Stack>(fx::build_stack(s.model, region_of(s, face), s.regions, s.grid,
-                                                        s.mask, rot, s.build, s.grid.spacing));
+  std::unique_ptr<fx::Stack> st;
+  if (face <= kSyntheticPressMax) {
+    auto p = s.presses.find(face);
+    if (p == s.presses.end())
+      throw std::invalid_argument("face region " + std::to_string(face) + " is not declared in the job");
+    std::vector<const topopt::ResolvedFaceRegion*> fp;
+    for (int id : p->second.footprint) fp.push_back(&region_of(s, id));
+    st = std::make_unique<fx::Stack>(fx::build_press_stack(s.model, fp, s.regions, s.grid, s.mask, rot, s.build,
+                                                           s.grid.spacing, &p->second.direction));
+  } else {
+    st = std::make_unique<fx::Stack>(fx::build_stack(s.model, region_of(s, face), s.regions, s.grid,
+                                                     s.mask, rot, s.build, s.grid.spacing));
+  }
   const fx::Stack& ref = *st;
   s.stacks[key] = std::move(st);
   return ref;
@@ -613,6 +636,30 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
     o.lattice_mm_mean = st.lattice_mm_mean;
     o.lattice_mm_max = st.lattice_mm_max;
     o.stack_mm_max = st.stack_mm_max;
+    for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
+    // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp)
+    if (face_region_id <= kSyntheticPressMax && s->mask.size() == s->grid.voxel_count() && s->grid.spacing > 0.0) {
+      const topopt::VoxelGrid& g = s->grid;
+      for (const fx::StackColumn& c : st.columns) {
+        const double len = c.exit_t - c.entry_t;
+        double run = 0.0;
+        if (len > 0.0) {
+          const topopt::Vec3 org = f.from_uv(c.u_mm, c.v_mm);
+          const int n = std::max(1, static_cast<int>(std::ceil(len / (0.25 * g.spacing))));
+          const double step = len / n;
+          for (int k = 0; k < n; ++k) {
+            const double t = c.entry_t + (k + 0.5) * step;
+            const topopt::Vec3 p{org.x + f.load.x * t, org.y + f.load.y * t, org.z + f.load.z * t};
+            const int i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
+            const int j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
+            const int kk = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
+            if (i < 0 || j < 0 || kk < 0 || i >= g.nx || j >= g.ny || kk >= g.nz || !s->mask[g.index(i, j, kk)]) break;
+            run += step;
+          }
+        }
+        o.col_lattice_run_mm.push_back(run);
+      }
+    }
     // ★ S1 (#361's 254cb137): a sector's voxels core does not own — its in_stack's column and t
     // test at each voxel centre, then core's public stack_owns_projection (field.cpp's in_stack).
     if (!st.cuts.empty() || !st.part_cuts.empty()) {
@@ -1287,6 +1334,39 @@ FlexPressVerdict flexible_scene_press_verdict(int64_t scene, const std::vector<i
   }
   return o;
 }
+
+// ★ R7-E1: register a press (FlexibleBridge.hpp). Every throw — core's refusal included — crosses the one guard as the error.
+int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>& footprint,
+                                      const std::vector<double>& direction, BridgeError& err) {
+  int32_t out = 0;
+  const std::string why = bridge_guard_run("flexible_scene_register_press", [&] {
+    auto s = scene_at(scene);
+    std::lock_guard<std::mutex> lock(s->mu);
+    if (direction.size() != 3)
+      throw std::invalid_argument("a press direction has 3 components (got " + std::to_string(direction.size()) + ")");
+    if (footprint.empty()) throw std::invalid_argument("a press needs at least one face region");
+    Scene::PressDef def;
+    for (int32_t id : footprint) def.footprint.push_back(id);
+    def.direction = topopt::Vec3{direction[0], direction[1], direction[2]};
+    std::vector<const topopt::ResolvedFaceRegion*> fp;
+    for (int id : def.footprint) fp.push_back(&region_of(*s, id));
+    // core builds it now: its refusal is the answer, and nothing is registered
+    auto st = std::make_unique<fx::Stack>(fx::build_press_stack(s->model, fp, s->regions, s->grid, s->mask, 0, s->build,
+                                                                s->grid.spacing, &def.direction));
+    const int32_t id = g_next_press.fetch_sub(1);
+    s->presses[id] = def;
+    s->stacks[std::make_pair(static_cast<int>(id), 0)] = std::move(st);
+    out = id;
+  });
+  if (!why.empty()) {
+    err.ok = false;
+    err.message = why;
+    return 0;
+  }
+  return out;
+}
+
+int32_t flexible_press_api_version() { return fx::kPressApiVersion; }
 
 // ★ AP3: core's side-stack threshold, for the (i) text only (FlexibleBridge.hpp).
 double flexible_side_stack_deg() { return fx::kSideStackDeg; }

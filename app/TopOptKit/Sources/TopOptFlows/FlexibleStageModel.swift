@@ -171,10 +171,19 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
     /// ★ ANGLED PRESSES (AP1): the press whose card is open (FlexiblePress id); nil ⇒ none.
     @Published public var selectedPress: UUID?
-    /// ★ R7-E1 STUB: the flat prism's drag preview, the last stop, the camera request.
+    /// ★ R7-E1 — THE FLAT PRISM (FlexibleStageModel+FlatPrism): what a handle shows while it moves (never in the settings or in
+    /// history), the press a commit is running for (the handles are disabled meanwhile), the last release the lattice stopped (its
+    /// line and [Set N mm]), the press the page should turn the camera to ([Done], a press selected).
     @Published public internal(set) var flatPreview: FlexibleFlatPreview?
+    @Published public internal(set) var flatCommitting: UUID?
     @Published public internal(set) var lastFlatStop: FlexibleFlatStop?
     @Published public internal(set) var flatCameraRequest: UUID?
+    /// ★ R7-E1 — THE SEAM: each strip press as core's open scene holds it (a synthetic key, core's press stack, the apex's t, the
+    /// footprint's per-triangle normals), and a press core refused, with its plain line.
+    @Published internal(set) var pressRegistrations: [UUID: FlexiblePressRegistration] = [:]
+    @Published public internal(set) var pressRefusals: [UUID: String] = [:]
+    /// ★ R7-E1: M2's strips read through were said (once per session).
+    var legacyStripsSaid = false
     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
     /// stored in the project until [Done].
     @Published public var edgePick: FlexibleEdgePick?
@@ -973,6 +982,8 @@ public final class FlexibleStageModel: ObservableObject {
         rasteriseStamps()
         scheduleDesigns(delayNS: 0)
         scheduleAuto()
+        registerPresses()        // ★ R7-E1: core's press stack for every strip press on the open scene (the seam)
+        announceLegacyStrips()   // ★ R7-E1: M2's strips read through — said once
     }
 
     /// ★ ROUND 3, ITEM 1: every pressed face's DRAWN map, from core's squish_fraction, as

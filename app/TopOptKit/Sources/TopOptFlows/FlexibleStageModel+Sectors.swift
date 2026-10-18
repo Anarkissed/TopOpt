@@ -28,6 +28,8 @@ struct FlexibleSectorMemoKey: Equatable {
     var includes: [LatticeRegionSpec]
     var strips: [UUID: FlexibleStrip]
     var stripOrder: [UUID]
+    /// ★ R7-E1: each press's flat prism (its direction and depth).
+    var cuts: [UUID: FlexibleFlatPrism.Cut]
     var newPicks: Set<UUID>
     var meshKey: String
     var controls: [Bool]
@@ -92,15 +94,18 @@ extension FlexibleStageModel {
         // I2's form read as it is (only under the red controls: the read-through moves it otherwise) — its strips are the
         // Surface stage's sectors, never Flexible ones
         let strips = FlexibleSectorMigration.isLegacy(s) ? [] : (s.presses ?? []).compactMap { p in p.strip.map { (p.id, $0) } }
+        // ★ R7-E1: each press's flat prism — its plane cuts its pieces (nil: a strip still saved with M2's width)
+        var cuts: [UUID: FlexibleFlatPrism.Cut] = [:]
+        if !FlexibleSectorMigration.isLegacy(s) { for p in s.presses ?? [] { if let c = FlexibleFlatPrism.planCut(of: p) { cuts[p.id] = c } } }
         let key = FlexibleSectorMemoKey(
             faceRegions: base, includes: includeSpecs, strips: Dictionary(strips, uniquingKeysWith: { a, _ in a }),
-            stripOrder: strips.map(\.0), newPicks: newPicks,
+            stripOrder: strips.map(\.0), cuts: cuts, newPicks: newPicks,
             meshKey: "\(mesh.signature.contentHash)|\(mesh.signature.topologyHash)|\(mesh.faceIDs.count)",
             controls: [FlexibleLatticeSections.controlWholeFace, FlexibleLatticeSections.controlAlwaysCut,
                        FlexibleLatticeSections.controlFingerprintIDs, FlexibleSectors.controlRecycle])
         if let m = sectorMemo, m.key == key { return (m.set, m.regions) }
         let set = FlexibleSectors.resolve(mesh: mesh, faceRegions: base, includes: key.includes,
-                                          strips: strips.map { (id: $0.0, strip: $0.1) }, newPicks: newPicks, numbers: sectorNumbers)
+                                          strips: strips.map { (id: $0.0, strip: $0.1) }, cuts: cuts, newPicks: newPicks, numbers: sectorNumbers)
         let regions = FlexibleRegions(model: base, mesh: mesh, flexible: set)
         if newPicks.isEmpty { sectorMemo = (key, set, regions) }
         return (set, regions)

@@ -204,8 +204,13 @@ public struct FlexStackInfo: Equatable, Sendable {
     /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
     /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
     public var sector: FlexSectorVerdict? = nil
-    /// ★ R7-E1 STUB: the regions whose union is the footprint (core's Stack.footprint_region_ids).
+    /// ★ R7-E1: the regions whose union is the footprint (core's Stack.footprint_region_ids) — a face's own id, or a press's
+    /// regions in order.
     public var footprintRegionIDs: [Int] = []
+    /// ★ R7-E1 (a press's stack only; empty for a face's): per column (column order), the latticed run CONTIGUOUS FROM ITS ENTRY
+    /// — core's own lattice_mm samples read until the first one off the lattice (the bridge, FlexibleBridge.hpp). core's
+    /// `latticeMM` counts every latticed sample of the column, another face-prism's lattice far down it too.
+    public var latticeRunMM: [Double] = []
 
     /// ★ ROUND 7, M1 (his img1, 2026-10-14: "ONLY the face-prism creates the lattice structure in any area"): this stack
     /// as the app keeps it when NO face-prism is set — core's frame, columns and entries unchanged, but no lattice on any
@@ -226,7 +231,7 @@ public struct FlexStackInfo: Equatable, Sendable {
             pitchMM: pitchMM, nu: nu, nv: nv, cell: cell, columns: cols, exitFaces: exitFaces, exitRegions: exitRegions,
             exitUnresolvedFraction: exitUnresolvedFraction, footprintAreaMM2: footprintAreaMM2,
             latticedColumns: 0, latticeMMMin: 0, latticeMMMean: 0, latticeMMMax: 0, stackMMMax: stackMMMax,
-            sector: sector)
+            sector: sector, footprintRegionIDs: footprintRegionIDs, latticeRunMM: latticeRunMM.map { _ in 0 })
     }
 }
 
@@ -752,7 +757,7 @@ public final class FlexibleScene: @unchecked Sendable {
             exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
             latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
             latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
-            sector: sector)
+            sector: sector, footprintRegionIDs: Array(s.footprint_region_ids).map { Int($0) }, latticeRunMM: Array(s.col_lattice_run_mm))
     }
 
     /// Core's `FaceFrame::from_uv` for each (u, v) mm point.

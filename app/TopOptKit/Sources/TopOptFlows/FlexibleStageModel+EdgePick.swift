@@ -7,18 +7,18 @@
 // beside it. A tap on a row or on the model (`edgePickTap`: the nearest corner, then edge; a repeat tap cycles) picks
 // it. What cannot be picked is listed grey with one line why: AP2's reasons, "In Group N" (in another edges group's
 // press already), core's verdict on its press, or the area's own (a fillet, a curved face). [Done · 2 picked]
-// (`finishEdgePick`) is ONE undoable edit: each pick's STRIP (an edge) or PATCH (a corner) is cut on every member face
-// through the Surface tool's own cut (FlexibleEdgeStrips), the face's own squeeze group KEEPS THE REST (its settings
-// moved onto the rest, re-expressed through core's frames), and each pick becomes an AP1 FlexiblePress over its strips,
-// aimed at AP3's default — core's halfway on the strips (FlexiblePressAimSet.defaultRelease) — in the new group, at the
-// group's one force he typed. SAVED, NOT WRITTEN TO ANY JOB (`sentPresses` stays empty until AP9; `designInputs` strips
-// presses), so no face press's job changes except the faces that gave a strip (their entry is their rest now).
+// (`finishEdgePick`) is ONE undoable edit: each pick's FLAT PRISM (★ R7-E1, his 2026-10-18 words: "There shouldn't be a strip
+// width. It should be a Flat prism …") is cut on every member face through the Surface tool's own cut (FlexibleEdgeStrips,
+// FlexibleFlatPrism), the face's own squeeze group KEEPS THE REST (its settings moved onto the rest, re-expressed through core's
+// frames), and each pick becomes an AP1 FlexiblePress over its pieces, aimed at core's halfway over its WHOLE member faces
+// (stored on its area at pick time — never re-aimed from the pieces), 3 mm deep, in the new group, at the group's one force he
+// typed. SAVED, NOT WRITTEN TO ANY JOB (`sentPresses` stays empty until AP9; `designInputs` strips presses), so no face
+// press's job changes except the faces that gave a piece (their entry is their rest now).
 // ★ CORE BEFORE THE CUT. The strips' halfway and core's verdict on them are asked of a scene opened on the regions AFTER
 // the cut, before anything is committed (`changeStrips`), so the cut and its presses are one edit and one undo step;
 // that scene then becomes the page's (`FlexibleWorker.install`), so the part does not open twice.
-// ★ THE WIDTH. "Strip width" on the edges group's tab: core's lattice depth under the members (the smaller member's
-// latticeMMMax), capped at half the face's extent across the edge; a change re-cuts that pick and every pick on the same
-// faces, in the one order (`setStripWidth`) — one undo step. Removing a press (or its whole group) gives its strip back.
+// ★ R7-E1 — NO WIDTH. The flat prism's depth and angles (FlexibleStageModel+FlatPrism's setFlatCut) re-cut that pick and every
+// pick on the same faces, in the one order — one undo step. Removing a press (or its whole group) gives its piece back.
 // ★ THE MAIN PAGE'S SELECTIONS ARE NOT TOUCHED: the Settings squeeze groups and the main page's Selections are two
 // separate lists (his 2026-10-10 reversal); the cut joins no Selections group.
 
@@ -77,7 +77,6 @@ extension FlexibleStageModel {
             let order = (existing.map(\.order).max() ?? 0) + 1
             let held = s.pressRegions
             var greyed: [Int: String] = [:], strips: [Int: FlexibleStrip] = [:], loads: [Int: [SIMD3<Double>]] = [:]
-            var depth: [Int: Double?] = [:]
             for c in list.candidates {
                 loads[c.number] = c.members.compactMap { facts.frames[$0]?.load }
                 if let why = c.why { greyed[c.number] = FlexibleRowCopy.fit(why); continue }
@@ -92,14 +91,9 @@ extension FlexibleStageModel {
                     greyed[c.number] = FlexibleRowCopy.noLatticeAt(FlexibleRowCopy.candidateLabel(c))
                     continue
                 }
-                var lattice: [Double?] = []
-                for m in c.members {
-                    if depth[m] == nil { depth[m] = .some(await latticeDepth(m)) }
-                    lattice.append(depth[m] ?? nil)
-                }
                 switch FlexibleEdgeStrips.strip(for: c, label: FlexibleRowCopy.candidateLabel(c), order: order, meet: meet,
                                                 facts: facts, faceRegions: restoredFaceRegions, existing: existing,
-                                                latticeMM: lattice, name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" }) {
+                                                name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" }) {
                 case .success(let st): strips[c.number] = st
                 case .failure(let r): greyed[c.number] = r.line
                 }
@@ -113,15 +107,24 @@ extension FlexibleStageModel {
             p.loading = false
             p.checking = true
             edgePick = p
-            // ★ CORE'S VERDICT on each pickable candidate's press (its whole members, along core's halfway)
+            // ★ CORE'S VERDICT on each pickable candidate's press (its whole members, along core's halfway). ★ R7-E1: that
+            // halfway — over the WHOLE member faces — is stored on its area (where the flat prism's arrow starts and snaps back
+            // to; the engine never re-aims from the pieces), and an inside edge or corner along it is greyed
             for c in list.candidates where strips[c.number] != nil {
                 let aim = try await pressAim(c.members)
                 guard edgePick?.token == token else { return }
-                if aim.defaultRelease == nil {
+                guard aim.defaultRelease != nil, let hw = aim.offered.first(where: { $0.kind == .halfway })?.direction else {
                     let why = aim.why ?? aim.asked.first { !$0.accepted }?.line ?? FlexibleRowCopy.coreRefuses
                     edgePick?.greyed[c.number] = FlexibleRowCopy.fit(why)
                     edgePick?.picks.removeAll { $0 == c.number }
+                    continue
                 }
+                if let st = edgePick?.strips[c.number], let line = FlexibleFlatPrism.convexityLine(st, d0: hw) {
+                    edgePick?.greyed[c.number] = line
+                    edgePick?.picks.removeAll { $0 == c.number }
+                    continue
+                }
+                edgePick?.strips[c.number]?.halfway = hw
             }
             edgePick?.checking = false
         } catch {
@@ -202,15 +205,25 @@ extension FlexibleStageModel {
         let lines = edgePickKeepsTheRest()
         let base = ((settings.presses ?? []).compactMap(\.strip).map(\.order).max() ?? 0) + 1
         var adds: [(id: UUID, strip: FlexibleStrip)] = []
+        var cuts: [UUID: FlatCutChange] = [:]
+        let mesh = project.viewerMesh
         for (i, n) in pick.picks.enumerated() {
             guard var st = pick.strips[n] else { continue }
             st.order = base + i
-            adds.append((UUID(), st))
+            let id = UUID()
+            adds.append((id, st))
+            // ★ R7-E1: a new pick sits on its whole faces' halfway, 3 mm deep (a face's default) — held so each face keeps
+            // some of itself (his answer: the half-face rule dropped)
+            if let d0 = st.halfway, let mesh {
+                let range = FlexibleFlatPrismAngles.depthRange(st, d: d0, limits: .init(loads: [], keepsRest: Self.keepsRest(st, mesh: mesh)))
+                cuts[id] = FlatCutChange(depthMM: Swift.min(FlexibleFlatPrism.defaultDepthMM, range.max), direction: d0,
+                                         snap: FlexiblePress.Snap.halfway.raw)
+            }
         }
         pick.working = true
         pick.line = nil
         edgePick = pick
-        if let why = await changeStrips(StripChange(add: adds), kg: kg, colour: pick.colour) {
+        if let why = await changeStrips(StripChange(add: adds, cut: cuts), kg: kg, colour: pick.colour) {
             edgePick?.working = false
             edgePick?.line = why
             return why
@@ -219,22 +232,13 @@ extension FlexibleStageModel {
         if let first = adds.first?.id, let g = FlexibleSqueezeGroups.group(ofPress: first, in: settings) {
             rail = .group(g.id)
             selectedPress = first
+            flatCameraRequest = first   // ★ R7-E1: the page turns the camera to the new press (D-AP-13 as ruled)
             toast = lines.first ?? FlexibleRowCopy.edgesGroupMade(g.number, edges: pick.edgesPicked, corners: pick.cornersPicked)
         }
         return nil
     }
 
     // MARK: - the strips after [Done]
-
-    /// ★ "Strip width" changed on press `id`: that pick and every pick on the same faces re-cut, in the one order —
-    /// one undo step. Clamped to 0.5 mm … the cap (half the narrowest member face across its edge).
-    @discardableResult
-    public func setStripWidth(_ id: UUID, mm: Double) async -> String? {
-        guard let st = settings.press(id)?.strip, mm.isFinite else { return nil }
-        let w = Swift.min(Swift.max(FlexibleEdgeStrips.minWidthMM, mm), st.capMM)
-        guard w != st.widthMM else { return nil }
-        return await changeStrips(StripChange(width: [id: w]))
-    }
 
     /// The presses' strips back to their faces, the presses gone — one undo step.
     @discardableResult
@@ -288,10 +292,11 @@ extension FlexibleStageModel {
 
     // MARK: - the one engine
 
-    /// What a change does to the strips.
+    /// What a change does to the strips. ★ R7-E1: `cut` — a press's flat prism (its depth, direction and snap kind; for a new
+    /// pick, where it starts) — in place of the width.
     struct StripChange {
         var add: [(id: UUID, strip: FlexibleStrip)] = []
-        var width: [UUID: Double] = [:]
+        var cut: [UUID: FlatCutChange] = [:]
         var remove: Set<UUID> = []
     }
 
@@ -317,14 +322,20 @@ extension FlexibleStageModel {
         var entries: [FlexibleEdgeStrips.Entry] = []
         var replay = Set<Int>()
         for p in s0.presses ?? [] {
-            guard var st = p.strip else { continue }
+            guard let st = p.strip else { continue }
             if ch.remove.contains(p.id) { replay.formUnion(st.members.map(\.root).filter { $0 >= 0 }); continue }
-            if let w = ch.width[p.id] { st.widthMM = w; replay.formUnion(st.members.map(\.root).filter { $0 >= 0 }) }
             entries.append(.init(id: p.id, strip: st, regions: p.regions))
         }
         for a in ch.add {
-            entries.append(.init(id: a.id, strip: a.strip, regions: nil))
-            replay.formUnion(a.strip.members.map(\.root).filter { $0 >= 0 })
+            // ★ R7-E1: I2's route keeps I2's own width (it makes I2's saved form for the migration tests — the red control)
+            var st = a.strip
+            if st.widthMM == nil {
+                var lattice: [Double?] = []
+                for mb in st.members { lattice.append(await latticeDepth(mb.face)) }
+                st.widthMM = FlexibleEdgeStrips.legacyDefaultWidth(capMM: st.capMM, latticeMM: lattice)
+            }
+            entries.append(.init(id: a.id, strip: st, regions: nil))
+            replay.formUnion(st.members.map(\.root).filter { $0 >= 0 })
         }
         let keep = Set(project.selection.groups.flatMap(\.regionIDs).map { Int($0) })
         var plan = FlexibleEdgeStrips.plan(entries, replay: replay, faceRegions: regions0, mesh: mesh, keep: keep)
@@ -502,32 +513,42 @@ extension FlexibleStageModel {
         }
         let s0 = settings
         let before = regions
+        // ★ R7-E1: every strip press as it will be — a cut change's direction and depth on it (M2's width written now), a new
+        // pick at its halfway — so the sectors are cut by each press's own flat prism (FlexibleFlatPrism.planCut)
         var strips: [(id: UUID, strip: FlexibleStrip)] = []
         var regionsOf: [UUID: [Int]] = [:]
-        for p in s0.presses ?? [] {
-            guard var st = p.strip, !ch.remove.contains(p.id) else { continue }
-            if let w = ch.width[p.id] { st.widthMM = w }
-            strips.append((p.id, st))
-            regionsOf[p.id] = p.regions
+        var will: [FlexiblePress] = []
+        for p in s0.presses ?? [] where !ch.remove.contains(p.id) {
+            var q = p
+            if var st = p.strip, let c = ch.cut[p.id] {
+                st.halfway = st.halfway ?? FlexibleFlatPrism.halfway(of: p)
+                st.widthMM = nil
+                q.strip = st
+                q.direction = c.direction
+                q.settings.deepestMM = c.depthMM
+            }
+            if let st = q.strip { strips.append((p.id, st)); regionsOf[p.id] = p.regions }
+            will.append(q)
         }
         var adds = Set<UUID>()
         for a in ch.add {
             var st = a.strip
             for k in st.members.indices { st.members[k].root = -1 }   // derived (FlexibleSectors)
+            guard let d = ch.cut[a.id]?.direction ?? st.halfway else {
+                return FlexibleRowCopy.fit("\(st.label) \u{00B7} \(FlexibleRowCopy.coreRefuses)")
+            }
             strips.append((a.id, st))
             adds.insert(a.id)
+            var f = FlexibleFaceSettings(faceRegionID: -1)
+            f.deepestMM = ch.cut[a.id]?.depthMM ?? FlexibleFlatPrism.defaultDepthMM
+            will.append(FlexiblePress(id: a.id, regions: [], direction: d, snap: FlexiblePress.Snap.halfway.raw, settings: f, strip: st))
         }
+        let willByID = Dictionary(will.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let changed = adds.union(ch.cut.keys)
         // the Flexible sectors after the change (the session's numbers: the same the committed settings will read)
         var probe = s0
-        probe.presses = (s0.presses ?? []).filter { !ch.remove.contains($0.id) }.map { p in
-            var q = p
-            if let w = ch.width[p.id] { q.strip?.widthMM = w }
-            return q
-        }
-        for (id, st) in strips where adds.contains(id) {
-            probe.presses?.append(FlexiblePress(id: id, regions: [], direction: SIMD3(0, 0, -1), settings: FlexibleFaceSettings(faceRegionID: -1), strip: st))
-        }
-        let state = sectorState(for: probe, newPicks: adds)
+        probe.presses = will.isEmpty ? nil : will
+        let state = sectorState(for: probe, newPicks: changed)
         var set = state.set
         var after = state.regions
         if FlexibleEdgeStrips.controlWholeFaces {
@@ -549,32 +570,41 @@ extension FlexibleStageModel {
         } catch {
             return FlexibleRowCopy.fit(text("\(error)"))
         }
-        let build = (try? await Task.detached(priority: .userInitiated) { try scene.info() }.value)?.buildDir ?? sceneInfo?.buildDir
-        let source = FlexibleAimSource(
-            frame: { r, f in try await Task.detached(priority: .userInitiated) { try scene.regionFrame(r, face: f) }.value },
-            verdict: { fp, d in try await Task.detached(priority: .userInitiated) { try scene.pressVerdict(fp, direction: d) }.value },
-            triangleLoads: { t in try await Task.detached(priority: .userInitiated) { try scene.triangleLoads(t) }.value },
-            faces: { after.faces(of: $0, mesh: mesh) }, mesh: mesh, buildDir: build,
-            name: { after.name($0, mesh: mesh) },
-            displayName: { r in
-                let sec = after.sector(r)
-                return FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? r : after.faces(of: r, mesh: mesh).first ?? r)
-            },
-            text: { after.renamed($0, mesh: mesh) })
-        // ── each new or re-cut press's default aim: core's halfway on ITS strips
-        var aims: [UUID: FlexiblePressAim.Release] = [:]
-        for (id, st) in strips {
-            let regs = set.stripRegions[id] ?? []
-            guard regionsOf[id] == nil || regs != regionsOf[id] else { continue }
-            do {
-                let aimSet = try await Self.aimSet(regs, source: source)
-                guard let rel = aimSet.defaultRelease else {
-                    let why = aimSet.why ?? aimSet.asked.first { !$0.accepted }?.line ?? FlexibleRowCopy.coreRefuses
-                    return FlexibleRowCopy.fit("\(st.label) · \(why)")
+        // ── ★ R7-E1: each new or re-cut press, as core sees it on the regions after the change — core's verdict on its STATED
+        // direction (never re-aimed: the halfway is its whole faces', stored at pick time), then core's press stack checked
+        // against the lattice: every column's target δ_k = (t_A + h) − entry_t_k within its lattice_mm (FlexibleFlatPrism.latticeCap)
+        func plain(_ reason: String) -> String {
+            var names: [Int: String] = [:]
+            for id in FlexiblePressAim.regionIDs(reason) {
+                let sec = after.sector(id)
+                names[id] = FlexibleRowCopy.faceName(sector: sec?.name, face: sec == nil ? id : after.faces(of: id, mesh: mesh).first ?? id)
+            }
+            return FlexiblePressAim.plainLine(reason) { names[$0] ?? "Face \($0)" }
+        }
+        if !FlexibleEdgeStrips.controlWholeFaces {
+            for id in changed.sorted(by: { $0.uuidString < $1.uuidString }) {
+                guard let q = willByID[id], let regs = set.stripRegions[id], !regs.isEmpty, let cut = FlexibleFlatPrism.cut(of: q) else { continue }
+                if let injected = Self.controlRefuseFlatCut { return plain(injected) }   // (RED CONTROL: core refuses)
+                do {
+                    let d = q.direction
+                    let v = try await Task.detached(priority: .userInitiated) { try scene.pressVerdict(regs, direction: d) }.value
+                    guard v.accepted else { return plain(v.reason) }
+                    let a = cut.apex
+                    let got = try await Task.detached(priority: .userInitiated) { () -> (FlexStackInfo, Double) in
+                        let k = try scene.registerPress(regs, direction: d)
+                        let st = try scene.stack(face: k, rotation: 0)
+                        let t = try scene.toUVT(face: k, rotation: 0, [a.x, a.y, a.z])
+                        return (st, t.count >= 3 ? t[2] : 0)
+                    }.value
+                    // (no face-prism — only under the tests' ask-core control, ruling 6 — is no lattice at all, M1: no stop to read)
+                    if facePrismsNow, let cap = FlexibleFlatPrism.latticeCap(got.0, apexT: got.1), cut.depthMM > cap + 1e-6 {
+                        let line = FlexibleRowCopy.flatLatticeEnds(cap)
+                        lastFlatStop = FlexibleFlatStop(press: id, line: line, setMM: cap)
+                        return line
+                    }
+                } catch {
+                    return FlexibleRowCopy.fit("\(q.strip?.label ?? "") \u{00B7} \(text("\(error)"))")
                 }
-                aims[id] = rel
-            } catch {
-                return FlexibleRowCopy.fit("\(st.label) · \(text("\(error)"))")
             }
         }
         // ── each root's settings onto its pieces after the change, re-expressed through core's frames (open scene → new)
@@ -624,7 +654,6 @@ extension FlexibleStageModel {
         project.sealUndoStep()
         actionSerial += 1
         let newGroup = FlexibleSqueezeGroups.nextID(s0)
-        let stripOf = Dictionary(strips.map { ($0.id, $0.strip) }, uniquingKeysWith: { a, _ in a })
         edit({ s in
             for mv in moved {
                 let at = s.faces.firstIndex { mv.old.contains($0.faceRegionID) } ?? s.faces.count
@@ -634,23 +663,27 @@ extension FlexibleStageModel {
             }
             for id in ch.remove { s.removePress(id) }
             for (id, _) in strips {
-                guard let regs = set.stripRegions[id], !regs.isEmpty else { continue }
+                guard let regs = set.stripRegions[id], !regs.isEmpty, let q = willByID[id] else { continue }
                 if var p = s.press(id) {
-                    p.strip = stripOf[id]
-                    if regs != p.regions {
-                        let wasHalfway = p.snapTarget == .halfway
-                        p.setMembers(regs)
-                        if wasHalfway, let rel = aims[id] { p.aim(rel.direction, snap: rel.snap?.raw) }
+                    if let c = ch.cut[id] {
+                        // ★ R7-E1: the flat prism — the one mutator (its pieces, direction, depth, snap; M2's width cleared)
+                        p.strip = q.strip
+                        p.setFlatCut(regions: regs, direction: c.direction, snap: c.snap, depthMM: c.depthMM)
+                    } else if regs != p.regions {
+                        // a neighbour's re-cut renumbered its pieces: its own plane, direction and snap kept
+                        p.regions = regs
+                        p.settings.faceRegionID = regs[0]
                     }
                     s.setPress(p)
-                } else if let rel = aims[id] {
+                } else if adds.contains(id) {
                     var f = FlexibleFaceSettings(faceRegionID: regs[0])
                     f.weightKg = kg ?? 0
                     f.weightFrom = nil
                     f.squeezeGroup = newGroup
+                    f.deepestMM = q.settings.deepestMM
                     // (the whole-face red control stores no strip area: its geometry would derive the strips again)
-                    s.setPress(FlexiblePress(id: id, regions: regs, direction: rel.direction, snap: rel.snap?.raw,
-                                             settings: f, strip: FlexibleEdgeStrips.controlWholeFaces ? nil : stripOf[id]))
+                    s.setPress(FlexiblePress(id: id, regions: regs, direction: q.direction, snap: FlexiblePress.Snap.halfway.raw,
+                                             settings: f, strip: FlexibleEdgeStrips.controlWholeFaces ? nil : q.strip))
                 }
             }
             FlexibleSqueezeGroups.normalise(&s)
