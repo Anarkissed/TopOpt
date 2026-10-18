@@ -102,8 +102,18 @@ final class FlexibleR7D2ReviewTests: XCTestCase {
         for k in 0..<n.z { for j in 0..<n.y { for i in 0..<n.x { rho[(k * n.y + j) * n.x + i] = i < 20 ? 0.15 : 0.21 } } }
         let grid = FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: SIMD3(0.5, 0.5, 0.5), spacing: 1, values: rho)
         let mask = FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: SIMD3(0.5, 0.5, 0.5), spacing: 1, values: [Float](repeating: 1, count: rho.count))
+        // ★ RE-PINNED (round 7, his report of 2026-10-18 — "the top isn't being bent or removed when I have set the finish to
+        // 'none'"): the lattice mask now reaches past the part's surface, so the (i) counts only the voxels INSIDE the part
+        // (the part's SDF ≤ 0). This fixture's part SDF was the ρ grid — positive, "outside", everywhere — so it now gets a part:
+        // the 40 × 40 × 20 box's own signed distance. Was: `partSDF: grid`.
+        var box = [Float](repeating: 0, count: rho.count)
+        for k in 0..<n.z { for j in 0..<n.y { for i in 0..<n.x {
+            let x = Float(i) + 0.5, y = Float(j) + 0.5, z = Float(k) + 0.5
+            box[(k * n.y + j) * n.x + i] = -min(min(x, 40 - x), min(min(y, 40 - y), min(z, 20 - z)))
+        } } }
+        let part = FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: SIMD3(0.5, 0.5, 0.5), spacing: 1, values: box)
         let f = FlexibleLatticeInputs(topology: .gyroid, wallMM: 0.42, lMinMM: 1.4, lMaxMM: 25, honeycombCellMM: 4,
-                                      buildDir: SIMD3(0, 0, 1), skinMM: 0.8, rho: grid, mask: mask, partSDF: grid, skinDist: grid,
+                                      buildDir: SIMD3(0, 0, 1), skinMM: 0.8, rho: grid, mask: mask, partSDF: part, skinDist: grid,
                                       boundsMin: .zero, boundsMax: SIMD3(40, 40, 20))
         var face = LatticeRegionSpec(role: .include, kind: .face)
         face.origin = SIMD3(10, 20, 20); face.normal = SIMD3(0, 0, -1)   // the top of the x < 20 half, into the part

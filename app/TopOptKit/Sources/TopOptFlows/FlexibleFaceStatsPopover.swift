@@ -33,7 +33,10 @@ public enum FlexibleFaceStats {
 
     /// ★ REVIEW OF R7-D2: the (i)'s rows from the Flexible lattice drawn inside the face's own prism (`regions`: its include
     /// region(s) — a face cut into sections has one per section). nil without a voxel of the lattice in it.
-    public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double) -> Rows? {
+    /// ★ ROUND 7: a voxel whose centre is outside the part is not counted (the mask now reaches past the surface);
+    /// `countOutside` is a test's control only (the rule before).
+    public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double,
+                            countOutside: Bool = false) -> Rows? {
         guard !regions.isEmpty else { return nil }
         let m = f.mask
         let same = m.nx == f.rho.nx && m.ny == f.rho.ny && m.nz == f.rho.nz
@@ -41,6 +44,9 @@ public enum FlexibleFaceStats {
             var out: [Float] = []
             for n in 0..<m.values.count where m.values[n] >= 0.5 {
                 let p = m.c0 + SIMD3<Float>(Float(n % m.nx), Float((n / m.nx) % m.ny), Float(n / (m.nx * m.ny))) * m.spacing
+                // ★ ROUND 7 (his 2026-10-18 report): the mask now reaches past the surface (FlexibleLatticeBuilder.inputs) —
+                // a voxel whose centre is outside the part is no lattice of the face's, so it is not counted
+                guard countOutside || FlexibleLatticeField.dPart(p, f) <= 0 else { continue }
                 guard inside(SIMD3<Double>(p)) else { continue }
                 out.append(same ? f.rho.values[n] : f.rho.sample(p))
             }

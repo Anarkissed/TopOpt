@@ -20,7 +20,8 @@
 // trilinear interpolation of the continuous index u = (p − c0)/spacing, clamped to
 // [0, n−1] per axis.
 //   ρ(p)      = clamp(trilinear(rho), 0.05, 0.9)        — core's density, gaps filled
-//   m(p)      = trilinear(mask)                          — 1 lattice voxel, 0 not
+//   m(p)      = trilinear(mask)                          — 1 lattice voxel, 0 not (★ round 7: core's lattice voxels AND
+//               each voxel core left Empty next to one — the region reaches the part's surface; the builder)
 //   dRegion   = (0.5 − m(p)) · 2 · rhoSpacing            — ≤ 0 inside the lattice region
 //   dPart     = trilinear(partSDF)                        — part surface, − inside; BEYOND the
 //               grid's box, max(that, |p − box|) (the grid has no margin — batch B review)
@@ -324,6 +325,51 @@ public enum FlexibleLatticeBuilder {
         return (positions, skinnedIdx, allSkinned)
     }
 
+    /// ★ ROUND 7: CORE'S OWN INSIDE RULE (voxelize.cpp `voxelize_fill`, the same arithmetic in Double): for each voxel `cells`
+    /// names on core's grid (x fastest; corner `origin`, spacing `h`), whether the part encloses its centre — the signed
+    /// sum of the +Z ray's crossings strictly above the centre is non-zero (a triangle edge-on to the ray is skipped; the
+    /// point-in-triangle test is boundary-inclusive; a crossing at the centre's height counts as below). Only the columns
+    /// the cells stand in are crossed.
+    static func coreEncloses(_ cells: [Int], part: ViewerMesh, nx: Int, ny: Int, origin: SIMD3<Double>, h: Double) -> [Bool] {
+        guard !cells.isEmpty else { return [] }
+        var wanted = [Bool](repeating: false, count: nx * ny)
+        for v in cells { wanted[v % (nx * ny)] = true }
+        var crossings: [Int: [(z: Double, sign: Int)]] = [:]
+        let pos = part.positions, idx = part.indices
+        func vertex(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(pos[b]), Double(pos[b + 1]), Double(pos[b + 2]))
+        }
+        for t in 0..<(idx.count / 3) {
+            let a = vertex(idx[3 * t]), b = vertex(idx[3 * t + 1]), c = vertex(idx[3 * t + 2])
+            let area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+            if Swift.abs(area2) < 1e-18 { continue }
+            let sign = area2 > 0 ? 1 : -1
+            let i0 = Swift.max(Int(((Swift.min(a.x, b.x, c.x) - origin.x) / h - 0.5).rounded(.down)), 0)
+            let i1 = Swift.min(Int(((Swift.max(a.x, b.x, c.x) - origin.x) / h - 0.5).rounded(.up)), nx - 1)
+            let j0 = Swift.max(Int(((Swift.min(a.y, b.y, c.y) - origin.y) / h - 0.5).rounded(.down)), 0)
+            let j1 = Swift.min(Int(((Swift.max(a.y, b.y, c.y) - origin.y) / h - 0.5).rounded(.up)), ny - 1)
+            guard i0 <= i1, j0 <= j1 else { continue }
+            for j in j0...j1 {
+                let py = origin.y + (Double(j) + 0.5) * h
+                for i in i0...i1 where wanted[j * nx + i] {
+                    let px = origin.x + (Double(i) + 0.5) * h
+                    let e0 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)
+                    let e1 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)
+                    let e2 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)
+                    guard (e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0) else { continue }
+                    crossings[j * nx + i, default: []].append(((e1 * a.z + e2 * b.z + e0 * c.z) / area2, sign))
+                }
+            }
+        }
+        return cells.map { v in
+            let cz = origin.z + (Double(v / (nx * ny)) + 0.5) * h
+            var above = 0
+            for x in crossings[v % (nx * ny)] ?? [] where x.z > cz { above += x.sign }
+            return above != 0
+        }
+    }
+
     /// Prepare the grids from core's density field and the part (off the main thread).
     /// `skinOffFaces` are the B-rep/pseudo face ids whose skin is off (M15);
     /// each entry's `cuts` narrow a split sector to its own half-spaces (the face is cut
@@ -331,6 +377,8 @@ public enum FlexibleLatticeBuilder {
     /// ★ ROUND 4 (D1): `finish` — the whole model's finish (FlexibleFinish). Covered keeps the
     /// grid below (the distance to every skinned surface, `skinOffFaces` honoured); None, Rim
     /// and Skin replace it with their own skin-distance grid and thickness.
+    /// ★ ROUND 7 (his report of 2026-10-18, the Top solid over the pockets at Balanced): the lattice mask reaches the part's
+    /// SURFACE (below). `maskToSurface: false` is a test's RED CONTROL only — the mask as core gives it.
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
@@ -368,6 +416,34 @@ public enum FlexibleLatticeBuilder {
                 let w = (c * ny + b) * nx + a
                 if rho[w] <= 0 { rho[w] = rho[v]; queue.append(w) }
             }
+        }
+        // ★ ROUND 7 — THE MASK REACHES THE SURFACE (his report of 2026-10-18: "the top isn't being bent or removed when I
+        // have set the finish to 'none'"). Core voxelizes from the bounding box's corner at the quality's spacing and keeps a
+        // voxel only when the part encloses its CENTRE (voxelize.cpp's +Z winding fill). Where a face's last voxel centre
+        // falls OUTSIDE the part — his 20 mm pad at Balanced is 19.2 voxels tall, its top layer's centre at z = 20.31 — that
+        // layer is Empty, the mask's trilinear sample crosses ½ half a voxel inside the surface (z = 19.79), and the printed
+        // solid S = max(dPart, −dRegion) drew a 0.21 mm sheet over every pocket (the walls stopped there too). So each voxel
+        // core left Empty — its centre outside the part by core's own rule, `coreEncloses` — that has a lattice voxel as a
+        // 6-neighbour joins the mask, with that neighbour's (flood-filled) ρ, so the legend's span is unchanged. The region
+        // then runs out past the surface and dPart clips it there, as at every face whose last voxel centre lies inside;
+        // dSkin still decides the finish. Data only: the MSL twin samples the same mask. (Not the app's SDF: it is made on
+        // voxels and reads part of the outermost texel near an edge as outside — on his pad at Fine it called four voxels
+        // under the Top's edge outside that core had kept, and would have widened the region there.)
+        if maskToSurface {
+            var cand: [(v: Int, from: Int)] = []
+            let six = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+            for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+                let v = (k * ny + j) * nx + i
+                guard mask[v] < 0.5 else { continue }
+                for (di, dj, dk) in six {
+                    let a = i + di, b = j + dj, c = k + dk
+                    guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
+                    let w = (c * ny + b) * nx + a
+                    if mask[w] >= 0.5 { cand.append((v, w)); break }
+                }
+            } } }
+            let inside = coreEncloses(cand.map(\.v), part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
+            for (n, c) in cand.enumerated() where !inside[n] { mask[c.v] = 1; rho[c.v] = rho[c.from] }   // decided on core's mask alone
         }
         let sp = Float(field.spacing)
         let c0 = SIMD3<Float>(field.origin) + SIMD3<Float>(repeating: 0.5 * sp)   // core's origin is the CORNER

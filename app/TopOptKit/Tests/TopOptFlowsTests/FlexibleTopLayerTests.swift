@@ -13,10 +13,13 @@
 // 0.21 mm sheet over every pocket — the "lid". The sides and the Bottom are open because their last voxel centres lie
 // inside the part. Fast (19.53) and Fine (19.92) have no such layer.
 //
-// ★ THE FIX (app only): FlexibleLatticeBuilder.inputs sets mask = 1 on each voxel whose centre is OUTSIDE the part (the
-// app's SDF > 0) and that has a lattice voxel as a 6-neighbour, with that neighbour's flood-filled ρ. dPart clips the walls
-// at the surface, as at every other face; dSkin still decides the finish. Written BEFORE the code (the red run:
-// round7/batch_tl/tl_red_run.txt). RED CONTROL inside each test: `maskToSurface: false` — the mask as core gives it.
+// ★ THE FIX (app only): FlexibleLatticeBuilder.inputs sets mask = 1 on each voxel whose centre is OUTSIDE the part and
+// that has a lattice voxel as a 6-neighbour, with that neighbour's flood-filled ρ. dPart clips the walls at the surface, as
+// at every other face; dSkin still decides the finish. Written BEFORE the code (the red run: round7/batch_tl/
+// tl_red_run.txt). RED CONTROL inside each test: `maskToSurface: false` — the mask as core gives it.
+// ★ "OUTSIDE" IS CORE'S OWN RULE (+Z winding at the voxel centre, voxelize.cpp), not the app's SDF > 0 the plan named: T2
+// went red on the SDF version at Fine — the voxel-made SDF read four voxels under the Top's edge (centre 0.08 mm under the
+// Top, 0.39 mm in from the side) as outside although core had kept them, and the region grew there.
 //   T1  Balanced: S at (95, 50, 19.9) open; the whole Top over each pocket open at z = 19.9, the walls reach it (X-ray), the
 //       middle of the Top solid; nothing below the top layer's reach moves, bit for bit; the legend's span, the (i)'s
 //       numbers and what the squish sims read unchanged; overLattice only firmer.
@@ -211,7 +214,7 @@ final class FlexibleTopLayerTests: XCTestCase {
             let specs = m.includeSpecs.filter { $0.selectableKey == key }
             XCTAssertFalse(specs.isEmpty, "premise: Face \(face)'s prism")
             let a = FlexibleFaceStats.rows(lattice: fix, regions: specs, depthMM: 25)
-            let b = FlexibleFaceStats.rows(lattice: control, regions: specs, depthMM: 25)
+            let b = FlexibleFaceStats.rows(lattice: control, regions: specs, depthMM: 25, countOutside: true)   // today's rule on today's mask
             XCTAssertNotNil(a)
             let ra: [LatticeDrawerRow] = a?.rows ?? [], rb: [LatticeDrawerRow] = b?.rows ?? []
             XCTAssertEqual(ra, rb, "★ Face \(face)'s (i): the same numbers (the voxels outside the part are not counted)")
@@ -231,6 +234,32 @@ final class FlexibleTopLayerTests: XCTestCase {
         XCTAssertEqual(lost, 0, "overLattice only gets firmer")
     }
 
+    /// T1b — the (i) counts only voxels inside the part (synthetic): a 40 × 40 × 20 block, ρ 0.15, with its top 5 mm marked
+    /// OUTSIDE the part (SDF > 0) at ρ 0.5 — as the voxels the mask now adds beyond a surface. The face's prism (the top of
+    /// the x < 20 half, 10 mm deep) reads 15 %. RED CONTROL: counting them (the rule before) reads 50 %.
+    func testTheInfoSkipsVoxelsOutsideThePart() throws {
+        let n = (x: 40, y: 40, z: 20)
+        var rho = [Float](repeating: 0.15, count: n.x * n.y * n.z), sdf = rho
+        for k in 0..<n.z { for j in 0..<n.y { for i in 0..<n.x {
+            let v = (k * n.y + j) * n.x + i
+            if k >= 15 { rho[v] = 0.5; sdf[v] = 1 } else { sdf[v] = -1 }
+        } } }
+        let c0 = SIMD3<Float>(0.5, 0.5, 0.5)
+        let grid = FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: rho)
+        let f = FlexibleLatticeInputs(topology: .gyroid, wallMM: 0.42, lMinMM: 1.4, lMaxMM: 25, honeycombCellMM: 4,
+                                      buildDir: SIMD3(0, 0, 1), skinMM: 0.8, rho: grid,
+                                      mask: FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: [Float](repeating: 1, count: rho.count)),
+                                      partSDF: FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: sdf), skinDist: grid,
+                                      boundsMin: .zero, boundsMax: SIMD3(40, 40, 20))
+        var face = LatticeRegionSpec(role: .include, kind: .face)
+        face.origin = SIMD3(10, 20, 20); face.normal = SIMD3(0, 0, -1)
+        face.halfUMM = 9.9; face.halfWMM = 9.9; face.depthMM = 10
+        let rows = try XCTUnwrap(FlexibleFaceStats.rows(lattice: f, regions: [face], depthMM: 10))
+        XCTAssertEqual(rows.rows[1].value, "15%", "★ the (i) counts only the voxels inside the part")
+        let before = try XCTUnwrap(FlexibleFaceStats.rows(lattice: f, regions: [face], depthMM: 10, countOutside: true))
+        XCTAssertEqual(before.rows[1].value, "50%", "★ RED CONTROL: counting the voxels outside the part moves the median")
+    }
+
     // MARK: - T2: Fast and Fine — nothing added
 
     func testFastAndFineAreUnchanged() async throws {
@@ -243,6 +272,17 @@ final class FlexibleTopLayerTests: XCTestCase {
             let fix = try F.inputs(m, p, maskToSurface: true), control = try F.inputs(m, p, maskToSurface: false)
             XCTAssertEqual(fix, control, "★ \(q): the inputs are byte-identical (no voxel centre outside the part next to the lattice)")
             XCTAssertEqual(try XCTUnwrap(m.lattice).inputs, fix)
+            // the (i) skips voxels outside the part (the app's SDF): at this quality it reads what it read before
+            let groupC = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" }, "his Group C")
+            for face: FaceID in [3, 5] {
+                let key = LatticeSelectableRef.face(group: groupC.id, face: face).key
+                let specs = m.includeSpecs.filter { $0.selectableKey == key }
+                let a = FlexibleFaceStats.rows(lattice: fix, regions: specs, depthMM: 25)
+                XCTAssertNotNil(a, "\(q): Face \(face) has numbers")
+                let today = FlexibleFaceStats.rows(lattice: control, regions: specs, depthMM: 25, countOutside: true)   // today's rule on today's mask
+                let ra: [LatticeDrawerRow] = a?.rows ?? [], rt: [LatticeDrawerRow] = today?.rows ?? []
+                XCTAssertEqual(ra, rt, "★ \(q): Face \(face)'s (i) reads what it read before")
+            }
             let s = FlexibleLatticeField.terms(at: Self.probe, fix).printed
             print("FLEX-TL-T2 \(q): grid \(field.nx) × \(field.ny) × \(field.nz) at \(field.spacing) mm, last centre z \(field.origin.z + (Double(field.nz) - 0.5) * field.spacing) · inputs identical to the control · S(95, 50, 19.9) \(s) mm")
             XCTAssertGreaterThan(s, 0, "\(q): the Top over the pocket was already open")
@@ -445,6 +485,20 @@ final class FlexibleTopLayerHostedTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(sPocket, 0.40, "★ \(cam.name) n \(n): the Top over the pockets opens (the sheet is gone)")
             XCTAssertLessThanOrEqual(sMiddle, 0.02, "★ \(cam.name) n \(n): the middle of the Top stays the solid it was")
         }
+        // X-ray (reported, and written for looking): the walls now reach the Top instead of stopping 0.21 mm under it — T1 pins
+        // it in numbers
+        s.xrayOn = true
+        let xa = try XCTUnwrap(s.layer(p, stage: .lattice, pageUp: false))
+        var xb = xa
+        xb.lattice = control
+        xb.token += 1_000_000
+        let fxa = try frame(s, p, cam: flexTopLayerCam, n: 1600, layer: xa, device: device)
+        let fxb = try frame(s, p, cam: flexTopLayerCam, n: 1600, layer: xb, device: device)
+        s.xrayOn = false
+        Self.dump(fxa, "T5_xray_1600_after.png")
+        Self.dump(fxb, "T5_xray_1600_before.png")
+        let changed = (0..<(1600 * 1600)).filter { FlexibleR7X1HostedTests.deltaE(fxa.px, fxb.px, $0) > 3 }.count
+        lines.append("X-ray n 1600: \(changed) px changed (\(String(format: "%.2f", 100 * Double(changed) / (1600.0 * 1600.0))) % of the frame)")
         print("FLEX-TL-T5 his Balanced pad, Finish None, Heat off, X-ray off (before = the mask as core gives it):\n  " + lines.joined(separator: "\n  "))
     }
 }
