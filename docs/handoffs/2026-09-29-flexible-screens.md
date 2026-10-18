@@ -1,6 +1,222 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · the H39 hotfix — no Regions icon on the Flexible stage, the printed part's shadow, and nothing asked of core without a face-prism (2026-10-17) (read this first)
+## ★ Round 7 · R7-D2 — Selections on the Flexible stage: your pick 2 (B1 with your three changes), the trash with a confirm and Undo, your four answers of 10-17 evening (2026-10-18) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, on top of `f43f56ef` (the H39 hotfix). Commits:
+- `87c9e3cd`: tests FIRST, against stubs (the red run is `round7/batch_d2/d2_red_run.txt`) — and condition (d)'s measurement.
+- `1c9ecdad`: the code, the five hooks, the look-and-fix passes.
+- `0c28e9bc`: the pictures (`look/`, `sides/`, `mockup/`), the other stages' comparison, the 16 hashes.
+- `c7dd03e6`: a follow-up the suite's review found — **a pick never outlives the stage**: leaving the Flexible stage drops the
+  pick (before, its chip waited and popped up when you came back), and a group picked on Topology is no longer taken as the
+  Flexible stage's pick. Test first (`round7/batch_d2/d2_followup_red_run.txt`: red before the fix).
+- `bef214c8`: one re-pin of our own test (R7-X1's VH1 red control — "Re-pins" below).
+- This section's commit.
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched**, twice:
+- at `1c9ecdad` (00:18): the app was not running, so nothing was terminated; `TopOpt.debug.dylib` sha256 `c0069c090439e7e9…`,
+  87 194 000 bytes, carries `flexible-chip-join`.
+- at `bef214c8` (02:59, **the build on the simulator now**): **the app WAS running** (`UIKitApplication:com.nadim.topopt`, PID
+  75080), so per the install rule it was **terminated first**, then installed, and **not launched** (not running after). The
+  installed `TopOpt.debug.dylib` is the built one (sha256 `5a6c4f39839bb602…`, 87 251 632 bytes) and carries
+  `flexible-chip-join` and the follow-up's `FlexibleMainStage.seenOwned` (nm).
+
+App only: no core file. #354 / main files: **five lines in WorkspacePlaceholder.swift** (the reviewer's approved list, table
+below). **ProjectModel.swift is untouched: H35 is HELD** (next paragraph).
+
+### ★ STOPPED on condition (d): "Lattice" on a new face waits for the reviewer
+The reviewer's condition (d) said a lattice-only group is OK "ONLY IF it changes nothing about a Topology run … if it does
+change a Topology run, STOP and tell the reviewer". I measured it before writing any code, on your pad
+(`round7/batch_d2/conditionD/`): a new group holding Face 4 with only a lattice role (no anchor, load or Protect).
+- **Without H35** its lattice role is dropped (#354's rule), the group is "Pending", and **Topology's Optimize is blocked**
+  ("finish the pending group"). The Topology job is unchanged.
+- **With H35** Optimize is allowed and nothing is anchored, loaded or protected, **but Topology's job is not the same**: its
+  lattice block gains Face 4's slab (3 479 → 4 374 bytes). Every face-prism of a Flexible project already rides Topology's
+  lattice block today (your Group C's do); this would be one more.
+So **H35 is not landed**, and on the new-face chip **[▦ Lattice] is greyed** with one line: "Lattice on a new face waits for
+a review". Everything else on the chip works. To get a lattice face now: **"Add to Group C as lattice"** (when a group was
+picked first), or **Protect** and then **▦ Lattice** on the face's chip (two taps). Posted to the reviewer with three options
+(comms 2026-10-18T02-40-59.241Z-362-7436ed); my recommendation is (A): land H35 and accept the face-prism in Topology's
+lattice block, as every other face-prism is. Nothing writes `latticeOnlyGroups` meanwhile (the field exists, optional,
+never encoded while empty — old projects open; tested).
+
+### What you will see now, in plain words
+**The Selections panel (left)** — #354's card is replaced on this stage by B1's quiet list (same place, same size, same
+minimise):
+- The header is only **"⌄ Selections 3"**. No Regions, no Keep clear, no kg | lbs, no eye, no All / Some / None. A tap
+  minimises it to the pill "› Selections 3".
+- **One line per group**: its colour, its name, its role icons (a Load shows its weight, read-only), a summary of its faces
+  ("▦ 2 · 25 mm", "▦ 2 · 20–25 mm", "▦ 1 ■ 1", "■ 1 · 10 mm", "—"), and a **trash** (your answer). A tap picks the group.
+- **Only the picked group opens**: "Depth mm" and "Expand mm", an **All N** line with the common value (or "mixed"), and one
+  line per face: its state icon, "Face 3", its **depth box**, its **expand box** and its **(i)** (your change b). Off faces
+  show "—". Each box is your number box: tap = keypad, drag up / down = scrub. A box edits AND picks its face.
+- It is as tall as its lines (it no longer stretches to an empty panel).
+- The Squish page's squeeze groups never appear here (the two lists stay separate; squish names stay squish names).
+
+**Tapping the part** (hook H22 — every edit-phase tap on this stage goes to the new router):
+- A face **no group holds** → **the new-face chip** at the face: "Face 2 · new" ✕, and — when you picked a group earlier
+  this session — **the FILLED blue button "Add to Group C as lattice"** with the depth under it ("25.0 mm deep, the same as
+  Face 3 + Face 5") — your change (c); then "Or start a new group:" and **[▦ Lattice] [Anchor] [Load] [Protect] [Keep
+  clear]**. A second free face tapped joins the chip ("Face 2 + Face 4 · new"); the same one again leaves it.
+- **Nothing is ever added, moved or removed by a tap.**
+  "On the Flexible screen you can't move a Topology piece by tapping it."
+  (the reviewer's sentence — condition (c); it is now true: #354's tap routers no longer run on this stage.)
+- A face **of a group** → **its chip**: the group's colour and name (tap to rename), its role (a tap opens Anchor / Load /
+  Protect / Keep clear), the **trash**, ✕; then "Face 3", its **(i)**, and **[▦ Lattice | ■ Solid | ⬚ Off]**. No grams
+  (your answer).
+- A tap on **empty space** closes the chip and creates nothing (hook H23).
+- **Anchor / Load / Protect / Keep clear** on a new face make a new group with the face Off (no lattice). Load says one
+  line: "Face 2 is a Load. Set its weight on the Squish page." (no keypad, no weight pill — your answer).
+- **Keep clear** on a group with lattice faces asks first: "Keep clear removes this lattice" [Cancel] [Keep clear]. If Keep
+  clear blocks a lattice, the chip says "Keep clear blocks lattice" [▦ Lattice instead]. A group locked on Topology says
+  "Locked on Topology" [Unlock] and takes no edit.
+- A new group never takes the face-prism's violet (existing purple groups are left alone).
+
+**Moving the chip** (your change a): drag it anywhere by any part of it (the grip on top says so); its leader line follows
+the face. Its spot is kept for that face for the session — another face gets its own spot, and coming back to the face
+brings the chip back where you left it. Let go over a panel and it slides to the nearest clear spot. It keeps off the
+Selections column, the capsule, the cube and the view icons (and their "Lattice ready" note), the legend, the corner pair
+and its open card, and the player.
+
+**The (i)** (your change b and your correction): **Cell, Density, Strut, Cells across** — the old card's own numbers for
+that face, at its depth — and one line: "The current preview's numbers at this depth." ("No numbers yet for this face"
+before the preview has them.)
+
+**The face-prism and its numbered handles** (H20 takes #354's numberless knobs off this stage):
+- The picked face (or every face of a picked group) shows its face-prism, and a **⇕ depth disc with its box "25.0 mm"** at the
+  prism's floor; on one face also a **↔ expand disc with "+0.0 mm"**. The box's number IS the list's number (one store):
+  type it (keypad) or drag the disc (it snaps to round millimetres and to the depth where the lattice certifies; 1–50 mm).
+- While a disc drags, X-ray turns on (the prism is inside the part) and goes back as it was when you let go. One drag = one
+  Undo.
+- The picked face wears a thin white edge light; no colour is painted on the model. The edge light and the leader never run
+  over the open Selections list, and a handle that would sit on it is left off (the list's boxes are right there).
+
+**The trash** (your answers: "Group trash should confirm deletion"; Undo brings it back): the trash on a group line or on the
+chip asks once, where you tapped it: "Delete Group C here and in Topology?" [Cancel] [Delete]. After [Delete] the message
+"Group C deleted here and in Topology" offers **[Undo]**, which puts the group back exactly — its faces, role, Protect,
+depths, and its place in the list.
+
+**Your four answers of 2026-10-17 evening**
+1. Face-prisms set and nothing squished (after Reset all + Exit) → the plain part and "Nothing to squish yet": **this was
+   already so** (measured on your pad; now pinned by a test).
+2. **X-ray on the main page shows every face-prism faint**, even before a pick; the picked group's bright.
+3. **The Squish page with [Prisms] and X-ray off keeps the part solid** (no 30 % see-through) until X-ray.
+4. **The face-prism glass over the open lattice is fainter** (glass, not an outline): 0.12 instead of #354's 0.60 for the
+   picked face-prism, 0.05 for the rest; away from the lattice it is #354's look as before.
+
+**D4 (the reviewer's ruling 5)**: a face whose face-prism cannot cut its lattice section (curved, hand-placed, non-convex)
+now says **"Curved lattice here · not yet"** on its Squish-page card, always (before: only a tap's toast).
+
+### The hooks (#354's WorkspacePlaceholder.swift — the approved list of 2026-10-14 19:45)
+| hook | line | anchor (the line before) | +a −r | gate |
+|---|---|---|---|---|
+| H20 | 1251 | `// ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.` | +0 −0 (one line edited) | `, !flexibleMain.owns(project, stage)` — #354's knobs off the Flexible stage; `!legendDrilledIn` kept |
+| H22 | 821 | `guard let m = viewerMesh else { return false }` (onPickPoint) | +1 | `flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp` → `flexibleMain.tapFace(…); return true` |
+| H23 | 886 | `onMiss: {` | +1 | `flexibleMain.owns(project, stage), !fullScreenPageUp` → `flexibleMain.missTap(); return` |
+| H25 | 9610 | `if selectionsCollapsed { latticePreviewNotice }` | +0 −0 (one line edited) | `flexibleMain.owns(project, stage), !fullScreenPageUp` → `FlexibleSelectionsList(…)`, else `selectionsLibraryCard` |
+| H32 | 1329 | `latticeEdgeLight` | +1 | `flexibleMain.owns(project, stage)` → `FlexibleOnModelLayer(…)` |
+| H35 | — | ProjectModel `latticeEligibleRoles()` | **HELD** | condition (d), above |
+| H39 | 9719 | (the H39 hotfix's) | kept | #354's card still draws on the Flexible stage in one state: the variant lattice page's library mount (`showLatticePage`, a full-screen page that H25's `!fullScreenPageUp` leaves to #354) — so H39 stays, as the ruling said |
+
+`git diff f43f56ef -- WorkspacePlaceholder.swift`: 5 insertions, 2 deletions — exactly these. `FlexibleRound7SelectionsHookTests`
+pins each once at its anchor with its gate and #354's next line; the gate removed from a copy turns it red; H35's absence and
+H39's presence are pinned too.
+
+### Your words → the fix → the test (tests FIRST at `87c9e3cd`; RED control inside each)
+| your words | the fix | pinned by (RED) |
+|---|---|---|
+| img1: "When a new face is selected, the pop-up … must always show up with a new face-selection." | H22 → `FlexibleFacePick` (a free face → the new-face chip; an owned face → its chip; a tap never writes a group) | `FlexibleFacePickTests` (RED: #354's LatticeLibraryTap.route grows Group C to [3, 4, 5]; TopologyPieceTap moves a free piece) · hosted S1 |
+| B1 + pick 2 (c): "make it more obvious that an 'Add to group C as lattice' is an obvious button" | `FlexibleJoinButton` — filled DS accent, white semibold, 48 tall, the button trait; writes the group's common depth and expand | `FlexibleFaceChipTests` (RED: the rejected outlined row) · `FlexibleFaceCommitTests` join · hosted S1 (full width, ≥ 44 tall; Face 4 joins at 25 mm, the chip stays) |
+| pick 2 (a): "move the modals around for each face by dragging" | the chip's drag (screen space, 8 pt slop, its spot written every frame, let go → nearest clear spot), kept per face | `FlexibleFaceChipTests` (the math; the gesture's wiring; RED: auto alone puts it back) · hosted S5 (a moved chip comes back where he left it; another face gets its own). An offscreen test cannot drive a SwiftUI drag — `drag_probe.txt` |
+| pick 2 (b) + correction: "The per-face (i) shows ONLY: Cell, Density, Strut, Cells across" | `FlexibleFaceStats` — #354's `LatticeRegionDrawer.make` for that face's card at its depth, his four rows; the caption | `FlexibleFaceChipTests` (RED: the full drawer has Hands over / As lattice / Saved) · hosted S4 |
+| img6: "Remove regions … Remove 'Keep Clear' at the top … a better designed way to set each face to be latticed/solid/off and have its depth/expand value" | H25 → `FlexibleSelectionsList` | `FlexibleSelectionsListTests` (RED: today's header carries Regions and Keep clear) |
+| img1: "The number on the face-prism should be tap to edit … they should *always* be equal" | H20 + `FlexibleLatticeHandles` (one store, one formatter) | `FlexibleMainPrismEqualityTests` (handle = list = drawn prism; 17.26 → "17.3 mm"; img2's Top picked: no 12.0 mm; RED: the prisms following the active group) · `FlexibleLatticeHandlesTests` (detents, the vertical fallback, 1–50, one Undo per drag, X-ray during it, the expand's negatives) |
+| your answers: a trash on main-page groups, "Group trash should confirm deletion", Undo restores | `FlexibleFaceCommits.delete` / `restore`, the confirm where the trash was tapped, the message's [Undo] | `FlexibleFaceCommitTests` (one step; restore exact after a background write — RED: performUndo then takes the write instead) · hosted S2 |
+| your answer: Load "NO weight pill … reword the Load toast" | `FlexibleSelectionsCopy.loadToast` | `FlexibleFaceCommitTests` |
+| your answer: Lattice on a new face = lattice only, no Protect | **HELD** (condition d) | `FlexibleLatticeOnlyGateTests` (the decode / re-encode; Reset all keeps the set; the STOP's facts) · `FlexibleFaceCommitTests` (RED: today's recipe sets Protect) |
+| 10-17 evening (2) X-ray, (3) Squish [Prisms], (4) fainter glass; (1) plain part | `volumes` / `prismAlphas`, `FlexibleStagePage.bodyAlpha` | `FlexibleR7EveningAnswersTests` (RED controls: X1's after-a-pick, X1's 30 %, M1's glass; (1) a positive control) |
+| ruling 5: D4 "must SAY so on screen" | the face card's line | `FlexibleR7EveningAnswersTests` D4 (his pad + a hand-placed face-prism over the Top) |
+
+**Test premises corrected after the red run** (said in the tests): the join's "one undo step" (the two expand writes before
+it are their own step); answer 1 was already true (its control became a positive control); the hosted drag became "a moved
+chip stays where he left it" (drag_probe.txt); `delete` returns what it took (for the exact [Undo]).
+
+### What looking at the pictures found, and fixed (before the commit)
+- The list cut "Face 3" to "…" and wrapped "All 2"; it stretched to an empty 420 pt panel → measured columns, as tall as its
+  lines.
+- The boxes read "25 mm" while the mockup reads "25.0 mm" → "25.0" / "+0.0" in the list and on the handles (one formatter).
+- The summary's ▦ drew as a grey square → the state icons.
+- After a join the list grew under the chip → the chip keeps off the whole Selections column (the mockup's rule).
+- At 11" landscape the chip sat on the "Lattice ready" note → the views row's note is a keep-out too.
+- The edge light and the leader ran across the open list; a handle sat on its boxes → clipped / left off there.
+- The trash's confirm showed twice (list and chip) and cut its question → once, where tapped, the question whole on its line.
+- img2's Top picked showed "All 1" → a one-face group picks its face.
+- **The trash's [Undo] did not bring Group C back on your pad**: the stage's own background writes after a delete (a re-opened
+  scene's section numbers) are undo steps too, and `performUndo` took that one → [Undo] now restores the deleted group
+  exactly.
+
+### Re-pins (our own tests only; each attributed in the test)
+- **`FlexibleR7X1VerifyHostedTests.testXrayWithHeatOnSeesTheLatticeAndItsHeatFromAbove`** (R7-X1 VERIFY's VH1 — ours), its
+  **red control only** (`bef214c8`). Your answers 2 and 4 put every face-prism's faint glass into X-ray, fainter over the walls
+  than without them, so under X1's old opaque lid the X-ray frame is no longer the lid-only frame. The suite measured the
+  control at wall edges 5.9 % (it asked < 5 %) and "differs from the lid" 82 % (it asked < 20 %). Now: in the shipping frame
+  the control pins the wall-edge measure (< 10 %; the test's own bar is 20 %), and X1's control as X1 measured it (no prism
+  before a pick: `controlXrayPickedOnly`) still holds both of its thresholds, unchanged. The shipping frame itself passes as
+  before: wall edges 62.1 %, differs 99.5 %, heated 96.8 % (bars 20 / 60 / 30 %).
+- Nothing else re-pinned; **no #354 test touched**. (The premises of D2's own new tests corrected after their red run are
+  listed above.)
+
+### The bytes and the other stages (condition e)
+- **Goldens (FlexibleAngledGoldenTests), 0 DIFFERS in both modes**, at `1c9ecdad` and again at `bef214c8`:
+  SWIFT_DETERMINISTIC_HASHING=1 38 identical; unseeded 32 identical + 1 PART-SKIP.
+- **The 16 stage-job hashes:** `round7/batch_d2/stage_job_hashes_d2.txt` (`1c9ecdad`) is byte-identical to H39's (whole file),
+  and the rerun at `bef214c8` is byte-identical to both.
+- **Topology, Structural, Aesthetic, Surface** (`FlexibleRound7OtherStagesProbe`, 13 frames, one environment, the five hooks
+  out then in): 12 identical; the structural Topology frame at 13" differs by 10 px in the load arrow's box — the same build
+  run again differs by 9 px there (the flicker R7-D1 and H39 recorded). `round7/batch_d2/other_stages/compare.txt`.
+- Every #354 test file is unchanged.
+
+### The pictures (`round7/batch_d2/`)
+- `look/`: your pad (a1Project(3) + your live lattice), the whole page hosted over the shipping renderer, at 13" and 11",
+  portrait and landscape: E01 at rest · E02 Face 3 tapped (chip M, the handles, Group C open in the list) · E03 Face 2 tapped
+  (the new-face chip, the filled "Add to Group C as lattice", [Lattice] held) · E04 joined (the chip stays on Face 2) · E05 the
+  (i)'s four numbers · E06 the trash's confirm · E07 deleted, the message with [Undo] · E08 [Undo]: Group C back · E09 a moved
+  chip and its leader · E10 X-ray, nothing picked: every face-prism faint · E11 the depth handle mid-drag (X-ray on, 18.0 in
+  the box and the list) · E12 img2's front camera with the Top picked: no 12.0 mm. Each size's log says where the chip landed
+  and "nothing touches" (0 touches at all four sizes).
+- `sides/`: ours beside the mockup's "Your pick" (rendered headlessly from the mockup, `mockup/`) at the same size and state.
+  (The mockup numbers its faces differently: its "Face 4" is your pad's Face 2.)
+- `conditionD/`: the measurement behind the STOP.
+
+### The runs (raw: `round7/batch_d2/d2_runs.txt`)
+- **The targeted suite at `1c9ecdad`**: 234 classes, 1 503 test cases: **1 409 passed, 90 skipped, 4 failed**. Three are known:
+  the refine line (FlexibleBatchNVerifyTests, 8 assertions), LatticeSimSolveTriggerTests (1), and the Play icon's ring
+  offscreen (FlexibleRound7ViewsHostedTests: M1's environmental TimelineView ring, 18 px; recorded in H39's and D1's runs).
+  **One is ours, caused by D2**: VH1's red control, re-pinned above. Chunk 5 died with signal 6 **after** all 59 of its test
+  cases had passed (at process exit); FlexibleLatticeSectionsTests rerun alone: 9 passed, no signal.
+- **After the follow-up and the re-pin**, each class alone (20 classes: every class that touches the pick or a stage change or
+  source-pins the two changed files, plus VH1 and the suite's other reds): all green except the known Play ring (20 px).
+- **Red runs**: `d2_red_run.txt` (the ten new classes against stubs, every one exit 1) and `d2_followup_red_run.txt` (2
+  failures before the fix).
+- **Goldens again at `bef214c8`**: 38 identical / 0 DIFFERS (deterministic), 32 identical / 0 DIFFERS / 1 PART-SKIP (unseeded).
+  **The 16 hashes at `bef214c8`**: byte-identical to `stage_job_hashes_d2.txt` and to H39's.
+- **iOS**: BUILD SUCCEEDED at `1c9ecdad` and at `bef214c8`; installed as above.
+
+### Not done, and why
+- **The lattice-only role (H35)**: STOPPED on condition (d) — above.
+- **The chip fading to 50 % during an orbit** (the plan): not built — the chip follows its face live (a moved one stays put).
+- **[Prisms]' read-only numbers** are drawn at each face-prism's floor (a tap picks that face), placed simply (no dashed leader
+  for a face turned away).
+- The (i) opened from the list does not move the pick to that face (it shows that face's numbers beside the list).
+- A moved chip's spot is kept for the session only (not saved with the project).
+
+### Questions
+1. **(Reviewer) condition (d)**: (A) land H35 and accept that a lattice-only face-prism rides Topology's lattice block like
+   every face-prism (my recommendation); (B) H35 plus a new #354 hook that leaves lattice-only groups out of the Topology run;
+   or (C) keep Protect behind [Lattice] until he decides (against his answer; not done).
+2. **(You)** Until then, is "Add to Group C as lattice" / "Protect then ▦ Lattice" a fine way to make a lattice face?
+3. **(You)** The trash's message stays 8 seconds with [Undo]. Long enough?
+
+## ★ Round 7 · the H39 hotfix — no Regions icon on the Flexible stage, the printed part's shadow, and nothing asked of core without a face-prism (2026-10-17) (the step before R7-D2 above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, on top of `a1e504a4` (the review of R7-D1). The reviewer's rulings of
 2026-10-17 20:25 + 20:36 (approved by you): ruling 1 (H39 and the Regions leak), ruling 4 (the contact-shadow hook, here H40)

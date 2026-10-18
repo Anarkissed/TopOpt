@@ -40,3 +40,82 @@ FLEX-R7D2-S1 13p chip M (612.0, 903.2901611328125, 404.0, 132.0) · chip N (553.
 FLEX-R7D2-S1 11p chip M (414.0, 791.4794921875, 404.0, 132.0) · chip N (414.0, 549.2468872070312, 404.0, 229.0) · join (426.0, 609.2468872070312, 380.0, 48.0)
 
 Test premises corrected after the red run (said in the tests): the join's ONE undo step (the two expand writes before it are their own step — sealed first); answer 1 of 2026-10-17 evening was ALREADY TRUE at HEAD (the red run passed its plain-part assertions; its control flag was dropped with the code it would have guarded — a POSITIVE control now: before Reset all the lattice is there to show); the hosted drag (an offscreen test cannot drive a SwiftUI drag — drag_probe.txt) became 'a moved chip stays where he left it for that face' + a source pin of the gesture; delete returns what it took (the [Undo] restores exactly).
+
+## 3. THE TARGETED SUITE at 1c9ecdad (2026-10-18 00:55–02:38): 234 classes (every Flexible* class, the classes that source-pin a touched file — WorkspacePlaceholder / ProjectModel pinners included —, the goldens, LatticeStaleTypeTests, the listed #354 classes), 20 chunks of 12, one process per chunk
+# swift test --skip-build --scratch-path /tmp/r7d-build --filter '\.(<12 classes>)/'; counts from Test Case lines
+=== chunk 1 exit 0 passed 70 failed 0 skipped 13 signal 0
+=== chunk 2 exit 1 passed 49 failed 1 skipped 13 signal 0
+=== chunk 3 exit 0 passed 72 failed 0 skipped 2 signal 0
+=== chunk 4 exit 0 passed 40 failed 0 skipped 3 signal 0
+=== chunk 5 exit 1 passed 57 failed 0 skipped 2 signal 1
+=== chunk 6 exit 0 passed 80 failed 0 skipped 0 signal 0
+=== chunk 7 exit 0 passed 72 failed 0 skipped 0 signal 0
+=== chunk 8 exit 0 passed 41 failed 0 skipped 9 signal 0
+=== chunk 9 exit 1 passed 51 failed 1 skipped 5 signal 0
+=== chunk 10 exit 0 passed 50 failed 0 skipped 17 signal 0
+=== chunk 11 exit 1 passed 51 failed 1 skipped 14 signal 0
+=== chunk 12 exit 0 passed 62 failed 0 skipped 2 signal 0
+=== chunk 13 exit 0 passed 50 failed 0 skipped 5 signal 0
+=== chunk 14 exit 0 passed 83 failed 0 skipped 1 signal 0
+=== chunk 15 exit 0 passed 66 failed 0 skipped 0 signal 0
+=== chunk 16 exit 0 passed 124 failed 0 skipped 1 signal 0
+=== chunk 17 exit 1 passed 79 failed 1 skipped 1 signal 0
+=== chunk 18 exit 0 passed 74 failed 0 skipped 0 signal 0
+=== chunk 19 exit 0 passed 152 failed 0 skipped 2 signal 0
+=== chunk 20 exit 0 passed 86 failed 0 skipped 0 signal 0
+TOTAL: 1503 test cases — 1409 passed, 90 skipped, 4 failed (13 assertion lines):
+  known: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (the refine line, x8 assertions)
+  known: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds (x1)
+  known: FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff (M1's environmental TimelineView ring offscreen: 18 px; rerun alone below: 20 px — the same as H39's and D1's runs)
+  OURS, caused by D2 (his answers 2 + 4): FlexibleR7X1VerifyHostedTests.testXrayWithHeatOnSeesTheLatticeAndItsHeatFromAbove — VH1's RED CONTROL (x2): under the opaque lid the X-ray frame now carries every face-prism's faint glass (fainter over the walls) → wall edges 5.9 % (was < 5 %), differs 82 % (was < 20 %). RE-PINNED at bef214c8 (attributed in the test); green below.
+  chunk 5: signal 6 AFTER every one of its 59 test cases reported passed ('Selected tests' passed 01:33:00.935; the process died at exit, its buffered prints cut) — FlexibleLatticeSectionsTests rerun alone below: 9 passed, no signal.
+  Every #354 test file unchanged (git diff f43f56ef..HEAD lists no #354 test file).
+raw assertion lines:
+  FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("18") is not greater than ("120") - ★ the sims running: an accent ring on t
+  LatticeStressTintTests.swift:195: error: -[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds] : XCTAssertTrue failed - ★ …and otherwise it actually runs
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is drawn whole (118.5 of 151.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is drawn whole (110.5 of 147.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is drawn whole (117.5 of 145.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn whole (117.5 of 128.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn whole (117.0 of 134.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn whole (118.5 of 133.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whole (145.5 of 151.0 pt)
+  FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole (144.0 of 147.0 pt)
+  FLEX-M2-JOB Send Group 3 only, Face 5 resting: +6 declarations [2000003, 2000004,error: Process '/Applications/Xcode.app/Contents/Developer/usr/bin/xctest -XCTest TopOptFlowsTests.FlexibleInPassCompositeTests/testGhostDoesNotHideTheLattice,TopOptFlowsTests.Fle
+  FlexibleR7X1VerifyHostedTests.swift:112: error: -[TopOptFlowsTests.FlexibleR7X1VerifyHostedTests testXrayWithHeatOnSeesTheLatticeAndItsHeatFromAbove] : XCTAssertLessThan failed: ("0.059478898565031905") is not less than ("0.05") - ★ RED CONTROL: the opaque h
+  FlexibleR7X1VerifyHostedTests.swift:113: error: -[TopOptFlowsTests.FlexibleR7X1VerifyHostedTests testXrayWithHeatOnSeesTheLatticeAndItsHeatFromAbove] : XCTAssertLessThan failed: ("0.8210132919648838") is not less than ("0.2") - ★ RED CONTROL: …its frame th
+
+## 4. THE FOLLOW-UP (a pick never outlives the stage) — tests first
+RED at 1c9ecdad's code (d2_followup_red_run.txt): testAPickNeverOutlivesTheStage — 2 failures ('★ leaving the stage drops the pick', '★ a group picked on Topology is not the stage's pick'); the remembered join group and the positive control passed.
+GREEN at c7dd03e6 + the VH1 re-pin (bef214c8), each class alone:
+=== exit 0 FlexibleMainPrismEqualityTests 02:40:50 passed 3 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleFacePickTests 02:40:53 passed 7 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleFaceCommitTests 02:40:55 passed 9 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleChromeStateTests 02:41:04 passed 4 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleLatticeHandlesTests 02:41:08 passed 6 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleMainStageTests 02:41:28 passed 8 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleMainPageRound4VerifyTests 02:42:42 passed 9 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleR7M1VerifyTests 02:43:11 passed 8 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleR7EveningAnswersTests 02:43:20 passed 5 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleRound7SelectionsHookTests 02:43:24 passed 4 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleBatchBReviewUXTests 02:43:27 passed 13 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleRound7ScreenHookTests 02:43:41 passed 4 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleRound6Tests 02:44:18 passed 11 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleSquishTests 02:44:23 passed 11 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleH39HostedTests 02:45:23 passed 1 failed 0 skipped 0 signal 0
+=== exit 0 SurfaceStageTests 02:45:25 passed 14 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleRound7SelectionsHostedTests 02:47:34 passed 5 failed 0 skipped 0 signal 0
+=== exit 0 FlexibleR7X1VerifyHostedTests 02:51:06 passed 2 failed 0 skipped 0 signal 0
+=== exit 1 FlexibleRound7ViewsHostedTests 02:55:59 passed 11 failed 1 skipped 0 signal 0
+=== exit 0 FlexibleLatticeSectionsTests 02:56:38 passed 9 failed 0 skipped 0 signal 0
+(FlexibleRound7ViewsHostedTests' one failure is the known Play ring above: 'ring 20 px'.)
+FLEX-R7X1V-H1 X-ray + Heat, img5 top, inside the strips: wall edges 62.1 % of the pixels (the lid alone 5.9 %), the frame differs from the lid's at 99.5 %, walls heated 96.8 % (vs Heat off) · Group C picked: wall edges 58.9 % · control (opaque lid): wall edges 5.9 %, differs 82.1 % · control with X1's prisms: wall edges 3.6 %, differs 3.2 %
+
+## 5. GOLDENS (FlexibleAngledGoldenTests) and the 16 STAGE-JOB HASHES
+at 1c9ecdad (00:52): SWIFT_DETERMINISTIC_HASHING=1: 38 identical, 0 DIFFERS, 0 PART-SKIP (13 tests, 0 failures) · unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP (13 tests, 0 failures)
+at bef214c8 (02:58): SWIFT_DETERMINISTIC_HASHING=1: 38 identical, 0 DIFFERS, 0 PART-SKIP (13 tests, 0 failures) · unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP (13 tests, 0 failures)
+stage_job_hashes.sh (angled_presses/, SWIFT_TEST_ARGS='--scratch-path /tmp/r7d-build'): at 1c9ecdad → stage_job_hashes_d2.txt; at bef214c8 → byte-identical to stage_job_hashes_d2.txt AND to round7/batch_h39/stage_job_hashes_h39.txt (cmp, whole file)
+
+## 6. iOS (xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-… -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build)
+at 1c9ecdad: BUILD SUCCEEDED; app not running (launchctl), installed 00:18, not launched; TopOpt.debug.dylib sha256 c0069c090439e7e9…, 87 194 000 bytes; carries 'flexible-chip-join'
+at bef214c8: BUILD SUCCEEDED; the app WAS running (UIKitApplication:com.nadim.topopt, PID 75080) → xcrun simctl terminate (rc 0), then install (rc 0), NOT launched; installed TopOpt.debug.dylib sha256 5a6c4f39839bb602…, 87 251 632 bytes, 02:59 = the built one; carries 'flexible-chip-join' and the follow-up's symbol FlexibleMainStage.seenOwned (nm); launchctl after: not running
