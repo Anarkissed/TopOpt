@@ -40,5 +40,10 @@ public final class FlexibleChromeState: ObservableObject {
     }
 
     /// D2's face chip may show: nothing else is open (the chip itself, or the keypad it opened).
-    public var allowsFaceChip: Bool { open == nil || open == .faceChip || open == .keypad }
+    public var allowsFaceChip: Bool {
+        if Self.controlChipOutsideTheRule { return true }
+        return open == nil || open == .faceChip || open == .keypad
+    }
+    /// ★ ROUND 7, R7-D3: test control only — the chip outside the one-card rule (the tray and the chip both up).
+    nonisolated(unsafe) static var controlChipOutsideTheRule = false
 }

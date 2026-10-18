@@ -77,6 +77,9 @@ public struct FlexibleSelectionsList: View {
     static let lineHeight: CGFloat = 44
     static let captionsHeight: CGFloat = 20
     static let maxListHeight: CGFloat = 420
+    /// ★ R7-D3: the most the open list draws (its header, the divider, 420 pt of lines) — the face chip's second tier keeps out
+    /// of the list's whole reach (FlexibleFaceChipLayout.listReach).
+    static let maxDrawnHeight: CGFloat = lineHeight + 1 + maxListHeight + 4
     @State private var contentHeight: CGFloat = 0
 
     private var groups: [SelectionGroup] { project.selection.groups }

@@ -364,18 +364,17 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
             let row = FlexibleMainViewToggles.rowFrame(viewport: v), note = FlexibleMainViewToggles.noteFrame(viewport: v)
             let frame = FlexibleMainViewToggles.frame(viewport: v)
             // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row of six 44 pt icons on one line): where the row leaves
-            // less than the note's 180 pt beside it (11" portrait, and the 820 pt pad), the note sits UNDER the row's right end,
-            // whole; it still costs the legends nothing (below). Was: beside the row at every size.
-            let under = name == "11p" || name == "11p820"
-            if under {
-                XCTAssertEqual(note.minY, row.maxY + DS.Space.s, accuracy: 0.5, "under the row at \(name)")
-                XCTAssertEqual(note.maxX, row.maxX, accuracy: 0.5, "on the row's right edge at \(name)")
-            } else {
-                XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
-                XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
-            }
+            // less than the note's 180 pt beside it (11" portrait, and the 820 pt pad), the note sat UNDER the row's right end.
+            // ★ RE-PINNED (round 7, R7-D3 — the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at
+            // 11" portrait" fixed before D3 is done): beside the row on its line at EVERY size again — where the left panel's
+            // column leaves too little, over that column's empty top (the open panel never rises above 2 × noteTop); it still
+            // costs the legends nothing (below). Was (R7-D1): under the row at 11p and 11p820.
+            let under = false
+            XCTAssertEqual(note.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
+            XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "left of the three buttons at \(name)")
             XCTAssertGreaterThanOrEqual(note.width, 180, "room for 'Lattice ready · Show' at \(name)")
-            XCTAssertFalse(note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)), "clear of the left panel at \(name)")
+            XCTAssertTrue(!note.intersects(FlexibleMainLegendLayout.leftStrip(viewport: v)) || note.maxY < FlexibleMainViewToggles.leftPanelHighestTop,
+                          "clear of the left panel (or above its highest reach) at \(name)")
             XCTAssertTrue(frame.contains(note))
             // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's settings' line is
             // gone — the NOTE costs the legends nothing again: the keep-out ends where the row ends, and the legends are

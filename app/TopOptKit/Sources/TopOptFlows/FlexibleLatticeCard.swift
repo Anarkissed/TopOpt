@@ -50,6 +50,18 @@ public enum FlexibleLatticeCard {
         return line.count <= 44 ? line : parts.joined(separator: " \u{00B7} ")
     }
 
+    /// ★ ROUND 7, R7-D3: the card offers [Send to core] — on Ready, and on a Preview with no hold (batch E's advisory: a
+    /// pressed face with no lattice under it still SENDS) — never while it sends. ONE rule for the button and the summary.
+    @MainActor static func offersSend(state: FlexibleLatticeButton.State, run: FlexibleCoreRun) -> Bool {
+        (state == .ready || (state == .preview && run.hold == nil)) && !run.isSending
+    }
+    /// ★ ROUND 7, R7-D3 (the reviewer's ruling 3 of 2026-10-17: "REQUIRED before D3 is done: the card's step 2 shows what goes
+    /// to core ('Group 1 · 22 lb · 1 face · bead 0.45 mm')"): the job's line above EVERY [Send to core] the card offers — D1's
+    /// review put it on Ready only, so a Preview that sends (batch E's advisory) sent without saying what. RED at 0e66bf47.
+    @MainActor static func shownSummary(state: FlexibleLatticeButton.State, run: FlexibleCoreRun, summary: () -> String?) -> String? {
+        offersSend(state: state, run: run) ? summary() : nil
+    }
+
     /// ① Preview's line from the face-prisms the job sends: ★ the review of R7-D1 — named as Selections names them ("Face 3 +
     /// Face 5", the mockup's), the count past two (one line), a split piece by count.
     static func previewLine(includes inc: [LatticeRegionSpec]) -> String {
@@ -295,8 +307,9 @@ struct FlexibleLatticeCardView: View {
             }
             if !FlexibleLatticeCard.controlDropsHoldNote { FlexibleExportRows.HoldNote(run: run, size: 13) }
             FlexibleExportRows.FixRow(run: run, compact: true)
-            // ★ the review of R7-D1: Ready says what goes to core, above [Send to core] (the mockup's line)
-            if state == .ready, let summary, !run.isSending {
+            // ★ the review of R7-D1: Ready says what goes to core, above [Send to core] (the mockup's line); ★ R7-D3: above EVERY
+            // [Send to core] the card offers (FlexibleLatticeCard.offersSend — the button below asks the same rule)
+            if FlexibleLatticeCard.offersSend(state: state, run: run), let summary {
                 Text(summary).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
                     .saidWhole(summary, minScale: 0.85)
@@ -315,7 +328,7 @@ struct FlexibleLatticeCardView: View {
                 .said(FlexibleLatticeCard.sendAgainTitle)
                 .accessibilityIdentifier("flexible-card-send-again")
             }
-            if (state == .ready || (state == .preview && run.hold == nil)) && !run.isSending {
+            if FlexibleLatticeCard.offersSend(state: state, run: run) {
                 Button(action: send) {
                     Text("Send to core").font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(FlexibleStageStyle.onAccent)

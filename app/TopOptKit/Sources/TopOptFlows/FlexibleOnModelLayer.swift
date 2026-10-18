@@ -84,7 +84,7 @@ public struct FlexibleOnModelLayer: View {
                         .highPriorityGesture(chipDragGesture(scope, placed: placed.rect, viewport: v))
                         .opacity(chipGesture ? 0.92 : 1)
                         .onChange(of: chipGesture) { live in
-                            if !live { finishChipDrag(scope, viewport: v, keepOut: placed.keepOut) }
+                            if !live { finishChipDrag(scope, viewport: v, tiers: placed.tiers) }
                         }
                 }
                 if let frame, main.prismsOn, chrome.allowsFaceChip || chrome.open == nil { prismNumbers(scope, frame: frame, origin: origin, viewport: v) }
@@ -222,7 +222,7 @@ public struct FlexibleOnModelLayer: View {
 
     // MARK: the chip's spot
 
-    private struct Placed { let rect: CGRect; let targets: [CGPoint]; let keepOut: [CGRect] }
+    private struct Placed { let rect: CGRect; let targets: [CGPoint]; let keepOut: [CGRect]; var tiers: [[CGRect]] = [] }
 
     private func place(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> Placed {
         let kind = FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup)
@@ -230,6 +230,14 @@ public struct FlexibleOnModelLayer: View {
         if let k = scope.chipKey, chipMeasuredKey == k, chipMeasuredSize.height > size.height { size.height = chipMeasuredSize.height }
         let pts = targets(scope).compactMap { local(frame.project($0), origin) }
         let keep = keepOuts(scope, frame: frame, origin: origin, viewport: v)
+        // ★ R7-D3: where nothing is clear of the list's whole column (the mini in portrait), the list's whole reach decides — then
+        // without the face's own handles (the chip may cover its own handles, never the page's chrome) — then the list as drawn
+        // (the mini's tall new-face chip, 229 pt, fits neither above nor below the reach; its list does not grow under a new face)
+        let tiers: [[CGRect]] = [keep] + (geometry.selectionsFrame == nil ? [] : [
+            keepOuts(scope, frame: frame, origin: origin, viewport: v, listColumn: false, listReach: true),
+            keepOuts(scope, frame: frame, origin: origin, viewport: v, listColumn: false, listReach: true, ownHandles: false),
+            keepOuts(scope, frame: frame, origin: origin, viewport: v, listColumn: false, ownHandles: false),
+        ])
         let anchor: CGPoint? = pts.isEmpty ? nil : CGPoint(x: pts.map(\.x).reduce(0, +) / CGFloat(pts.count),
                                                          y: pts.map(\.y).reduce(0, +) / CGFloat(pts.count))
         var r: CGRect
@@ -240,10 +248,10 @@ public struct FlexibleOnModelLayer: View {
             // front): the automatic spot also keeps off the lit faces' outline on screen — a drag may put it anywhere
             let face = Self.outlineBounds(FlexibleFaceOutline.edges(faces: litFaces(scope), mesh: project.viewerMesh), frame: frame)
                 .map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
-            r = FlexibleFaceChipLayout.auto(size: size, anchor: anchor, viewport: v, keepOut: keep,
+            r = FlexibleFaceChipLayout.auto(size: size, anchor: anchor, viewport: v, tiers: tiers,
                                             soft: FlexibleFaceChipLayout.faceKeepOut(face, viewport: v))
         }
-        return Placed(rect: r, targets: pts, keepOut: keep)
+        return Placed(rect: r, targets: pts, keepOut: keep, tiers: tiers)
     }
 
     private func noteChip(_ scope: FlexibleFaceScope, _ s: CGSize) {
@@ -253,14 +261,16 @@ public struct FlexibleOnModelLayer: View {
     }
 
     private func keepOuts(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize,
-                          listColumn: Bool = true, ownHandles: Bool = true) -> [CGRect] {
+                          listColumn: Bool = true, listReach: Bool = false, ownHandles: Bool = true) -> [CGRect] {
         // ★ LOOKED AT (13" portrait: after a join the list grew under a chip placed against its old frame): while the list is
         // open the whole left panel column is kept clear (the mockup's own rule), the measured pill while it is minimised
         // ★ the review of R7-D2: [Prisms]' small numbers keep off the list as it is drawn (`listColumn: false` — the whole column
         // dropped Face 5's number at 11" portrait, though it sat above the list)
         let measured = geometry.selectionsFrame.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
-        let sel: CGRect? = listColumn && (measured.map { $0.height > FlexibleChromeLayout.selectionsPillHeight + 4 } ?? true)
-            ? FlexibleFaceChipLayout.selectionsColumn(viewport: v) : measured
+        let open = measured.map { $0.height > FlexibleChromeLayout.selectionsPillHeight + 4 } ?? true
+        // ★ R7-D3: the chip's second tier keeps out of the open list's whole reach (a measure lags a frame as the list grows)
+        let sel: CGRect? = listColumn && open ? FlexibleFaceChipLayout.selectionsColumn(viewport: v)
+            : (listReach && open ? measured.map { FlexibleFaceChipLayout.listReach(measured: $0, viewport: v) } : measured)
         let legend = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)?.frame
         let panel = FlexibleMainPlayerSlot.openPanel(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
         let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
@@ -280,11 +290,11 @@ public struct FlexibleOnModelLayer: View {
     }
 
     /// The drag is over (ended or cancelled): let go over a keep-out, the chip slides to the nearest clear spot.
-    private func finishChipDrag(_ scope: FlexibleFaceScope, viewport v: CGSize, keepOut: [CGRect]) {
+    private func finishChipDrag(_ scope: FlexibleFaceScope, viewport v: CGSize, tiers: [[CGRect]]) {
         defer { dragAnchor = nil }
         guard dragAnchor != nil, let key = scope.chipKey, let spot = ui.spots[key] else { return }
         let size = FlexibleFaceChipLayout.size(FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup))
-        ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, keepOut: keepOut).origin
+        ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, tiers: tiers).origin   // ★ R7-D3: the tiers
     }
 
     // MARK: the leader
@@ -559,3 +569,4 @@ enum FlexiblePrismNumbers {
         return out
     }
 }
+

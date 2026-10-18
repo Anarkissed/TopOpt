@@ -374,14 +374,11 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
             // ★ RE-PINNED (R7-V, his 2026-10-14 words: "Remove the two full worded view icons"): batch V's settings left the
             // row's line — the note is beside the row again, left of it
             let row = FlexibleMainViewToggles.rowFrame(viewport: v), right = row.minX
-            if name == "11p" {
-                // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the
-                // row leaves too little beside it, so the note sits UNDER the row's right end, whole. Was: beside it.
-                XCTAssertEqual(n.minY, row.maxY + DS.Space.s, accuracy: 0.5, "11p: under the row")
-                XCTAssertEqual(n.maxX, row.maxX, accuracy: 0.5, "11p: on the row's right edge")
-            } else {
-                XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it")
-            }
+            // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the note
+            // sat UNDER the row's right end. ★ RE-PINNED (round 7, R7-D3 — the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at 11\" portrait" fixed before D3 is done): beside the row, left of it, at every size — at 11"
+            // portrait over the left column's empty top. Was (R7-D1): under the row there.
+            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it at \(name)")
+            XCTAssertEqual(n.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }

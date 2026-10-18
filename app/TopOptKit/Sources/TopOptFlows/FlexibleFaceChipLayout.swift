@@ -42,6 +42,17 @@ public enum FlexibleFaceChipLayout {
         return CGRect(x: 0, y: top, width: PageChrome.edge + PageChrome.panelWidth, height: max(0, v.height - top))
     }
 
+    /// ★ ROUND 7, R7-D3: the open list's whole REACH — it grows about its centre (PageLeftModal centres it) up to its header and
+    /// 420 pt of lines, never above 2 × noteTop — from ANY measure of it (its centre does not move as a group opens). The chip's
+    /// second tier (the mini in portrait): a measure taken before Group C opened under a pick is stale for a frame (the list
+    /// notes its frame asynchronously) — its reach never is.
+    public static func listReach(measured m: CGRect, viewport v: CGSize) -> CGRect {
+        let maxH = FlexibleSelectionsList.maxDrawnHeight
+        let top = min(m.minY, max(FlexibleMainViewToggles.leftPanelHighestTop, m.midY - maxH / 2))
+        let bottom = max(m.maxY, min(v.height - PageChrome.edge, max(m.midY + maxH / 2, top + maxH)))
+        return CGRect(x: 0, y: top, width: PageChrome.edge + PageChrome.panelWidth, height: max(0, bottom - top))
+    }
+
     /// The top-centre dock: under the name row and the capsule.
     public static func dockTop(_ v: CGSize) -> CGFloat { FlexibleChromeLayout.capsuleTop + FlexibleChromeLayout.capsuleHeight + PageChrome.gap }
 
@@ -138,6 +149,42 @@ public enum FlexibleFaceChipLayout {
             if inside(r, v), !hits(r, all) { return r }
         }
         return auto(size: s, anchor: anchor, viewport: v, keepOut: keepOut)
+    }
+
+    /// ★ ROUND 7, R7-D3 (found by the integration test, the mini in portrait — 744 pt wide): the 404 pt chip never fits beside
+    /// the open list's 372 pt column, so NOTHING was clear — the automatic spot fell back onto the views row and the cube, and a
+    /// chip let go on the corner pair stayed on it. The whole column stays the first wish; where nothing is clear of it,
+    /// `fallback` (the same keep-outs with the list AS DRAWN) decides — above or below the list, never on it.
+    public static func auto(size s: CGSize, anchor: CGPoint?, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?, soft: CGRect? = nil) -> CGRect {
+        auto(size: s, anchor: anchor, viewport: v, tiers: [keepOut] + (fallback.map { [$0] } ?? []), soft: soft)
+    }
+    /// ★ R7-D3: the keep-outs in TIERS, the first wish first — the first tier with a clear spot decides; none clear: the first
+    /// tier's own answer (today's). The layer's tiers: the list's whole column + the face's own handles → the list's whole
+    /// reach + its handles → the reach alone (on the mini in portrait the picked face's handles took the one free band below
+    /// the list: the chip may cover its own handles, never the page's chrome) → the list as drawn (the mini's 229 pt new-face
+    /// chip fits neither above nor below the reach).
+    public static func auto(size s: CGSize, anchor: CGPoint?, viewport v: CGSize, tiers: [[CGRect]], soft: CGRect? = nil) -> CGRect {
+        var first: CGRect?
+        for k in tiers {
+            let r = auto(size: s, anchor: anchor, viewport: v, keepOut: k, soft: soft)
+            if inside(r, v), !hits(r, k) { return r }
+            if first == nil { first = r }
+        }
+        return first ?? clamped(CGRect(origin: .zero, size: s), viewport: v)
+    }
+    /// ★ R7-D3: a let-go with the same fallback (on the mini in portrait it stayed on the pair).
+    public static func released(_ r: CGRect, viewport v: CGSize, keepOut: [CGRect], fallback: [CGRect]?) -> CGRect {
+        released(r, viewport: v, tiers: [keepOut] + (fallback.map { [$0] } ?? []))
+    }
+    /// ★ R7-D3: a let-go over the same tiers.
+    public static func released(_ r: CGRect, viewport v: CGSize, tiers: [[CGRect]]) -> CGRect {
+        var first: CGRect?
+        for k in tiers {
+            let a = released(r, viewport: v, keepOut: k)
+            if !hits(a, k) { return a }
+            if first == nil { first = a }
+        }
+        return first ?? clamped(r, viewport: v)
     }
 
     /// Where a chip that started at `anchor` is while a finger has moved it by `translation` (clamped 16 pt inside).

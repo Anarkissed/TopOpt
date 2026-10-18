@@ -57,6 +57,17 @@ public struct FlexibleCornerPair: View {
         self._geometry = ObservedObject(wrappedValue: main.chromeGeometry)
     }
 
+    /// ★ ROUND 7, R7-D3 (the plan's integration rule: "Gravity setup folds everything and clears the pick"): the tray's
+    /// Gravity [Change] as the pair hands it — the stage drops the pick first (gravity setup's taps are #354's gravity picker:
+    /// H22 is gated on the edit phase, so a chip left over would float over that picker and come back on its own), then
+    /// #354's own gravity setup (H30's closure). RED at 0e66bf47: the closure alone — Face 3's chip came back over the picker.
+    @MainActor static func gravityAction(main: FlexibleMainStage, then changeGravity: @escaping () -> Void) -> () -> Void {
+        { [weak main] in
+            main?.gravitySetupStarts()
+            changeGravity()
+        }
+    }
+
     /// Test control only: the panels placed IN layout (the bar would measure them — the defect the overlay avoids).
     @MainActor static var controlPanelInLayout = false
     /// Test control only: the blocker rule fed the status its onChange closure captured (the first build: no pop on his pad).
@@ -110,7 +121,7 @@ public struct FlexibleCornerPair: View {
         switch chrome.open {
         case .setup:
             FlexibleCornerPairStyle.panel(width: w, maxHeight: maxH) {
-                FlexibleSetupTray(project: project, tray: tray, chrome: chrome, app: app, changeGravity: changeGravity,
+                FlexibleSetupTray(project: project, tray: tray, chrome: chrome, app: app, changeGravity: Self.gravityAction(main: main, then: changeGravity),
                                   narrow: FlexibleChromeLayout.panelIsNarrow(w))
             }
             .background(FlexibleCornerPairStyle.publish("setupTray"))
@@ -192,7 +203,7 @@ private struct FlexibleLatticeCardMount: View {
                                 close: { chrome.close(.latticeCard) },
                                 send: { main.sendFromCard() },
                                 showFix: { chrome.show(.callout) },
-                                summary: st == .ready ? FlexibleLatticeCard.jobSummary(model: model) : nil,
+                                summary: FlexibleLatticeCard.shownSummary(state: st, run: run, summary: { FlexibleLatticeCard.jobSummary(model: model) }),   // ★ R7-D3: above every send
                                 sendAgain: { main.resendFromCard() },
                                 fixButtons: fixes)
     }
@@ -306,3 +317,4 @@ enum FlexibleCornerPairStyle {
             .allowsHitTesting(false)
     }
 }
+

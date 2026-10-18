@@ -45,6 +45,14 @@ extension FlexibleMainStage {
         if s != facePick { facePick = s }
     }
 
+    /// ★ ROUND 7, R7-D3: gravity setup starts (the tray's Gravity [Change]) — every card folds and the pick goes (its taps
+    /// are #354's gravity picker until it is done; the join's group is remembered, as when leaving the stage).
+    func gravitySetupStarts() {
+        chrome.foldAll()
+        faceUI.closeTransient()
+        if !facePick.scope.isNone { var s = facePick; s.scope = .none; facePick = s }
+    }
+
     /// The list's group line (GROUP scope) — ★ LOOKED AT (img2's front camera, the Top picked: chip G read "All 1"): a group of
     /// ONE face picks that face.
     func pickGroup(_ gid: UUID, project: ProjectModel) {

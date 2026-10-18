@@ -172,13 +172,28 @@ extension FlexibleMainViewToggles {
     /// of the left panel (inside `frame`, which every legend and the player keep out of — and
     /// which now ends where the row ends, so the note costs the legends nothing).
     /// (★ R7-V: batch V's two worded view settings, which sat between it and the buttons in landscape, are gone.)
+    /// ★ R7-D3: the highest the open left panel's top ever reaches (PageLeftModal: padded noteTop, then a spacer of at least
+    /// noteTop above the panel).
+    public static var leftPanelHighestTop: CGFloat { 2 * PageChrome.noteTop }
+
     public static func noteFrame(viewport: CGSize) -> CGRect {
         let row = rowFrame(viewport: viewport)
         let right = row.minX
         let room = right - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
         // ★ R7-D1: one line of six 44 pt icons leaves too little beside it on a narrow pad (11" portrait) — the note goes
         // UNDER the row's right end there, whole, instead of squeezed beside it
+        // ★ ROUND 7, R7-D3 (the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at 11" portrait"
+        // — REQUIRED before D3 is done): the left panel's column is reserved its whole height above, yet the open panel never
+        // rises above PageLeftModal's 2 × noteTop (its top padding, then a spacer of at least noteTop) — on the row's line that
+        // column is empty. So the note stays BESIDE the icons there, over the column's empty top, whole; it goes under the row
+        // only where even that is too narrow. RED at 0e66bf47 (FlexibleRound7DesignIntegrationTests I5): under the row at 11".
         if room < FlexibleMainNote.minWidth {
+            let open = right - DS.Space.s - PageChrome.edge
+            let y = row.midY - FlexibleMainNote.height / 2
+            if y + FlexibleMainNote.height < leftPanelHighestTop, open >= FlexibleMainNote.minWidth {
+                let w = min(FlexibleMainNote.width, open)
+                return CGRect(x: right - DS.Space.s - w, y: y, width: w, height: FlexibleMainNote.height)
+            }
             let w = min(FlexibleMainNote.width, viewport.width - 2 * PageChrome.edge)
             return CGRect(x: row.maxX - w, y: row.maxY + DS.Space.s, width: w, height: FlexibleMainNote.height)
         }
@@ -214,6 +229,10 @@ struct FlexibleMainNoteView: View {
                 }
             }
             .latticeBandChipKeepOut()
+            // ★ R7-D3: the note as drawn (the hosted tests and the evidence read it)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainNote": g.frame(in: .global)])
+            }.allowsHitTesting(false))
             .frame(maxWidth: maxWidth, alignment: .trailing)
             .transition(.opacity)
         }

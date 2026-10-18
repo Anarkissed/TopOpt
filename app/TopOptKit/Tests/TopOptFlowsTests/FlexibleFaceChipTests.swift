@@ -71,7 +71,10 @@ final class FlexibleFaceChipTests: XCTestCase {
         XCTAssertTrue(src.contains(".highPriorityGesture(chipDragGesture("), "★ the chip's drag wins (it never orbits the camera)")
         XCTAssertTrue(src.contains("ui.spots[key] = FlexibleFaceChipLayout.dragged(anchor: dragAnchor ?? placed.origin, translation: d.translation,"),
                       "★ the spot is written every frame (a cancelled drag keeps where it got to)")
-        XCTAssertTrue(src.contains("ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, keepOut: keepOut).origin"),
+        // ★ RE-PINNED (round 7, R7-D3 — found by FlexibleRound7DesignIntegrationTests I2: on the mini in portrait nothing is clear of
+        // the list's whole column, so a let-go stayed on the corner pair): the let-go searches the keep-out TIERS (the column,
+        // then the list's whole reach, then without the face's own handles). Was: `keepOut: keepOut` alone.
+        XCTAssertTrue(src.contains("ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, tiers: tiers).origin"),
                       "★ let go: the nearest clear spot")
         let r = FlexibleFaceChipLayout.dragged(anchor: CGPoint(x: 500, y: 600), translation: CGSize(width: -120, height: 160),
                                                size: CGSize(width: 404, height: 150), viewport: Self.pad13p)
