@@ -192,6 +192,10 @@ final class FlexibleGroupPaletteHostedTests: XCTestCase {
         let file = ImportedFile(name: "octagonal_prism.stl", path: path.path, triangleCount: mesh.triangleCount,
                                 faceCount: mesh.faceCount, watertight: mesh.watertight, pseudoFaces: mesh.pseudoFaces)
         let pm = ProjectModel(id: UUID(), name: "prism", material: "ABS", process: .fdm, importedFile: file, importedMesh: mesh)
+        // ★ RE-PINNED (round 7, the H39 hotfix — the reviewer's ruling 6 of 2026-10-17: the Flexible stage asks core nothing
+        // without a face-prism): this synthetic prism sets none and the test waits for core's stacks and designs — its stage
+        // models ask core as before the ruling (a test control; the fresh id keeps it to this project)
+        FlexibleStageModel.controlAskCoreWithoutPrismFor.insert(pm.id)
         return (pm, dir)
     }
 

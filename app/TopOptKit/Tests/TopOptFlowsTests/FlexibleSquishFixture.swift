@@ -91,6 +91,10 @@ enum FlexibleSquishFixture {
                                 faceCount: m.faceCount, watertight: m.watertight, pseudoFaces: m.pseudoFaces)
         let pm = ProjectModel(id: UUID(), name: "fixture", material: "ABS", process: .fdm, importedFile: file, importedMesh: m)
         pm.lattice.flexible = FlexibleStageSettings(materialID: "varioshore_tpu")
+        // ★ RE-PINNED (round 7, the H39 hotfix — ruling 6: the Flexible stage asks core nothing without a face-prism): these
+        // synthetic parts set none, and the tests on them pin core's own stacks, designs and fields — their stage models ask
+        // core as before the ruling (a test control; the fresh id keeps it to this project)
+        FlexibleStageModel.controlAskCoreWithoutPrismFor.insert(pm.id)
         return pm
     }
 

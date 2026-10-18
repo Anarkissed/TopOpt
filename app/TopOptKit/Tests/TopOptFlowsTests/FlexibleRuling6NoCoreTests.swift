@@ -118,6 +118,32 @@ final class FlexibleRuling6NoCoreTests: XCTestCase {
         print("FLEX-RULING6-N2 opened \(door.opened) asked \(door.asked) (unchanged after the last face-prism went)")
     }
 
+    // MARK: - N4: a hold, then an open at once — the open's scene stays (found by the suite, a3784168)
+
+    /// The suite's FlexibleFEFieldTests (a3784168): the stage held (no face-prism), the fixture set face-prisms and opened
+    /// again in the same turn — the open reached the worker FIRST and the late hold dropped the new scene, so every stack was
+    /// refused "Set a face to Lattice in Selections first". RED at a3784168 (the hold not awaited by the open).
+    func testAHoldThenAnOpenAtOnceKeepsTheNewScene() async throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        XCTAssertTrue(m.heldWithoutFacePrism, "premise: held (its hold has not reached the worker yet)")
+        _ = try F.hisLiveLattice(r.project)   // a face-prism in the same turn
+        m.openScene()
+        try await FlexibleHisProject.waitFor(90, "the scene and every stack (built or refused)") {
+            m.sceneState == .ready && !m.heldWithoutFacePrism && m.loadedKeys.allSatisfy { m.stacks[$0] != nil || m.stackErrors[$0] != nil }
+        }
+        await m.waitForIdle()
+        XCTAssertEqual(m.stackErrors.mapValues { $0 }.values.sorted(), [], "★ no stack refused by a late hold")
+        XCTAssertTrue(m.loadedKeys.allSatisfy { m.stacks[$0] != nil }, "★ every stack built")
+        let alive = (try? await m.workerForTests.withScene { _ in true }) ?? false
+        XCTAssertTrue(alive, "★ the worker still holds the new scene")
+        XCTAssertEqual(m.workerForTests.door.opened, 1)
+    }
+
     // MARK: - N3
 
     func testTheDoorRefusesASceneJobWithNoFacePrism() throws {

@@ -541,6 +541,8 @@ public final class FlexibleStageModel: ObservableObject {
     var controlAskCoreWithoutPrism = false
     /// ★ RULING 6: no face-prism — the stage is ready on the plain part and holds NO core scene (nothing is asked of core).
     private(set) var heldWithoutFacePrism = false
+    /// ★ RULING 6: the worker's `hold()` in flight — the next open waits for it, so a late hold never drops a newer scene.
+    private var pendingHold: Task<Void, Never>?
     /// The key the last open was ATTEMPTED with (a failed open is retried only on a new one).
     private(set) var openAttemptKey: String?
 
@@ -569,7 +571,9 @@ public final class FlexibleStageModel: ObservableObject {
         sceneState = .opening
         heldWithoutFacePrism = false
         let worker = self.worker
+        let hold = pendingHold   // ★ RULING 6: a hold asked before this open reaches the worker first
         track(Task.detached(priority: .userInitiated) {
+            await hold?.value
             do {
                 let info = try await worker.open(jobJSON: job.json, jobDir: job.dir, key: key, facePrism: true)   // (mayAskCore, above)
                 // ★ ROUND 7 (M2): what of his settings moves onto lattice sections, asked of core on the opened scene
@@ -594,6 +598,9 @@ public final class FlexibleStageModel: ObservableObject {
         })
     }
 
+    /// ★ RULING 6: wait for a hold in flight to reach the worker (the strips' [Done] installs a scene after it).
+    func holdLanded() async { await pendingHold?.value }
+
     /// ★ ROUND 7, RULING 6 (FlexibleCoreDoor): no face-prism — nothing is asked of core. The stage is READY on the plain
     /// part (every rule keyed on "the opened scene sets no face-prism" holds: the one line, no [Fix], the views unavailable,
     /// the button disabled with its reason, each face's [Lattice under it]); core's old scene is let go, so nothing can be
@@ -609,7 +616,9 @@ public final class FlexibleStageModel: ObservableObject {
         designTask?.cancel()
         autoTask?.cancel()
         let worker = self.worker
-        track(Task { await worker.hold() })
+        let hold = Task { await worker.hold() }
+        pendingHold = hold
+        track(hold)
         sceneInfo = nil
         stacks = [:]
         geometry = [:]
