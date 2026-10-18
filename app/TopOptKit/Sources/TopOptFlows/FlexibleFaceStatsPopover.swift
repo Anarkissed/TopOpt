@@ -35,6 +35,10 @@ public enum FlexibleFaceStats {
     /// region(s) — a face cut into sections has one per section). nil without a voxel of the lattice in it.
     /// ★ ROUND 7: a voxel whose centre is outside the part is not counted (the mask now reaches past the surface);
     /// `countOutside` is a test's control only (the rule before).
+    /// ★ R7-E1 (the top-lid fix's check): "outside" is CORE's own rule, as the mask decides it — the voxels the fill added
+    /// (`FlexibleLatticeInputs.coreOutside`, coreEncloses) — not the app's voxel-made SDF, which reads part of the outermost
+    /// voxel near an edge as outside (four of core's own voxels under his pad's Top edge at Fine) and called added voxels
+    /// inside where the SDF rounds. `outsideBySDF` is a test's RED CONTROL only (0d8ae925's rule).
     public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double,
                             countOutside: Bool = false, outsideBySDF: Bool = false) -> Rows? {
         guard !regions.isEmpty else { return nil }
@@ -45,8 +49,12 @@ public enum FlexibleFaceStats {
             for n in 0..<m.values.count where m.values[n] >= 0.5 {
                 let p = m.c0 + SIMD3<Float>(Float(n % m.nx), Float((n / m.nx) % m.ny), Float(n / (m.nx * m.ny))) * m.spacing
                 // ★ ROUND 7 (his 2026-10-18 report): the mask now reaches past the surface (FlexibleLatticeBuilder.inputs) —
-                // a voxel whose centre is outside the part is no lattice of the face's, so it is not counted
-                guard countOutside || FlexibleLatticeField.dPart(p, f) <= 0 else { continue }
+                // a voxel whose centre is outside the part is no lattice of the face's, so it is not counted. ★ R7-E1:
+                // outside by core's rule (the voxels the fill added), not the app's SDF
+                if !countOutside {
+                    if outsideBySDF { guard FlexibleLatticeField.dPart(p, f) <= 0 else { continue } }
+                    else if f.coreOutside.contains(n) { continue }   // (indexed on the mask grid)
+                }
                 guard inside(SIMD3<Double>(p)) else { continue }
                 out.append(same ? f.rho.values[n] : f.rho.sample(p))
             }

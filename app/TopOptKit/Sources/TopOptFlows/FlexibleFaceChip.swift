@@ -130,6 +130,18 @@ struct FlexibleFaceChip: View {
                     FlexibleFaceCommits.latticeInstead(group: gid, project: project)
                     cardsChanged()
                 }
+            } else if ui.roleOpen == gid, ui.protectLockSaid == gid {
+                // ★ R7-E1 (his answer 2026-10-18 ~15:50): why [Protect] stays on — one line, where the face line was
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "lock.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(Self.protectTint.color)
+                    Text(FlexibleSelectionsCopy.protectLocked).font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44)
+                .background(publish("chipProtectLocked"))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("flexible-chip-protect-locked")
             } else if let ref {
                 faceLine(g, ref)
             } else {
@@ -228,20 +240,24 @@ struct FlexibleFaceChip: View {
             .frame(height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background(publish("chipRole"))
         .accessibilityLabel(k.isLoad ? "\(word), \(FlexibleSelectionsCopy.weightOnSquish). Tap to change the role"
                             : reading.shield ? "\(word), protected from Topology. Tap to change the role" : "\(word). Tap to change the role")
         .accessibilityIdentifier("flexible-chip-role")
     }
 
-    /// The role line (the capsule opened): Anchor and Load exclusive, Protect and Keep clear toggle.
+    /// The role line (the capsule opened): Anchor and Load exclusive, Protect and Keep clear toggle. ★ R7-E1 (his answer
+    /// 2026-10-18 ~15:50): on a Lattice group [Protect] wears a lock and a tap on it says "Protect stays on while a face is
+    /// Lattice" (on the line under it) — nothing is written.
     private func roleLine(_ g: SelectionGroup) -> some View {
         let k = project.force.kind(for: g.id)
         let lit: [FlexibleGroupRoleButton: Bool] = [.anchor: k.isAnchor, .load: k.isLoad, .protect: project.force.isProtected(g.id),
                                                     .keepClear: project.force.keepClearAffix(for: g.id) == .on]
+        let locked = FlexibleFaceCommits.protectLocked(g.id, project)
         return HStack(spacing: DS.Space.s) {
             ForEach(FlexibleGroupRoleButton.allCases, id: \.self) { b in
                 let kind = FlexibleNewFaceKind(rawValue: b.rawValue) ?? .anchor
-                FlexibleNewFaceButton(kind: kind, lit: lit[b] ?? false) {
+                FlexibleNewFaceButton(kind: kind, lit: lit[b] ?? false, locked: b == .protect && locked) {
                     let wasLoad = project.force.kind(for: g.id).isLoad, hadWeight = project.force.kind(for: g.id).weightKg != nil
                     switch FlexibleFaceCommits.setRole(b, group: g.id, project: project) {
                     case .asksFirst: ui.roleOpen = nil; ui.keepClearAsk = g.id
@@ -251,9 +267,11 @@ struct FlexibleFaceChip: View {
                         if b == .load, !wasLoad, !hadWeight, let kg = project.force.kind(for: g.id).weightKg { ui.unweighed[g.id] = kg }
                         cardsChanged()
                     case .refused: ui.roleOpen = nil
-                    case .locked: break   // ★ R7-E1 STUB
+                    case .locked: ui.protectLockSaid = g.id   // ★ R7-E1: the line under the role line says why
                     }
                 }
+                .background(publish("chipRole-\(b.rawValue)"))
+                .accessibilityLabel(b == .protect && locked ? "Protect, locked on while a face is Lattice" : FlexibleSelectionsCopy.kindWord(kind))
             }
             Spacer(minLength: 0)
             closeButton
@@ -428,6 +446,8 @@ struct FlexibleJoinButtonStyle: ButtonStyle {
 struct FlexibleNewFaceButton: View {
     let kind: FlexibleNewFaceKind
     var lit: Bool = false
+    /// ★ R7-E1: Protect locked on (a Lattice group) — a small lock in its corner.
+    var locked: Bool = false
     let action: () -> Void
     static let size = CGSize(width: 64, height: 56)
 
@@ -454,6 +474,17 @@ struct FlexibleNewFaceButton: View {
                 .fill(s.fill > 0 ? s.tint.opacity(s.fill).color : DS.Color.fillSubtle.color)
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder((lit ? s.tint : RGBA(0, 0, 0, 0)).color, lineWidth: 2)))
+            .overlay(alignment: .topTrailing) {
+                if locked {
+                    // ★ R7-E1: Protect locked on while a face of the group is Lattice
+                    Image(systemName: "lock.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(s.tint.color)
+                        .padding(5)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipRole-\(kind.rawValue)-lock": g.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                        .accessibilityHidden(true)
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

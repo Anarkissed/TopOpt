@@ -116,7 +116,7 @@ final class FlexibleR7E1FollowUpTests: XCTestCase {
         var d = [Float](repeating: -1, count: nx * ny * nz)
         for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
             let x = (Double(i) + 0.5) * h, y = (Double(j) + 0.5) * h, z = (Double(k) + 0.5) * h
-            if x > 20, y < 20, y > 12, z < 20 { d[(k * ny + j) * nx + i] = 0.2 }
+            if x > 20, x < 40, y < 20, y > 12, z < 20 { d[(k * ny + j) * nx + i] = 0.2 }   // only centres inside the part
         } } }
         return FlexDensityField(nx: nx, ny: ny, nz: nz, spacing: h, origin: .zero, density: d,
                                 owner: [Int](repeating: -1, count: nx * ny * nz))

@@ -239,7 +239,9 @@ public final class FlexibleFaceChipState: ObservableObject {
     @Published public var renaming: UUID?
     @Published public var renameDraft = ""
     /// The role line open on chip M.
-    @Published public var roleOpen: UUID?
+    @Published public var roleOpen: UUID? { didSet { if roleOpen != oldValue { protectLockSaid = nil } } }
+    /// ★ R7-E1 (his answer 2026-10-18 ~15:50): [Protect] tapped on a Lattice group — the role line says why it stays on.
+    @Published public var protectLockSaid: UUID?
     /// "Delete Group C here and in Topology?" waiting for [Delete] / [Cancel].
     @Published public var deleteAsk: UUID?
     /// …asked from the chip's trash (else the list's) — the confirm shows where the trash was tapped, once.

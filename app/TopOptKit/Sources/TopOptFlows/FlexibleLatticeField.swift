@@ -117,7 +117,9 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     public var skinDist: FlexGrid     // mm, unsigned distance to the skinned surfaces
     public var boundsMin: SIMD3<Float>
     public var boundsMax: SIMD3<Float>
-    /// ★ R7-E1 STUB: the mask voxels whose centre core's own rule (coreEncloses) puts OUTSIDE the part.
+    /// ★ R7-E1 (the top-lid fix's check): the mask voxels whose centre core's own rule (`coreEncloses`, voxelize.cpp's +Z
+    /// winding) puts OUTSIDE the part — exactly the voxels the mask-to-surface fill added (core's own lattice voxels are inside
+    /// by construction). The (i) skips them (FlexibleFaceStats.rows). Not sampled by the shader.
     public var coreOutside: Set<Int> = []
 }
 
@@ -381,6 +383,8 @@ public enum FlexibleLatticeBuilder {
     /// and Skin replace it with their own skin-distance grid and thickness.
     /// ★ ROUND 7 (his report of 2026-10-18, the Top solid over the pockets at Balanced): the lattice mask reaches the part's
     /// SURFACE (below). `maskToSurface: false` is a test's RED CONTROL only — the mask as core gives it.
+    /// ★ R7-E1 (the top-lid fix's check): `cornerRule` — an outside voxel with a SOLID, non-lattice face-neighbour is not added
+    /// (an inside corner); `false` is a test's RED CONTROL only (the fill as 0d8ae925 made it).
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
@@ -432,21 +436,40 @@ public enum FlexibleLatticeBuilder {
         // dSkin still decides the finish. Data only: the MSL twin samples the same mask. (Not the app's SDF: it is made on
         // voxels and reads part of the outermost texel near an edge as outside — on his pad at Fine it called four voxels
         // under the Top's edge outside that core had kept, and would have widened the region there.)
+        // ★ R7-E1 (the top-lid fix's check): at an INSIDE corner the voxel to add can also touch, face to face, a voxel that is
+        // SOLID (inside the part by core's rule) and not lattice — an unselected wall. Its mask 1 beside that 0 put the ½
+        // crossing up to half a voxel INSIDE the wall: a groove cut into a face no face-prism names (a synthetic L: 640 of 7,056
+        // wall points within a voxel of the corner). Such a voxel is not added (the lattice face keeps core's half-voxel there,
+        // one voxel wide, as before the fill); every other fill voxel is added as before (his pad: all 4,604, unchanged).
+        var added = Set<Int>()
         if maskToSurface {
-            var cand: [(v: Int, from: Int)] = []
+            var cand: [(v: Int, from: Int, solid: [Int])] = []
             let six = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
             for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
                 let v = (k * ny + j) * nx + i
                 guard mask[v] < 0.5 else { continue }
+                var from = -1
+                var others: [Int] = []
                 for (di, dj, dk) in six {
                     let a = i + di, b = j + dj, c = k + dk
                     guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
                     let w = (c * ny + b) * nx + a
-                    if mask[w] >= 0.5 { cand.append((v, w)); break }
+                    if mask[w] >= 0.5 { if from < 0 { from = w } } else { others.append(w) }
                 }
+                if from >= 0 { cand.append((v, from, others)) }
             } } }
-            let inside = coreEncloses(cand.map(\.v), part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
-            for (n, c) in cand.enumerated() where !inside[n] { mask[c.v] = 1; rho[c.v] = rho[c.from] }   // decided on core's mask alone
+            // one call over every voxel asked: the candidates, and (the corner rule) their non-lattice face-neighbours
+            var asked = cand.map(\.v)
+            var at: [Int: Int] = [:]
+            for (n, v) in asked.enumerated() { at[v] = n }
+            if cornerRule {
+                for c in cand { for w in c.solid where at[w] == nil { at[w] = asked.count; asked.append(w) } }
+            }
+            let inside = coreEncloses(asked, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
+            for (n, c) in cand.enumerated() where !inside[n] {
+                if cornerRule, c.solid.contains(where: { inside[at[$0]!] }) { continue }   // a solid, non-lattice neighbour
+                mask[c.v] = 1; rho[c.v] = rho[c.from]; added.insert(c.v)   // decided on core's mask alone
+            }
         }
         let sp = Float(field.spacing)
         let c0 = SIMD3<Float>(field.origin) + SIMD3<Float>(repeating: 0.5 * sp)   // core's origin is the CORNER
@@ -489,6 +512,6 @@ public enum FlexibleLatticeBuilder {
             honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
             buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
             rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
-            boundsMin: part.bounds.min, boundsMax: part.bounds.max)
+            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added)
     }
 }

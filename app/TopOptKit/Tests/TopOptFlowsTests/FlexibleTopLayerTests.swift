@@ -246,11 +246,15 @@ final class FlexibleTopLayerTests: XCTestCase {
         } } }
         let c0 = SIMD3<Float>(0.5, 0.5, 0.5)
         let grid = FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: rho)
-        let f = FlexibleLatticeInputs(topology: .gyroid, wallMM: 0.42, lMinMM: 1.4, lMaxMM: 25, honeycombCellMM: 4,
+        var f = FlexibleLatticeInputs(topology: .gyroid, wallMM: 0.42, lMinMM: 1.4, lMaxMM: 25, honeycombCellMM: 4,
                                       buildDir: SIMD3(0, 0, 1), skinMM: 0.8, rho: grid,
                                       mask: FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: [Float](repeating: 1, count: rho.count)),
                                       partSDF: FlexGrid(nx: n.x, ny: n.y, nz: n.z, c0: c0, spacing: 1, values: sdf), skinDist: grid,
                                       boundsMin: .zero, boundsMax: SIMD3(40, 40, 20))
+        // ★ RE-PINNED (round 7, R7-E1 — the top-lid fix's check: the (i) decides "outside" with core's own rule, like the mask,
+        // not the app's SDF): the voxels marked outside are now the ones the fill ADDED (`coreOutside`, as the builder records
+        // them), not only SDF > 0. Was: the SDF alone (no `coreOutside`). The numbers checked are unchanged.
+        f.coreOutside = Set((0..<rho.count).filter { $0 / (n.x * n.y) >= 15 })
         var face = LatticeRegionSpec(role: .include, kind: .face)
         face.origin = SIMD3(10, 20, 20); face.normal = SIMD3(0, 0, -1)
         face.halfUMM = 9.9; face.halfWMM = 9.9; face.depthMM = 10

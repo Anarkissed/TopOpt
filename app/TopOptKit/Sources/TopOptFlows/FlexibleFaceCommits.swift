@@ -85,7 +85,7 @@ public enum FlexibleSelectionsCopy {
     public static let depthCaption = "Depth mm"
     public static let expandCaption = "Expand mm"
     public static let setRole = "Set role"
-    /// ★ R7-E1 STUB (his answer 2026-10-18 ~15:50): Protect is locked on while a face of the group is Lattice.
+    /// ★ R7-E1 (his answer 2026-10-18 ~15:50): a tap on [Protect] of a Lattice group says why it stays on.
     public static let protectLocked = "Protect stays on while a face is Lattice"
     public static func allFaces(_ n: Int) -> String { "All \(n)" }
     public static func kindWord(_ k: FlexibleNewFaceKind) -> String {
@@ -104,11 +104,16 @@ enum FlexibleFaceCommits {
 
     /// ★ RED CONTROL only (FlexibleLatticeIsProtectedTests): R7-D2's hold put back — `newGroup(.lattice, …)` refuses.
     static var controlLatticeHeld = false
-    /// ★ R7-E1 STUB — RED CONTROL only: Protect toggles off on a Lattice group (the rule before his 2026-10-18 answer).
+    /// ★ RED CONTROL only (FlexibleR7E1FollowUpTests): Protect toggles off on a Lattice group (the rule before his 2026-10-18
+    /// answer — the group then went Pending and its lattice dropped out).
     static var controlProtectUnlocked = false
 
-    /// ★ R7-E1 STUB: is Protect locked on for this group (it reads Lattice)?
-    static func protectLocked(_ id: UUID, _ p: ProjectModel) -> Bool { false }
+    /// ★ R7-E1 — HIS ANSWER of 2026-10-18 ~15:50: "On a Lattice group, Protect is LOCKED ON while any face of the group is
+    /// Lattice (a lattice can never be exposed to Topology)." A group that reads Lattice (protected, no Anchor, Load or Keep
+    /// clear, a Lattice face) cannot have Protect tapped off; once no face is Lattice it toggles again.
+    static func protectLocked(_ id: UUID, _ p: ProjectModel) -> Bool {
+        !controlProtectUnlocked && readsLattice(id, p)
+    }
 
     /// ★ HIS RULING 2026-10-18 ("These two things should behave the same way"): a group reads "Lattice" — in the chip's role
     /// capsule and on the list's line, the shield beside it — when it is Protected (no Anchor, no Load, no Keep clear) and
@@ -315,10 +320,13 @@ enum FlexibleFaceCommits {
     }
 
     /// Chip M's role line: Anchor and Load exclusive (the lit one re-tapped changes nothing), Protect and Keep clear toggle.
-    /// Keep clear on a group with Lattice faces asks first ("Keep clear removes this lattice").
+    /// Keep clear on a group with Lattice faces asks first ("Keep clear removes this lattice"). ★ R7-E1 (his answer
+    /// 2026-10-18 ~15:50): [Protect] on a Lattice group is LOCKED on — the tap writes nothing (no undo step) and answers
+    /// `.locked`, so the chip says "Protect stays on while a face is Lattice".
     @discardableResult
     static func setRole(_ b: FlexibleGroupRoleButton, group gid: UUID, project p: ProjectModel) -> FlexibleRoleAnswer {
         guard group(gid, p) != nil, !isLocked(gid, p) else { return .refused }
+        if b == .protect, protectLocked(gid, p) { return .locked }
         let kind = p.force.kind(for: gid)
         if b == .keepClear, p.force.keepClearAffix(for: gid) != .on, hasLattice(gid, p) { return .asksFirst }
         if b == .anchor, kind.isAnchor { return .done }
