@@ -1,6 +1,106 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · the redesign — your two picks on the Flexible stage, together (R7-D1 + R7-D2 + their reviews + the H39 hotfix + R7-D3, the integration) (2026-10-18) (read this first)
+## ★ Round 7 · your ruling of 2026-10-18 — a lattice face is always protected from Topology; [▦ Lattice] on a new face works (2026-10-18) (read this first)
+
+Your words: "We do not want any lattices to be affected by topology optimization. This is why I set it within 'protect' in
+the first place. These two things should behave the same way." They replace your 2026-10-14 answer "Lattice on a new face
+= lattice-only (no Protect)".
+
+Branch `claude/flexible-screens` (PR #362), on top of `4e339147` (the redesign's handoff). Commits:
+- `6af7aa78`: the tests FIRST, against stubs (red run `round7/batch_lp/lp_red_run.txt`; `lp_stubs.diff.txt` is the stub state).
+- `dfee100e`: the code, and the re-pins of our own tests.
+- This section's commit (with `lp_runs.txt`, `lp_suite_classes.txt`, `stage_job_hashes_lp.txt`).
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched** (15:22). The app **was running**,
+so it was terminated first, as the install rule says. The installed `TopOpt.debug.dylib` is the built one (cmp; sha256
+`001d9422077aa6a5…`, 87 542 848 bytes). It contains "protected from Topology" and does not contain "For lattice now".
+
+**App only, Flexible files only.** WorkspacePlaceholder.swift, ProjectModel.swift and MetalMeshView.swift are byte-identical
+to `4e339147`. **H35 is withdrawn**: it was never landed, and now it never will be. In the hook table below this section
+("The merged hook table"), the H35 row now reads **WITHDRAWN (your ruling)** instead of "HELD". The reviewer's condition (d)
+no longer applies.
+
+### What you will see now, in plain words
+- **Tap a face that no group holds, then tap [▦ Lattice] on its chip. It works now.** You get a new group with that face
+  set to Lattice and **Protect underneath it**, so Topology never touches that lattice. This is exactly what "Protect, then
+  Lattice" gave you before, done in one tap. One Undo takes it back.
+- **Gone**: the greyed [▦ Lattice] button and its line "For lattice now: tap Protect, then Lattice". All five buttons
+  (Lattice, Anchor, Load, Protect, Keep clear) now look and work the same. Chip N is 22 pt shorter.
+- **The group reads "Lattice"**:
+  - on the face's chip: "▦ Lattice 🛡". The shield means it is protected from Topology. VoiceOver says "Lattice, protected
+    from Topology".
+  - on the Selections list: the lattice glyph with the shield beside it.
+  - Your Group C, made the old way (Protect, then Lattice), reads the same. **The two routes are now one.**
+- A Protect group whose faces are all Solid or Off still reads "Protect". A Load or an Anchor group that has lattice faces
+  reads Load or Anchor.
+- **On Topology**: the new group is protected, and its face-prism rides Topology's lattice block just like Group C's does.
+  Optimize is **not** blocked. On your pad, Topology's job with Face 4 done this way is byte-identical to Face 4 done as
+  Protect then Lattice (3 479 → 4 453 bytes either way).
+- **Its depth** is the same depth Protect-then-Lattice gives: the lattice default, **4.0 mm** on your pad. To change it, type
+  a number in the list's box or on the numbered handle. To make the face as deep as Group C, use "Add to Group C as lattice"
+  instead (it takes Group C's 25 mm).
+- **Two faces at once** ("Face 2 + Face 4 · new") → [▦ Lattice] makes both faces Lattice under one protected group, the same
+  as [Protect] followed by "All 2" → Lattice.
+
+### The tests → the code (RED first)
+| what | test | RED at the stubs (`6af7aa78`) |
+|---|---|---|
+| [▦ Lattice] on a new face gives a Lattice group with Protect underneath. Not loaded, anchored or Keep clear. The lattice role survives #354's gate. ONE undo step. Optimize is allowed. The group reads Lattice. **Topology's job equals the same face done as [Protect] then [▦ Lattice] today, byte for byte** (one face, and two faces). The Undo removes the group. | `FlexibleLatticeIsProtectedTests.testLatticeOnANewFaceIsLatticeAndProtectedAndTopologysJobIsTodays` | red: "made no group (held)". **RED CONTROL**: with the held button put back (`FlexibleFaceCommits.controlLatticeHeld`), the same check fails |
+| The withdrawn role, kept as a control: a lattice role with no Protect is Pending, **blocks** Topology's Run, and never reaches the job. Protect turns it into a "Lattice" group | `…testTheWithdrawnLatticeOnlyRoleWouldBlockTopology` | red at the last line (the reading) |
+| Both routes read "Lattice" with the shield (chip and list). Protect with Solid or Off reads Protect. A Load with a lattice face reads Load | `…testBothRoutesReadLatticeWithTheShieldBesideIt` | red: "Protect" |
+| [▦ Lattice] through the stage: the chip stays, now on the new group's face. Chip N's kind no longer has the held line | `…testTheChipsLatticeButtonCommitsThroughTheStage` | red |
+| An old project opens and re-encodes as before. A project.json that carries the withdrawn key still opens (the key is ignored and dropped on save). The field is gone from the source | `…testAnOldProjectOpensAndAProjectWithTheWithdrawnKeyStillOpens` | red (the field was still there) |
+| **Hosted, on your pad at 13" portrait**: a click on chip N's [▦ Lattice] makes ONE protected Lattice group of Face 2. The chip stays on Face 2 and Optimize is allowed | `FlexibleLatticeIsProtectedHostedTests` | red: the greyed, disabled button made no group |
+| H35 withdrawn: no H35 line in ProjectModel. No TopOptFlows source names the lattice-only set, the hold, or the route line | `FlexibleRound7SelectionsHookTests.testH35IsWithdrawnNoLatticeOnlyRoleAnywhere` | red in 6 sources. **RED CONTROLS**: putting back the approved H35 line, or just its comment, is caught |
+
+The code (`dfee100e`, Flexible files only):
+- `FlexibleFaceCommits.newGroup(.lattice)` does three things: Protect, then every new face Lattice, then the group's role
+  and depth seeded the way #354's row chip seeds them. It writes no face depth of its own.
+- `readsLattice` is true for a protected group (no Anchor, Load or Keep clear) that has a Lattice face.
+- The chip: the role capsule reads "Lattice" with the shield. The five buttons have no `held`. `Kind.new(join:)` lost its
+  held line.
+- The list's glyphs start with the lattice glyph when the group reads Lattice.
+- Removed: `FlexibleStageSettings.latticeOnlyGroups` and its designInputs, Reset all, delete and restore lines;
+  `latticeHeld`; "Lattice only"; `latticeOnlyRoleLanded`.
+
+### Re-pins (our own tests only; each one is attributed to your 2026-10-18 words inside the test)
+- `FlexibleLatticeOnlyGateTests` → renamed `FlexibleLatticeIsProtectedTests`. Its three pins of the HELD role were: the
+  field's decode, Reset all keeping the set, and "a lattice-only group blocks Run". They became the tests above.
+- `FlexibleRound7SelectionsHookTests.testH35IsHeldProjectModelHasNoLatticeOnlyLine` → `testH35IsWithdrawnNoLatticeOnlyRoleAnywhere`.
+- `FlexibleFaceCommitTests.testLatticeOnANewFaceIsHeldAndTodaysRecipeSetsProtect` → `testLatticeOnANewFaceSetsProtectLikeTheLatticeUnderRecipe`.
+  Its old red control called Protect "his answer: it must not"; your ruling reverses that. Also: `testEveryLineFits44` no
+  longer lists the route line.
+- `FlexibleR7D2ReviewTests.testTheHeldLatticeLineSaysTheTwoTapRoute` → `testTheLatticeButtonIsNeverGreyedAndTheRouteLineIsGone`.
+- `FlexibleFaceChipTests`: `.new(join: true, held: true)` → `.new(join: true)`.
+- Also edited: the log line in `FlexibleRound7SelectionsEvidenceProbe`, and a comment in `FlexibleRound7DesignIntegrationHostedTests`.
+- No #354 test was touched.
+
+### The bytes and the runs (raw: `round7/batch_lp/lp_runs.txt`)
+- **Goldens, 0 DIFFERS in both modes** at `dfee100e`: with SWIFT_DETERMINISTIC_HASHING=1, 38 identical; unseeded, 32
+  identical + 1 PART-SKIP (13 tests, 0 failures each). These are R7-D3's counts.
+- **The 16 stage-job hashes**: `stage_job_hashes_lp.txt` is byte-identical (cmp, whole file) to R7-D3's
+  `stage_job_hashes_d3.txt`. A protected lattice face-prism riding Topology's lattice block is how things already worked
+  (Group C's), so nothing moved.
+- **The targeted run** at `dfee100e`: **36 classes** (`lp_suite_classes.txt`). That is every class whose source names a
+  touched file or type, plus D3's hosted integration test (chip N got shorter), condition (e)'s hook pins, and
+  LatticeStaleTypeTests. Result: **220 cases — 200 passed, 20 skipped (the evidence probes, which need their env), 0
+  failed**, with no signal. LatticeStaleTypeTests 6/6. No tracked file was rewritten.
+
+### Not done, and why
+- The full 276-class suite was not re-run. This step touches 7 Flexible files and no #354 / main file; the 36 classes
+  above are the ones that reach those files.
+- No new offscreen pictures. The hosted test drives the real page and measured chip N at 404 × 128 pt with no route line.
+- Carried from R7-D3: F12 (one toolbar Undo after a trash), the hold sends' weight and bead, the chip on the mini in
+  portrait, and R7-D2's carried questions.
+
+### Questions
+1. **(You)** Protect on a "Lattice" group: the role line still lets you tap Protect off. If you do, the group goes Pending,
+   as it always has: its lattice drops out and Topology's Optimize waits. Keep that, or should Protect stay locked on while
+   any face of the group is Lattice?
+2. **(You)** [▦ Lattice]'s depth is the lattice default (4.0 mm on your pad), the same as Protect-then-Lattice. Is that
+   right, or should a new lattice face start at the depth you last typed this session?
+
+## ★ Round 7 · the redesign — your two picks on the Flexible stage, together (R7-D1 + R7-D2 + their reviews + the H39 hotfix + R7-D3, the integration) (2026-10-18) (the step before your 2026-10-18 ruling above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, on top of `0e66bf47` (the review of R7-D2). R7-D3's commits:
 - `246a7923`: the cross-batch tests (FIRST, against stubs — `round7/batch_d3/d3_red_run.txt`; `d3_stubs.diff.txt` is that stub state) and the fixes. Flexible files only.
@@ -68,7 +168,7 @@ WorkspacePlaceholder.swift vs `cb388365` (before R7-D1): **+20 −15** — exact
 | H39 | 9719 | the Selections header's Regions toggle | +1 | `.flexibleDrawn(when: !owns)` (kept: #354's card still draws on Flexible inside the variant page) |
 | H30 | 11767 / 11774 | bottomBar, after `Spacer()` / after `optimizeButton` | +2 | `owns` → `FlexibleCornerPair(…)` else { today's four lines, byte-identical; H10 once } |
 | H40 | MetalMeshView 4085 | `let latticeOnly = bodyAlpha <= 0.5` | 1 edited | `&& !flexibleBodyPrinted` |
-| H35 | — | ProjectModel `latticeEligibleRoles()` | HELD | condition (d) |
+| H35 | — | ProjectModel `latticeEligibleRoles()` | ~~HELD~~ **WITHDRAWN** | his ruling of 2026-10-18 (the section above): a lattice face is always protected — never landed, never will be |
 
 ### The reviewer's conditions of 2026-10-14 19:45 — each with its evidence
 - **(a) H31 — every message of the full-screen Export step reaches the corner card.** `FlexibleRound7CardMessagesTests` lists the step's messages across 14 scenarios and finds each on the sheet and in the card (D1), plus "under a blocker" and "an older answer" (the review of D1). The reviewer closed it on 2026-10-17 (ruling 2: the drawer confirmation and the Save & Exit pocket check are #354's lattice stage). Green in this suite.
