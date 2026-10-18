@@ -44,7 +44,6 @@ extension FlexibleStageModel {
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
         s.weightUnit = settings.weightUnit
         s.sectors = settings.sectors   // ★ ROUND 7 (M2): the numbers stay (never reused)
-        s.latticeOnlyGroups = settings.latticeOnlyGroups   // ★ ROUND 7 (R7-D2): the main page's lattice-only groups stay
         if let mesh = project.viewerMesh {
             // ★ ROUND 7 (M2): the main page's groups read over the regions with no strip left (the Flexible sectors of `s`)
             let m = faceRegions ?? restoredFaceRegions

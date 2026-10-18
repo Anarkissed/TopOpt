@@ -25,11 +25,12 @@ public enum FlexibleFaceChipLayout {
     public static let clearance: CGFloat = 8
 
     /// The chip's kinds (the plan's N / M / G / B / L) — their drawn heights, for placement before the first measure.
-    public enum Kind: Equatable, Sendable { case new(join: Bool, held: Bool = false), member, group, blocked, locked }
+    public enum Kind: Equatable, Sendable { case new(join: Bool), member, group, blocked, locked }
 
     public static func size(_ k: Kind) -> CGSize {
         switch k {
-        case let .new(join, held): return CGSize(width: width, height: 44 + 64 + (join ? 48 + 8 + 24 : 0) + (held ? 22 : 0) + 2 * padding + 8)
+        // ★ his ruling 2026-10-18: no held route line under the five buttons any more (it was 22 pt)
+        case let .new(join): return CGSize(width: width, height: 44 + 64 + (join ? 48 + 8 + 24 : 0) + 2 * padding + 8)
         // ★ the review of R7-D2: 132 as drawn (the grip's 12 was missing — the chip sat 12 pt lower than placed, onto the face's
         // outline and onto the (i)'s card); the layer also takes the chip's measured height when it grows (the role line, a confirm)
         case .member, .group, .blocked, .locked: return CGSize(width: width, height: 44 + 44 + 2 * padding + 8 + 12)

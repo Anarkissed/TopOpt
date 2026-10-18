@@ -6,13 +6,13 @@
 // "please make it stay on the same group and never shift").
 //
 // ★ HIS ANSWERS IT FOLLOWS (r7/tasks.md):
-//   * "Lattice picked for a new face in the pop-up = a LATTICE-ONLY role on the Flexible stage (no Protect set behind it)".
-//     ★ HELD: the reviewer's condition (d) — "a lattice-only group … is OK ONLY IF it changes nothing about a Topology run
-//     … if it does change a Topology run, STOP and tell the reviewer". Measured before any D2 code (round7/batch_d2/
-//     conditionD/): without H35 such a group is Pending and BLOCKS Topology's Optimize; with H35 it rides Topology's
-//     lattice block (Face 4's include slab, 3 479 → 4 374 job bytes). So H35 is NOT landed and the [▦ Lattice] button
-//     of chip N is held (greyed, one line) until the reviewer rules — `latticeOnlyRoleLanded`. Nothing writes
-//     `latticeOnlyGroups` meanwhile.
+//   * ★ HIS RULING of 2026-10-18 (it SUPERSEDES his 2026-10-14 "Lattice picked for a new face in the pop-up = a LATTICE-ONLY
+//     role … (no Protect set behind it)"): "We do not want any lattices to be affected by topology optimization. This is why
+//     I set it within 'protect' in the first place. These two things should behave the same way." So chip N's [▦ Lattice]
+//     makes the group Lattice WITH Protect underneath — exactly [Protect] and then [▦ Lattice] on the face's chip, in ONE
+//     undo step — and a protected group with a Lattice face reads "Lattice" (the shield beside it), whichever way it was
+//     made. The lattice-only role (H35, its lattice-only set) is withdrawn: R7-D2 held it on the reviewer's condition (d)
+//     (round7/batch_d2/conditionD/: without Protect the group is Pending and BLOCKS Topology's Optimize), now moot.
 //   * After Load: "NO weight pill (the weight is set later on the Settings page); reword the Load toast accordingly."
 //   * "Main-page groups get a TRASH icon too (B1), deleting the group for Topology as well; one Undo brings it back" +
 //     "Group trash should confirm deletion" (the reviewer's (f): "with a confirm before deleting and Undo: yes").
@@ -58,10 +58,6 @@ public enum FlexibleSelectionsCopy {
     public static let weightUnset = "weight: Squish page"
     public static let orNew = "Or start a new group:"
     public static func loadToast(_ face: String) -> String { "\(face) is a Load. Set its weight on the Squish page." }
-    /// ★ HELD (condition d): under chip N's five buttons while the lattice-only role waits for the reviewer.
-    /// ★ the review of R7-D2: the route in plain words (was "Lattice on a new face waits for a review" — process talk, and
-    /// no way to a lattice face on the session's first new face).
-    public static let latticeHeld = "For lattice now: tap Protect, then Lattice"
     /// ★ the review of R7-D2: ONE line of ≤ 44 characters whatever name he typed ("Delete Left side squeeze pad here and in
     /// Topology?" was 50 and widened the 348 pt list) — the name stays on the group's line right above the question.
     public static func deleteAsk(_ name: String) -> String {
@@ -88,7 +84,6 @@ public enum FlexibleSelectionsCopy {
     public static let weightOnSquish = "set on the Squish page"
     public static let depthCaption = "Depth mm"
     public static let expandCaption = "Expand mm"
-    public static let latticeOnly = "Lattice only"
     public static let setRole = "Set role"
     public static func allFaces(_ n: Int) -> String { "All \(n)" }
     public static func kindWord(_ k: FlexibleNewFaceKind) -> String {
@@ -105,16 +100,17 @@ public enum FlexibleSelectionsCopy {
 @MainActor
 enum FlexibleFaceCommits {
 
-    /// ★ HELD (condition d, 2026-10-17): the lattice-only role waits for the reviewer's ruling — H35 is not in
-    /// ProjectModel, so chip N's [▦ Lattice] is greyed and `newGroup(.lattice, …)` refuses. Flipped (with H35 landed and the
-    /// role's tests re-pinned) only on the reviewer's word.
-    static let latticeOnlyRoleLanded = false
-
-    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the red control that puts the held [Lattice] back.
+    /// ★ RED CONTROL only (FlexibleLatticeIsProtectedTests): R7-D2's hold put back — `newGroup(.lattice, …)` refuses.
     static var controlLatticeHeld = false
 
-    /// STUB (round 7, his ruling 2026-10-18 — the tests are written first): the group reads "Lattice".
-    static func readsLattice(_ id: UUID, _ p: ProjectModel) -> Bool { false }
+    /// ★ HIS RULING 2026-10-18 ("These two things should behave the same way"): a group reads "Lattice" — in the chip's role
+    /// capsule and on the list's line, the shield beside it — when it is Protected (no Anchor, no Load, no Keep clear) and
+    /// holds a Lattice face. [▦ Lattice] on a new face and [Protect] then [▦ Lattice] both give exactly that.
+    static func readsLattice(_ id: UUID, _ p: ProjectModel) -> Bool {
+        let k = p.force.kind(for: id)
+        guard !k.isLoad, !k.isAnchor, p.force.keepClearAffix(for: id) != .on, p.force.isProtected(id) else { return false }
+        return hasLattice(id, p)
+    }
 
     // MARK: reads
 
@@ -195,12 +191,14 @@ enum FlexibleFaceCommits {
     }
 
     /// Chip N: a new group of the free faces with one role. Anchor / Load / Protect / Keep clear leave the faces Off (no
-    /// lattice role); Lattice is the lattice-only role (HELD — refuses while `latticeOnlyRoleLanded` is false).
+    /// lattice role). ★ Lattice (his ruling 2026-10-18): Protect underneath and every new face Lattice — [Protect] then the
+    /// face chip's [▦ Lattice] (or the group's "All N" → Lattice), byte for byte, in ONE undo step: the group's role and depth
+    /// seeded as #354's row chip seeds them (the lattice default depth), no face depth of its own.
     @discardableResult
     static func newGroup(_ kind: FlexibleNewFaceKind, faces: [FlexibleFreeFace], project p: ProjectModel,
                          session s: inout FlexibleFacePickSession) -> UUID? {
         guard !faces.isEmpty else { return nil }
-        if kind == .lattice, !latticeOnlyRoleLanded { return nil }
+        if kind == .lattice, controlLatticeHeld { return nil }
         p.sealUndoStep()
         let gid = p.selection.addGroup()
         // ★ a new group never takes the face-prism's own violet (#BF5AF2, the palette's 5th); existing ones are left alone
@@ -213,21 +211,13 @@ enum FlexibleFaceCommits {
         case .protect: p.force.setProtected(gid, true)
         case .keepClear: p.force.setKeepClearAffix(gid, .on)
         case .lattice:
-            // (landed only with H35 and the reviewer's word): a lattice role with no Protect behind it
-            let d = s.lastDepth ?? LatticeSlabDepth.clamp(p.lattice.paintDepthMM)
-            for r in refs(faces, in: gid) {
-                if let g = group(gid, p) {
-                    LatticeSelectableRoles.declare(.include, for: r, siblings: p.latticeSelectableRefs(g), groupRole: .include,
-                                                   in: &p.lattice.selectableRoles)
-                }
-                p.writeLatticeDepthMM(r, mm: d)
+            // ★ his ruling 2026-10-18: Protect underneath (Topology never touches a lattice), then every new face Lattice —
+            // setAll / seed are the face chip's and the "All N" line's own writes (setState / setAll below)
+            p.force.setProtected(gid, true)
+            if let g = group(gid, p) {
+                LatticeSelectableRoles.setAll(.include, refs: p.latticeSelectableRefs(g), in: &p.lattice.selectableRoles)
             }
-            p.lattice.groupRoles[gid] = .include
-            p.lattice.groupDepthMM[gid] = LatticeSlabDepth.clamp(d)
-            p.lattice.enabled = true
-            var only = p.lattice.flexible?.latticeOnlyGroups ?? []
-            only.insert(gid)
-            p.lattice.flexible?.latticeOnlyGroups = only
+            seed(.include, gid, p)
         }
         p.sealUndoStep()
         s.lastGroup = gid
@@ -378,7 +368,6 @@ enum FlexibleFaceCommits {
         let roles: [String: LatticeSelectableRole]
         let depths: [String: Double]
         let expands: [String: Double]
-        let latticeOnly: Bool
         let hidden: Bool
     }
 
@@ -395,7 +384,6 @@ enum FlexibleFaceCommits {
                             roles: p.lattice.selectableRoles.filter { keys.contains($0.key) },
                             depths: p.lattice.selectableDepthMM.filter { keys.contains($0.key) },
                             expands: p.lattice.selectableExpandMM.filter { keys.contains($0.key) },
-                            latticeOnly: p.lattice.flexible?.latticeOnlyGroups?.contains(gid) == true,
                             hidden: p.groupView.isHidden(gid))
         p.sealUndoStep()
         // WorkspacePlaceholder's private removeGroup, step for step
@@ -410,9 +398,6 @@ enum FlexibleFaceCommits {
             p.lattice.selectableRoles.removeValue(forKey: r.key)
             p.lattice.selectableDepthMM.removeValue(forKey: r.key)
             p.lattice.selectableExpandMM.removeValue(forKey: r.key)
-        }
-        if var only = p.lattice.flexible?.latticeOnlyGroups, only.remove(gid) != nil {
-            p.lattice.flexible?.latticeOnlyGroups = only.isEmpty ? nil : only
         }
         p.sealUndoStep()
         return taken
@@ -433,11 +418,6 @@ enum FlexibleFaceCommits {
         for (k, v) in d.roles { p.lattice.selectableRoles[k] = v }
         for (k, v) in d.depths { p.lattice.selectableDepthMM[k] = v }
         for (k, v) in d.expands { p.lattice.selectableExpandMM[k] = v }
-        if d.latticeOnly {
-            var only = p.lattice.flexible?.latticeOnlyGroups ?? []
-            only.insert(d.group.id)
-            p.lattice.flexible?.latticeOnlyGroups = only
-        }
         if d.hidden, !p.groupView.isHidden(d.group.id) { p.groupView.toggleHidden(d.group.id) }
         p.sealUndoStep()
     }

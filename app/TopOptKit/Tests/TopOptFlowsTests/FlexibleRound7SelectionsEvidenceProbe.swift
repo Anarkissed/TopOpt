@@ -210,7 +210,8 @@ final class FlexibleRound7SelectionsEvidenceProbe: XCTestCase {
         s.tapFace(p, face: 2, point: nil, mesh: mesh)   // Face 2: the free side his img1 camera sees
         pump(1.5)
         layout(h, s, "E03")
-        log.append("  join \(h.frames.all["chipJoin"].map(Self.f) ?? "none") · held line: \(FlexibleSelectionsCopy.latticeHeld)")
+        // ★ his ruling 2026-10-18: [▦ Lattice] works (Lattice + Protect) — R7-D2's held line is gone
+        log.append("  join \(h.frames.all["chipJoin"].map(Self.f) ?? "none") · lattice \(h.frames.all["chipNew-lattice"].map(Self.f) ?? "none")")
         shot(h, "E03_face2_chipN_join")
         press(h, "chipJoin", what: "Add to Group C as lattice")
         pump(1.5)

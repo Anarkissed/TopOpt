@@ -200,15 +200,20 @@ final class FlexibleR7D2ReviewTests: XCTestCase {
         XCTAssertTrue(line.contains(".lineLimit(1)"), "one line")
     }
 
-    // MARK: R7 — the held [Lattice] says the route
+    // MARK: R7 — [Lattice] on a new face works: no greyed button, no route line
 
-    func testTheHeldLatticeLineSaysTheTwoTapRoute() {
-        let s = FlexibleSelectionsCopy.latticeHeld
-        XCTAssertLessThanOrEqual(s.count, 44, s)
-        XCTAssertTrue(s.contains("Protect") && s.contains("Lattice"), "★ the route: Protect, then Lattice on the face's chip")
-        XCTAssertFalse(s.lowercased().contains("review"), "★ no reviewer-process words on his screen")
-        // ★ RED CONTROL: the old line
-        XCTAssertTrue("Lattice on a new face waits for a review".contains("review"), "★ RED CONTROL: the old line was process talk")
+    /// ★ RE-PINNED (our own test, his ruling of 2026-10-18: "We do not want any lattices to be affected by topology optimization. This is why I set it within 'protect' in the first place. These two things should behave the same way."): was
+    /// `testTheHeldLatticeLineSaysTheTwoTapRoute` — the greyed [▦ Lattice]'s line "For lattice now: tap Protect, then Lattice".
+    /// [▦ Lattice] now makes a Lattice group with Protect underneath (FlexibleLatticeIsProtectedTests), so the button is never
+    /// disabled and the line is gone. RED CONTROL: R7-D2's chip source (the disabled button + the line) is caught.
+    func testTheLatticeButtonIsNeverGreyedAndTheRouteLineIsGone() throws {
+        let chip = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleFaceChip.swift"), encoding: .utf8)
+        func greyed(_ t: String) -> Bool { t.contains(".disabled(held)") || t.contains("flexible-chip-lattice-held") || t.contains("latticeHeld") }
+        XCTAssertFalse(greyed(chip), "★ chip N's [▦ Lattice] is a working button; no route line under the five")
+        XCTAssertTrue(chip.contains("FlexibleNewFaceButton(kind: k) {"), "every one of the five buttons is drawn the same way")
+        // ★ RED CONTROL: R7-D2's lines
+        XCTAssertTrue(greyed("        .disabled(held)\n        .opacity(held ? 0.38 : 1)\n"), "★ RED CONTROL: the greyed button is caught")
+        XCTAssertTrue(greyed(".accessibilityIdentifier(\"flexible-chip-lattice-held\")"), "★ RED CONTROL: the route line is caught")
     }
 
     // MARK: R8 — the number boxes take a tap across 44 pt

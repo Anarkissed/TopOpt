@@ -1,6 +1,7 @@
 // FlexibleFaceCommitTests — round 7, batch R7-D2, THE COMMITS, written BEFORE the code (red run: round7/batch_d2/
 // d2_red_run.txt). Each commit is ONE sealed undo step through #354's public setters. His answers (r7/tasks.md, 2026-10-14):
-// "Lattice picked for a new face in the pop-up = a LATTICE-ONLY role … (no Protect set behind it)" (★ HELD: condition (d));
+// "Lattice picked for a new face in the pop-up = a LATTICE-ONLY role … (no Protect set behind it)" (★ SUPERSEDED by his ruling
+// of 2026-10-18 — a lattice face is always protected: [▦ Lattice] = Lattice with Protect underneath);
 // after Load "NO weight pill … reword the Load toast"; "Main-page groups get a TRASH icon too … one Undo brings it back";
 // "Group trash should confirm deletion"; (c) "'Add to Group C as lattice' is an obvious button" — it writes what it says.
 import XCTest
@@ -17,19 +18,34 @@ final class FlexibleFaceCommitTests: XCTestCase {
         return (r, r.project, c)
     }
 
-    /// ★ HELD (condition d): [▦ Lattice] on a new face refuses — no group, nothing written — until the reviewer rules.
-    /// RED CONTROL: FlexibleLatticeUnder's .newGroup recipe (today's one-tap Lattice) sets Protect behind the lattice.
-    func testLatticeOnANewFaceIsHeldAndTodaysRecipeSetsProtect() throws {
+    /// [▦ Lattice] on a new face: a group, Protect underneath, the face Lattice — ONE undo step — the same protection as the
+    /// Squish page's [Lattice under it] (FlexibleLatticeUnder's .newGroup: "that is how we make a lattice and protected from TO").
+    /// RED CONTROL: R7-D2's hold put back refuses and writes nothing.
+    /// ★ RE-PINNED (our own test, his ruling of 2026-10-18: "We do not want any lattices to be affected by topology optimization. This is why I set it within 'protect' in the first place. These two things should behave the same way."): was
+    /// `testLatticeOnANewFaceIsHeldAndTodaysRecipeSetsProtect` — the HOLD (newGroup(.lattice) refused; "his answer: it must not"
+    /// set Protect). His Topology-job check is FlexibleLatticeIsProtectedTests.
+    func testLatticeOnANewFaceSetsProtectLikeTheLatticeUnderRecipe() throws {
         let (_, p, _) = try hisPad()
         var s = FlexibleFacePickSession(scope: .pending([.face(4)]))
-        let before = p.editSnapshot
-        XCTAssertNil(FlexibleFaceCommits.newGroup(.lattice, faces: [.face(4)], project: p, session: &s), "★ held: no lattice-only group")
-        XCTAssertEqual(p.editSnapshot, before, "★ nothing written")
-        XCTAssertNil(p.lattice.flexible?.latticeOnlyGroups, "nothing writes the lattice-only set")
-        // ★ RED CONTROL: today's recipe behind [Lattice under it] — Protect + Lattice
+        let past = p.undo.past.count
+        let gid = try XCTUnwrap(FlexibleFaceCommits.newGroup(.lattice, faces: [.face(4)], project: p, session: &s), "★ a Lattice group")
+        XCTAssertTrue(p.force.isProtected(gid), "★ Protect underneath")
+        XCTAssertEqual(p.latticeSelectableRole(.face(group: gid, face: 4), in: gid), .include, "★ the face Lattice")
+        XCTAssertEqual(p.lattice.groupRoles[gid], .include, "seeded as the row chip seeds")
+        XCTAssertEqual(p.undo.past.count, past + 1, "★ ONE undo step")
+        p.performUndo()
+        XCTAssertNil(p.selection.groups.first { $0.id == gid }, "the Undo removes it")
+        // the Squish page's [Lattice under it] protects its lattice the same way
         p.flexibleLatticeUnder(.newGroup(face: 4, region: nil, name: "Face 4", depthMM: 25))
         let g = try XCTUnwrap(p.selection.groups.first { $0.name == "Face 4" })
-        XCTAssertTrue(p.force.isProtected(g.id), "★ RED CONTROL: today's one-tap lattice sets Protect (his answer: it must not)")
+        XCTAssertTrue(p.force.isProtected(g.id), "[Lattice under it] sets Protect too — one rule")
+        // ★ RED CONTROL: the hold put back
+        FlexibleFaceCommits.controlLatticeHeld = true
+        defer { FlexibleFaceCommits.controlLatticeHeld = false }
+        var s2 = FlexibleFacePickSession(scope: .pending([.face(2)]))
+        let before = p.editSnapshot
+        XCTAssertNil(FlexibleFaceCommits.newGroup(.lattice, faces: [.face(2)], project: p, session: &s2), "★ RED CONTROL: the held button made nothing")
+        XCTAssertEqual(p.editSnapshot, before, "★ RED CONTROL: … and wrote nothing")
     }
 
     func testAnchorLoadProtectKeepClearMakeAGroupWithTheFaceOff() throws {
@@ -180,7 +196,9 @@ final class FlexibleFaceCommitTests: XCTestCase {
 
     /// His rule: one visible line per setting, ≤ 44 characters.
     func testEveryLineFits44() {
-        for s in [FlexibleSelectionsCopy.latticeHeld, FlexibleSelectionsCopy.statsCaption, FlexibleSelectionsCopy.noNumbers,
+        // ★ RE-PINNED (our own test, his ruling of 2026-10-18): `latticeHeld` ("For lattice now: tap Protect, then Lattice") left
+        // the list with the greyed button
+        for s in [FlexibleSelectionsCopy.statsCaption, FlexibleSelectionsCopy.noNumbers,
                   FlexibleSelectionsCopy.empty, FlexibleSelectionsCopy.keepClearAsk, FlexibleSelectionsCopy.keepClearBlocks,
                   FlexibleSelectionsCopy.locked, FlexibleSelectionsCopy.orNew, FlexibleSelectionsCopy.joinLabel("Group C"),
                   FlexibleSelectionsCopy.joinNote(depthMM: 25, like: ["Face 3", "Face 5"]), FlexibleSelectionsCopy.deleted("Group C")] {

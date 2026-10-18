@@ -371,11 +371,13 @@ struct FlexibleRoleGlyphs: View {
     let group: UUID
     let size: CGFloat
 
-    /// The group line's role glyphs, in order (symbol, tint).
+    /// The group line's role glyphs, in order (symbol, tint). ★ His ruling 2026-10-18: a group that reads "Lattice" (protected,
+    /// a Lattice face) shows the lattice glyph first, its shield beside it.
     @MainActor
     static func glyphs(_ project: ProjectModel, _ group: UUID) -> [(symbol: String, tint: RGBA)] {
         let k = project.force.kind(for: group)
         var out: [(symbol: String, tint: RGBA)] = []
+        if FlexibleFaceCommits.readsLattice(group, project) { out.append(("square.grid.3x3.fill", FlexibleStageStyle.facePrismToken)) }
         if k.isAnchor { out.append(("lock.fill", DS.Color.okGreen)) }
         if k.isLoad { out.append(("arrow.down", DS.Color.accent)) }
         if project.force.isProtected(group) { out.append(("shield.lefthalf.filled", FlexibleFaceChip.protectTint)) }

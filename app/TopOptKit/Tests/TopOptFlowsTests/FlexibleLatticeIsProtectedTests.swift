@@ -109,6 +109,7 @@ final class FlexibleLatticeIsProtectedTests: XCTestCase {
         // two new faces at once ("Face 2 + Face 4 · new") — the same as [Protect] then "All 2" → Lattice
         let two = try latticeOnNewFaces([2, 4], reference: try protectThenLatticeJob([2, 4]))
         XCTAssertEqual(two.wrong, [], "★ two new faces: the same")
+        print("FLEX-LP job: his pad \(plain.utf8.count) bytes; + Face 4 as Protect then Lattice = + Face 4 as [Lattice] \(reference.utf8.count) bytes; the default depth \(LatticeSlabDepth.clamp(p0.lattice.paintDepthMM)) mm")
         // ★ RED CONTROL: the held [▦ Lattice] (R7-D2's hold, put back) fails the very same check
         FlexibleFaceCommits.controlLatticeHeld = true
         let held = try latticeOnNewFaces([4], reference: reference)

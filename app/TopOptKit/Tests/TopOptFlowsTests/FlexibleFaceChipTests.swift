@@ -84,7 +84,8 @@ final class FlexibleFaceChipTests: XCTestCase {
     }
 
     func testAutoPlacementOrderAndTheKeepOuts() {
-        let size = FlexibleFaceChipLayout.size(.new(join: true, held: true))
+        // ★ RE-PINNED (our own test, his ruling of 2026-10-18): chip N has no held route line any more — was `.new(join: true, held: true)`
+        let size = FlexibleFaceChipLayout.size(.new(join: true))
         let v = Self.pad13p
         let a = CGPoint(x: 700, y: 800)
         let above = FlexibleFaceChipLayout.auto(size: size, anchor: a, viewport: v, keepOut: [])

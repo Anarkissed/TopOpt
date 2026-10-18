@@ -204,12 +204,9 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// Surface root, I2's form — FlexibleSectorMigration reads it through). OPTIONAL, omitted when nil: old projects decode
     /// and encode byte-identical. LABELS ONLY: never part of the lattice's key (`designInputs`).
     public var sectors: FlexibleSectorStore?
-    /// ★ ROUND 7 (batch R7-D2 — his answer of 2026-10-14: "Lattice picked for a new face in the pop-up = a LATTICE-ONLY role on
-    /// the Flexible stage (no Protect set behind it)"): the main page's groups that carry a lattice role with no anchor, load or
-    /// Protect behind it. MAIN-PAGE data (Reset all keeps it); never part of the lattice's key (`designInputs`) — the face-prisms
-    /// reach the lattice through the scene. OPTIONAL, omitted when nil: old projects decode and encode byte-identical.
-    /// ★ HELD with H35 (the reviewer's condition (d), 2026-10-17): nothing writes it until the reviewer rules.
-    public var latticeOnlyGroups: Set<UUID>?
+    // ★ ROUND 7 (his ruling 2026-10-18): R7-D2's lattice-only set is WITHDRAWN — a lattice face is always protected from
+    // Topology, so no main-page group carries a lattice role without Protect. No build ever wrote the key (nil was never
+    // encoded); a project.json that carried it would still open (the key is ignored) — FlexibleLatticeIsProtectedTests.
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -230,7 +227,6 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.groupColours = nil
         c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
-        c.latticeOnlyGroups = nil   // ★ ROUND 7 (R7-D2): main-page roles — the face-prisms reach the lattice through the scene
         c.weightUnit = nil
         // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
         // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)

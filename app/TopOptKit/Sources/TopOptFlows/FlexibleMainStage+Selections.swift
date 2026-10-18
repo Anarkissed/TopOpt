@@ -115,7 +115,7 @@ extension FlexibleMainStage {
 
     // MARK: chip N
 
-    /// The five buttons (Lattice HELD — FlexibleFaceCommits.latticeOnlyRoleLanded).
+    /// The five buttons (★ Lattice = Lattice with Protect underneath — his ruling 2026-10-18).
     func commitNew(_ kind: FlexibleNewFaceKind, project: ProjectModel, cardsChanged: () -> Void) {
         guard case let .pending(faces) = facePick.scope else { return }
         var s = facePick

@@ -6,9 +6,9 @@
 //       button "Add to Group C as lattice" (the DS accent, white semibold label, the group's swatch, 48 tall — it reads and
 //       looks like a button, never an outlined title row: his image 2) with the depth it will take under it; then
 //       "Or start a new group:" and five 64 × 56 buttons [▦ Lattice] [Anchor] [Load] [Protect] [Keep clear].
-//       (★ HELD: [▦ Lattice] waits for the reviewer's ruling on condition (d) — greyed; the line under the row gives the
-//       two-tap route: "For lattice now: tap Protect, then Lattice". The join is offered only for a group that already has a
-//       lattice face — the review of R7-D2.)
+//       (★ HIS RULING 2026-10-18: [▦ Lattice] makes the group Lattice with Protect underneath — Topology never touches a
+//       lattice — and the group reads "Lattice", the shield beside it; R7-D2's greyed button and its route line are gone.
+//       The join is offered only for a group that already has a lattice face — the review of R7-D2.)
 //   M — a face of a group: swatch, the name (tap to rename), the role capsule (a Load shows its weight, set on the Squish
 //       page), the trash (it CONFIRMS — his answer), ✕; then "Face 3", its (i) (his change b), and the segment
 //       [▦ Lattice | ■ Solid | ⬚ Off]. No grams (his answer: hidden until core reports the real per-face lattice weight).
@@ -45,7 +45,7 @@ struct FlexibleFaceChip: View {
     @MainActor
     static func kind(_ scope: FlexibleFaceScope, project p: ProjectModel, lastGroup: UUID?) -> FlexibleFaceChipLayout.Kind {
         switch scope {
-        case .pending: return .new(join: FlexibleFaceCommits.canJoin(lastGroup, p), held: !FlexibleFaceCommits.latticeOnlyRoleLanded)
+        case .pending: return .new(join: FlexibleFaceCommits.canJoin(lastGroup, p))
         case let .face(g, _), let .group(g):
             if FlexibleFaceCommits.isLocked(g, p) { return .locked }
             if FlexibleFaceCommits.blockedByKeepClear(g, p) { return .blocked }
@@ -99,15 +99,10 @@ struct FlexibleFaceChip: View {
         }
         HStack(spacing: DS.Space.s) {
             ForEach(FlexibleNewFaceKind.allCases, id: \.self) { k in
-                FlexibleNewFaceButton(kind: k, held: k == .lattice && !FlexibleFaceCommits.latticeOnlyRoleLanded) {
+                FlexibleNewFaceButton(kind: k) {
                     main.commitNew(k, project: project, cardsChanged: cardsChanged)
                 }
             }
-        }
-        if !FlexibleFaceCommits.latticeOnlyRoleLanded {
-            Text(FlexibleSelectionsCopy.latticeHeld).font(.system(size: 11.5)).foregroundStyle(DS.Color.textTertiary.color)
-                .lineLimit(1)
-                .accessibilityIdentifier("flexible-chip-lattice-held")
         }
     }
 
@@ -186,7 +181,8 @@ struct FlexibleFaceChip: View {
         .frame(minHeight: 44)
     }
 
-    /// What the role capsule reads for a group: its word, its glyph, its tint, and a shield beside it.
+    /// What the role capsule reads for a group: its word, its glyph, its tint, and a shield beside it (★ his ruling 2026-10-18:
+    /// a protected group with a Lattice face reads "Lattice" — the shield says Topology never touches it).
     struct RoleReading: Equatable {
         let word: String
         let symbol: String
@@ -205,9 +201,9 @@ struct FlexibleFaceChip: View {
                                symbol: "arrow.down", tint: DS.Color.accent, shield: false)
         } else if k.isAnchor { return RoleReading(word: "Anchor", symbol: "lock.fill", tint: DS.Color.okGreen, shield: false)
         } else if project.force.keepClearAffix(for: g) == .on { return RoleReading(word: "Keep clear", symbol: "nosign", tint: DS.Color.clearance, shield: false)
+        } else if FlexibleFaceCommits.readsLattice(g, project) {
+            return RoleReading(word: FlexibleSelectionsCopy.kindWord(.lattice), symbol: "square.grid.3x3.fill", tint: FlexibleStageStyle.facePrismToken, shield: true)
         } else if project.force.isProtected(g) { return RoleReading(word: "Protect", symbol: "shield.lefthalf.filled", tint: protectTint, shield: false)
-        } else if project.lattice.flexible?.latticeOnlyGroups?.contains(g) == true {
-            return RoleReading(word: FlexibleSelectionsCopy.latticeOnly, symbol: "square.grid.3x3.fill", tint: FlexibleStageStyle.facePrismToken, shield: false)
         }
         return RoleReading(word: FlexibleSelectionsCopy.setRole, symbol: "plus", tint: DS.Color.textSecondary, shield: false)
     }
@@ -223,13 +219,17 @@ struct FlexibleFaceChip: View {
             HStack(spacing: 4) {
                 Image(systemName: symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(tint.color)
                 Text(word).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                if reading.shield {
+                    Image(systemName: "shield.lefthalf.filled").font(.system(size: 10.5, weight: .bold)).foregroundStyle(Self.protectTint.color)
+                }
             }
             .padding(.horizontal, DS.Space.s).frame(height: 28)
             .background(Capsule().fill(tint.opacity(0.18).color))
             .frame(height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(k.isLoad ? "\(word), \(FlexibleSelectionsCopy.weightOnSquish). Tap to change the role" : "\(word). Tap to change the role")
+        .accessibilityLabel(k.isLoad ? "\(word), \(FlexibleSelectionsCopy.weightOnSquish). Tap to change the role"
+                            : reading.shield ? "\(word), protected from Topology. Tap to change the role" : "\(word). Tap to change the role")
         .accessibilityIdentifier("flexible-chip-role")
     }
 
@@ -241,7 +241,7 @@ struct FlexibleFaceChip: View {
         return HStack(spacing: DS.Space.s) {
             ForEach(FlexibleGroupRoleButton.allCases, id: \.self) { b in
                 let kind = FlexibleNewFaceKind(rawValue: b.rawValue) ?? .anchor
-                FlexibleNewFaceButton(kind: kind, held: false, lit: lit[b] ?? false) {
+                FlexibleNewFaceButton(kind: kind, lit: lit[b] ?? false) {
                     let wasLoad = project.force.kind(for: g.id).isLoad, hadWeight = project.force.kind(for: g.id).weightKg != nil
                     switch FlexibleFaceCommits.setRole(b, group: g.id, project: project) {
                     case .asksFirst: ui.roleOpen = nil; ui.keepClearAsk = g.id
@@ -426,7 +426,6 @@ struct FlexibleJoinButtonStyle: ButtonStyle {
 /// One of chip N's five buttons (and the role line's four): an 18 pt glyph over an 11.5 pt bold word, 64 × 56.
 struct FlexibleNewFaceButton: View {
     let kind: FlexibleNewFaceKind
-    let held: Bool
     var lit: Bool = false
     let action: () -> Void
     static let size = CGSize(width: 64, height: 56)
@@ -457,11 +456,9 @@ struct FlexibleNewFaceButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(held)
-        .opacity(held ? 0.38 : 1)
         .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipNew-\(kind.rawValue)": g.frame(in: .global)]) }
             .allowsHitTesting(false))
-        .accessibilityLabel(held ? "\(FlexibleSelectionsCopy.kindWord(kind)). \(FlexibleSelectionsCopy.latticeHeld)" : FlexibleSelectionsCopy.kindWord(kind))
+        .accessibilityLabel(FlexibleSelectionsCopy.kindWord(kind))
         .accessibilityIdentifier("flexible-chip-new-\(kind.rawValue)")
     }
 }

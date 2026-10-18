@@ -221,7 +221,8 @@ final class FlexibleRound7DesignIntegrationHostedTests: XCTestCase {
         try press(h, "selHeader", "the Selections pill (open)")
         pump(1.0)
 
-        // H2 — chip N (a free face: the tallest chip, 229 pt with the join and the route line) keeps off the chrome and the list
+        // H2 — chip N (a free face: the tallest chip, with the join; R7-D2's route line went with his 2026-10-18 ruling) keeps
+        // off the chrome and the list
         // too (★ found LOOKING at the mini in portrait: no tier was clear and it docked on the cube, the views row and the legend)
         s.pickGroup(c, project: p); pump(0.8)
         s.tapFace(p, face: 2, point: nil, mesh: mesh)
