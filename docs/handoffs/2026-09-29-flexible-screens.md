@@ -1,6 +1,148 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · the review of R7-D1 — what the two-angle review found on the new screen, what is fixed, and what waits for the reviewer (2026-10-17) (read this first)
+## ★ Round 7 · the H39 hotfix — no Regions icon on the Flexible stage, the printed part's shadow, and nothing asked of core without a face-prism (2026-10-17) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, on top of `a1e504a4` (the review of R7-D1). The reviewer's rulings of
+2026-10-17 20:25 + 20:36 (approved by you): ruling 1 (H39 and the Regions leak), ruling 4 (the contact-shadow hook, here H40)
+and ruling 6 (M1's F10 / F15 / F16). Commits:
+- `76df22e8`: tests FIRST, against stubs. The red run is `round7/batch_h39/h39_red_run.txt`.
+- `a3784168`: the code, the re-pins, the pictures.
+- `a465f66f`: the follow-up — a fault the suite found (a late "hold" could drop a newer scene) fixed, and the suite's blast
+  radius re-pinned (our own tests).
+- This section's commit.
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched.** The app was open (`launchctl`:
+UIKitApplication:com.nadim.topopt, pid 9200); you said today you no longer use it, so it was terminated with `simctl terminate`,
+then installed. The installed `TopOpt.debug.dylib` is the built one (sha256 `65e7f5c2…62b5413`, 84 237 488 bytes, 22:22).
+
+App only: no core file. Two #354 lines, both on the reviewer's approved list (the table below). Everything else is in Flexible
+files. ProjectModel.swift is untouched.
+
+### What you will see now, in plain words
+- **The Regions icon (the dashed squares in the Selections header) is gone from the Flexible stage.** Before, a tap on it only
+  turned it blue — and the Regions panel then popped up the moment you went to Topology. Now nothing on the Flexible stage can
+  open it, so Topology never shows a Regions panel you did not open there. (The other way round is already safe: a panel you
+  left open on Topology is hidden on the Flexible stage, and a tap there never edits a region — #354's tap router takes every
+  lattice-stage tap before it reaches the region editor.) On Topology, the Structural / Aesthetic lattice stage and Surface the
+  icon is where it was and works as before.
+  - With the icon gone, "Keep clear" in that header now fits on one line (its pill takes the freed room). The Selections card
+    itself is still #354's until D2 replaces it.
+- **On the Lattice page, with X-ray off (the printed view), the part now sits on its shadow.** Before, in None / Rim / Skin
+  the solid part floated with no shadow under it. The shadow is the whole part's footprint, so near the floor it also darkens
+  what you see through the open lattice. Topology, Structural, Aesthetic and Surface draw exactly the same frames as before.
+- **With no face-prism, the Flexible stage asks core for nothing at all** (the reviewer's ruling 6: no design, no preview, no
+  run). Before, it still opened core's scene on the WHOLE part and asked it for every pressed face's stack and design; it only
+  hid what core said. Now:
+  - the main page: the plain part, the big button greyed with "Set a face to Lattice in Selections first" (as before);
+  - the Squish page: the same top line, and each face's card says "No lattice under it" with its [Lattice under it] (as
+    before);
+  - **new**: with no face-prism the Squish page draws no curve on the part. Placing a curve on a face needs core's frame for
+    that face, and core is not asked. The curve comes back the moment a face is set to Lattice (Questions, 1).
+  - the moment you set a face to Lattice in Selections, core is asked as before; take the last one away and the stage lets
+    go of core's scene again.
+- "On the Flexible screen you can't move a Topology piece by tapping it." This is the reviewer's sentence (condition c). It
+  becomes true with the Selections half (D2, its tap router H22), **not yet**: today a tap on the Flexible screen still does
+  what it did.
+
+**Corrections to the review of R7-D1 below:** its "The Regions icon … is still on this stage … please don't tap it" no longer
+holds (H39), and its Question 1 is answered by the reviewer's ruling 1 (this section).
+
+### The hooks (#354 / main files)
+| hook | file : line | anchor (the line before it) | +a −r | gate |
+|---|---|---|---|---|
+| H39 | WorkspacePlaceholder.swift : 9716 | `.accessibilityLabel("Regions")` (#354's Regions toggle in the Selections header) | +1 −0 | `.flexibleDrawn(when: !flexibleMain.owns(project, stage))` — the toggle drawn only off the Flexible stage (FlexibleDrawnWhen.swift: the view when on, nothing otherwise) |
+| H40 | MetalMeshView.swift : 4085 | `// it shows up on screen"). The body is hidden; its footprint must not stay behind.` | +1 −1 | `let latticeOnly = bodyAlpha <= 0.5 && !flexibleBodyPrinted` — `flexibleBodyPrinted` (MeshRenderer+FlexibleLattice.swift) = the Flexible pass in frame AND its printed view; false on every other stage |
+
+H26 (`regionsOpen, !flexibleMain.owns(project, stage)` on the panel) is unchanged. Both new hooks are pinned once at their
+anchor with their gate, and the gate-removed copy goes red (`FlexibleH39HotfixHookTests`). The R7-D1 table is unchanged
+(`FlexibleRound7ScreenHookTests` green).
+
+**When D2's H25 lands** (the ruling's words): keep H39 only if #354's Selections card can still draw on the Flexible stage in
+some state; otherwise remove it in that commit and say so.
+
+### What was asked → the fix → the test (RED control)
+| asked | the fix | pinned by (RED) |
+|---|---|---|
+| ruling 1: H39, the toggle drawn only when `!flexibleMain.owns(project, stage)` | the one modifier line after #354's `.accessibilityLabel("Regions")` | `FlexibleH39HotfixHookTests.testH39…` (pin; RED: the gate replaced by `true`) |
+| ruling 1: nothing on Flexible can set regionsOpen; a Flexible session never pops the panel on Topology | H39 removes the only writer that opens it (the toggle); the panel's Done only closes it; no binding passes it on; H26 keeps the panel off the stage | `testNothingOnTheFlexibleStageCanSetRegionsOpen` (every write of regionsOpen; RED: today's text) · **hosted** `FlexibleH39HostedTests` on your pad at 13" portrait: Topology's toggle opens the panel (POSITIVE control, cover 0.999); on the Flexible stage the toggle's own picture is not found (best match 15.5 vs 0.0 on Topology); back on Topology through the capsule's ‹ Topology: no panel (cover 0.0); your own tap there still opens it (0.999). **RED** at `76df22e8` and again with H39's line taken out after the code: the toggle matched at 0.0, the tap set it, Topology showed the panel (0.999) |
+| ruling 4: H40 at :4085, +1 −1, pin + red control; other stages pixel-identical | the hook; its gate in our renderer file | pin (RED: gate removed) · `FlexibleH40ShadowTests` your live lattice, printed view, the shipping renderer with its floor: 4 122 px change, all darker — the shadow (RED `controlNoPrintedShadow`: today's frame) · `FlexibleH40OtherStagesDigestProbe`: 12 frames of the other stages WITH the floor and contact shadow (Topology ×4, the Structural lattice-only and body-shown ×4, Surface tinted ×2, a see-through body ×2), before = after byte for byte (`shadow/compare.txt`) |
+| ruling 6: NO request of any kind (design, preview, run) to core without a face-prism; red-first test that none reaches the bridge | every core scene the stage opens goes through `FlexibleCoreDoor` (the worker's open and the strips' two [Done] openings), which refuses with no face-prism; with none the stage does not knock (`holdWithoutFacePrism`: ready on the plain part, core's old scene let go, no stack / design / Auto / lattice kept); the run stays refused by FlexibleCoreRun (M1) | `FlexibleRuling6NoCoreTests` on your pad as saved: every way the stage can ask (open again, a weight, a curve point, a recompute, Auto, the main page's build, the model's, Ready's send, a step button) → **0 scenes opened, 0 asks, 0 runs**; the one line, [Lattice under it], nothing "still designing". RED `controlAskCoreWithoutPrism` (the stage before the ruling): 1 scene, 45 asks, 5 designs. N2: a face-prism opens it (1 scene), taking the last one away shuts it (no new asks; the worker refuses in your words). N3: the door refuses a no-face-prism job. `testEveryCoreSceneTheFlexibleStageOpensGoesThroughTheDoor`: the door is the only `FlexibleScene(jobJSON:` in the app's Flexible code (RED: today's three) |
+| the suite (`a3784168`): a hold followed at once by an open could drop the open's new scene | the open (and the strips' [Done] opening) waits for a pending hold (`pendingHold` / `holdLanded`) | `FlexibleRuling6NoCoreTests.testAHoldThenAnOpenAtOnceKeepsTheNewScene` (N4; RED twice at `a3784168`: every stack refused "Set a face to Lattice…", the worker's scene gone) |
+
+**Two test premises corrected after the red run** (said in the tests): the leak check counted `regionsOpen = false` once —
+the declaration's own initial value is the second; and the hosted check first looked for "ink between Selections and the Keep
+clear pill", but with the toggle gone the pill widens into that room — it now matches the toggle's own picture, and its red
+control was re-run with H39's line taken out.
+
+### Re-pins (our own tests only; each attributed in the test to ruling 6)
+- `FlexibleSquishFixture.settle` and `FlexibleHisProject.openedModel`: with no face-prism there is no stack to wait for.
+- `FlexiblePressFixtures.project(path:name:)` (the cube, slabs, STEP cube, M2 stand, L bracket), `.padProject()` (C1's
+  pad), `FlexibleSquishFixture.stlProject` (the cylinder, the M2 stand) and `FlexibleGroupPaletteHostedTests.prismProject` (the
+  octagonal prism; `a465f66f`): these synthetic parts set no face-prism, and the tests on them pin core's own frames, aims,
+  verdicts and designs — so their stage models ask core as before the ruling (a test control, `FlexibleStageModel.controlAskCoreWithoutPrismFor`, keyed
+  by each fixture's fresh project id). The app never sets it.
+- `FlexibleAngledGoldenRecorder.sendSetModel`: the send sets saved with no face-prism (**A1_0002 and A1_0003**) are opened the
+  same way, so the goldens keep pinning the encoder's bytes over core's stacks (F15's pattern). Projects with a face-prism are
+  untouched.
+- `FlexibleR7M1Tests` 1a and 1a+, `FlexibleR7M1VerifyTests` V1: core's whole-part premises and the M1-build red controls are read
+  from a stage on the pre-ruling path (`wholePartControl` / the new `askCoreControl`), never from the stage under test, which
+  now asks nothing. V1 is back to its red run's first expectation: no design is asked.
+- **Every #354 test is unchanged** (no #354 test file touched).
+
+### The bytes and the other stages (condition e)
+- **Goldens, 0 DIFFERS in both modes** (at `a3784168` and again at `a465f66f`): deterministic 38 identical; unseeded 32
+  identical + 1 PART-SKIP.
+- **The 16 stage-job hashes:** `round7/batch_h39/stage_job_hashes_h39.txt` (`a465f66f`) is byte-identical to the R7-D1
+  review's (whole file); `a3784168`'s was too.
+- **Renderer, the other stages:** the 12 frames above, identical before / after.
+- **Chrome, Topology / Structural / Aesthetic / Surface** (`FlexibleRound7OtherStagesProbe`, 13 frames, `other_stages/compare.txt`):
+  - against R7-D1's committed `before/` every frame differed by one or two colour levels everywhere: the Mac's main display
+    changed since (this run's PNGs carry a "U28E590" colour profile, R7-D1's "Display P3"). So it was re-run in ONE environment,
+    back to back: the two #354 lines taken out, then put back;
+  - 11 of 13 identical; the 2 structural Topology frames differ only on the load arrow (104 px at 11", 3–12 px at 13"), and two
+    more "before" runs differ from each other by the same pixels: the arrow's anti-aliasing flicker R7-D1 recorded.
+
+### The pictures (`round7/batch_h39/`)
+- `regions/` (your pad, the whole app page hosted at 13" portrait; the chrome only — the part is drawn by Metal, not in it):
+  `H39_R1_1` Topology at open · `_2` your tap opens Regions there · `_3` the Flexible stage with no Regions icon ("Keep clear"
+  on one line) · `_4` Topology after the Flexible session, no panel. The two `RED_CONTROL` pictures: H39's line taken out —
+  the icon on the Flexible stage, and the panel carried over to Topology.
+- `shadow/`: your live lattice in the printed view by the shipping renderer with its floor, before and after H40, and the
+  after with the changed pixels marked red (the footprint along the part's foot). `before/` the other stages' 12 frames and
+  their digests; `after/digests.txt` the same digests.
+- `other_stages/`: the chrome comparison and the load arrow's flicker, side by side.
+
+### The runs (raw: `round7/batch_h39/h39_runs.txt`)
+- **Red** (`76df22e8`, stubs): every new test red where it should be; `testTheGateIsFalseOffThePrintedView` passed (a fact,
+  not a fix).
+- **Green**: the four new classes green; the M1 classes re-pinned and green.
+- **The targeted suite, once, at `a3784168`**: 267 classes in 23 chunks of 12 — every Flexible class, every class that names a
+  touched file (WorkspacePlaceholder and MetalMeshView included), the R7-D1 review's list, LatticeStaleTypeTests (6/6) and the
+  listed #354 classes (SurfaceStageGesturesTests does not exist). **1 627 tests, 1 522 passed, 94 skipped, 11 failed.** No exit
+  signal 11. The 11:
+  - known: AppModelTests 3MF ×3; FlexibleBatchNVerifyTests' refine line; LatticeSimSolveTriggerTests; FlexibleRound7ViewsHostedTests'
+    Play ring (M1's environmental TimelineView ring);
+  - ours, fixed at `a465f66f`: **FlexibleFEFieldTests — a real fault.** The stage held (no face-prism); the fixture set
+    face-prisms and opened again in the same turn; the open reached core first and the late hold let its new scene go, so every
+    stack was refused "Set a face to Lattice in Selections first". The open now waits for a pending hold (new test N4: red twice
+    before, green now). FlexibleS1VerifyTests, FlexibleGroupPaletteHostedTests and FlexibleRound6HostedTests ×2: synthetic parts
+    with no face-prism (re-pinned like the other synthetic fixtures).
+  - Re-run green after the follow-up: those five classes, the four new ones, the M1 classes, and every class that reads the two
+    changed files. Goldens again 0 DIFFERS both modes; the 16 hashes again identical.
+  - The four evidence files #354's probes rewrite (plane-extents ×2, smoothing ×2) were restored with git checkout.
+- **iOS** (`a465f66f`): BUILD SUCCEEDED (DerivedData flexA1); installed as above; the dylib carries `FlexibleCoreDoor` and
+  `flexibleDrawn`.
+
+### Open questions
+1. **(You)** With no face-prism, the Squish page now shows no curve on the part (placing it needs core, which the ruling says
+   not to ask). The cards still say "No lattice under it" with [Lattice under it]. Is that what you want there, or should the
+   Squish page say once, in its top line, that curves appear when a face is latticed?
+2. **(Reviewer)** The synthetic test parts, C1's pad and the A1_0002 / A1_0003 send sets ask core through a test control so the
+   goldens and the core-maths tests keep pinning core's bytes (F15's pattern, now for the scene too). Keep that, or move those
+   fixtures onto real face-prisms (which re-records their goldens)?
+3. **(Reviewer)** The H39 modifier widens "Keep clear" on the Flexible stage's header (one line). Fine until D2?
+
+## ★ Round 7 · the review of R7-D1 — what the two-angle review found on the new screen, what is fixed, and what waits for the reviewer (2026-10-17) (the step before the H39 hotfix above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, on top of `999c6025` (R7-D1). Commits:
 - `185fcc10`: tests FIRST, against stubs. The red run is `round7/batch_d1_review/d1r_red_run.txt`.
