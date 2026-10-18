@@ -134,4 +134,12 @@ extension FlexibleScene {
         return FlexPressVerdict(accepted: r.accepted, reason: String(r.reason), load: FlexConv.v3(r.load),
                                 buildAngleDeg: r.build_angle_deg, side: r.side, columns: Int(r.columns))
     }
+
+    /// ★ R7-E1 STUB: register a press (footprint + direction) on the open scene; its synthetic id.
+    public func registerPress(_ footprint: [Int], direction: SIMD3<Double>) throws -> Int {
+        throw TopOptError(message: "R7-E1 stub: no press registration yet")
+    }
+
+    /// ★ R7-E1 STUB: core's press API version.
+    public static var pressApiVersion: Int { 0 }
 }

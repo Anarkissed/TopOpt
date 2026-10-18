@@ -204,6 +204,8 @@ public struct FlexStackInfo: Equatable, Sendable {
     /// ★ S1 (#361's 254cb137 — the spec's V2): a SECTOR's ownership is core's own, asked once (see
     /// FlexSectorVerdict). nil: a stack without cuts (core owns every voxel its columns hold).
     public var sector: FlexSectorVerdict? = nil
+    /// ★ R7-E1 STUB: the regions whose union is the footprint (core's Stack.footprint_region_ids).
+    public var footprintRegionIDs: [Int] = []
 
     /// ★ ROUND 7, M1 (his img1, 2026-10-14: "ONLY the face-prism creates the lattice structure in any area"): this stack
     /// as the app keeps it when NO face-prism is set — core's frame, columns and entries unchanged, but no lattice on any

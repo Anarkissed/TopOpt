@@ -171,6 +171,10 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var selectedRegion: Int? { didSet { if oldValue != selectedRegion { selectionChanged() } } }
     /// ★ ANGLED PRESSES (AP1): the press whose card is open (FlexiblePress id); nil ⇒ none.
     @Published public var selectedPress: UUID?
+    /// ★ R7-E1 STUB: the flat prism's drag preview, the last stop, the camera request.
+    @Published public internal(set) var flatPreview: FlexibleFlatPreview?
+    @Published public internal(set) var lastFlatStop: FlexibleFlatStop?
+    @Published public internal(set) var flatCameraRequest: UUID?
     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
     /// stored in the project until [Done].
     @Published public var edgePick: FlexibleEdgePick?

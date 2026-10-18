@@ -85,11 +85,11 @@ final class FlexibleSectorStoreTests: XCTestCase {
         XCTAssertNil(why, "[Done] cut the strips")
         let press = try XCTUnwrap(m.presses.first { $0.strip != nil }, "the edge press")
         XCTAssertTrue(press.regions.allSatisfy(FlexibleRegions.isFlexible), "★ its strips are Flexible-only sectors: \(press.regions)")
-        // the strip width
-        let w = try XCTUnwrap(press.strip).widthMM
-        let why2 = await m.setStripWidth(press.id, mm: max(FlexibleEdgeStrips.minWidthMM, w / 2))
+        // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width."): the edit was the strip width
+        // halved (setStripWidth); it is the flat prism's depth now (setFlatCut), the same re-cut and one undo step
+        let why2 = await FlexibleFlatPrismFixtures.reDepth(m, press.id)
         XCTAssertNil(why2)
-        try await F.reopen(m, "the width changed")
+        try await F.reopen(m, "the depth changed")
         p.performUndo()
         try await F.reopen(m, "undo")
         p.performRedo()

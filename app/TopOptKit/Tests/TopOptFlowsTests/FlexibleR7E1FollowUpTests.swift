@@ -106,6 +106,22 @@ final class FlexibleR7E1FollowUpTests: XCTestCase {
         return ViewerMesh(vertices: v, indices: idx, faceIDs: ids)
     }
 
+    /// The same L as outward-wound triangles in Double (an ASCII STL for core's importer — FlexibleFlatPrismTests' inside edge).
+    nonisolated static func lTriangles() -> [FlexiblePressFixtures.Tri] {
+        let o: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(40, 0), SIMD2(40, 20), SIMD2(20, 20), SIMD2(20, 40), SIMD2(0, 40)]
+        func p(_ q: SIMD2<Double>, _ z: Double) -> SIMD3<Double> { SIMD3(q.x, q.y, z) }
+        var out: [FlexiblePressFixtures.Tri] = []
+        for (a, b, c) in [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 5)] {
+            out.append((p(o[a], 0), p(o[c], 0), p(o[b], 0)))       // bottom, −Z
+            out.append((p(o[a], 20), p(o[b], 20), p(o[c], 20)))    // top, +Z
+        }
+        for i in 0..<o.count {
+            let a = o[i], b = o[(i + 1) % o.count]
+            out.append((p(a, 0), p(b, 0), p(b, 20))); out.append((p(a, 0), p(b, 20), p(a, 20)))
+        }
+        return out
+    }
+
     /// Core's grid over the L as core makes it at Balanced-like spacing (h = 40/38.4: the notch faces sit 0.2 voxel past a
     /// centre, as his pad's Top does), origin at the bounding box's corner. The lattice: the +X arm's voxels within 8 mm under
     /// the notch face y = 20 (a face-prism there), ρ 0.2; every other voxel −1 (solid inside, empty outside — core's field

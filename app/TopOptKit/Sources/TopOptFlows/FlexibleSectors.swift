@@ -149,8 +149,8 @@ public enum FlexibleSectors {
     /// `includes`: Selections' include specs (the face-prisms). `strips`: every edge/corner press's area, in pick order of
     /// storage. `newPicks`: picks being made now — refused where they cannot be cut (D6); a kept strip is clipped and noted.
     static func resolve(mesh: ViewerMesh, faceRegions: FaceRegionModel, includes: [LatticeRegionSpec],
-                        strips: [(id: UUID, strip: FlexibleStrip)], newPicks: Set<UUID> = [],
-                        numbers: FlexibleSectorNumbers) -> FlexibleSectorSet {
+                        strips: [(id: UUID, strip: FlexibleStrip)], cuts: [UUID: FlexibleFlatPrism.Cut] = [:],
+                        newPicks: Set<UUID> = [], numbers: FlexibleSectorNumbers) -> FlexibleSectorSet {
         var out = FlexibleSectorSet()
         var scratch = faceRegions
         let roots = Self.roots(mesh: mesh, faceRegions: faceRegions)
@@ -235,7 +235,7 @@ public enum FlexibleSectors {
             var st = strip
             var refusal: String?
             for (k, mb) in strip.members.enumerated() {
-                let h = FlexibleEdgeStrips.halfSpaces(mb, width: strip.widthMM)
+                let h = FlexibleEdgeStrips.legacyHalfSpaces(mb, width: strip.widthMM ?? 0)
                 let fe = Swift.max(1e-6, 1e-7 * area(mb.face, []))
                 var cands: [(chain: String, scratch: RegionID?, root: Root, section: String?, a: Double)] = []
                 for r in roots where r.faces.contains(mb.face) {

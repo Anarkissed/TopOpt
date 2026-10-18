@@ -191,7 +191,7 @@ struct FlexibleEdgeGroupRows: View {
                 FlexRow(st.kind == .corner ? FlexibleRowCopy.patchSizeRow : FlexibleRowCopy.stripWidthRow,
                         info: FlexibleRowCopy.Info.stripWidth, id: "flexible-row-strip-width") {
                     FlexNumberBox(key: "strip-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.stripWidthRow,
-                                  spec: FlexNumberSpec(value: st.widthMM, unit: "mm", step: 0.5,
+                                  spec: FlexNumberSpec(value: st.widthMM ?? 0, unit: "mm", step: 0.5,
                                                        range: FlexibleEdgeStrips.minWidthMM...max(FlexibleEdgeStrips.minWidthMM, st.capMM),
                                                        decimals: 1),
                                   padTarget: $padTarget, onNote: { model.toast = $0 }) { v in

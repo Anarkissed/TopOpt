@@ -188,9 +188,11 @@ final class FlexibleR7SettingsEvidence: XCTestCase {
         XCTAssertNil(why)
     }
 
-    func setStripWidth(_ m: FlexibleStageModel, _ id: UUID, _ mm: Double) {
+    // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width."): the evidence's edit was a Strip
+    // width change; it is the flat prism's depth now (setFlatCut), the same one re-cut and one undo step.
+    func reDepth(_ m: FlexibleStageModel, _ id: UUID) {
         var done = false
-        Task { @MainActor in _ = await m.setStripWidth(id, mm: mm); done = true }
+        Task { @MainActor in _ = await FlexibleFlatPrismFixtures.reDepth(m, id); done = true }
         XCTAssertTrue(pumpUntil(240) { done } && settled(m), "re-cut, the part open again")
     }
 
@@ -230,11 +232,10 @@ final class FlexibleR7SettingsEvidence: XCTestCase {
             pump(0.6)
             try write("R7S_img4_BEFORE_edges_tab_with_face1_chip_and_curves.png", model: try renderModel(m, r, cam: iso, device: device), panel: image(h))
             lines.append("before: tab \(m.rail) · selected \(m.selectedRegion.map(String.init) ?? "none") · chip \(FlexibleDepthChips.handle(model: m, k: 3) != nil) · curves \(FlexibleStageOverlays.curveEditors(model: m)?.axes ?? [])")
-            let w = try XCTUnwrap(m.press(st.press)?.strip).widthMM
-            setStripWidth(m, st.press, w > 20 ? w - 5 : w + 5)
+            reDepth(m, st.press)
             pump(0.6)
             try write("R7S_img4_BEFORE_after_strip_width_back_on_group1.png", model: try renderModel(m, r, cam: iso, device: device), panel: image(h))
-            lines.append("before, after Strip width: tab \(m.rail)")
+            lines.append("before, after the depth re-cut: tab \(m.rail)")
         }
         // ── the same steps, fixed
         do {
@@ -247,11 +248,11 @@ final class FlexibleR7SettingsEvidence: XCTestCase {
             pump(0.6)
             try write("R7S_img4_AFTER_edges_tab_no_chip_no_curves.png", model: try renderModel(m, r, cam: iso, device: device), panel: image(h))
             lines.append("after: tab \(m.rail) · selected \(m.selectedRegion.map(String.init) ?? "none") · chip \(FlexibleDepthChips.handle(model: m, k: 3) != nil) · curves \(FlexibleStageOverlays.curveEditors(model: m)?.axes ?? [])")
-            let w = try XCTUnwrap(m.press(st.press)?.strip).widthMM
-            setStripWidth(m, st.press, w > 20 ? w - 5 : w + 5)
+            let h0 = m.press(st.press).flatMap(FlexibleFlatPrism.depth(of:)) ?? 0
+            reDepth(m, st.press)
             pump(0.6)
             try write("R7S_img4_AFTER_strip_width_stays_on_the_edges_group.png", model: try renderModel(m, r, cam: iso, device: device), panel: image(h))
-            lines.append("after, Strip width \(w) → \(m.press(st.press)?.strip?.widthMM ?? 0): tab \(m.rail) (edges group \(st.edges))")
+            lines.append("after, depth \(h0) → \(m.press(st.press).flatMap(FlexibleFlatPrism.depth(of:)) ?? 0): tab \(m.rail) (edges group \(st.edges))")
             // Group 1 open: Face 1's own chip and curves (the numbers of what he works on)
             m.rail = .group(try XCTUnwrap(m.squeezeGroup(of: st.top)).id)
             pump(0.6)

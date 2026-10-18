@@ -342,18 +342,26 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         }
         XCTAssertTrue(lines.contains("Face 1 keeps the rest \u{00B7} strip taken for Edge \(c.number)") ||
                       lines.contains("Face 1 keeps the rest \u{00B7} strip for Edge \(c.number)"), "the line names the face and the edge")
-        // the default width: core's lattice depth under the members, capped at half the face across the edge
-        let lat = [m.stack(1)?.latticeMMMax, m.stack(2)?.latticeMMMax].compactMap { $0 }
-        print("FLEX-I2-4 width: lattice depth under Face 1 / Face 2 \(lat) · cap \(st.capMM) · default \(st.widthMM)")
-        XCTAssertEqual(st.capMM, 10, accuracy: 1e-6, "Face 2 is 20 mm across the edge: the cap is half of it")
-        XCTAssertEqual(st.widthMM, min(lat.min() ?? st.capMM, st.capMM), accuracy: 1e-12, "the default width")
+        // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that
+        // gets wider as it gets dragged further towards the centre of the model from the edge."): was the DEFAULT WIDTH (core's
+        // lattice depth under the members, capped at half the face). A pick carries no width now: it carries core's halfway
+        // over its whole member faces, and the press starts at the flat prism's default depth (3 mm — a face's default).
+        let widthText: String = st.widthMM.map { "\($0)" } ?? "none"
+        let halfwayText: String = st.halfway.map { "\($0)" } ?? "none"
+        print("FLEX-I2-4 area: no width (\(widthText)) · halfway \(halfwayText) · cap \(st.capMM)")
+        XCTAssertNil(st.widthMM, "★ no strip width")
+        XCTAssertNotNil(st.halfway, "★ core's halfway, stored at pick time")
+        XCTAssertEqual(st.capMM, 10, accuracy: 1e-6, "Face 2 is 20 mm across the edge (half of it, kept for M2's read-through)")
         let why1 = try await done(m)
         XCTAssertNil(why1, "[Done] cut the strips")
         let press = try XCTUnwrap(m.presses.first { $0.strip != nil }, "one press")
         XCTAssertEqual(m.presses.filter { $0.strip != nil }.count, 1)
         XCTAssertEqual(press.regions.count, 2, "a strip on each face")
         XCTAssertTrue(press.regions.allSatisfy(FlexibleRegions.isSector), "each strip is a sector")
-        let w = try XCTUnwrap(press.strip).widthMM
+        // ★ RE-PINNED (R7-E1): the reach w is the flat prism's implied reach (h / dot(a, d) — h√2 on this right-angled edge)
+        let cutDone = try XCTUnwrap(FlexibleFlatPrism.cut(of: press))
+        XCTAssertEqual(cutDone.depthMM, FlexibleFlatPrism.defaultDepthMM, accuracy: 1e-12, "★ a new pick starts at 3 mm")
+        let w = try XCTUnwrap(FlexibleFlatPrism.reach(try XCTUnwrap(press.strip), member: 0, cutDone))
         for (k, reg) in press.regions.enumerated() {
             let face = press.strip!.members[k].face
             XCTAssertEqual(m.regions.faces(of: reg, mesh: mesh), [face], "strip \(k) lies on face \(face)")
@@ -399,7 +407,8 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         // the Surface tool's, compared here piece for piece (the strip and its rest on Face 1)
         XCTAssertEqual(r.project.faceRegions, before.faceRegions, "★ the Surface stage's regions are not touched (M2)")
         let twin = try FlexiblePressFixtures.a1Project(3, self).project
-        let h = FlexibleEdgeStrips.halfSpaces(press.strip!.members[0], width: w)[0]
+        // ★ RE-PINNED (R7-E1): the strip's plane is the flat prism's in-face cut (was the width's half-space)
+        let h = FlexibleFlatPrism.memberCuts(press.strip!, cutDone)[0][0]
         let leaves = twin.commitSurfaceCut(SurfaceCut(point: h.point, normal: h.normal, faceID: FaceID(press.strip!.members[0].face),
                                                       faceNormal: SIMD3(0, 0, 1)))
         XCTAssertEqual(leaves.count, 2)
@@ -595,12 +604,14 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         return (m, top, slanted)
     }
 
-    // MARK: - (7) the width
+    // MARK: - (7) the depth (was: the width)
 
-    /// ★ "STRIP WIDTH": the default is core's lattice depth under the members capped at half the face across the edge
-    /// (test 4); a change RE-CUTS (the strip L × w', the rest the face less it; the press at core's halfway on its new
-    /// strips; the face's settings follow its rest) as ONE undo step; past the cap it stops at the cap.
-    func testTheStripWidthReCutsOnChangeAsOneUndoStep() async throws {
+    /// ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that gets
+    /// wider as it gets dragged further towards the centre of the model from the edge."): was testTheStripWidthReCutsOnChange-
+    /// AsOneUndoStep. A DEPTH change of the flat prism RE-CUTS (the strip L × the implied reach h√2, the rest the face less it;
+    /// the press stays on its whole faces' halfway — never re-aimed; the face's settings follow its rest) as ONE undo step; a
+    /// typed depth past what the faces allow is held so each face keeps some of itself (his answer: the half-face rule dropped).
+    func testTheFlatPrismDepthReCutsOnChangeAsOneUndoStep() async throws {
         let (r, m) = try await hisPad()
         let mesh = try XCTUnwrap(r.project.viewerMesh)
         let p = try await pickMode(m)
@@ -608,45 +619,54 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         let why5 = try await done(m)
         XCTAssertNil(why5)
         let press = try XCTUnwrap(m.presses.first { $0.strip != nil })
-        let w0 = press.strip!.widthMM
+        let h0 = try XCTUnwrap(FlexibleFlatPrism.depth(of: press))
         let afterDone = r.project.faceRegions
         let settingsDone = m.settings
         let regionsDone = m.regions
         func groupOn(_ face: Int, _ s: FlexibleStageSettings, _ regs: FlexibleRegions) -> Int? {
             s.faces.first { regs.faces(of: $0.faceRegionID, mesh: mesh) == [face] }?.squeezeGroup
         }
-        let w1 = w0 > 6 ? 6.0 : max(1, w0 / 2)
-        let why6 = await m.setStripWidth(press.id, mm: w1)
+        let h1 = 6.0
+        let why6 = await m.setFlatCut(press.id, depthMM: h1, direction: press.direction, snap: press.snap)
         XCTAssertNil(why6)
         try await FlexibleHisProject.waitFor(240, "the part open again") { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
         await m.waitForIdle()
         let re = try XCTUnwrap(m.press(press.id))
-        XCTAssertEqual(re.strip?.widthMM, w1)
+        XCTAssertEqual(re.settings.deepestMM, h1, accuracy: 1e-12)
+        XCTAssertNil(re.strip?.widthMM, "no width")
         // ★ RE-PINNED (round 7, M2 — the reviewer's ruling 3): a strip is a Flexible sector keyed by its ROLE (its press and
         // member), so a re-cut keeps its ids and moves its cuts (I2's Surface cut made new sector ids)
         XCTAssertEqual(re.regions, press.regions, "re-cut: the same Flexible ids")
         XCTAssertNotEqual(re.regions.map { regionsDone.cuts(of: $0) }, re.regions.map { m.regions.cuts(of: $0) }, "re-cut: new cuts")
         for (k, reg) in re.regions.enumerated() {
             let face = re.strip!.members[k].face
-            XCTAssertEqual(Self.area(m, reg, face: face), 100 * w1, accuracy: 1e-3 * 100 * w1, "face \(face): L × \(w1)")
+            let reach = h1 * 2.0.squareRoot()
+            XCTAssertEqual(Self.area(m, reg, face: face), 100 * reach, accuracy: 1e-3 * 100 * reach, "face \(face): L × h√2")
             let rest = m.settings.faces.filter { m.regions.faces(of: $0.faceRegionID, mesh: mesh) == [face] }
             XCTAssertEqual(rest.count, 1, "face \(face): its rest, re-keyed")
             XCTAssertEqual(rest.first?.squeezeGroup, groupOn(face, settingsDone, regionsDone), "face \(face): its group keeps the new rest")
         }
-        let aim = try await m.pressAim(re.regions)
-        XCTAssertEqual(Self.bits(re.direction), Self.bits(try XCTUnwrap(aim.defaultRelease).direction), "core's halfway on the new strips")
+        XCTAssertEqual(Self.bits(re.direction), Self.bits(try XCTUnwrap(press.strip?.halfway)), "★ the whole faces' halfway — never re-aimed")
         XCTAssertEqual(FlexibleEdgeStrips.regionsInTwoEntries(m.settings), [])
-        print("FLEX-I2-7 width \(w0) → \(w1): regions \(press.regions) → \(re.regions)")
+        print("FLEX-I2-7 depth \(h0) → \(h1): regions \(press.regions) → \(re.regions)")
         r.project.performUndo()
-        XCTAssertEqual(r.project.faceRegions, afterDone, "ONE undo step: the cut at \(w0) back")
-        XCTAssertEqual(m.settings, settingsDone)
+        XCTAssertEqual(r.project.faceRegions, afterDone, "ONE undo step: the Surface regions untouched")
+        XCTAssertEqual(m.settings, settingsDone, "ONE undo step: the cut at \(h0) back")
         r.project.performRedo()
-        // past the cap
+        // past what the faces allow: held so each face keeps some of itself
         try await FlexibleHisProject.waitFor(240, "the part open again") { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
         await m.waitForIdle()
-        let why7 = await m.setStripWidth(press.id, mm: 999)
-        XCTAssertNil(why7)
-        XCTAssertEqual(m.press(press.id)?.strip?.widthMM, press.strip!.capMM, "the width stops at the cap: the face keeps a rest")
+        let why7 = await m.setFlatCut(press.id, depthMM: 999, direction: press.direction, snap: press.snap)
+        try await FlexibleHisProject.waitFor(240, "the part open again") { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
+        await m.waitForIdle()
+        let held = try XCTUnwrap(m.press(press.id))
+        let cut = try XCTUnwrap(FlexibleFlatPrism.cut(of: held))
+        print("FLEX-I2-7 999 mm typed: \(why7 ?? "stored") · depth \(cut.depthMM) · toast \(m.toast ?? "-")")
+        XCTAssertLessThan(cut.depthMM, 999, "★ never 999 mm")
+        for (k, mb) in held.strip!.members.enumerated() {
+            XCTAssertTrue(FlexibleFlatPrism.keepsRest(FlexibleEdgeStrips.triangles(face: mb.face, mesh: mesh), member: mb, cut),
+                          "★ member \(k): the face keeps some of itself")
+        }
     }
 
     // MARK: - (8) what cannot be picked

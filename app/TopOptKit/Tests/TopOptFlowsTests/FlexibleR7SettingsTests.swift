@@ -141,10 +141,10 @@ final class FlexibleR7SettingsTests: XCTestCase {
             // ★ HIS IMG4: a Strip width change, then the re-open after the cut
             var prompt = FlexibleFixPrompt(actionSerial: m.actionSerial)
             _ = prompt.next(m.readiness, actionSerial: m.actionSerial, settled: true)
-            let w = try XCTUnwrap(m.press(pid)?.strip).widthMM
-            let why = await m.setStripWidth(pid, mm: w > 6.5 ? 6 : 8)
+            // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that gets wider as it gets dragged further towards the centre of the model from the edge."): the edit was a Strip width change (setStripWidth); the Strip width is gone, so the edit is the flat prism's depth (setFlatCut, 6 or 8 mm) — the same one re-cut and one undo step.
+            let why = await FlexibleFlatPrismFixtures.reDepth(m, pid)
             XCTAssertNil(why)
-            check(m, want, "Group \(g.number): setStripWidth")
+            check(m, want, "Group \(g.number): setFlatCut (the depth)")
             try await reopened(m)
             check(m, want, "Group \(g.number): the re-open after the cut")
             // the pop-up's rule: a re-cut rest is not a NEW issue (ids by the face's root)
@@ -203,9 +203,9 @@ final class FlexibleR7SettingsTests: XCTestCase {
         let e2 = try XCTUnwrap(m.squeezeGroup(ofPress: pid))
         m.selectedRegion = top
         m.rail = .group(e2.id)
-        let w = try XCTUnwrap(m.press(pid)?.strip).widthMM
-        _ = await m.setStripWidth(pid, mm: w > 6.5 ? 6 : 8)
-        XCTAssertEqual(m.rail, .group(1), "control: after Strip width, Group 1 — his img4")
+        // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that gets wider as it gets dragged further towards the centre of the model from the edge."): the edit was a Strip width change (setStripWidth); the Strip width is gone, so the edit is the flat prism's depth (setFlatCut, 6 or 8 mm) — the same one re-cut and one undo step.
+        _ = await FlexibleFlatPrismFixtures.reDepth(m, pid)
+        XCTAssertEqual(m.rail, .group(1), "control: after the depth re-cut, Group 1 — his img4")
         try await reopened(m)
         XCTAssertEqual(m.rail, .group(1), "control: after the re-open, Group 1")
     }
@@ -225,8 +225,8 @@ final class FlexibleR7SettingsTests: XCTestCase {
             let r0 = try standing()
             var prompt = FlexibleFixPrompt(actionSerial: m.actionSerial)
             _ = prompt.next(r0, actionSerial: m.actionSerial, settled: true)
-            let w = try XCTUnwrap(m.press(pid)?.strip).widthMM
-            _ = await m.setStripWidth(pid, mm: w > 6.5 ? 6 : 8)
+            // ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width. It should be a Flat prism that gets wider as it gets dragged further towards the centre of the model from the edge."): the edit was a Strip width change (setStripWidth); the Strip width is gone, so the edit is the flat prism's depth (setFlatCut, 6 or 8 mm) — the same one re-cut and one undo step.
+            _ = await FlexibleFlatPrismFixtures.reDepth(m, pid)
             try await reopened(m)
             let r1 = try standing()
             let popped = prompt.next(r1, actionSerial: m.actionSerial, settled: true)

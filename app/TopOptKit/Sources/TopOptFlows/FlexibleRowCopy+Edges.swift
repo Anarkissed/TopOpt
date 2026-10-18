@@ -94,4 +94,18 @@ extension FlexibleRowCopy {
     public static let patchSizeRow = "Patch size"
     /// A press is saved, never sent until core builds press stacks (AP9).
     public static let pressNotSent = "Set up \u{00B7} core support pending"
+
+    // MARK: ★ R7-E1 STUB — the flat prism's words
+    public static let insideEdge = "An inside edge \u{00B7} no flat prism"
+    public static let insideCorner = "An inside corner \u{00B7} no flat prism"
+    public static let flatFarEnd = "Stops here \u{00B7} the far end reaches 0 mm"
+    public static let flatShallowest = "Stops here \u{00B7} 0.5 mm is the least"
+    public static func flatCrossAll(_ n: Int) -> String { "The flat prism must cross all \(n) faces" }
+    public static func flatLatticeEnds(_ mm: Double) -> String { fit("Stops at " + String(format: "%.1f", mm) + " mm \u{00B7} the lattice ends there") }
+    public static let stripsAreFlatNow = "Edge strips are flat prisms now \u{00B7} same reach"
+    public static let flatDeepestRow = "Deepest squish"
+    public static func flatTiltRow(toward face: String) -> String { fit("Tilt toward \(face)") }
+    public static func flatTwistRow(end: String) -> String { fit("Twist \(end) deeper") }
+    public static func flatUpDownRow(into face: String) -> String { fit("Up/down more into \(face)") }
+    public static func flatLeftRightRow(toward face: String) -> String { fit("Left/right toward \(face)") }
 }

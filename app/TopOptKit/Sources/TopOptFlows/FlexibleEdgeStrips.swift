@@ -51,25 +51,30 @@ public struct FlexibleStrip: Codable, Equatable, Hashable, Sendable {
         public var span: [Double]?
         /// Half the face's extent across the edge (each edge, for a corner): the width's cap on this face.
         public var capMM: Double
+        /// ★ R7-E1 STUB: a corner face's two edge directions from the corner.
+        public var edges: [SIMD3<Double>]?
 
         public init(face: Int, root: Int, origin: SIMD3<Double>, away: [SIMD3<Double>], along: SIMD3<Double>? = nil,
-                    span: [Double]? = nil, capMM: Double) {
+                    span: [Double]? = nil, capMM: Double, edges: [SIMD3<Double>]? = nil) {
             self.face = face; self.root = root; self.origin = origin; self.away = away
-            self.along = along; self.span = span; self.capMM = capMM
+            self.along = along; self.span = span; self.capMM = capMM; self.edges = edges
         }
     }
 
     public var kind: Kind
     /// "Edge 3" / "Corner 1" — its number in the list it was picked from (the list renumbers after a cut).
     public var label: String
-    /// The strip's width / the patch's side (mm).
-    public var widthMM: Double
+    /// The strip's width / the patch's side (mm). ★ R7-E1 STUB: optional.
+    public var widthMM: Double?
     /// Pick order, across every edges/corners group (the first pick keeps a shared corner square).
     public var order: Int
     public var members: [Member]
+    /// ★ R7-E1 STUB: core's halfway over the whole members at pick time.
+    public var halfway: SIMD3<Double>?
 
-    public init(kind: Kind, label: String, widthMM: Double, order: Int, members: [Member]) {
+    public init(kind: Kind, label: String, widthMM: Double? = nil, order: Int, members: [Member], halfway: SIMD3<Double>? = nil) {
         self.kind = kind; self.label = label; self.widthMM = widthMM; self.order = order; self.members = members
+        self.halfway = halfway
     }
 
     /// The width's cap: half the narrowest member face's extent across its edge — a face group always keeps a rest.
@@ -234,7 +239,7 @@ public enum FlexibleEdgeStrips {
 
     /// ★ A member's AREA as half-spaces (each kept where dot(p − point, normal) ≥ 0, as a RegionCut): within `w` of
     /// each edge (its plane parallel to the edge, its normal in the face), and an edge's start and end along it.
-    public static func halfSpaces(_ m: FlexibleStrip.Member, width w: Double) -> [RegionCut] {
+    public static func legacyHalfSpaces(_ m: FlexibleStrip.Member, width w: Double) -> [RegionCut] {
         var out = m.away.map { u in RegionCut(point: m.origin + u * w, normal: -u) }
         if let e = m.along, let s = m.span, s.count == 2 {
             out.append(RegionCut(point: m.origin + e * s[0], normal: e))
@@ -282,7 +287,11 @@ public enum FlexibleEdgeStrips {
         public let id: UUID
         public var strip: FlexibleStrip
         public var regions: [Int]?
-        public init(id: UUID, strip: FlexibleStrip, regions: [Int]?) { self.id = id; self.strip = strip; self.regions = regions }
+        /// ★ R7-E1 STUB: the flat prism's plane (nil: M2's width).
+        public var cut: FlexibleFlatPrism.Cut?
+        public init(id: UUID, strip: FlexibleStrip, regions: [Int]?, cut: FlexibleFlatPrism.Cut? = nil) {
+            self.id = id; self.strip = strip; self.regions = regions; self.cut = cut
+        }
     }
 
     /// The regions after a change, and what each piece is.
@@ -363,7 +372,7 @@ public enum FlexibleEdgeStrips {
             }
             var free: [Int] = [root]
             for p in picks {
-                let h = halfSpaces(p.strip.members[p.k], width: p.strip.widthMM)
+                let h = legacyHalfSpaces(p.strip.members[p.k], width: p.strip.widthMM ?? 0)
                 // the free piece the pick's area lies in; where it reaches two (a strip wider than the corner patch
                 // beside it: the strip less the patch is an L, and a sector is one convex piece — core refuses two
                 // sectors of one face in a press), it takes the piece holding most of it and the sliver stays the rest

@@ -2,8 +2,9 @@
 // (A1_0003 as he saved it). Written BEFORE the code.
 //   H1 the [+ New] tab asks [Faces] [Edges/corners] on one line; in pick mode the card lists EVERY candidate, one row
 //      each, at least 44 pt tall, inside the panel; the card's lines are one line each; after [Done] the edges group's
-//      tab shows its press with its "Strip width" row (one line) and the face-keeps-the-rest line. RED: the stub card
-//      (no rows).
+//      tab shows its press and the face-keeps-the-rest line. RED: the stub card (no rows).
+//      ★ RE-PINNED (round 7, R7-E1 — his 2026-10-18 words: "There shouldn't be a strip width."): the tab's "Strip width" row
+//      is gone (its flat prism's rows are FlexibleFlatPrismHostedTests' H1); this test never clicked it.
 //   EVIDENCE (FLEX_I2_EVIDENCE_DIR=<dir>): his pad at his img2 and img3 cameras in pick mode — every edge and corner in
 //   its colour with its number, beside the panel's list; an edge picked with the "keeps the rest" lines; [Done]: the
 //   strip taken (the new group's glass on its strips) beside the edges group's tab. The model by the shipping renderer
