@@ -32,6 +32,12 @@ public final class FlexibleChromeGeometry: ObservableObject {
         if abs(h - panelHeight) > 0.5 { panelHeight = h }
         if card != panelCard { panelCard = card }
     }
+    /// ★ ROUND 7, R7-D2: the Selections list's frame (global) — the face chip keeps clear of it.
+    @Published public internal(set) var selectionsFrame: CGRect?
+    func noteSelections(_ r: CGRect?) {
+        guard r != selectionsFrame else { return }
+        DispatchQueue.main.async { [weak self] in if self?.selectionsFrame != r { self?.selectionsFrame = r } }
+    }
 }
 
 public struct FlexibleCornerPair: View {

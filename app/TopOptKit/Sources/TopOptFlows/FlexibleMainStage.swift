@@ -189,6 +189,17 @@ public final class FlexibleMainStage: ObservableObject {
     public let chromeGeometry = FlexibleChromeGeometry()
     /// ★ R7-D1: which blockers already popped above the pair this session (each new one pops once).
     var calloutRule = FlexibleCalloutRule()
+    /// ★ ROUND 7, R7-D2 (his mockup pick 2, B1): what the main page has picked — a free face waiting for the chip's answer, a
+    /// face of a group, or a whole group — and what the session remembers beside it (FlexibleFacePick). Coarse: one publish
+    /// per tap (the prisms follow it).
+    @Published public internal(set) var facePick = FlexibleFacePickSession()
+    /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,
+    /// observed only by the chip's layer and the list, so a drag never re-runs the workspace.
+    public let faceUI = FlexibleFaceChipState()
+    /// ★ R7-D2: the router is writing the active group (not an outside pick).
+    var routerWritesSelection = false
+    /// ★ R7-D2: #354's depth planes (the handles' geometry), and what they were built from.
+    var planesCache: (inputs: FacePrismInputs, planes: [ProjectModel.LatticeDepthPlane])?
     /// ★ the review of R7-D1: what Send would do now, memoised (answerIsCurrent asks it on every pass of the split).
     let coreJobMemo = FlexibleCoreJobMemo()
     /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each
@@ -396,6 +407,17 @@ public final class FlexibleMainStage: ObservableObject {
     var controlColumnSquish = false
     /// Test control only: a failed sim holds the loop at rest (no column fallback — the red control).
     var controlNoFallback = false
+    /// ★ ROUND 7, R7-D2, test controls only (each the rule it reverses): the prisms follow the ACTIVE Selections group (R7-V /
+    /// M1), not the pick; the lattice drawn over an empty setup (his answer 1 of 2026-10-17 evening: the plain part); X-ray
+    /// shows a group's face-prisms only after a pick (X1 — his answer 2); #354's own glass over the open lattice (M1 — his
+    /// answer 4: fainter glass).
+    @MainActor static var controlPrismsFollowActiveGroup = false
+    @MainActor static var controlLatticeOverEmptySetup = false
+    @MainActor static var controlXrayPickedOnly = false
+    @MainActor static var controlPrismGlassOverLattice = false
+    /// ★ R7-D2 (his answer 2): the faint face-prisms' alphas (every face-prism in X-ray before a pick, the rest after one).
+    static let faintFaceAlpha: Float = 0.06
+    static let faintEdgeAlpha: Float = 0.40
     /// ★ BATCH N, test control only: the page ignores the refined fields (batch G / M — the quick field
     /// and its fold cut for ever; the red control of the swap and the line).
     var controlNoRefineView = false

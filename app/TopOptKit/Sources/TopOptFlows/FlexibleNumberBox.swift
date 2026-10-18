@@ -153,6 +153,14 @@ struct FlexNumberBox: View {
     var onUnit: (FlexibleWeightUnit) -> Void = { _ in }
     /// ★ S VERIFICATION: the one line when a typed value is refused or clamped (the page's toast).
     var onNote: ((String) -> Void)? = nil
+    /// ★ ROUND 7, R7-D2: the keypad offers the sign key (the expand shrinks below 0).
+    var allowsNegative = false
+    /// ★ R7-D2: its twin box (the handle's ⇄ the list's) — while either's keypad is open, both wear the accent stroke.
+    var twin: String? = nil
+    /// ★ R7-D2: the text shown in place of the number ("mixed").
+    var shownOverride: String? = nil
+    /// ★ R7-D2: the list's narrower box (12.5 pt, tighter).
+    var compact = false
     /// Commit (the unit it shows): once per keypad close, once per drag release.
     let onCommit: (Double) -> Void
 

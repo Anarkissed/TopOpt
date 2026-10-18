@@ -189,6 +189,9 @@ public struct FlexibleStagePage: View {
     }
     /// Test control only (R7-V review): Bend alone in the X-ray ghost (R7-V's first build) — under `controlAlwaysXray`.
     @MainActor static var controlBendGhost = false
+    /// ★ ROUND 7, R7-D2 — test control only (his answer 3 of 2026-10-17 evening: "Squish page with [Prisms] on and X-ray off:
+    /// the part stays SOLID until X-ray (no 30 % see-through)"): X1's 30 % see-through with [Prisms].
+    @MainActor static var controlPrismsSeeThrough = false
     /// Test control only (X1): rounds 3–7's page — always in X-ray, no prism of the bend.
     @MainActor static var controlAlwaysXray = false
     /// The page is in X-ray: his icon (★ X1), or the red control's always.

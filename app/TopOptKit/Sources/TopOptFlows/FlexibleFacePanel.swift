@@ -296,6 +296,12 @@ struct FlexibleFaceRows: View {
         }
     }
 
+    /// ★ ROUND 7, R7-D2 (the reviewer's ruling 5 on M2's D4: "D4 (curved prisms don't cut yet) must SAY so on screen when it
+    /// applies"): the face's one line when a curved, hand-placed or non-convex face-prism meets it and cannot cut its lattice
+    /// section — nil otherwise.
+    @MainActor
+    static func curvedLine(model: FlexibleStageModel, region r: Int) -> String? { nil }
+
     /// The selected face's one warning line (FlexibleRowCopy.faceWarning), or nil.
     /// ★ D2 REVIEW: a PINCHED face counts the columns its two HALVES cannot reach (the lattice is
     /// built from them) — core's whole-column design said 832 on his face 3, the halves miss 412.
