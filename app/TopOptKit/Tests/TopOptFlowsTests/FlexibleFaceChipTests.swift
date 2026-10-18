@@ -110,7 +110,17 @@ final class FlexibleFaceChipTests: XCTestCase {
 
     // MARK: (b) the (i)
 
+    /// ★ RE-PINNED (round 7, the review of R7-D2 — our own test): the SHIPPING (i) no longer reads #354's slab card — on his pad
+    /// it said "Cell 5.00 mm, Density 5 %" beside a legend reading 15–21 % for the same face. It reads the Flexible lattice drawn
+    /// at that face (`FlexibleMainStage.faceStats` → `FlexibleFaceStats.rows(lattice:regions:depthMM:)`, pinned by
+    /// FlexibleR7D2ReviewTests R3 and FlexibleR7D2ReviewHostedTests R3). What stays pinned here: his four rows, the caption,
+    /// and `rows(card:)` — kept as R3's red control — still reads the drawer's own numbers. Was: the shipping (i)'s rows equal
+    /// LatticeRegionDrawer.make for the face's card.
     func testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers() throws {
+        let layer = try String(contentsOf: FlexibleRound7SelectionsHookTests.sources.appendingPathComponent("FlexibleOnModelLayer.swift"), encoding: .utf8)
+        XCTAssertTrue(layer.contains("let rows = main.faceStats(info.ref, group: info.group, project: project)"), "★ the card reads the drawn lattice")
+        XCTAssertFalse(layer.contains("FlexibleFaceStats.rows(card:"), "★ not #354's slab card")
+        XCTAssertEqual(FlexibleFaceStats.labels, ["Cell", "Density", "Strut", "Cells across"], "★ his four (his correction)")
         let card = try XCTUnwrap(FlexibleFaceChipTests.sampleCard(), "a card")
         let rows = try XCTUnwrap(FlexibleFaceStats.rows(card: card, depthMM: 25, held: true))
         XCTAssertEqual(rows.rows.map(\.label), ["Cell", "Density", "Strut", "Cells across"], "★ ONLY his four (his correction)")

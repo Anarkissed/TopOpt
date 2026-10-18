@@ -30,7 +30,9 @@ public enum FlexibleFaceChipLayout {
     public static func size(_ k: Kind) -> CGSize {
         switch k {
         case let .new(join, held): return CGSize(width: width, height: 44 + 64 + (join ? 48 + 8 + 24 : 0) + (held ? 22 : 0) + 2 * padding + 8)
-        case .member, .group, .blocked, .locked: return CGSize(width: width, height: 44 + 44 + 2 * padding + 8)
+        // ★ the review of R7-D2: 132 as drawn (the grip's 12 was missing — the chip sat 12 pt lower than placed, onto the face's
+        // outline and onto the (i)'s card); the layer also takes the chip's measured height when it grows (the role line, a confirm)
+        case .member, .group, .blocked, .locked: return CGSize(width: width, height: 44 + 44 + 2 * padding + 8 + 12)
         }
     }
 
@@ -61,6 +63,15 @@ public enum FlexibleFaceChipLayout {
         return k
     }
 
+    /// ★ REVIEW OF R7-D2: the picked face's own outline on screen as a keep-out for the AUTOMATIC spot (13"/11" portrait:
+    /// chip M sat on Face 3's own lattice) — unless the face fills so much of the screen (≥ 45 %) that nothing would be clear.
+    public static let faceKeepOutMaxShare: CGFloat = 0.45
+    public static func faceKeepOut(_ bounds: CGRect?, viewport v: CGSize) -> CGRect? {
+        guard let b = bounds?.intersection(CGRect(origin: .zero, size: v)), !b.isNull, b.width > 0, b.height > 0,
+              b.width * b.height < faceKeepOutMaxShare * v.width * v.height else { return nil }
+        return b
+    }
+
     static func hits(_ r: CGRect, _ keepOut: [CGRect]) -> Bool {
         keepOut.contains { $0.insetBy(dx: -clearance, dy: -clearance).intersects(r) }
     }
@@ -88,6 +99,14 @@ public enum FlexibleFaceChipLayout {
                 let x = min(max(c.x, inset), max(inset, v.width - inset - s.width))
                 let r = CGRect(x: x, y: c.y, width: s.width, height: s.height)
                 if inside(r, v), !hits(r, keepOut) { return r }
+                // ★ the review of R7-D2 (img2's front camera: the open list's column blocked "above", so the chip went below,
+                // onto the pad's front): slid sideways past what it hits, on the same side, before the next side
+                for k in keepOut where k.insetBy(dx: -clearance, dy: -clearance).intersects(r) {
+                    for sx in [k.maxX + clearance, k.minX - clearance - s.width] {
+                        let r2 = CGRect(x: sx, y: c.y, width: s.width, height: s.height)
+                        if inside(r2, v), !hits(r2, keepOut) { return r2 }
+                    }
+                }
             }
         }
         // none of the four: the nearest clear spot to "above" (the same search a let-go uses), when there is one
@@ -107,6 +126,18 @@ public enum FlexibleFaceChipLayout {
             x += 12
         }
         return clamped(centre, viewport: v)
+    }
+
+    /// ★ the review of R7-D2: the automatic spot with a SOFT keep-out — the face it edits: kept off it when a spot clear of
+    /// everything exists; else placed as if the face were not there (the chrome's keep-outs always win — at 11" portrait no
+    /// spot was clear of Face 3 AND the chrome, and the dock put the chip on the cube and the views row).
+    public static func auto(size s: CGSize, anchor: CGPoint?, viewport v: CGSize, keepOut: [CGRect], soft: CGRect?) -> CGRect {
+        if let soft {
+            let all = keepOut + [soft]
+            let r = auto(size: s, anchor: anchor, viewport: v, keepOut: all)
+            if inside(r, v), !hits(r, all) { return r }
+        }
+        return auto(size: s, anchor: anchor, viewport: v, keepOut: keepOut)
     }
 
     /// Where a chip that started at `anchor` is while a finger has moved it by `translation` (clamped 16 pt inside).
@@ -173,6 +204,9 @@ public final class FlexibleFaceChipState: ObservableObject {
     @Published public var dragging: String?
     /// What the last delete took (the message's [Undo] puts it back).
     var deleted: FlexibleFaceCommits.Deleted?
+    /// ★ the review of R7-D2: a Load the chip made this session → the weight it was made with (the force's default) — it reads
+    /// "weight: Squish page" until its weight changes (set on the Squish page).
+    @Published public var unweighed: [UUID: Double] = [:]
     var xrayBeforeDrag: Bool?
     var held: LatticeDepthDetent.Candidate?
     var seed: Double?

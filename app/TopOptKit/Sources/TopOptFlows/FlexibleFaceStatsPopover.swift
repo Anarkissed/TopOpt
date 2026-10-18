@@ -4,12 +4,16 @@
 // Strut, Cells across. (Not Hands over, As lattice or Saved.)"; the reviewer's (e): the caption "The current preview's
 // numbers at this depth." yes).
 //
-// ★ THE NUMBERS ARE #354's. Built with #354's PUBLIC `LatticeRegionDrawer.make(card:depthMM:held:latticeReachesTheRun:)`
-// from the card WorkspacePlaceholder already computes for that face (`latticeSelectableCards[ref.key]`, else the group's
-// `latticeFaceCards[group]`, handed in by H25 / H32), at the depth the face's box shows (`latticeSlabDepthMM(ref, in:)`):
-// exactly the old drawer's rows, filtered to his four, with the drawer's own "(estimate)" note when Cells across is the
-// bake's estimate. It holds FACTS, never a setting. No card yet → "No numbers yet for this face". An Off face has no (i).
-// No grams anywhere (his answer: hidden until core reports the real per-face lattice weight).
+// ★ THE NUMBERS ARE THE LATTICE HE SEES (the review of R7-D2, 2026-10-18). R7-D2 built them from #354's slab card (the
+// barrier preview's octet, `face_slab_preview`): "Cell 5.00 mm, Density 5 %" beside a legend that read "15 % · ≈8.7 mm …
+// 21 % · ≈6.7 mm" for the same face — two numbers for one thing, his img1 complaint ("they should *always* be equal"), and
+// the caption "The current preview's numbers at this depth." untrue. Now `rows(lattice:regions:depthMM:)` reads the
+// Flexible lattice DRAWN inside that face's own prism (its include region(s), `LatticeRegionMask.contains`, over the
+// lattice mask's voxels — the legend's own sample set): Density = the median ρ there, Cell = the cell drawn at that ρ
+// (`FlexibleProbe.drawnCell`, the legend's formula, "≈" inside a blend) with its family, Strut = the wall it is drawn with,
+// Cells across = depth ÷ cell. It holds FACTS, never a setting. No lattice yet (or no voxel of it in the face's prism) →
+// "No numbers yet for this face". An Off face has no (i). No grams anywhere (his answer: hidden until core reports the real
+// per-face lattice weight). `rows(card:…)` (#354's drawer) stays only as the tests' red control.
 
 import SwiftUI
 import TopOptDesign
@@ -22,6 +26,43 @@ public enum FlexibleFaceStats {
         public let rows: [LatticeDrawerRow]
         /// The drawer's estimate note under Cells across ("estimate, core checks it"), when it is the bake's estimate.
         public let note: String?
+        /// ★ REVIEW OF R7-D2: the numbers behind the rows (the face's density and drawn cell), for the tests.
+        public var rho: Double? = nil
+        public var cellMM: Double? = nil
+    }
+
+    /// ★ REVIEW OF R7-D2: the (i)'s rows from the Flexible lattice drawn inside the face's own prism (`regions`: its include
+    /// region(s) — a face cut into sections has one per section). nil without a voxel of the lattice in it.
+    public static func rows(lattice f: FlexibleLatticeInputs, regions: [LatticeRegionSpec], depthMM: Double) -> Rows? {
+        guard !regions.isEmpty else { return nil }
+        let m = f.mask
+        let same = m.nx == f.rho.nx && m.ny == f.rho.ny && m.nz == f.rho.nz
+        func sample(_ inside: (SIMD3<Double>) -> Bool) -> [Float] {
+            var out: [Float] = []
+            for n in 0..<m.values.count where m.values[n] >= 0.5 {
+                let p = m.c0 + SIMD3<Float>(Float(n % m.nx), Float((n / m.nx) % m.ny), Float(n / (m.nx * m.ny))) * m.spacing
+                guard inside(SIMD3<Double>(p)) else { continue }
+                out.append(same ? f.rho.values[n] : f.rho.sample(p))
+            }
+            return out
+        }
+        // the lattice's own voxels in the face's prism (its slab where one was built), else anywhere in the declared prism
+        var rhos = sample { p in regions.contains { LatticeRegionMask.contains(p, region: $0) } }
+        if rhos.isEmpty { rhos = sample { p in regions.contains { LatticeRegionMask.containsWholePrism(p, region: $0) } } }
+        guard !rhos.isEmpty else { return nil }
+        rhos.sort()
+        let rho = Double(rhos[rhos.count / 2])
+        let cell = FlexibleProbe.drawnCell(rho: rho, f)
+        let family = f.topology == .honeycomb ? "Honeycomb" : "Gyroid"
+        let across = cell.mm > 0 ? depthMM / cell.mm : 0
+        let rows = [LatticeDrawerRow(label: "Cell", value: String(format: "%@%.1f mm · %@", cell.blended ? "≈" : "", cell.mm, family)),
+                    LatticeDrawerRow(label: "Density", value: String(format: "%.0f%%", rho * 100)),
+                    LatticeDrawerRow(label: "Strut", value: String(format: "%.2f mm", Double(f.wallMM))),
+                    LatticeDrawerRow(label: "Cells across", value: String(format: "%.1f", across))]
+        var out = Rows(rows: rows, note: nil)
+        out.rho = rho
+        out.cellMM = cell.mm
+        return out
     }
 
     /// The (i)'s rows for one face — #354's drawer for that card at that depth, his four rows only; nil without a card.
@@ -37,6 +78,53 @@ public enum FlexibleFaceStats {
     public static func card(_ ref: LatticeSelectableRef, group: UUID, cards: [String: LatticeFaceCard],
                             groupCards: [UUID: LatticeFaceCard]) -> LatticeFaceCard? {
         cards[ref.key] ?? groupCards[group]
+    }
+}
+
+/// ★ REVIEW OF R7-D2: where the (i)'s card goes. From the CHIP (its (i) sits inside the chip): BELOW the chip, lined up
+/// with the (i) (the mockup's `placeInfo`), else above it, else beside it — never on it (R7-D2 put it right of the (i), on the
+/// chip's own title and segment, at all four sizes). From the LIST: beside its (i), to the right (the mockup), off the list.
+/// Each spot is kept 8 pt inside the screen and, where one is clear, off the page's keep-outs.
+enum FlexibleFaceStatsPlacement {
+    static let gap: CGFloat = 8
+    /// The card's height before it is measured (the four rows, the caption, the title: 160 as drawn, a little to spare).
+    static func estimatedHeight(rows: Bool) -> CGFloat { rows ? 172 : 96 }
+
+    static func frame(anchor a: CGRect, chip: CGRect?, size: CGSize, viewport v: CGSize, keepOut: [CGRect]) -> CGRect {
+        let w = size.width, h = size.height
+        func fits(_ r: CGRect) -> Bool { r.minX >= gap - 0.5 && r.minY >= gap - 0.5 && r.maxX <= v.width - gap + 0.5 && r.maxY <= v.height - gap + 0.5 }
+        func overlap(_ r: CGRect) -> CGFloat {
+            keepOut.reduce(0) { acc, k in let i = r.intersection(k); return acc + (i.isNull ? 0 : i.width * i.height) }
+        }
+        func pick(_ cands: [CGRect], avoid: CGRect?) -> CGRect? {
+            let ok = cands.filter { fits($0) && !(avoid?.intersects($0) ?? false) }
+            return ok.first { overlap($0) == 0 } ?? ok.min { overlap($0) < overlap($1) }
+        }
+        if let c = chip {
+            func xs(_ x: CGFloat) -> [CGFloat] { [x, c.minX, c.maxX - w].map { min(max(gap, $0), v.width - gap - w) } }
+            let below = c.maxY + gap, above = c.minY - gap - h
+            var cands: [CGRect] = []
+            for x in xs(a.minX - 12) { cands.append(CGRect(x: x, y: below, width: w, height: h)) }   // below the chip (the mockup)
+            for x in xs(a.minX - 12) { cands.append(CGRect(x: x, y: above, width: w, height: h)) }   // above it
+            for y in [c.minY, c.maxY - h] {
+                cands.append(CGRect(x: c.maxX + gap, y: y, width: w, height: h))                       // right of it
+                cands.append(CGRect(x: c.minX - gap - w, y: y, width: w, height: h))                   // left of it
+            }
+            return pick(cands, avoid: c) ?? CGRect(x: min(max(gap, c.minX), v.width - gap - w), y: min(max(gap, below), v.height - gap - h), width: w, height: h)
+        }
+        // the list's (i): to the right of the panel it sits in (the mockup), its middle on the (i), else its top or bottom there,
+        // else just above or below whatever is in the way there (the chip, at 11" portrait), the nearest first
+        let host = keepOut.first { $0.contains(CGPoint(x: a.midX, y: a.midY)) }
+        let x = max(a.maxX, host?.maxX ?? a.maxX) + gap
+        var around: [CGFloat] = []
+        for k in keepOut { around.append(k.minY - gap - h); around.append(k.maxY + gap) }
+        let mid = a.midY - h / 2
+        around.sort { abs($0 - mid) < abs($1 - mid) }
+        let first: [CGFloat] = [mid, a.minY - 12, a.maxY + 12 - h]
+        let top = v.height - gap - h
+        let ys: [CGFloat] = (first + around).map { (y: CGFloat) -> CGFloat in min(max(gap, y), top) }
+        let cands = ys.map { CGRect(x: x, y: $0, width: w, height: h) } + ys.map { CGRect(x: a.minX - gap - w, y: $0, width: w, height: h) }
+        return pick(cands, avoid: nil) ?? CGRect(x: min(max(gap, x), v.width - gap - w), y: ys[0], width: w, height: h)
     }
 }
 

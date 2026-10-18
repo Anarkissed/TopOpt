@@ -200,6 +200,8 @@ public final class FlexibleMainStage: ObservableObject {
     var routerWritesSelection = false
     /// ★ R7-D2: #354's depth planes (the handles' geometry), and what they were built from.
     var planesCache: (inputs: FacePrismInputs, planes: [ProjectModel.LatticeDepthPlane])?
+    /// ★ the review of R7-D2: the (i)'s numbers per face, memoised on the drawn lattice's generation and the face's depth.
+    var faceStatsMemo: [String: FlexibleFaceStats.Rows?] = [:]
     /// ★ the review of R7-D1: what Send would do now, memoised (answerIsCurrent asks it on every pass of the split).
     let coreJobMemo = FlexibleCoreJobMemo()
     /// ★ C2 VERIFICATION: how the pill takes him to the Lattice stage (H10 hands it over with each

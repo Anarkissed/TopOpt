@@ -28,6 +28,9 @@ public enum FlexibleNewFaceKind: String, CaseIterable, Sendable { case lattice, 
 /// Chip M's role line (the capsule opens these).
 public enum FlexibleGroupRoleButton: String, CaseIterable, Sendable { case anchor, load, protect, keepClear }
 
+/// ★ REVIEW OF R7-D2: what else a join gives the face (a Load group's share of its load, an Anchor group's anchor).
+public enum FlexibleJoinAlso: Equatable, Sendable { case none, load, anchor }
+
 /// A role tap's answer: done, or "Keep clear removes this lattice" must be asked first.
 public enum FlexibleRoleAnswer: Equatable, Sendable { case done, asksFirst, refused }
 
@@ -41,12 +44,34 @@ public enum FlexibleSelectionsCopy {
         let names = like.count > 2 ? "\(like.count) faces" : like.joined(separator: " + ")
         return d + ", the same as " + names
     }
+    /// ★ REVIEW OF R7-D2: the join's note — for a Load or an Anchor group, what else the face takes, in plain words (the
+    /// review: "Add to Top as lattice" joined the Load and took part of its 10 kg while the label said only "as lattice").
+    public static func joinNote(depthMM: Double, like: [String], also: FlexibleJoinAlso) -> String {
+        let d = String(format: "%.1f mm deep", depthMM)
+        switch also {
+        case .none: return joinNote(depthMM: depthMM, like: like)
+        case .load: return d + " · it also shares the Load"
+        case .anchor: return d + " · it is also anchored"
+        }
+    }
+    /// ★ REVIEW OF R7-D2: a Load the chip made, its weight not set yet (the mockup's words).
+    public static let weightUnset = "weight: Squish page"
     public static let orNew = "Or start a new group:"
     public static func loadToast(_ face: String) -> String { "\(face) is a Load. Set its weight on the Squish page." }
     /// ★ HELD (condition d): under chip N's five buttons while the lattice-only role waits for the reviewer.
-    public static let latticeHeld = "Lattice on a new face waits for a review"
-    public static func deleteAsk(_ name: String) -> String { "Delete \(name) here and in Topology?" }
-    public static func deleted(_ name: String) -> String { "\(name) deleted here and in Topology" }
+    /// ★ the review of R7-D2: the route in plain words (was "Lattice on a new face waits for a review" — process talk, and
+    /// no way to a lattice face on the session's first new face).
+    public static let latticeHeld = "For lattice now: tap Protect, then Lattice"
+    /// ★ the review of R7-D2: ONE line of ≤ 44 characters whatever name he typed ("Delete Left side squeeze pad here and in
+    /// Topology?" was 50 and widened the 348 pt list) — the name stays on the group's line right above the question.
+    public static func deleteAsk(_ name: String) -> String {
+        let s = "Delete \(name) here and in Topology?"
+        return s.count <= 44 ? s : "Delete this group here and in Topology?"
+    }
+    public static func deleted(_ name: String) -> String {
+        let s = "\(name) deleted here and in Topology"
+        return s.count <= 44 ? s : "Group deleted here and in Topology"
+    }
     public static let delete = "Delete"
     public static let cancel = "Cancel"
     public static let undo = "Undo"
@@ -118,10 +143,18 @@ enum FlexibleFaceCommits {
         return counts.max { a, b in a.value == b.value ? a.key > b.key : a.value < b.value }?.key
     }
 
-    /// The join offers this group: picked earlier this session, still there, editable, and able to carry a lattice role.
+    /// The join offers this group: picked earlier this session, still there, editable, able to carry a lattice role, and
+    /// ★ (the review of R7-D2) already holding a lattice face — "Add to Top as lattice" was offered for his Load with no
+    /// lattice face: it joined the Load (part of its 10 kg on the new face) at the paint default (4.0 mm), not a lattice depth.
     static func canJoin(_ id: UUID?, _ p: ProjectModel) -> Bool {
         guard let id, group(id, p) != nil, !isLocked(id, p) else { return false }
-        return mayCarryLattice(id, p)
+        return mayCarryLattice(id, p) && hasLattice(id, p)
+    }
+
+    /// ★ REVIEW OF R7-D2: what else joining `id` gives the face — a Load group's share of its load, an Anchor group's anchor.
+    static func joinAlso(_ id: UUID, _ p: ProjectModel) -> FlexibleJoinAlso {
+        let k = p.force.kind(for: id)
+        return k.isLoad ? .load : k.isAnchor ? .anchor : .none
     }
 
     /// What the join writes: the group's most common live depth and expand (lastDepth, else the default, when it has

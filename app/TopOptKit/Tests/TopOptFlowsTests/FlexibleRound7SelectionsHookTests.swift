@@ -110,17 +110,23 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
 
     /// ★ H35 HELD (condition d): the reviewer's words — "if it does change a Topology run, STOP and tell the reviewer". It does
     /// (FlexibleLatticeOnlyGateTests.testConditionDALatticeOnlyGroupAndATopologyRun), so ProjectModel carries no H35 line and
-    /// chip N's [Lattice] is held. RED CONTROL: the approved H35 line put back into a copy is found.
+    /// chip N's [Lattice] is held. RED CONTROL: the hold check run on a copy with the approved H35 line put back goes red.
+    /// ★ RE-PINNED (round 7, the review of R7-D2 — our own test): its red control inserted the H35 line into a copy and then
+    /// asserted the copy contained it, which can never fail. Now the SAME hold check (`held`) runs on that copy and must say
+    /// "not held". Was: `XCTAssertTrue(withH35.contains(h35))`.
     func testH35IsHeldProjectModelHasNoLatticeOnlyLine() throws {
         let pm = try Self.text("ProjectModel.swift")
         let h35 = "lattice.flexible?.latticeOnlyGroups"
-        XCTAssertFalse(pm.contains(h35), "★ H35 is not landed (STOPPED on condition d)")
-        XCTAssertFalse(pm.contains("Flexible (PR #362) H35"), "no H35 comment either")
+        func held(_ text: String) -> Bool { !text.contains(h35) && !text.contains("Flexible (PR #362) H35") }
+        XCTAssertTrue(held(pm), "★ H35 is not landed (STOPPED on condition d): no H35 line, no H35 comment")
         XCTAssertFalse(FlexibleFaceCommits.latticeOnlyRoleLanded, "★ chip N's [Lattice] waits for the reviewer")
         let anchor = "                keepClearOn: force.keepClearAffix(for: id) == .on)\n"
         XCTAssertEqual(pm.components(separatedBy: anchor).count - 1, 1, "H35's anchor is still there for the day it lands")
         let withH35 = pm.replacingOccurrences(of: anchor, with: anchor + "                || (\(h35)?.contains(id) == true && force.keepClearAffix(for: id) != .on)   // Flexible (PR #362) H35: x\n")
-        XCTAssertTrue(withH35.contains(h35), "★ RED CONTROL: the approved line, put back, is seen")
+        XCTAssertNotEqual(withH35, pm, "premise: the copy carries the approved line")
+        XCTAssertFalse(held(withH35), "★ RED CONTROL: with the approved H35 line put back, the hold check says it landed")
+        XCTAssertFalse(held(pm.replacingOccurrences(of: anchor, with: anchor + "                // Flexible (PR #362) H35: x\n")),
+                       "★ RED CONTROL: the H35 comment alone is caught too")
     }
 
     /// The new code lives in new Flexible files; the hooks name only them.

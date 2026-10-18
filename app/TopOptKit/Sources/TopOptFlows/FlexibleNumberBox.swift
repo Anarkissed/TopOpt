@@ -163,6 +163,9 @@ struct FlexNumberBox: View {
     var compact = false
     /// ★ R7-D2: the unit beside the number (not beside "mixed").
     var unitShown = true
+    /// ★ the review of R7-D2: the tap target's height around the 32 pt look — the main page's boxes pass 44 (his 44 pt rule;
+    /// a tap a few points off the box landed on its row). nil: the box's own 32 (the Squish page, unchanged).
+    var hitHeight: CGFloat? = nil
     /// Commit (the unit it shows): once per keypad close, once per drag release.
     let onCommit: (Double) -> Void
 
@@ -175,50 +178,47 @@ struct FlexNumberBox: View {
     /// VERIFICATION: 8 pt (was 3) — a finger's tap wanders more than 3 pt.
     static let tapSlop: CGFloat = 8
     static let height: CGFloat = 32
+    /// ★ REVIEW OF R7-D2: his 44 pt target rule.
+    static let target: CGFloat = 44
 
     var body: some View {
         let shown = scrub.map { FlexNumberSpec.format($0.shown, decimals: spec.decimals) } ?? (shownOverride ?? spec.text)
         let lit = padTarget == key || scrub != nil || (twin != nil && padTarget == twin)   // ★ R7-D2: the twin wears the accent too
-        HStack(spacing: 4) {
-            // the number (and the up / down hint): a TAP opens the keypad, a vertical DRAG scrubs
-            Button { padTarget = key } label: {
-                HStack(spacing: 4) {
-                    Text(shown)
-                        .font(.system(size: compact ? 12.5 : 14, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .lineLimit(1).fixedSize()
-                        .frame(minWidth: 26, alignment: .trailing)
-                        .accessibilityIdentifier("flexible-number-\(key)-value")
-                    if units.count <= 1, unitShown { unitView }
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(DS.Color.textTertiary.color)
+        Group {
+            if let hit = hitHeight, units.count <= 1 {
+                // ★ the review of R7-D2 (his 44 pt rule: a tap a few points off the 32 pt box landed on the list's row): the
+                // WHOLE band is the button — the 32 pt look centred in a transparent `hit` (44) band that takes the tap and the
+                // scrub; the look and its published frame are the same
+                Button { padTarget = key } label: {
+                    face(shown: shown, lit: lit)
+                        .frame(height: max(hit, Self.height))
+                        .contentShape(Rectangle())
                 }
-                .frame(height: Self.height)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            // the drag wins over the tap once the finger travels (a scrub never opens the keypad)
-            .highPriorityGesture(drag)
-            // a weight: its unit is its own menu (kg / lb / N / kN), apart from the number
-            if units.count > 1 {
-                Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 18)
-                unitView
+                .buttonStyle(.plain)
+                .highPriorityGesture(drag)
+                .fixedSize()
+            } else {
+                HStack(spacing: 4) {
+                    // the number (and the up / down hint): a TAP opens the keypad, a vertical DRAG scrubs
+                    Button { padTarget = key } label: {
+                        number(shown)
+                            .frame(height: Self.height)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // the drag wins over the tap once the finger travels (a scrub never opens the keypad)
+                    .highPriorityGesture(drag)
+                    // a weight: its unit is its own menu (kg / lb / N / kN), apart from the number
+                    if units.count > 1 {
+                        Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 18)
+                        unitView
+                    }
+                }
+                .modifier(BoxLook(compact: compact, lit: lit))
+                .fixedSize()
+                .background(published)
             }
         }
-        .padding(.horizontal, compact ? 7 : 9)
-        .frame(height: Self.height)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DS.Color.fillSubtle.color)
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder((lit ? DS.Color.accent : DS.Color.strokeStrong).color,
-                              lineWidth: lit ? 1.5 : 1)))
-        .fixedSize()
-        // its frame reaches the page (the hosted tests click it)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self,
-                                   value: ["numberBox-\(key)": g.frame(in: .global)]
-                                       .merging(padTarget == key ? ["numberBoxKeypad-\(key)": g.frame(in: .global)] : [:]) { $1 })
-        }.allowsHitTesting(false))
         .numberPad(Binding(get: { padTarget == key }, set: { if !$0, padTarget == key { padTarget = nil } }),
                    config: .init(title: title, unit: spec.unit, allowsDecimal: true, allowsNegative: allowsNegative), seed: spec.value) { buffer.typed($0) }
         .onChange(of: padTarget == key) { open in
@@ -236,6 +236,55 @@ struct FlexNumberBox: View {
             if v != spec.value { onCommit(v) }
         }
         .accessibilityIdentifier("flexible-number-\(key)")
+    }
+
+    /// The number, its unit (one unit) and the up / down hint.
+    private func number(_ shown: String) -> some View {
+        HStack(spacing: 4) {
+            Text(shown)
+                .font(.system(size: compact ? 12.5 : 14, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).fixedSize()
+                .frame(minWidth: 26, alignment: .trailing)
+                .accessibilityIdentifier("flexible-number-\(key)-value")
+            if units.count <= 1, unitShown { unitView }
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+        }
+    }
+
+    /// ★ the review of R7-D2: the box as it looks (the 44 pt target's inside) — its frame published as the box's own.
+    private func face(shown: String, lit: Bool) -> some View {
+        number(shown)
+            .frame(height: Self.height)
+            .modifier(BoxLook(compact: compact, lit: lit))
+            .fixedSize()
+            .background(published)
+    }
+
+    /// Its frame reaches the page (the hosted tests click it).
+    private var published: some View {
+        GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                   value: ["numberBox-\(key)": g.frame(in: .global)]
+                                       .merging(padTarget == key ? ["numberBoxKeypad-\(key)": g.frame(in: .global)] : [:]) { $1 })
+        }.allowsHitTesting(false)
+    }
+
+    /// The field's look: padded, 32 pt, a rounded fill and its hairline (the accent while its keypad or a scrub is live).
+    private struct BoxLook: ViewModifier {
+        let compact: Bool
+        let lit: Bool
+        func body(content: Content) -> some View {
+            content
+                .padding(.horizontal, compact ? 7 : 9)
+                .frame(height: FlexNumberBox.height)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(DS.Color.fillSubtle.color)
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder((lit ? DS.Color.accent : DS.Color.strokeStrong).color,
+                                      lineWidth: lit ? 1.5 : 1)))
+        }
     }
 
     @ViewBuilder private var unitView: some View {

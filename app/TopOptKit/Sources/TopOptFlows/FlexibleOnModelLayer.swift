@@ -11,8 +11,10 @@
 //     ("25.0 mm" — the list's number, one store), and in FACE scope the expand disc ↔ with its box ("+0.0 mm"); a tap on a
 //     box opens the numeric keypad, a vertical drag scrubs, the disc drags along the prism;
 //   * under [Prisms], every other lattice face-prism's number, read-only — a tap on one picks that face;
-//   * the (i)'s card (his change b — FlexibleFaceStatsPopover), beside the (i) it opened from;
-//   * the one message (a Load's "Set its weight on the Squish page", a delete's [Undo]).
+//   * the (i)'s card (his change b — FlexibleFaceStatsPopover): below the chip when the chip's (i) opened it, beside the
+//     list's (i) otherwise (★ the review of R7-D2: it sat on the chip); its numbers are the lattice drawn at that face;
+//   * the one message (a Load's "Set its weight on the Squish page", a delete's [Undo]) — above the player when Play is on
+//     (★ the review of R7-D2: it was drawn on the player's own band).
 // ONLY the chip, the discs, the boxes, the numbers and the message take a touch — the layer itself is hit-transparent, so
 // orbit and pinch still reach the part (FlexibleRound7SelectionsHostedTests: a tap on an empty point reaches what is under).
 
@@ -37,6 +39,10 @@ public struct FlexibleOnModelLayer: View {
     /// started. The spot itself is written to `ui.spots` every frame, so a cancelled drag still keeps where it got to.
     @GestureState private var chipGesture = false
     @State private var dragAnchor: CGPoint?
+    /// ★ the review of R7-D2: the chip's drawn size, for the scope it was measured on — placement takes it when the chip grows
+    /// past its kind's estimate (the role line, a confirm), so it never runs onto a keep-out, the face or the (i)'s card.
+    @State private var chipMeasuredKey: String?
+    @State private var chipMeasuredSize: CGSize = .zero
 
     public init(main: FlexibleMainStage, project: ProjectModel, projection: CameraProjection?, settle: simd_quatf,
                 bottomClearance: CGFloat, cards: [String: LatticeFaceCard], groupCards: [UUID: LatticeFaceCard],
@@ -60,10 +66,10 @@ public struct FlexibleOnModelLayer: View {
             let v = g.size
             let scope = FlexibleFacePick.validated(main.facePick, project: project).scope
             let frame = viewFrame
+            let chipPlaced: Placed? = frame.flatMap { f in chrome.allowsFaceChip && !scope.isNone ? place(scope, frame: f, origin: origin, viewport: v) : nil }
             ZStack(alignment: .topLeading) {
                 if let frame { edgeLights(scope, frame: frame, origin: origin, under: listUnder(origin: origin, viewport: v)) }
-                if let frame, chrome.allowsFaceChip, !scope.isNone {
-                    let placed = place(scope, frame: frame, origin: origin, viewport: v)
+                if let frame, let placed = chipPlaced {
                     leaders(placed.targets, chip: placed.rect, under: listUnder(origin: origin, viewport: v))
                     handles(scope, frame: frame, origin: origin, under: listUnder(origin: origin, viewport: v))
                     FlexibleFaceChip(main: main, project: project, ui: ui, scope: scope, cardsChanged: cardsChanged)
@@ -71,6 +77,8 @@ public struct FlexibleOnModelLayer: View {
                         .frame(width: placed.rect.width)
                         .background(GeometryReader { c in
                             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceChip": c.frame(in: .global)])
+                                .onAppear { noteChip(scope, c.size) }
+                                .onChange(of: c.size) { noteChip(scope, $0) }
                         }.allowsHitTesting(false))
                         .offset(x: placed.rect.minX, y: placed.rect.minY)
                         .highPriorityGesture(chipDragGesture(scope, placed: placed.rect, viewport: v))
@@ -80,8 +88,15 @@ public struct FlexibleOnModelLayer: View {
                         }
                 }
                 if let frame, main.prismsOn, chrome.allowsFaceChip || chrome.open == nil { prismNumbers(scope, frame: frame, origin: origin, viewport: v) }
-                if let info = ui.info { statsCard(info, origin: origin, viewport: v) }
-                if let t = ui.toast { toast(t, viewport: v) }
+                if let info = ui.info {
+                    let fromChip = info.key.hasPrefix("c-")
+                    statsCard(info, origin: origin, viewport: v, chip: fromChip ? chipPlaced?.rect : nil,
+                              // the (i)'s card is passing: it may sit over the face's own handles while open (11" portrait: kept
+                              // off them, it went onto the corner pair), never over the page's panels
+                              keepOut: (frame.map { keepOuts(scope, frame: $0, origin: origin, viewport: v, ownHandles: false) } ?? [])
+                                + (fromChip ? [] : chipPlaced.map { [$0.rect] } ?? []))
+                }
+                if let t = ui.toast { toast(t, viewport: v, chip: chipPlaced?.rect) }
             }
             .frame(width: v.width, height: v.height, alignment: .topLeading)
         }
@@ -185,7 +200,24 @@ public struct FlexibleOnModelLayer: View {
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+            // the lit faces' outline on screen (the projector's space is the page's, as `local` reads it) — the tests read it
+            .background(Color.clear.preference(key: FlexibleKeepOutKey.self,
+                                               value: Self.outlineBounds(segs, frame: frame).map { ["faceOutline": $0] } ?? [:])
+                .allowsHitTesting(false))
         }
+    }
+
+    /// The lit faces' outline on screen (the projector's space), or nil when none of it projects.
+    static func outlineBounds(_ segs: [(SIMD3<Float>, SIMD3<Float>)], frame: LatticeBandChipFrame) -> CGRect? {
+        var r: CGRect?
+        for s in segs {
+            for q in [s.0, s.1] {
+                guard let p = frame.project(q) else { continue }
+                let pr = CGRect(x: p.x, y: p.y, width: 0, height: 0)
+                r = r.map { $0.union(pr) } ?? pr
+            }
+        }
+        return r
     }
 
     // MARK: the chip's spot
@@ -194,7 +226,8 @@ public struct FlexibleOnModelLayer: View {
 
     private func place(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> Placed {
         let kind = FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup)
-        let size = FlexibleFaceChipLayout.size(kind)
+        var size = FlexibleFaceChipLayout.size(kind)
+        if let k = scope.chipKey, chipMeasuredKey == k, chipMeasuredSize.height > size.height { size.height = chipMeasuredSize.height }
         let pts = targets(scope).compactMap { local(frame.project($0), origin) }
         let keep = keepOuts(scope, frame: frame, origin: origin, viewport: v)
         let anchor: CGPoint? = pts.isEmpty ? nil : CGPoint(x: pts.map(\.x).reduce(0, +) / CGFloat(pts.count),
@@ -203,21 +236,35 @@ public struct FlexibleOnModelLayer: View {
         if let key = scope.chipKey, let spot = ui.spots[key] {
             r = FlexibleFaceChipLayout.clamped(CGRect(origin: spot, size: size), viewport: v)
         } else {
-            r = FlexibleFaceChipLayout.auto(size: size, anchor: anchor, viewport: v, keepOut: keep)
+            // ★ the review of R7-D2 (13"/11" portrait: chip M sat on Face 3's own lattice; img2's front camera: on the pad's
+            // front): the automatic spot also keeps off the lit faces' outline on screen — a drag may put it anywhere
+            let face = Self.outlineBounds(FlexibleFaceOutline.edges(faces: litFaces(scope), mesh: project.viewerMesh), frame: frame)
+                .map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
+            r = FlexibleFaceChipLayout.auto(size: size, anchor: anchor, viewport: v, keepOut: keep,
+                                            soft: FlexibleFaceChipLayout.faceKeepOut(face, viewport: v))
         }
         return Placed(rect: r, targets: pts, keepOut: keep)
     }
 
-    private func keepOuts(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> [CGRect] {
+    private func noteChip(_ scope: FlexibleFaceScope, _ s: CGSize) {
+        guard s.height > 0 else { return }
+        if chipMeasuredKey != scope.chipKey { chipMeasuredKey = scope.chipKey }
+        if abs(chipMeasuredSize.height - s.height) > 0.5 || abs(chipMeasuredSize.width - s.width) > 0.5 { chipMeasuredSize = s }
+    }
+
+    private func keepOuts(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize,
+                          listColumn: Bool = true, ownHandles: Bool = true) -> [CGRect] {
         // ★ LOOKED AT (13" portrait: after a join the list grew under a chip placed against its old frame): while the list is
         // open the whole left panel column is kept clear (the mockup's own rule), the measured pill while it is minimised
+        // ★ the review of R7-D2: [Prisms]' small numbers keep off the list as it is drawn (`listColumn: false` — the whole column
+        // dropped Face 5's number at 11" portrait, though it sat above the list)
         let measured = geometry.selectionsFrame.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
-        let sel: CGRect? = (measured.map { $0.height > FlexibleChromeLayout.selectionsPillHeight + 4 } ?? true)
+        let sel: CGRect? = listColumn && (measured.map { $0.height > FlexibleChromeLayout.selectionsPillHeight + 4 } ?? true)
             ? FlexibleFaceChipLayout.selectionsColumn(viewport: v) : measured
         let legend = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)?.frame
         let panel = FlexibleMainPlayerSlot.openPanel(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
         let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
-        let own = handleRects(scope, frame: frame, origin: origin)
+        let own = ownHandles ? handleRects(scope, frame: frame, origin: origin) : []
         return FlexibleFaceChipLayout.keepOuts(viewport: v, selections: sel, legend: legend, panel: panel, player: player, own: own)
     }
 
@@ -324,7 +371,7 @@ public struct FlexibleOnModelLayer: View {
                 .accessibilityLabel("Depth handle")
                 .accessibilityIdentifier("flexible-handle-depth-\(ref.key)")
             FlexNumberBox(key: key, title: "Depth", spec: spec, padTarget: $ui.padTarget, twin: "list-depth-\(ref.key)",
-                          shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: false)) { v in
+                          shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: false), hitHeight: FlexNumberBox.target) { v in
                 var s = main.facePick
                 FlexibleFaceCommits.setDepth(v, ref: group == nil ? ref : nil, group: gid, project: project, session: &s)
                 main.facePick = s
@@ -353,7 +400,8 @@ public struct FlexibleOnModelLayer: View {
                 .accessibilityLabel("Expand handle")
                 .accessibilityIdentifier("flexible-handle-expand-\(ref.key)")
             FlexNumberBox(key: key, title: "Expand", spec: spec, padTarget: $ui.padTarget, allowsNegative: true,
-                          twin: "list-expand-\(ref.key)", shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: true)) { v in
+                          twin: "list-expand-\(ref.key)", shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: true),
+                          hitHeight: FlexNumberBox.target) { v in
                 FlexibleFaceCommits.setExpand(v, ref: ref, group: gid, project: project)
                 cardsChanged()
             }
@@ -368,8 +416,14 @@ public struct FlexibleOnModelLayer: View {
         let picked = main.pickedPlaneKeys(project) ?? []
         let tags = FlexiblePrismNumbers.place(
             project.latticeDepthPlanes().filter { $0.role == .include && !picked.contains($0.ref.key) && !project.groupView.isHidden($0.groupID) }
-                .compactMap { p -> (ProjectModel.LatticeDepthPlane, CGPoint)? in local(frame.project(p.handle.anchor), origin).map { (p, $0) } },
-            viewport: v, keepOut: keepOuts(scope, frame: frame, origin: origin, viewport: v))
+                .compactMap { p -> (ProjectModel.LatticeDepthPlane, [CGPoint])? in
+                    // ★ the review of R7-D2: its floor point, else the face's centre, else halfway (Face 5's sat under the open list
+                    // and was dropped silently)
+                    let spots = [p.handle.anchor, p.handle.planeOrigin, (p.handle.anchor + p.handle.planeOrigin) / 2]
+                        .compactMap { local(frame.project($0), origin) }
+                    return spots.isEmpty ? nil : (p, spots)
+                },
+            viewport: v, keepOut: keepOuts(scope, frame: frame, origin: origin, viewport: v, listColumn: false))
         ForEach(tags, id: \.0.id) { t in
             Button { main.pickFace(t.0.ref, group: t.0.groupID, project: project) } label: {
                 Text(FlexibleLatticeHandles.depthText(project.latticeSlabDepthMM(t.0.ref, in: t.0.groupID)))
@@ -386,28 +440,29 @@ public struct FlexibleOnModelLayer: View {
 
     // MARK: the (i)'s card
 
-    private func statsCard(_ info: FlexibleFaceChipState.Info, origin: CGPoint, viewport v: CGSize) -> some View {
-        let depth = project.latticeSlabDepthMM(info.ref, in: info.group)
-        let card = FlexibleFaceStats.card(info.ref, group: info.group, cards: cards, groupCards: groupCards)
-        let rows = FlexibleFaceStats.rows(card: card, depthMM: depth, held: project.force.isProtected(info.group),
-                                          reaches: project.latticeReachesTheRun(info.ref))
+    /// ★ the review of R7-D2: the numbers are the lattice drawn at that face (`main.faceStats` — the legend's lattice; #354's
+    /// slab card, handed in as `cards` / `groupCards` by H32, is no longer read here); from the chip's (i) the card goes below
+    /// the chip (`chip`), never on it.
+    private func statsCard(_ info: FlexibleFaceChipState.Info, origin: CGPoint, viewport v: CGSize, chip: CGRect?, keepOut: [CGRect]) -> some View {
+        let rows = main.faceStats(info.ref, group: info.group, project: project)
         let a = info.anchor.offsetBy(dx: -origin.x, dy: -origin.y)
-        let w = FlexibleFaceStatsCard.width, h: CGFloat = rows == nil ? 96 : 210
-        var x = a.maxX + 8
-        if x + w > v.width - 8 { x = a.minX - 8 - w }
-        x = min(max(8, x), v.width - 8 - w)
-        let y = min(max(8, a.midY - h / 2), v.height - 8 - h)
+        let size = CGSize(width: FlexibleFaceStatsCard.width, height: FlexibleFaceStatsPlacement.estimatedHeight(rows: rows != nil))
+        let r = FlexibleFaceStatsPlacement.frame(anchor: a, chip: chip, size: size, viewport: v, keepOut: keepOut)
         return FlexibleFaceStatsCard(title: project.latticeSelectableName(info.ref) + " · lattice", rows: rows) { ui.info = nil }
             .fixedSize()
             .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["statsCard": g.frame(in: .global)]) }
                 .allowsHitTesting(false))
-            .offset(x: x, y: y)
+            .offset(x: r.minX, y: r.minY)
     }
 
     // MARK: the message
 
-    private func toast(_ t: FlexibleFaceChipState.Toast, viewport v: CGSize) -> some View {
-        HStack(spacing: DS.Space.m) {
+    private func toast(_ t: FlexibleFaceChipState.Toast, viewport v: CGSize, chip: CGRect?) -> some View {
+        let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
+        // ★ the review of R7-D2: above the player; and above the chip when the chip sits in its band (11" landscape)
+        let width = min(v.width - 32, CGFloat(t.text.count) * 7.6 + (t.undo ? 70 : 0) + 2 * DS.Space.l)
+        let spot = FlexibleSelectionsMessage.frame(size: CGSize(width: width, height: 44), viewport: v, player: player, avoid: chip.map { [$0] } ?? [])
+        return HStack(spacing: DS.Space.m) {
             Text(t.text).font(.system(size: 13.5, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
             if t.undo {
                 Button { main.undoDelete(project: project, cardsChanged: cardsChanged) } label: {
@@ -424,10 +479,32 @@ public struct FlexibleOnModelLayer: View {
         .background(Capsule().fill(DS.Surface.toast.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.toast)
         .fixedSize()
-        .position(x: (PageChrome.edge + PageChrome.panelWidth + v.width) / 2,
-                  y: v.height - FlexibleChromeLayout.barClearance - PageChrome.gap - 22)
+        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["toast": g.frame(in: .global)]) }
+            .allowsHitTesting(false))
+        .position(x: spot.midX, y: spot.midY)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-toast")
+    }
+}
+
+/// ★ REVIEW OF R7-D2: where the one message goes — its band above the bar, centred between the left panel and the right
+/// edge; with Play on, ABOVE the player (its note row included), a gap between (R7-D2 drew it on the player's own band:
+/// neither could be read, and the delete's [Undo] sat on the player's track).
+enum FlexibleSelectionsMessage {
+    /// `avoid`: what else may sit in its band (the chip) — the message goes above it (its true width decides).
+    static func frame(size: CGSize, viewport v: CGSize, player: CGRect?, avoid: [CGRect] = []) -> CGRect {
+        let x = (PageChrome.edge + PageChrome.panelWidth + v.width) / 2 - size.width / 2
+        var r = CGRect(x: x, y: v.height - FlexibleChromeLayout.barClearance - PageChrome.gap - 22 - size.height / 2,
+                       width: size.width, height: size.height)
+        if let p = player, p.width > 0, r.insetBy(dx: 0, dy: -PageChrome.gap / 2).intersects(CGRect(x: r.minX, y: p.minY, width: r.width, height: p.height)) {
+            r.origin.y = p.minY - PageChrome.gap - size.height
+        }
+        for _ in 0..<2 {
+            guard let k = avoid.first(where: { $0.width > 0 && $0.intersects(r.insetBy(dx: 0, dy: -PageChrome.gap / 2)) }) else { break }
+            r.origin.y = k.minY - PageChrome.gap - size.height
+        }
+        if r.minY < PageChrome.gap { r.origin.y = PageChrome.gap }
+        return r
     }
 }
 
@@ -462,17 +539,22 @@ enum FlexibleFaceOutline {
     }
 }
 
-/// [Prisms]' read-only numbers: each at its floor, greedily kept off the keep-outs and off each other.
+/// [Prisms]' read-only numbers: each at the first of its spots (its floor, the face's centre, halfway) that is clear,
+/// greedily kept off the keep-outs and off each other.
 enum FlexiblePrismNumbers {
-    static func place(_ cands: [(ProjectModel.LatticeDepthPlane, CGPoint)], viewport v: CGSize, keepOut: [CGRect]) -> [(ProjectModel.LatticeDepthPlane, CGPoint)] {
+    static func place(_ cands: [(ProjectModel.LatticeDepthPlane, [CGPoint])], viewport v: CGSize, keepOut: [CGRect]) -> [(ProjectModel.LatticeDepthPlane, CGPoint)] {
         var taken: [CGRect] = []
         var out: [(ProjectModel.LatticeDepthPlane, CGPoint)] = []
-        for (p, at) in cands {
-            let r = CGRect(x: at.x - 34, y: at.y - 13, width: 68, height: 26)
-            guard r.minX >= 8, r.minY >= 8, r.maxX <= v.width - 8, r.maxY <= v.height - 8 else { continue }
-            if keepOut.contains(where: { $0.intersects(r) }) || taken.contains(where: { $0.insetBy(dx: -4, dy: -4).intersects(r) }) { continue }
-            taken.append(r)
-            out.append((p, at))
+        for (p, spots) in cands {
+            // ★ the review of R7-D2: the first of its spots that is on screen and clear (one spot only dropped it silently)
+            for at in spots {
+                let r = CGRect(x: at.x - 34, y: at.y - 13, width: 68, height: 26)
+                guard r.minX >= 8, r.minY >= 8, r.maxX <= v.width - 8, r.maxY <= v.height - 8 else { continue }
+                if keepOut.contains(where: { $0.intersects(r) }) || taken.contains(where: { $0.insetBy(dx: -4, dy: -4).intersects(r) }) { continue }
+                taken.append(r)
+                out.append((p, at))
+                break
+            }
         }
         return out
     }

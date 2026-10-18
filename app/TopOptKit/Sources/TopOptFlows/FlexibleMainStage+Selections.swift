@@ -122,7 +122,12 @@ extension FlexibleMainStage {
         if let o = oldKey, let n = s.scope.chipKey, let spot = faceUI.spots[o] { faceUI.spots[n] = spot }
         sessionPicked = true
         facePick = s
-        if kind == .load { faceUI.say(FlexibleSelectionsCopy.loadToast(faces.map { FlexibleFacePick.name($0, project: project) }.joined(separator: " + "))) }
+        if kind == .load {
+            // ★ the review of R7-D2: its weight is the force's default until he sets it on the Squish page — the chip and the list
+            // say "weight: Squish page" meanwhile (not "2.5 kg")
+            if let kg = project.force.kind(for: gid).weightKg { faceUI.unweighed[gid] = kg }
+            faceUI.say(FlexibleSelectionsCopy.loadToast(faces.map { FlexibleFacePick.name($0, project: project) }.joined(separator: " + ")))
+        }
         cardsChanged()
     }
 
@@ -172,6 +177,22 @@ extension FlexibleMainStage {
         revalidatePick(project)
         model?.refreshMainPageLoads()
         cardsChanged()
+    }
+
+    // MARK: the (i)'s numbers
+
+    /// ★ REVIEW OF R7-D2: the (i)'s numbers for a face — the Flexible lattice DRAWN inside its own prism (its include
+    /// region(s), by the emission's selectable key), at the depth its box shows; the legend's lattice, never #354's slab card.
+    /// nil before a lattice is drawn ("No numbers yet for this face").
+    func faceStats(_ ref: LatticeSelectableRef, group gid: UUID, project: ProjectModel) -> FlexibleFaceStats.Rows? {
+        guard let m = model, m.project === project, let g = m.lattice else { return nil }
+        let depth = project.latticeSlabDepthMM(ref, in: gid)
+        let key = "\(g.generation)|\(ref.key)|\(depth)"
+        if let hit = faceStatsMemo[key] { return hit }
+        let rows = FlexibleFaceStats.rows(lattice: g.inputs, regions: m.includeSpecs.filter { $0.selectableKey == ref.key }, depthMM: depth)
+        if faceStatsMemo.count > 64 { faceStatsMemo.removeAll() }
+        faceStatsMemo[key] = rows
+        return rows
     }
 
     // MARK: the prisms the pick draws (H15' — `volumes`)

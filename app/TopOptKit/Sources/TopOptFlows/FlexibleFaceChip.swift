@@ -6,7 +6,9 @@
 //       button "Add to Group C as lattice" (the DS accent, white semibold label, the group's swatch, 48 tall — it reads and
 //       looks like a button, never an outlined title row: his image 2) with the depth it will take under it; then
 //       "Or start a new group:" and five 64 × 56 buttons [▦ Lattice] [Anchor] [Load] [Protect] [Keep clear].
-//       (★ HELD: [▦ Lattice] waits for the reviewer's ruling on condition (d) — greyed, one line under the row.)
+//       (★ HELD: [▦ Lattice] waits for the reviewer's ruling on condition (d) — greyed; the line under the row gives the
+//       two-tap route: "For lattice now: tap Protect, then Lattice". The join is offered only for a group that already has a
+//       lattice face — the review of R7-D2.)
 //   M — a face of a group: swatch, the name (tap to rename), the role capsule (a Load shows its weight, set on the Squish
 //       page), the trash (it CONFIRMS — his answer), ✕; then "Face 3", its (i) (his change b), and the segment
 //       [▦ Lattice | ■ Solid | ⬚ Off]. No grams (his answer: hidden until core reports the real per-face lattice weight).
@@ -28,10 +30,15 @@ struct FlexibleFaceChip: View {
     static let protectTint = RGBA(hex: 0x2EE0C7)
     static let segmentWidth: CGFloat = 80
 
-    /// A Load group's weight, read-only ("22 lbs") — set on the Squish page.
+    /// A Load group's weight, read-only — set on the Squish page. ★ the review of R7-D2: in the FLEXIBLE stage's unit (his
+    /// lb — the player's "11 lb each" and the Squish page's boxes), not Topology's kg; a Load the chip made this session whose
+    /// weight is still the one it was made with reads "weight: Squish page" (the mockup's words — his answer: the weight is
+    /// set later on the Squish page), not the force's 2.5 kg default.
     @MainActor
-    static func loadWeight(_ p: ProjectModel, _ g: UUID) -> String? {
-        p.force.kind(for: g).weightKg.map { p.force.formattedWeight(kg: $0) }
+    static func loadWeight(_ p: ProjectModel, _ g: UUID, ui: FlexibleFaceChipState?) -> String? {
+        guard let kg = p.force.kind(for: g).weightKg else { return nil }
+        if let made = ui?.unweighed[g], abs(made - kg) < 1e-9 { return FlexibleSelectionsCopy.weightUnset }
+        return FlexibleWeightUnit(stored: p.lattice.flexible?.weightUnit).text(kg: kg)
     }
 
     /// The chip's kind (its placement height).
@@ -84,7 +91,7 @@ struct FlexibleFaceChip: View {
         .frame(minHeight: 32)
         if let gid = main.facePick.lastGroup, FlexibleFaceCommits.canJoin(gid, project), let g = FlexibleFaceCommits.group(gid, project) {
             let v = FlexibleFaceCommits.joinValues(gid, project, session: main.facePick)
-            FlexibleJoinButton(group: g, note: FlexibleSelectionsCopy.joinNote(depthMM: v.depth, like: v.like)) {
+            FlexibleJoinButton(group: g, note: FlexibleSelectionsCopy.joinNote(depthMM: v.depth, like: v.like, also: FlexibleFaceCommits.joinAlso(gid, project))) {
                 main.commitJoin(project: project, cardsChanged: cardsChanged)
             }
             Text(FlexibleSelectionsCopy.orNew).font(.system(size: 12, weight: .medium))
@@ -185,7 +192,10 @@ struct FlexibleFaceChip: View {
         let symbol: String
         let tint: RGBA
         if k.isLoad {
-            word = "Load" + (Self.loadWeight(project, g.id).map { " " + $0 } ?? ""); symbol = "arrow.down"; tint = DS.Color.accent
+            // ★ the review of R7-D2: an unset weight reads as the list does — "↓ weight: Squish page" (with "Load" in front it was
+            // cut to "Load weight: Squish p…")
+            let w = Self.loadWeight(project, g.id, ui: ui)
+            word = w == FlexibleSelectionsCopy.weightUnset ? (w ?? "Load") : "Load" + (w.map { " " + $0 } ?? ""); symbol = "arrow.down"; tint = DS.Color.accent
         } else if k.isAnchor { word = "Anchor"; symbol = "lock.fill"; tint = DS.Color.okGreen
         } else if project.force.keepClearAffix(for: g.id) == .on { word = "Keep clear"; symbol = "nosign"; tint = DS.Color.clearance
         } else if project.force.isProtected(g.id) { word = "Protect"; symbol = "shield.lefthalf.filled"; tint = Self.protectTint
@@ -218,9 +228,14 @@ struct FlexibleFaceChip: View {
             ForEach(FlexibleGroupRoleButton.allCases, id: \.self) { b in
                 let kind = FlexibleNewFaceKind(rawValue: b.rawValue) ?? .anchor
                 FlexibleNewFaceButton(kind: kind, held: false, lit: lit[b] ?? false) {
+                    let wasLoad = project.force.kind(for: g.id).isLoad, hadWeight = project.force.kind(for: g.id).weightKg != nil
                     switch FlexibleFaceCommits.setRole(b, group: g.id, project: project) {
                     case .asksFirst: ui.roleOpen = nil; ui.keepClearAsk = g.id
-                    case .done: ui.roleOpen = nil; cardsChanged()
+                    case .done:
+                        ui.roleOpen = nil
+                        // a Load made here with no weight of its own yet: "weight: Squish page" until it is set there
+                        if b == .load, !wasLoad, !hadWeight, let kg = project.force.kind(for: g.id).weightKg { ui.unweighed[g.id] = kg }
+                        cardsChanged()
                     case .refused: ui.roleOpen = nil
                     }
                 }
@@ -361,7 +376,9 @@ struct FlexibleJoinButton: View {
         Button(action: action) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "plus.circle.fill").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white)
-                Circle().fill(group.color.color).frame(width: 12, height: 12)
+                // ★ the review of R7-D2: a blue group's swatch vanished on the blue fill — a dark ring inside the white one
+                Circle().fill(group.color.color).frame(width: 14, height: 14)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.45), lineWidth: 3))
                     .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(FlexibleSelectionsCopy.joinLabel(group.name))

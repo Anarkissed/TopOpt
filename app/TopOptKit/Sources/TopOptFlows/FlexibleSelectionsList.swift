@@ -171,7 +171,7 @@ public struct FlexibleSelectionsList: View {
                     Text(g.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1)
                     FlexibleRoleGlyphs(project: project, group: g.id, size: 13)
-                    if let w = FlexibleFaceChip.loadWeight(project, g.id) {
+                    if let w = FlexibleFaceChip.loadWeight(project, g.id, ui: ui) {
                         Text(w).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                     }
                     Spacer(minLength: DS.Space.xs)
@@ -334,7 +334,7 @@ public struct FlexibleSelectionsList: View {
                                   negative: Bool = false, commit: @escaping (Double) -> Void) -> some View {
         FlexNumberBox(key: key, title: title, spec: Self.spec(spec, value), padTarget: $ui.padTarget, allowsNegative: negative, twin: twin,
                       shownOverride: mixed ? FlexibleSelectionsCopy.mixed : FlexibleLatticeHandles.boxNumber(value, signed: negative),
-                      compact: true, unitShown: !mixed, onCommit: commit)
+                      compact: true, unitShown: !mixed, hitHeight: FlexNumberBox.target, onCommit: commit)
             .frame(width: Self.boxWidth)
     }
 
@@ -421,8 +421,10 @@ struct FlexibleDeleteConfirm: View {
     // own line, whole; [Cancel] [Delete] under it
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // ★ the review of R7-D2: never fixed-size (a 50-character question widened the 348 pt list and cut every trash)
             Text(FlexibleSelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).fixedSize()
+                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, DS.Space.s).padding(.horizontal, DS.Space.xs)
                 .accessibilityIdentifier("flexible-delete-question")
         HStack(spacing: DS.Space.s) {
