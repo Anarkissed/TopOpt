@@ -1,6 +1,145 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-D2 — Selections on the Flexible stage: your pick 2 (B1 with your three changes), the trash with a confirm and Undo, your four answers of 10-17 evening (2026-10-18) (read this first)
+## ★ Round 7 · the review of R7-D2 — what the two-angle review found on your pad, what is fixed, and what still waits (2026-10-18) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), main worktree, on top of `828d352c` (R7-D2's handoff). Commits:
+- `850c802a`: the fixes and their tests (tests FIRST against stubs — the red run is `round7/batch_d2_review/d2r_red_run.txt`;
+  `d2r_make_stubs.py.txt` rebuilds that stub state from `828d352c`).
+- `09b81004`: the pictures (`look/`, `sides/`), the runs (`d2r_runs.txt`), the trash-Undo diagnosis.
+- This section's commit.
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched** (09:02): the app was NOT running (launchctl), so nothing was terminated; the installed `TopOpt.debug.dylib` is the built one (sha256 `3a84ca41aeb2918a…`, 87 441 952 bytes) and carries "For lattice now: tap Protect, then Lattice", "Delete this group here and in Topology?" and "weight: Squish page".
+
+**App only, Flexible files only.** No core file. **No #354 / main file changed in this step**: WorkspacePlaceholder.swift and
+ProjectModel.swift are byte-identical to `828d352c` — the hook table is R7-D2's (five lines in WorkspacePlaceholder, H35 still
+HELD, H39 kept; `FlexibleRound7SelectionsHookTests` green). For the record, unchanged:
+
+| hook | line | anchor (the line before) | +a −r (vs f43f56ef) | gate |
+|---|---|---|---|---|
+| H20 | 1251 | `// ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.` | one line edited | `, !flexibleMain.owns(project, stage)` |
+| H22 | 821 | `guard let m = viewerMesh else { return false }` | +1 | `flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp` |
+| H23 | 886 | `onMiss: {` | +1 | `flexibleMain.owns(project, stage), !fullScreenPageUp` |
+| H25 | 9610 | `if selectionsCollapsed { latticePreviewNotice }` | one line edited | `flexibleMain.owns(project, stage), !fullScreenPageUp` |
+| H32 | 1329 | `latticeEdgeLight` | +1 | `flexibleMain.owns(project, stage)` |
+| H35 | — | ProjectModel `latticeEligibleRoles()` | HELD | condition (d) |
+| H39 | 9719 | (the H39 hotfix's) | kept | `!flexibleMain.owns(project, stage)` |
+
+`git diff 828d352c -- WorkspacePlaceholder.swift ProjectModel.swift`: empty.
+
+**Condition (d) still waits for the reviewer** (R7-D2's STOP; nothing new from the reviewer reached this session). Until the
+ruling, chip N's [▦ Lattice] stays greyed — but its line now says the way to a lattice face in plain words (below).
+
+### What you will see now, in plain words
+"On the Flexible screen you can't move a Topology piece by tapping it." (the reviewer's sentence — condition (c); still true.)
+- **The (i)** (beside each face in the list, and on the face's chip) now shows **the lattice you are looking at** — the
+  Flexible lattice drawn inside that face's prism: on your pad Face 3 reads **Cell 8.7 mm · Gyroid, Density 16 %, Strut
+  0.45 mm, Cells across 2.9**, inside the legend's own "15 % · ≈8.7 mm … 21 % · ≈6.7 mm". (Before, it showed a different
+  lattice's numbers — #354's slab card: 5 %, 5.00 mm — beside that legend; your img1 rule: two numbers for one thing must
+  always be equal.) The caption "The current preview's numbers at this depth." is now true.
+- **The (i) opened from the chip sits below the chip** (or above / beside it when there is no room) — never on it. From the
+  list it sits to the right of the list, off the list and off the chip.
+- **With Play on, a message sits above the player** (the Load's "Face 2 is a Load. Set its weight on the Squish page." and the
+  delete's message with [Undo]) — before, both were drawn on the player and neither could be read.
+- **"Add to Group C as lattice" is offered only for a group that already has a lattice face.** Before, picking the Top (your
+  Load, no lattice face) and then a free face offered "Add to Top as lattice · 4.0 mm deep" — a tap would have put the face
+  into the Load (sharing its 10 kg) at the paint default. A Load or Anchor group that does have lattice faces says so on the
+  button: "21.0 mm deep · it also shares the Load" / "… · it is also anchored". The group's colour dot now has a dark ring, so a
+  blue group shows on the blue button.
+- **Weights read in the Flexible unit (your lb)**: the Top reads "22 lb" in the list and on its chip (the player says "11 lb
+  each"); before "10 kg". **A Load made on the chip reads "weight: Squish page"** (the mockup's words) until its weight is set
+  there; before it showed the force's default "Load 2.5 kg".
+- **The delete question is always one line** — "Delete Group C here and in Topology?", or "Delete this group here and in
+  Topology?" when the name is long (your renamed "Left side squeeze pad" made 50 characters, widened the list past its panel
+  and cut every trash in half). The list stays 348 pt.
+- **The greyed [▦ Lattice] on a new face says the route**: "For lattice now: tap Protect, then Lattice" (was "Lattice on a new
+  face waits for a review").
+- **Number boxes take a tap across 44 pt** (the look is the same 32 pt box; a tap a few points off it used to land on the row).
+- **The chip's own spot keeps off the face it edits** when there is a clear spot off it (at 11" portrait there is none clear
+  of both the face and the screen's panels: then the panels win, as before — the chip never lands on the cube or the icons).
+- **[Prisms] shows both of Group C's numbers** (one was dropped when its spot sat under the list: it now tries the face's
+  centre, then halfway).
+
+### The review's findings → the fix → the test (RED first)
+| # | finding (severity) | fix | pinned by (RED) |
+|---|---|---|---|
+| F2 | the message drawn on the player (major) | `FlexibleSelectionsMessage.frame` — above the player and its note row when Play is on | R7D2Review R2 (pure, 4 sizes; RED: the old spot is the player's band) · hosted R2 (4 sizes, Play on: the Load's message, the delete's message, [Undo] off `playerCapsule` / `playerTopRow` / `playerNote`) |
+| F3 | the (i)'s numbers contradict the legend (major) | `FlexibleFaceStats.rows(lattice:regions:depthMM:)` + `FlexibleMainStage.faceStats` — the drawn lattice in the face's own prism (median ρ over the mask's voxels in its include regions; the drawn cell; the wall; depth ÷ cell) | R7D2Review R3 (a synthetic lattice: the face's half, not the other's; RED: #354's slab card reads another lattice) · hosted R3 (4 sizes: density and cell inside the legend's span) |
+| F1 | the chip's (i) covers the chip (major) | `FlexibleFaceStatsPlacement.frame` — below / above / beside the chip, the chip's measured height; the list's (i) right of the list, off the chip | R7D2Review R1 (4 sizes; RED: the old spot covers the chip) · hosted R1 (4 sizes: the chip's card off the chip; the list's card off the list and the chip) |
+| F4 | the join offers a Load / Anchor group (major) | `canJoin` needs a live lattice face; `joinAlso` + the note; the ringed swatch | R7D2Review R4 (his Top: no join; Group C at 25 mm; a Load with a lattice face says it; RED: the old rule offered the Top) |
+| F5 | kg beside lb; a new Load shows a weight he never set (major) | `loadWeight` in `FlexibleStageSettings.weightUnit`; `faceUI.unweighed` → "weight: Squish page" | R7D2Review R5 (22 lb; "weight: Squish page" → "10 lb" once set; RED: Topology's formatter reads "10 kg") |
+| F6 | a renamed group's delete question overflows the list (major) | ≤ 44 characters whatever the name; the Text no longer fixed-size | R7D2Review R6 (+ the source pin; RED: the old 50-character sentence) · hosted R6 (4 sizes: the list 348 pt, every trash inside it; the chip keeps its width) |
+| F7 | the greyed [Lattice] with process words (major) | "For lattice now: tap Protect, then Lattice" | R7D2Review R7 (RED: the old line) |
+| F8 | number boxes 32 pt tall (minor) | `FlexNumberBox(hitHeight: 44)` for the main page's boxes: the whole 44 pt band is the button; the Squish page's boxes unchanged | hosted R8 (a click 5 pt above and 5 pt below the list's box opens its keypad — RED before) · R7D2Review R8 (source pins; the Squish page untouched) |
+| F9 | the chip's automatic spot on the face it edits (minor) | the lit faces' outline as a SOFT keep-out (`auto(…, soft:)`), sliding sideways past a panel before the next side, the member chip's true 132 pt height | R7D2Review R9 + soft (RED: the old spot on the face; the face as a hard keep-out docks the chip on the cube) · hosted R9 (4 sizes: never on the chrome; off the face wherever a spot off it exists) |
+| F10 | [Prisms] drops a number under the list (minor) | `FlexiblePrismNumbers.place` tries the floor, the face's centre, halfway; keeps off the list as drawn | R7D2Review R10 (RED: one spot → dropped) |
+| F13 | the hit-transparency test ran with nothing picked (minor) | the test: Face 3 picked on his pad (chip, leader, handles, edge light drawn) | hosted S6' (a click on an empty point and across the edge light reaches the probe; positive control: a click on the chip does not) |
+| F14 | H35's "red control" could never fail (minor) | the hold check run on the patched copy must say "landed" | FlexibleRound7SelectionsHookTests (re-pinned, attributed) |
+| F11 | "—" beside the trash reads like a button (minor) | **not changed** — the mockup you picked shows it; question 3 below | — |
+| F12 | after a trash, the app's Undo first undoes a hidden write (minor) | **not fixed — diagnosed** (`d2r_trash_undo_diag.txt`): ~0.5 s after a delete the Squish page re-files its face entries (its face list goes 9 → 10: the lattice sections under the deleted face-prisms are gone, so the entries are carried back to their faces — M2's carry), and that lands as its own undo step. The message's [Undo] restores the group exactly in one tap (it does not go through the undo list). Folding the carry into the delete's step needs an undo-merge in ProjectModel (#354's file) — asked of the reviewer. Until then: use the message's [Undo], or press the app's Undo twice. | — |
+| F15 | the exit crash (signal 11 / 6) (not D2's) | **outside this batch** — root cause recorded: a scheduled `FlexibleStageModel.scheduleDesigns` task still in `FlexibleCore.strainUnder` → `topoptbridge::flexible_strain_under` while `exit()` destroys the bridge's static FlexibleData cache (`__cxa_finalize_ranges`); test noise, not the iPad app | — |
+
+**Test premises corrected after the red run** (said in the tests): the synthetic lattice's span is a Float (ρ read back from
+the rows, not the literal 0.15); the hosted R9 check became "never on the chrome, and off the face wherever a spot off it
+exists" (an oracle: the let-go's own search with the page's real keep-outs — the legend and the face's own handles too;
+without them it "found" a spot under the legend). Added after the red run, each with its own red control: the soft keep-out
+test (RED: the face as a hard keep-out docks the chip on the cube), the message-above-the-chip case in R2, and the hosted
+list-(i) check (its red is the first look's log: `selectionsList×statsCard`).
+
+### What looking at the pictures found, and fixed (before the commit)
+- 11" portrait: with the face as a hard keep-out no spot was clear, and the dock put chip M on the cube and the view icons →
+  the face is a soft keep-out (the chrome wins).
+- The chip's role capsule cut "Load weight: Squish p…" → an unset weight reads "↓ weight: Squish page", as the list does.
+- The chip's (i) card overlapped the chip by 4 pt and the chip sat 4 pt on Face 3's outline: the member chip draws 132 pt, its
+  estimate was 120 → the true height, and the layer takes the chip's measured height when it grows.
+- The list's (i) card overlapped the list's edge by 4 pt, and the chip at 11" portrait → right of the list, else just above or
+  below what is in the way.
+- 11" portrait: the chip's (i) card, kept off the face's own handles, went onto the Lattice button → the passing card may sit
+  over the face's handles while open, never over the page's panels.
+- 11" landscape: the Load's message under the chip → above the chip too.
+- 11" portrait [Prisms]: Face 5's number dropped under the whole list column → the list as drawn.
+
+### Re-pins (our own tests only; each attributed in the test)
+- `FlexibleRound7SelectionsHookTests.testH35IsHeldProjectModelHasNoLatticeOnlyLine` — its red control (F14).
+- `FlexibleFaceChipTests.testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers` — the shipping (i) reads the drawn lattice
+  (source pin); `rows(card:)` stays as R3's red control and is still pinned to the drawer's numbers.
+- No #354 test touched.
+
+### The bytes and the other stages (condition e)
+- **Goldens (FlexibleAngledGoldenTests), 0 DIFFERS in both modes** at `850c802a`: SWIFT_DETERMINISTIC_HASHING=1 38 identical; unseeded 32 identical + 1 PART-SKIP (13 tests, 0 failures each).
+- **The 16 stage-job hashes**: `round7/batch_d2_review/stage_job_hashes_d2r.txt` is byte-identical (whole file) to R7-D2's `stage_job_hashes_d2.txt`.
+- **Topology, Structural, Aesthetic, Surface** (`FlexibleRound7OtherStagesProbe`, 13 frames, one environment): the R7-D2 head as rendered at 04:58 vs `850c802a` — **13 identical, 0 px** (`other_stages/compare.txt`). Expected: no shared file changed.
+- Every #354 test file is unchanged; WorkspacePlaceholder.swift and ProjectModel.swift are unchanged.
+
+### The pictures (`round7/batch_d2_review/`)
+- `look/`: your pad, the whole page over the shipping renderer, 13" and 11", portrait and landscape: R00 rest · R01 the first
+  new face (the route line) · R02 chip M's own spot · R03 the chip's (i) · R04 the list's (i) beside the lattice legend · R05
+  the Top, then Face 2: no join · R06 Group C, then Face 2: the join · R07 [Load]: "weight: Squish page", lb · R08 / R08b the
+  long name's question (list / chip) · R09 / R10 Play on: the messages above the player · R11 [Prisms]: both numbers · R12
+  img2's front camera, the Top picked. Each size's log lists the frames, any target under 44 pt and every overlap.
+- `sides/`: the review's picture beside ours, the same state (F1–F10).
+
+### The runs (raw: `round7/batch_d2_review/d2r_runs.txt`)
+- **Red run** (`d2r_red_run.txt`): every new test failed against the stubs except S6' (coverage the review asked for — the code was already right; its positive control holds); no RED CONTROL assertion failed.
+- **Green** at `850c802a`: the review's 18 tests + the D2 classes they touch (FlexibleRound7SelectionsHostedTests, FlexibleFaceChipTests, FlexibleRound7SelectionsHookTests): 32 passed, 0 failed; earlier also FlexibleRound5SettingsHostedTests and FlexibleMainPageLoadsTests (the Squish page's boxes) green.
+- **The targeted suite at `850c802a`** (07:10–08:55): 237 classes (R7-D2's 234 + the review's three), 20 chunks of 12: **1 522 test cases — 1 425 passed, 94 skipped, 3 failed, all on the known list**: the refine line (FlexibleBatchNVerifyTests, 8 assertions), LatticeSimSolveTriggerTests (1), the Play icon's ring offscreen (FlexibleRound7ViewsHostedTests, 23 px). Chunk 5 exited with signal 11 **after all 12 of its suites had passed** — the known exit race (F15). LatticeStaleTypeTests 6/6. **No failure caused by this step; nothing re-pinned beyond the two above.**
+- **Goldens, hashes, other stages**: above. **iOS**: BUILD SUCCEEDED; installed as above.
+
+### Not done, and why
+- H35 / the lattice-only role: the reviewer's ruling on condition (d).
+- F11 and F12 above; F15 outside this batch.
+- Carried from R7-D2: the chip does not fade during an orbit; a moved chip's spot is kept for the session only; the (i) from
+  the list does not move the pick. The "weight: Squish page" mark is for the session too (after a restart a Load made on the
+  chip shows its stored weight, the force's default, in lb).
+
+### Questions
+1. **(Reviewer)** condition (d): (A) / (B) / (C) — unchanged from R7-D2's post.
+2. **(Reviewer)** F12: an undo-merge hook in ProjectModel (fold a background write into the step before it) so one toolbar Undo
+   restores a trashed group — or leave it (the message's [Undo] does it in one)?
+3. **(You)** a group with no lattice face shows "—" beside its trash (as in the mockup you picked). Keep it, or show nothing?
+4. **(You)** the (i) now shows the lattice you see (16 %, 8.7 mm on Face 3) — the right numbers?
+5. **(You)** the trash's [Undo] message stays 8 seconds — long enough? (from R7-D2)
+
+## ★ Round 7 · R7-D2 — Selections on the Flexible stage: your pick 2 (B1 with your three changes), the trash with a confirm and Undo, your four answers of 10-17 evening (2026-10-18) (the step before the review above)
 
 Branch `claude/flexible-screens` (PR #362), main worktree, on top of `f43f56ef` (the H39 hotfix). Commits:
 - `87c9e3cd`: tests FIRST, against stubs (the red run is `round7/batch_d2/d2_red_run.txt`) — and condition (d)'s measurement.
