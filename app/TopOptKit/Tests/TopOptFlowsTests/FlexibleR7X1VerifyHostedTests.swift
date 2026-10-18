@@ -104,13 +104,26 @@ final class FlexibleR7X1VerifyHostedTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(seen.share, 0.60, "★ …the frame is not the lid's")
         XCTAssertGreaterThanOrEqual(heated.share, 0.30, "★ …and its walls wear the heat (not the density ramp)")
         // ★ RED CONTROL: X1's first build — the heat on an opaque lid in X-ray
+        // ★ RE-PINNED (R7-D2 — his answer 2 of 2026-10-17 evening, "X-ray on the main page shows EVERY face-prism faint, the
+        // picked group's bright (even before a pick)", and answer 4, fainter glass over the open lattice): X-ray now draws every
+        // face-prism faint, and that glass is fainter when the walls are drawn than in the lid-only frame, so under the opaque
+        // lid the X-ray frame is no longer the lid frame pixel for pixel (the targeted suite measured: wall edges 5.9 %, differs
+        // 82 % — was < 5 % and < 20 %). In the SHIPPING frame the control now proves the wall-edge measure only (far under the
+        // 20 % bar; the faint prisms' outlines add about 1 %), and "differs from the lid" is no longer a signal there; the
+        // X1 control as X1 measured it (no prism before a pick: `controlXrayPickedOnly`) still holds both, unchanged.
         s.controlHeatOnLid = true
+        defer { s.controlHeatOnLid = false; FlexibleMainStage.controlXrayPickedOnly = false }
         let ctl = try shots()
+        FlexibleMainStage.controlXrayPickedOnly = true
+        let ctlX1 = try shots()
+        FlexibleMainStage.controlXrayPickedOnly = false
         s.controlHeatOnLid = false
         let cSeen = H.differing(ctl.xh, ctl.lid, where: fp.strips), cWalls = Self.detail(ctl.xh, where: fp.strips)
-        H.dump(ctl.xh, "VH1_control_xray_heat_lid_img5.png")
-        XCTAssertLessThan(cWalls, 0.05, "★ RED CONTROL: the opaque heat square hid the lattice (no wall edge)")
-        XCTAssertLessThan(cSeen.share, 0.20, "★ RED CONTROL: …its frame the lid's")
+        let cSeenX1 = H.differing(ctlX1.xh, ctlX1.lid, where: fp.strips), cWallsX1 = Self.detail(ctlX1.xh, where: fp.strips)
+        H.dump(ctl.xh, "VH1_control_xray_heat_lid_img5.png"); H.dump(ctlX1.xh, "VH1_control_xray_heat_lid_x1prisms_img5.png")
+        XCTAssertLessThan(cWalls, 0.10, "★ RED CONTROL: the opaque heat square hid the lattice (wall edges far under the 20 % bar; R7-D2's faint prism outlines aside)")
+        XCTAssertLessThan(cWallsX1, 0.05, "★ RED CONTROL (X1's prisms): the opaque heat square hid the lattice (no wall edge)")
+        XCTAssertLessThan(cSeenX1.share, 0.20, "★ RED CONTROL (X1's prisms): …its frame the lid's")
         // Group C picked: its face-prisms' extent, the lattice inside them (a pick re-reads the main page: the lattice is
         // waited for again)
         let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
@@ -129,7 +142,7 @@ final class FlexibleR7X1VerifyHostedTests: XCTestCase {
         H.dump(picked, "VH1_xray_heat_groupC_picked_img5.png"); H.dump(pickedLid, "VH1_xray_heat_groupC_picked_no_walls_img5.png")
         XCTAssertGreaterThan(s.volumes(p, on: .lattice, drilledIn: false).count, 0, "premise: Group C's face-prisms drawn")
         XCTAssertGreaterThanOrEqual(pickedWalls, 0.15, "★ Group C picked: its face-prisms hold the lattice (not two empty boxes)")
-        print("FLEX-R7X1V-H1 X-ray + Heat, img5 top, inside the strips: wall edges \(String(format: "%.1f", 100 * walls)) % of the pixels (the lid alone \(String(format: "%.1f", 100 * lidDetail)) %), the frame differs from the lid's at \(String(format: "%.1f", 100 * seen.share)) %, walls heated \(String(format: "%.1f", 100 * heated.share)) % (vs Heat off) · Group C picked: wall edges \(String(format: "%.1f", 100 * pickedWalls)) % · control (opaque lid): wall edges \(String(format: "%.1f", 100 * cWalls)) %, differs \(String(format: "%.1f", 100 * cSeen.share)) %")
+        print("FLEX-R7X1V-H1 X-ray + Heat, img5 top, inside the strips: wall edges \(String(format: "%.1f", 100 * walls)) % of the pixels (the lid alone \(String(format: "%.1f", 100 * lidDetail)) %), the frame differs from the lid's at \(String(format: "%.1f", 100 * seen.share)) %, walls heated \(String(format: "%.1f", 100 * heated.share)) % (vs Heat off) · Group C picked: wall edges \(String(format: "%.1f", 100 * pickedWalls)) % · control (opaque lid): wall edges \(String(format: "%.1f", 100 * cWalls)) %, differs \(String(format: "%.1f", 100 * cSeen.share)) % · control with X1's prisms: wall edges \(String(format: "%.1f", 100 * cWallsX1)) %, differs \(String(format: "%.1f", 100 * cSeenX1.share)) %")
     }
 
     // MARK: - VH2: the printed view's heat is on the walls, not a 0 mm lid
