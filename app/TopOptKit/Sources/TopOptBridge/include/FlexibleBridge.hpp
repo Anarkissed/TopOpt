@@ -270,6 +270,10 @@ struct FlexStack {
   // core's own lattice_mm samples (faces.cpp: n = ⌈len / ¼ voxel⌉ points at entry + (k + ½)·step along the load, against the
   // scene's mask), counted until the first sample off the lattice. core's lattice_mm counts every latticed sample of the column
   // (another face-prism's lattice far down it too); the flat prism's wedge must stay in the lattice it starts in.
+  // ★ R7-E1 REVIEW: a leading off-lattice stretch within two voxels of the entry is travel (a surface voxel core leaves Empty —
+  // its centre outside the part, the Top at Balanced — never makes the run 0), and a hole of at most one voxel's diagonal inside
+  // the run is crossed (core's Empty sheet under the Top's triangle diagonal at Balanced): run = t of the end of the last latticed
+  // sample before the first longer gap − entry_t.
   std::vector<double> col_lattice_run_mm;
 };
 FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t rotation_deg,
@@ -740,7 +744,8 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
 int32_t flexible_press_api_version();
 
 // ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the FIRST sample (it stops at
-// the first sample off the lattice, so a surface voxel core leaves Empty makes the run 0) — E1's rule. (STUB: the rule unchanged.)
+// the first sample off the lattice, so a surface voxel core leaves Empty makes the run 0) — E1's rule. Off: the leading
+// off-lattice stretch within one voxel of the entry is travel (col_lattice_run_mm).
 void flexible_control_run_from_first_sample(bool on);
 
 // ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.

@@ -15,11 +15,11 @@ extension FlexibleRowCopy.Info {
     public static let newKind = "Faces: a group of faces pressed straight in, as before. Edges/corners: pick where faces meet; each gets a flat prism you drag in from the edge. The faces' own groups keep the rest. A group holds one or the other."
     public static let edgePick = "Every edge and corner of the part, in colours that never repeat on touching ones, numbered as here. Tap a row or tap the part; tap the same spot again to reach the next one there. Grey rows can't be pressed — the line says why."
     /// ★ R7-E1: the flat prism's rows.
-    public static let flatDepth = "How deep the flat prism presses in along its arrow at the edge (the corner). Deeper reaches wider on every face. It stops where the lattice ends (core's columns) and where a face would keep none of itself."
-    public static let flatTilt = "Tips the arrow toward one face or the other. 0° is core's halfway; a drag snaps back to it within 3°."
+    public static let flatDepth = "How deep the flat prism presses in along its arrow at the edge (the corner). Deeper reaches wider on every face. It stops where the lattice ends and where a face would keep none of itself."
+    public static let flatTilt = "Tips the arrow toward one face or the other. 0° is halfway between the faces; a drag snaps back to it within 3°."
     public static let flatTwist = "Twists the flat prism along the edge: one end presses deeper. It stops when the shallow end reaches 0 mm."
-    public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is core's halfway."
-    public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is core's halfway."
+    public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is halfway between the faces."
+    public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is halfway between the faces."
 }
 
 // MARK: - [+ New]: which kind
@@ -202,7 +202,9 @@ struct FlexibleEdgeGroupRows: View {
                     FlexWarningLine(text: stop.line, id: "flexible-flat-stop-line")
                     if let mm = stop.setMM, mm >= FlexibleFlatPrism.minDepthMM {
                         Button {
-                            Task { @MainActor in if let why = await model.setFlatCut(p.id, depthMM: mm, direction: p.direction, snap: p.snap) { model.toast = why } }
+                            // ★ R7-E1 REVIEW: N is core's number along the RELEASED arrow — the fix keeps that arrow
+                            Task { @MainActor in if let why = await model.setFlatCut(p.id, depthMM: mm, direction: stop.direction ?? p.direction,
+                                                                                    snap: stop.direction == nil ? p.snap : stop.snap) { model.toast = why } }
                         } label: {
                             Text(FlexibleRowCopy.flatSetMM(mm)).font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minHeight: 44)

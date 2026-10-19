@@ -279,14 +279,22 @@ public enum FlexibleFlatPrism {
 
     /// ★ HIS RULE (the half-face rule dropped): does member `m`'s face keep some of itself — at least `restMarginMM` beyond the
     /// cut somewhere — under plane `c`? `tris`: the face's triangles.
-    public static func keepsRest(_ tris: [[SIMD3<Double>]], member m: FlexibleStrip.Member, _ c: Cut) -> Bool {
-        guard let t = inFace(m, c.direction) else { return true }
+    /// ★ R7-E1 REVIEW: `others` — the other presses' beyond-cuts on this face (`beyond`): the face keeps 0.5 mm beyond EVERY cut on
+    /// it together (two flat prisms on one face could take it all between them).
+    public static func keepsRest(_ tris: [[SIMD3<Double>]], member m: FlexibleStrip.Member, _ c: Cut, others: [RegionCut] = []) -> Bool {
+        guard let b = beyond(m, c) else { return others.isEmpty || FlexibleEdgeStrips.area(tris, others) > 1e-6 }
+        return FlexibleEdgeStrips.area(tris, [b] + others) > 1e-6
+    }
+
+    /// The half-plane of member `m`'s face at least `restMarginMM` beyond the cut of plane `c` (nil: the plane meets the face
+    /// edge-on — no cut line).
+    public static func beyond(_ m: FlexibleStrip.Member, _ c: Cut) -> RegionCut? {
+        guard let t = inFace(m, c.direction) else { return nil }
         let dt = simd_dot(t, c.direction)
-        guard dt > 1e-12 else { return true }
+        guard dt > 1e-12 else { return nil }
         // the cut line in the face: dot(p − A, t) = h / dt·|t|… — the point on it nearest A, then the margin beyond
         let onLine = c.apex + t * (c.depthMM / dt)
-        let beyond = RegionCut(point: onLine + t * restMarginMM, normal: t)
-        return FlexibleEdgeStrips.area(tris, [beyond]) > 1e-6
+        return RegionCut(point: onLine + t * restMarginMM, normal: t)
     }
 
     // MARK: - the lattice the plane may press (core's press stack)

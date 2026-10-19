@@ -184,6 +184,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public internal(set) var pressRefusals: [UUID: String] = [:]
     /// ★ R7-E1: M2's strips read through were said (once per session).
     var legacyStripsSaid = false
+    /// ★ R7-E1 REVIEW: core's exact lattice stop per press, found by a release (the arrow's bits, N, the lattice it was found on) —
+    /// the next drag's hard stop (flatDragCap).
+    var flatExactStops: [UUID: (bits: [UInt64], mm: Double, lattice: String)] = [:]
     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
     /// stored in the project until [Done].
     @Published public var edgePick: FlexibleEdgePick?

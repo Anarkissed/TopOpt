@@ -61,7 +61,7 @@ extension FlexibleRowCopy {
     /// A fillet: the area needs a sharp, straight edge. ★ R7-E1: no strips any more — "A fillet · needs a sharp edge".
     public static let stripFillet = "A fillet \u{00B7} needs a sharp edge"
     /// An edge that is not one straight line.
-    public static let stripCurvedEdge = "A curved edge · no straight strip"
+    public static let stripCurvedEdge = "A curved edge \u{00B7} no flat prism"   // ★ R7-E1 review: no strip
 
     // MARK: the face keeps the rest
 
@@ -106,8 +106,16 @@ extension FlexibleRowCopy {
     public static let flatBackToHalfway = "Back to halfway"
     public static func flatSetMM(_ mm: Double) -> String { "Set " + String(format: "%.1f", mm) + " mm" }
 
-    // MARK: ★ R7-E1 REVIEW (STUBS: the old words)
-    public static func flatStartsAt(_ mm: Double) -> String { flatLatticeEnds(mm) }
-    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double) -> String { flatLatticeEnds(0) }
-    public static func outOfFlexible(_ name: String) -> String { fit("\(name) was taken out of the Flexible setup") }
+    // MARK: ★ R7-E1 REVIEW — the stops said whole (his rule: one line, ≤ 44)
+    /// A new pick the lattice stops below 3 mm starts at the stop: "Starts at 2.8 mm · the lattice ends there".
+    public static func flatStartsAt(_ mm: Double) -> String { fit("Starts at " + String(format: "%.1f", mm) + " mm \u{00B7} the lattice ends there") }
+    /// An angle the lattice stops, said as the angle (never a depth): "Twist stops at 6.2° · lattice ends".
+    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double) -> String {
+        let word = twist ? flatTwistWord(corner: corner) : flatTiltWord(corner: corner)
+        return fit("\(word) stops at " + FlexNumberSpec.format(deg, decimals: 1) + "\u{00B0} \u{00B7} lattice ends")
+    }
+    /// Both angles moved and the lattice stopped them part way.
+    public static let flatAngleStopsBoth = "Angle stops here \u{00B7} the lattice ends there"
+    /// A candidate member taken out of the Flexible setup — one line, whole ("Face 1 · lattice A is out of Flexible").
+    public static func outOfFlexible(_ name: String) -> String { fit("\(name) is out of Flexible") }
 }

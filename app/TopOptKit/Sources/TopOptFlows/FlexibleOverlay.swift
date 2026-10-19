@@ -31,7 +31,8 @@ public struct FlexibleOverlayFace {
 }
 
 public struct FlexibleOverlayMesh {
-    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    /// ★ R7-E1 REVIEW, RED CONTROL only: a cut region's column quads drawn as they come — past the face's outer edge where its
+    /// frame turns (a flat corner's rest), with notches between them (the sawtooth he would see along the Top's edges).
     nonisolated(unsafe) public static var controlNoEdgeFill = false
     public let mesh: ViewerMesh
     public let partFlatVertices: Int
@@ -171,6 +172,31 @@ public struct FlexibleOverlayMesh {
             return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
         }
         let identity = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
+        // ★ R7-E1 REVIEW (the verifier: a flat corner made every top edge of his pad a sawtooth): a region WITH cuts is drawn by
+        // core's column quads on core's grid — its frame is its footprint's principal axis, so a flat corner's pentagonal rest is
+        // framed at 45° to the Top's edges and its quads stepped past the outer edge and left notches along it. Per pressed region
+        // with cuts: each part face's OUTER edges (a face's triangle edges used once), the strip one pitch wide inside each — that
+        // band of the region keeps its own part pieces (under the quads, dented by the ramp like every part vertex), and no quad
+        // corner is left past the face's edge. A whole face, and every region whose quads never cross its face's edge, draw as before.
+        struct Band { let faces: Set<Int>; let cuts: [RegionCut]; let strips: [Int: [RegionCut]] }
+        var bands: [Band] = []
+        var faceTris: [Int: [[SIMD3<Double>]]] = [:]
+        func trisOf(_ f: Int) -> [[SIMD3<Double>]] {
+            if let t = faceTris[f] { return t }
+            var out: [[SIMD3<Double>]] = []
+            for t in 0..<part.triangleCount where t < pfid.count && Int(pfid[t]) == f {
+                out.append([vtx(part.indices[3 * t]), vtx(part.indices[3 * t + 1]), vtx(part.indices[3 * t + 2])])
+            }
+            faceTris[f] = out
+            return out
+        }
+        if !controlNoEdgeFill {
+            for f in faces where !f.cuts.isEmpty && f.stack.pitchMM > 0 {
+                var strips: [Int: [RegionCut]] = [:]
+                for face in f.faces { strips[face] = outerStrips(trisOf(face), width: f.stack.pitchMM) }
+                bands.append(Band(faces: f.faces, cuts: f.cuts, strips: strips))
+            }
+        }
         for t in 0..<part.triangleCount {
             let f = t < pfid.count ? Int(pfid[t]) : -1
             let pressed = faces.filter { $0.faces.contains(f) }
@@ -186,7 +212,20 @@ public struct FlexibleOverlayMesh {
             }
             for piece in FlexibleFacePieces.pieces(a, b, c, planes: facePlanes) {
                 // replaced by a pressed sector's map: this piece is on its side of every cut
-                if pressed.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) { continue }
+                if pressed.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) {
+                    // ★ R7-E1 REVIEW: its band along the face's outer edges stays, under the quads
+                    if let band = bands.first(where: { $0.faces.contains(f) && FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) {
+                        for strip in band.strips[f] ?? [] {
+                            let poly = FlexibleMeet.clipPolygon(piece.points, [strip])
+                            guard poly.count >= 3, FlexibleMeet.area(poly) > FlexibleFacePieces.slivermm2 else { continue }
+                            let w = poly.map { FlexibleFacePieces.barycentric($0, a, b, c) }
+                            for (x, y, z) in FlexibleFacePieces.fan(poly.count) {
+                                emit(t, f, [poly[x], poly[y], poly[z]], [w[x], w[y], w[z]], at: nil)
+                            }
+                        }
+                    }
+                    continue
+                }
                 if piece.whole {
                     if edge == nil {
                         kept.append(t); keptFace.append(f); keptCentroid.append(piece.centroid)
@@ -223,10 +262,13 @@ public struct FlexibleOverlayMesh {
             let st = f.stack
             let x = st.xAxis * (st.pitchMM / 2), y = st.yAxis * (st.pitchMM / 2)
             let lift = -st.load * 0.05
+            // ★ R7-E1 REVIEW: a region with cuts — no quad corner past its face's outer edge (moved in the face's plane onto it)
+            let clampTris: [[SIMD3<Double>]]? = !controlNoEdgeFill && !f.cuts.isEmpty ? f.faces.sorted().flatMap { trisOf($0) } : nil
             for (k, c) in st.columns.enumerated() {
                 let p = f.centres[k] + st.load * c.entryT + lift
                 let base = Int32(pos.count / 3)
-                for q in [p - x - y, p + x - y, p + x + y, p - x + y] {
+                for q0 in [p - x - y, p + x - y, p + x + y, p - x + y] {
+                    let q = clampTris.map { Self.ontoFace(q0, $0) } ?? q0
                     pos += [Float(q.x), Float(q.y), Float(q.z)]
                 }
                 // wound so the quad faces out of the part (along −load)
@@ -243,6 +285,75 @@ public struct FlexibleOverlayMesh {
                                    keptWeights: weights,
                                    subdivision: edge == nil ? nil : Subdivision(source: subSource, cornerWeights: subCorners,
                                                                                 subOf: subOf, bary: subBary))
+    }
+
+    // MARK: ★ R7-E1 REVIEW — the edge fill's geometry
+
+    /// The strips `width` wide inside each OUTER edge of a face (its triangle edges used once), as the half-planes that keep them:
+    /// RegionCut(point on the edge + inward·width, normal −inward) keeps the points within `width` of that edge's line.
+    static func outerStrips(_ tris: [[SIMD3<Double>]], width: Double) -> [RegionCut] {
+        struct E: Hashable { let a: [Int64], b: [Int64] }
+        func key(_ p: SIMD3<Double>) -> [Int64] { [Int64((p.x * 1e5).rounded()), Int64((p.y * 1e5).rounded()), Int64((p.z * 1e5).rounded())] }
+        var count: [E: Int] = [:]
+        var owner: [E: (SIMD3<Double>, SIMD3<Double>, SIMD3<Double>)] = [:]
+        for t in tris where t.count == 3 {
+            for i in 0..<3 {
+                let p = t[i], q = t[(i + 1) % 3], r = t[(i + 2) % 3]
+                let ka = key(p), kb = key(q)
+                let e = ka.lexicographicallyPrecedes(kb) ? E(a: ka, b: kb) : E(a: kb, b: ka)
+                count[e, default: 0] += 1
+                owner[e] = (p, q, r)
+            }
+        }
+        var out: [RegionCut] = []
+        for (e, n) in count where n == 1 {
+            guard let (p, q, r) = owner[e] else { continue }
+            let normal = simd_cross(q - p, r - p)
+            guard simd_length(normal) > 1e-12 else { continue }
+            var inward = simd_normalize(simd_cross(simd_normalize(normal), q - p))
+            if simd_dot(inward, r - p) < 0 { inward = -inward }
+            out.append(RegionCut(point: p + inward * width, normal: -inward))
+        }
+        return out.sorted { ($0.point.x, $0.point.y, $0.point.z) < ($1.point.x, $1.point.y, $1.point.z) }
+    }
+
+    /// `q` moved in its nearest face triangle's plane onto the face where it lies past the face's edge (its offset off the plane
+    /// kept); unchanged where it lies over the face.
+    static func ontoFace(_ q: SIMD3<Double>, _ tris: [[SIMD3<Double>]]) -> SIMD3<Double> {
+        var best: (d: Double, c: SIMD3<Double>, n: SIMD3<Double>)?
+        for t in tris where t.count == 3 {
+            let c = closest(q, t[0], t[1], t[2])
+            let d = simd_distance_squared(q, c)
+            if best == nil || d < best!.d {
+                let n = simd_cross(t[1] - t[0], t[2] - t[0])
+                best = (d, c, simd_length(n) > 1e-12 ? simd_normalize(n) : .zero)
+            }
+        }
+        guard let b = best else { return q }
+        let off = q - b.c
+        let inPlane = off - b.n * simd_dot(off, b.n)
+        return simd_length(inPlane) > 1e-6 ? q - inPlane : q
+    }
+
+    /// The point of triangle (a, b, c) nearest `p` (Ericson, Real-Time Collision Detection 5.1.5).
+    static func closest(_ p: SIMD3<Double>, _ a: SIMD3<Double>, _ b: SIMD3<Double>, _ c: SIMD3<Double>) -> SIMD3<Double> {
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+        if d1 <= 0, d2 <= 0 { return a }
+        let bp = p - b
+        let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+        if d3 >= 0, d4 <= d3 { return b }
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0, d1 >= 0, d3 <= 0 { return a + ab * (d1 / (d1 - d3)) }
+        let cp = p - c
+        let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+        if d6 >= 0, d5 <= d6 { return c }
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0, d2 >= 0, d6 <= 0 { return a + ac * (d2 / (d2 - d6)) }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0, d4 - d3 >= 0, d5 - d6 >= 0 { return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))) }
+        let den = 1 / (va + vb + vc)
+        return a + ab * (vb * den) + ac * (vc * den)
     }
 
     // MARK: colour

@@ -63,6 +63,9 @@ public struct FlexibleStagePage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The fix pop-up (item 9): which issue, and the rule that opens it on a NEW one.
     @State private var fixShown: FlexibleIssue?
+    /// ★ R7-E1 REVIEW: the flat press the camera last turned to ([Done], a press selected) — while it is the one he works on, a
+    /// pop-up that fires by itself is shown but does not turn the camera away from it.
+    @State private var flatTurnHold: UUID?
     @State private var prompt = FlexibleFixPrompt()
     /// The face the pop-up pulses on the part.
     @State private var pulse: DetentPulse?
@@ -354,7 +357,8 @@ public struct FlexibleStagePage: View {
         // ★ R7-E1: the camera on [Done] and on selecting a flat press — D-AP-13 as ruled (down the arrow; the reviewer is asked)
         .onChange(of: model.flatCameraRequest) { id in turnToFlatPress(id) }
         .onAppear { turnToFlatPress(model.flatCameraRequest) }   // (a [Done] made before the page showed)
-        .onChange(of: model.selectedPress) { id in if FlexibleFlatPrismUI.openEdgesGroup(model) != nil { turnToFlatPress(id) } }
+        // ★ R7-E1 REVIEW: a press the camera already holds is not turned to again (a late second turn after [Done] undid his view)
+        .onChange(of: model.selectedPress) { id in if FlexibleFlatPrismUI.openEdgesGroup(model) != nil, id != flatTurnHold { turnToFlatPress(id) } }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
@@ -477,7 +481,8 @@ public struct FlexibleStagePage: View {
     /// and that layer drawn over the chrome again (the red control).
     @MainActor static var controlNoOverlays = false
     @MainActor static var controlOverlaysOverChrome = false
-    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    /// ★ R7-E1 REVIEW, RED CONTROL only: a pop-up that fires by itself turns the camera even right after [Done] turned it to
+    /// the new flat prism (E1: it overrode the turn and looked at the back).
     @MainActor static var controlPopupTurnsCamera = false
 
     /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame — every keep-out (the panel,
@@ -562,14 +567,17 @@ public struct FlexibleStagePage: View {
         if let i = prompt.next(r, actionSerial: model.actionSerial,
                                settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),
            fixShown == nil, Self.popsAtOnce(i, model: model) {   // ★ R7-S verify: not over [+ New]'s own ask
-            present(i)
+            // ★ R7-E1 REVIEW (the verifier: after [Done] the pop-up turned the camera to the back, the new prism drawn through the
+            // part): while the camera holds the flat press he works on, the pop-up shows and the camera stays
+            let holds = flatTurnHold != nil && FlexibleFlatPrismUI.workingPress(model) == flatTurnHold
+            present(i, turnCamera: Self.controlPopupTurnsCamera || !holds)
         }
         if let f = fixShown, !r.popping.contains(where: { $0.id == f.id }) { fixShown = nil }
     }
 
     /// Open the pop-up on `issue`: select its face, pulse every face it names (a shared stack:
     /// both ends, one after the other), turn the camera to see them (two: an oblique view).
-    private func present(_ issue: FlexibleIssue) {
+    private func present(_ issue: FlexibleIssue, turnCamera: Bool = true) {
         fixShown = issue
         guard issue.region != nil else { return }
         // ★ ROUND 7 (S, 4f f): its face is selected only in the OPEN tab — a face in another group is named and pulsed,
@@ -591,7 +599,7 @@ public struct FlexibleStagePage: View {
         }
         let g = loads.count >= 2 ? FlexibleFixPopup.cameraRegion(load: loads[0], other: loads[1], settle: settle)
             : loads.first.flatMap { FlexibleFixPopup.cameraRegion(load: $0, settle: settle) }
-        if let g { camera.snap(to: g, animated: !reduceMotion) }
+        if turnCamera, let g { camera.snap(to: g, animated: !reduceMotion) }
     }
 
     private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }
@@ -600,6 +608,7 @@ public struct FlexibleStagePage: View {
     private func turnToFlatPress(_ id: UUID?) {
         guard let id, let p = model.press(id), p.strip != nil, let g = FlexibleFlatPrismUI.camera(press: p, settle: settle) else { return }
         camera.snap(to: g, animated: !reduceMotion)
+        flatTurnHold = id
         if model.flatCameraRequest == id { model.flatCameraRequest = nil }
     }
 

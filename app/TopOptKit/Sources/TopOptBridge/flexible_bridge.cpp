@@ -639,9 +639,19 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
     o.lattice_mm_max = st.lattice_mm_max;
     o.stack_mm_max = st.stack_mm_max;
     for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
-    // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp)
+    // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp).
+    // ★ R7-E1 REVIEW (the verifier: at Balanced his 20 mm pad is 19.2 voxels tall and core leaves the Top's surface layer Empty —
+    // its centres at z 20.31, above the part — so every column entering through the Top read 0 mm and [Done] was refused at
+    // 0.4 mm): a leading stretch OFF the lattice within TWO voxels of the entry is travel, not the end — the run is the t of the
+    // last sample of the first latticed stretch past the entry. Two, not one: along the Top's triangle diagonal core also leaves
+    // the voxel below the surface layer Empty at Balanced (six columns of 7,776 over his Top + Face 2 entering there). A column with no latticed sample within two voxels of its entry still reads 0. And inside the run a
+    // hole of at most one voxel's diagonal is crossed, not its end: at Balanced core leaves voxels along the Top's triangle
+    // diagonal (x = y on his pad) Empty inside the lattice, and the columns crossing them stopped there — his Top + Face 2 edge was
+    // capped at 2.98 mm by one (a column entering at (3.6, 2.0, 20): 1.56 mm of lattice, then the hole). A gap longer than a voxel's diagonal (the 50 mm between Face 3's and Face 5's slabs on
+    // his live pad) still ends it. Where the run has no hole (Fast, Fine, the sides) it is E1's, sample for sample.
     if (face_region_id <= kSyntheticPressMax && s->mask.size() == s->grid.voxel_count() && s->grid.spacing > 0.0) {
       const topopt::VoxelGrid& g = s->grid;
+      const bool first_sample = g_control_run_first_sample.load();   // (the red control: E1's rule)
       for (const fx::StackColumn& c : st.columns) {
         const double len = c.exit_t - c.entry_t;
         double run = 0.0;
@@ -649,14 +659,32 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
           const topopt::Vec3 org = f.from_uv(c.u_mm, c.v_mm);
           const int n = std::max(1, static_cast<int>(std::ceil(len / (0.25 * g.spacing))));
           const double step = len / n;
+          bool in_lattice = false;
+          int gap = 0;   // off-lattice samples since the last latticed one (inside the run)
+          const int gap_max = static_cast<int>(std::floor(std::sqrt(3.0) * g.spacing / step));   // one voxel's diagonal
           for (int k = 0; k < n; ++k) {
             const double t = c.entry_t + (k + 0.5) * step;
             const topopt::Vec3 p{org.x + f.load.x * t, org.y + f.load.y * t, org.z + f.load.z * t};
             const int i = static_cast<int>(std::floor((p.x - g.origin.x) / g.spacing));
             const int j = static_cast<int>(std::floor((p.y - g.origin.y) / g.spacing));
             const int kk = static_cast<int>(std::floor((p.z - g.origin.z) / g.spacing));
-            if (i < 0 || j < 0 || kk < 0 || i >= g.nx || j >= g.ny || kk >= g.nz || !s->mask[g.index(i, j, kk)]) break;
-            run += step;
+            const bool on = !(i < 0 || j < 0 || kk < 0 || i >= g.nx || j >= g.ny || kk >= g.nz) && s->mask[g.index(i, j, kk)];
+            if (first_sample) {
+              if (!on) break;
+              run += step;
+              continue;
+            }
+            if (on) {
+              // the first latticed sample: the leading Empty stretch (k samples) counts as travel; a hole of at most one voxel
+              // inside the run is crossed (its samples count); then sample by sample, as E1
+              run = in_lattice ? run + gap * step + step : k * step + step;
+              in_lattice = true;
+              gap = 0;
+            } else if (!in_lattice) {
+              if ((k + 0.5) * step > 2.0 * g.spacing) break;   // no lattice within two voxels of the entry
+            } else if (++gap > gap_max) {
+              break;   // the lattice ended: more than a voxel's diagonal of no lattice
+            }
           }
         }
         o.col_lattice_run_mm.push_back(run);

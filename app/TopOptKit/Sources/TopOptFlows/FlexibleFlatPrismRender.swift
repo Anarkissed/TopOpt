@@ -148,10 +148,14 @@ enum FlexibleFlatPrismUI {
 
     /// The last arrow the overlay drew, in the page's points (the hosted tests read it).
     static var lastArrowEnds: (head: CGPoint, tail: CGPoint)?
-    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    /// ★ R7-E1 REVIEW, RED CONTROL only: the knob only at the arrow's true tail (off the screen in his working views: no knob).
     static var controlKnobAtTailOnly = false
-    /// ★ R7-E1 REVIEW (STUB): each angle box's label.
-    static func boxLabel(tilt: Bool, corner: Bool) -> String { tilt ? "\u{2195}" : "\u{2194}" }
+
+    /// ★ R7-E1 REVIEW (the verifier: "on a vertical edge a sideways drag changes the ↕ value"): each angle box names its angle in
+    /// his row words, not an arrow glyph.
+    static func boxLabel(tilt: Bool, corner: Bool) -> String {
+        tilt ? FlexibleRowCopy.flatTiltWord(corner: corner) : FlexibleRowCopy.flatTwistWord(corner: corner)
+    }
     /// The last keypad a flat-prism box opened (the hosted tests read it).
     static var lastPad: String?
 
@@ -164,26 +168,55 @@ enum FlexibleFlatPrismUI {
         let boxes: CGPoint
     }
     static let knobGap: CGFloat = 56
-    static func layout(head: CGPoint, tail: CGPoint, edge: CGVector?) -> Layout {
+    /// The handles' boxes as he sees them (the hosted tests and the clip read the same sizes).
+    nonisolated static let chipSize = CGSize(width: 96, height: 46), knobSize = CGSize(width: 46, height: 46), boxesSize = CGSize(width: 150, height: 100)
+    nonisolated static func rect(_ c: CGPoint, _ size: CGSize) -> CGRect { CGRect(x: c.x - size.width / 2, y: c.y - size.height / 2, width: size.width, height: size.height) }
+    /// ★ R7-E1 REVIEW: a handle wholly on the screen and clear of the chrome (its WHOLE box, not its centre: the chip sat 19 pt
+    /// under the panel).
+    static func clear(_ r: CGRect, keepOut: [CGRect], viewport: CGSize) -> Bool {
+        guard r.minX.isFinite, r.minY.isFinite else { return false }
+        guard CGRect(origin: .zero, size: viewport).insetBy(dx: 8, dy: 8).contains(r) else { return false }
+        return !keepOut.contains { $0.insetBy(dx: -4, dy: -4).intersects(r) }
+    }
+    static func layout(head: CGPoint, tail: CGPoint, edge: CGVector?, fits: ((CGRect) -> Bool)? = nil, fixedKnob: Bool = false) -> Layout {
         var knob = tail
         let dx = tail.x - head.x, dy = tail.y - head.y
         // clear of the chip (86 × 44 about the head) whatever way the knob sits from it: 56 pt at least
         func clear(_ ux: CGFloat, _ uy: CGFloat) -> CGFloat { Swift.max(knobGap, abs(ux) * 72 + abs(uy) * 56) }
         let l0 = hypot(dx, dy)
-        if l0 < clear(l0 > 1e-3 ? dx / l0 : 0, l0 > 1e-3 ? dy / l0 : 1) {
+        if !fixedKnob, l0 < clear(l0 > 1e-3 ? dx / l0 : 0, l0 > 1e-3 ? dy / l0 : 1) {
             var e = edge ?? CGVector(dx: 0, dy: 1)
             let len = hypot(e.dx, e.dy)
             e = len > 1e-3 ? CGVector(dx: e.dx / len, dy: e.dy / len) : CGVector(dx: 0, dy: 1)
             if l0 > 1e-3, e.dx * dx + e.dy * dy < 0 { e = CGVector(dx: -e.dx, dy: -e.dy) }   // on the tail's side
             let g = clear(e.dx, e.dy)
             knob = CGPoint(x: head.x + e.dx * g, y: head.y + e.dy * g)
+            // ★ R7-E1 REVIEW: under the chrome there (the panel just below the head in portrait), the other way along the edge, then
+            // across it
+            if let fits, !fits(rect(knob, knobSize)) {
+                for v in [CGVector(dx: -e.dx, dy: -e.dy), CGVector(dx: -e.dy, dy: e.dx), CGVector(dx: e.dy, dy: -e.dx)] {
+                    let gv = clear(v.dx, v.dy)
+                    let k = CGPoint(x: head.x + v.dx * gv, y: head.y + v.dy * gv)
+                    if fits(rect(k, knobSize)) { knob = k; break }
+                }
+            }
         }
         // the boxes: beside the knob, across the head–knob line (their 100 × 92 card clear of the knob's 44 pt)
         var ax = knob.x - head.x, ay = knob.y - head.y
         let l = hypot(ax, ay)
         if l > 1e-3 { ax /= l; ay /= l } else { ax = 0; ay = 1 }
         let px = -ay, py = ax
-        let boxes = CGPoint(x: knob.x + px * 92 + ax * 24, y: knob.y + py * 92 + ay * 24)
+        var boxes = CGPoint(x: knob.x + px * 92 + ax * 24, y: knob.y + py * 92 + ay * 24)
+        // ★ R7-E1 REVIEW: the other side when that one is off the screen or under the chrome; then beyond the knob
+        if let fits, !fits(rect(boxes, boxesSize)) {
+            // the other side, then back toward the head on either side, then beyond the knob
+            var tries: [CGPoint] = []
+            for back in [CGFloat(24), -30, -70] {
+                for side in [CGFloat(1), -1] { tries.append(CGPoint(x: knob.x + side * px * 100 + ax * back, y: knob.y + side * py * 100 + ay * back)) }
+            }
+            tries.append(CGPoint(x: knob.x + ax * 84, y: knob.y + ay * 84))
+            if let b = tries.first(where: { fits(rect($0, boxesSize)) }) { boxes = b }
+        }
         return Layout(chip: head, knob: knob, boxes: boxes)
     }
 
@@ -195,10 +228,24 @@ enum FlexibleFlatPrismUI {
     }
 }
 
-/// ★ R7-E1 REVIEW (STUB): the knob's drag as a pure function.
+/// ★ R7-E1 REVIEW — the knob's drag as a pure function (the verifier: the hosted page delivers the knob no synthetic events, so
+/// the math is tested here): the angles a drag of `translation` reaches from `start` — solved on `jac` (screen points per degree
+/// of θ and of φ at the knob), or, looking down the arrow (no jacobian), the trackball (0.5° per point) — each snapped to exactly 0
+/// within 3°.
 enum FlexibleFlatPrismKnob {
     static func angles(start: (theta: Double, phi: Double), translation: CGSize, jac: (a: CGVector, b: CGVector)?) -> (theta: Double, phi: Double) {
-        start
+        var dth: Double, dph: Double
+        if let j = jac {
+            // solve translation = dθ·a + dφ·b
+            let det = Double(j.a.dx * j.b.dy - j.a.dy * j.b.dx)
+            dth = Double(translation.width * j.b.dy - translation.height * j.b.dx) / det
+            dph = Double(j.a.dx * translation.height - j.a.dy * translation.width) / det
+        } else {
+            // looking down the arrow: the trackball (0.5° per point) — across twists, up tilts
+            dph = Double(translation.width) * FlexiblePressAim.trackballDegPerPoint
+            dth = Double(-translation.height) * FlexiblePressAim.trackballDegPerPoint
+        }
+        return (FlexibleFlatPrismAngles.snapped(start.theta + dth), FlexibleFlatPrismAngles.snapped(start.phi + dph))
     }
 }
 
@@ -220,6 +267,8 @@ struct FlexibleFlatPrismOverlay: View {
     struct ChipDrag { let press: UUID; let startMM: Double; let perMM: CGVector?; let maxMM: Double; let minMM: Double; let maxStop: FlexibleFlatPrismAngles.Stop? }
     struct KnobDrag {
         let press: UUID
+        /// How far out along the arrow the knob sits (mm) — its drag moves that point.
+        let len: Double
         let start: (theta: Double, phi: Double)
         let jac: (a: CGVector, b: CGVector)?   // screen points per degree of θ and of φ
         let arcs: (tilt: [CGPoint], twist: [CGPoint], ticks: [CGPoint], tags: [(String, CGPoint)])
@@ -227,6 +276,93 @@ struct FlexibleFlatPrismOverlay: View {
 
     /// Test diagnostics only: why the overlay drew nothing the last time.
     static var lastWhy = ""
+
+    /// ★ R7-E1 REVIEW: where the working press's handles go this frame (the strokes keep out of them; the handles sit there).
+    struct Placed {
+        let head: CGPoint
+        let tail: CGPoint
+        let lay: FlexibleFlatPrismUI.Layout
+        /// How far out along the arrow the knob sits (mm): the arrow's length, or shorter where its true tail is off the screen.
+        let knobLen: Double
+        let edge: CGVector?
+        let showChip: Bool, showKnob: Bool, showBoxes: Bool
+        /// A member face turned toward the camera (else the press is behind the part: its handles hidden, its lines faint).
+        let facing: Bool
+        @MainActor var holes: [CGRect] {
+            var out: [CGRect] = []
+            if showChip { out.append(FlexibleFlatPrismUI.rect(lay.chip, FlexibleFlatPrismUI.chipSize)) }
+            if showKnob { out.append(FlexibleFlatPrismUI.rect(lay.knob, FlexibleFlatPrismUI.knobSize)) }
+            if showBoxes { out.append(FlexibleFlatPrismUI.rect(lay.boxes, FlexibleFlatPrismUI.boxesSize)) }
+            return out
+        }
+    }
+
+    /// ★ R7-E1 REVIEW (the verifier: in his working views the arrow points at the camera, so its tail — and the knob — was off the
+    /// bottom of the screen; the chip sat 19 pt under the panel; the dashed lines ran through the chip's digits): the chip at the
+    /// head, nudged (≤ 60 pt) until its whole box is clear; the knob at the arrow's tail — or, off the screen or under the chrome,
+    /// at the farthest point along the arrow that is clear and ≥ 56 pt from the chip (the knob drags that point: the same angles);
+    /// the boxes beside it on whichever side is clear.
+    private func placed(_ st: FlexibleStrip, _ c: FlexibleFlatPrism.Cut, _ a: FlexibleFlatPrismUI.Arrow, _ proj: CameraProjection) -> Placed? {
+        guard let h = proj.project(SIMD3<Float>(a.head)), let t = proj.project(SIMD3<Float>(a.tail)) else { return nil }
+        typealias UI = FlexibleFlatPrismUI
+        let vp = proj.viewportSize
+        let fits: (CGRect) -> Bool = { UI.clear($0, keepOut: keepOut, viewport: vp) }
+        let edge: CGVector? = a.along.flatMap { e in
+            guard let p0 = proj.project(SIMD3<Float>(a.anchor)), let p1 = proj.project(SIMD3<Float>(a.anchor + e * 10)) else { return nil }
+            return CGVector(dx: p1.x - p0.x, dy: p1.y - p0.y)
+        }
+        let len = simd_length(a.anchor - a.tail)
+        // the chip at the head, nudged the least way until its whole box is clear (the set moves with it)
+        var off = CGVector.zero
+        if chipDrag == nil, !fits(UI.rect(h, UI.chipSize)) {
+            search: for r in [CGFloat(18), 27, 36, 48, 60] {
+                for k in 0..<8 {
+                    let ang = Double(k) * .pi / 4 - .pi / 2
+                    let o = CGVector(dx: r * CGFloat(cos(ang)), dy: r * CGFloat(sin(ang)))
+                    if fits(UI.rect(CGPoint(x: h.x + o.dx, y: h.y + o.dy), UI.chipSize)) { off = o; break search }
+                }
+            }
+        }
+        let head = CGPoint(x: h.x + off.dx, y: h.y + off.dy)
+        // the knob: ON the arrow (it drags the arrow's tail) — at the tail, or the farthest clear point along it, clear of the chip
+        var knobLen = knobDrag?.len ?? len
+        func along(_ l: Double) -> CGPoint? { proj.project(SIMD3<Float>(a.anchor - c.direction * l)) }
+        let chipBox = UI.rect(head, UI.chipSize).insetBy(dx: -4, dy: -4)
+        let tail0 = along(knobLen) ?? t
+        var lay = UI.layout(head: head, tail: tail0, edge: edge, fits: fits)
+        if !UI.controlKnobAtTailOnly, knobDrag == nil, !(fits(UI.rect(lay.knob, UI.knobSize)) && fits(UI.rect(lay.boxes, UI.boxesSize))) {
+            // the farthest point along the arrow where the knob AND its boxes are clear; else the farthest where the knob is
+            var knobOnly: (FlexibleFlatPrismUI.Layout, Double)?
+            search: for f in [0.9, 0.8, 0.7, 0.6, 0.5, 0.42, 0.35, 0.29, 0.24, 0.2, 0.16, 0.13, 0.1] {
+                guard let p0 = along(len * f) else { continue }
+                // on the arrow, or nudged off it the least (≤ 36 pt) where the chrome sits on it (the panel's edge beside it)
+                for o in [CGVector.zero, CGVector(dx: 12, dy: 0), CGVector(dx: -12, dy: 0), CGVector(dx: 24, dy: 0), CGVector(dx: -24, dy: 0),
+                          CGVector(dx: 36, dy: 0), CGVector(dx: -36, dy: 0), CGVector(dx: 0, dy: -24), CGVector(dx: 0, dy: 24)] {
+                    let p = CGPoint(x: p0.x + o.dx, y: p0.y + o.dy)
+                    guard hypot(p.x - head.x, p.y - head.y) >= UI.knobGap, !UI.rect(p, UI.knobSize).intersects(chipBox),
+                          fits(UI.rect(p, UI.knobSize)) else { continue }
+                    let l = UI.layout(head: head, tail: p, edge: edge, fits: fits, fixedKnob: true)
+                    if fits(UI.rect(l.boxes, UI.boxesSize)) { lay = l; knobLen = len * f; knobOnly = nil; break search }
+                    if knobOnly == nil { knobOnly = (l, len * f) }
+                }
+            }
+            if let k = knobOnly, !fits(UI.rect(lay.knob, UI.knobSize)) { lay = k.0; knobLen = k.1 }
+        }
+        let control = UI.controlKnobAtTailOnly
+        let showChip = chipDrag != nil || fits(UI.rect(lay.chip, UI.chipSize))
+            || FlexibleDepthChipLayout.visible(lay.chip, keepOut: keepOut, viewport: vp)
+        let showKnob = knobDrag != nil || (control ? FlexibleDepthChipLayout.visible(lay.knob, keepOut: keepOut, viewport: vp)
+                                                   : fits(UI.rect(lay.knob, UI.knobSize)))
+        let showBoxes = control ? FlexibleDepthChipLayout.visible(lay.boxes, keepOut: keepOut, viewport: vp) : fits(UI.rect(lay.boxes, UI.boxesSize))
+        // facing: a member's face turned to the camera at the arrow's anchor
+        var facing = true
+        if let ap = proj.project(SIMD3<Float>(a.anchor)), let ray = proj.ray(throughViewPoint: ap) {
+            let r = SIMD3<Double>(ray.dir)
+            facing = st.members.contains { m in (FlexibleFlatPrism.inwardNormal(m, toward: c.direction).map { simd_dot($0, r) } ?? 1) > 0.02 }
+        }
+        return Placed(head: h, tail: t, lay: lay, knobLen: knobLen, edge: edge, showChip: showChip, showKnob: showKnob,
+                      showBoxes: showBoxes, facing: facing)
+    }
 
     var body: some View {
         let _ = { Self.lastWhy = projection == nil ? "no projection" : FlexibleFlatPrismUI.openEdgesGroup(model) == nil ? "no edges tab" : "drawn" }()
@@ -243,21 +379,28 @@ struct FlexibleFlatPrismOverlay: View {
                 }
                 return (id, FlexibleFlatPrismUI.arrow(st, c, lengthMM: len), traces)
             }
+            let here: Placed? = working.flatMap { id in
+                guard let a = arrows.first(where: { $0.0 == id })?.1, let st = model.press(id)?.strip, let c = model.flatCut(id) else { return nil }
+                return placed(st, c, a, proj)
+            }
             ZStack {
                 Canvas { ctx, size in
                     if let clip { FlexibleChromeClip.apply(&ctx, size: size, holes: clip) }
+                    // ★ R7-E1 REVIEW: the lines keep out of the working press's handles (they ran through the chip's digits)
+                    if let here, here.facing { FlexibleChromeClip.apply(&ctx, size: size, holes: here.holes) }
                     for (id, a, traces) in arrows {
                         let on = id == working
+                        let fade = on && here?.facing == false ? 0.25 : 1.0   // behind the part: faint
                         var tp = Path()
                         for t in traces where t.count == 2 {
                             if let p0 = proj.project(SIMD3<Float>(t[0])), let p1 = proj.project(SIMD3<Float>(t[1])) { tp.move(to: p0); tp.addLine(to: p1) }
                         }
-                        ctx.stroke(tp, with: .color(colour.color.opacity(on ? 1 : 0.45)),
+                        ctx.stroke(tp, with: .color(colour.color.opacity((on ? 1 : 0.45) * fade)),
                                    style: StrokeStyle(lineWidth: on ? 3 : 2, lineCap: .round, dash: [7, 5]))
                         guard let h = proj.project(SIMD3<Float>(a.head)), let t = proj.project(SIMD3<Float>(a.tail)) else { continue }
                         var ap = Path()
                         ap.move(to: t); ap.addLine(to: h)
-                        ctx.stroke(ap, with: .color(colour.color.opacity(on ? 1 : 0.45)),
+                        ctx.stroke(ap, with: .color(colour.color.opacity((on ? 1 : 0.45) * fade)),
                                    style: StrokeStyle(lineWidth: on ? 3.5 : 2.5, lineCap: .round, dash: [9, 6]))   // dashed: not sent yet
                         // the head
                         let ang = atan2(h.y - t.y, h.x - t.x)
@@ -266,9 +409,9 @@ struct FlexibleFlatPrismOverlay: View {
                         head.addLine(to: CGPoint(x: h.x - 13 * cos(ang - 0.42), y: h.y - 13 * sin(ang - 0.42)))
                         head.addLine(to: CGPoint(x: h.x - 13 * cos(ang + 0.42), y: h.y - 13 * sin(ang + 0.42)))
                         head.closeSubpath()
-                        ctx.fill(head, with: .color(colour.color.opacity(on ? 1 : 0.45)))
+                        ctx.fill(head, with: .color(colour.color.opacity((on ? 1 : 0.45) * fade)))
                         if let d = a.deepEnd, let q = proj.project(SIMD3<Float>(d)) {
-                            ctx.draw(Text("\u{25BC}").font(.system(size: 13, weight: .bold)).foregroundColor(colour.color), at: CGPoint(x: q.x, y: q.y - 12))
+                            ctx.draw(Text("\u{25BC}").font(.system(size: 13, weight: .bold)).foregroundColor(colour.color.opacity(fade)), at: CGPoint(x: q.x, y: q.y - 12))
                         }
                     }
                     // the knob's guide arcs while it is held
@@ -297,7 +440,7 @@ struct FlexibleFlatPrismOverlay: View {
                         }
                     }
                 }
-                if let id = working, let a = arrows.first(where: { $0.0 == id })?.1 { handles(id, a, proj) }
+                if let id = working, let a = arrows.first(where: { $0.0 == id })?.1, let here, here.facing { handles(id, a, proj, here) }
                 if let s = stop, Date() < s.until {
                     Text(s.text).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
@@ -313,41 +456,17 @@ struct FlexibleFlatPrismOverlay: View {
 
     // MARK: the handles
 
-    @ViewBuilder private func handles(_ id: UUID, _ a: FlexibleFlatPrismUI.Arrow, _ proj: CameraProjection) -> some View {
-        if let p = model.press(id), let st = p.strip, let h = proj.project(SIMD3<Float>(a.head)), let t = proj.project(SIMD3<Float>(a.tail)),
-           let shown = FlexibleFlatPrismUI.shown(model: model, press: id) {
-            let edge: CGVector? = a.along.flatMap { e in
-                guard let p0 = proj.project(SIMD3<Float>(a.anchor)), let p1 = proj.project(SIMD3<Float>(a.anchor + e * 10)) else { return nil }
-                return CGVector(dx: p1.x - p0.x, dy: p1.y - p0.y)
-            }
-            // ★ the handles keep off the chrome: a head under it (the mini in portrait, the panel over the arrow's head) nudges
-            // the whole set the least way out (≤ 36 pt), so the chip still sits at the head
-            let lay: FlexibleFlatPrismUI.Layout = {
-                let base = FlexibleFlatPrismUI.layout(head: h, tail: t, edge: edge)
-                if FlexibleDepthChipLayout.visible(base.chip, keepOut: keepOut, viewport: proj.viewportSize) || chipDrag != nil { return base }
-                for r in [CGFloat(18), 27, 36] {
-                    for k in 0..<8 {
-                        let a = Double(k) * .pi / 4 - .pi / 2
-                        let off = CGVector(dx: r * CGFloat(cos(a)), dy: r * CGFloat(sin(a)))
-                        let c = CGPoint(x: h.x + off.dx, y: h.y + off.dy)
-                        if FlexibleDepthChipLayout.visible(c, keepOut: keepOut, viewport: proj.viewportSize) {
-                            return FlexibleFlatPrismUI.layout(head: c, tail: CGPoint(x: t.x + off.dx, y: t.y + off.dy), edge: edge)
-                        }
-                    }
-                }
-                return base
-            }()
+    @ViewBuilder private func handles(_ id: UUID, _ a: FlexibleFlatPrismUI.Arrow, _ proj: CameraProjection, _ here: Placed) -> some View {
+        if let p = model.press(id), let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: id) {
+            let h = here.head, t = here.tail, lay = here.lay
             let label = st.label
             let busy = model.flatCommitting == id
             let _ = { FlexibleFlatPrismUI.lastArrowEnds = (h, t) }()
-            let showChip = FlexibleDepthChipLayout.shows(lay.chip, dragging: chipDrag != nil, keepOut: keepOut, viewport: proj.viewportSize)
-            let showKnob = FlexibleDepthChipLayout.shows(lay.knob, dragging: knobDrag != nil, keepOut: keepOut, viewport: proj.viewportSize)
-            let showBoxes = FlexibleDepthChipLayout.visible(lay.boxes, keepOut: keepOut, viewport: proj.viewportSize)
             Color.clear.frame(width: 1, height: 1)
                 .background(mark("flatPrism-\(label)", CGRect(x: min(h.x, t.x), y: min(h.y, t.y), width: max(1, abs(h.x - t.x)), height: max(1, abs(h.y - t.y)))))
                 .background(mark("flatArrow-\(label)", CGRect(x: min(h.x, t.x), y: min(h.y, t.y), width: max(1, abs(h.x - t.x)), height: max(1, abs(h.y - t.y)))))
                 .allowsHitTesting(false)
-            if showChip {
+            if here.showChip {
                 // a TAP opens the keypad; a drag (past 4 pt) moves the plane along the arrow — the drag wins once it travels
                 Button {
                     FlexibleFlatPrismUI.lastPad = "flat-depth-\(id.uuidString)"
@@ -363,21 +482,21 @@ struct FlexibleFlatPrismOverlay: View {
                     .disabled(busy)
                     .accessibilityIdentifier("flexible-flat-depth-chip")
             }
-            if showKnob {
+            if here.showKnob {
                 FlexibleHandleDisc(symbol: "arrow.up.and.down.and.arrow.left.and.right", active: knobDrag != nil)
                     .contentShape(Rectangle())
                     .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatKnob-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
-                    .gesture(knobGesture(id, st, a, proj).updating($dragging) { _, s, _ in s = true })
+                    .gesture(knobGesture(id, st, a, proj, len: here.knobLen).updating($dragging) { _, s, _ in s = true })
                     .position(lay.knob)
                     .disabled(busy)
                     .accessibilityLabel("Tilt and twist \(label)")
                     .accessibilityIdentifier("flexible-flat-knob")
             }
-            if showBoxes {
+            if here.showBoxes {
                 VStack(spacing: 4) {
-                    angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: "\u{2195}", value: shown.tilt, tilt: true)
+                    angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: true, corner: st.kind == .corner), value: shown.tilt, tilt: true)
                         .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTiltBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
-                    angleBox(id, st, key: "flat-twist-\(id.uuidString)", glyph: "\u{2194}", value: shown.twist, tilt: false)
+                    angleBox(id, st, key: "flat-twist-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: false, corner: st.kind == .corner), value: shown.twist, tilt: false)
                         .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTwistBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
                 }
                 .padding(4)
@@ -405,7 +524,7 @@ struct FlexibleFlatPrismOverlay: View {
 
     private func angleBox(_ id: UUID, _ st: FlexibleStrip, key: String, glyph: String, value: Double, tilt: Bool) -> some View {
         HStack(spacing: 3) {
-            Text(glyph).font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textSecondary.color)
+            Text(glyph).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1).fixedSize()
             FlexNumberBox(key: key, title: st.label + " \u{00B7} " + (tilt ? FlexibleRowCopy.flatTiltWord(corner: st.kind == .corner) : FlexibleRowCopy.flatTwistWord(corner: st.kind == .corner)),
                           spec: FlexNumberSpec(value: (value * 10).rounded() / 10, unit: "\u{00B0}", step: 1, range: -89...89, decimals: 1),
                           padTarget: $padTarget, allowsNegative: true, twin: key + "-card", hitHeight: 44) { v in
@@ -451,11 +570,11 @@ struct FlexibleFlatPrismOverlay: View {
             .onEnded { _ in finishDrags() }
     }
 
-    private func knobGesture(_ id: UUID, _ st: FlexibleStrip, _ a: FlexibleFlatPrismUI.Arrow, _ proj: CameraProjection) -> some Gesture {
+    private func knobGesture(_ id: UUID, _ st: FlexibleStrip, _ a: FlexibleFlatPrismUI.Arrow, _ proj: CameraProjection, len knobLen: Double) -> some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(FlexibleStageSpace.name))
             .onChanged { g in
                 guard model.flatCommitting == nil, let c = model.flatCut(id), let f = FlexibleFlatPrismUI.frame(model, id) else { return }
-                let len = simd_length(a.anchor - a.tail)
+                let len = knobDrag?.len ?? knobLen
                 func tail(_ th: Double, _ ph: Double) -> CGPoint? {
                     proj.project(SIMD3<Float>(a.anchor - FlexibleFlatPrismAngles.compose(f, theta: th, phi: ph) * len))
                 }
@@ -481,21 +600,10 @@ struct FlexibleFlatPrismOverlay: View {
                     let other = f.corner ? "sides" : FlexibleFlatPrismUI.memberName(model, st, 1)
                     if let p = tail(tmax, s.phi) { tags.append((named, CGPoint(x: p.x, y: p.y - 14))) }
                     if let p = tail(tmin, s.phi) { tags.append((other, CGPoint(x: p.x, y: p.y - 14))) }
-                    knobDrag = KnobDrag(press: id, start: s, jac: jac, arcs: (ta, tb, ticks, tags))
+                    knobDrag = KnobDrag(press: id, len: len, start: s, jac: jac, arcs: (ta, tb, ticks, tags))
                 }
                 guard let k = knobDrag else { return }
-                var dth: Double, dph: Double
-                if let j = k.jac {
-                    // solve translation = dθ·a + dφ·b
-                    let det = Double(j.a.dx * j.b.dy - j.a.dy * j.b.dx)
-                    dth = Double(g.translation.width * j.b.dy - g.translation.height * j.b.dx) / det
-                    dph = Double(j.a.dx * g.translation.height - j.a.dy * g.translation.width) / det
-                } else {
-                    // looking down the arrow: the trackball (0.5° per point)
-                    dph = Double(g.translation.width) * FlexiblePressAim.trackballDegPerPoint
-                    dth = Double(-g.translation.height) * FlexiblePressAim.trackballDegPerPoint
-                }
-                let want = (FlexibleFlatPrismAngles.snapped(k.start.theta + dth), FlexibleFlatPrismAngles.snapped(k.start.phi + dph))
+                let want = FlexibleFlatPrismKnob.angles(start: k.start, translation: g.translation, jac: k.jac)   // ★ R7-E1 REVIEW: pure, tested
                 let r = FlexibleFlatPrismAngles.clamp(st, frame: f, h: c.depthMM, from: k.start, to: want,
                                                       limits: model.flatLimits(id, withLattice: false))
                 if let s = r.stop { say(FlexibleFlatPrismAngles.line(s, strip: st, name: { FlexibleFlatPrismUI.memberName(model, st, $0) }), at: g.location) }
@@ -518,6 +626,7 @@ struct FlexibleFlatPrismOverlay: View {
         chipDrag = nil
         knobDrag = nil
         held = nil
+        stop = nil   // ★ R7-E1 REVIEW: the drag's bubble goes with the drag (the release says the exact stop on the card)
         ClearanceHaptics.release()
         guard let id, model.flatPreview?.press == id else { return }
         Task { @MainActor in
