@@ -86,7 +86,8 @@ public enum FlexiblePageChannels {
                                 drawnLattice: FlexibleGeneratedLattice?, heat: Bool = true,
                                 depthScaleMM: Double? = nil, mapValues: [Float]? = nil,
                                 controlColumnColours: Bool = false, groupColours: Bool = true,
-                                roleMarks: Bool = true, heatRegions: Set<Int>? = nil, sectionTints: Bool = false) -> Channels {
+                                roleMarks: Bool = true, heatRegions: Set<Int>? = nil, sectionTints: Bool = false,
+                                pressHeat: [FlexiblePressHeat.Entry] = []) -> Channels {
         // part regions: loaded / resting / selected / linked other end — by REGION, so a split
         // sector is tinted on its own side of its cuts (FlexibleRegions).
         // ★ ROUND 4 (D2): no "conflict" tint — two faces on one stack are a pinch (one group) or
@@ -150,7 +151,11 @@ public enum FlexiblePageChannels {
             return Channels(tints: n > 0 ? out : nil, dents: nil, exaggeration: 0, animated: false, legendLine: "")
         }
         let shown = FlexibleShownValues(model: model, drawnLattice: drawnLattice)
-        let scale = depthScaleMM ?? shown.maxDepth
+        // ★ R7-E5: an edges group's heat (its presses' columns, FlexiblePressHeat) shares the ONE scale — its own top when no face
+        // is heated beside it
+        let pressTop = heat ? FlexiblePressHeat.top(pressHeat) : 0
+        let faceHeated = heatRegions.map { only in model.loadedKeys.contains { only.contains($0.region) } } ?? !model.loadedKeys.isEmpty
+        let scale = depthScaleMM ?? (pressTop > 0 ? (faceHeated ? Swift.max(shown.maxDepth, pressTop) : pressTop) : shown.maxDepth)
         var colours: [FlexFaceKey: [SIMD4<Float>]] = [:]
         var numbers: [FlexFaceKey: [Double?]] = [:]
         for k in model.loadedKeys {
@@ -180,6 +185,7 @@ public enum FlexiblePageChannels {
         let heated = heatRegions.map { only in colours.filter { only.contains($0.key.region) } } ?? colours
         var tints = overlay.tints(partTint: tintOf, columnColours: heat ? heated : [:], vertexColour: heat ? vertexColour : nil,
                                   ghost: xray ? FlexibleColours.ghost : nil)
+        if heat, pressTop > 0 { FlexiblePressHeat.paint(&tints, overlay: overlay, model: model, entries: pressHeat, scale: scale) }   // ★ R7-E5
         // ★ ROUND 7 (M2): the sections' violet reads through the X-ray ghost — flagged like the map (flags.y), not ghosted
         if sectionTints, regions.flexible?.partialRoots.isEmpty == false {
             let violet = SIMD4<Float>(FlexibleStageStyle.facePrismTint, Self.sectionTintAlpha)

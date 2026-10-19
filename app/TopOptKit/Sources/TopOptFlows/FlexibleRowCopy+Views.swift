@@ -10,6 +10,8 @@ extension FlexibleRowCopy {
     /// ★ R7-E3 (the reviewer's interim-sim conditions): an edges group plays the app's interim sim along its arrow on the current
     /// lattice — said while it shows, so nobody reads its depths as tuned.
     public static let latticeNotTunedForPress = "Lattice not tuned for this press yet"
+    /// ★ R7-E5: the legend's line over an edges group's heat (the interim sim's squish along each arrow).
+    public static let pressHeatLine = "Squish along the arrow · interim sim"
     /// ★ R7-E3: the main page's group selector — its first entry, and the card's tab when it is the card's only row.
     public static let selectorAll = "All (one after another)"
     public static let selectorTab = "SQUEEZE GROUP"

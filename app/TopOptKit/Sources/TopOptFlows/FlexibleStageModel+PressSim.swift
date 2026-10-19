@@ -24,7 +24,7 @@ extension FlexibleStageModel {
     /// One edges group's interim sim as wanted now: its sim (the player's entry), its presses and their key.
     struct PressSimWant {
         let sim: FlexibleSim
-        let presses: [(regions: [Int], direction: SIMD3<Double>, weightN: Double)]
+        let presses: [FlexibleFERequest.PressPush]
         let key: Int
     }
 
@@ -34,20 +34,28 @@ extension FlexibleStageModel {
         return squeezeGroups.filter { $0.kind == .edges }.compactMap { g -> PressSimWant? in
             let ps = g.presses.compactMap { settings.press($0) }.filter { $0.strip != nil && !$0.regions.isEmpty && $0.settings.weightN > 0 }
             guard !ps.isEmpty else { return nil }
+            // ★ R7-E5: each press pushes WHERE HE DREW (its curves or its stamp — FlexiblePressPush), not evenly
+            let pushes = ps.map { p -> FlexibleFERequest.PressPush in
+                let s = flatCut(p.id).map { FlexiblePressPush.samples(p, $0) } ?? FlexiblePressPush.Samples()
+                return FlexibleFERequest.PressPush(regions: p.regions, direction: p.direction, weightN: p.settings.weightN,
+                                                   pushXYZ: s.xyz, pushWeight: s.weight)
+            }
             var h = Hasher()
             h.combine(lattice?.generation)
             h.combine(openedKey)
-            for p in ps {
+            for (p, q) in zip(ps, pushes) {
                 h.combine(p.regions)
                 h.combine(FlexiblePressAim.bits(p.direction))
                 h.combine(p.settings.weightN)
                 h.combine(p.settings.deepestMM)
+                h.combine(q.pushWeight)   // ★ R7-E5: a new drawing solves again
+                h.combine(q.pushXYZ)
             }
             let name = groupName(g)
             let labels = ps.compactMap { $0.strip?.label }
             let sim = FlexibleSim(id: FlexibleSim.groupID(g.number), kind: .group(g.number),
                                   title: FlexibleRowCopy.simTitle(name: name, names: labels), short: name, keys: [])
-            return PressSimWant(sim: sim, presses: ps.map { ($0.regions, $0.direction, $0.settings.weightN) }, key: h.finalize())
+            return PressSimWant(sim: sim, presses: pushes, key: h.finalize())
         }
     }
 

@@ -27,6 +27,11 @@ public struct FlexSquishPressInfo: Equatable, Sendable {
     public var footprintRegionIDs: [Int]
     public var direction: [Double]
     public var weightN: Double
+    /// ★ R7-E5 (his answer of 2026-10-19 ~17:50: Play follows the drawn curve, not an even push): the press's drawn shape as samples
+    /// on its footprint — 3 coordinates per sample (model mm) and a weight each (0…1); a loaded cell face takes its nearest sample's
+    /// weight, the force renormalised to `weightN`. Empty: an even push.
+    public var pushXYZ: [Double] = []
+    public var pushWeight: [Double] = []
     public init(face: Int, rotation: Int, columnPressureMPa: [Double]) {
         self.face = face; self.rotation = rotation; self.columnPressureMPa = columnPressureMPa
         self.footprintRegionIDs = []; self.direction = []; self.weightN = 0
@@ -186,6 +191,8 @@ extension FlexibleScene {
                 x.footprint_region_ids = FlexConv.i(p.footprintRegionIDs)
                 x.direction = FlexConv.d(p.direction)
                 x.weight_n = p.weightN
+                x.push_xyz = FlexConv.d(p.pushXYZ)        // ★ R7-E5: the drawn shape
+                x.push_weight = FlexConv.d(p.pushWeight)
             }
             presses.push_back(x)
         }

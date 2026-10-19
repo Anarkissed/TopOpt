@@ -7,8 +7,10 @@
 // outline — one shell (FaceOffsetShell: base = rest, offset = bent), drawn by MetalMeshView's clearance pass in the
 // face-prism's purple, faint, through the X-ray ghost (★ X1 VERIFY: a NEUTRAL glass — the violet vanished on the heat's
 // blue, his Group 1's prism unseen under the Top's heat; and its number, in a box, at its deepest point, with the ONE card's
-// row). A pinch's two faces are two prisms in the one shell. An
-// edges/corners group has no press stacks yet (AP9): no prism.
+// row). A pinch's two faces are two prisms in the one shell.
+// ★ R7-E5 (his answer of 2026-10-19 ~17:50: "X-ray showing the bend as a prism" for edge groups): an edges/corners group's prism is
+// its presses' FOOTPRINTS (the drawn part triangles of each flat prism's pieces) at rest and moved by its interim sim at the size Play
+// shows — the wedge of the bend along each arrow, into the model (R7-E3's guard `g.kind != .edges` dropped).
 // ★ WELDED: the overlay's map quads are flat (each triangle its own corners), so its corners are welded by rest position
 // (to 1 µm) — the skirt then rides only the group's outline (the edges used by one triangle), and a corner's bend is the
 // mean of its quads' (the column route's steps are smoothed; the 3D sim's field is continuous already).
@@ -59,14 +61,24 @@ enum FlexibleBendPrism {
     }
     /// Test control only (X1 verify): X1's first build — the violet prism, no number, no legend row.
     static var controlFirstBuild = false
+    /// Test control only (R7-E5): R7-E3's guard — no prism for an edges group.
+    static var controlNoEdges = false
 
     /// The current group's bend prism, or nil (no group, no stack, no dent).
     static func item(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh?, dents: [Float]?, k: Double) -> ClearanceRenderItem? {
-        guard let o, let d = dents, k > 0, let g = m.playingGroup, g.kind != .edges else { return nil }
+        guard let o, let d = dents, k > 0, let g = m.playingGroup, !(controlNoEdges && g.kind == .edges) else { return nil }
         let pos = o.mesh.flat.positions
         let n = min(pos.count, d.count) / 3
         var ranges: [Range<Int>] = []
-        for r in g.regions {
+        if g.kind == .edges {   // ★ R7-E5: each press's footprint (its drawn part triangles)
+            for id in g.presses {
+                guard let p = m.press(id), !p.regions.isEmpty else { continue }
+                for t in FlexiblePressHeat.footprintTriangles(model: m, overlay: o, regions: p.regions) where 3 * t + 3 <= n {
+                    ranges.append(3 * t..<3 * t + 3)
+                }
+            }
+        }
+        for r in g.regions where g.kind != .edges {
             guard let key = m.key(r), let start = o.flatStart[key], let st = m.stacks[key], start < n else { continue }
             ranges.append(start..<min(start + 6 * st.columns.count, n))
         }

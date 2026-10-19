@@ -652,6 +652,16 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
         }
         const Vec3 at = add(ctr, mul(n, 0.5 * h));
         double pr = mean;
+        if (along && !Pr.push_at.empty()) {   // ★ R7-E5: where it presses follows his drawing (the nearest sample's weight)
+          std::size_t best = 0;
+          double bd = std::numeric_limits<double>::infinity();
+          for (std::size_t q = 0; q < Pr.push_at.size(); ++q) {
+            const Vec3 e = sub(at, Pr.push_at[q]);
+            const double d2 = dot(e, e);
+            if (d2 < bd) { bd = d2; best = q; }
+          }
+          pr = mean * Pr.push_weight[best];
+        }
         if (!along && !(control & kUniformPressure)) {
           double u = 0.0, v = 0.0;
           st.frame.to_uv(at, u, v);

@@ -542,6 +542,12 @@ struct FlexSquishPress {                // one pressed face of the squeeze group
   std::vector<int32_t> footprint_region_ids;
   std::vector<double> direction;
   double weight_n = 0.0;
+  // ★ R7-E5 (his answer of 2026-10-19 ~17:50: "Play following the drawn curve (not an even push)"): the press's drawn shape as
+  // samples on its footprint — `push_xyz` (3 per sample, model mm) and `push_weight` (0…1 each: the curve's multiplier there, or
+  // 1 under the stamp and 0 off it). Each loaded cell face takes the weight of its NEAREST sample, then the whole is renormalised
+  // to `weight_n` (the force is unchanged; only where it presses follows the drawing). Empty: `weight_n` spread evenly (R7-E3).
+  std::vector<double> push_xyz;
+  std::vector<double> push_weight;
 };
 using FlexSquishPresses = std::vector<FlexSquishPress>;
 struct FlexSquishLaw {

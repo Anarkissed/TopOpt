@@ -212,6 +212,13 @@ squishfe::Press press_of(Scene& s, const FlexSquishPress& p) {
   out.has_direction = true;
   out.direction = topopt::Vec3{d.x / n, d.y / n, d.z / n};
   out.weight_n = p.weight_n;
+  // ★ R7-E5: the drawn shape (nearest-sample weights); a malformed list is the caller's error
+  if (p.push_xyz.size() != 3 * p.push_weight.size())
+    throw std::invalid_argument("a press's drawn shape needs 3 coordinates per weight");
+  for (std::size_t i = 0; i < p.push_weight.size(); ++i) {
+    out.push_at.push_back(topopt::Vec3{p.push_xyz[3 * i], p.push_xyz[3 * i + 1], p.push_xyz[3 * i + 2]});
+    out.push_weight.push_back(std::isfinite(p.push_weight[i]) ? std::max(0.0, p.push_weight[i]) : 0.0);
+  }
   return out;
 }
 

@@ -29,6 +29,9 @@ struct Press {
   bool has_direction = false;
   topopt::Vec3 direction{0, 0, 0};
   double weight_n = 0.0;
+  // ★ R7-E5: the drawn shape's samples (FlexSquishPress.push_xyz / push_weight); empty = an even push
+  std::vector<topopt::Vec3> push_at;
+  std::vector<double> push_weight;
 };
 
 struct Setup {

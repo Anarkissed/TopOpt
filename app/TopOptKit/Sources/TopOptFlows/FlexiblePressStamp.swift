@@ -24,6 +24,25 @@ public enum FlexiblePressStamp {
     /// ★ RED CONTROL only (FlexiblePressStampTests): the face handle's free (u, v) drag — a drag across the edge moves it off.
     nonisolated(unsafe) static var controlFreeDrag = false
 
+    /// ★ R7-E5 (his answer of 2026-10-19 ~17:50: "Stamp turn: 0° = the long side along the edge (turning away counts up)"): the
+    /// turn he reads and types is measured from the stamp's LONG side lying along the edge, whatever its own width/length axes
+    /// (stored `rotationDeg` turns its width from the edge — unchanged, so saved stamps keep their place). 0 ≤ shown < 180 (a
+    /// stamp's outline repeats every half turn).
+    public static func longSideBase(_ p: FlexibleStampPlacement) -> Double { p.lengthMM > p.widthMM ? 90 : 0 }
+    /// ★ RED CONTROL only: E4's box — the stored turn shown as it is (90° for a stamp whose length is its long side).
+    nonisolated(unsafe) static var controlStoredTurn = false
+    public static func shownTurn(_ p: FlexibleStampPlacement) -> Double {
+        if controlStoredTurn { return p.rotationDeg }
+        let t = (p.rotationDeg - longSideBase(p)).truncatingRemainder(dividingBy: 180)
+        let u = t < 0 ? t + 180 : t
+        return u >= 180 - 1e-9 ? 0 : u
+    }
+    /// The stored turn for a typed one (`deg` from the long side along the edge).
+    public static func storedTurn(shown deg: Double, _ p: FlexibleStampPlacement) -> Double {
+        if controlStoredTurn { return deg.truncatingRemainder(dividingBy: 360) }
+        return (deg + longSideBase(p)).truncatingRemainder(dividingBy: 360)
+    }
+
     /// The stamp's frame in the plane ⟂ the arrow: x = the edge (a corner: its first edge) seen down the arrow, y = d × x.
     public static func frame(_ s: FlexibleStrip, direction d: SIMD3<Double>) -> (x: SIMD3<Double>, y: SIMD3<Double>)? {
         let e: SIMD3<Double>?

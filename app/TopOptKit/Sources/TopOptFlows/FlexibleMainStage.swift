@@ -1165,14 +1165,18 @@ public final class FlexibleMainStage: ObservableObject {
         // the Squish page's — the main page wears heat and a dent only from a lattice DRAWN (or core's 3D heat). While none is
         // drawn (building, stale, deferred) it is the plain model. RED CONTROL `controlDrawnCurveOnMain`: the drawn curve's.
         let latticeHeat = prisms && (drawn != nil || feNow != nil || Self.controlDrawnCurveOnMain)
+        // ★ R7-E5: an edges group's heat follows the selector (All / the 3-second hold: every edges group)
+        let pressHeat = heat && latticeHeat ? FlexiblePressHeat.entries(model: m, groups: mainPressHeatGroups) : []
         var c = FlexiblePageChannels.channels(model: m, overlay: overlay, xray: false, drawnLattice: drawn, heat: heat && latticeHeat,
-                                              depthScaleMM: feNow?.scaleMM, mapValues: feNow?.first,
+                                              depthScaleMM: pressHeat.isEmpty ? feNow?.scaleMM : feNow.map { Swift.max($0.scaleMM, FlexiblePressHeat.top(pressHeat)) },
+                                              mapValues: feNow?.first,
                                               controlColumnColours: controlColumnHeat, groupColours: false,
-                                              roleMarks: controlRolesOnMain)   // ★ R7-V: no role mark on the main page's model
+                                              roleMarks: controlRolesOnMain,   // ★ R7-V: no role mark on the main page's model
+                                              pressHeat: pressHeat)
         if !latticeHeat { c.dents = nil; c.exaggeration = 0; c.mapValues = nil }
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: m) }   // (the red control only)
         let shown = FlexibleShownValues(model: m, drawnLattice: drawn)
-        dentMaxMM = latticeHeat ? (feNow?.scaleMM ?? shown.maxDepth) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism; ★ M1 VERIFY: none without a lattice drawn)
+        dentMaxMM = latticeHeat ? (pressHeat.isEmpty ? (feNow?.scaleMM ?? shown.maxDepth) : c.heatScaleMM) : 0   // ★ BATCH N VERIFICATION: the sequence AS ON SCREEN (★ M1: none without a face-prism; ★ M1 VERIFY: none without a lattice drawn)
         heatValues = c.mapValues
         dentMapShown = overlay?.flatStart.isEmpty == false && dentMaxMM > 0   // ★ BATCH M (M6): the dent view's X-ray
         // ★ BATCH M VERIFICATION: …but not on the column FALLBACK (a lattice drawn, its sims failed — or none,

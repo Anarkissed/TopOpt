@@ -1,6 +1,71 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-E4 — the two sides of a curve inside an edge's flat prism, seen from [Top] and [45°]; a stamp that sits on the edge (2026-10-19) (read this first)
+## ★ Round 7 · R7-E5 — edges groups: Heat on the flat prism's footprint, X-ray's bend prism, Play presses where you drew; the stamp turn from its long side; [Top] keeps the handles (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `c5a65af1` (R7-E4). NOT pushed. App + our bridge files only; core untouched; no
+#354/main file edited. **Front-end only** (your ruling of 2026-10-19 ~14:50): all of it runs on the interim sim (R7-E3); nothing
+reaches a job (`FlexibleBackend.sendsPresses` stays off; the chip "Lattice not tuned for this press yet" still shows).
+
+### What you will see now, in plain words
+- **Heat on an edges group**: the flat prism's footprint is coloured, column by column of the press, by how much the interim sim
+  squishes it along the arrow (at the size Play shows it). It follows the group the views show: the open group on the Squish page
+  (tap), every group on the 3-second hold, the selector's group on the Lattice page. The card reads **"Squish along the arrow ·
+  interim sim"** with its own scale (0 … 2.1 mm on your live pad).
+- **X-ray** on an edges group: the bend as a prism into the model — the footprint at rest and moved along each arrow, with its
+  number (2.6 mm on your pad) and the card's "Prism = bend at full load" row.
+- **Play follows what you drew**: the push is no longer even — Curves press each point by the curve there (across × along; a
+  corner by its one curve), Stamp presses only under the stamp. The force is unchanged; only where it presses moves.
+- **Stamp turn: 0° = its long side along the edge**; turning it away counts up (your Fingertip on Edge 16 now reads 0°, was 90°).
+  Choosing another stamp keeps the turn you read.
+- **[Top] keeps the chip, knob and Tilt/Twist boxes** (E4_01 had none — see the bug below).
+
+### His words → fix → test (`FlexibleR7E5Tests`; each RED control asserted red inside its test)
+1. "Heat colours" → new `FlexiblePressPushHeat.swift` (`FlexiblePressHeat`: per column of core's press stack,
+   `columnCompression` × min(1, the field's safe scale); painted on the footprint's drawn triangles, every vertex by its column, opaque
+   through X-ray) via `FlexiblePageChannels.channels(pressHeat:)`; the Squish page (`FlexibleStagePage.pressHeat`, `heatDrawn`, the
+   legend's line and top) and the Lattice page (`FlexibleMainStage.mainPressHeatGroups`, `dentMaxMM`).
+   `testAnEdgesGroupSquishesWhereHeDrewWearsHeatAndShowsItsBend` (A1_0003 + Edge 16): 1350/1350 footprint vertices painted, 0 off
+   their column's colour, 8 shades, the legend top = the press's top (3.67 mm); a face group open → none; the hold → every group's;
+   the Lattice page follows the selector. RED `controlNoPressHeat`: 0 painted, no heat rows.
+2. "X-ray showing the bend as a prism" → `FlexibleBendPrism`: R7-E3's `.edges` guard dropped; an edges group's shell is its presses'
+   footprints at rest → moved. Same test: 251 corners, deepest 4.0 mm, 95 % of the movement along the arrow. RED `controlNoEdges`: nil.
+3. "Play following the drawn curve (not an even push)" → `FlexiblePressPush.samples` (the footprint sampled 33 × 33 in fold
+   coordinates, each weighted by the curve or the stamp) → `FlexibleFERequest.PressPush` → bridge `FlexSquishPress.push_xyz /
+   push_weight` (each loaded cell face takes its nearest sample's weight, renormalised to the group's force; empty = R7-E3's even
+   push, byte-for-byte). `testThePushFollowsTheDrawnCurveAndTheStamp` (samples on the faces < 1e-6 mm; never edited = all ones; first
+   side 0.2 → mean weight 0.57 vs 1.0; the stamp: 523 of 1089 samples, all under it). On the sim (test 1, first side 0.15 out to a
+   quarter): the soft side moves 2.48 mm vs 3.30 mm (ratio 0.75); RED `controlEvenPush` (solved too): 4.76 vs 4.83 (0.99).
+4. "Stamp turn: 0° = the long side along the edge" → `FlexiblePressStamp.shownTurn / storedTurn` (stored turn unchanged, so saved
+   stamps keep their place; the box and the menu use the shown turn), the (i) copy. `testTheStampTurnReadsFromItsLongSide` (seed 0°,
+   120 stored → 30°, round trip, at 0° its reach along the edge is its long side). RED `controlStoredTurn`: 90°.
+5. E4_01 ([Top] lost the handles) — a REAL bug: Edge 16 is a vertical edge, so from the top both faces are edge-on; E4 hid the handles
+   unless a face turned toward the ray through the ANCHOR, and with the camera over the part (pole clamp 2.9°, perspective to the
+   panned press) both faces turned away (−0.52). Now `FlexibleFlatPrismUI.facing` judges along the camera's line of sight and hides
+   only when every face turns away by more than ~6°. `testTheTopViewKeepsTheFlatPrismsHandles` (line of sight +0.035 both → shown;
+   behind → hidden). RED `controlFacingNeedsAFrontFace` with the anchor ray: hidden. Found by looking: my first fix (edge-on at the
+   anchor ray) still drew nothing in E5_01 — the picture, not the test, caught it.
+
+### Raw runs — `round7/batch_e5/e5_runs.txt` (app/TopOptKit, --scratch-path /tmp/r7ev-build)
+- New class 4/4. Targeted (the classes that touch or pin the changed files): chunk 1 (E1b, E3, E2Park, E2, PressCurve, PressStamp,
+  FlatPrismEngine, FlatPrism, SquishCopy, R7F, R7Merge, R7R, EdgeGroups), chunk 2 (Round4, Round6, BatchVReview, ShownValues,
+  LegendPlacement, Squish, BatchCVerify, CurveEdit, BatchBReviewUX, DepthPrism, VerifyD1, R7X1, R7X1Verify, Round7Views,
+  Round7ScreenHook), chunk 3 (MainPageHook, BatchCHook, OverlayClip, Round7ViewsHosted, Round7ViewsReviewHosted, Round6Hosted,
+  FlatPrismHosted, BatchVHosted, EdgeGroupsHosted, E1ReviewHosted) — all passed, no re-pin. After the facing fix: FlatPrismHosted,
+  EdgeGroupsHosted, E1ReviewHosted, FlatPrism, EdgeGroups, E1b again — 30 passed (1 skipped), and the new class 4/4.
+- Goldens: FlexibleAngledGoldenTests 0 DIFFERS both modes (38 identical deterministic; 32 + 1 PART-SKIP unseeded); the 16 stage-job
+  hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_e5.txt`). (The facing fix after them is the overlay's view
+  code only.) No press is sent, so no job byte moved.
+- Evidence (`look/`, 13" portrait, his live pad, Edge 16): E5_01 [Top] with chip, knob and boxes; E5_02 Heat on the footprint at
+  the full squish with the legend and the chip; E5_03 X-ray's bend prism and its 2.6 mm tag; E5_04 Stamp turn 0°.
+  Seen, not fixed: in E5_01 the depth chip sits on the across curve's middle point; in E5_03 the prism's tag overlaps "along".
+
+### Open questions
+1. The skin couples an edge's two faces strongly: a side drawn at 0.15 still moves 75 % as far as the other. Fine for the interim,
+   or should the sim's Play show the drawing more literally until core designs it?
+2. The chip on the curve's middle point in [Top] (E5_01): move the chip off the curve, or leave it (the point is still draggable
+   beside it)?
+
+## ★ Round 7 · R7-E4 — the two sides of a curve inside an edge's flat prism, seen from [Top] and [45°]; a stamp that sits on the edge (2026-10-19) (the step before R7-E5 above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `8fee58e6` (R7-E3). NOT pushed. App only; core untouched; no #354/main file
 edited. **Front-end only, by your ruling of 2026-10-19 ~14:50**: nothing of the curves or the stamp goes to core (the switch

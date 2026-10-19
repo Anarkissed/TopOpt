@@ -79,6 +79,7 @@ public struct FlexibleStagePage: View {
     /// ★ X1 VERIFY: the prism's number (in a box, at its floor) and whether the bend is well short of the curve he drew.
     @State private var bendTag: FlexibleBendPrism.Tag?
     @State private var bendShort = false
+    @State private var pressHeatTop: Double?   // ★ R7-E5: an edges group's heat top (the legend's scale)
     /// ★ BATCH C (item 1.4): the legend reads too — tap it ("TAP THE PART TO READ"), then the
     /// part: the dent's true mm at that spot, pinned as a callout; a tap never selects a face
     /// while it reads; a double tap anywhere (or the legend again) comes back out.
@@ -225,7 +226,11 @@ public struct FlexibleStagePage: View {
     /// so on its tab the part wore no heat while the card still said "What you drew · 0 mm … 28.4 mm" and took a tap to read.
     @MainActor static func heatDrawn(model: FlexibleStageModel, views: FlexibleStageViews) -> Bool {
         if controlLegendIgnoresDrawnHeat { return views.heatScope != .off }
-        return !FlexibleStageHeat.shown(model: model, views: views).isEmpty
+        return !FlexibleStageHeat.shown(model: model, views: views).isEmpty || !pressHeat(model: model, views: views).isEmpty   // ★ R7-E5
+    }
+    /// ★ R7-E5: the edges groups' heat the Squish page draws (the open group on tap, every group on the hold).
+    @MainActor static func pressHeat(model: FlexibleStageModel, views: FlexibleStageViews) -> [FlexiblePressHeat.Entry] {
+        FlexiblePressHeat.entries(model: model, groups: FlexiblePressHeat.squishPageGroups(model: model, views: views))
     }
     /// Test control only (the merge): the dent's rows whenever Heat is on, drawn or not (the merged code before this fix).
     @MainActor static var controlLegendIgnoresDrawnHeat = false
@@ -521,7 +526,8 @@ public struct FlexibleStagePage: View {
         let filter = controlHeatAlwaysOn ? nil : FlexibleStageHeat.filter(model: model, views: v)
         var c = FlexiblePageChannels.channels(model: model, overlay: overlay, xray: xray(v), drawnLattice: nil,   // ★ X1: his icon
                                               heat: filter.map { !$0.isEmpty } ?? true, groupColours: false, heatRegions: filter,
-                                              sectionTints: true)   // ★ ROUND 7 (M2): violet where a tap works
+                                              sectionTints: true,   // ★ ROUND 7 (M2): violet where a tap works
+                                              pressHeat: pressHeat(model: model, views: v))   // ★ R7-E5: an edges group's heat
         if controlRound5Frames { FlexibleGroupFrames.paint(&c.tints, overlay: overlay, model: model) }   // (the red control only)
         return c
     }
@@ -545,6 +551,8 @@ public struct FlexibleStagePage: View {
             if restart, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion) }
         }
         tints = c.tints
+        let pTop: Double? = Self.pressHeat(model: model, views: model.views).isEmpty ? nil : c.heatScaleMM   // ★ R7-E5
+        if pTop != pressHeatTop { pressHeatTop = pTop }
         let heat = FlexibleGroupWalls.heatSamples(tints: c.tints, overlay: overlay, model: model)   // ★ R6 REVIEW
         if heat != glassHeat { glassHeat = heat }
         dents = c.dents
@@ -863,7 +871,8 @@ public struct FlexibleStagePage: View {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
                                reading: legendDrilled ? reading : nil, hasDent: dentRows,   // ★ R7-V; ★ R7 MERGE: heat drawn
                                k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()),
-                               bendPrism: bendTag != nil, bendShort: bendShort)   // ★ X1 VERIFY
+                               bendPrism: bendTag != nil, bendShort: bendShort,   // ★ X1 VERIFY
+                               pressHeatTopMM: pressHeatTop)   // ★ R7-E5
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
                             Color.clear
@@ -1298,6 +1307,8 @@ struct FlexibleLegend: View {
     /// ★ X1 VERIFY: X-ray's bend prism (its legend row), and whether the bend is well short of the curve he drew.
     var bendPrism = false
     var bendShort = false
+    /// ★ R7-E5: an edges group's heat on the legend — its line and top end (nil: the faces' "What you drew" scale).
+    var pressHeatTopMM: Double? = nil
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
     /// the "TAP TO READ" line, the line, and half the gap under it).
     static let tabHeight: CGFloat = DS.Space.ml + 16
@@ -1334,7 +1345,7 @@ struct FlexibleLegend: View {
                     .font(.system(size: 10, weight: .bold)).tracking(0.7)
                     .foregroundStyle(DS.Color.accent.color)
                     .accessibilityIdentifier("flexible-legend-tab")
-                Text(shown.legendLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                Text(pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .accessibilityIdentifier("flexible-legend-line")
                 // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
@@ -1349,7 +1360,7 @@ struct FlexibleLegend: View {
                     }
                 }
                 HStack {
-                    Text("0 mm"); Spacer(); Text(String(format: "%.1f mm", shown.maxDepth))
+                    Text("0 mm"); Spacer(); Text(String(format: "%.1f mm", pressHeatTopMM ?? shown.maxDepth))
                 }
                 .font(.system(size: 11, weight: .medium)).monospacedDigit()
                 .foregroundStyle(DS.Color.textSecondary.color)

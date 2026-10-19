@@ -65,12 +65,24 @@ public struct FlexibleFERequest: Sendable {
     /// an edges group's sim — each press pushes ALONG its arrow over its whole footprint with its force (core's solver, the current
     /// lattice's stiffness at its own density; no column strain: 0; no core prediction to calibrate to — `targets` empty, so the field
     /// keeps the solve's own size, cut only so it never folds). It never writes a job.
-    public static func pressSim(id: String, presses: [(regions: [Int], direction: SIMD3<Double>, weightN: Double)],
-                                voxels: Int) -> Sim {
+    public static func pressSim(id: String, presses: [PressPush], voxels: Int) -> Sim {
         Sim(id: id,
-            pressed: presses.map { FlexSquishPressInfo(press: $0.regions, direction: [$0.direction.x, $0.direction.y, $0.direction.z],
-                                                       weightN: $0.weightN) },
+            pressed: presses.map { q in
+                var x = FlexSquishPressInfo(press: q.regions, direction: [q.direction.x, q.direction.y, q.direction.z], weightN: q.weightN)
+                x.pushXYZ = q.pushXYZ; x.pushWeight = q.pushWeight   // ★ R7-E5: where it presses follows his drawing
+                return x
+            },
             strainOp: [Float](repeating: 0, count: voxels), targets: [])
+    }
+
+    /// ★ R7-E3 + R7-E5: one press of an edges group's interim sim — its footprint, its arrow, its force, and (R7-E5) its drawn shape
+    /// as weighted samples on the footprint (FlexiblePressPush; empty: an even push).
+    public struct PressPush: Equatable, Sendable {
+        public let regions: [Int]
+        public let direction: SIMD3<Double>
+        public let weightN: Double
+        public var pushXYZ: [Double] = []
+        public var pushWeight: [Double] = []
     }
 
     /// The bridge's request for `sim`.

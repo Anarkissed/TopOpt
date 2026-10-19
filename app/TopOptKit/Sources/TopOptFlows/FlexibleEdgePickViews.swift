@@ -23,7 +23,7 @@ extension FlexibleRowCopy.Info {
     /// ★ R7-E4: the flat press's Shape row, its stamp.
     public static let pressShape = "Curves: two curves inside the flat prism — across the edge (one side on each face) and along it. They start as the flat prism itself; drag a point toward the part for softer there. A curve never passes the flat face. The two buttons turn the view: from the top, and 45° up from the side the arrow comes from. Stamp: ONE stamp that sits on the edge (a corner: on its point); drag its handle along the edge. Shape only for now — core support comes later."
     public static let pressStamp = "What presses the edge. It sits on the edge and slides only along it; a corner's stays on its point, and only its size and turn change."
-    public static let pressStampTurn = "Turns the stamp on the edge: 0° lays its width along the edge."
+    public static let pressStampTurn = "Turns the stamp on the edge: 0° lays its long side along the edge; turning it away counts up."
 }
 
 // MARK: - [+ New]: which kind
@@ -503,7 +503,9 @@ struct FlexiblePressShapeRows: View {
                     ForEach(model.library?.stamps.filter { $0.shape != "whole_face" } ?? []) { s in
                         Button(s.name) {
                             model.updatePressStamp(press.id) { q in
+                                let turn = FlexiblePressStamp.shownTurn(q)   // ★ R7-E5: the turn he reads is kept across a new stamp
                                 q.source = .library(s.id); q.widthMM = s.naturalSizeMM.width; q.lengthMM = s.naturalSizeMM.length; q.rigid = s.press == "rigid"
+                                q.rotationDeg = FlexiblePressStamp.storedTurn(shown: turn, q)
                             }
                         }
                     }
@@ -523,8 +525,9 @@ struct FlexiblePressShapeRows: View {
             }
             FlexRow(FlexibleRowCopy.stampTurnRow, info: FlexibleRowCopy.Info.pressStampTurn, id: "flexible-row-press-stamp-turn") {
                 FlexNumberBox(key: "press-stamp-turn-\(press.id.uuidString)", title: FlexibleRowCopy.stampTurnRow,
-                              spec: FlexibleNumberSpecs.stampTurn(deg: p.rotationDeg), padTarget: $padTarget) { v in
-                    model.updatePressStamp(press.id) { $0.rotationDeg = v.truncatingRemainder(dividingBy: 360) }
+                              spec: FlexibleNumberSpecs.stampTurn(deg: FlexiblePressStamp.shownTurn(p)), padTarget: $padTarget) { v in
+                    // ★ R7-E5: 0° = the long side along the edge (turning away counts up)
+                    model.updatePressStamp(press.id) { $0.rotationDeg = FlexiblePressStamp.storedTurn(shown: v, $0) }
                 }
             }
         }

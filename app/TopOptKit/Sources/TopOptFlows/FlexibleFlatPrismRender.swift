@@ -77,6 +77,23 @@ enum FlexibleFlatPrismRender {
     }
 }
 
+extension FlexibleFlatPrismUI {
+    /// ★ RED CONTROL only (FlexibleR7E5Tests): E4's rule — handles only when a member face turns TOWARD the camera.
+    nonisolated(unsafe) static var controlFacingNeedsAFrontFace = false
+    /// ★ R7-E5 (E4_01: [Top] on his Edge 16 — a VERTICAL edge between two side faces — drew no chip, knob or boxes and a faint
+    /// arrow): looking down the edge from the top sees both its faces EDGE-ON, and E4's test (a member face turned toward the ray
+    /// through the anchor, dot > 0.02) read that as "behind the part" — the camera's pole clamp (2.9°) and the perspective ray to the
+    /// panned press turned both faces slightly away. Now: judged along the camera's LINE OF SIGHT (`r`, the view's centre ray), the
+    /// press is behind only when every member face turns away by more than `edgeOn` (≈ 6°); edge-on is in view (the fold is exactly
+    /// what [Top] shows).
+    static let edgeOn = 0.1
+    static func facing(_ st: FlexibleStrip, direction d: SIMD3<Double>, ray r: SIMD3<Double>) -> Bool {
+        let dots = st.members.map { m in FlexibleFlatPrism.inwardNormal(m, toward: d).map { simd_dot($0, r) } ?? 1 }
+        if controlFacingNeedsAFrontFace { return dots.contains { $0 > 0.02 } }
+        return !dots.allSatisfy { $0 < -edgeOn }
+    }
+}
+
 /// The flat prism's on-model pieces, as values (the overlay, the card, the evidence and the tests read the same).
 @MainActor
 enum FlexibleFlatPrismUI {
@@ -373,11 +390,14 @@ struct FlexibleFlatPrismOverlay: View {
         let showKnob = knobDrag != nil || (control ? FlexibleDepthChipLayout.visible(lay.knob, keepOut: keepOut, viewport: vp)
                                                    : fits(UI.rect(lay.knob, UI.knobSize)))
         let showBoxes = control ? FlexibleDepthChipLayout.visible(lay.boxes, keepOut: keepOut, viewport: vp) : fits(UI.rect(lay.boxes, UI.boxesSize))
-        // facing: a member's face turned to the camera at the arrow's anchor
+        // facing: the press is not behind the part (R7-E5: judged along the camera's line of sight; edge-on counts as in view)
         var facing = true
-        if let ap = proj.project(SIMD3<Float>(a.anchor)), let ray = proj.ray(throughViewPoint: ap) {
-            let r = SIMD3<Double>(ray.dir)
-            facing = st.members.contains { m in (FlexibleFlatPrism.inwardNormal(m, toward: c.direction).map { simd_dot($0, r) } ?? 1) > 0.02 }
+        if FlexibleFlatPrismUI.controlFacingNeedsAFrontFace {   // (RED CONTROL: E4's rule — the ray through the anchor)
+            if let ap = proj.project(SIMD3<Float>(a.anchor)), let ray = proj.ray(throughViewPoint: ap) {
+                facing = FlexibleFlatPrismUI.facing(st, direction: c.direction, ray: SIMD3<Double>(ray.dir))
+            }
+        } else if let ray = proj.ray(throughViewPoint: CGPoint(x: vp.width / 2, y: vp.height / 2)) {
+            facing = FlexibleFlatPrismUI.facing(st, direction: c.direction, ray: SIMD3<Double>(ray.dir))
         }
         return Placed(head: h, tail: t, lay: lay, knobLen: knobLen, edge: edge, showChip: showChip, showKnob: showKnob,
                       showBoxes: showBoxes, facing: facing)
