@@ -204,29 +204,32 @@ extension FlexibleStageModel {
     /// twisted (or a corner tipped) more than 2 % off › core's side label. nil: nothing to say.
     /// (The design ordered the side label before the twist line; on his pad every edge press is a side press, so the twist's honest
     /// line — his answer of 2026-10-18 — would never show: it comes first, the side label then, the ruling's sentence in its (i).)
-    public func pressWarning(_ id: UUID) -> (line: String, fixes: [FlexiblePressFix])? {
+    /// `warn`: said in the warning colour (not in the job; a twist core's map follows less closely than 2 %) — the side label is a
+    /// plain caption.
+    public func pressWarning(_ id: UUID) -> (line: String, fixes: [FlexiblePressFix], warn: Bool)? {
         guard let p = settings.press(id), let st = p.strip else { return nil }
         if let v = pressSupport[id], !v.inJob {
-            if case .shared(let sh)? = v.reason { return (sh.line, sharedFixes(p, sh)) }
-            return (v.line ?? FlexibleRowCopy.pressNotSent, [])
+            if case .shared(let sh)? = v.reason { return (sh.line, sharedFixes(p, sh), true) }
+            return (v.line ?? FlexibleRowCopy.pressNotSent, [], true)
         }
         if let off = pressOffPercent(id), let shape = pressShape(id) {
             let tipped = st.kind == .corner
                 && FlexibleFlatPrism.halfway(of: p).map { FlexiblePressAim.bits($0) != FlexiblePressAim.bits(p.direction) } ?? false
             if FlexiblePressShape.twisted(shape) || tipped,
-               let line = FlexiblePressShape.line(offPercent: off, corner: st.kind == .corner) { return (line, []) }
+               let line = FlexiblePressShape.line(offPercent: off, corner: st.kind == .corner) { return (line, [], true) }
         }
-        if pressStack(id)?.side == true { return (FlexibleRowCopy.sidePress, []) }
+        if pressStack(id)?.side == true { return (FlexibleRowCopy.sidePress, [], false) }
         return nil
     }
 
-    /// The 1–3 fixes of a shared surface: [Shallower] (only when a shallower flat prism shares none), [Remove Edge 16], [Face 3 rests]
-    /// (the other is a loaded face).
+    /// The 1–3 fixes of a shared surface, the gentlest first (the first is the filled button): [Shallower] (only when a shallower
+    /// flat prism shares none), [Face 3 rests] (the other is a loaded face), [Remove Edge 16] (found by looking: Remove sat first, a
+    /// filled green button for the one that deletes).
     func sharedFixes(_ p: FlexiblePress, _ sh: FlexibleSharedFootprint) -> [FlexiblePressFix] {
         var out: [FlexiblePressFix] = []
         if let d = shallowerClear(p, sh) { out.append(.shallower(p.id, depthMM: d)) }
-        out.append(.remove(p.id, label: sh.pressName))
         if sh.otherPress == nil, settings.face(sh.otherRegion)?.isLoaded == true { out.append(.rest(sh.otherRegion, name: sh.otherName)) }
+        out.append(.remove(p.id, label: sh.pressName))
         return Array(out.prefix(3))
     }
 

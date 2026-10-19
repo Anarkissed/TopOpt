@@ -246,6 +246,14 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
         pump(0.5)
         return why
     }
+    /// An async call's value, the run loop pumped meanwhile (nil on a throw).
+    func awaitValue<T>(_ body: @escaping () async throws -> T) -> T? {
+        var out: T?
+        var fin = false
+        Task { @MainActor in out = try? await body(); fin = true }
+        pumpUntil(120) { fin }
+        return out
+    }
     func reopened(_ m: FlexibleStageModel) { pumpUntil(180) { m.sceneState == .ready && m.openedKey == m.currentSceneKey }; pump(1) }
 
     // MARK: - the pictures
@@ -287,8 +295,13 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
     /// named ("Group 2 · 11 lb · 2 edges · bead 0.45 mm").
     func testB_CardStepTwo() throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_E2_DIR") }
-        let (_, stage, m) = try open(rest: [2, 3, 4, 5])
+        let (r, stage, m) = try open(rest: [2, 3, 4, 5])
         _ = try pick(m, [[3, 2], [3, 4]])
+        stage.didExitSettings()
+        stage.apply(r.project, owned: true, pageUp: false)
+        pumpUntil(300) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+        stage.refresh()
+        pump(1)
         let run = stage.coreRun
         run.showHold(m.coreHold)
         let status = stage.cornerStatus(m)
@@ -299,6 +312,9 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
         try viewShot("B01_card_group1_beside_edges_group.png", h1)
         for r in m.squeezeGroups.first(where: { $0.number == 1 })?.regions ?? [] { m.rest(r) }
         pumpUntil(60) { m.sentSqueezeGroups.count == 1 }
+        pumpUntil(300) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+        stage.refresh()
+        pump(1)
         run.showHold(m.coreHold)
         let status2 = stage.cornerStatus(m)
         let st2 = FlexibleLatticeButton.state(status2, phase: run.phase, answerIsCurrent: stage.answerIsCurrent(m))
@@ -326,19 +342,59 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
             s.heat = false
             s.refresh()
             pump(1)
-            log.append("\(tag): lattice \(m.lattice != nil) · error \(m.latticeError ?? "-") · sent \(m.sentPresses.count)")
+            log.append("\(tag): lattice \(m.lattice != nil) · error \(m.latticeError ?? "-") · sent \(m.sentPresses.count) · built with \(m.lattice?.topology ?? "-") \(m.lattice?.tempC ?? 0) °C · now \(m.designTopology) \(m.designTempC ?? 0) °C")
             return m.lastCombinedField
         }
         let e2 = try build("E2 (sent)")
         let e2Layer = s.layer(r.project, stage: .lattice, pageUp: false)
+        s.xrayOn = true
+        let e2X = s.layer(r.project, stage: .lattice, pageUp: false)
+        s.xrayOn = false
+        // core's own fields on this scene: the Top group's, and each press's over its key (what the firmer-wins combines)
+        let b = m.build, top = m.loadedKeys
+        var parts: [String] = []
+        if let f = awaitValue({ try await m.frameWorker.withScene { try $0.densityField(faces: top.map(\.region), rotations: top.map(\.rotation), build: b) } }) {
+            parts.append("the Top's field ρ \(f.density.filter { $0 > 0 }.min() ?? 0)…\(f.density.max() ?? 0)")
+            let keys = ps.compactMap { m.pressKey($0.id) }
+            if let pf = awaitValue({ try await m.frameWorker.withScene { try $0.densityField(faces: keys, rotations: keys.map { _ in 0 }, build: b) } }), let e2 {
+                let expect = FlexibleGroupField.firmer([f, pf]).field
+                let differ = expect.density.indices.filter { expect.density[$0] != e2.density[$0] }
+                let topDiff = differ.filter { pf.density[$0] <= 0 }.count
+                parts.append("the built E2 lattice vs firmer(the Top's field, the edges group's field) now: \(differ.count) voxels differ (\(topDiff) outside the presses' bands)")
+            }
+            if let c = FlexibleGroupField.sample(f, SIMD3(50, 50, 10)), let e = e2.flatMap({ FlexibleGroupField.sample($0, SIMD3(50, 50, 10)) }) {
+                parts.append("at the pad's centre (50, 50, 10): the Top's field \(c) · the built E2 lattice \(e) · topology \(m.designTopology) \(m.designTempC ?? 0) °C")
+            }
+        }
+        for p in ps {
+            if let k = m.pressKey(p.id), let f = awaitValue({ try await m.frameWorker.withScene { try $0.densityField(faces: [k], rotations: [0], build: b) } }) {
+                let assigned = f.density.filter { $0 > 0 }
+                parts.append("\(p.strip?.label ?? "") (key \(k)) field ρ \(assigned.min() ?? 0)…\(assigned.max() ?? 0) over \(assigned.count) voxels")
+            }
+            if let st = m.pressStack(p.id) {
+                let runs = st.columns.map { $0.exitT - $0.entryT }
+                parts.append("\(p.strip?.label ?? "") stack: \(st.columns.count) columns, entry→exit \(String(format: "%.1f", runs.min() ?? 0))…\(String(format: "%.1f", runs.max() ?? 0)) mm, lattice \(String(format: "%.1f", st.latticeMMMin))…\(String(format: "%.1f", st.latticeMMMax)) mm")
+            }
+            if let d = m.pressDesign(p.id) {
+                parts.append("\(p.strip?.label ?? "") design: ok \(d.ok) too firm \(d.tooFirm) too soft \(d.tooSoft) beyond \(d.beyondData) · ρ \(d.buildableDensityRange.map { "\($0.lowerBound)…\($0.upperBound)" } ?? "-")")
+            }
+        }
+        log.append(parts.joined(separator: "\n  "))
         FlexibleStageModel.controlStripPresses = true
         let e1 = try build("E1 (presses stripped)")
+        log.append("E1: topology \(m.designTopology) \(m.designTempC ?? 0) °C · at the centre \(e1.flatMap { FlexibleGroupField.sample($0, SIMD3(50, 50, 10)) } ?? -9)")
         let e1Layer = s.layer(r.project, stage: .lattice, pageUp: false)
+        s.xrayOn = true
+        let e1X = s.layer(r.project, stage: .lattice, pageUp: false)
+        s.xrayOn = false
         FlexibleStageModel.controlStripPresses = false
         let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
         let cam = FlexibleRound6Tests.Cam(name: "front-right", azimuth: .pi / 4, elevation: 0.62, zoom: 1)
-        for (tag, layer) in [("C01_lattice_E2_graded_along_the_arrow", e2Layer), ("C02_lattice_E1_presses_stripped", e1Layer)] {
+        for (tag, layer) in [("C01_lattice_E2_graded_along_the_arrow", e2Layer), ("C02_lattice_E1_presses_stripped", e1Layer),
+                             ("C05_lattice_E2_xray", e2X), ("C06_lattice_E1_xray", e1X)] {
             guard let layer else { log.append("!! \(tag): no layer"); continue }
+            s.xrayOn = tag.hasSuffix("xray")   // (the ghost body with it)
+            defer { s.xrayOn = false }
             let mr = try FlexibleRound6EvidenceProbe().renderer(
                 mesh: try XCTUnwrap(s.mesh(r.project, on: .lattice)), tints: s.tints(r.project, on: .lattice, roles: [:], stress: nil),
                 dents: s.dents(r.project, on: .lattice), scale: s.dentScale(r.project, on: .lattice), bodyAlpha: s.bodyAlpha(r.project, on: .lattice) ?? 1,
@@ -352,14 +408,16 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
             }
         }
         // the field's slice at mid-height (z ≈ 10 mm): density as grey (−1 not lattice: black; 0 unassigned: dark red)
+        // one scale for both slices (the lightest ρ of either to the densest of either)
+        let both = (e2?.density ?? []) + (e1?.density ?? [])
+        let lat0 = both.filter { $0 > 0 }
+        let hi = Double(lat0.max() ?? 1), lo = Double(lat0.min() ?? 0)
         for (tag, f) in [("C03_density_slice_z10_E2", e2), ("C04_density_slice_z10_E1", e1)] {
             guard let f else { continue }
             let k = Swift.max(0, Swift.min(f.nz - 1, Int(((10 - f.origin.z) / f.spacing).rounded(.down))))
             let sc = 6
             let W = f.nx * sc, H = f.ny * sc
             var px = [UInt8](repeating: 0, count: W * H * 4)
-            let lat = f.density.filter { $0 > 0 }
-            let hi = Double(lat.max() ?? 1), lo = Double(lat.min() ?? 0)
             for j in 0..<f.ny { for i in 0..<f.nx {
                 let d = Double(f.density[f.index(i, j, k)])
                 var c: (UInt8, UInt8, UInt8) = (0, 0, 0)
@@ -394,11 +452,17 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
         let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.p13)
         pump(3)
         let press = try XCTUnwrap(try pick(m, [[3, 2]]).first)
+        var old = m.pressKey(press.id)
         _ = run { await m.setFlatCut(press.id, depthMM: 10.6, direction: press.direction, snap: press.snap) }
         reopened(m)
+        pumpUntil(240) { (m.pressKey(press.id) ?? old) != old && m.pressDesign(press.id) != nil }
+        old = m.pressKey(press.id)
         let why = run { await m.setFlatAngle(press.id, degrees: 15, tilt: false) }
         reopened(m)
-        pumpUntil(240) { m.pressDesign(press.id) != nil && m.pressSupport[press.id]?.inJob == true }
+        let landed = pumpUntil(240) { (m.pressKey(press.id) ?? old) != old && m.pressDesign(press.id) != nil && m.pressSupport[press.id]?.inJob == true }
+        log.append("after the twist: landed \(landed)")
+        if let g = m.squeezeGroup(ofPress: press.id) { m.rail = .group(g.id) }
+        m.selectedPress = press.id
         pump(2)
         setCam(h, az: .pi / 4, el: .pi / 6)
         log.append("twist 15° at 10.6 mm: \(why ?? "stored") · line \(m.pressWarning(press.id)?.line ?? "-") · N \(m.pressOffPercent(press.id) ?? -1)% · map \(m.pressMap(press.id).map { "\($0.mode)" } ?? "-")")

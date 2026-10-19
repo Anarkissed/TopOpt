@@ -463,7 +463,9 @@ final class FlexibleR7E2Tests: XCTestCase {
                 let back = try await settled(m, press.id, f.title)
                 XCTAssertTrue(back.inJob, "★ \(f.title): back in the job")
             }
-            r.project.performUndo(); try await F.M2.reopen(m, "undo \(f.title)")
+            // the page's own undo (FlexibleStagePage.history: the snapshot back, then the designs re-run — a bare
+            // performUndo leaves the pipeline behind, which only the page's catch-up re-runs)
+            FlexibleStagePage.history(undo: true, project: r.project, model: m); try await F.M2.reopen(m, "undo \(f.title)")
         }
         // core's own refusal: the edges group's job with Face 3 loaded beside the press
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: press.id))
@@ -618,6 +620,34 @@ final class FlexibleR7E2Tests: XCTestCase {
         FlexibleStageModel.controlHoldIgnoresPresses = false
         print("FLEX-E2-9 RED CONTROL hold kind: \(String(describing: kind))")
         XCTAssertNil(kind, "★ RED CONTROL: no notice — one group would be dropped unsaid")
+    }
+
+    // MARK: - E2-11 (found by looking)
+
+    /// ★ FOUND BY LOOKING at the lattice's pictures (round7/batch_e2/look, C03): on his pad with the edges group sent, the main
+    /// page built its lattice while Auto's answer was still on its way — designed at 190 °C, Auto then chose 220 °C, the designs
+    /// moved and the lattice stayed (the press registering re-asks Auto, so it lands later than before). A lattice designed at
+    /// another family or temperature than the designs now is STALE (it is rebuilt), and the main page does not build while a
+    /// design run is in flight. RED CONTROL: the rule before — 190 °C vs 220 °C reads current.
+    func testALatticeDesignedAtAnotherTemperatureIsStale() {
+        let k = 42, scene = "scene"
+        XCTAssertFalse(FlexibleStageModel.latticeStale(builtKey: k, builtScene: scene, builtTopology: "gyroid", builtTempC: 220,
+                                                        key: k, scene: scene, topology: "gyroid", tempC: 220), "the same: current")
+        XCTAssertTrue(FlexibleStageModel.latticeStale(builtKey: k, builtScene: scene, builtTopology: "gyroid", builtTempC: 190,
+                                                       key: k, scene: scene, topology: "gyroid", tempC: 220), "★ designed at 190 °C, now 220 °C: stale")
+        XCTAssertTrue(FlexibleStageModel.latticeStale(builtKey: k, builtScene: scene, builtTopology: "honeycomb", builtTempC: 220,
+                                                       key: k, scene: scene, topology: "gyroid", tempC: 220), "★ another family: stale")
+        XCTAssertTrue(FlexibleStageModel.latticeStale(builtKey: k + 1, builtScene: scene, builtTopology: "gyroid", builtTempC: 220,
+                                                       key: k, scene: scene, topology: "gyroid", tempC: 220), "another key: stale (as before)")
+        // ★ RED CONTROL: the rule before
+        FlexibleStageModel.controlStaleIgnoresDesign = true
+        defer { FlexibleStageModel.controlStaleIgnoresDesign = false }
+        XCTAssertFalse(FlexibleStageModel.latticeStale(builtKey: k, builtScene: scene, builtTopology: "gyroid", builtTempC: 190,
+                                                        key: k, scene: scene, topology: "gyroid", tempC: 220), "★ RED CONTROL: 190 vs 220 reads current")
+        // the main page waits for a design run in flight (source pin: buildIfReady's guard)
+        let src = (try? FlexibleSource.code("FlexibleMainStage.swift")) ?? ""
+        let body = src.range(of: "func buildIfReady()").map { String(src[$0.lowerBound...].prefix(1200)) } ?? ""
+        XCTAssertTrue(body.contains("!m.designsInFlight"), "★ the main page never builds while core's designs are in flight")
     }
 
     // MARK: - E2-10

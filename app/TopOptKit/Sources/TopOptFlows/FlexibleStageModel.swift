@@ -1293,8 +1293,23 @@ public final class FlexibleStageModel: ObservableObject {
     /// — ★ BATCH B REVIEW: or the SCENE it was built on (a new grid, a new lattice region, a
     /// new bead on the main page; the shared model keeps its lattice across the session).
     public var latticeIsStale: Bool {
-        lattice.map { $0.settingsKey != latticeSettingsKey || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
+        lattice.map {
+            Self.latticeStale(builtKey: $0.settingsKey, builtScene: $0.sceneKey, builtTopology: $0.topology, builtTempC: $0.tempC,
+                              key: latticeSettingsKey, scene: openedKey, topology: designTopology, tempC: designTempC ?? 0)
+        } ?? false
     }
+
+    /// ★ R7-E2 (found by looking at the lattice's pictures — his pad's lattice designed at 190 °C while Auto went on to choose 220 °C:
+    /// the designs moved, the lattice stayed): is a lattice built from (key, scene, family, temperature) stale now? Also when the
+    /// family or the temperature its designs were made at is not the one the designs are made at now.
+    nonisolated static func latticeStale(builtKey: Int, builtScene: String?, builtTopology: String, builtTempC: Double,
+                                         key: Int, scene: String?, topology: String, tempC: Double) -> Bool {
+        if builtKey != key || (builtScene != nil && builtScene != scene) { return true }
+        if controlStaleIgnoresDesign { return false }   // (RED CONTROL: the rule before)
+        return builtTopology != topology || builtTempC != tempC
+    }
+    /// ★ RED CONTROL only: the rule before (the family and temperature a lattice was designed at never make it stale).
+    nonisolated(unsafe) static var controlStaleIgnoresDesign = false
 
     /// ★ R7-E2: what the lattice is keyed by — the design inputs (presses included now), and which presses are IN THE JOB (a press
     /// whose design lands after a build makes that build stale). With none in the job: exactly designInputs' hash, as before.

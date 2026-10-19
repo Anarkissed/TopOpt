@@ -195,9 +195,13 @@ struct FlexibleEdgeGroupRows: View {
             .contentShape(Rectangle())
             .onTapGesture { model.selectedPress = p.id }
             // ★ R7-E1: ONE warning line, the first that applies — core refused it › a lattice stop (with its fix) › not sent yet
+            // ★ R7-E2 (found by looking — his twisted Edge 16: "Twist stops at 7° · lattice ends" hid "Twisted · squish shape up to
+            // 16% off"): a lattice stop is said about his last change; the press's own line (not in the job and why · how far off a
+            // twist is · core's side label) stays under it — two facts, a line each
             if let why = model.pressRefusals[p.id] {
                 FlexWarningLine(text: why, id: "flexible-edge-press-refused")
-            } else if let stop = model.lastFlatStop, stop.press == p.id {
+            }
+            if model.pressRefusals[p.id] == nil, let stop = model.lastFlatStop, stop.press == p.id {
                 HStack(spacing: DS.Space.s) {
                     FlexWarningLine(text: stop.line, id: "flexible-flat-stop-line")
                     if let mm = stop.setMM, mm >= FlexibleFlatPrism.minDepthMM {
@@ -214,7 +218,8 @@ struct FlexibleEdgeGroupRows: View {
                         .accessibilityIdentifier("flexible-flat-set-mm")
                     }
                 }
-            } else if let w = model.pressWarning(p.id) {
+            }
+            if model.pressRefusals[p.id] == nil, let w = model.pressWarning(p.id) {
                 // ★ R7-E2: not in the job (its reason, 1–3 fixes) › twisted more than 2 % off › core's side label
                 pressWarningRow(p, w)
             }
@@ -240,14 +245,13 @@ struct FlexibleEdgeGroupRows: View {
     }
 
     /// ★ R7-E2: the press's one warning line beyond core's refusal and a lattice stop, and its 1–3 fixes (each one undo step).
-    @ViewBuilder private func pressWarningRow(_ p: FlexiblePress, _ w: (line: String, fixes: [FlexiblePressFix])) -> some View {
-        let sent = model.sentPresses.contains(p.id)
+    @ViewBuilder private func pressWarningRow(_ p: FlexiblePress, _ w: (line: String, fixes: [FlexiblePressFix], warn: Bool)) -> some View {
         let label = p.strip?.label ?? p.id.uuidString
         VStack(alignment: .leading, spacing: 4) {
-            if sent {
+            if !w.warn {
                 FlexCaption(text: w.line).accessibilityIdentifier("flexible-edge-press-note")
             } else {
-                FlexWarningLine(text: w.line, id: "flexible-edge-press-unsent")
+                FlexWarningLine(text: w.line, id: "flexible-edge-press-warning")
             }
             if !w.fixes.isEmpty {
                 HStack(spacing: DS.Space.s) {
