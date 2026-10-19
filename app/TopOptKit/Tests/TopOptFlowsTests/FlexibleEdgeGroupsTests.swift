@@ -709,7 +709,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         print("FLEX-I2-8 greyed: " + p.greyed.sorted { $0.key < $1.key }.map { "#\($0.key) \(p.candidate($0.key)?.members ?? []) '\($0.value)'" }.joined(separator: " | "))
         let inGroup = p.greyed.filter { $0.value == "In Group 4" }
         XCTAssertGreaterThan(inGroup.count, 0, "the candidates over the strips read 'In Group 4'")
-        XCTAssertTrue(p.greyed.contains { $0.value.contains("is out of Flexible") }, "face 5 taken out: AP2's line")   // ★ re-pinned (R7-E1 review, ours): one line, whole — "… was taken out of the Fle…" was cut
+        XCTAssertFalse(p.greyed.contains { $0.value.contains("is out of Flexible") }, "face 5 deleted: its edges stay pressable")   // ★ re-pinned (R7-E1b, his 2026-10-19 note "why are so many greyed out??" — a deleted face is the re-sync's memory, never unpressable)
         for (n, why) in p.greyed {
             XCTAssertLessThanOrEqual(why.count, 44, "#\(n): '\(why)' is one line")
             m.toggleEdgePick(n)

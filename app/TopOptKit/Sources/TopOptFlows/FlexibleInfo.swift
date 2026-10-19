@@ -114,6 +114,20 @@ struct FlexWarningLine: View {
     }
 }
 
+/// ★ R7-E1b (his 2026-10-19 note: "There should be some sort red notification explaining why something can't go as far as the user
+/// wanted"): a held depth or angle, said in RED in one line — the bound that stopped it, with its number.
+struct FlexStopLine: View {
+    static var colour: RGBA { DS.Color.danger }
+    let text: String
+    var id: String = "flexible-flat-stop-line"
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.colour.color)
+            .lineLimit(1).minimumScaleFactor(0.85)
+            .accessibilityIdentifier(id)
+    }
+}
+
 /// Long text inside an (i) popover (the only place a caption lives now).
 struct FlexInfoText: View {
     let text: String

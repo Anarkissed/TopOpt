@@ -199,6 +199,8 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 6 ITEM 2: [+ New] → [Edges/corners] — pick mode (FlexibleEdgePick); nil when not picking. Nothing is
     /// stored in the project until [Done].
     @Published public var edgePick: FlexibleEdgePick?
+    /// ★ R7-E1b: the open edges group's own pick state — its pressable edges and corners on the part; a tap ADDS one (FlexibleStageModel+EdgeAdd).
+    @Published public var edgeAdd: FlexibleEdgePick?
     /// ★ ROUND 7 (S, 4h): on [+ New] with nothing pressed, the face a tap chose to start Group 1 while the keypad asks its
     /// weight ("How much weight presses here?"); nil when nothing is asked.
     @Published public var newGroupAsk: Int?

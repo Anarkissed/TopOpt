@@ -358,6 +358,10 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.flatCameraRequest) { id in turnToFlatPress(id) }
         .onAppear { turnToFlatPress(model.flatCameraRequest) }   // (a [Done] made before the page showed)
         // ★ R7-E1 REVIEW: a press the camera already holds is not turned to again (a late second turn after [Done] undid his view)
+        // ★ R7-E1b: the open edges group's lit edges, read again when the group, its presses or the opened part change
+        .task(id: FlexibleFlatPrismUI.openEdgesGroup(model).map { ["\($0.id)", model.sceneState == .ready ? model.openedKey ?? "" : "opening"] + $0.presses.map(\.uuidString) }) {
+            model.syncEdgeAdd()
+        }
         .onChange(of: model.selectedPress) { id in if FlexibleFlatPrismUI.openEdgesGroup(model) != nil, id != flatTurnHold { turnToFlatPress(id) } }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
@@ -401,6 +405,12 @@ public struct FlexibleStagePage: View {
                     if model.edgePick != nil {
                         if let p = pt, let q = proj.projection, let sp = q.project(p),
                            let line = model.edgePickTap(at: sp, projection: q) { model.toast = line }
+                        return true
+                    }
+                    // ★ R7-E1b: an edges group open — a lit edge or corner is ADDED to it; a spot that cannot be pressed says why
+                    if model.edgeAdd != nil, let p = pt, let q = proj.projection, let sp = q.project(p),
+                       let answer = model.edgeAddTap(at: sp, projection: q) {
+                        if let line = answer { model.toast = line }
                         return true
                     }
                     model.tapFace(Int(fid), point: pt.map { SIMD3<Double>($0) })
@@ -1017,6 +1027,9 @@ struct FlexibleStageOverlays: View {
             // ★ ROUND 6 ITEM 2: pick mode — every edge and corner, coloured and numbered as the list
             if model.edgePick != nil { FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip) }
             // ★ R7-E1: the open edges tab's flat prisms — traces, arrows, the chip at the head, the knob at the tail
+            if FlexibleFlatPrismUI.openEdgesGroup(model) != nil, model.edgeAdd != nil {
+                FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip, add: true)   // ★ R7-E1b
+            }
             if FlexibleFlatPrismUI.openEdgesGroup(model) != nil {
                 FlexibleFlatPrismOverlay(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, padTarget: padTarget ?? .constant(nil))
             }

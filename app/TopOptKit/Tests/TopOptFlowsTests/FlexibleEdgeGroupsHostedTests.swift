@@ -108,14 +108,11 @@ final class FlexibleEdgeGroupsHostedTests: XCTestCase {
         pump(0.6)
         let p = try XCTUnwrap(m.edgePick)
         let panelFrame = CGRect(x: 0, y: 0, width: FlexibleSettingsPanel.width, height: h.view.bounds.height)
-        var rows: [String] = []
-        for c in p.candidates {
-            let f = try XCTUnwrap(h.frames.all["edgeRow-\(c.number)"], "#\(c.number) has its row")
-            XCTAssertGreaterThanOrEqual(f.height, 44, "#\(c.number)'s row is a finger's target")
-            XCTAssertLessThanOrEqual(f.maxX, panelFrame.maxX + 0.5, "#\(c.number)'s row inside the panel")
-            rows.append("#\(c.number) \(Int(f.height))pt")
-        }
-        print("FLEX-I2-H1 rows: " + rows.joined(separator: " "))
+        // ★ re-pinned (R7-E1b, his answer 2026-10-19: "NO LIST of edges/corners: only the pressable edges/corners light up on the part"):
+        // the card lists none — the 44 pt targets are the part's tags (FlexibleEdgePickRules.tagTargetPt)
+        XCTAssertTrue(p.candidates.allSatisfy { h.frames.all["edgeRow-\($0.number)"] == nil }, "★ no row per candidate")
+        XCTAssertGreaterThanOrEqual(FlexibleEdgePickRules.tagTargetPt, 44)
+        _ = panelFrame
         let c = try XCTUnwrap(p.candidates.first { $0.kind == .edge && Set($0.members) == [1, 2] })
         m.toggleEdgePick(c.number)
         m.setEdgePickWeight(5)

@@ -13,11 +13,11 @@ import TopOptKit
 
 extension FlexibleRowCopy.Info {
     public static let newKind = "Faces: a group of faces pressed straight in, as before. Edges/corners: pick where faces meet; each gets a flat prism you drag in from the edge. The faces' own groups keep the rest. A group holds one or the other."
-    public static let edgePick = "Every edge and corner of the part, in colours that never repeat on touching ones, numbered as here. Tap a row or tap the part; tap the same spot again to reach the next one there. Grey rows can't be pressed — the line says why."
+    public static let edgePick = "Only the edges and corners that can be pressed light up on the part, numbered, in colours that never repeat on touching ones. Tap one there; tap the same spot again to reach the next one. A tap where nothing lights up says why."
     /// ★ R7-E1: the flat prism's rows.
     public static let flatDepth = "How deep the flat prism presses in along its arrow at the edge (the corner). Deeper reaches wider on every face. It stops where the lattice ends and where a face would keep none of itself."
     public static let flatTilt = "Tips the arrow toward one face or the other. 0° is halfway between the faces; a drag snaps back to it within 3°."
-    public static let flatTwist = "Twists the flat prism along the edge: one end presses deeper. It stops when the shallow end reaches 0 mm."
+    public static let flatTwist = "Turns the flat prism along the edge: one end presses deeper. It stops when the shallow end reaches 0 mm."
     public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is halfway between the faces."
     public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is halfway between the faces."
 }
@@ -75,6 +75,7 @@ struct FlexibleEdgePickCard: View {
                         .accessibilityIdentifier("flexible-edge-keeps-rest")
                 }
                 if let line = p.line { FlexWarningLine(text: line, id: "flexible-edge-pick-why") }
+                if let g = p.fixGroup { FlexibleEdgeFixGroupButton(model: model, group: g, kp: \.edgePick) }
                 if p.checking { FlexCaption(text: FlexibleRowCopy.edgePickChecking) }
                 HStack(spacing: DS.Space.s) {
                     Button {
@@ -98,60 +99,26 @@ struct FlexibleEdgePickCard: View {
                     .accessibilityIdentifier("flexible-edge-pick-cancel")
                     if p.working { ProgressView().controlSize(.small) }
                 }
-                ForEach(p.candidates) { c in FlexibleEdgeCandidateRow(model: model, pick: p, candidate: c) }
             }
         }
     }
 }
 
-/// One row of the list: "● 7  Corner · Face 1 + Face 2 + Face 3  ☐"; greyed with its one line why.
-struct FlexibleEdgeCandidateRow: View {
+/// ★ R7-E1b: a blocked spot's fix — [Open Group N], the group that edge or corner is in.
+struct FlexibleEdgeFixGroupButton: View {
     @ObservedObject var model: FlexibleStageModel
-    let pick: FlexibleEdgePick
-    let candidate: FlexibleEdgeCandidates.Candidate
-
+    let group: Int
+    let kp: ReferenceWritableKeyPath<FlexibleStageModel, FlexibleEdgePick?>
     var body: some View {
-        let n = candidate.number
-        let picked = pick.picks.contains(n)
-        let why = pick.greyed[n]
-        let colour = picked ? pick.colour.rgba : (why == nil ? (pick.colours[n]?.rgba ?? DS.Color.strokeStrong) : DS.Color.textDisabled)
-        Button { model.toggleEdgePick(n) } label: {
-            HStack(spacing: DS.Space.s) {
-                Text("\(n)").font(.system(size: 11, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(DS.Color.background.color)
-                    .frame(minWidth: 22, minHeight: 22).background(Circle().fill(colour.color))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(FlexibleRowCopy.candidateRow(candidate, names: candidate.members.map { model.displayName($0) }))
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle((why == nil ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                    if let why {
-                        Text(why).font(.system(size: 11, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                    }
-                }
-                Spacer(minLength: DS.Space.xs)
-                if why == nil {
-                    Image(systemName: picked ? "checkmark.square.fill" : "square")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle((picked ? pick.colour.rgba : DS.Color.textTertiary).color)
-                }
+        if let g = model.squeezeGroups.first(where: { $0.id == group }) {
+            Button { model.openFixGroup(kp) } label: {
+                Text(FlexibleRowCopy.openGroup(model.groupName(g))).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minHeight: 44)
+                    .background(Capsule().fill(FlexibleStageStyle.accent))
             }
-            .padding(.horizontal, DS.Space.m)
-            .frame(minHeight: FlexibleFaceList.rowHeight)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill((picked ? DS.Color.fillSelected : DS.Color.fillSubtle).color))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder((picked ? pick.colour.rgba : DS.Color.strokeSubtle).color, lineWidth: picked ? 1.5 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("flexible-edge-open-group")
         }
-        .buttonStyle(.plain)
-        .disabled(why != nil)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["edgeRow-\(n)": g.frame(in: .global)])
-        }.allowsHitTesting(false))
-        .accessibilityLabel(FlexibleRowCopy.candidateLabel(candidate) + (why.map { ", " + $0 } ?? (picked ? ", picked" : "")))
-        .accessibilityIdentifier("flexible-edge-row-\(n)")
     }
 }
 
@@ -167,6 +134,13 @@ struct FlexibleEdgeGroupRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
+            // ★ R7-E1b (his answer: "in a group, tapping an edge/corner adds it"): the lit ones on the part are what a tap adds
+            if let a = model.edgeAdd, a.into == group.id {
+                FlexCaption(text: a.loading || a.checking ? FlexibleRowCopy.edgePickLine(picked: 0, loading: true) : FlexibleRowCopy.edgeAddLine)
+                    .accessibilityIdentifier("flexible-edge-add-line")
+                if let line = a.line { FlexWarningLine(text: line, id: "flexible-edge-add-why") }
+                if let g = a.fixGroup { FlexibleEdgeFixGroupButton(model: model, group: g, kp: \.edgeAdd) }
+            }
             ForEach(group.presses, id: \.self) { id in
                 if let p = model.press(id) { row(p) }
             }
@@ -201,16 +175,30 @@ struct FlexibleEdgeGroupRows: View {
             if let why = model.pressRefusals[p.id] {
                 FlexWarningLine(text: why, id: "flexible-edge-press-refused")
             }
+            // ★ R7-E1b: a group selection like the faces have — the press moves to another edges group (its one force)
+            if selected { pressGroupChips(p) }
             if model.pressRefusals[p.id] == nil, let stop = model.lastFlatStop, stop.press == p.id {
+                FlexStopLine(text: stop.line)   // ★ R7-E1b: RED, one line — the bound and its number
                 HStack(spacing: DS.Space.s) {
-                    FlexWarningLine(text: stop.line, id: "flexible-flat-stop-line")
+                    if let ref = stop.prismRef, let mm = stop.prismMM {
+                        Button {
+                            if let why = model.deepenFacePrism(ref, mm: mm) { model.toast = why }
+                        } label: {
+                            Text(FlexibleRowCopy.deepenFacePrism(mm)).font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(Capsule().fill(FlexibleStageStyle.accent))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-flat-deepen-prism")
+                    }
                     if let mm = stop.setMM, mm >= FlexibleFlatPrism.minDepthMM {
                         Button {
                             // ★ R7-E1 REVIEW: N is core's number along the RELEASED arrow — the fix keeps that arrow
                             Task { @MainActor in if let why = await model.setFlatCut(p.id, depthMM: mm, direction: stop.direction ?? p.direction,
                                                                                     snap: stop.direction == nil ? p.snap : stop.snap) { model.toast = why } }
                         } label: {
-                            Text(FlexibleRowCopy.flatSetMM(mm)).font(.system(size: 13, weight: .semibold))
+                            Text(mm > (FlexibleFlatPrism.depth(of: p) ?? 0) + 1e-6 ? FlexibleRowCopy.flatDeepenTo(mm) : FlexibleRowCopy.flatSetMM(mm))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minHeight: 44)
                                 .background(Capsule().fill(FlexibleStageStyle.accent))
                         }
@@ -282,10 +270,11 @@ struct FlexibleEdgeGroupRows: View {
     @ViewBuilder private func flatRows(_ p: FlexiblePress, _ st: FlexibleStrip, _ shown: FlexibleFlatPrismUI.Shown) -> some View {
         let corner = st.kind == .corner
         let range = model.press(p.id).map { _ in
-            FlexibleFlatPrismAngles.depthRange(st, d: model.flatCut(p.id)?.direction ?? p.direction, limits: model.flatLimits(p.id, withLattice: true))
+            FlexibleFlatPrismAngles.depthRange(st, d: model.flatCut(p.id)?.direction ?? p.direction, limits: model.flatLimits(p.id, withLattice: false))   // ★ R7-E1b: past the lattice, the MODEL holds it (red, with core's number)
         }
         let f = FlexibleFlatPrismUI.frame(model, p.id)
         let name: (Int) -> String = { FlexibleFlatPrismUI.memberName(model, st, $0) }
+        let steep = f?.thetaIsTwist ?? false   // ★ R7-E1b: Tilt = up/down, Twist = left/right
         FlexRow(FlexibleRowCopy.flatDeepestRow, info: FlexibleRowCopy.Info.flatDepth, id: "flexible-row-deepest") {
             FlexNumberBox(key: "flat-depth-card-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.flatDeepestRow,
                           spec: FlexNumberSpec(value: shown.depthMM, unit: "mm", step: 0.5,
@@ -296,13 +285,13 @@ struct FlexibleEdgeGroupRows: View {
         }
         .background(publish("flatRow-deepest-\(st.label)"))
         FlexRow(corner ? FlexibleRowCopy.flatUpDownRow(into: f.map { name($0.tiltMember) } ?? "the top")
-                       : FlexibleRowCopy.flatTiltRow(toward: name(0)),
+                       : FlexibleRowCopy.flatTiltRow(toward: name(0), steep: steep),
                 info: corner ? FlexibleRowCopy.Info.flatUpDown : FlexibleRowCopy.Info.flatTilt, id: "flexible-row-tilt") {
             angleBox(p, st, tilt: true, value: shown.tilt)
         }
         .background(publish("flatRow-tilt-\(st.label)"))
         FlexRow(corner ? FlexibleRowCopy.flatLeftRightRow(toward: f.flatMap { $0.twistMember }.map(name) ?? "a side")
-                       : FlexibleRowCopy.flatTwistRow(end: f?.namedEnd ?? "one end"),
+                       : FlexibleRowCopy.flatTwistRow(end: f?.namedEnd ?? "one end", steep: steep),
                 info: corner ? FlexibleRowCopy.Info.flatLeftRight : FlexibleRowCopy.Info.flatTwist, id: "flexible-row-twist") {
             angleBox(p, st, tilt: false, value: shown.twist)
         }
@@ -320,6 +309,21 @@ struct FlexibleEdgeGroupRows: View {
         }
     }
 
+    /// ★ R7-E1b: the edges groups by name, the press's own lit — a tap moves it there (one undo step). Only with two or more.
+    @ViewBuilder private func pressGroupChips(_ p: FlexiblePress) -> some View {
+        let groups = model.squeezeGroups.filter { $0.kind == .edges }
+        if groups.count > 1 {
+            FlexRow(FlexibleRowCopy.groupRow, info: FlexibleRowCopy.Info.groupRow, id: "flexible-edge-press-group") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    FlexChips(options: groups.map { ("\($0.id)", model.groupName($0)) }, selection: "\(group.id)",
+                              id: "flexible-edge-group", equalWidths: false) { v in if let g = Int(v) { model.movePress(p.id, to: g) } }
+                        .fixedSize()
+                }
+            }
+            .background(publish("edgeGroupChips-\(p.strip?.label ?? "")"))
+        }
+    }
+
     /// Its frame reaches the page (the hosted tests read it): "flatRow-<row>-<label>".
     private func publish(_ key: String) -> some View {
         GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }.allowsHitTesting(false)
@@ -327,8 +331,8 @@ struct FlexibleEdgeGroupRows: View {
 
     private func angleBox(_ p: FlexiblePress, _ st: FlexibleStrip, tilt: Bool, value: Double) -> some View {
         let key = (tilt ? "flat-tilt-" : "flat-twist-") + p.id.uuidString
-        return FlexNumberBox(key: key + "-card", title: st.label + " \u{00B7} " + (tilt ? FlexibleRowCopy.flatTiltWord(corner: st.kind == .corner)
-                                                                                         : FlexibleRowCopy.flatTwistWord(corner: st.kind == .corner)),
+        let steep = FlexibleFlatPrismUI.frame(model, p.id)?.thetaIsTwist ?? false
+        return FlexNumberBox(key: key + "-card", title: st.label + " \u{00B7} " + FlexibleFlatPrismUI.boxLabel(tilt: tilt, corner: st.kind == .corner, steep: steep),
                              spec: FlexNumberSpec(value: (value * 10).rounded() / 10, unit: "\u{00B0}", step: 1, range: -89...89, decimals: 1),
                              padTarget: $padTarget, allowsNegative: true, twin: key) { v in
             Task { @MainActor in if let why = await model.setFlatAngle(p.id, degrees: v, tilt: tilt) { model.toast = why } }
@@ -346,6 +350,8 @@ struct FlexibleEdgePickOverlay: View {
     @ObservedObject var proj: FlexibleProjectionBox
     var keepOut: [CGRect] = []
     var clip: [CGRect]? = nil
+    /// ★ R7-E1b: the open edges group's lit ones (model.edgeAdd) — a tag ADDS it to the group; else [+ New]'s pick card.
+    var add = false
 
     /// What the overlay draws, as values (the evidence probe and the tests read the same list).
     struct Mark: Equatable {
@@ -361,9 +367,10 @@ struct FlexibleEdgePickOverlay: View {
     }
 
     @MainActor
-    static func marks(model: FlexibleStageModel, projection: CameraProjection?, keepOut: [CGRect] = []) -> [Mark] {
-        guard let p = model.edgePick, !p.loading, let projection else { return [] }
-        let shown = FlexibleEdgePickRules.project(p.candidates, loads: p.loads, projection: projection)
+    static func marks(model: FlexibleStageModel, projection: CameraProjection?, keepOut: [CGRect] = [], add: Bool = false) -> [Mark] {
+        guard let p = add ? model.edgeAdd : model.edgePick, !p.loading, let projection else { return [] }
+        // ★ R7-E1b (his answer: no list; only the pressable light up): what cannot be pressed is not drawn
+        let shown = FlexibleEdgePickRules.project(p.drawn, loads: p.loads, projection: projection)
         let s = FlexibleEdgePickRules.tagTargetPt
         return shown.map { c in
             let picked = p.picks.contains(c.number)
@@ -380,7 +387,7 @@ struct FlexibleEdgePickOverlay: View {
     }
 
     var body: some View {
-        let marks = Self.marks(model: model, projection: proj.projection, keepOut: keepOut)
+        let marks = Self.marks(model: model, projection: proj.projection, keepOut: keepOut, add: add)
         ZStack {
             Canvas { ctx, size in
                 if let clip { FlexibleChromeClip.apply(&ctx, size: size, holes: clip) }
@@ -402,7 +409,10 @@ struct FlexibleEdgePickOverlay: View {
             }
             .allowsHitTesting(false)
             ForEach(marks.filter { $0.target != nil }, id: \.number) { m in
-                Button { model.toggleEdgePick(m.number) } label: {
+                Button {
+                    if add { Task { @MainActor in if let why = await model.addEdgeToGroup(m.number) { model.toast = why } } }
+                    else { model.toggleEdgePick(m.number) }
+                } label: {
                     Text(m.text).font(.system(size: 12, weight: .bold)).monospacedDigit()
                         .foregroundStyle(DS.Color.background.color)
                         .padding(.horizontal, 6).frame(minWidth: 24, minHeight: 22)

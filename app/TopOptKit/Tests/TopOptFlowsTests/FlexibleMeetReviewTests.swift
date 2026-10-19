@@ -185,9 +185,14 @@ final class FlexibleMeetReviewTests: XCTestCase {
         print("FLEX-AP2R REMOVED cube60, top taken out: offered \(after.candidates.filter(\.offered).count) of \(after.candidates.count) · "
               + withTop.map { "#\($0.number) \($0.offered) '\($0.why ?? "")'" }.joined(separator: " | "))
         XCTAssertEqual(withTop.count, 8, "the top's 4 edges and 4 corners are still listed")
-        XCTAssertTrue(withTop.allSatisfy { !$0.offered }, "★ never offered")
-        XCTAssertTrue(withTop.allSatisfy { $0.why?.contains("is out of Flexible") ?? false }, "one line says why")   // ★ re-pinned (R7-E1 review, ours): one line, whole
-        XCTAssertEqual(after.candidates.filter(\.offered).count, 12)
+        // ★ re-pinned (R7-E1b, his 2026-10-19 note "why are so many greyed out??" on img_1019_5): a face taken out (deleted) is the
+        // re-sync's memory, never "cannot be pressed" — its edges and corners are OFFERED (the old rule: the red control)
+        XCTAssertTrue(withTop.allSatisfy { $0.offered }, "★ offered")
+        XCTAssertEqual(after.candidates.filter(\.offered).count, 20)
+        FlexibleEdgeCandidates.controlRemovedBlocks = true
+        defer { FlexibleEdgeCandidates.controlRemovedBlocks = false }
+        let old = try await m.edgeCandidates()
+        XCTAssertEqual(old.candidates.filter(\.offered).count, 12, "RED CONTROL: the old rule")
         XCTAssertEqual(after.candidates.map { "#\($0.number) \($0.members)" }, before.candidates.map { "#\($0.number) \($0.members)" },
                        "the numbers do not move")
     }

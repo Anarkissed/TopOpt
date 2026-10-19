@@ -35,8 +35,13 @@ extension FlexibleRowCopy {
     /// The pick card's one line: what to do, and how many are picked.
     public static func edgePickLine(picked: Int, loading: Bool) -> String {
         if loading { return "Reading the edges and corners…" }
-        return picked == 0 ? "Tap edges or corners · on the part or here" : "Tap edges or corners · \(picked) picked"
+        // ★ R7-E1b (his answer: no list): the part is where he taps
+        return picked == 0 ? "Tap a lit edge or corner on the part" : "Tap lit edges or corners · \(picked) picked"
     }
+    /// ★ R7-E1b: an edge or corner added to an existing group, and the open edges group's own line.
+    public static func edgeAdded(_ label: String, to group: String) -> String { fit("\(label) added to \(group)") }
+    public static let edgeAddLine = "Tap a lit edge or corner to add it"
+    public static func openGroup(_ name: String) -> String { fit("Open \(name)", 24) }
     /// [Done · 2 picked]
     public static func edgePickDone(_ n: Int) -> String { n == 0 ? "Done" : "Done \u{00B7} \(n) picked" }
     public static let edgePickCancel = "Cancel"
@@ -97,21 +102,30 @@ extension FlexibleRowCopy {
     public static func flatLatticeEnds(_ mm: Double) -> String { fit("Stops at " + String(format: "%.1f", mm) + " mm \u{00B7} the lattice ends there") }
     public static let stripsAreFlatNow = "Edge strips are flat prisms now \u{00B7} same reach"
     public static let flatDeepestRow = "Deepest squish"
-    public static func flatTiltRow(toward face: String) -> String { fit("Tilt toward \(face)") }
-    public static func flatTwistRow(end: String) -> String { fit("Twist \(end) deeper") }
+    // ★ R7-E1b (his 2026-10-19 note: "'Tilt' generally comes off as up/down to many … you have 'Tilt' going left/right and 'Twist'
+    // going up/down. Please reverse this."): the words follow the arrow's motion ON THE PART — "Tilt" moves it up/down, "Twist"
+    // left/right. On a steep edge (his Edge 16 and 18, the pad's 20 mm sides) tipping toward a face is left/right and deepening one
+    // end is up/down, so the two words swap there; on a level edge they stay. `steep`: FlexibleFlatPrismAngles.Frame.thetaIsTwist.
+    public static func flatTiltRow(toward face: String, steep: Bool = false) -> String { fit("\(flatTiltWord(corner: false, steep: steep)) toward \(face)") }
+    public static func flatTwistRow(end: String, steep: Bool = false) -> String { fit("\(flatTwistWord(corner: false, steep: steep)) \(end) deeper") }
     public static func flatUpDownRow(into face: String) -> String { fit("Up/down more into \(face)") }
     public static func flatLeftRightRow(toward face: String) -> String { fit("Left/right toward \(face)") }
-    public static func flatTiltWord(corner: Bool) -> String { corner ? "Up/down" : "Tilt" }
-    public static func flatTwistWord(corner: Bool) -> String { corner ? "Left/right" : "Twist" }
+    /// The word of θ (tip toward a face) and of φ (along the edge). RED CONTROL `controlOldWords`: E1's (θ always "Tilt").
+    public static func flatTiltWord(corner: Bool, steep: Bool = false) -> String { corner ? "Up/down" : (steep && !controlOldWords ? "Twist" : "Tilt") }
+    public static func flatTwistWord(corner: Bool, steep: Bool = false) -> String { corner ? "Left/right" : (steep && !controlOldWords ? "Tilt" : "Twist") }
+    nonisolated(unsafe) static var controlOldWords = false
     public static let flatBackToHalfway = "Back to halfway"
     public static func flatSetMM(_ mm: Double) -> String { "Set " + String(format: "%.1f", mm) + " mm" }
+    /// ★ R7-E1b: a stop's fixes — deeper (a twist's far end) and the face-prism the lattice comes from.
+    public static func flatDeepenTo(_ mm: Double) -> String { "Deepen to " + String(format: "%.1f", mm) + " mm" }
+    public static func deepenFacePrism(_ mm: Double) -> String { fit("Deepen the face-prism to " + String(format: "%.1f", mm) + " mm") }
 
     // MARK: ★ R7-E1 REVIEW — the stops said whole (his rule: one line, ≤ 44)
     /// A new pick the lattice stops below 3 mm starts at the stop: "Starts at 2.8 mm · the lattice ends there".
     public static func flatStartsAt(_ mm: Double) -> String { fit("Starts at " + String(format: "%.1f", mm) + " mm \u{00B7} the lattice ends there") }
     /// An angle the lattice stops, said as the angle (never a depth): "Twist stops at 6.2° · lattice ends".
-    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double) -> String {
-        let word = twist ? flatTwistWord(corner: corner) : flatTiltWord(corner: corner)
+    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double, steep: Bool = false) -> String {
+        let word = twist ? flatTwistWord(corner: corner, steep: steep) : flatTiltWord(corner: corner, steep: steep)
         return fit("\(word) stops at " + FlexNumberSpec.format(deg, decimals: 1) + "\u{00B0} \u{00B7} lattice ends")
     }
     /// Both angles moved and the lattice stopped them part way.

@@ -43,6 +43,9 @@ public enum FlexibleFlatPrismAngles {
         public let twistMember: Int?
         /// An edge: the end + φ deepens ("top end").
         public let namedEnd: String
+        /// ★ R7-E1b: a STEEP edge (≥ 30° up the build direction): θ moves the arrow left/right on the part and φ up/down, so θ is
+        /// called "Twist" and φ "Tilt" (his words: Tilt = up/down, Twist = left/right).
+        public var thetaIsTwist = false
     }
 
     /// The frame of strip `s` about halfway `d0`, `up` = core's build direction (nil: no member normal, or d0 along a member).
@@ -79,7 +82,8 @@ public enum FlexibleFlatPrismAngles {
         }
         let other = named == e1 ? e0 : e1
         guard let r = ortho(other - named, [d, u]) else { return nil }
-        return Frame(d0: d0, tilt: u, twist: r, corner: false, tiltMember: 0, twistMember: nil, namedEnd: word)
+        return Frame(d0: d0, tilt: u, twist: r, corner: false, tiltMember: 0, twistMember: nil, namedEnd: word,
+                     thetaIsTwist: Swift.abs(simd_dot(l.dir, up)) >= 0.5)
     }
 
     /// ★ The direction at (θ, φ) degrees: d0 ITSELF at (0, 0) (its bits — the halfway exactly), else unit and canonical.

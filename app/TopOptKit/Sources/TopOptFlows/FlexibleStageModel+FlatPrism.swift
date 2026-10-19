@@ -33,9 +33,12 @@ public struct FlexibleFlatPreview: Equatable, Sendable {
 public struct FlexibleFlatStop: Equatable, Sendable {
     public let press: UUID
     public let line: String
-    public let setMM: Double?
+    public var setMM: Double?
     public var direction: SIMD3<Double>? = nil
     public var snap: String? = nil
+    /// ★ R7-E1b: a lattice stop's fix when the lattice comes from one face-prism — [Deepen the face-prism to N mm].
+    public var prismRef: LatticeSelectableRef? = nil
+    public var prismMM: Double? = nil
 }
 
 /// What one press is registered as on core's open scene.
@@ -66,6 +69,10 @@ extension FlexibleStageModel {
     @MainActor static var controlNoStartHold = false
     @MainActor static var controlPerPressRest = false
     @MainActor static var controlNoLatticeLanding = false
+    /// ★ R7-E1b RED CONTROLS only: a depth the lattice stops lands on core's first N (from the deeper footprint — short of the furthest
+    /// that fits, his "goes back to an arbitrary number"); a held value is said only in the 2 s toast (no red line on the card).
+    @MainActor static var controlNoFurthest = false
+    @MainActor static var controlToastOnly = false
 
     // MARK: - what is shown
 
@@ -183,25 +190,50 @@ extension FlexibleStageModel {
         guard let p = settings.press(id), let st = p.strip, depthMM.isFinite, FlexiblePress.isAimable(direction) else { return nil }
         guard flatCommitting == nil else { return FlexibleRowCopy.edgePickOpening }
         let range = FlexibleFlatPrismAngles.depthRange(st, d: direction, limits: flatLimits(id, withLattice: false))
-        let h = Swift.min(Swift.max(depthMM, range.min), range.max)
+        var h = Swift.min(Swift.max(depthMM, range.min), range.max)
+        // ★ R7-E1b: a held depth is the press's RED line (the bound and its number), not only a 2 s toast — and typed again past it,
+        // the line stays (the value already sits at the furthest)
+        var held: FlexibleFlatStop? = nil
         if Swift.abs(h - depthMM) > 1e-9 {
             let stop = depthMM > range.max ? (range.maxStop ?? .shallow) : range.minStop
-            toast = FlexibleFlatPrismAngles.heldLine(h, unit: " mm", stop: stop, strip: st, name: flatMemberName(st))
+            let line = FlexibleFlatPrismAngles.heldLine(h, unit: " mm", stop: stop, strip: st, name: flatMemberName(st))
+            toast = line
+            if !Self.controlToastOnly { held = FlexibleFlatStop(press: id, line: line, setMM: nil, direction: direction, snap: snap) }
+        }
+        // ★ R7-E1b: past the lattice's exact stop already found for this arrow (on this lattice), it is held there at once — said in
+        // red with core's number and its fix — and core is not asked again
+        if !Self.controlNoFurthest, let e = flatExactStops[id], e.bits == FlexiblePressAim.bits(direction), e.lattice == sceneKey(regionsKey: ""),
+           h > e.mm + 1e-9 {
+            h = e.mm
+            held = latticeStop(id, st, n: e.mm, want: depthMM, direction: direction, snap: snap)
+            toast = held?.line
         }
         let unchanged = !FlexibleFlatPrism.isLegacy(p) && FlexiblePressAim.bits(p.direction) == FlexiblePressAim.bits(direction)
             && p.settings.deepestMM.bitPattern == h.bitPattern && p.snap == snap
-        if unchanged { lastFlatStop = nil; return nil }
+        if unchanged { if held != nil { lastFlatStop = held }; return nil }   // a no-op keeps the line it had
         flatCommitting = id
         defer { flatCommitting = nil }
         let why = await changeStrips(StripChange(cut: [id: FlatCutChange(depthMM: h, direction: direction, snap: snap)]))
-        if why == nil { lastFlatStop = nil; return nil }
+        if why == nil { lastFlatStop = held; return nil }
         // ★ R7-E1 REVIEW — THE LATTICE IS A HARD STOP (the verifier: "the drag runs to 46.1 mm, then the release springs back to 3 mm
         // under a different number"; his wish of 2026-10-17: "hard stop"): a release core's columns stop LANDS on the stop — a depth
         // on N, an angle on the last angle the lattice allows (never a depth that drops the angle) — one edit, said in one line
         guard !Self.controlNoLatticeLanding, !FlexibleSectors.controlSurfaceRoute, let stop = lastFlatStop, stop.press == id,
-              let n = stop.setMM else { return why }
+              let n = stop.setMM else {
+            // ★ R7-E1b (found on his live pad: Edge 16 typed to 200 mm, held at 70.4 by his rule, then core refused "its lattice is in
+            // two places" and NOTHING was stored): any other refusal of core's lands on the furthest it accepts, said with its words
+            guard !Self.controlNoFurthest, !Self.controlNoLatticeLanding, !FlexibleSectors.controlSurfaceRoute, let why else { return why }
+            let reason = Self.reasonOnly(why, label: st.label)
+            if FlexiblePressAim.bits(direction) == FlexiblePressAim.bits(p.direction) {
+                guard h > p.settings.deepestMM + 0.1 else { return why }
+                return await furthestDepth(id, want: h, direction: direction, snap: snap, reason: reason) ? nil : why
+            }
+            return await landAngle(id, depthMM: h, direction: direction, reason: reason)
+        }
         if FlexiblePressAim.bits(direction) == FlexiblePressAim.bits(p.direction) {
-            return await landDepth(id, from: n, direction: direction, snap: snap, floor: range.min)
+            let r = await landDepth(id, from: n, direction: direction, snap: snap, floor: range.min)
+            if r == nil, !Self.controlNoFurthest { _ = await furthestDepth(id, want: h, direction: direction, snap: snap) }
+            return r
         }
         return await landAngle(id, depthMM: h, direction: direction)
     }
@@ -230,18 +262,92 @@ extension FlexibleStageModel {
         return lastFlatStop?.line
     }
 
+    /// ★ R7-E1b (his 2026-10-19 note: "passing a pre-defined limit, going back to an arbitrary number and then not being able to extend
+    /// further"): core's N is read on the DEEPER footprint (more rim columns), so it lands SHORT of what fits. From N, up toward the
+    /// depth he asked for, bisected on core's exact check of each cut (nothing stored), to within 0.1 mm — the furthest that fits is
+    /// stored (one more undo step only when it moved), held as the drag's stop, and said in red with core's number; when one face-prism
+    /// makes the lattice there, the fix [Deepen the face-prism to M mm] (M: its depth plus what was missing).
+    /// `reason`: core's own words when it was not the lattice that stopped it (not kept as the drag's stop). true when something was
+    /// stored or said.
+    @discardableResult
+    private func furthestDepth(_ id: UUID, want: Double, direction: SIMD3<Double>, snap: String?, reason: String? = nil) async -> Bool {
+        guard let p = settings.press(id), let st = p.strip else { return false }
+        var lo = p.settings.deepestMM, hi = want
+        guard hi > lo + 0.1 else { return false }
+        let keep = lastFlatStop
+        var best: FlexibleStripPlan.Ready?
+        for _ in 0..<7 where hi - lo > 0.1 {
+            let mid = (lo + hi) / 2
+            if case .ready(let plan) = await prepareFlexibleStrips(StripChange(cut: [id: FlatCutChange(depthMM: mid, direction: direction, snap: snap)])) {
+                lo = mid; best = plan
+            } else {
+                hi = mid
+            }
+        }
+        lastFlatStop = keep
+        if let plan = best, await commitFlexibleStrips(plan) != nil { return false }
+        let n = settings.press(id)?.settings.deepestMM ?? lo
+        if let reason {
+            guard best != nil else { return false }   // nothing deeper fits: the refusal stands
+            let line = FlexibleRowCopy.fit("Max " + String(format: "%.1f", n) + " mm \u{00B7} " + reason)
+            lastFlatStop = FlexibleFlatStop(press: id, line: line, setMM: nil, direction: direction, snap: snap)
+            toast = line
+            return true
+        }
+        flatExactStops[id] = (FlexiblePressAim.bits(direction), n, sceneKey(regionsKey: ""))
+        lastFlatStop = latticeStop(id, st, n: n, want: want, direction: direction, snap: snap)
+        toast = FlexibleFlatPrismAngles.heldLine(n, unit: " mm", stop: .lattice(n), strip: st, name: { _ in "" })
+        return true
+    }
+
+    /// Core's refusal without the press's own name ("Edge 16 · its lattice is in two places" → "its lattice is in two places").
+    static func reasonOnly(_ why: String, label: String) -> String {
+        let parts = why.components(separatedBy: " \u{00B7} ")
+        return parts.count > 1 && parts[0] == label ? parts.dropFirst().joined(separator: " \u{00B7} ") : why
+    }
+
+    /// A lattice stop at `n` for a depth `want`, said in red, with [Deepen the face-prism to M mm] when one face-prism makes it.
+    func latticeStop(_ id: UUID, _ st: FlexibleStrip, n: Double, want: Double, direction: SIMD3<Double>, snap: String?) -> FlexibleFlatStop {
+        var stop = FlexibleFlatStop(press: id, line: FlexibleRowCopy.flatLatticeEnds(n), setMM: nil, direction: direction, snap: snap)
+        if want > n + 0.05, let (ref, depth) = latticePrism(under: st) {
+            let m = Swift.min(50, ((depth + want - n) * 2).rounded(.up) / 2)
+            if m > depth + 1e-6 { stop.prismRef = ref; stop.prismMM = m }
+        }
+        return stop
+    }
+
+    /// The ONE face-prism (a Lattice depth plane) the press's lattice comes from: the one on its member faces, else the part's only
+    /// one; nil when that is not one plane (no fix offered).
+    func latticePrism(under st: FlexibleStrip) -> (LatticeSelectableRef, Double)? {
+        let planes = project.latticeDepthPlanes().filter { $0.role == .include }
+        let faces = Set(st.members.map(\.face))
+        let on = planes.filter { faces.contains($0.faceKey) }
+        let pick = on.count == 1 ? on : (on.isEmpty && planes.count == 1 ? planes : [])
+        return pick.first.map { ($0.ref, $0.depthMM) }
+    }
+
+    /// [Deepen the face-prism to M mm]: that face-prism's depth (the main page's own setter), one undo step; the part opens again.
+    public func deepenFacePrism(_ ref: LatticeSelectableRef, mm: Double) -> String? {
+        project.sealUndoStep()
+        project.writeLatticeDepthMM(ref, mm: mm)
+        project.sealUndoStep()
+        lastFlatStop = nil
+        openScene()
+        return nil
+    }
+
     /// ★ R7-E1 REVIEW: an ANGLE release the lattice stopped — the angles bisected (5 halvings, each core's exact check on the cut
     /// it makes, nothing stored) from the stored arrow toward the released one at depth `depthMM`, landed on the last that core's
     /// columns allow; said as the angle ("Twist stops at 6.2° · lattice ends"). nil when landed (or nothing past the stored arrow
     /// fits: it stays, said); else the refusal stands.
-    private func landAngle(_ id: UUID, depthMM h: Double, direction: SIMD3<Double>) async -> String? {
+    private func landAngle(_ id: UUID, depthMM h: Double, direction: SIMD3<Double>, reason: String? = nil) async -> String? {
         guard let p = settings.press(id), let st = p.strip, let f = FlexibleFlatPrismUI.frame(self, id) else { return nil }
         let a0 = FlexibleFlatPrismAngles.decompose(f, p.direction), a1 = FlexibleFlatPrismAngles.decompose(f, direction)
         let tiltMoved = abs(a1.theta - a0.theta) > 1e-9, twistMoved = abs(a1.phi - a0.phi) > 1e-9
         func at(_ t: Double) -> (theta: Double, phi: Double) { (a0.theta + t * (a1.theta - a0.theta), a0.phi + t * (a1.phi - a0.phi)) }
         var lo = 0.0, hi = 1.0
         var best: (FlexibleStripPlan.Ready, SIMD3<Double>)?
-        for _ in 0..<5 {
+        for _ in 0..<(Self.controlNoFurthest ? 5 : 8) {   // ★ R7-E1b: to within 1/256 of the move (5: 1/32 — "an arbitrary number")
             let mid = (lo + hi) / 2, a = at(mid)
             let d = FlexibleFlatPrismAngles.compose(f, theta: a.theta, phi: a.phi)
             if case .ready(let plan) = await prepareFlexibleStrips(StripChange(cut: [id: FlatCutChange(depthMM: h, direction: d, snap: nil)])) {
@@ -252,8 +358,14 @@ extension FlexibleStageModel {
             }
         }
         let landed = best.map { FlexibleFlatPrismAngles.decompose(f, $0.1) } ?? a0
-        let line = tiltMoved && twistMoved ? FlexibleRowCopy.flatAngleStopsBoth
-            : FlexibleRowCopy.flatAngleStops(twist: twistMoved, corner: st.kind == .corner, deg: twistMoved ? landed.phi : landed.theta)
+        var line = tiltMoved && twistMoved ? FlexibleRowCopy.flatAngleStopsBoth
+            : FlexibleRowCopy.flatAngleStops(twist: twistMoved, corner: st.kind == .corner, deg: twistMoved ? landed.phi : landed.theta,
+                                             steep: f.thetaIsTwist)
+        if let reason {   // ★ R7-E1b: core's own words when it was not the lattice
+            let head = line.components(separatedBy: " \u{00B7} ").first ?? line
+            line = FlexibleRowCopy.fit(head + " \u{00B7} " + reason)
+        }
+        if reason != nil, best == nil { return line }   // nothing past the stored arrow fits core: the refusal stands, in its words
         if let (plan, d) = best {
             if let why = await commitFlexibleStrips(plan) { return why }
             lastFlatStop = FlexibleFlatStop(press: id, line: line, setMM: nil, direction: d, snap: nil)
@@ -271,13 +383,31 @@ extension FlexibleStageModel {
         guard let p = settings.press(id), let st = p.strip, let c = flatCut(id), let f = FlexibleFlatPrismUI.frame(self, id) else { return nil }
         let now = FlexibleFlatPrismAngles.decompose(f, c.direction)
         let want = tilt ? (degrees, now.phi) : (now.theta, degrees)
-        let r = FlexibleFlatPrismAngles.clamp(st, frame: f, h: c.depthMM, from: now, to: want, limits: flatLimits(id, withLattice: false))
+        let lim = flatLimits(id, withLattice: false)
+        let r = FlexibleFlatPrismAngles.clamp(st, frame: f, h: c.depthMM, from: now, to: want, limits: lim)
+        var held: FlexibleFlatStop? = nil
         if let s = r.stop {
-            toast = FlexibleFlatPrismAngles.heldLine(tilt ? r.theta : r.phi, unit: "\u{00B0}", stop: s, strip: st, name: flatMemberName(st))
+            let line = FlexibleFlatPrismAngles.heldLine(tilt ? r.theta : r.phi, unit: "\u{00B0}", stop: s, strip: st, name: flatMemberName(st))
+            toast = line
+            held = FlexibleFlatStop(press: id, line: line, setMM: nil)
+            // ★ R7-E1b: the twist's far end has a fix — deep enough that the shallow end stays at 0 mm at the angle he asked for
+            let dw = FlexibleFlatPrismAngles.compose(f, theta: want.0, phi: want.1)
+            if s == .farEnd, let l = FlexibleFlatPrism.line(st) {
+                let x = ((FlexibleFlatPrism.length(st) * Swift.abs(simd_dot(l.dir, dw)) + 0.05) * 10).rounded(.up) / 10
+                let range = FlexibleFlatPrismAngles.depthRange(st, d: dw, limits: lim)
+                if x <= range.max, FlexibleFlatPrismAngles.check(st, d: dw, h: x, limits: lim) == nil {
+                    held?.setMM = x; held?.direction = dw
+                }
+            }
         }
         let d = FlexibleFlatPrismAngles.compose(f, theta: r.theta, phi: r.phi)
         let snap: String? = r.theta == 0 && r.phi == 0 ? FlexiblePress.Snap.halfway.raw : nil
-        return await setFlatCut(id, depthMM: c.depthMM, direction: d, snap: snap ?? (FlexiblePressAim.bits(d) == FlexiblePressAim.bits(p.direction) ? p.snap : nil))
+        let why = await setFlatCut(id, depthMM: c.depthMM, direction: d, snap: snap ?? (FlexiblePressAim.bits(d) == FlexiblePressAim.bits(p.direction) ? p.snap : nil))
+        // a lattice landing says its own line; else the held angle is the press's red line
+        if why == nil, let held, !Self.controlToastOnly, !(lastFlatStop?.press == id && (lastFlatStop?.line.contains("lattice") ?? false)) {
+            lastFlatStop = held
+        }
+        return why
     }
 
     /// [Back to halfway]: the arrow on its halfway again, the depth kept.

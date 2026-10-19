@@ -288,7 +288,7 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
             XCTAssertEqual(a.theta, 0, accuracy: 0.05, "the tilt untouched")
             XCTAssertEqual(q.settings.deepestMM, 10, accuracy: 1e-9, "★ the depth kept")
             let line = try XCTUnwrap(m.lastFlatStop?.line)
-            XCTAssertEqual(line, FlexibleRowCopy.flatAngleStops(twist: true, corner: false, deg: a.phi), "★ said as an angle")
+            XCTAssertEqual(line, FlexibleRowCopy.flatAngleStops(twist: true, corner: false, deg: a.phi, steep: true), "★ said as an angle")   // ★ re-pinned (R7-E1b, his 2026-10-19 note: Tilt = up/down — on his steep Edge 16 the along-edge angle is "Tilt")
             XCTAssertLessThanOrEqual(line.count, 44)
             XCTAssertFalse(line.contains(" mm"), "★ never a depth")
         }

@@ -88,6 +88,14 @@ enum FlexibleFlatPrismUI {
         let twist: Double
     }
 
+    /// ★ R7-E1b (his 2026-10-19 note: "A corner/edge prism should be the same purple as a face-prism. Let us keep the same visual
+    /// language throughout the app."): the flat prism's traces, arrow and head wear FlexibleStageStyle.facePrismToken, as its wedge
+    /// does (facePrismTint) — never the group's colour (the RED CONTROL).
+    static func prismColour(_ m: FlexibleStageModel, _ g: FlexibleSqueezeGroup) -> RGBA {
+        controlGroupColour ? m.groupColour(g) : FlexibleStageStyle.facePrismToken
+    }
+    static var controlGroupColour = false
+
     /// The open tab's edges group (nil: a faces tab, [Model], [New], or the views hide every overlay).
     static func openEdgesGroup(_ m: FlexibleStageModel) -> FlexibleSqueezeGroup? {
         guard case .group(let gid) = m.rail, let g = m.railGroup(gid), g.kind == .edges else { return nil }
@@ -155,8 +163,8 @@ enum FlexibleFlatPrismUI {
 
     /// ★ R7-E1 REVIEW (the verifier: "on a vertical edge a sideways drag changes the ↕ value"): each angle box names its angle in
     /// his row words, not an arrow glyph.
-    static func boxLabel(tilt: Bool, corner: Bool) -> String {
-        tilt ? FlexibleRowCopy.flatTiltWord(corner: corner) : FlexibleRowCopy.flatTwistWord(corner: corner)
+    static func boxLabel(tilt: Bool, corner: Bool, steep: Bool = false) -> String {
+        tilt ? FlexibleRowCopy.flatTiltWord(corner: corner, steep: steep) : FlexibleRowCopy.flatTwistWord(corner: corner, steep: steep)
     }
     /// The last keypad a flat-prism box opened (the hosted tests read it).
     static var lastPad: String?
@@ -235,7 +243,10 @@ enum FlexibleFlatPrismUI {
 /// of θ and of φ at the knob), or, looking down the arrow (no jacobian), the trackball (0.5° per point) — each snapped to exactly 0
 /// within 3°.
 enum FlexibleFlatPrismKnob {
-    static func angles(start: (theta: Double, phi: Double), translation: CGSize, jac: (a: CGVector, b: CGVector)?) -> (theta: Double, phi: Double) {
+    /// ★ R7-E1b: `thetaAcross` — a steep edge: looking down the arrow, across (left/right) tips toward a face (θ, its "Twist") and up
+    /// tilts along the edge (φ, its "Tilt") — the words follow the motion.
+    static func angles(start: (theta: Double, phi: Double), translation: CGSize, jac: (a: CGVector, b: CGVector)?,
+                       thetaAcross: Bool = false) -> (theta: Double, phi: Double) {
         var dth: Double, dph: Double
         if let j = jac {
             // solve translation = dθ·a + dφ·b
@@ -244,8 +255,9 @@ enum FlexibleFlatPrismKnob {
             dph = Double(j.a.dx * translation.height - j.a.dy * translation.width) / det
         } else {
             // looking down the arrow: the trackball (0.5° per point) — across twists, up tilts
-            dph = Double(translation.width) * FlexiblePressAim.trackballDegPerPoint
-            dth = Double(-translation.height) * FlexiblePressAim.trackballDegPerPoint
+            let across = Double(translation.width) * FlexiblePressAim.trackballDegPerPoint
+            let up = Double(-translation.height) * FlexiblePressAim.trackballDegPerPoint
+            (dph, dth) = thetaAcross ? (up, across) : (across, up)
         }
         return (FlexibleFlatPrismAngles.snapped(start.theta + dth), FlexibleFlatPrismAngles.snapped(start.phi + dph))
     }
@@ -370,7 +382,7 @@ struct FlexibleFlatPrismOverlay: View {
         let _ = { Self.lastWhy = projection == nil ? "no projection" : FlexibleFlatPrismUI.openEdgesGroup(model) == nil ? "no edges tab" : "drawn" }()
         if let proj = projection, let g = FlexibleFlatPrismUI.openEdgesGroup(model), let mesh = model.project.viewerMesh {
             let working = FlexibleFlatPrismUI.workingPress(model)
-            let colour = model.groupColour(g)
+            let colour = FlexibleFlatPrismUI.prismColour(model, g)   // ★ R7-E1b: the face-prism purple, as every prism on the part
             let len = FlexiblePressAim.arrowLength(boundsDiagonalMM: Double(simd_length(mesh.bounds.max - mesh.bounds.min)))
             let arrows: [(UUID, FlexibleFlatPrismUI.Arrow, [[SIMD3<Double>]])] = g.presses.compactMap { id in
                 guard let p = model.press(id), let st = p.strip, let c = model.flatCut(id) else { return nil }
@@ -450,6 +462,7 @@ struct FlexibleFlatPrismOverlay: View {
                     Text(s.text).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                         .lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
                         .background(Capsule().fill(DS.Surface.panel.color.opacity(0.92)))
+                        .overlay(Capsule().strokeBorder(FlexStopLine.colour.color, lineWidth: 1.5))   // ★ R7-E1b: a stop is RED
                         .position(x: s.at.x, y: s.at.y - 40)
                         .allowsHitTesting(false)
                         .accessibilityIdentifier("flexible-flat-stop")
@@ -466,6 +479,7 @@ struct FlexibleFlatPrismOverlay: View {
             let h = here.head, t = here.tail, lay = here.lay
             let label = st.label
             let busy = model.flatCommitting == id
+            let steep = FlexibleFlatPrismUI.frame(model, id)?.thetaIsTwist ?? false   // ★ R7-E1b: Tilt = up/down, Twist = left/right
             let _ = { FlexibleFlatPrismUI.lastArrowEnds = (h, t) }()
             Color.clear.frame(width: 1, height: 1)
                 .background(mark("flatPrism-\(label)", CGRect(x: min(h.x, t.x), y: min(h.y, t.y), width: max(1, abs(h.x - t.x)), height: max(1, abs(h.y - t.y)))))
@@ -499,9 +513,9 @@ struct FlexibleFlatPrismOverlay: View {
             }
             if here.showBoxes {
                 VStack(spacing: 4) {
-                    angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: true, corner: st.kind == .corner), value: shown.tilt, tilt: true)
+                    angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: true, corner: st.kind == .corner, steep: steep), value: shown.tilt, tilt: true)
                         .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTiltBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
-                    angleBox(id, st, key: "flat-twist-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: false, corner: st.kind == .corner), value: shown.twist, tilt: false)
+                    angleBox(id, st, key: "flat-twist-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: false, corner: st.kind == .corner, steep: steep), value: shown.twist, tilt: false)
                         .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTwistBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
                 }
                 .padding(4)
@@ -530,7 +544,7 @@ struct FlexibleFlatPrismOverlay: View {
     private func angleBox(_ id: UUID, _ st: FlexibleStrip, key: String, glyph: String, value: Double, tilt: Bool) -> some View {
         HStack(spacing: 3) {
             Text(glyph).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1).fixedSize()
-            FlexNumberBox(key: key, title: st.label + " \u{00B7} " + (tilt ? FlexibleRowCopy.flatTiltWord(corner: st.kind == .corner) : FlexibleRowCopy.flatTwistWord(corner: st.kind == .corner)),
+            FlexNumberBox(key: key, title: st.label + " \u{00B7} " + glyph,
                           spec: FlexNumberSpec(value: (value * 10).rounded() / 10, unit: "\u{00B0}", step: 1, range: -89...89, decimals: 1),
                           padTarget: $padTarget, allowsNegative: true, twin: key + "-card", hitHeight: 44) { v in
                 FlexibleFlatPrismUI.lastPad = key
@@ -608,7 +622,7 @@ struct FlexibleFlatPrismOverlay: View {
                     knobDrag = KnobDrag(press: id, len: len, start: s, jac: jac, arcs: (ta, tb, ticks, tags))
                 }
                 guard let k = knobDrag else { return }
-                let want = FlexibleFlatPrismKnob.angles(start: k.start, translation: g.translation, jac: k.jac)   // ★ R7-E1 REVIEW: pure, tested
+                let want = FlexibleFlatPrismKnob.angles(start: k.start, translation: g.translation, jac: k.jac, thetaAcross: f.thetaIsTwist)   // ★ R7-E1 REVIEW: pure, tested
                 let r = FlexibleFlatPrismAngles.clamp(st, frame: f, h: c.depthMM, from: k.start, to: want,
                                                       limits: model.flatLimits(id, withLattice: false))
                 if let s = r.stop { say(FlexibleFlatPrismAngles.line(s, strip: st, name: { FlexibleFlatPrismUI.memberName(model, st, $0) }), at: g.location) }

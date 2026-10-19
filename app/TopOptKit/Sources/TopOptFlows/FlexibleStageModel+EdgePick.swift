@@ -59,17 +59,17 @@ extension FlexibleStageModel {
 
     /// The candidates, their colours, what cannot be picked and why, and each one's area — then core's verdict on each
     /// pickable one's press (over its whole members, along core's halfway), greying what core refuses.
-    func loadEdgePick() async {
-        guard let token = edgePick?.token else { return }
+    func loadEdgePick(_ kp: ReferenceWritableKeyPath<FlexibleStageModel, FlexibleEdgePick?> = \.edgePick) async {
+        guard let token = self[keyPath: kp]?.token else { return }
         do {
             let facts = try await meetFacts()
-            guard let meet = await meetOffMain(), edgePick?.token == token else { return }
+            guard let meet = await meetOffMain(), self[keyPath: kp]?.token == token else { return }
             // AP2's list, its one-line reasons in the PANEL's names ("Face 5", "Top A")
             let list = FlexibleEdgeCandidates.make(meet: meet, facts: facts, removed: Set(settings.removedRegions ?? []),
                                                    name: { [weak self] r in self?.displayName(r) ?? "Face \(r)" })
             if let why = list.unread {
-                edgePick?.loading = false
-                edgePick?.line = FlexibleRowCopy.fit(why)
+                self[keyPath: kp]?.loading = false
+                self[keyPath: kp]?.line = FlexibleRowCopy.fit(why)
                 return
             }
             let s = settings
@@ -98,7 +98,7 @@ extension FlexibleStageModel {
                 case .failure(let r): greyed[c.number] = r.line
                 }
             }
-            guard edgePick?.token == token, var p = edgePick else { return }
+            guard self[keyPath: kp]?.token == token, var p = self[keyPath: kp] else { return }
             p.candidates = list.candidates
             p.colours = FlexibleEdgePickRules.colours(list.candidates, excluding: p.colour)
             p.greyed = greyed
@@ -106,32 +106,32 @@ extension FlexibleStageModel {
             p.loads = loads
             p.loading = false
             p.checking = true
-            edgePick = p
+            self[keyPath: kp] = p
             // ★ CORE'S VERDICT on each pickable candidate's press (its whole members, along core's halfway). ★ R7-E1: that
             // halfway — over the WHOLE member faces — is stored on its area (where the flat prism's arrow starts and snaps back
             // to; the engine never re-aims from the pieces), and an inside edge or corner along it is greyed
             for c in list.candidates where strips[c.number] != nil {
                 let aim = try await pressAim(c.members)
-                guard edgePick?.token == token else { return }
+                guard self[keyPath: kp]?.token == token else { return }
                 guard aim.defaultRelease != nil, let hw = aim.offered.first(where: { $0.kind == .halfway })?.direction else {
                     let why = aim.why ?? aim.asked.first { !$0.accepted }?.line ?? FlexibleRowCopy.coreRefuses
-                    edgePick?.greyed[c.number] = FlexibleRowCopy.fit(why)
-                    edgePick?.picks.removeAll { $0 == c.number }
+                    self[keyPath: kp]?.greyed[c.number] = FlexibleRowCopy.fit(why)
+                    self[keyPath: kp]?.picks.removeAll { $0 == c.number }
                     continue
                 }
-                if let st = edgePick?.strips[c.number], let line = FlexibleFlatPrism.convexityLine(st, d0: hw) {
-                    edgePick?.greyed[c.number] = line
-                    edgePick?.picks.removeAll { $0 == c.number }
+                if let st = self[keyPath: kp]?.strips[c.number], let line = FlexibleFlatPrism.convexityLine(st, d0: hw) {
+                    self[keyPath: kp]?.greyed[c.number] = line
+                    self[keyPath: kp]?.picks.removeAll { $0 == c.number }
                     continue
                 }
-                edgePick?.strips[c.number]?.halfway = hw
+                self[keyPath: kp]?.strips[c.number]?.halfway = hw
             }
-            edgePick?.checking = false
+            self[keyPath: kp]?.checking = false
         } catch {
-            guard edgePick?.token == token else { return }
-            edgePick?.loading = false
-            edgePick?.checking = false
-            edgePick?.line = FlexibleRowCopy.fit(text("\(error)"))
+            guard self[keyPath: kp]?.token == token else { return }
+            self[keyPath: kp]?.loading = false
+            self[keyPath: kp]?.checking = false
+            self[keyPath: kp]?.line = FlexibleRowCopy.fit(text("\(error)"))
         }
     }
 
@@ -156,9 +156,11 @@ extension FlexibleStageModel {
     public func edgePickTap(at point: CGPoint, projection: CameraProjection) -> String? {
         guard var p = edgePick, !p.loading, !p.working else { return nil }
         let shown = FlexibleEdgePickRules.project(p.candidates, loads: p.loads, projection: projection)
-        let hit = FlexibleEdgePickRules.hit(shown, at: point, last: p.cycle)
+        // ★ R7-E1b: only what is drawn (the pressable and the picked) is reached; a spot that cannot be pressed says why, with its fix
+        let hit = FlexibleEdgePickRules.hit(shown, at: point, last: p.cycle, pressable: Set(p.drawn.map(\.number)))
         p.cycle = hit.cycle
         edgePick = p
+        if let b = hit.blocked { return blockedLine(b, in: \.edgePick) }
         guard let n = hit.toggle else { return FlexibleRowCopy.edgePickMiss }
         if let u = hit.untoggle, p.pickable(u) { toggleEdgePick(u) }
         guard p.pickable(n) else {
@@ -335,6 +337,8 @@ extension FlexibleStageModel {
         var add: [(id: UUID, strip: FlexibleStrip)] = []
         var cut: [UUID: FlatCutChange] = [:]
         var remove: Set<UUID> = []
+        /// ★ R7-E1b: the EXISTING edges group the added presses join (its stored id); nil: a new group.
+        var into: Int? = nil
     }
 
     /// ★ APPLY A STRIP CHANGE AS ONE EDIT: re-cut every chain it touches (FlexibleEdgeStrips.plan), open a scene on the
@@ -738,7 +742,7 @@ extension FlexibleStageModel {
                                                  faceRegions: restoredFaceRegions, mesh: mesh, regions: after)
         project.sealUndoStep()
         actionSerial += 1
-        let newGroup = FlexibleSqueezeGroups.nextID(s0)
+        let newGroup = Self.controlAddMakesNewGroup ? FlexibleSqueezeGroups.nextID(s0) : (ch.into ?? FlexibleSqueezeGroups.nextID(s0))
         edit({ s in
             for mv in moved {
                 let at = s.faces.firstIndex { mv.old.contains($0.faceRegionID) } ?? s.faces.count

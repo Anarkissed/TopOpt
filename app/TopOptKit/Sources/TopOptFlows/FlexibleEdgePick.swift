@@ -51,11 +51,21 @@ public struct FlexibleEdgePick: Equatable {
     public var line: String?
     /// The last tap on the model (a repeat tap cycles).
     public var cycle: FlexibleEdgePickRules.Cycle?
+    /// ★ R7-E1b (his 2026-10-19 answer: "Edges/corners can be added to an EXISTING edges group"): the open edges group a tap ADDS
+    /// to (its stored id) — nil for [+ New]'s pick card.
+    public var into: Int?
+    /// ★ R7-E1b: the group the last tapped spot is already in (its fix: [Open Group N]).
+    public var fixGroup: Int?
 
     public init(groupID: Int, colour: FlexibleGroupColour) { self.groupID = groupID; self.colour = colour }
 
     public func candidate(_ n: Int) -> FlexibleEdgeCandidates.Candidate? { candidates.first { $0.number == n } }
     public func pickable(_ n: Int) -> Bool { greyed[n] == nil && strips[n] != nil }
+    /// ★ R7-E1b (his answer: "NO LIST … only the pressable edges/corners light up on the part"): what the part draws — the pressable
+    /// ones and the picked ones; never one that cannot be pressed (the RED CONTROL: every candidate, as the list had it).
+    @MainActor public var drawn: [FlexibleEdgeCandidates.Candidate] {
+        FlexibleEdgePickRules.controlDrawAll ? candidates : candidates.filter { pickable($0.number) || picks.contains($0.number) }
+    }
     public var edgesPicked: Int { picks.filter { candidate($0)?.kind != .corner }.count }
     public var cornersPicked: Int { picks.filter { candidate($0)?.kind == .corner }.count }
 }
@@ -82,6 +92,8 @@ public enum FlexibleEdgePickRules {
     @MainActor static var controlRoundRobin = false
     @MainActor static var controlEdgeFirst = false
     @MainActor static var controlNoCycle = false
+    /// ★ R7-E1b RED CONTROL: the part draws every candidate (the greyed ones too).
+    @MainActor static var controlDrawAll = false
 
     // MARK: colours
 
@@ -176,6 +188,8 @@ public enum FlexibleEdgePickRules {
         public let toggle: Int?
         public let untoggle: Int?
         public let cycle: Cycle?
+        /// ★ R7-E1b: nothing pressable there, but this candidate (not drawn — it cannot be pressed): its one line why is said.
+        public var blocked: Int? = nil
     }
 
     /// Screen distance from `p` to segment ab.
@@ -200,8 +214,16 @@ public enum FlexibleEdgePickRules {
     /// ★ THE TAP (front-facing candidates only; the list reaches the rest): the nearest corner within 22 pt, else the
     /// nearest edge within 22 pt, else nothing. A REPEAT tap within 22 pt of the last one (two or more candidates there)
     /// toggles the last step's candidate back and the NEXT one on, round and round.
+    /// ★ R7-E1b: `pressable` — the numbers drawn on the part; a tap reaches only those, and, when none is near, names the nearest one
+    /// that cannot be pressed (`blocked`) so its one line why is said (nil: every candidate is reachable, as before).
     @MainActor
-    public static func hit(_ ps: [Projected], at p: CGPoint, last: Cycle?) -> Hit {
+    public static func hit(_ ps: [Projected], at p: CGPoint, last: Cycle?, pressable: Set<Int>? = nil) -> Hit {
+        if let ok = pressable {
+            let h = hit(ps.filter { ok.contains($0.number) }, at: p, last: last)
+            if h.toggle != nil { return h }
+            let other = hit(ps.filter { !ok.contains($0.number) }, at: p, last: nil)
+            return Hit(toggle: nil, untoggle: nil, cycle: nil, blocked: other.toggle)
+        }
         let near = ps.filter(\.front).compactMap { c -> (c: Projected, d: CGFloat)? in
             guard let d = distance(c, p), d <= tapRadiusPt else { return nil }
             return (c, d)

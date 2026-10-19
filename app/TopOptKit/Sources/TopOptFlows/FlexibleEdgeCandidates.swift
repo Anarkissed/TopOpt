@@ -146,6 +146,9 @@ public struct FlexibleEdgeCandidates {
     public internal(set) var appOnlyFacePairs: [FlexibleMeet.Pair] = []
     public internal(set) var coreOnlyFacePairs: [FlexibleMeet.Pair] = []
 
+    /// ★ R7-E1b RED CONTROL only: a member taken out of the Flexible setup greys its candidates again (the bug he saw).
+    nonisolated(unsafe) static var controlRemovedBlocks = false
+
     public var corners: [Candidate] { candidates.filter { $0.kind == .corner } }
     /// Edges and blends.
     public var edges: [Candidate] { candidates.filter { $0.kind != .corner } }
@@ -185,7 +188,11 @@ public struct FlexibleEdgeCandidates {
         /// Why not offered (one line), or nil. `chain`: a blend's curved members, `turnDeg`: the angle between its
         /// two flats (core's loads) — a chain member may spread that far and no further.
         func whyNot(_ members: [Int], chain: Set<Int> = [], turnDeg: Double = 0) -> String? {
-            for r in members where removed.contains(r) { return FlexibleRowCopy.outOfFlexible(name(r)) }   // ★ R7-E1 review: one line, whole
+            // ★ R7-E1b (his img_1019_5, 2026-10-19: "why are so many greyed out??" — "Face 1 · lattice A is out of Flexible" on most of
+            // his pad): `removedRegions` is the re-sync's memory of a face he DELETED from a group (Reset all / the trash write every
+            // held face there), never "this face cannot be pressed" — pressing a deleted face brings it back (FlexibleStageModel.press).
+            // A deleted face's edges and corners are offered like any other (the RED CONTROL: the old rule).
+            if Self.controlRemovedBlocks { for r in members where removed.contains(r) { return FlexibleRowCopy.outOfFlexible(name(r)) } }
             for i in 0..<members.count {
                 for j in (i + 1)..<members.count where meet.shareFace(members[i], members[j]) {
                     return "\(name(members[i])) and \(name(members[j])) are parts of one face"

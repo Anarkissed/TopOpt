@@ -1,5 +1,73 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## ★ Round 7 · R7-E1b — his notes of 2026-10-19 on E1: no list, a deleted face no longer greys its edges, add to an existing edges group, the purple prism, Tilt = up/down, the furthest possible with a red line (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `4f735cff` (R7-E2, which he PAUSED before its verify). NOT pushed. App only;
+core untouched; no #354/main file edited. **E2's verify follows this batch** (E2 still works: FlexibleR7E2HostedTests 3/3 after
+these changes; the goldens and the 16 stage-job hashes unchanged).
+
+### What you will see now, in plain words
+- **No list.** [+ New] → Edges/corners shows only the card's one line ("Tap a lit edge or corner on the part"), the squeeze and
+  [Done]. The edges and corners you can press light up on the part, numbered (44 pt tags); ones that cannot be pressed are not
+  drawn. A tap where nothing is lit says why in one line ("Corner 2 · In Group 4") with its fix [Open Group 4].
+- **Why so many were grey (img_1019_5):** a bug. Faces you had deleted from a group (Reset all and the trash remember them in
+  `removedRegions`, so the re-sync does not bring them back) were treated as "cannot be pressed". On your live pad that greyed 20 of
+  24. Now all 24 light up (a deleted face can be pressed again, as a face press already could).
+- **Add to an existing edges group:** with an edges group open, its pressable edges and corners light up; a tap adds one to THAT
+  group at the group's squeeze (one undo step). Under the selected press, a "Squeeze group" chip row (as the faces have) moves it to
+  another edges group, taking that group's squeeze (one undo step). Shown only with two or more edges groups.
+- **Same purple:** the flat prism's arrow, traces and head now use the face-prism purple (the wedge already did).
+- **Tilt = up/down, Twist = left/right, on the part.** Your Edge 16 and 18 are the pad's 20 mm sides (steep), so tipping toward a
+  face (left/right) is now "Twist" and one end deeper (up/down) is "Tilt" — rows, boxes on the model and the knob's trackball axes.
+  A level edge keeps E1's words (they were already right there). Corners keep Up/down and Left/right.
+- **Limits:** typing or dragging past what fits now lands on the FURTHEST value that fits (core checked to within 0.1 mm for depth;
+  1/256 of the move for an angle, was 1/32), and a RED line under the press says why with the number: "Max 18.1 mm · its lattice is
+  in two places" (core's refusal; before, nothing was stored), "Held at 34.6° · Face 3 keeps the rest", "Tilt stops at 1° · lattice
+  ends". You can always go back up to that value. Fixes when there is one: [Deepen to N mm] (a twist whose short end hit 0 mm) and
+  [Deepen the face-prism to N mm] (a lattice stop from one face-prism; not seen on your pad, whose stop is core's "in two places").
+
+### His words → fix → test (RED control in each test, asserted red)
+1. "why are so many greyed out??" → `FlexibleEdgeCandidates.whyNot` no longer greys a removed region →
+   `FlexibleR7E1bTests.testHisLivePadOffersTheEdgesOfADeletedFace` (his live pad as saved: 24/24 pressable; RED
+   `controlRemovedBlocks`: 20 greyed, 4 pressable).
+2. "best not to list greyed out corners/edges" → the card's list removed; `FlexibleEdgePick.drawn`; the tap reaches only lit ones
+   and names a grey spot (`Hit.blocked`, `blockedLine`) → `testOnlyThePressableAreDrawnAndAGreySpotSaysWhy` (RED `controlDrawAll`;
+   the old tap hits the nearer grey one).
+3. "no way to add a corner/edge to any group without creating a new one … a Group selection just like the faces" →
+   `FlexibleStageModel+EdgeAdd.swift` (`edgeAdd`, `addEdgeToGroup`, `movePress`; `StripChange.into`) →
+   `testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords` (RED `controlAddMakesNewGroup`, `controlMoveKeepsForce`).
+4. "same purple as a face-prism" → `FlexibleFlatPrismUI.prismColour` → same test (RED `controlGroupColour`).
+5. "Please reverse this" (Tilt/Twist) → `Frame.thetaIsTwist` (steep edge), the words, the knob → same test (RED `controlOldWords`).
+6. "going back to an arbitrary number … red notification … furthest possible … a solution" → `furthestDepth` (from core's first N,
+   which was read on the deeper footprint and landed short, up to what fits), any other core refusal also lands on the furthest,
+   held values kept as the red `FlexStopLine` (a no-op retype keeps it), the fixes → `testEachBoundHoldsAtTheFurthestInRedWithItsFix`
+   on his live lattice (200 mm → 18.26 mm; RED `controlNoFurthest`: nothing stored, 16.26; RED `controlToastOnly`).
+Found by looking (E1b_03): the open group read its edges while the part was still opening ("The part is still opening.", nothing
+lit) → it is read once the part is open.
+
+### Re-pins (all ours, each attributed in the line)
+- `FlexibleMeetReviewTests.testAFaceTakenOutOfTheSetupIsListedNotOffered` and `FlexibleEdgeGroupsTests` (8): a deleted face is
+  offered now (old rule kept as the red control). `FlexibleEdgeGroupsHostedTests` H1: no row per candidate.
+  `FlexibleR7E1ReviewTests.testAnAngleTheLatticeStopsIsSaidAsAnAngle`: the along-edge angle on steep Edge 16 is "Tilt".
+- Found by the suite: `FlexibleFlatPrismHostedTests.testTheHandlesAreOnTheArrow` — the earlier screen size's page, still hosted,
+  re-drew and wrote the shared arrow ends; each size's page now closes before the next (test harness only).
+
+### Raw runs — `round7/batch_e1b/e1b_runs.txt`
+- Targeted (classes that touch or source-pin the changed files, 4 chunks): 45 + 37 + 66 + 69 cases; failures then = the 4 above and
+  the 2 E1b ones, fixed and re-run green (rerun1–5). Goldens (FlexibleAngledGoldenTests): det identical 38 · DIFFERS 0; unseeded
+  identical 32 · DIFFERS 0 · PART-SKIP 1. The 16 stage-job hashes cmp-identical to `stage_job_hashes_e1r.txt` (no job bytes move:
+  nothing here writes a job). The later edits touch only the flat-prism landing and the add-state timing (not the job writer); the
+  affected classes were re-run (rerun4–5, probe2).
+- iOS: BUILD SUCCEEDED; the app WAS running → terminated, installed 14:14:55, NOT launched; installed dylib == built (sha256 4bdd0752…); strings "Tap a lit edge or corner" 2, "Deepen the face-prism to" 1.
+- Evidence (`round7/batch_e1b/look/`, 13" portrait, his live pad as saved): E1b_01 pick, lit only; E1b_02 beside his img_1019_5;
+  E1b_03 his edges group (Edge 16 + 18): lit edges to add, red line, purple, Twist/Tilt; E1b_04 the chips with a second edges group.
+
+### Open questions
+1. "Max 18.1 mm · its lattice is in two places" is core's own refusal on your live pad (Edge 16 deeper than 18.1 mm reaches a second
+   lattice). No app fix offered; is a plainer line wanted, or a fix?
+2. The rows keep θ first (on a steep edge that row reads "Twist"); put "Tilt" first always?
+3. The group selector for Play and every view (his 6th note) is NOT in this batch.
+
 ## ★ Round 7 · R7-E2 — edges and corners are SENT to core: the press is designed on core's own press stack, the lattice is graded along its arrow, one group per export said first (2026-10-19) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `668a975c` (the review of R7-E1). NOT pushed. Commits:

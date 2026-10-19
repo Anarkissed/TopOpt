@@ -187,6 +187,9 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
                               "★ a tap on the chip opens the keypad")
                 FlexibleFlatPrismUI.lastPad = nil
             }
+            // ★ found by the suite (R7-E1b): the earlier size's page, still hosted, re-drew on a later publish and wrote the shared
+            // arrow ends — each size's page goes before the next is read
+            h.window.orderOut(nil); h.window.contentView = nil
         }
         print("FLEX-E1-H2 " + report.joined(separator: " · "))
     }
