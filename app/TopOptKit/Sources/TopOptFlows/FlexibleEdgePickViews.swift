@@ -20,6 +20,10 @@ extension FlexibleRowCopy.Info {
     public static let flatTwist = "Turns the flat prism along the edge: one end presses deeper. It stops when the shallow end reaches 0 mm."
     public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is halfway between the faces."
     public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is halfway between the faces."
+    /// ★ R7-E4: the flat press's Shape row, its stamp.
+    public static let pressShape = "Curves: two curves inside the flat prism — across the edge (one side on each face) and along it. They start as the flat prism itself; drag a point toward the part for softer there. A curve never passes the flat face. The two buttons turn the view: from the top, and 45° up from the side the arrow comes from. Stamp: ONE stamp that sits on the edge (a corner: on its point); drag its handle along the edge. Shape only for now — core support comes later."
+    public static let pressStamp = "What presses the edge. It sits on the edge and slides only along it; a corner's stays on its point, and only its size and turn change."
+    public static let pressStampTurn = "Turns the stamp on the edge: 0° lays its width along the edge."
 }
 
 // MARK: - [+ New]: which kind
@@ -230,6 +234,8 @@ struct FlexibleEdgeGroupRows: View {
             }
             if let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: p.id) {
                 flatRows(p, st, shown)
+                // ★ R7-E4: the press he works on — Shape [Curves | Stamp] with the curve's two views, its stamp's rows
+                if FlexibleFlatPrismUI.workingPress(model) == p.id { FlexiblePressShapeRows(model: model, press: p, strip: st, padTarget: $padTarget) }
             }
             ForEach(model.keepsTheRest(press: p.id), id: \.self) { line in
                 Text(line).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
@@ -460,5 +466,83 @@ struct FlexibleEdgePickOverlay: View {
                 .accessibilityIdentifier("flexible-edge-tag-\(m.number)")
             }
         }
+    }
+}
+
+/// ★ R7-E4 — a flat press's Shape row: [Curves | Stamp] and the curve's two views as icons ([Top], [45°] — never down the arrow); a
+/// corner says once that its one curve moves all three sides; Stamp shows its stamp's one line, size and turn (it sits on the edge).
+struct FlexiblePressShapeRows: View {
+    @ObservedObject var model: FlexibleStageModel
+    let press: FlexiblePress
+    let strip: FlexibleStrip
+    @Binding var padTarget: String?
+
+    var body: some View {
+        let stamp = press.settings.isStampShape
+        FlexRow(FlexibleRowCopy.shape, info: FlexibleRowCopy.Info.pressShape, id: "flexible-row-press-shape") {
+            HStack(spacing: 4) {
+                FlexChips(options: FlexibleRowCopy.shapeOptions, selection: stamp ? "stamp" : "curves",
+                          id: "flexible-press-shape", equalWidths: false) { v in model.setPressShape(press.id, v) }
+                    .fixedSize()
+                if !stamp {
+                    viewButton(.top, icon: "arrow.down", label: FlexibleRowCopy.pressViewTop)
+                    viewButton(.deg45, icon: "rotate.3d", label: FlexibleRowCopy.pressView45)
+                }
+            }
+        }
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressShape-\(strip.label)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        if !stamp, strip.kind == .corner {
+            FlexCaption(text: FlexibleRowCopy.cornerOneCurve).accessibilityIdentifier("flexible-press-corner-one-curve")
+        }
+        if stamp, let p = press.settings.designStamp {
+            FlexRow(FlexibleRowCopy.pressStamp(name: model.stampName(p), corner: strip.kind == .corner),
+                    info: FlexibleRowCopy.Info.pressStamp, id: "flexible-row-press-stamp") {
+                Menu {
+                    ForEach(model.library?.stamps.filter { $0.shape != "whole_face" } ?? []) { s in
+                        Button(s.name) {
+                            model.updatePressStamp(press.id) { q in
+                                q.source = .library(s.id); q.widthMM = s.naturalSizeMM.width; q.lengthMM = s.naturalSizeMM.length; q.rigid = s.press == "rigid"
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("flexible-press-stamp-menu")
+            }
+            FlexRow(FlexibleRowCopy.stampSizeRow, info: FlexibleRowCopy.Info.stampSize, id: "flexible-row-press-stamp-size") {
+                FlexNumberBox(key: "press-stamp-size-\(press.id.uuidString)", title: FlexibleRowCopy.stampWidthTitle,
+                              spec: FlexibleNumberSpecs.stampWidth(mm: p.widthMM, faceMM: FlexibleFlatPrism.length(strip) > 0 ? FlexibleFlatPrism.length(strip) : nil),
+                              padTarget: $padTarget, onNote: { model.toast = $0 }) { v in
+                    model.updatePressStamp(press.id) { FlexibleStampSize.setWidth(v, of: &$0) }
+                }
+            }
+            FlexRow(FlexibleRowCopy.stampTurnRow, info: FlexibleRowCopy.Info.pressStampTurn, id: "flexible-row-press-stamp-turn") {
+                FlexNumberBox(key: "press-stamp-turn-\(press.id.uuidString)", title: FlexibleRowCopy.stampTurnRow,
+                              spec: FlexibleNumberSpecs.stampTurn(deg: p.rotationDeg), padTarget: $padTarget) { v in
+                    model.updatePressStamp(press.id) { $0.rotationDeg = v.truncatingRemainder(dividingBy: 360) }
+                }
+            }
+        }
+    }
+
+    private func viewButton(_ v: FlexiblePressCurveBaselines.View, icon: String, label: String) -> some View {
+        Button { model.showPressCurve(press.id, v) } label: {
+            Group {
+                if v == .deg45 { Text("45\u{00B0}").font(.system(size: 13, weight: .bold)) }
+                else { Image(systemName: icon).font(.system(size: 14, weight: .semibold)) }
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .frame(width: 44, height: 44)
+            .background(Circle().fill(DS.Color.fillSubtle.color))
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("flexible-press-view-\(v.rawValue)")
     }
 }

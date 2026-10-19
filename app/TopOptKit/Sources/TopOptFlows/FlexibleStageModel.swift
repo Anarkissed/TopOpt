@@ -178,6 +178,8 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public internal(set) var flatCommitting: UUID?
     @Published public internal(set) var lastFlatStop: FlexibleFlatStop?
     @Published public internal(set) var flatCameraRequest: UUID?
+    /// ★ R7-E4: [Top] / [45°] beside a flat press's Shape row — the page turns the camera to that curve view.
+    @Published public internal(set) var pressViewRequest: FlexiblePressViewRequest?
     /// ★ R7-E1 — THE SEAM: each strip press as core's open scene holds it (a synthetic key, core's press stack, the apex's t, the
     /// footprint's per-triangle normals), and a press core refused, with its plain line.
     @Published internal(set) var pressRegistrations: [UUID: FlexiblePressRegistration] = [:]

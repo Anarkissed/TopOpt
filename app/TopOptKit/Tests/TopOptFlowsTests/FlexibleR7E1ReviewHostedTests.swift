@@ -161,6 +161,9 @@ final class FlexibleR7E1ReviewHostedTests: XCTestCase {
                     let cm = try XCTUnwrap(cameraModel(h))
                     var c = cm.camera
                     c.setOrientation(azimuth: .pi / 4, elevation: el)
+                    // ★ RE-PINNED (R7-E4: a selected press is now panned into the stage's free area, beside the panel — the page's
+                    // turn on selection); his home and ~55° views are looked at from the part's HOME target, as before
+                    c.target = c.homeTarget
                     cm.adopt(c)
                     pump(1.5)
                     pumpUntil(10) { h.frames.marks["flatArrow-\(label)"] != nil }

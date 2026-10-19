@@ -76,6 +76,12 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     /// flat prism is this press's direction and deepest squish, FlexibleFlatPrism). nil: a press made another way (a tilt,
     /// AP1's own). OPTIONAL, omitted when nil.
     public var strip: FlexibleStrip?
+    /// ★ R7-E4: an edge or corner press's curves are MULTIPLIERS of its flat prism (0…1, in fold coordinates: across 0 = the
+    /// first face's trace, ½ = the edge, 1 = the second's; along the edge's span; a corner's one curve rim → vertex) and its
+    /// stamp sits on the edge (FlexiblePressStamp) — true once he first bends a curve or picks Stamp. nil: never edited — the
+    /// curves read as the flat prism itself (all ones, FlexiblePressCurveBaselines.multipliers), whatever a press saved before
+    /// E4 holds. OPTIONAL, omitted when nil.
+    public var foldCurves: Bool?
 
     public init(id: UUID = UUID(), regions: [Int], direction: SIMD3<Double>, snap: String? = nil,
                 settings: FlexibleFaceSettings, drawnIn: FlexibleFrameRef? = nil, faceIndex: Int? = nil,
@@ -96,6 +102,9 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
 
     /// ★ Can this be stored as a press direction? Finite, with a length (core refuses a zero
     /// press_direction, and a NaN makes the project's JSON unwritable — every later save would fail).
+    /// ★ RED CONTROL only (FlexiblePressCurveTests): a flat press re-aimed records a frame of record (its fold curves reframed).
+    nonisolated(unsafe) static var controlReframeFlat = false
+
     public static func isAimable(_ d: SIMD3<Double>) -> Bool {
         d.x.isFinite && d.y.isFinite && d.z.isFinite && simd_length(d) >= 1e-9
     }
@@ -163,7 +172,8 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     @discardableResult
     public mutating func setMembers(_ members: [Int]) -> Bool {
         guard let first = members.first, members != regions else { return false }
-        if drawnIn == nil { drawnIn = .press(frame) }
+        // ★ R7-E4: a flat press's curves are in fold coordinates and its stamp on the edge — never in a frame of record (no reframe)
+        if drawnIn == nil, strip == nil || Self.controlReframeFlat { drawnIn = .press(frame) }
         regions = members
         settings.faceRegionID = first
         switch snapTarget {
@@ -182,7 +192,8 @@ public struct FlexiblePress: Codable, Equatable, Hashable, Sendable, Identifiabl
     @discardableResult
     public mutating func aim(_ d: SIMD3<Double>, snap: String?) -> Bool {
         guard Self.isAimable(d) else { return false }
-        if drawnIn == nil, FlexiblePressFrame.bits(d) != FlexiblePressFrame.bits(direction) { drawnIn = .press(frame) }
+        if drawnIn == nil, strip == nil || Self.controlReframeFlat,
+           FlexiblePressFrame.bits(d) != FlexiblePressFrame.bits(direction) { drawnIn = .press(frame) }
         direction = d
         self.snap = snap
         return true

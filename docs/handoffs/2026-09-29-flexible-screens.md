@@ -1,6 +1,87 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-E3 — edges groups SQUISH when played; the group selector on the Lattice page; one number per edge; nothing lit until [+] (2026-10-19) (read this first)
+## ★ Round 7 · R7-E4 — the two sides of a curve inside an edge's flat prism, seen from [Top] and [45°]; a stamp that sits on the edge (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `8fee58e6` (R7-E3). NOT pushed. App only; core untouched; no #354/main file
+edited. **Front-end only, by your ruling of 2026-10-19 ~14:50**: nothing of the curves or the stamp goes to core (the switch
+`FlexibleBackend.sendsPresses` stays off); the card keeps "Shape only · core support comes later".
+
+### What you will see now, in plain words
+- **Shape [Curves | Stamp] on the edge you work on**, with two round buttons beside it: **↓ = from the top**, **45° = 45° up from
+  the side the arrow comes from**. Each turns the camera there AND zooms onto that edge (it no longer looks at the whole part).
+  Looking down the arrow is never offered for editing (the curve has no height there).
+- **Curves**: two curves drawn ON the part — **Across** (one side on each face, folding over the edge) and **Along** (the edge's
+  length). They start as the flat prism itself: straight lines on the flat face. Drag a point toward the part = softer there; a point
+  can never go past the flat face. A deeper prism or a new angle keeps your shape — the curve moves with the prism.
+- **A corner** has one curve (core holds one for a corner), drawn on its two faces nearest you, with the line
+  **"Corner · one curve for all 3 sides"**.
+- **Stamp**: one stamp sits on the edge, its long side along it (the library's first that fits; on your 20 mm Edge 16 at 6 mm a
+  Fingertip 10.8 × 14.4 mm). Its handle slides **only along the edge** and stops at the ends. A corner's stamp sits on the corner
+  point; only its size and turn change. Width and Stamp turn are boxes, as on a face.
+- **The camera puts the edge beside the panel**, not under it: after [Done], on selecting a press, and in the two views (found by the
+  suite: the Shape row makes the panel one line taller, and at 11" and the mini in portrait the knob hid under it).
+- Not in this batch (back-end, parked by your ruling): core designing the lattice under the curve (core's map F × M), laying the
+  stamp on core's press grid, design_stamp / check_stamp, and the "how close core's profile is" line measuring the curve. The
+  squish you see when playing is still the interim sim (it pushes with the group's force; it does not read the curve yet).
+
+### His words → fix → test (each RED control asserted red inside its test)
+1. "create two sides of a curve … viewable from the top and from a 45 degree angle" + his default (the flat prism's straight lines,
+   never past it) → new `FlexiblePressCurveBaselines.swift`: curves stored as MULTIPLIERS of the flat prism in fold coordinates
+   (`curveY` across 0 = first face's trace, ½ = the edge, 1 = the second face's trace; `curveX` along; `curveCentreEdge` a corner's
+   one curve), drawn with `FlexibleCurveEditor` unchanged on baselines that lie ON the flat face (up = −d, amplitude = h);
+   `FlexiblePress.foldCurves` (optional; nil = never edited = all ones, so presses saved before E4 read as the flat prism); a flat
+   press re-aimed never gets a frame of record (`aim` / `setMembers`, no reframe of fold curves).
+   - `FlexiblePressCurveTests.testTheTwoSidedCurveStartsAsTheFlatPrism` — Edge 16 at 3 / 9 mm and twisted 8° at 6 mm: worst drawn
+     point off P 1.1e-14 mm; ½ under the edge, 0 and 1 on the traces. RED: a face's baseline on one rim → 3.0 mm off P.
+   - `testACurveNeverPassesTheFlatPrism` — y 1.4 / 1.2 stored as 1; no drawn point past P at 3 mm and after 9 mm + a tip; the
+     multipliers kept. RED: absolute S stored → [0, 0.24, 1, 0.24, 0] ≠ his [1, 0.4, 1, 0.6, 1]; RED: a flat press reframed.
+   - `testTheTwoViewsShowTheCurve` — [Top] = the gizmo's Top; [45°] exactly 45° up from the arrow's side; Edge 16's curve height on
+     screen 1.0 ([Top]) and 0.707 ([45°]); its baseline 1.0 / 1.0. RED: down the arrow 8e-8 (why it is never an editing view).
+   - `testACornerCurveMovesAllThreeSidesAndSaysSo` — one curve (centre_edge), two drawn sides on the flat face, the line once. RED:
+     three independent sides.
+2. "A stamp should work as on any face - except from the edge/corner and aligned to it alone" → new `FlexiblePressStamp.swift`
+   (stored edge-relative: centre on the edge's line, turn from the edge, so a depth or angle change keeps it on the edge; the outline
+   folds onto the faces; the handle slides along the edge only, clamped to the span; a corner's is fixed at the vertex), the Shape
+   rows `FlexiblePressShapeRows` (FlexibleEdgePickViews.swift), the camera requests (`showPressCurve`, FlexibleStagePage).
+   - `FlexiblePressStampTests.testTheStampSitsOnTheEdge` — Fingertip 10.8 × 14.4 mm on Edge 16 at 6 mm; centre on the edge line (< 1e-6 mm), long axis ∥ the edge
+     (|dot| > 1 − 1e-9), fits 90 % of the footprint (20 × 12 mm), outline on the faces, a 7 mm perpendicular drag leaves the across
+     offset 0, a long drag stops at the span's end, the corner's centre == the vertex and it does not move. RED: the face handle's
+     free drag → 7 mm off the edge.
+   - `testShapeStampSeedsOnTheEdgeAndCurvesKeepsIt` — Stamp seeds one stamp on the edge; the model clamps a slide to the span;
+     Curves keeps it stored.
+3. Found by looking (13" portrait, his live pad): the two views showed the whole part with Edge 16's 3 mm curves a few points tall
+   under the panel → the views zoom onto the press (`focus`) and pan it into the free area (`freeCentre`, split by the legend and the
+   view buttons); the legend's pill hid the stamp handle → the free area avoids it; the handle sat under the depth chip → it keeps
+   56 pt from the chip with a leader (the face stamp's rule).
+4. Found by the suite: `FlexibleFlatPrismHostedTests.testTheHandlesAreOnTheArrow` (11" and mini portrait: knob and boxes under the
+   taller panel) → the pan above (green again, no re-pin).
+
+### Re-pins (attributed)
+- `FlexibleR7E1ReviewHostedTests.testTheKnobIsOnScreenInHisWorkingViews`: its RED control's premise ("in the home view the tail is
+  off the screen") assumed the camera never pans to a selected press; E4 pans it beside the panel. The home and ~55° views are now
+  set from the part's HOME target (`c.target = c.homeTarget`), as the test means; the assertions are unchanged.
+
+### Raw runs (round7/batch_e4/, app/TopOptKit, --scratch-path /tmp/r7e-build)
+- New: FlexiblePressCurveTests 4/4, FlexiblePressStampTests 2/2 (every red control red).
+- Targeted at 8fee58e6 + tree: chunk 1 (E1b, E3, E2Park, E2, PressSave, PressReview, PressReframe, FlatPrismEngine, FlatPrism,
+  SquishCopy, EveningAnswers, Readiness) all passed; chunk 2 (the FlexibleStagePage / FlexibleStageModel pinners) all passed;
+  chunk 3: FlexibleFlatPrismHostedTests failed (item 4) → fixed and green on re-run, with the 10 other hosted / curve classes;
+  that re-run's one failure was the re-pin above, which then passed (final re-run: E1ReviewHosted + the two new classes, 0 failed).
+- Goldens: FlexibleAngledGoldenTests 0 DIFFERS both modes (38 identical deterministic; 32 + 1 PART-SKIP unseeded); the 16 stage-job hashes
+  cmp-identical to stage_job_hashes_e1r.txt (stage_job_hashes_e4.txt). Nothing of a press is sent, so no byte moved.
+- Evidence (13" portrait, the shipping renderer under the hosted page, his live pad, Edge 16 = Face 3 + Face 4 there):
+  `look/E4_01` [Top]: the across curve's first side lifted, the second straight on the flat face; `E4_02` the same at [45°];
+  `E4_03` Stamp: the Fingertip folded over Edge 16, slid toward one end, its handle beside the chip; `E4_04` E4_02 beside your
+  img_edges_1018.
+
+### Open questions
+1. The stamp's turn reads **90°** when a stamp's length is its long side (so its long side lies along the edge). Keep, or show 0°
+   for "long side along the edge" whatever the stamp's own axes?
+2. The hosted five-size check of the Shape row and view buttons is not written (budget); the two pictures and the existing hosted
+   suites cover 13" and the knob at 11" / mini. Want it?
+3. Corners: drawn on the two faces nearest the camera (the largest on screen); twisted edges keep the curves on the flat face too.
+
+## ★ Round 7 · R7-E3 — edges groups SQUISH when played; the group selector on the Lattice page; one number per edge; nothing lit until [+] (2026-10-19) (the step before R7-E4 above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `383f79d2` (R7-E2 PARKED). NOT pushed. App + our bridge files only; core
 untouched; no #354/main file edited. Sending presses to core stays PARKED (`FlexibleBackend.sendsPresses` off).

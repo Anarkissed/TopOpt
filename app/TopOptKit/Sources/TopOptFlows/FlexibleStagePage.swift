@@ -356,6 +356,8 @@ public struct FlexibleStagePage: View {
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         // ★ R7-E1: the camera on [Done] and on selecting a flat press — D-AP-13 as ruled (down the arrow; the reviewer is asked)
         .onChange(of: model.flatCameraRequest) { id in turnToFlatPress(id) }
+        // ★ R7-E4: [Top] / [45°] beside a flat press's Shape row
+        .onChange(of: model.pressViewRequest) { r in turnToPressCurve(r) }
         .onAppear { turnToFlatPress(model.flatCameraRequest) }   // (a [Done] made before the page showed)
         // ★ R7-E1 REVIEW: a press the camera already holds is not turned to again (a late second turn after [Done] undid his view)
         // ★ R7-E1b: the open edges group's lit edges, read again when the group, its presses or the opened part change
@@ -617,9 +619,58 @@ public struct FlexibleStagePage: View {
     /// ★ R7-E1: turn to a flat press (the gizmo view down its arrow, D-AP-13 as ruled), once.
     private func turnToFlatPress(_ id: UUID?) {
         guard let id, let p = model.press(id), p.strip != nil, let g = FlexibleFlatPrismUI.camera(press: p, settle: settle) else { return }
+        // ★ R7-E4 (found by the suite): the press in the free part of the stage, not under the panel (its orientation's own axes);
+        // a turn asked before the page has laid out (a [Done] made before it showed) pans again once it has
+        panToPress(id, g)
+        if frames["stage"] == nil || proj.projection == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { panToPress(id, g) }
+        }
         camera.snap(to: g, animated: !reduceMotion)
         flatTurnHold = id
         if model.flatCameraRequest == id { model.flatCameraRequest = nil }
+    }
+
+    /// ★ R7-E4: the camera's target moved so press `id` shows in the stage's free area, seen from gizmo region `g`.
+    private func panToPress(_ id: UUID, _ g: GizmoRegion) {
+        guard let p = model.press(id), let st = p.strip, let cut = model.flatCut(id) else { return }
+        var final = camera.camera
+        let ae = g.orientation(currentAzimuth: final.azimuth)
+        final.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+        final.setRoll(0)
+        var now = camera.camera
+        now.target = pressTarget(SIMD3<Float>(FlexiblePressCurveBaselines.focus(st, cut).centre), camera: final)
+        camera.adopt(now)
+    }
+
+    /// ★ R7-E4: the camera target that shows model point `m` in the middle of the stage's free area (right of the panel or above it).
+    private func pressTarget(_ m: SIMD3<Float>, camera c: OrbitCamera) -> SIMD3<Float> {
+        let centre = (overlay?.mesh ?? project.viewerMesh)?.bounds.center ?? .zero
+        let w = centre + settle.act(m - centre)
+        guard let st = frames["stage"], let size = proj.projection?.viewportSize, size.width > 0 else { return w }
+        let panel = frames["panel"].map { $0.offsetBy(dx: -st.minX, dy: -st.minY) }
+        let top = frames["exitRow"].map { $0.maxY - st.minY } ?? 0
+        let crossing = ["legend", "viewButtons", "player"].compactMap { frames[$0]?.offsetBy(dx: -st.minX, dy: -st.minY) }
+        guard let at = FlexiblePressCurveBaselines.freeCentre(stage: size, panel: panel, top: Swift.max(0, top), obstacles: crossing) else { return w }
+        return FlexiblePressCurveBaselines.target(placing: w, at: at, size: size, rot: c.viewRotation(), distance: c.distance, fovY: c.fovY)
+    }
+
+    /// ★ R7-E4: the curve's view — [Top] (the gizmo's top) or [45°] (45° up from the side the arrow comes from), exactly.
+    private func turnToPressCurve(_ r: FlexiblePressViewRequest?) {
+        guard let r, let p = model.press(r.press) else { return }
+        let arrow = settle.act(SIMD3<Float>(model.flatCut(r.press)?.direction ?? p.direction))
+        let eye = FlexiblePressCurveBaselines.eye(r.view, arrow: arrow)
+        var c = camera.camera
+        let ae = OrbitCamera.azimuthElevation(forDirection: eye, currentAzimuth: c.azimuth)
+        c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+        c.setRoll(0)
+        // found by looking: framed on the press (its curves and arrow), not the whole part — Home still returns to the part
+        if let st = p.strip, let cut = model.flatCut(r.press) {
+            let f = FlexiblePressCurveBaselines.focus(st, cut)
+            c.distance = Swift.min(Swift.max(Float(f.radius) * 2.2 / sin(c.fovY * 0.5), c.minDistance), c.maxDistance)
+            c.target = pressTarget(SIMD3<Float>(f.centre), camera: c)
+        }
+        camera.adopt(c)
+        flatTurnHold = r.press
     }
 
     // MARK: the squish player (bottom-centre, its frame computed against the page's keep-outs)
@@ -1031,6 +1082,9 @@ struct FlexibleStageOverlays: View {
                 FlexibleEdgePickOverlay(model: model, proj: proj, keepOut: keepOut, clip: clip, add: true)   // ★ R7-E1b
             }
             if FlexibleFlatPrismUI.openEdgesGroup(model) != nil {
+                // ★ R7-E4: the working press's curves (Curves) or its stamp on the edge (Stamp) — under the flat prism's handles
+                FlexiblePressCurveLayer(model: model, projection: proj.projection, keepOut: keepOut, clip: clip)
+                FlexiblePressStampHandle(model: model, projection: proj.projection, keepOut: keepOut, clip: clip)
                 FlexibleFlatPrismOverlay(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, padTarget: padTarget ?? .constant(nil))
             }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs

@@ -171,4 +171,14 @@ extension FlexibleRowCopy {
     public static func edgesJobSummary(group: String, weight: String, edges: Int, corners: Int, beadMM: Double) -> String {
         [group, weight, edgesDetail(edges: edges, corners: corners), String(format: "bead %.2f mm", beadMM)].joined(separator: " \u{00B7} ")
     }
+    /// ★ R7-E4: a corner's one curve (core holds one for the corner).
+    public static let cornerOneCurve = "Corner \u{00B7} one curve for all 3 sides"
+    /// The curve's two views, as the icons' spoken labels.
+    public static let pressViewTop = "View from the top"
+    public static let pressView45 = "View 45\u{00B0} from the side"
+    /// The flat press's stamp row: "Stamp · Palm on the edge" (a corner: "on the corner").
+    public static func pressStamp(name: String, corner: Bool) -> String {
+        let tail = corner ? " on the corner" : " on the edge"
+        return fit("Stamp \u{00B7} " + fit(name, 34 - tail.count) + tail, 34)
+    }
 }
