@@ -177,7 +177,8 @@ public struct FlexibleOverlayMesh {
         // framed at 45° to the Top's edges and its quads stepped past the outer edge and left notches along it. Per pressed region
         // with cuts: each part face's OUTER edges (a face's triangle edges used once), the strip one pitch wide inside each — that
         // band of the region keeps its own part pieces (under the quads, dented by the ramp like every part vertex), and no quad
-        // corner is left past the face's edge. A whole face, and every region whose quads never cross its face's edge, draw as before.
+        // corner is left past the face's edge — only for a region whose quads DO step past its face's edge (a turned frame; a face
+        // of at most 64 triangles). A whole face, and every region whose quads never cross its face's edge, draw as before.
         struct Band { let faces: Set<Int>; let cuts: [RegionCut]; let strips: [Int: [RegionCut]] }
         var bands: [Band] = []
         var faceTris: [Int: [[SIMD3<Double>]]] = [:]
@@ -190,8 +191,20 @@ public struct FlexibleOverlayMesh {
             faceTris[f] = out
             return out
         }
+        // only where a quad DOES step past the face's edge (a turned frame); planar faces of a few triangles (a curved face, many)
+        var stepsOut = Set<FlexFaceKey>()
         if !controlNoEdgeFill {
             for f in faces where !f.cuts.isEmpty && f.stack.pitchMM > 0 {
+                let tris = f.faces.sorted().flatMap { trisOf($0) }
+                guard !tris.isEmpty, tris.count <= 64 else { continue }
+                let st = f.stack
+                let x = st.xAxis * (st.pitchMM / 2), y = st.yAxis * (st.pitchMM / 2)
+                let out = st.columns.indices.contains { k in
+                    let p = f.centres[k] + st.load * st.columns[k].entryT
+                    return [p - x - y, p + x - y, p + x + y, p - x + y].contains { simd_distance(Self.ontoFace($0, tris), $0) > 1e-3 }
+                }
+                guard out else { continue }
+                stepsOut.insert(f.key)
                 var strips: [Int: [RegionCut]] = [:]
                 for face in f.faces { strips[face] = outerStrips(trisOf(face), width: f.stack.pitchMM) }
                 bands.append(Band(faces: f.faces, cuts: f.cuts, strips: strips))
@@ -263,7 +276,7 @@ public struct FlexibleOverlayMesh {
             let x = st.xAxis * (st.pitchMM / 2), y = st.yAxis * (st.pitchMM / 2)
             let lift = -st.load * 0.05
             // ★ R7-E1 REVIEW: a region with cuts — no quad corner past its face's outer edge (moved in the face's plane onto it)
-            let clampTris: [[SIMD3<Double>]]? = !controlNoEdgeFill && !f.cuts.isEmpty ? f.faces.sorted().flatMap { trisOf($0) } : nil
+            let clampTris: [[SIMD3<Double>]]? = stepsOut.contains(f.key) ? f.faces.sorted().flatMap { trisOf($0) } : nil
             for (k, c) in st.columns.enumerated() {
                 let p = f.centres[k] + st.load * c.entryT + lift
                 let base = Int32(pos.count / 3)
