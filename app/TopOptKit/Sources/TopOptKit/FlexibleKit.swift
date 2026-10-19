@@ -235,6 +235,47 @@ public struct FlexStackInfo: Equatable, Sendable {
     }
 }
 
+extension FlexStackInfo {
+    /// ★ R7-E2: core's Stack as the bridge copied it (a scene's — flexible_scene_stack — or a run's A5 stack — flexible_run_job;
+    /// one conversion for both, so the bit test compares like with like).
+    init(bridge s: topoptbridge.FlexStack) {
+        // ★ hoist every vector once: a C++ member read through Swift interop COPIES the
+        // vector, so `s.col_u_mm[k]` in a loop copied 10,000 elements per column (3 s).
+        let iu = Array(s.col_iu), iv = Array(s.col_iv), cu = Array(s.col_u_mm), cv = Array(s.col_v_mm)
+        let ca = Array(s.col_area_mm2), ce = Array(s.col_entry_t), cx = Array(s.col_exit_t)
+        let cl = Array(s.col_lattice_mm), cf = Array(s.col_exit_face)
+        var cols: [FlexColumn] = []
+        cols.reserveCapacity(cu.count)
+        for k in 0..<cu.count {
+            cols.append(FlexColumn(iu: Int(iu[k]), iv: Int(iv[k]), uMM: cu[k], vMM: cv[k], areaMM2: ca[k],
+                                   entryT: ce[k], exitT: cx[k], latticeMM: cl[k], exitFace: Int(cf[k])))
+        }
+        let efi = Array(s.exit_face_ids), eff = Array(s.exit_face_fractions)
+        let eri = Array(s.exit_region_ids), erf = Array(s.exit_region_fractions)
+        let ef = (0..<efi.count).map { FlexLink(id: Int(efi[$0]), fraction: eff[$0]) }
+        let er = (0..<eri.count).map { FlexLink(id: Int(eri[$0]), fraction: erf[$0]) }
+        // ★ S1 (#361's 254cb137): a sector's ownership, core's verdict for every voxel of the grid
+        let sector: FlexSectorVerdict? = s.sector
+            ? FlexSectorVerdict(origin: FlexConv.v3(s.grid_origin), spacing: s.grid_spacing, nx: Int(s.grid_nx),
+                                ny: Int(s.grid_ny), nz: Int(s.grid_nz), refused: Set(Array(s.sector_refused).map { Int($0) }))
+            : nil
+        self.init(
+            frameValid: s.frame_valid, frameReason: String(s.frame_reason),
+            load: FlexConv.v3(s.load), xAxis: FlexConv.v3(s.x_axis), yAxis: FlexConv.v3(s.y_axis),
+            centroid: FlexConv.v3(s.centroid), rotationDeg: Int(s.rotation_deg),
+            uMin: s.u_min, vMin: s.v_min, uExtentMM: s.u_extent_mm, vExtentMM: s.v_extent_mm,
+            areaMM2: s.area_mm2, projectedAreaMM2: s.projected_area_mm2,
+            normalSpreadDeg: s.normal_spread_deg, normalSpreadFlag: s.normal_spread_flag,
+            buildAngleDeg: s.build_angle_deg, side: s.side, principalAxisTied: s.principal_axis_tied,
+            pitchMM: s.pitch_mm, nu: Int(s.nu), nv: Int(s.nv), cell: Array(s.cell).map { Int($0) },
+            columns: cols, exitFaces: ef, exitRegions: er,
+            exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
+            latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
+            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
+            sector: sector, footprintRegionIDs: Array(s.footprint_region_ids).map { Int($0) }, latticeRunMM: Array(s.col_lattice_run_mm))
+    }
+}
+
 /// ★ S1 (#361's 254cb137 — the spec's V2): core's ownership of a SECTOR stack's voxels. Core's
 /// `in_stack` keeps, of the voxels a sector's columns hold, only those `stack_owns_projection` owns:
 /// the voxel's OWN ray cast back onto the footprint, tested against the cuts of the part it lands on
@@ -422,6 +463,10 @@ public struct FlexJobFaceInfo: Equatable, Sendable {
     public let map: FlexMap
     public let designStamp: FlexStamp?
     public let skinOn: Bool
+    /// ★ R7-E2 (an edge or corner press, core's C1 keys as core's own parser read them): the regions pressed as one footprint, in
+    /// the job's order (empty: a single-region entry), and the stated direction before core's press_unit (nil: none stated).
+    public var footprintRegionIDs: [Int] = []
+    public var pressDirection: SIMD3<Double>? = nil
 }
 
 public struct FlexJobBlockInfo: Equatable, Sendable {
@@ -663,7 +708,9 @@ public enum FlexibleCore {
                              y: FlexCurve(x: Array(f.y_x), y: Array(f.y_y)),
                              centreEdge: FlexCurve(x: Array(f.c_x), y: Array(f.c_y)),
                              deepestMM: f.deepest_squish_mm),
-                designStamp: FlexConv.stamp(f.design_stamp), skinOn: f.skin_on)
+                designStamp: FlexConv.stamp(f.design_stamp), skinOn: f.skin_on,
+                footprintRegionIDs: Array(f.footprint_region_ids).map { Int($0) },
+                pressDirection: f.has_press_direction ? FlexConv.v3(f.press_direction) : nil)
         }
         var checks: [(face: Int, stamp: FlexStamp)] = []
         for k in 0..<b.check_face_ids.count {
@@ -724,40 +771,7 @@ public final class FlexibleScene: @unchecked Sendable {
         var err = topoptbridge.BridgeError()
         let s = topoptbridge.flexible_scene_stack(handle, Int32(face), Int32(rotation), &err)
         try FlexConv.check(err)
-        // ★ hoist every vector once: a C++ member read through Swift interop COPIES the
-        // vector, so `s.col_u_mm[k]` in a loop copied 10,000 elements per column (3 s).
-        let iu = Array(s.col_iu), iv = Array(s.col_iv), cu = Array(s.col_u_mm), cv = Array(s.col_v_mm)
-        let ca = Array(s.col_area_mm2), ce = Array(s.col_entry_t), cx = Array(s.col_exit_t)
-        let cl = Array(s.col_lattice_mm), cf = Array(s.col_exit_face)
-        var cols: [FlexColumn] = []
-        cols.reserveCapacity(cu.count)
-        for k in 0..<cu.count {
-            cols.append(FlexColumn(iu: Int(iu[k]), iv: Int(iv[k]), uMM: cu[k], vMM: cv[k], areaMM2: ca[k],
-                                   entryT: ce[k], exitT: cx[k], latticeMM: cl[k], exitFace: Int(cf[k])))
-        }
-        let efi = Array(s.exit_face_ids), eff = Array(s.exit_face_fractions)
-        let eri = Array(s.exit_region_ids), erf = Array(s.exit_region_fractions)
-        let ef = (0..<efi.count).map { FlexLink(id: Int(efi[$0]), fraction: eff[$0]) }
-        let er = (0..<eri.count).map { FlexLink(id: Int(eri[$0]), fraction: erf[$0]) }
-        // ★ S1 (#361's 254cb137): a sector's ownership, core's verdict for every voxel of the grid
-        let sector: FlexSectorVerdict? = s.sector
-            ? FlexSectorVerdict(origin: FlexConv.v3(s.grid_origin), spacing: s.grid_spacing, nx: Int(s.grid_nx),
-                                ny: Int(s.grid_ny), nz: Int(s.grid_nz), refused: Set(Array(s.sector_refused).map { Int($0) }))
-            : nil
-        return FlexStackInfo(
-            frameValid: s.frame_valid, frameReason: String(s.frame_reason),
-            load: FlexConv.v3(s.load), xAxis: FlexConv.v3(s.x_axis), yAxis: FlexConv.v3(s.y_axis),
-            centroid: FlexConv.v3(s.centroid), rotationDeg: Int(s.rotation_deg),
-            uMin: s.u_min, vMin: s.v_min, uExtentMM: s.u_extent_mm, vExtentMM: s.v_extent_mm,
-            areaMM2: s.area_mm2, projectedAreaMM2: s.projected_area_mm2,
-            normalSpreadDeg: s.normal_spread_deg, normalSpreadFlag: s.normal_spread_flag,
-            buildAngleDeg: s.build_angle_deg, side: s.side, principalAxisTied: s.principal_axis_tied,
-            pitchMM: s.pitch_mm, nu: Int(s.nu), nv: Int(s.nv), cell: Array(s.cell).map { Int($0) },
-            columns: cols, exitFaces: ef, exitRegions: er,
-            exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
-            latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
-            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
-            sector: sector, footprintRegionIDs: Array(s.footprint_region_ids).map { Int($0) }, latticeRunMM: Array(s.col_lattice_run_mm))
+        return FlexStackInfo(bridge: s)
     }
 
     /// Core's `FaceFrame::from_uv` for each (u, v) mm point.
@@ -966,12 +980,20 @@ public struct FlexRunInfo: Equatable, Sendable {
     public let refusal: FlexRefusal?
     public let receiptJSON: String
     public let files: [String]
-    public init(refusal: FlexRefusal?, receiptJSON: String, files: [String]) {
-        self.refusal = refusal; self.receiptJSON = receiptJSON; self.files = files
+    /// ★ R7-E2 — A5 (reviewer 2026-10-08): the run's own stacks, one per LOADED entry in job order (an edge or corner press's
+    /// built by core from its face_region_ids + press_direction), and its density field (nil on a refusal) — what the receipt and
+    /// the files were written from, for the bit test against the app's own.
+    public let stacks: [FlexStackInfo]
+    public let field: FlexDensityField?
+    public init(refusal: FlexRefusal?, receiptJSON: String, files: [String], stacks: [FlexStackInfo] = [], field: FlexDensityField? = nil) {
+        self.refusal = refusal; self.receiptJSON = receiptJSON; self.files = files; self.stacks = stacks; self.field = field
     }
 }
 
 extension FlexibleCore {
+    /// ★ R7-E2 STUB SWITCH (tests only; the stub state of the red run): the run's stacks and field not read back.
+    nonisolated(unsafe) public static var controlNoRunStacks = false
+
     /// Run a job document with a `flexible` block through core's Flexible runner. The other
     /// sections' runner (`run_lattice_job` → `lattice_variant_job`) refuses such a job; this is
     /// the entry point core gives it. Throws on malformed input (core's words).
@@ -982,7 +1004,14 @@ extension FlexibleCore {
                                               std.string(materialsPath), std.string(fingerprint), &err)
         try FlexConv.check(err)
         let files = Array(r.files).map { String($0) }
+        // ★ R7-E2 — A5: the run's stacks and field, as values
+        let stacks = Self.controlNoRunStacks ? [] : r.stacks.map { FlexStackInfo(bridge: $0) }
+        let field: FlexDensityField? = r.has_field && !Self.controlNoRunStacks
+            ? FlexDensityField(nx: Int(r.field.nx), ny: Int(r.field.ny), nz: Int(r.field.nz), spacing: r.field.spacing,
+                               origin: FlexConv.v3(r.field.origin), density: Array(r.field.density),
+                               owner: Array(r.field.owner).map { Int($0) })
+            : nil
         return FlexRunInfo(refusal: r.refused ? FlexRefusal(code: String(r.refusal_code), reason: String(r.refusal_reason)) : nil,
-                           receiptJSON: String(r.receipt_json), files: files)
+                           receiptJSON: String(r.receipt_json), files: files, stacks: stacks, field: field)
     }
 }

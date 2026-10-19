@@ -214,8 +214,9 @@ struct FlexibleEdgeGroupRows: View {
                         .accessibilityIdentifier("flexible-flat-set-mm")
                     }
                 }
-            } else {
-                FlexCaption(text: FlexibleRowCopy.pressNotSent)
+            } else if let w = model.pressWarning(p.id) {
+                // ★ R7-E2: not in the job (its reason, 1–3 fixes) › twisted more than 2 % off › core's side label
+                pressWarningRow(p, w)
             }
             if let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: p.id) {
                 flatRows(p, st, shown)
@@ -236,6 +237,36 @@ struct FlexibleEdgeGroupRows: View {
         }.allowsHitTesting(false))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("flexible-edge-press-\(p.strip?.label ?? "")")
+    }
+
+    /// ★ R7-E2: the press's one warning line beyond core's refusal and a lattice stop, and its 1–3 fixes (each one undo step).
+    @ViewBuilder private func pressWarningRow(_ p: FlexiblePress, _ w: (line: String, fixes: [FlexiblePressFix])) -> some View {
+        let sent = model.sentPresses.contains(p.id)
+        VStack(alignment: .leading, spacing: 4) {
+            if sent {
+                FlexCaption(text: w.line).accessibilityIdentifier("flexible-edge-press-note")
+            } else {
+                FlexWarningLine(text: w.line, id: "flexible-edge-press-unsent")
+            }
+            if !w.fixes.isEmpty {
+                HStack(spacing: DS.Space.s) {
+                    ForEach(Array(w.fixes.prefix(3).enumerated()), id: \.offset) { i, f in
+                        Button {
+                            Task { @MainActor in if let why = await model.applyPressFix(f) { model.toast = why } }
+                        } label: {
+                            Text(f.title).font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .padding(.horizontal, 12).frame(minHeight: 44)
+                                .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                                .overlay(FlexibleCornerPairStyle.secondaryEdge(i == 0))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-press-fix-\(f.id)")
+                    }
+                }
+            }
+        }
     }
 
     /// ★ R7-E1: the flat prism's rows — the same numbers as the chip and the knob's boxes on the model (one store: the press).

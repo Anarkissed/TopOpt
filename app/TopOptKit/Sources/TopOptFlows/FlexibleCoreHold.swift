@@ -108,8 +108,10 @@ public struct FlexibleCoreHold: Equatable, Sendable {
     /// What core CAN run instead, 1–3 buttons: each group alone (one end of any pinch inside it
     /// resting), or — one group — each end of the pinch resting. Only a set that leaves no pinch
     /// and at least one pressed face is offered.
+    /// ★ R7-E2: `pressMarker` — a press IN THE JOB by its first region (nil: not in it). A send that leaves a group out lists its
+    /// presses' markers among the resting regions: the job then leaves those presses out (a press is never a resting entry).
     public static func sends(groups: [FlexibleSqueezeGroup], pinches: [(a: Int, b: Int)],
-                             name: (Int) -> String) -> [FlexibleCoreFix] {
+                             name: (Int) -> String, pressMarker: ((UUID) -> Int?)? = nil) -> [FlexibleCoreFix] {
         let pressed = groups.flatMap(\.regions)
         func unique(_ xs: [Int]) -> [Int] { var seen = Set<Int>(); return xs.filter { seen.insert($0).inserted } }
         func noPinchLeft(_ rest: Set<Int>) -> Bool { pinches.allSatisfy { rest.contains($0.a) || rest.contains($0.b) } }

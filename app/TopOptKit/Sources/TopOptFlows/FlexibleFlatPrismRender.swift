@@ -148,6 +148,8 @@ enum FlexibleFlatPrismUI {
 
     /// The last arrow the overlay drew, in the page's points (the hosted tests read it).
     static var lastArrowEnds: (head: CGPoint, tail: CGPoint)?
+    /// ★ R7-E2: whether the overlay last drew each press's arrow SOLID (sent) or dashed (not sent), by its label (the hosted tests).
+    static var lastArrowSolid: [String: Bool] = [:]
     /// ★ R7-E1 REVIEW, RED CONTROL only: the knob only at the arrow's true tail (off the screen in his working views: no knob).
     static var controlKnobAtTailOnly = false
 

@@ -463,6 +463,12 @@ struct FlexJobFace {
   std::vector<double> x_x, x_y, y_x, y_y, c_x, c_y;
   FlexStampGrid design_stamp;
   bool skin_on = true;
+  // ★ R7-E2 (an edge or corner press — core's C1 addendum keys, read back through core's own parser): the regions pressed as one
+  // footprint (`face_region_ids`, in the job's order; empty for a single-region entry) and the stated direction (`press_direction`,
+  // as core parsed it — before press_unit) when `has_press_direction`.
+  std::vector<int32_t> footprint_region_ids;
+  bool has_press_direction = false;
+  double press_direction[3] = {0, 0, 0};
 };
 struct FlexJobBlock {
   std::string material_id;
@@ -487,12 +493,20 @@ FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError& 
 // `job_dir`, and every receipt, heat map and CSV written into `out_dir`. A stage refusal
 // (calibrate-first filament, two loaded faces on one stack, …) comes back in the result with
 // core's code and sentence; malformed input fills `err`.
+using FlexStacks = std::vector<FlexStack>;
 struct FlexRunResult {
   bool refused = false;
   std::string refusal_code;
   std::string refusal_reason;
   std::string receipt_json;        // the `flexible` block of run_info.json
   std::vector<std::string> files;  // written, relative to out_dir
+  // ★ R7-E2 — A5 (reviewer 2026-10-08): the run's own stacks, one per LOADED entry in job order (a press's built by core's
+  // build_press_stack from its face_region_ids + press_direction), copied field for field as flexible_scene_stack copies a
+  // scene's (frame, columns, links, footprint — no lattice run, no sector verdict: those are the scene's), and its density
+  // field (`has_field` false on a refusal) — what the receipt and the files were written from, for the app's bit test.
+  FlexStacks stacks;
+  bool has_field = false;
+  FlexField field;
 };
 FlexRunResult flexible_run_job(const std::string& job_json, const std::string& job_dir,
                                const std::string& out_dir, const std::string& materials_path,

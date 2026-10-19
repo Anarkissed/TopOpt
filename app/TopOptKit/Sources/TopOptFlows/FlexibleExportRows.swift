@@ -69,6 +69,17 @@ enum FlexibleExportRows {
         }
     }
 
+    /// ★ R7-E2 (the ruling's item 5 — "Show that in plain words"): the job sent carried a SIDE press — one line under core's line,
+    /// the ruling's whole sentence behind its (i).
+    struct PressNote: View {
+        @ObservedObject var run: FlexibleCoreRun
+        var size: CGFloat = 14
+
+        var body: some View {
+            EmptyView()   // ★ R7-E2 STUB
+        }
+    }
+
     /// ★ C2 VERIFICATION: what core CAN run (or the filament with data), 1–3 big buttons.
     struct FixRow: View {
         @ObservedObject var run: FlexibleCoreRun

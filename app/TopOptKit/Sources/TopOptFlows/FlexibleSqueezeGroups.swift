@@ -260,6 +260,13 @@ public enum FlexibleSqueezeGroups {
         return out
     }
 
+    /// ★ R7-E2: two PRESSES of one squeeze group that push the same material along one axis (core's stack conflict over their
+    /// press stacks — core names a press stack by its first region, so `pressOf` maps that region, and the press's synthetic key,
+    /// to the press). Core refuses one stack pressed twice in a job (one_profile_per_stack): each such press leaves the job, said.
+    public static func pressPinches(_ conflicts: [FlexConflictInfo], _ s: FlexibleStageSettings, pressOf: [Int: UUID]) -> [(a: UUID, b: UUID)] {
+        []   // ★ R7-E2 STUB
+    }
+
     /// The faces each face is pinched with (both directions).
     public static func partners(_ pinches: [(a: Int, b: Int)]) -> [Int: [Int]] {
         var out: [Int: [Int]] = [:]

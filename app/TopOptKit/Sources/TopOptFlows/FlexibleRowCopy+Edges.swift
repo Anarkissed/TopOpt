@@ -118,4 +118,36 @@ extension FlexibleRowCopy {
     public static let flatAngleStopsBoth = "Angle stops here \u{00B7} the lattice ends there"
     /// A candidate member taken out of the Flexible setup — one line, whole ("Face 1 · lattice A is out of Flexible").
     public static func outOfFlexible(_ name: String) -> String { fit("\(name) is out of Flexible") }
+
+    // MARK: ★ R7-E2 — sent to core (his rule: one line, ≤ 44; the reviewer's: shared_footprint in plain words)
+
+    /// Two entries share surface (core's A3): "Edge 16 and Face 3 share 85 mm²".
+    public static func sharedFootprint(_ a: String, _ b: String, mm2: Double) -> String {
+        let n = String(format: "%.0f", mm2.rounded())
+        let tail = " share \(n) mm\u{00B2}"
+        let room = maxChars - tail.count - " and ".count
+        return fit(fit(a, room / 2) + " and " + fit(b, room - Swift.min(a.count, room / 2)) + tail)
+    }
+    /// A press core is designing (its stack read, its design not in yet).
+    public static let pressDesigning = "Set up \u{00B7} core is designing it"
+    /// A press core would not design: "Not sent · no squish data for it".
+    public static func pressNotDesigned(_ why: String) -> String { fit("Not sent \u{00B7} \(why)") }
+    /// A region that would be in two entries.
+    public static func pressTwoEntries(_ name: String) -> String { fit("Not sent \u{00B7} \(name) is pressed twice") }
+    /// Two presses of one group pushing the same material along one axis (core's one_profile_per_stack).
+    public static func pressConflict(_ a: String, _ b: String) -> String { fit("\(fit(a, 16)) and \(fit(b, 16)) press one stack") }
+    /// Core's side label for a press sent along a side (core's FaceFrame.side — more than 15° off build Z).
+    public static let sidePress = "Side press \u{00B7} gyroid only \u{00B7} estimate"
+    /// ★ The ruling's sentence (2026-10-07, item 5), whole — the limits sheet, the Export caption's (i), the side label's (i).
+    public static let angledEstimateSentence = "Squish data were measured pressing straight down; angled presses are estimates until they're measured."
+    /// The same, in one line (the once-per-session pop-up and the Export caption).
+    public static let angledEstimateShort = "Angled presses are estimates until measured"
+    /// ★ HIS ANSWER (2026-10-18 ~16:50): the twist ships with its honest line — how far core's profile is off the flat prism.
+    public static func twistOff(_ percent: Double) -> String { fit("Twisted \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
+    /// A corner core's map cannot follow within 2 %.
+    public static func cornerOff(_ percent: Double) -> String { fit("Tipped \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
+    /// Step ② for an edges group: "Group 3 · 5 lb · 2 edges · bead 0.45 mm" (its weight, its edges and corners, the bead).
+    public static func edgesJobSummary(group: String, weight: String, edges: Int, corners: Int, beadMM: Double) -> String {
+        [group, weight, edgesDetail(edges: edges, corners: corners), String(format: "bead %.2f mm", beadMM)].joined(separator: " \u{00B7} ")
+    }
 }

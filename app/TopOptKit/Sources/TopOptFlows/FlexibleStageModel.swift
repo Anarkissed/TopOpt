@@ -184,6 +184,13 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public internal(set) var pressRefusals: [UUID: String] = [:]
     /// ★ R7-E1: M2's strips read through were said (once per session).
     var legacyStripsSaid = false
+    /// ★ R7-E2: the ruling's angled-estimate sentence was popped (once per session, when a side press first goes into the job).
+    var sideSentenceSaid = false
+    /// ★ R7-E2: core's stack conflicts among the faces AND the registered presses (a press stack named by its first region) — the
+    /// presses' own (FlexibleSqueezeGroups.pressPinches); the faces' pinches keep reading `conflicts`, unchanged.
+    @Published public internal(set) var pressConflicts: [FlexConflictInfo] = []
+    /// ★ R7-E2: the gate's verdicts, memoised by what they are read from (the shared-surface pre-check clips triangles).
+    var pressSupportMemo: (key: String, value: [UUID: FlexiblePressSupport.Verdict])?
     /// ★ R7-E1 REVIEW: core's exact lattice stop per press, found by a release (the arrow's bits, N, the lattice it was found on) —
     /// the next drag's hard stop (flatDragCap).
     var flatExactStops: [UUID: (bits: [UInt64], mm: Double, lattice: String)] = [:]

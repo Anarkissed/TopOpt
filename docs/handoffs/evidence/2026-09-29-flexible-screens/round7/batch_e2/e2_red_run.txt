@@ -1,0 +1,90 @@
+# R7-E2 — the red run at the stubs (this commit's sources). swift test --skip-build --scratch-path /tmp/r7e-build --filter 'TopOptFlowsTests\.(FlexibleR7E2Tests|FlexibleR7E2HostedTests)/'
+# every failure is the fix's own assertion (the 2 'unexpected' are the stubs' throws: no press written → 'Mark at least one face…'; no press design → 'face −1099 has no design yet'); no RED CONTROL assertion failed.
+# after this run started, four of the new tests' helpers were corrected (said in the handoff): E2-2's wait for the new key, E2-3's premise (the lattice lands a typed 15° twist at 7.03° on his pad — seen here), E2-7 / E2-9 read Group 1's own regions, E2-6 seals the edit before counting a fix's step.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+FlexibleR7E2HostedTests.swift:112: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise] : XCTAssertTrue failed - ★ in the job: ["Set up · core support pending"]
+FlexibleR7E2HostedTests.swift:133: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(true)") - ★ sent: the arrow is solid
+FlexibleR7E2HostedTests.swift:143: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(false)") - ★ not sent: the arrow is dashed
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' failed (260.555 seconds).
+FlexibleR7E2HostedTests.swift:112: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTAssertTrue failed - ★ in the job: ["Set up · core support pending"]
+FlexibleR7E2HostedTests.swift:175: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTAssertTrue failed - ★ said this session
+FlexibleR7E2HostedTests.swift:176: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("Angled presses are estimates until measured")") - ★ the pop-up, in one line (≤ 44)
+FlexibleR7E2HostedTests.swift:191: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTAssertTrue failed - the second press sent
+FlexibleR7E2HostedTests.swift:195: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTAssertTrue failed - ★ the limits sheet says the ruling's sentence
+FlexibleR7E2HostedTests.swift:201: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession] : XCTUnwrap failed: expected non-nil value of type "FlexibleCoreFix" - the edges group's send
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' failed (481.636 seconds).
+FlexibleR7E2HostedTests.swift:112: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine] : XCTAssertTrue failed - ★ in the job: ["Set up · core support pending"]
+FlexibleR7E2HostedTests.swift:163: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine] : XCTAssertEqual failed: ("Optional("Set up · core support pending")") is not equal to ("Optional("Side press · gyroid only · estimate")") - ★ the side label
+FlexibleR7E2HostedTests.swift:164: error: -[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine] : XCTAssertTrue failed - ★ on the tab: 'Side press · gyroid only · estimate'
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' failed (242.596 seconds).
+	 Executed 3 tests, with 12 failures (0 unexpected) in 984.786 (984.786) seconds
+FlexibleR7E2Tests.swift:130: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TopOptFlows.FlexFaceKey(region: -1040, rotation: 0))") - ★ its design key is its synthetic key
+FlexibleR7E2Tests.swift:131: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TopOptFlows.FlexFaceKey(region: -1040, rotation: 0))") - ★ key(r) works for a synthetic id
+FlexibleR7E2Tests.swift:132: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(DE519196-BB3D-43B5-AB10-15C2F9A2E73C)")
+FlexibleR7E2Tests.swift:133: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget] : XCTUnwrap failed: expected non-nil value of type "FlexibleFaceSettings" - ★ target(synthetic) is the press
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsADesignTarget]' failed (4.049 seconds).
+FlexibleR7E2Tests.swift:269: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - ★ everything holds: in the job
+FlexibleR7E2Tests.swift:289: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - two entries: its own line
+FlexibleR7E2Tests.swift:289: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - shared: its own line
+FlexibleR7E2Tests.swift:289: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - designing: its own line
+FlexibleR7E2Tests.swift:289: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - refused: its own line
+FlexibleR7E2Tests.swift:289: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - conflict: its own line
+FlexibleR7E2Tests.swift:292: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertEqual failed: ("Optional("Set up · core support pending")") is not equal to ("Optional("Edge 16 and Face 3 share 85 mm²")")
+FlexibleR7E2Tests.swift:293: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - ★ core's schema takes face_region_ids + press_direction (the probe, its control parsing)
+FlexibleR7E2Tests.swift:298: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - ★ Edge 16 is in the job: Set up · core support pending
+FlexibleR7E2Tests.swift:299: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed
+FlexibleR7E2Tests.swift:301: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTAssertTrue failed - ★ its group is sent
+FlexibleR7E2Tests.swift:303: error: -[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt] : XCTUnwrap failed: expected non-nil value of type "FlexibleCoreFix" - a send of the edges group alone
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testAPressIsSentOnlyWhenCoreTakesIt]' failed (3.133 seconds).
+FlexibleHisProject.swift:110: error: -[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff] : failed - timed out waiting for 10.6 mm: registered again and designed
+FlexibleHisProject.swift:110: error: -[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff] : failed - timed out waiting for twisted 15°: registered again and designed
+FlexibleR7E2Tests.swift:238: error: -[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff] : XCTAssertEqualWithAccuracy failed: ("7.031249999999999") is not equal to ("15.0") +/- ("1e-09") - premise: twisted 15°
+FlexibleR7E2Tests.swift:239: error: -[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff] : XCTUnwrap failed: expected non-nil value of type "Press"
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testATwistSaysHowFarOff]' failed (364.248 seconds).
+FlexibleR7E2Tests.swift:368: error: -[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit] : XCTAssertTrue failed - cube: the corner is in the job (Set up · core support pending)
+FlexibleJob.swift:116: error: -[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit] : failed: caught error: "Mark at least one face as carrying weight."
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit]' failed (0.173 seconds).
+FlexibleR7E2Tests.swift:629: error: -[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged] : XCTAssertTrue failed - ★ only the press entry is added
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testFacePressesUnchanged]' failed (0.002 seconds).
+FlexibleR7E2Tests.swift:558: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTAssertTrue failed - Edge 14: sent
+FlexibleR7E2Tests.swift:558: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTAssertTrue failed - Edge 16: sent
+FlexibleR7E2Tests.swift:561: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTAssertEqual failed: ("[1]") is not equal to ("[1, 2]") - premise: Group 1 and the edges group, both sent
+FlexibleR7E2Tests.swift:562: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTAssertEqual failed: ("Optional(TopOptFlows.FlexibleCoreHold.Kind.edgesBeside)") is not equal to ("Optional(TopOptFlows.FlexibleCoreHold.Kind.squeezeGroups)") - ★ the notice shows before Export
+FlexibleR7E2Tests.swift:566: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTAssertTrue failed - ★ a send per group: ["Send Group 1 only"]
+FlexibleHisProject.swift:110: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : failed - timed out waiting for Group 1 rests
+FlexibleR7E2Tests.swift:584: error: -[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid] : XCTUnwrap failed: expected non-nil value of type "String" - ★ step ② names the edges group
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testOneGroupPerExportSaid]' failed (63.195 seconds).
+FlexibleR7E2Tests.swift:531: error: -[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault] : XCTUnwrap failed: expected non-nil value of type "FlexFaceDesignInfo" - cube edge: designed
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testRimDefault]' failed (0.166 seconds).
+FlexibleR7E2Tests.swift:417: error: -[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords] : XCTAssertTrue failed - premise: Edge 16 in the job
+FlexibleR7E2Tests.swift:423: error: -[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords] : failed - ★ the shared surface keeps it out: Optional(TopOptFlows.FlexiblePressSupport.Reason.coreSupport)
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testSharedFootprintInPlainWords]' failed (3.564 seconds).
+FlexibleHisProject.swift:110: error: -[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers] : failed - timed out waiting for h 6.0: registered again and designed
+FlexibleR7E2Tests.swift:180: error: -[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers] : XCTUnwrap failed: expected non-nil value of type "Press"
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheDefaultMapIsTheFlatPrismInCoresNumbers]' failed (184.127 seconds).
+FlexibleR7E2Tests.swift:489: error: -[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow] : XCTAssertTrue failed - premise: Edge 16 in the job
+FlexibleR7E2Tests.swift:490: error: -[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow] : XCTAssertNotEqual failed: ("Optional("Set up · core support pending")") is equal to ("Optional("Set up · core support pending")") - ★ no longer pending
+FlexibleKit.swift:554: error: -[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow] : failed: caught error: "face -1099 has no design yet"
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testTheLatticeIsGradedAlongTheArrow]' failed (3.533 seconds).
+	 Executed 10 tests, with 38 failures (2 unexpected) in 626.189 (626.191) seconds
+	 Executed 13 tests, with 50 failures (2 unexpected) in 1610.975 (1610.977) seconds
+	 Executed 13 tests, with 50 failures (2 unexpected) in 1610.975 (1610.978) seconds
+FLEX-E2-H1 sent: solid nil · marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"]
+FLEX-E2-H1 gated: solid nil · 'Set up · core support pending'
+FLEX-E2-H2 the tab's lines: []
+FLEX-E2-4 gate schema: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate bridge: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate api 1: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate not stacked: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate two entries: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate shared: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate designing: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate refused: inJob false · 'Set up · core support pending'
+FLEX-E2-4 gate conflict: inJob false · 'Set up · core support pending'
+FLEX-E2-3 untwisted: 'Set up · core support pending' · off -1.0%
+FLEX-E2-10 with a press: 0 line(s) inserted at line 106, 0 changed
+FLEX-E2-9 hold 'This export makes Group 1 only.' · why 'Core designs one squeeze group per job. Group 2 (edges and corners) is not in this export: core does not take edge or corner presses yet.' · sends ["Send Group 1 only"]
+FLEX-E2-9 [Send Group 1 only] presses 0 · loaded faces [1]
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

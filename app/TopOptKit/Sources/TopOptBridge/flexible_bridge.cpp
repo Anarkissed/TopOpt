@@ -251,6 +251,62 @@ void copy_design(const fx::FaceDesign& d, FlexFaceDesign& o) {
   o.sigma_max = d.sigma.max;
 }
 
+// ★ R7-E2: core's Stack copied field for field — the frame, the columns, the linked other end, the footprint (one copy for the
+// scene's stacks and the run's A5 stacks, so the bit test compares like with like). The scene adds its own lattice run and sector
+// verdict (flexible_scene_stack).
+void fill_stack(const fx::Stack& st, FlexStack& o) {
+  const fx::FaceFrame& f = st.frame;
+  o.frame_valid = f.valid;
+  o.frame_reason = f.reason;
+  put3(o.load, f.load);
+  put3(o.x_axis, f.x_axis);
+  put3(o.y_axis, f.y_axis);
+  put3(o.centroid, f.centroid);
+  o.rotation_deg = f.rotation_deg;
+  o.u_min = f.u_min;
+  o.v_min = f.v_min;
+  o.u_extent_mm = f.u_extent_mm;
+  o.v_extent_mm = f.v_extent_mm;
+  o.area_mm2 = f.area_mm2;
+  o.projected_area_mm2 = f.projected_area_mm2;
+  o.normal_spread_deg = f.normal_spread_deg;
+  o.normal_spread_flag = f.normal_spread_flag;
+  o.build_angle_deg = f.build_angle_deg;
+  o.side = f.side;
+  o.principal_axis_tied = f.principal_axis_tied;
+  o.pitch_mm = st.pitch_mm;
+  o.nu = st.nu;
+  o.nv = st.nv;
+  o.cell.assign(st.cell.begin(), st.cell.end());
+  for (const fx::StackColumn& c : st.columns) {
+    o.col_iu.push_back(c.iu);
+    o.col_iv.push_back(c.iv);
+    o.col_u_mm.push_back(c.u_mm);
+    o.col_v_mm.push_back(c.v_mm);
+    o.col_area_mm2.push_back(c.area_mm2);
+    o.col_entry_t.push_back(c.entry_t);
+    o.col_exit_t.push_back(c.exit_t);
+    o.col_lattice_mm.push_back(c.lattice_mm);
+    o.col_exit_face.push_back(c.exit_face);
+  }
+  for (const fx::StackLink& l : st.exit_faces) {
+    o.exit_face_ids.push_back(l.id);
+    o.exit_face_fractions.push_back(l.area_fraction);
+  }
+  for (const fx::StackLink& l : st.exit_regions) {
+    o.exit_region_ids.push_back(l.id);
+    o.exit_region_fractions.push_back(l.area_fraction);
+  }
+  o.exit_unresolved_fraction = st.exit_unresolved_fraction;
+  o.footprint_area_mm2 = st.footprint_area_mm2;
+  o.latticed_columns = st.latticed_columns;
+  o.lattice_mm_min = st.lattice_mm_min;
+  o.lattice_mm_mean = st.lattice_mm_mean;
+  o.lattice_mm_max = st.lattice_mm_max;
+  o.stack_mm_max = st.stack_mm_max;
+  for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
+}
+
 // The assembled field for these faces' last designs (cached on the scene). Caller holds s.mu.
 const fx::DensityField& field_of(Scene& s, const std::vector<int32_t>& face_region_ids,
                                  const std::vector<int32_t>& rotations, const FlexBuild& build) {
@@ -590,55 +646,7 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
     std::lock_guard<std::mutex> lock(s->mu);
     const fx::Stack& st = stack_of(*s, face_region_id, rotation_deg);
     const fx::FaceFrame& f = st.frame;
-    o.frame_valid = f.valid;
-    o.frame_reason = f.reason;
-    put3(o.load, f.load);
-    put3(o.x_axis, f.x_axis);
-    put3(o.y_axis, f.y_axis);
-    put3(o.centroid, f.centroid);
-    o.rotation_deg = f.rotation_deg;
-    o.u_min = f.u_min;
-    o.v_min = f.v_min;
-    o.u_extent_mm = f.u_extent_mm;
-    o.v_extent_mm = f.v_extent_mm;
-    o.area_mm2 = f.area_mm2;
-    o.projected_area_mm2 = f.projected_area_mm2;
-    o.normal_spread_deg = f.normal_spread_deg;
-    o.normal_spread_flag = f.normal_spread_flag;
-    o.build_angle_deg = f.build_angle_deg;
-    o.side = f.side;
-    o.principal_axis_tied = f.principal_axis_tied;
-    o.pitch_mm = st.pitch_mm;
-    o.nu = st.nu;
-    o.nv = st.nv;
-    o.cell.assign(st.cell.begin(), st.cell.end());
-    for (const fx::StackColumn& c : st.columns) {
-      o.col_iu.push_back(c.iu);
-      o.col_iv.push_back(c.iv);
-      o.col_u_mm.push_back(c.u_mm);
-      o.col_v_mm.push_back(c.v_mm);
-      o.col_area_mm2.push_back(c.area_mm2);
-      o.col_entry_t.push_back(c.entry_t);
-      o.col_exit_t.push_back(c.exit_t);
-      o.col_lattice_mm.push_back(c.lattice_mm);
-      o.col_exit_face.push_back(c.exit_face);
-    }
-    for (const fx::StackLink& l : st.exit_faces) {
-      o.exit_face_ids.push_back(l.id);
-      o.exit_face_fractions.push_back(l.area_fraction);
-    }
-    for (const fx::StackLink& l : st.exit_regions) {
-      o.exit_region_ids.push_back(l.id);
-      o.exit_region_fractions.push_back(l.area_fraction);
-    }
-    o.exit_unresolved_fraction = st.exit_unresolved_fraction;
-    o.footprint_area_mm2 = st.footprint_area_mm2;
-    o.latticed_columns = st.latticed_columns;
-    o.lattice_mm_min = st.lattice_mm_min;
-    o.lattice_mm_mean = st.lattice_mm_mean;
-    o.lattice_mm_max = st.lattice_mm_max;
-    o.stack_mm_max = st.stack_mm_max;
-    for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
+    fill_stack(st, o);   // ★ R7-E2: the one copy (the run's A5 stacks take it too)
     // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp).
     // ★ R7-E1 REVIEW (the verifier: at Balanced his 20 mm pad is 19.2 voxels tall and core leaves the Top's surface layer Empty —
     // its centres at z 20.31, above the part — so every column entering through the Top read 0 mm and [Done] was refused at
@@ -1077,6 +1085,10 @@ FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError& 
       g.c_y = f.curve_c_y;
       if (f.has_design_stamp) g.design_stamp = from_core(f.design_stamp);
       g.skin_on = f.skin_on;
+      // ★ R7-E2: an edge or corner press's keys, as core parsed them
+      for (int id : f.footprint_region_ids) g.footprint_region_ids.push_back(id);
+      g.has_press_direction = f.has_press_direction;
+      if (f.has_press_direction) put3(g.press_direction, f.press_direction);
       o.faces.push_back(std::move(g));
     }
     for (const topopt::JobFlexibleCheckStamp& c : b.check_stamps) {
@@ -1108,6 +1120,23 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
     o.refusal_reason = r.refusal_reason;
     o.receipt_json = r.receipt_json;
     o.files = r.files;
+    // ★ R7-E2 — A5: the run's stacks (one per loaded entry, job order) and its field, as values
+    for (const fx::Stack& st : r.stacks) {
+      FlexStack fs;
+      fill_stack(st, fs);
+      o.stacks.push_back(std::move(fs));
+    }
+    if (!r.refused && !r.field.density.empty()) {
+      const fx::DensityField& f = r.field;
+      o.has_field = true;
+      o.field.nx = f.nx;
+      o.field.ny = f.ny;
+      o.field.nz = f.nz;
+      o.field.spacing = f.spacing;
+      put3(o.field.origin, f.origin);
+      o.field.density.assign(f.density.begin(), f.density.end());
+      o.field.owner.assign(f.owner.begin(), f.owner.end());
+    }
   } catch (const std::exception& e) {
     fail(err, e);
     o = FlexRunResult{};

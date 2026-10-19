@@ -13,9 +13,9 @@
 // it is its OWN undo step; a direction that cannot be stored is refused (FlexiblePress.isAimable); and
 // after the page's undo / redo a press card open on a press the history took away closes
 // (`historyRestored`, called by FlexibleStagePage.history).
-// ★ WHAT IS SENT. Nothing yet: `sentPresses` is empty until the bridge builds press stacks (AP9, through
-// FlexiblePressSupport.inJob in AP6). The job's one-group rule, core's hold, the sims and the stress
-// route read `sentSqueezeGroups`, so a press alone in a group never holds or breaks a face press's job.
+// ★ WHAT IS SENT. ★ R7-E2: `sentPresses` — the edge and corner presses FlexiblePressSupport's gate lets in (AP9). The job's
+// one-group rule, core's hold, the sims and the stress route read `sentSqueezeGroups`, so a press that is NOT sent never holds or
+// breaks a face press's job.
 // ★ THE PICKING, THE ARROW, THE CARD AND THE CLASH FIXES are AP2–AP4; this file is the saved state only.
 
 import Foundation
@@ -29,10 +29,11 @@ extension FlexibleStageModel {
 
     public func press(_ id: UUID) -> FlexiblePress? { settings.press(id) }
 
-    /// The presses IN THE JOB. ★ Empty until AP9: core's schema accepts press_direction only after the
-    /// #361 sync (S1), and the bridge does not build a press's stack before the seam (AP9) — so no press
-    /// is ever sent, simulated or built into the lattice before then.
-    public var sentPresses: Set<UUID> { [] }
+    /// The presses IN THE JOB. ★ R7-E2 (AP9's second half): every edge or corner press FlexiblePressSupport's gate lets in —
+    /// core's schema takes it, the bridge builds its stack, core's press API is 2, core stacked and designed it on the open scene,
+    /// no region in two entries, no shared surface, no same-axis stack in its group (FlexibleStageModel+PressSend). A tilted
+    /// single-face press (AP1, no flat prism) is never sent.
+    public var sentPresses: Set<UUID> { Set(pressSupport.compactMap { $0.value.inJob ? $0.key : nil }) }
 
     /// The squeeze groups with something SENT (FlexibleSqueezeGroups.groups(_:sent:)).
     public var sentSqueezeGroups: [FlexibleSqueezeGroup] { FlexibleSqueezeGroups.groups(settings, sent: sentPresses) }

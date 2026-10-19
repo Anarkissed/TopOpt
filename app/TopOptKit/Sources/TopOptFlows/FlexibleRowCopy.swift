@@ -268,6 +268,12 @@ public enum FlexibleRowCopy {
         if side { return "Side face · gyroid only · estimated" }
         return nil
     }
+    /// ★ R7-E2: the same, core's region ids in his names (`names`) — a shared_footprint refusal ("presses A and B share surface
+    /// (face region a and face region b overlap by N mm2)") reads "Edge 16 and Face 3 share 85 mm²".
+    public static func faceWarning(refusalCode: String?, refusalReason: String?, unreachedColumns: Int, side: Bool,
+                                   names: (Int) -> String) -> String? {
+        faceWarning(refusalCode: refusalCode, refusalReason: refusalReason, unreachedColumns: unreachedColumns, side: side)   // ★ R7-E2 STUB
+    }
     /// The number pad's title when a face with no main-page load is pressed.
     public static let askWeight = "How much weight presses here?"
     /// [Rests] chosen here on a face a main-page Load group presses: said, never hidden.

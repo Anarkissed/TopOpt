@@ -48,6 +48,10 @@ public enum FlexibleJob {
         /// run job with any is refused HERE (core refuses one stack pressed from both ends), not
         /// only in the model's wrapper — every caller that builds Inputs must fill it.
         public var pinches: [[Int]] = []
+        /// ★ R7-E2: the edge and corner presses IN THE JOB (FlexiblePressSupport's gate), each written AFTER the face entries as one
+        /// loaded entry: face_region_ids (its pieces, member order) + press_direction (its stored bits). Empty ⇒ the job is
+        /// byte-identical to before (every face entry is).
+        public var presses: [PressEntry] = []
 
         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
@@ -57,6 +61,25 @@ public enum FlexibleJob {
             self.stampGrids = stampGrids
         }
     }
+
+    /// ★ R7-E2: one edge or corner press as the job states it (core's C1 addendum keys).
+    public struct PressEntry: Equatable, Sendable {
+        public let id: UUID
+        /// Its pieces, in member order (core names the press by the first).
+        public let regions: [Int]
+        /// press.direction, its stored bits (core normalises it once, press_unit).
+        public let direction: SIMD3<Double>
+        public let weightN: Double
+        /// The map core is sent (FlexiblePressShape.map — the same the design used): mode, curves, deepest squish.
+        public let map: FlexMap
+        public init(id: UUID, regions: [Int], direction: SIMD3<Double>, weightN: Double, map: FlexMap) {
+            self.id = id; self.regions = regions; self.direction = direction; self.weightN = weightN; self.map = map
+        }
+    }
+
+    /// ★ RED CONTROL only (FlexibleR7E2Tests): the press's pieces written as plain face entries (no face_region_ids, no
+    /// press_direction) — core would design each piece along its own normal.
+    nonisolated(unsafe) static var controlPressAsFaces = false
 
     public enum EncodeError: Error, Equatable, CustomStringConvertible {
         case noFilament

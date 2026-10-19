@@ -78,6 +78,12 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
         return "Core refused it: " + first
     }
 
+    /// ★ R7-E2 — the reviewer's ruling (2026-10-10 19:40: "map shared_footprint to plain words, naming both presses/regions and the
+    /// overlap in mm²"): a refusal with core's region ids put in his names (`names`: a region id → "Edge 16" / "Face 3").
+    public static func refusalLine(_ r: FlexRefusal, names: (Int) -> String) -> String {
+        refusalLine(r)   // ★ R7-E2 STUB
+    }
+
     /// Read core's answer: the refusal from the result, the choices from its receipt.
     public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double, scope: String? = nil) -> FlexibleCoreRunReport {
         let receipt = (try? JSONSerialization.jsonObject(with: Data(r.receiptJSON.utf8))) as? [String: Any] ?? [:]
@@ -113,6 +119,9 @@ public final class FlexibleCoreRun: ObservableObject {
     @Published public private(set) var hold: FlexibleCoreHold?
     /// The document the phase answers (the same job is not sent twice).
     public private(set) var sentJob: String?
+    /// ★ R7-E2 (the ruling's item 5: "Show that in plain words"): the job sent carries a SIDE press — the Export caption says the
+    /// angled estimate in one line, the ruling's whole sentence behind its (i). nil otherwise.
+    @Published public internal(set) var pressNote: String?
     /// The step's button that sent it (nil: the job Settings describes).
     public private(set) var sentFix: FlexibleCoreFix?
     /// ★ C2 VERIFICATION: a button of the step was tapped (the main stage acts on it — the model

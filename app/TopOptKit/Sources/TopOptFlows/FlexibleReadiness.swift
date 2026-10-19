@@ -256,6 +256,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// ★ ROUND 7, M1 VERIFY: the opened scene sets a face-prism (default true: the pure tests' readiness, and a scene still
         /// opening). False: the top line is the no-face-prism line, never "Ready".
         public var facePrisms = true
+        /// ★ R7-E2: edge and corner presses IN THE JOB (FlexiblePressSupport) — something IS pressed, so "no pressed face" does not
+        /// block an edges group sent on its own.
+        public var sentPresses = 0
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
