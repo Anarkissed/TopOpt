@@ -333,9 +333,10 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
     // MARK: - R7
 
     /// R7. His pad, Corner (Faces 1 + 2 + 3) [Done]: the Top's rest (his Group 1 press) is a pentagon, so core frames it on its
-    /// principal axis — turned to the Top's edges. Its column quads now stop at the Top's outer edge (none past it by more than a
-    /// micron) and the band along every outer edge is covered (a point 0.2 mm inside each, every 0.5 mm, lies on a drawn triangle of
-    /// the Top). RED CONTROL (the quads as they come): quads past the edge and notches along it — the sawtooth.
+    /// principal axis — turned to the Top's edges. Its column quads now stop at the Top's outer edge and behind its own cut line
+    /// (none past either by more than a micron), and the band along every outer edge and along the cut is covered (a point 0.2 mm
+    /// inside each, every 0.5 mm, lies on a drawn triangle of the Top). RED CONTROL (the quads as they come): quads past the edge
+    /// and notches along it — the sawtooth. (The cut line's checks were added after the red run, found by looking at the corner.)
     func testACornersTurnedRestHasNoSawtooth() async throws {
         let (r, m) = try await F.hisPad(self)
         let mesh = try XCTUnwrap(r.project.viewerMesh)
@@ -351,6 +352,11 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
         let lo = SIMD2(xs.min()!, ys.min()!), hi = SIMD2(xs.max()!, ys.max()!)
         print("FLEX-E1R-R7 the Top's rest frame x \(st.xAxis) · pitch \(st.pitchMM) · columns \(st.columns.count) · Top \(lo)…\(hi)")
         XCTAssertGreaterThan(Swift.min(abs(st.xAxis.x), abs(st.xAxis.y)), 0.1, "the case: core's frame is turned to the Top's edges")
+        // ★ found by looking at the corner's picture (after the red run): the rest's own cut line (the corner's diagonal) stepped
+        // too — the quads behind it and the band along it are checked the same way
+        let cutLines = m.regions.cuts(of: topKey.region).filter { abs($0.normal.z) < 1e-9 && simd_length($0.normal) > 1e-12 }
+            .map { RegionCut(point: $0.point, normal: simd_normalize($0.normal)) }
+        XCTAssertFalse(cutLines.isEmpty, "the Top's rest has its in-face cut (the corner's)")
         func measure() throws -> (past: Double, notches: Int, samples: Int) {
             let o = try XCTUnwrap(FlexiblePageChannels.overlay(model: m))
             let start = try XCTUnwrap(o.flatStart[topKey])
@@ -359,6 +365,7 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
             for v in start..<(start + 6 * st.columns.count) {
                 let x = Double(pos[3 * v]), y = Double(pos[3 * v + 1])
                 past = Swift.max(past, lo.x - x, x - hi.x, lo.y - y, y - hi.y)
+                for c in cutLines { past = Swift.max(past, -simd_dot(SIMD3(x, y, c.point.z) - c.point, c.normal)) }
             }
             // the Top's drawn triangles (its face id, near its plane), in plan
             var tris: [[SIMD2<Double>]] = []
@@ -379,6 +386,17 @@ final class FlexibleR7E1ReviewTests: XCTestCase {
             while s < hi.x - 0.25 { samples += [SIMD2(s, lo.y + 0.2), SIMD2(s, hi.y - 0.2)]; s += 0.5 }
             s = lo.y + 0.25
             while s < hi.y - 0.25 { samples += [SIMD2(lo.x + 0.2, s), SIMD2(hi.x - 0.2, s)]; s += 0.5 }
+            // along each cut line, 0.2 mm inside the rest, inside the Top
+            for c in cutLines {
+                let n2 = SIMD2(c.normal.x, c.normal.y), along = SIMD2(-c.normal.y, c.normal.x)
+                let p0 = SIMD2(c.point.x, c.point.y) + n2 * 0.2
+                var t = -150.0
+                while t < 150 {
+                    let q = p0 + along * t
+                    if q.x > lo.x + 0.25, q.x < hi.x - 0.25, q.y > lo.y + 0.25, q.y < hi.y - 0.25 { samples.append(q) }
+                    t += 0.5
+                }
+            }
             return (past, samples.filter { !inside($0) }.count, samples.count)
         }
         FlexibleOverlayMesh.controlNoEdgeFill = true

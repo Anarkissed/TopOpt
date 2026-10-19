@@ -59,6 +59,9 @@ public struct FlexibleOverlayMesh {
     /// sub-vertex is the linear blend of its kept triangle's corner dents, so the drawn
     /// geometry is exactly the unsubdivided one (no new seam) — only the colour gets finer.
     public let subdivision: Subdivision?
+    /// ★ R7-E1 REVIEW: per kept part triangle of an edge fill's band (FlexibleOverlayMesh.build), the region and the column whose
+    /// square lies over it — the band takes that square's colour, so where it shows between the squares no colour steps.
+    public var bandColumn: [Int: (key: FlexFaceKey, column: Int)] = [:]
 
     public struct Subdivision {
         /// Per kept (unsubdivided) triangle: its source triangle, and its three corners'
@@ -179,7 +182,8 @@ public struct FlexibleOverlayMesh {
         // band of the region keeps its own part pieces (under the quads, dented by the ramp like every part vertex), and no quad
         // corner is left past the face's edge — only for a region whose quads DO step past its face's edge (a turned frame; a face
         // of at most 64 triangles). A whole face, and every region whose quads never cross its face's edge, draw as before.
-        struct Band { let faces: Set<Int>; let cuts: [RegionCut]; let strips: [Int: [RegionCut]] }
+        struct Band { let key: FlexFaceKey; let faces: Set<Int>; let cuts: [RegionCut]; let strips: [Int: [RegionCut]]; let surface: [SIMD3<Double>] }
+        var bandColumn: [Int: (key: FlexFaceKey, column: Int)] = [:]
         var bands: [Band] = []
         var faceTris: [Int: [[SIMD3<Double>]]] = [:]
         func trisOf(_ f: Int) -> [[SIMD3<Double>]] {
@@ -206,8 +210,13 @@ public struct FlexibleOverlayMesh {
                 guard out else { continue }
                 stepsOut.insert(f.key)
                 var strips: [Int: [RegionCut]] = [:]
-                for face in f.faces { strips[face] = outerStrips(trisOf(face), width: f.stack.pitchMM) }
-                bands.append(Band(faces: f.faces, cuts: f.cuts, strips: strips))
+                for face in f.faces {
+                    // its outer edges, and (found by looking at the corner) its own cut lines: the strip one pitch inside each
+                    strips[face] = outerStrips(trisOf(face), width: f.stack.pitchMM)
+                        + Self.inPlaneCuts(f.cuts, trisOf(face)).map { RegionCut(point: $0.point + $0.normal * f.stack.pitchMM, normal: SIMD3<Double>.zero - $0.normal) }
+                }
+                bands.append(Band(key: f.key, faces: f.faces, cuts: f.cuts, strips: strips,
+                                  surface: st.columns.indices.map { f.centres[$0] + st.load * st.columns[$0].entryT }))
             }
         }
         for t in 0..<part.triangleCount {
@@ -233,7 +242,13 @@ public struct FlexibleOverlayMesh {
                             guard poly.count >= 3, FlexibleMeet.area(poly) > FlexibleFacePieces.slivermm2 else { continue }
                             let w = poly.map { FlexibleFacePieces.barycentric($0, a, b, c) }
                             for (x, y, z) in FlexibleFacePieces.fan(poly.count) {
+                                let first = kept.count
                                 emit(t, f, [poly[x], poly[y], poly[z]], [w[x], w[y], w[z]], at: nil)
+                                // the square over it: the column nearest its middle
+                                let mid = (poly[x] + poly[y] + poly[z]) / 3
+                                if let col = band.surface.indices.min(by: { simd_distance_squared(band.surface[$0], mid) < simd_distance_squared(band.surface[$1], mid) }) {
+                                    for i in first..<kept.count { bandColumn[i] = (band.key, col) }
+                                }
                             }
                         }
                     }
@@ -277,11 +292,21 @@ public struct FlexibleOverlayMesh {
             let lift = -st.load * 0.05
             // ★ R7-E1 REVIEW: a region with cuts — no quad corner past its face's outer edge (moved in the face's plane onto it)
             let clampTris: [[SIMD3<Double>]]? = stepsOut.contains(f.key) ? f.faces.sorted().flatMap { trisOf($0) } : nil
+            let clampCuts = clampTris.map { Self.inPlaneCuts(f.cuts, $0) } ?? []
             for (k, c) in st.columns.enumerated() {
                 let p = f.centres[k] + st.load * c.entryT + lift
                 let base = Int32(pos.count / 3)
                 for q0 in [p - x - y, p + x - y, p + x + y, p - x + y] {
-                    let q = clampTris.map { Self.ontoFace(q0, $0) } ?? q0
+                    var q = q0
+                    if let tris = clampTris {
+                        // onto the face, behind the region's own cut lines, onto the face again (a corner where the two meet)
+                        q = Self.ontoFace(q, tris)
+                        for cut in clampCuts {
+                            let d = simd_dot(q - cut.point, cut.normal)
+                            if d < 0 { q -= cut.normal * d }
+                        }
+                        q = Self.ontoFace(q, tris)
+                    }
                     pos += [Float(q.x), Float(q.y), Float(q.z)]
                 }
                 // wound so the quad faces out of the part (along −load)
@@ -293,11 +318,13 @@ public struct FlexibleOverlayMesh {
         }
         let mesh = ViewerMesh(vertices: pos, indices: idx, faceIDs: fid,
                               faceGeometry: part.faceGeometry, pseudoFaces: part.pseudoFaces)
-        return FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
-                                   flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid,
-                                   keptWeights: weights,
-                                   subdivision: edge == nil ? nil : Subdivision(source: subSource, cornerWeights: subCorners,
-                                                                                subOf: subOf, bary: subBary))
+        var built = FlexibleOverlayMesh(mesh: mesh, partFlatVertices: kept.count * 3, keptTriangles: kept,
+                                        flatStart: flatStart, keptFace: keptFace, keptCentroid: keptCentroid,
+                                        keptWeights: weights,
+                                        subdivision: edge == nil ? nil : Subdivision(source: subSource, cornerWeights: subCorners,
+                                                                                     subOf: subOf, bary: subBary))
+        built.bandColumn = bandColumn
+        return built
     }
 
     // MARK: ★ R7-E1 REVIEW — the edge fill's geometry
@@ -328,6 +355,19 @@ public struct FlexibleOverlayMesh {
             out.append(RegionCut(point: p + inward * width, normal: -inward))
         }
         return out.sorted { ($0.point.x, $0.point.y, $0.point.z) < ($1.point.x, $1.point.y, $1.point.z) }
+    }
+
+    /// A region's cuts whose normals lie in the face's plane (the in-face cuts a sector, a rest or a flat prism lays), unit.
+    static func inPlaneCuts(_ cuts: [RegionCut], _ tris: [[SIMD3<Double>]]) -> [RegionCut] {
+        guard let t = tris.first, t.count == 3 else { return [] }
+        let n = simd_cross(t[1] - t[0], t[2] - t[0])
+        guard simd_length(n) > 1e-12 else { return [] }
+        let nf = simd_normalize(n)
+        return cuts.compactMap { c in
+            let l = simd_length(c.normal)
+            guard l > 1e-12, abs(simd_dot(c.normal / l, nf)) < 1e-6 else { return nil }
+            return RegionCut(point: c.point, normal: c.normal / l)
+        }
     }
 
     /// `q` moved in its nearest face triangle's plane onto the face where it lies past the face's edge (its offset off the plane
@@ -390,6 +430,17 @@ public struct FlexibleOverlayMesh {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 8)
         for t in 0..<keptFace.count {
+            // ★ R7-E1 REVIEW: an edge fill's band wears the colour of the square over it (clay where the square is clay)
+            if let b = bandColumn[t] {
+                guard let cols = columnColours[b.key], b.column < cols.count, cols[b.column].w > 0 else { continue }
+                let c = cols[b.column]
+                for j in 0..<3 {
+                    let v = t * 3 + j
+                    out[v * 8] = c.x; out[v * 8 + 1] = c.y; out[v * 8 + 2] = c.z; out[v * 8 + 3] = c.w
+                    out[v * 8 + 5] = 1
+                }
+                continue
+            }
             guard let c = partTint(keptFace[t], keptCentroid[t]) else { continue }
             for j in 0..<3 {
                 let v = t * 3 + j

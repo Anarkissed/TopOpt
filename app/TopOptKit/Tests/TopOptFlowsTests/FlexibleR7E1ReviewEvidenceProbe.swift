@@ -88,6 +88,7 @@ final class FlexibleR7E1ReviewEvidenceProbe: XCTestCase {
     }
     func setCam(_ h: Host, az: Float, el: Float) {
         guard let cm = cameraModel(h) else { log.append("!! no camera model"); return }
+        cm.snap(toID: "Front", animated: false)   // stops a turn still easing in (the offscreen host's display link is slow)
         var c = cm.camera
         c.setOrientation(azimuth: az, elevation: el)
         cm.adopt(c)
@@ -307,10 +308,14 @@ final class FlexibleR7E1ReviewEvidenceProbe: XCTestCase {
         let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.p13)
         pump(3)
         let press = try edge(m, faces: [3, 2])
+        pump(4)   // (the [Done] turn's animation ends before the view is set)
         _ = run { await m.setFlatCut(press.id, depthMM: 10, direction: press.direction, snap: press.snap) }
         pumpUntil(120) { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
         setCam(h, az: .pi / 4, el: .pi / 6)
+        pump(2)
+        log.append("before the twist: \(camLine(h))")
         let why = run { await m.setFlatAngle(press.id, degrees: 5, tilt: false) }
+        log.append("right after the twist: \(camLine(h))")
         pumpUntil(120) { m.sceneState == .ready && m.openedKey == m.currentSceneKey }
         pump(2)
         toastNow = m.toast
@@ -384,8 +389,9 @@ final class FlexibleR7E1ReviewEvidenceProbe: XCTestCase {
         toastNow = m.toast
         log.append("second typed 40 → \(w ?? "stored") at \(m.press(p2.id)?.settings.deepestMM ?? -1) · toast \(m.toast ?? "-")")
         m.selectedPress = p2.id
-        pump(2)
+        pump(4)   // (selecting the press turns the camera to it — D-AP-13; its animation ends first)
         setCam(h, az: .pi / 4, el: Float(1.2))
+        pump(2)
         try shot("E01_13p_two_presses_face3_keeps_rest.png", h)
         flush("E_lines.txt")
     }
