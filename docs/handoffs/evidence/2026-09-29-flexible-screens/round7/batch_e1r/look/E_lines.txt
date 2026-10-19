@@ -1,0 +1,3 @@
+[Done] both: stored
+second typed 40 → stored at 30.003571302112864 · toast Held at 30 mm · Face 3 keeps the rest
+E01_13p_two_presses_face3_keeps_rest.png: cam az 0.785 el 1.200 dist 214.9 · probe (6, 6, 8, 255) · marks ["flatArrow-Edge 16 (830.0, 688.0, 509.0, 2.0)", "flatDepthChip-Edge 16 (783.0, 666.0, 95.0, 45.0)", "flatPrism-Edge 16 (830.0, 688.0, 509.0, 2.0)"] · toast Held at 30 mm · Face 3 keeps the rest

@@ -1,6 +1,174 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-E1 — edges and corners are a FLAT PRISM you drag in; Protect stays on under a lattice; two top-lid follow-ups (2026-10-18) (read this first)
+## ★ Round 7 · the review of R7-E1 — what the two verifiers found on the flat prism, what is fixed, and what still waits (2026-10-19) (read this first)
+
+Two verifiers looked at R7-E1 on your pad, your live project (Balanced) and your simulator project: one by the numbers, one by
+the pictures the page itself draws. They found two blockers and six bigger problems. Both blockers and five of the six are fixed,
+each with a test written FIRST (red at stubs) and a red control inside it; so are most of the small ones (the words, the boxes'
+labels, the chip under the panel, the lines through its number, [Set N mm] keeping your angle, a neighbour press asked core too,
+the bridge's own tests run). One is NOT changed on purpose: the camera on [Done] stays as the reviewer ruled it (D-AP-13, down the
+arrow) — the reviewer is asked again, with the verifier's pictures.
+
+Branch `claude/flexible-screens` (PR #362), on top of `4aa2fed9` (R7-E1's handoff). Commits:
+- `9062004f` the tests FIRST, against stubs (red run `round7/batch_e1r/e1r_red_run.txt`, the stubs `e1r_stubs.diff.txt`).
+- `a51d9627` the code.
+- `140a7cb7` found by the targeted suite: the edge fill only where a region's squares step past its face's edge.
+- `107e5adf` found by looking at the corner's pictures: the corner's own cut line clamped and filled too, and the fill wears the
+  colour of the square over it.
+- This section's commit (runs, hashes, pictures in `round7/batch_e1r/`).
+
+**Nothing is pushed.** **Installed on the iPad Pro 13" simulator (147E56A1), not launched** (03:46, at `107e5adf`). The app was not
+running at any of the three installs, so nothing was terminated. The installed `TopOpt.debug.dylib` is the built one (cmp; sha256
+`7a9fea574551443b…`, 89 155 584 bytes); it carries "Starts at", "stops at … lattice ends", "is out of Flexible", "no flat prism", "Held at", the new bridge symbol, and no
+"Strip width".
+
+**App only.** No #354 / main file: WorkspacePlaceholder.swift, ProjectModel.swift and MetalMeshView.swift are byte-identical to
+`4aa2fed9`. No core file. The bridge files (`flexible_bridge.cpp`, `FlexibleBridge.hpp`) are ours: the press columns' run rule and
+one tests-only switch. Nothing is sent to core's job: goldens and the 16 stage-job hashes unchanged (below).
+
+### What you will see now, in plain words
+- **At Balanced (your quality) the Top's edges and corners work.** [Done] on the Top + Face 2 edge or the Top corner made the flat
+  prism refuse at once ("Stops at 0.4 mm"). Now it starts 3 mm deep and goes as deep as the lattice really goes (about 25 mm on your
+  pad, as at Fine).
+- **A new pick that the lattice stops shallower than 3 mm starts at the stop**, and one line says so: "Starts at 1.9 mm · the
+  lattice ends there". (It used to fail [Done] with no fix.)
+- **Two flat prisms on one face can no longer swallow it.** Each face keeps some of itself beyond EVERY cut on it together. Type
+  40 mm on the second edge of Face 3 and it is held: "Held at 30 mm · Face 3 keeps the rest", and its drag stops there too.
+- **The lattice is a hard stop.** Drag or type past where the lattice ends and the prism lands ON the stop (one change, one Undo):
+  "Held at 18.5 mm · the lattice ends there", and the card keeps "Stops at 18.5 mm · the lattice ends there". The next drag stops
+  exactly there. No more "runs to 46 mm, then jumps back to 3 mm".
+- **An angle the lattice stops is said as an angle.** Twist 5° on your live Edge 16 at 10 mm and it lands on the last twist the
+  lattice allows, the depth kept: "Twist stops at 1.7° · lattice ends". It never offers a depth that would throw your angle away.
+- **After [Done] the camera stays on the new prism** even when a fix pop-up appears by itself ("Group 2 would squish …"): the
+  pop-up shows, the camera no longer swings round to the back.
+- **The angle knob and its boxes are on the screen in your working views** (the home view and steeper). The arrow points at you,
+  so its real tail is below the screen; the knob now sits on the arrow where it is visible (or right beside it where the panel's
+  edge is in the way), its two boxes beside it.
+- **The boxes say "Tilt" and "Twist"** (a corner: "Up/down", "Left/right"), not ↕ / ↔ — on an upright edge a sideways drag tilts,
+  and the arrows said the opposite.
+- **The depth chip is never half under the panel**, and the dashed lines no longer run through its number.
+- **A corner no longer makes the Top's edges jagged.** After a corner, the Top's own press is cut to a five-sided piece; core lays
+  its grid at 45° to it, and its little squares stepped out past the Top's edges (a sawtooth on all four). They now stop at the edge
+  and the edge is filled, in the same colour; the same along the corner's own cut, on the Top and on the side faces.
+- **Plain words**: "Face 1 · lattice A is out of Flexible" (it was cut mid-word), "A curved edge · no flat prism", and the (i) texts
+  say "halfway between the faces" / "where the lattice ends" (no "core's columns").
+
+### Not changed on purpose
+- **The camera on [Done]** is still the view straight down the arrow (D-AP-13, as the reviewer ruled). The verifier's pictures show
+  what you would see there: your pad as a thin band, the flat prism a sliver; the same press reads as a cut corner from 30° up. The
+  reviewer is asked (again, with the pictures) to amend it to a view 25–50° off the arrow.
+
+### Why, and where this differs from what the verifiers suggested
+- **The lattice stop's measurement (the bridge, ours).** Each press column's lattice run is measured on core's own samples and core's
+  own lattice. At Balanced core leaves your Top's surface layer empty (its centres sit 0.31 mm above the part), so every column
+  entering through the Top read "no lattice". The verifier suggested allowing about one voxel at the entry. Looking at the binding
+  column showed a second effect: core also leaves voxels along the Top's triangle diagonal empty INSIDE the lattice at Balanced (a
+  column entering at (3.6, 2.0, 20) has 1.56 mm of lattice, a ~1.5 mm hole, then lattice again). So the rule is: an empty stretch
+  within two voxels of the entry is travel, and a hole no longer than one voxel's diagonal inside the run is crossed; a longer gap
+  (the 50 mm between your Face 3 and Face 5 slabs) still ends it. Where a run has no hole (Fast, Fine, the sides) it is E1's, sample
+  for sample. The diagonal hole is core's own voxelization; the reviewer is told (not asked of #361).
+- **Two prisms on one face are HELD, not refused.** The verifier suggested refusing. Your typed values are held to every other limit
+  (and the hold said), so this one is too; the plan still refuses anything that would leave a face group's face with no piece.
+- **"Keeps some of itself" is 0.5 mm beyond every cut**, so between two prisms on one face at least 1 mm stays.
+- **The angle stop is found by halving** (five halvings, each core's exact check on the cut it would make, nothing stored, about a
+  second on your live project) and the best one is stored without opening the scene again.
+- **The sawtooth fix touches only a pressed region whose squares DO step past its face's edge** (a turned frame — the corner's
+  rest): its squares are kept inside the face's outer edge and behind the region's own cut lines, and a band one square wide of the
+  region's own surface lies under them along both (dented like the rest of the part, in the colour of the square over it), so
+  nothing steps out and no notch or colour step opens. Every other region, and a whole face, draws exactly as before (the first
+  version banded every region with cuts and the suite caught it — below).
+
+### The tests → the code (RED first)
+| what | test | RED at the stubs |
+|---|---|---|
+| **The Top at Balanced** (your pad, the Top's 20 mm face-prism, quality Balanced): [Done] on the Top + Face 2 edge and on the Top corner stores 3 mm deep; no latticed column reads 0 mm; the cap > 10 mm (25.6). Your live project's side edge still stores. **RED CONTROL** (E1's run from the first sample): "Stops at 0.4 mm · the lattice ends there", nothing stored | `FlexibleR7E1ReviewTests.testTheTopEdgeAndTheCornerStoreAtBalanced` | red: refused |
+| **A new pick starts at the stop** (your live project, Group C's prisms at 2 mm): stored at 1.93 mm (2/√2 within a pitch), "Starts at 1.9 mm · the lattice ends there", one Undo step. **RED CONTROL**: refused | `…testANewPickStartsAtTheLatticeStop` | red: refused |
+| **Each face keeps some of itself, all presses together** (your pad: Face 3's edges with Face 2 and Face 4): the first at 40 mm; the second typed 40 → held at 30.0 ("Held at 30 mm · Face 3 keeps the rest"), Face 3 keeps a 20 mm² rest, no shared footprint, no surface in two entries, the drag stops at the hold. **RED CONTROL** (per press): stored at 40, Face 3's rest the whole face over both pieces | `…testEachFaceKeepsSomeOfItselfUnderTwoPresses` | red |
+| **A hard stop** (your live form, Face 3's prism 25 mm): a release at 20 mm lands on 18.46 (25/√2 within a pitch), one Undo, the card's line, the hold said; the next drag's stop is exactly 18.46. **RED CONTROL**: nothing stored, the drag's stop 33 mm | `…testTheLatticeStopIsAHardStop` | red |
+| **An angle stop said as an angle** (your live project, Balanced, Edge 16 at 10 mm): typed twist 5° → lands at 1.72°, depth 10 kept, "Twist stops at 1.7° · lattice ends", no " mm". **RED CONTROL**: "Stops at 4.3 mm …", its fix the untwisted arrow | `…testAnAngleTheLatticeStopsIsSaidAsAnAngle` | red |
+| **The knob's drag, pure**: right = twist, up = tilt, under 3° snaps to halfway, 3° stays, the trackball looking down the arrow; the boxes "Tilt"/"Twist"/"Up/down"/"Left/right" | `…testTheKnobDragIsPure` | red |
+| **Plain words**: the removed member's reason whole in 44; no "strip"; no "core's" in the (i) | `…testPlainWords` | red |
+| **No sawtooth** (your pad, the corner Faces 1 + 2 + 3): the Top's rest is framed at 45°; no quad past the Top's edge or behind the corner's cut (0.000 mm), the band 0.2 mm inside every outer edge and the cut covered (0 of 811 points open; the cut line's 15 added after the red run, found by looking). **RED CONTROL**: 0.82 mm past, 265 of 811 open | `…testACornersTurnedRestHasNoSawtooth` | red: 0.82 mm, 250 of 796 |
+| **Hosted, the camera after [Done]** (13"): the pop-up fires by itself; the camera stays on D-AP-13's view of the press (az 0.785, el 0). **RED CONTROL**: turned to the back (az π) | `FlexibleR7E1ReviewHostedTests.testAPopUpAfterDoneKeepsTheTurn` | red |
+| **Hosted, the knob in your views** (home 45°/30° and 55°, 13" portrait and 11" landscape): the knob and both boxes drawn, on screen, clear of the chrome, ≥ 56 pt from the chip; the chip clear too. **RED CONTROL** (E1's knob at the true tail): no knob | `…testTheKnobIsOnScreenInHisWorkingViews` | red |
+
+Not test-driven (said): a neighbour press whose pieces another press's change re-cuts is now asked core's verdict too (no case on
+your pad makes one); a press whose faces turn away from the camera draws faint and without handles; the knob's on-device drag (the
+hosted page delivers it no events — its math is the tested pure function).
+
+### Re-pins (our own tests only; each attributed inside the test)
+- `FlexibleFlatPrismSeamTests.testTheDepthStopsWhereTheLatticeEnds` (R7-E1's): a release past the stop now LANDS on N (one Undo
+  step, the card's line) instead of storing nothing with [Set N mm] — the verifier's "runs to 46 mm, then springs back to 3 mm
+  under a different number", your "hard stop".
+- `FlexibleFlatPrismHostedTests.testTheEdgesTabHasNoStripWidth`: a ≤ 44 check of `prefix(44)` (always true) dropped.
+- `FlexibleEdgeGroupsTests`, `FlexibleMeetReviewTests`: the removed member's reason reads "is out of Flexible" (whole).
+- No #354 test touched.
+
+### The bytes and the runs (raw: `round7/batch_e1r/e1r_runs.txt`)
+- **The targeted run** at `140a7cb7` (01:03–02:56): **185 TopOptFlowsTests classes** (`e1r_suite_classes.txt`: every Flexible*
+  class — 177, every class that pins a touched file among them, the goldens too — + LatticeStaleTypeTests, ProjectStoreTests,
+  UndoHistoryTests, LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, BottomBarMeasurementTests,
+  LatticeIncludeGateTests), 16 chunks of 12: **1,034 cases — 930 passed, 103 skipped (env-gated probes), 1 failed**: the known
+  FlexibleBatchNVerifyTests refine line. No signal; LatticeStaleTypeTests 6/6; no tracked file rewritten. **This time also the six
+  TopOptKitTests Flexible* classes** (the bridge's own — the verifier found R7-E1's run left them out): 37 passed, 2 skipped, 0 failed.
+- The first run of that suite (at `a51d9627`) found one thing in its first chunk, and was stopped (by PID) to fix it: the edge fill
+  laid its band under every pressed region with cuts, and FlexibleBatchCVerifyTests' Stress colour check read p99 0.1005 (≥ 0.1) on
+  your 0004's lattice sections. `140a7cb7` limits it to regions whose squares step past the face's edge: 14/14, p99 0.081.
+- **Goldens, 0 DIFFERS in both modes**: with SWIFT_DETERMINISTIC_HASHING=1, 38 identical; unseeded, 32 identical + 1 PART-SKIP
+  (13 tests, 0 failures each) — the counts of every round-7 step.
+- **The 16 stage-job hashes**: `stage_job_hashes_e1r.txt` is byte-identical (cmp, whole file) to the top-lid step's
+  `stage_job_hashes_tl.txt`. Nothing here reaches a job.
+- After `107e5adf` (drawing only), **every class that builds the page's overlay or hosts the page, and the flat-prism, edge-group
+  and review classes — 62 classes** (`e1r_post_classes.txt`): **323 cases — 291 passed, 32 skipped, 0 failed**, no signal. (Goldens
+  and hashes not re-run for it: no job, no core call changes.)
+
+### The pictures (`round7/batch_e1r/look/`, the PAGE as it draws — its own renderer under its own chrome, the UX verifier's harness; not device screenshots)
+All at the page's home view (45°, 30° up) unless said; the A pictures on your pad (the Top's 20 mm face-prism), at 13" portrait.
+- `A01_13p_after_done_popup_camera_kept.png` — right after [Done] on Face 2 + Face 3: the pop-up shows, the camera stays on the press
+  (D-AP-13's view, as ruled: your pad edge-on, the prism a sliver); `A01b_…beside_after_done.png` beside your img_edges_1018.
+- `A02_13p_home_3mm_knob_on_screen.png`, `A03_13p_home_10.6mm.png`, `A04_13p_home_twist+10.png`, `A05_13p_55deg_3mm.png` — the
+  chip at the arrow's head (clear of the panel, the dashes kept out of its number), the knob on the arrow near the bottom (24 pt
+  beside it where the panel's edge is in the way), its boxes "Tilt" / "Twist".
+- `A06_11l_home_3mm.png`, `A07_11l_55deg_3mm.png` — the same at 11" landscape: the knob exactly on the arrow below the part.
+- `B01_13p_released_at_20_landed.png` — your live form: released at 20 mm, landed at 18.5 mm; the top line "Held at 18.5 mm · the
+  lattice ends there", the card "Stops at 18.5 mm · the lattice ends there", Deepest squish 18.5.
+- `C01_13p_twist_landed.png` — your live project (Balanced): typed twist 5° at 10 mm landed at 1.7°, the card "Twist stops at 1.7° ·
+  lattice ends", Twist 1.7. (At D-AP-13's view: on this project the harness could not set the home view — the picture is for the
+  card.)
+- `D01_13p_corner_fast_model_tab_edges.png` / `D01_13p_corner_balanced_model_tab_edges.png` — after the corner (Faces 1 + 2 + 3),
+  Fast and Balanced: clean edges. Beside each, `D02_…_RED_CONTROL_sawtooth.png` — the squares as they come: the sawtooth on every
+  edge of the Top (what the verifier saw). These two pairs are kept at the device's pixels.
+- `D03_13p_top_face2_edge_balanced_stored.png` — the Top + Face 2 edge stored at Balanced, 3 mm, its knob and boxes.
+- `E01_13p_two_presses_face3_keeps_rest.png` — from above: Face 3's two flat prisms (40 mm and the held 30 mm), Face 3 keeping its
+  strip between them. Lines: `A_lines.txt` … `E_lines.txt` (camera, every handle's frame, the toast).
+
+### Not done, and why
+- **D-AP-13** unchanged (binding); the reviewer is asked to amend it.
+- **[Untwist]** on the far-end stop is not added: that stop is a 2-second bubble while dragging, and the card's [Back to halfway]
+  already undoes both angles. **The side label** ("Side press · gyroid only · estimate") waits for E2, when a press is sent.
+- **The pick list** still lists greyed rows first and cuts long titles ("Corner · Face 5 + Face 1 · lattice…"); only the reasons are
+  fixed. (Carried from AP2, not new in E1.)
+- **Turning the camera so the working press sits right of the panel** when the edges tab opens: not built; the handles keep off the
+  panel instead.
+- **A 3 mm wedge still sits under its chip** in some views (the chip is where you drag); the lines no longer cross the number.
+- **The pop-up after [Done] on your pad** ("Group 2 would squish ~14.3 of 15.9 mm: Group 1 needs firmer material") still appears:
+  it is the groups check on core's stacks of the re-cut faces; whether an unsent edge press should raise it is a question below.
+- **The twist at Balanced** is limited by core's empty top voxel layer (the same 0.21 mm sheet as the top-lid fix): a twisted
+  prism's columns rise into it. That is core's lattice as it stands; said below.
+- **A strip saved by M2 off halfway** keeps no halfway (its knob and angle boxes stay inert) — none of your projects has one.
+- E2–E4 (the send, the sim along the arrow, the curves and stamp) are still to come.
+
+### Questions
+1. **(Reviewer)** D-AP-13 for edges and corners: amend to the view 25–50° off the arrow (the verifier's pictures: down the arrow your
+   pad is a band and the prism a sliver)?
+2. **(Reviewer)** Core at Balanced leaves voxels along your Top's triangle diagonal empty inside the lattice (the +Z winding test on
+   the diagonal edge, it seems) — the stop now crosses such one-voxel holes; raise it with #361 (it may leave a thin unprinted sheet)?
+3. **(Reviewer)** Keep the lattice run's two tolerances (two voxels at the entry, one voxel's diagonal inside)?
+4. **(You)** After [Done] on your pad a groups pop-up appears ("Group 2 would squish ~14.3 of 15.9 mm"): the edge press re-cuts
+   Face 2 and Face 3 and their groups' presses are checked again. Leave it, or keep the groups check quiet until a press is sent?
+5. **(You)** Between two prisms on one face at least 1 mm stays (0.5 mm beyond each cut). Enough?
+
+## ★ Round 7 · R7-E1 — edges and corners are a FLAT PRISM you drag in; Protect stays on under a lattice; two top-lid follow-ups (2026-10-18) (the step before the review above)
 
 Your words (2026-10-18, ~15:00 and ~15:10): "There should be a prism that the user can drag to show how far it can squish in.
 … It should also be able to be angled up or down based on the user's choice." and "There shouldn't be a strip width. It should
