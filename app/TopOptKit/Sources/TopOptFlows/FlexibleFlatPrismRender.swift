@@ -148,6 +148,10 @@ enum FlexibleFlatPrismUI {
 
     /// The last arrow the overlay drew, in the page's points (the hosted tests read it).
     static var lastArrowEnds: (head: CGPoint, tail: CGPoint)?
+    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    static var controlKnobAtTailOnly = false
+    /// ★ R7-E1 REVIEW (STUB): each angle box's label.
+    static func boxLabel(tilt: Bool, corner: Bool) -> String { tilt ? "\u{2195}" : "\u{2194}" }
     /// The last keypad a flat-prism box opened (the hosted tests read it).
     static var lastPad: String?
 
@@ -188,6 +192,13 @@ enum FlexibleFlatPrismUI {
     /// and its handles do not collapse to one point; until a ruling, the knob is drawn ≥ 56 pt from the head — `layout`.)
     static func camera(press p: FlexiblePress, settle: simd_quatf) -> GizmoRegion? {
         FlexibleFixPopup.cameraRegion(load: p.direction, settle: settle)
+    }
+}
+
+/// ★ R7-E1 REVIEW (STUB): the knob's drag as a pure function.
+enum FlexibleFlatPrismKnob {
+    static func angles(start: (theta: Double, phi: Double), translation: CGSize, jac: (a: CGVector, b: CGVector)?) -> (theta: Double, phi: Double) {
+        start
     }
 }
 

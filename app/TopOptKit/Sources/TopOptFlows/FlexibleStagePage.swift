@@ -477,6 +477,8 @@ public struct FlexibleStagePage: View {
     /// and that layer drawn over the chrome again (the red control).
     @MainActor static var controlNoOverlays = false
     @MainActor static var controlOverlaysOverChrome = false
+    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    @MainActor static var controlPopupTurnsCamera = false
 
     /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame — every keep-out (the panel,
     /// the legend, the view buttons, the player), the player whole, the fix pop-up, the top line and its toast, the Exit row,

@@ -739,6 +739,10 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
 // ★ R7-E1: core's press API version (fx::kPressApiVersion; 2 at #361 099dcaed).
 int32_t flexible_press_api_version();
 
+// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the FIRST sample (it stops at
+// the first sample off the lattice, so a surface voxel core leaves Empty makes the run 0) — E1's rule. (STUB: the rule unchanged.)
+void flexible_control_run_from_first_sample(bool on);
+
 // ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
 // The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated
 // direction (flexible_scene_region_frame with a direction).

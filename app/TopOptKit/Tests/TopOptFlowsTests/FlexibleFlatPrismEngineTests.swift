@@ -60,14 +60,16 @@ final class FlexibleFlatPrismSeamTests: XCTestCase {
         XCTAssertTrue(body.contains("kSyntheticPressMax") && body.contains("fx::build_press_stack("), "★ stack_of dispatches ids ≤ −1000 to build_press_stack")
     }
 
-    /// His live pad (Face 3's face-prism at 25 mm): a release at 20 mm stores nothing and says "Stops at N mm · the lattice ends
-    /// there" with [Set N mm], N from core's columns over the 20 mm footprint — 25/√2 within one column pitch (the flat prism's
-    /// wedge reaches the 25 mm slab's far side at h = 25/√2 on Face 2's rim). The cap read from the press's CURRENT stack (3 mm
-    /// deep) is an upper bound (deeper adds rim columns) — the drag's stop; the release's check is exact. N reads each column's
-    /// latticed run from its entry (FlexStackInfo.latticeRunMM). RED: the members' own stacks (the width's old default source)
-    /// would let it go to 25 mm; core's whole-column lattice_mm (Face 5's prism far down the diagonal too) much further.
+    /// His live pad (Face 3's face-prism at 25 mm): a release at 20 mm LANDS on "Stops at N mm · the lattice ends there", N from
+    /// core's columns over the 20 mm footprint — 25/√2 within one column pitch (the flat prism's wedge reaches the 25 mm slab's far
+    /// side at h = 25/√2 on Face 2's rim). The cap read from the press's CURRENT stack (3 mm deep) is an upper bound (deeper adds rim
+    /// columns); the release's check is exact. N reads each column's latticed run from its entry (FlexStackInfo.latticeRunMM). RED:
+    /// the members' own stacks (the width's old default source) would let it go to 25 mm; core's whole-column lattice_mm (Face 5's
+    /// prism far down the diagonal too) much further.
     /// (Corrected after the green run, our own new test: it asserted the CURRENT stack's cap == 25/√2, which holds only on the
-    /// footprint at that depth.)
+    /// footprint at that depth.) ★ RE-PINNED by the R7-E1 review (ours; the verifier: "the drag runs to 46.1 mm, then the release
+    /// springs back to 3 mm under a different number"; his wish of 2026-10-17 for every limit: "hard stop"): the release no longer
+    /// stores nothing with a [Set N mm] — it lands on N (one Undo step) and the card keeps the line; FlexibleR7E1ReviewTests R4.
     func testTheDepthStopsWhereTheLatticeEnds() async throws {
         let (r, m) = try await F.hisLivePad(self)
         let (_, c, _) = try await F.edge16(m)
@@ -75,22 +77,18 @@ final class FlexibleFlatPrismSeamTests: XCTestCase {
         try await FlexibleHisProject.waitFor(120, "registered") { m.pressStack(press.id) != nil }
         let st = try XCTUnwrap(m.pressStack(press.id))
         let upper = try XCTUnwrap(m.flatLatticeCap(press.id), "the cap from core's columns under the current footprint")
-        let before = r.project.lattice.flexible, past = r.project.undo.past.count
+        let past = r.project.undo.past.count
         let why = await m.setFlatCut(press.id, depthMM: 20, direction: press.direction, snap: press.snap)
-        let n = try XCTUnwrap(m.lastFlatStop?.setMM, "★ [Set N mm], N from core")
+        try await F.M2.reopen(m, "landed")
+        let n = try XCTUnwrap(m.press(press.id)).settings.deepestMM
         let total = (st.columns.map { $0.latticeMM + $0.entryT }.min() ?? 0) - (m.pressRegistrations[press.id]?.apexT ?? 0)
         print("FLEX-E1-S his live pad, Edge 16: release at 20 mm → \(why ?? "stored") · N \(n) (25/√2 = \(25 / 2.0.squareRoot())) · pitch \(st.pitchMM) · the 3 mm stack's cap \(upper) · with core's whole-column lattice_mm \(total)")
         XCTAssertEqual(n, 25 / 2.0.squareRoot(), accuracy: st.pitchMM, "★ the lattice ends at 25/√2, within one pitch")
-        XCTAssertEqual(why, FlexibleRowCopy.flatLatticeEnds(n), "★ one line from core's number")
-        XCTAssertEqual(why.map { $0.count <= 44 }, true)
-        XCTAssertEqual(r.project.lattice.flexible, before, "★ nothing stored")
-        XCTAssertEqual(r.project.undo.past.count, past, "★ no undo step")
+        XCTAssertNil(why, "★ landed on N")
+        XCTAssertEqual(m.lastFlatStop?.line, FlexibleRowCopy.flatLatticeEnds(n), "★ one line from core's number")
+        XCTAssertEqual(m.lastFlatStop.map { $0.line.count <= 44 }, true)
+        XCTAssertEqual(r.project.undo.past.count, past + 1, "★ one undo step")
         XCTAssertGreaterThanOrEqual(upper, n - 1e-9, "the current stack's cap is an upper bound")
-        // [Set N mm] stores N
-        let set = await m.setFlatCut(press.id, depthMM: n, direction: press.direction, snap: press.snap)
-        XCTAssertNil(set, "★ [Set N mm] stores N")
-        try await F.M2.reopen(m, "set N")
-        XCTAssertEqual(try XCTUnwrap(m.press(press.id)).settings.deepestMM, n, accuracy: 1e-9)
         // ★ RED CONTROLS: the members' own stacks (I2's width default) — Face 3's lattice is 25 mm deep; and core's whole-column
         // lattice_mm (another face-prism far down the column) is no stop at all here
         let groupC = try XCTUnwrap(r.project.selection.groups.first { $0.name == "Group C" })

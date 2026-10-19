@@ -186,7 +186,7 @@ final class FlexibleMeetReviewTests: XCTestCase {
               + withTop.map { "#\($0.number) \($0.offered) '\($0.why ?? "")'" }.joined(separator: " | "))
         XCTAssertEqual(withTop.count, 8, "the top's 4 edges and 4 corners are still listed")
         XCTAssertTrue(withTop.allSatisfy { !$0.offered }, "★ never offered")
-        XCTAssertTrue(withTop.allSatisfy { $0.why?.contains("taken out of the Flexible setup") ?? false }, "one line says why")
+        XCTAssertTrue(withTop.allSatisfy { $0.why?.contains("is out of Flexible") ?? false }, "one line says why")   // ★ re-pinned (R7-E1 review, ours): one line, whole
         XCTAssertEqual(after.candidates.filter(\.offered).count, 12)
         XCTAssertEqual(after.candidates.map { "#\($0.number) \($0.members)" }, before.candidates.map { "#\($0.number) \($0.members)" },
                        "the numbers do not move")

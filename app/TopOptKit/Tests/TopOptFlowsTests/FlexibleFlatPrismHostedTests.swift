@@ -142,7 +142,7 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
         }
         for line in [FlexibleRowCopy.flatDeepestRow, FlexibleRowCopy.flatTiltRow(toward: "Face 3"), FlexibleRowCopy.flatTwistRow(end: "top end"),
                      FlexibleRowCopy.flatUpDownRow(into: "Face 1"), FlexibleRowCopy.flatLeftRightRow(toward: "Face 2"),
-                     FlexibleRowCopy.keepsTheRest(name: "Face 3", label: "Edge 16", corner: false), FlexibleRowCopy.Info.newKind.prefix(44).description] {
+                     FlexibleRowCopy.keepsTheRest(name: "Face 3", label: "Edge 16", corner: false)] {   // (★ R7-E1 review: the (i) text's prefix(44) dropped — always ≤ 44, it checked nothing)
             XCTAssertLessThanOrEqual(line.count, 44, "'\(line)' is one line")
         }
         XCTAssertFalse(FlexibleRowCopy.Info.newKind.contains("strip"), "★ the [+ New] words name no strip")

@@ -105,4 +105,9 @@ extension FlexibleRowCopy {
     public static func flatTwistWord(corner: Bool) -> String { corner ? "Left/right" : "Twist" }
     public static let flatBackToHalfway = "Back to halfway"
     public static func flatSetMM(_ mm: Double) -> String { "Set " + String(format: "%.1f", mm) + " mm" }
+
+    // MARK: ★ R7-E1 REVIEW (STUBS: the old words)
+    public static func flatStartsAt(_ mm: Double) -> String { flatLatticeEnds(mm) }
+    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double) -> String { flatLatticeEnds(0) }
+    public static func outOfFlexible(_ name: String) -> String { fit("\(name) was taken out of the Flexible setup") }
 }

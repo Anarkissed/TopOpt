@@ -185,7 +185,7 @@ public struct FlexibleEdgeCandidates {
         /// Why not offered (one line), or nil. `chain`: a blend's curved members, `turnDeg`: the angle between its
         /// two flats (core's loads) — a chain member may spread that far and no further.
         func whyNot(_ members: [Int], chain: Set<Int> = [], turnDeg: Double = 0) -> String? {
-            for r in members where removed.contains(r) { return "\(name(r)) was taken out of the Flexible setup" }
+            for r in members where removed.contains(r) { return FlexibleRowCopy.outOfFlexible(name(r)) }   // ★ R7-E1 review: one line, whole
             for i in 0..<members.count {
                 for j in (i + 1)..<members.count where meet.shareFace(members[i], members[j]) {
                     return "\(name(members[i])) and \(name(members[j])) are parts of one face"

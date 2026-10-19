@@ -1,0 +1,158 @@
+diff --git a/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp b/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
+index 54e0f3f9..0a27d1b0 100644
+--- a/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
++++ b/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
+@@ -147,6 +147,8 @@ struct Scene {
+ // ★ R7-E1: synthetic press ids start here and go down — new for every registration, never reused in the process.
+ constexpr int kSyntheticPressMax = -1000;
+ std::atomic<int32_t> g_next_press{kSyntheticPressMax};
++// ★ R7-E1 REVIEW: TESTS ONLY — the press columns' run from the first sample (flexible_control_run_from_first_sample).
++std::atomic<bool> g_control_run_first_sample{false};
+ 
+ std::mutex g_scene_mu;
+ std::map<int64_t, std::shared_ptr<Scene>> g_scenes;
+@@ -1368,6 +1370,9 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
+ 
+ int32_t flexible_press_api_version() { return fx::kPressApiVersion; }
+ 
++// ★ R7-E1 REVIEW: the red control of the press columns' latticed run (FlexibleBridge.hpp) — tests only.
++void flexible_control_run_from_first_sample(bool on) { g_control_run_first_sample.store(on); }
++
+ // ★ AP3: core's side-stack threshold, for the (i) text only (FlexibleBridge.hpp).
+ double flexible_side_stack_deg() { return fx::kSideStackDeg; }
+ 
+diff --git a/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp b/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
+index 3e7cae00..8f1b3282 100644
+--- a/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
++++ b/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
+@@ -739,6 +739,10 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
+ // ★ R7-E1: core's press API version (fx::kPressApiVersion; 2 at #361 099dcaed).
+ int32_t flexible_press_api_version();
+ 
++// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the FIRST sample (it stops at
++// the first sample off the lattice, so a surface voxel core leaves Empty makes the run 0) — E1's rule. (STUB: the rule unchanged.)
++void flexible_control_run_from_first_sample(bool on);
++
+ // ★ AP3: core's side-stack threshold (fx::kSideStackDeg, 15°) — for the side label's (i) text ONLY.
+ // The side VERDICT is never computed from it in the app: it is core's FaceFrame.side for the stated
+ // direction (flexible_scene_region_frame with a direction).
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeCandidates.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeCandidates.swift
+index cd326a0f..6860aeed 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeCandidates.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgeCandidates.swift
+@@ -185,7 +185,7 @@ public struct FlexibleEdgeCandidates {
+         /// Why not offered (one line), or nil. `chain`: a blend's curved members, `turnDeg`: the angle between its
+         /// two flats (core's loads) — a chain member may spread that far and no further.
+         func whyNot(_ members: [Int], chain: Set<Int> = [], turnDeg: Double = 0) -> String? {
+-            for r in members where removed.contains(r) { return "\(name(r)) was taken out of the Flexible setup" }
++            for r in members where removed.contains(r) { return FlexibleRowCopy.outOfFlexible(name(r)) }   // ★ R7-E1 review: one line, whole
+             for i in 0..<members.count {
+                 for j in (i + 1)..<members.count where meet.shareFace(members[i], members[j]) {
+                     return "\(name(members[i])) and \(name(members[j])) are parts of one face"
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
+index 6e5cd5e8..f9509cac 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
+@@ -148,6 +148,10 @@ enum FlexibleFlatPrismUI {
+ 
+     /// The last arrow the overlay drew, in the page's points (the hosted tests read it).
+     static var lastArrowEnds: (head: CGPoint, tail: CGPoint)?
++    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
++    static var controlKnobAtTailOnly = false
++    /// ★ R7-E1 REVIEW (STUB): each angle box's label.
++    static func boxLabel(tilt: Bool, corner: Bool) -> String { tilt ? "\u{2195}" : "\u{2194}" }
+     /// The last keypad a flat-prism box opened (the hosted tests read it).
+     static var lastPad: String?
+ 
+@@ -191,6 +195,13 @@ enum FlexibleFlatPrismUI {
+     }
+ }
+ 
++/// ★ R7-E1 REVIEW (STUB): the knob's drag as a pure function.
++enum FlexibleFlatPrismKnob {
++    static func angles(start: (theta: Double, phi: Double), translation: CGSize, jac: (a: CGVector, b: CGVector)?) -> (theta: Double, phi: Double) {
++        start
++    }
++}
++
+ // MARK: - the overlay (traces, arrows) and the handles (chip, knob, boxes)
+ 
+ struct FlexibleFlatPrismOverlay: View {
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleOverlay.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleOverlay.swift
+index 701e5ed4..e4fdb43a 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleOverlay.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleOverlay.swift
+@@ -31,6 +31,8 @@ public struct FlexibleOverlayFace {
+ }
+ 
+ public struct FlexibleOverlayMesh {
++    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
++    nonisolated(unsafe) public static var controlNoEdgeFill = false
+     public let mesh: ViewerMesh
+     public let partFlatVertices: Int
+     /// Per kept part triangle: its SOURCE triangle in the part (a triangle a sector cut
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+index 10c3b976..cff99265 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+@@ -105,4 +105,9 @@ extension FlexibleRowCopy {
+     public static func flatTwistWord(corner: Bool) -> String { corner ? "Left/right" : "Twist" }
+     public static let flatBackToHalfway = "Back to halfway"
+     public static func flatSetMM(_ mm: Double) -> String { "Set " + String(format: "%.1f", mm) + " mm" }
++
++    // MARK: ★ R7-E1 REVIEW (STUBS: the old words)
++    public static func flatStartsAt(_ mm: Double) -> String { flatLatticeEnds(mm) }
++    public static func flatAngleStops(twist: Bool, corner: Bool, deg: Double) -> String { flatLatticeEnds(0) }
++    public static func outOfFlexible(_ name: String) -> String { fit("\(name) was taken out of the Flexible setup") }
+ }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+FlatPrism.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+FlatPrism.swift
+index ffcac9b9..ad19511b 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+FlatPrism.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+FlatPrism.swift
+@@ -33,6 +33,8 @@ public struct FlexibleFlatStop: Equatable, Sendable {
+     public let press: UUID
+     public let line: String
+     public let setMM: Double?
++    public var direction: SIMD3<Double>? = nil
++    public var snap: String? = nil
+ }
+ 
+ /// What one press is registered as on core's open scene.
+@@ -51,6 +53,10 @@ extension FlexibleStageModel {
+     @MainActor static var controlRefuseFlatCut: String?
+     /// ★ RED CONTROL only: every drag sample is a stored edit (the live writes the preview replaced).
+     @MainActor static var controlLiveFlatWrites = false
++    /// ★ R7-E1 REVIEW, RED CONTROLS only (STUBS: no effect yet).
++    @MainActor static var controlNoStartHold = false
++    @MainActor static var controlPerPressRest = false
++    @MainActor static var controlNoLatticeLanding = false
+ 
+     // MARK: - what is shown
+ 
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleStagePage.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleStagePage.swift
+index 560bf0b4..52baeea2 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleStagePage.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleStagePage.swift
+@@ -477,6 +477,8 @@ public struct FlexibleStagePage: View {
+     /// and that layer drawn over the chrome again (the red control).
+     @MainActor static var controlNoOverlays = false
+     @MainActor static var controlOverlaysOverChrome = false
++    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
++    @MainActor static var controlPopupTurnsCamera = false
+ 
+     /// ★ BATCH V (m19): what nothing drawn on the part may show through, in the stage's frame — every keep-out (the panel,
+     /// the legend, the view buttons, the player), the player whole, the fix pop-up, the top line and its toast, the Exit row,
+diff --git a/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift b/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
+index d8bebef3..e64c07aa 100644
+--- a/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
++++ b/app/TopOptKit/Sources/TopOptKit/FlexibleKit+Meet.swift
+@@ -148,4 +148,9 @@ extension FlexibleScene {
+ 
+     /// ★ R7-E1: core's press API version (fx::kPressApiVersion).
+     public static var pressApiVersion: Int { Int(topoptbridge.flexible_press_api_version()) }
++
++    /// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the first sample (E1's rule).
++    nonisolated(unsafe) public static var controlRunFromFirstSample = false {
++        didSet { topoptbridge.flexible_control_run_from_first_sample(controlRunFromFirstSample) }
++    }
+ }

@@ -33,6 +33,8 @@ public struct FlexibleFlatStop: Equatable, Sendable {
     public let press: UUID
     public let line: String
     public let setMM: Double?
+    public var direction: SIMD3<Double>? = nil
+    public var snap: String? = nil
 }
 
 /// What one press is registered as on core's open scene.
@@ -51,6 +53,10 @@ extension FlexibleStageModel {
     @MainActor static var controlRefuseFlatCut: String?
     /// ★ RED CONTROL only: every drag sample is a stored edit (the live writes the preview replaced).
     @MainActor static var controlLiveFlatWrites = false
+    /// ★ R7-E1 REVIEW, RED CONTROLS only (STUBS: no effect yet).
+    @MainActor static var controlNoStartHold = false
+    @MainActor static var controlPerPressRest = false
+    @MainActor static var controlNoLatticeLanding = false
 
     // MARK: - what is shown
 

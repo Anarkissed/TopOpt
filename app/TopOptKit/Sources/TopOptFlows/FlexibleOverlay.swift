@@ -31,6 +31,8 @@ public struct FlexibleOverlayFace {
 }
 
 public struct FlexibleOverlayMesh {
+    /// ★ R7-E1 REVIEW, RED CONTROL only (STUB: no effect yet).
+    nonisolated(unsafe) public static var controlNoEdgeFill = false
     public let mesh: ViewerMesh
     public let partFlatVertices: Int
     /// Per kept part triangle: its SOURCE triangle in the part (a triangle a sector cut

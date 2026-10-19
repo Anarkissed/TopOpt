@@ -148,4 +148,9 @@ extension FlexibleScene {
 
     /// ★ R7-E1: core's press API version (fx::kPressApiVersion).
     public static var pressApiVersion: Int { Int(topoptbridge.flexible_press_api_version()) }
+
+    /// ★ R7-E1 REVIEW — TESTS ONLY (a red control): the press columns' latticed run counted from the first sample (E1's rule).
+    nonisolated(unsafe) public static var controlRunFromFirstSample = false {
+        didSet { topoptbridge.flexible_control_run_from_first_sample(controlRunFromFirstSample) }
+    }
 }

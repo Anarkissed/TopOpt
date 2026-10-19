@@ -147,6 +147,8 @@ struct Scene {
 // ★ R7-E1: synthetic press ids start here and go down — new for every registration, never reused in the process.
 constexpr int kSyntheticPressMax = -1000;
 std::atomic<int32_t> g_next_press{kSyntheticPressMax};
+// ★ R7-E1 REVIEW: TESTS ONLY — the press columns' run from the first sample (flexible_control_run_from_first_sample).
+std::atomic<bool> g_control_run_first_sample{false};
 
 std::mutex g_scene_mu;
 std::map<int64_t, std::shared_ptr<Scene>> g_scenes;
@@ -1367,6 +1369,9 @@ int32_t flexible_scene_register_press(int64_t scene, const std::vector<int32_t>&
 }
 
 int32_t flexible_press_api_version() { return fx::kPressApiVersion; }
+
+// ★ R7-E1 REVIEW: the red control of the press columns' latticed run (FlexibleBridge.hpp) — tests only.
+void flexible_control_run_from_first_sample(bool on) { g_control_run_first_sample.store(on); }
 
 // ★ AP3: core's side-stack threshold, for the (i) text only (FlexibleBridge.hpp).
 double flexible_side_stack_deg() { return fx::kSideStackDeg; }
