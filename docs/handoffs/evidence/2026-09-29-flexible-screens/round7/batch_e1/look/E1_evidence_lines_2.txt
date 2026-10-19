@@ -1,0 +1,6 @@
+Corner 2: halfway SIMD3<Double>(-0.5773502691896258, 0.5773502691896258, -0.5773502691896258) · legs ["5.20", "5.20", "5.20"] mm at 3.0 mm · up/down into Face 1 · left/right toward Face 2
+wrote E1_13p_Corner2_corner_1_3_2.png
+read through: Edge 16 widthMM 15.0 → 10.6066 mm deep · reach ["15.0000", "15.0000"] · toast Edge strips are flat prisms now · same reach
+read through: Edge 18 widthMM 15.0 → 10.6066 mm deep · reach ["15.0000", "15.0000"] · toast Edge strips are flat prisms now · same reach
+wrote E1_13p_his_Group3_read_through.png
+wrote E1_his_img_edges_1018_beside_the_read_through.png
