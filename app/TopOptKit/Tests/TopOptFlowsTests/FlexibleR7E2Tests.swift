@@ -648,6 +648,74 @@ final class FlexibleR7E2Tests: XCTestCase {
         let src = (try? FlexibleSource.code("FlexibleMainStage.swift")) ?? ""
         let body = src.range(of: "func buildIfReady()").map { String(src[$0.lowerBound...].prefix(1200)) } ?? ""
         XCTAssertTrue(body.contains("!m.designsInFlight"), "★ the main page never builds while core's designs are in flight")
+        // (added after the suite's first run: FlexibleMainPageRound4Tests saw the first build at Auto's opening guess go stale)
+        XCTAssertTrue(body.contains("!(m.autoInFlight && m.autoDecides)"), "★ …nor before Auto's answer, while Auto decides")
+    }
+
+    // MARK: - E2-12 (found by looking)
+
+    /// ★ FOUND BY LOOKING (the evidence probe's twisted Edge 16, round7/batch_e2/look/D_lines.txt): for half a second after the
+    /// twist the card said "Not sent · Core can't build this press" — core's "face region −1013 is not declared in the job", a
+    /// design asked on the OLD key landing on the re-opened scene. The moment the arrow moves the old registration is not the
+    /// press's: no design key, no design asked on it, "Set up · core is designing it", no press written; then core's new stack,
+    /// designed, back in the job — and no refusal on the card at any moment of it. (The arrow is moved by a direct edit, 3° of
+    /// twist under the lattice's 7° stop, so the moment before anything lands can be read.) RED CONTROL, read at that same moment:
+    /// any registration counts (the rule before) — the old key still designs it and the press reads "in the job" on the old stack
+    /// with the new arrow.
+    func testAPressWhoseArrowMovedWaitsForCoresNewStack() async throws {
+        let (_, m, press) = try await padEdge16(rest: [2, 3, 4, 5])
+        let v0 = try await settled(m, press.id, "Edge 16")
+        XCTAssertTrue(v0.inJob, "premise: Edge 16 in the job")
+        let old = try XCTUnwrap(m.pressKey(press.id))
+        let g = try XCTUnwrap(m.squeezeGroup(ofPress: press.id))
+        let f = try XCTUnwrap(FlexibleFlatPrismUI.frame(m, press.id))
+        let c = try XCTUnwrap(m.flatCut(press.id))
+        let now = FlexibleFlatPrismAngles.decompose(f, c.direction)
+        var p = try XCTUnwrap(m.settings.press(press.id))
+        p.direction = FlexibleFlatPrismAngles.compose(f, theta: now.theta, phi: now.phi + 3)
+        p.snap = nil
+        m.edit { $0.setPress(p) }
+        // ── the moment after the edit (no await: nothing has landed) ──
+        func sendJSON() throws -> String {
+            // the edges group's own send when both groups are in the job; the press out of it, the job is the Top's alone
+            let send = m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" }
+            return try m.runJobJSON(resting: Set(send?.resting ?? []))
+        }
+        FlexibleStageModel.controlStaleRegistrationCounts = true
+        let redKey = m.pressDesignKey(press.id)?.region
+        let redInJob = m.pressSupport[press.id]?.inJob
+        let redTargets = m.pressDesignTargets.contains { $0.id == press.id }
+        FlexibleStageModel.controlStaleRegistrationCounts = false
+        let v = try XCTUnwrap(m.pressSupport[press.id])
+        print("FLEX-E2-12 the moment after the twist: key \(String(describing: m.pressDesignKey(press.id)?.region)) · '\(v.line ?? "in the job")' · designed \(m.pressDesignTargets.contains { $0.id == press.id }) · RED CONTROL key \(String(describing: redKey)) in the job \(String(describing: redInJob)) designed \(redTargets)")
+        XCTAssertNil(m.pressDesignKey(press.id), "★ the old registration is not the press's")
+        XCTAssertFalse(v.inJob)
+        XCTAssertEqual(v.reason, .designing)
+        XCTAssertEqual(v.line, FlexibleRowCopy.pressDesigning, "★ 'Set up · core is designing it'")
+        XCTAssertFalse(m.pressDesignTargets.contains { $0.id == press.id }, "★ no design asked on the old key")
+        XCTAssertFalse(try sendJSON().contains("press_direction"), "★ nothing written while its stack is being read")
+        XCTAssertEqual(redKey, old, "★ RED CONTROL: the old key")
+        XCTAssertEqual(redInJob, true, "★ RED CONTROL: 'in the job' on the old stack with the new arrow")
+        XCTAssertTrue(redTargets, "★ RED CONTROL: a design asked on the old key")
+        // ── then: the scene re-opens, core's new stack, designed, back in the job — every verdict on the way read ──
+        var seen: [String] = []
+        let start = Date()
+        while true {
+            if let w = m.pressSupport[press.id] {
+                let said = w.inJob ? "in the job" : "\(w.reason.map { "\($0)" } ?? "-")"
+                if seen.last != said { seen.append(said) }
+            }
+            if m.sceneState == .ready, m.openedKey != m.currentSceneKey { m.openScene() }
+            if m.sceneState == .ready, m.openedKey == m.currentSceneKey, let k = m.pressKey(press.id), k != old,
+               m.pressSupport[press.id]?.inJob == true { break }
+            if Date().timeIntervalSince(start) > 240 { XCTFail("timed out: \(seen)"); break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        await m.waitForIdle()
+        print("FLEX-E2-12 on the way: \(seen) · new key \(m.pressKey(press.id) ?? 0) (old \(old))")
+        XCTAssertFalse(seen.contains { $0.hasPrefix("designRefused") || ($0.hasPrefix("notStacked") && $0 != "notStacked(\"\")") },
+                       "★ no refusal on the card at any moment: \(seen)")
+        XCTAssertTrue(try sendJSON().contains("press_direction"), "★ back in the job, written")
     }
 
     // MARK: - E2-10

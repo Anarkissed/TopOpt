@@ -50,6 +50,9 @@ struct FlexiblePressRegistration: Equatable {
     /// ★ R7-E2: an edge's two ends (its line's start and stop) in core's press frame — core's to_uvt (u, v, t); empty for a corner.
     /// FlexiblePressShape reads the across axis, the tent's peak and a twist from them.
     var endsUVT: [SIMD3<Double>] = []
+    /// ★ R7-E2 (found by looking): the model's opened scene key when core registered it — a registration from another scene (or
+    /// for another arrow) is not the press's while its new one is being read (FlexibleStageModel.registrationIsCurrent).
+    var sceneKey: String? = nil
 }
 
 extension FlexibleStageModel {
@@ -329,6 +332,7 @@ extension FlexibleStageModel {
             }
             // the scene may have moved on while core was asked: only a current answer is kept
             guard let now = try? await worker.withScene({ ObjectIdentifier($0) }), now == sid else { return }
+            for (id, reg) in out where reg.sceneKey == nil { var c = reg; c.sceneKey = self.openedKey; out[id] = c }
             let moved = out != self.pressRegistrations
             if moved { self.pressRegistrations = out }
             if refused != self.pressRefusals { self.pressRefusals = refused }

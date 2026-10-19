@@ -232,6 +232,13 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var groupMisses: [FlexibleGroupEstimate.Miss] = []
     @Published public private(set) var recommendation: FlexRecommendationInfo?
     @Published public private(set) var recommendationError: String?
+    /// ★ R7-E2 (found by the suite, after the lattice became stale at another temperature): Auto's answer is on its way. While
+    /// Auto decides the temperature or the family (`autoDecides`), the main page waits for it before it builds — one build, at
+    /// the temperature the designs end at, never a first one at Auto's opening guess rebuilt a second later.
+    @Published public private(set) var autoInFlight = false
+    private var autoGeneration = 0
+    /// Auto's answer can move the designs: the temperature or the family is left to Auto.
+    public var autoDecides: Bool { settings.nozzleTempC == nil || settings.topology == "auto" }
     @Published public private(set) var checks: [UUID: FlexStampCheckInfo] = [:]
     @Published public private(set) var stampGrids: [UUID: FlexStamp] = [:]
     /// Check mode shows the stamp's dent instead of the design's (M14). ★ SINCE ROUND 4 (D1) NO
@@ -646,6 +653,7 @@ public final class FlexibleStageModel: ObservableObject {
         }
         designTask?.cancel()
         autoTask?.cancel()
+        if autoInFlight { autoInFlight = false }
         let worker = self.worker
         let hold = Task { await worker.hold() }
         pendingHold = hold
@@ -1203,8 +1211,11 @@ public final class FlexibleStageModel: ObservableObject {
 
     public func scheduleAuto() {
         autoTask?.cancel()
+        autoGeneration += 1
+        let gen = autoGeneration
         guard let path = materialsPath, let mat = material, !mat.testedTempsC.isEmpty else {
             recommendation = nil
+            if autoInFlight { autoInFlight = false }
             return
         }
         let faceRequests = settings.loadedFaces.compactMap { f -> FlexFaceRequest? in
@@ -1218,7 +1229,12 @@ public final class FlexibleStageModel: ObservableObject {
             FlexFaceRequest(face: $0.key.region, rotation: 0, map: $0.map, weightN: $0.weightN, stamp: nil)
         }
         let faces = faceRequests + presses
-        guard !faces.isEmpty else { recommendation = nil; return }
+        guard !faces.isEmpty else {
+            recommendation = nil
+            if autoInFlight { autoInFlight = false }
+            return
+        }
+        if !autoInFlight { autoInFlight = true }
         // Auto weighs every tested temperature and both families; the user's overrides
         // are applied on top (R5), never fed back as if Auto chose them.
         let temps = mat.testedTempsC
@@ -1242,9 +1258,13 @@ public final class FlexibleStageModel: ObservableObject {
                     if before != self.designTopology || beforeT != self.designTempC {
                         self.scheduleDesigns(delayNS: 0)
                     }
+                    if gen == self.autoGeneration, self.autoInFlight { self.autoInFlight = false }
                 }
             } catch {
-                await MainActor.run { self.recommendationError = "\(error)" }
+                await MainActor.run {
+                    self.recommendationError = "\(error)"
+                    if gen == self.autoGeneration, self.autoInFlight { self.autoInFlight = false }
+                }
             }
         }
     }

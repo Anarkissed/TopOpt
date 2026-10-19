@@ -356,6 +356,16 @@ final class FlexibleBatchCVerifyTests: XCTestCase {
         try await FlexibleHisProject.waitFor(90, "his designs") { !m.readiness.designing && !m.designsInFlight }
         await m.waitForIdle()
         stage.refresh()
+        // ★ RE-PINNED (R7-E2, found by the suite): a lattice designed at a temperature Auto has since moved from is STALE now
+        // (FlexibleStageModel.latticeStale — his pad's lattice was built at Auto's first 190 °C while its 220 °C answer was on
+        // its way), and the main page builds only once core's designs are in. This test drew that early lattice; it now waits
+        // for the current one, as he sees it.
+        try await FlexibleHisProject.waitFor(240, "his current lattice") {
+            if !m.latticeBuilding, m.lattice == nil || m.latticeIsStale { stage.refresh() }
+            return m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding
+        }
+        await m.waitForIdle()
+        stage.refresh()
         let c = FlexibleStressContext.reached(try XCTUnwrap(r.app.makeLatticeSimContext()))
         let res = try TopOptKit.analyzeSolidLoadCase(modelPath: c.modelPath, material: c.material, materialsPath: c.materialsPath,
                                                      rulesPath: c.rulesPath, resolution: c.resolution, anchorFaceIDs: c.anchorFaceIDs,

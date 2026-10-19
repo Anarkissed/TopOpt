@@ -378,6 +378,15 @@ final class FlexibleR7M1Tests: XCTestCase {
         run.runner = { _, _, _, _ in FlexRunInfo(refusal: nil, receiptJSON: "{\"faces\":[{}],\"topology\":\"gyroid\"}", files: []) }
         // ★ the pill: a preview, never the Ready green
         stage.refresh()
+        // ★ RE-PINNED (R7-E2, found by the suite): the main page builds ONCE, after Auto's answer and core's designs are in (a
+        // lattice designed at another temperature is stale now — his pad's was built at Auto's first 190 °C while its 220 °C
+        // answer was on its way); the pill is read when that build has landed, as he sees it
+        try await FlexibleHisProject.waitFor(240, "the pad's lattice") {
+            if !m.latticeBuilding, m.lattice == nil || m.latticeIsStale { stage.refresh() }
+            return m.lattice != nil && !m.latticeIsStale && !m.latticeBuilding
+        }
+        await m.waitForIdle()
+        stage.refresh()
         XCTAssertEqual(m.coreHoldKind, .edgesBeside)
         XCTAssertEqual(stage.status.line, FlexibleRowCopy.edgesBesidePill)
         XCTAssertEqual(stage.status.tone, .preview)

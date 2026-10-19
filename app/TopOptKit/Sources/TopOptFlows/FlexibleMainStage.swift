@@ -1107,8 +1107,10 @@ public final class FlexibleMainStage: ObservableObject {
               m.latticeFailure == nil else { return }
         let r = m.readiness
         // ★ R7-E2 (found by looking): never while core's designs are in flight — the build reads core's cached designs, which a
-        // run in flight is replacing (his pad: built at Auto's first temperature while its answer was still on its way)
-        guard r.isReady, !r.designing, !m.designsInFlight else { return }
+        // run in flight is replacing (his pad: built at Auto's first temperature while its answer was still on its way) — nor,
+        // while Auto decides the temperature or the family, before Auto's answer is in (found by the suite: a first build at
+        // Auto's opening guess was stale a second later and built again)
+        guard r.isReady, !r.designing, !m.designsInFlight, !(m.autoInFlight && m.autoDecides) else { return }
         m.generateLattice()
         awaitingReady = true   // ★ C2: the note says "Lattice ready" when this build lands
     }

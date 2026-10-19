@@ -53,10 +53,26 @@ extension FlexibleStageModel {
         edit { $0.setPress(p) }
     }
 
-    /// The press's design key (its synthetic key, rotation 0) on the open scene.
+    /// The press's design key (its synthetic key, rotation 0) on the open scene — only while its registration is CURRENT.
     public func pressDesignKey(_ id: UUID) -> FlexFaceKey? {
-        pressRegistrations[id].map { FlexFaceKey(region: $0.key, rotation: 0) }
+        guard let r = pressRegistrations[id], let p = settings.press(id),
+              Self.registrationIsCurrent(regions: r.regions, direction: r.direction, sceneKey: r.sceneKey,
+                                         pressRegions: p.regions, pressBits: FlexiblePressAim.bits(p.direction), openedKey: openedKey)
+        else { return nil }
+        return FlexFaceKey(region: r.key, rotation: 0)
     }
+
+    /// ★ R7-E2 (found by looking — his Edge 16 twisted to 15°: for half a second the card said "Not sent · Core can't build this
+    /// press": the design asked on the OLD key landed on the re-opened scene, "face region −1013 is not declared in the job"):
+    /// a registration is the press's only while it was made for the press's own pieces and arrow, on the scene now open. Until
+    /// the new one lands the press is "Set up · core is designing it" — no design asked on the old key, nothing written.
+    nonisolated static func registrationIsCurrent(regions: [Int], direction: [UInt64], sceneKey: String?,
+                                                  pressRegions: [Int], pressBits: [UInt64], openedKey: String?) -> Bool {
+        if controlStaleRegistrationCounts { return true }   // (RED CONTROL: the rule before — any registration counts)
+        return regions == pressRegions && direction == pressBits && (sceneKey == nil || sceneKey == openedKey)
+    }
+    /// ★ RED CONTROL only (FlexibleR7E2Tests): a registration counts whatever arrow or scene it was made for.
+    nonisolated(unsafe) static var controlStaleRegistrationCounts = false
 
     /// Core's design of the press (on its press stack).
     public func pressDesign(_ id: UUID) -> FlexFaceDesignInfo? { pressDesignKey(id).flatMap { designs[$0] } }
