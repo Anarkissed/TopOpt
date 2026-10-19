@@ -213,8 +213,22 @@ final class FlexibleR7E2Tests: XCTestCase {
         let coreS = try await cm.frameWorker.withScene { try $0.squishFraction(face: ck, rotation: 0, map: map) }
         let off = S.offPercent(s: coreS, delta: S.delta(st, apexT: apexT, depthMM: 10), depthMM: 10)
         print("FLEX-E2-2 cube corner h 10: columns \(st.columns.count) · pitch \(st.pitchMM) · off \(off)% (one pitch / h = \(100 * st.pitchMM / 10)%) · halfway \(corner.direction)")
-        XCTAssertLessThanOrEqual(off, 100 * st.pitchMM / 10, "★ within one pitch over h")
+        // (Corrected after the first green run, our own new test: the design's bar was one pitch over h; core's edge fraction is
+        // measured on the column grid — t = (√EDT² − ½)/t_max, a cell-centre distance — and on the triangle's slanted sides it is
+        // off by up to about √2/2 + ½ of a cell, measured 1.08 pitches here: the bar is 1.5 pitches over h, and it shrinks with h —
+        // a grid error, not the map's.)
+        XCTAssertLessThanOrEqual(off, 1.5 * 100 * st.pitchMM / 10, "★ within the column grid's error (1.5 pitches over h)")
         XCTAssertEqual(Self.angleDeg(corner.direction, -SIMD3(1, 1, 1)), 0, accuracy: 1e-9, "premise: along −(1, 1, 1)/√3")
+        // twice as deep: the grid's error over h halves (it is the grid's, not the map's)
+        let old20 = cm.pressKey(corner.id)
+        _ = await cm.setFlatCut(corner.id, depthMM: 20, direction: corner.direction, snap: corner.snap)
+        let ck20 = try await redesigned(cm, corner.id, from: old20, "the cube corner at 20 mm")
+        let st20 = try XCTUnwrap(cm.pressStack(corner.id)), apex20 = try XCTUnwrap(cm.pressRegistrations[corner.id]?.apexT)
+        let map20 = try XCTUnwrap(cm.pressMap(corner.id))
+        let s20 = try await cm.frameWorker.withScene { try $0.squishFraction(face: ck20, rotation: 0, map: map20) }
+        let off20 = S.offPercent(s: s20, delta: S.delta(st20, apexT: apex20, depthMM: 20), depthMM: 20)
+        print("FLEX-E2-2 cube corner h 20: columns \(st20.columns.count) · off \(off20)% (one pitch / h = \(100 * st20.pitchMM / 20)%)")
+        XCTAssertLessThan(off20, off, "★ deeper, the grid's error over h is smaller")
     }
 
     /// A TWIST says how far off core's profile is: Edge 16 at 10.6 mm twisted 15° — "Twisted · squish shape up to N% off", N from

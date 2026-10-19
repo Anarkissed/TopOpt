@@ -228,11 +228,16 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
         c.weightUnit = nil
-        // ★ ANGLED PRESSES (AP1): a press core cannot build yet cannot change the lattice — until the
-        // bridge builds press stacks (AP9 removes this line, so every press edit re-keys the lattice)
-        c.presses = nil
+        // ★ R7-E2 (AP9): an edge or corner press (a flat prism) is built into the lattice now — core builds its stack, designs it,
+        // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted
+        // face press: no flat prism) still cannot change it, and a project without presses keys as before (nil either way).
+        let flat = (c.presses ?? []).filter { $0.strip != nil }
+        c.presses = flat.isEmpty || Self.controlStripPresses ? nil : flat   // (RED CONTROL only: E1's rule, all stripped)
         return c
     }
+
+    /// ★ RED CONTROL only (FlexibleR7E2Tests — FlexibleStageModel.controlStripPresses): E1's rule, the presses out of the lattice's key.
+    nonisolated(unsafe) static var controlStripPresses = false
 
     /// The model-wide finish (nil or an unknown value ⇒ Covered).
     public var finishMode: FlexibleFinish { finish.flatMap(FlexibleFinish.init(rawValue:)) ?? .covered }

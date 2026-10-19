@@ -47,6 +47,9 @@ struct FlexiblePressRegistration: Equatable {
     let stack: FlexStackInfo
     let apexT: Double
     let normals: [SIMD3<Double>]
+    /// ★ R7-E2: an edge's two ends (its line's start and stop) in core's press frame — core's to_uvt (u, v, t); empty for a corner.
+    /// FlexiblePressShape reads the across axis, the tent's peak and a twist from them.
+    var endsUVT: [SIMD3<Double>] = []
 }
 
 extension FlexibleStageModel {
@@ -304,24 +307,33 @@ extension FlexibleStageModel {
                 let bits = FlexiblePressAim.bits(p.direction)
                 if let k = known[p.id], k.scene == sid, k.regions == p.regions, k.direction == bits { out[p.id] = k; continue }
                 guard let cut = FlexibleFlatPrism.cut(of: p) else { continue }
+                // ★ R7-E2: an edge's two ends, for core's to_uvt (FlexiblePressShape)
+                let ends: [SIMD3<Double>] = p.strip.flatMap { FlexibleFlatPrism.line($0) }.map { l in
+                    [l.origin + l.dir * l.s0, l.origin + l.dir * l.s1]
+                } ?? []
                 do {
-                    let r = try await worker.withScene { s -> (Int, FlexStackInfo, Double) in
+                    let r = try await worker.withScene { s -> (Int, FlexStackInfo, Double, [SIMD3<Double>]) in
                         let key = try s.registerPress(p.regions, direction: p.direction)
                         let st = try s.stack(face: key, rotation: 0)
                         let t = try s.toUVT(face: key, rotation: 0, [cut.apex.x, cut.apex.y, cut.apex.z])
-                        return (key, st, t.count >= 3 ? t[2] : 0)
+                        let e = ends.isEmpty ? [] : try s.toUVT(face: key, rotation: 0, ends.flatMap { [$0.x, $0.y, $0.z] })
+                        let uvt = stride(from: 0, to: e.count - 2, by: 3).map { SIMD3(e[$0], e[$0 + 1], e[$0 + 2]) }
+                        return (key, st, t.count >= 3 ? t[2] : 0, uvt)
                     }
                     let normals = (try? await Self.footprintNormals(p.regions, source: source)) ?? nil
                     out[p.id] = FlexiblePressRegistration(scene: sid, regions: p.regions, direction: bits, key: r.0, stack: r.1,
-                                                          apexT: r.2, normals: normals ?? [])
+                                                          apexT: r.2, normals: normals ?? [], endsUVT: r.3)
                 } catch {
                     refused[p.id] = self.plainLine("\(error)")
                 }
             }
             // the scene may have moved on while core was asked: only a current answer is kept
             guard let now = try? await worker.withScene({ ObjectIdentifier($0) }), now == sid else { return }
-            if out != self.pressRegistrations { self.pressRegistrations = out }
+            let moved = out != self.pressRegistrations
+            if moved { self.pressRegistrations = out }
             if refused != self.pressRefusals { self.pressRefusals = refused }
+            // ★ R7-E2: a press registered anew (a new scene, new pieces or bits) is designed on its new press stack
+            if moved { self.scheduleDesigns(delayNS: 0); self.scheduleAuto() }
         })
     }
 

@@ -44,17 +44,73 @@ public enum FlexiblePressShape {
 
     /// Is the edge twisted (its two ends at different depths along core's load)? A corner: false.
     public static func twisted(_ p: Press) -> Bool {
-        false   // ★ R7-E2 STUB
+        guard !p.corner, p.endsUVT.count == 2 else { return false }
+        // an untwisted edge lies ⟂ the arrow: its two ends at one t (to rounding); a 1° twist on a 20 mm edge is 0.35 mm
+        return Swift.abs(p.endsUVT[1].z - p.endsUVT[0].z) > twistToleranceMM
     }
+    /// Two ends whose t differ by less than this are one depth (an untwisted edge, to core's rounding).
+    public static let twistToleranceMM = 1e-6
 
     /// The axis ACROSS the edge: true = core's X, false = core's Y (nil: a corner).
     public static func acrossIsX(_ st: FlexStackInfo, _ p: Press) -> Bool? {
-        nil   // ★ R7-E2 STUB
+        guard !p.corner, p.endsUVT.count == 2 else { return nil }
+        if controlAcrossIsY { return false }   // (RED CONTROL: X assumed along the edge)
+        // the edge's projection in core's (u, v): the axis it runs LESS along is the one across it
+        let du = Swift.abs(p.endsUVT[1].x - p.endsUVT[0].x), dv = Swift.abs(p.endsUVT[1].y - p.endsUVT[0].y)
+        return du < dv
     }
 
     /// ★ THE MAP core is sent for a flat press `depthMM` deep, from core's press stack `st` and core's t of the apex `apexT`.
-    public static func map(_ st: FlexStackInfo, apexT: Double, depthMM: Double, press p: Press) -> FlexMap {
-        FlexMap(mode: "both", x: .flat, y: .flat, centreEdge: .flat, deepestMM: depthMM)   // ★ R7-E2 STUB
+    public static func map(_ st: FlexStackInfo, apexT: Double, depthMM h: Double, press p: Press) -> FlexMap {
+        // a corner: core's edge fraction, linear — the roof of the footprint (exact to the grid on a box corner at halfway)
+        if p.corner { return FlexMap(mode: "centre_edge", x: .flat, y: .flat, centreEdge: FlexCurve(x: [0, 1], y: [0, 1]), deepestMM: h) }
+        guard let ax = acrossIsX(st, p), h > 0 else {
+            return FlexMap(mode: "both", x: .flat, y: .flat, centreEdge: .flat, deepestMM: h)
+        }
+        let e0 = p.endsUVT[0], e1 = p.endsUVT[1]
+        let acrossExtent = ax ? st.uExtentMM : st.vExtentMM, alongExtent = ax ? st.vExtentMM : st.uExtentMM
+        func across(_ q: SIMD3<Double>) -> Double { ax ? q.x : q.y }
+        func along(_ q: SIMD3<Double>) -> Double { ax ? q.y : q.x }
+        // the tent: 0 at both rims (each face's trace), 1 at the edge's own coordinate across (core's to_uvt of its ends)
+        let peak = acrossExtent > 0 ? (across(e0) + across(e1)) / 2 / acrossExtent : 0.5
+        let tentCurve = tent(peak: peak)
+        // along: ≡ 1 untwisted; twisted, a ramp from the deep end's 1 to the shallow end's δ/h on the edge (core's t of each end)
+        var alongCurve = FlexCurve.flat
+        if twisted(p), alongExtent > 0 {
+            let y0 = Swift.min(1, Swift.max(0, (apexT + h - e0.z) / h)), y1 = Swift.min(1, Swift.max(0, (apexT + h - e1.z) / h))
+            alongCurve = ramp(along(e0) / alongExtent, y0, along(e1) / alongExtent, y1)
+        }
+        return FlexMap(mode: "both", x: ax ? tentCurve : alongCurve, y: ax ? alongCurve : tentCurve, centreEdge: .flat, deepestMM: h)
+    }
+
+    /// The tent: `pointsPerSide` collinear points from (0, 0) up to (peak, 1), as many down to (1, 0). x strictly increasing, from 0
+    /// to exactly 1 (core's pen-curve rules).
+    static func tent(peak raw: Double) -> FlexCurve {
+        let n = pointsPerSide
+        let lo = 1.0 / Double(4 * n * n), p = Swift.min(1 - lo, Swift.max(lo, raw.isFinite ? raw : 0.5))
+        var x: [Double] = [], y: [Double] = []
+        for i in 0...n { x.append(p * Double(i) / Double(n)); y.append(Double(i) / Double(n)) }
+        for j in 1...n { x.append(p + (1 - p) * Double(j) / Double(n)); y.append(1 - Double(j) / Double(n)) }
+        x[0] = 0; x[x.count - 1] = 1; y[0] = 0; y[y.count - 1] = 0; y[n] = 1
+        return FlexCurve(x: x, y: y)
+    }
+
+    /// A ramp along the edge: (b0, y0) to (b1, y1) on `pointsPerSide` collinear points, flat beyond the edge's ends; from 0 to 1.
+    static func ramp(_ b0: Double, _ y0: Double, _ b1: Double, _ y1: Double) -> FlexCurve {
+        var (bl, yl, bh, yh) = b0 <= b1 ? (b0, y0, b1, y1) : (b1, y1, b0, y0)
+        func at(_ b: Double) -> Double { bh - bl > 1e-12 ? yl + (yh - yl) * (b - bl) / (bh - bl) : yh }
+        // the edge's ends inside [0, 1] (the footprint's extent along it)
+        let cl = Swift.min(1, Swift.max(0, bl)), ch = Swift.min(1, Swift.max(0, bh))
+        (yl, yh) = (at(cl), at(ch))
+        (bl, bh) = (cl, ch)
+        guard bh - bl > 1e-6 else { return FlexCurve(x: [0, 1], y: [Swift.max(yl, yh), Swift.max(yl, yh)]) }
+        let n = pointsPerSide
+        var x: [Double] = [], y: [Double] = []
+        if bl > 1e-9 { x.append(0); y.append(yl) }
+        for i in 0...n { x.append(bl + (bh - bl) * Double(i) / Double(n)); y.append(yl + (yh - yl) * Double(i) / Double(n)) }
+        if bh < 1 - 1e-9 { x.append(1); y.append(yh) }
+        x[0] = 0; x[x.count - 1] = 1
+        return FlexCurve(x: x, y: y.map { Swift.min(1, Swift.max(0, $0)) })
     }
 
     // MARK: - how close core's profile is
@@ -73,7 +129,8 @@ public enum FlexiblePressShape {
     }
 
     /// The card's one line when core's profile is more than 2 % off the flat prism (nil: within 2 %).
-    public static func line(offPercent: Double) -> String? {
-        nil   // ★ R7-E2 STUB
+    public static func line(offPercent: Double, corner: Bool = false) -> String? {
+        guard !controlSilent, offPercent > warnPercent else { return nil }   // (RED CONTROL: silent)
+        return corner ? FlexibleRowCopy.cornerOff(offPercent) : FlexibleRowCopy.twistOff(offPercent)
     }
 }

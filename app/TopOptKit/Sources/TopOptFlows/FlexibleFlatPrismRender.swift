@@ -381,6 +381,9 @@ struct FlexibleFlatPrismOverlay: View {
                 }
                 return (id, FlexibleFlatPrismUI.arrow(st, c, lengthMM: len), traces)
             }
+            // ★ R7-E2: the arrow is SOLID while its press is in core's job, dashed while not (refused, gated, designing)
+            let sent = model.sentPresses
+            let _ = { for (id, _, _) in arrows { if let l = model.press(id)?.strip?.label { FlexibleFlatPrismUI.lastArrowSolid[l] = sent.contains(id) } } }()
             let here: Placed? = working.flatMap { id in
                 guard let a = arrows.first(where: { $0.0 == id })?.1, let st = model.press(id)?.strip, let c = model.flatCut(id) else { return nil }
                 return placed(st, c, a, proj)
@@ -403,7 +406,7 @@ struct FlexibleFlatPrismOverlay: View {
                         var ap = Path()
                         ap.move(to: t); ap.addLine(to: h)
                         ctx.stroke(ap, with: .color(colour.color.opacity((on ? 1 : 0.45) * fade)),
-                                   style: StrokeStyle(lineWidth: on ? 3.5 : 2.5, lineCap: .round, dash: [9, 6]))   // dashed: not sent yet
+                                   style: StrokeStyle(lineWidth: on ? 3.5 : 2.5, lineCap: .round, dash: sent.contains(id) ? [] : [9, 6]))   // ★ R7-E2: solid when sent
                         // the head
                         let ang = atan2(h.y - t.y, h.x - t.x)
                         var head = Path()

@@ -301,7 +301,7 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      pill: "Fix: pick a filament"))
         }
         // 2. no pressed face — the selected face, else the one most likely to carry weight
-        if i.pressed.isEmpty {
+        if i.pressed.isEmpty, i.sentPresses == 0 {   // ★ R7-E2: an edges group sent on its own is pressed
             let target = i.selected ?? i.suggested
             out.append(FlexibleIssue(id: "noPressedFace", kind: .noPressedFace, region: target,
                                      oneLine: target.map { "Press \(name($0)) or tap the face that carries weight" }
@@ -565,6 +565,7 @@ extension FlexibleStageModel {
         i.canLatticeUnder = { [weak self] r in self?.latticeUnderPlan(r) != nil }   // ★ batch E
         i.issueKey = { [weak self] r in self?.issueKey(r) ?? "\(r)" }   // ★ ROUND 7 (S, 4f f)
         i.facePrisms = !noFacePrismKnown   // ★ ROUND 7, M1 VERIFY
+        i.sentPresses = Self.controlStripPresses ? 0 : sentPresses.count   // ★ R7-E2
         if squeezeGroups.count > 1 {
             i.groupMisses = groupMisses
             let gs = squeezeGroups

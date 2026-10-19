@@ -66,6 +66,7 @@ public struct FlexibleExportSheet: View {
                 }
                 FlexibleExportRows.CoreRow(run: run)   // ★ R7-D1: the rows the corner card draws too (FlexibleExportRows)
                 FlexibleExportRows.HoldNote(run: run)
+                FlexibleExportRows.PressNote(run: run)   // ★ R7-E2: a side press sent, said
                 FlexibleExportRows.FixRow(run: run)
                 FlexibleExportRows.Exports(run: run)
             }

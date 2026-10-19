@@ -515,10 +515,13 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
 
     /// ★ EACH PICK IS AN AP1 PRESS: over its strips (member order), aimed at AP3's default — core's halfway on ITS
     /// strips, bit for bit (FlexiblePressAimSet.defaultRelease), 45° from each face on a box edge — snap "halfway", in
-    /// the new group (Group 4, edges, the pick's colour), at the force he typed. SAVED, NEVER SENT: not in sentPresses,
-    /// not in the sends' jobs (no press_direction, no strip region), not in the lattice's key. RED (run here): a
-    /// ViewerMesh-normal stand-in for the halfway has other bits.
-    func testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsNeverSent() async throws {
+    /// the new group (Group 4, edges, the pick's colour), at the force he typed. ★ RE-PINNED (round 7, R7-E2 — AP9's second half;
+    /// the reviewer's ruling of 2026-10-07: "Angled presses go into the job only once core's schema accepts them (probe-gated)"):
+    /// was "SAVED, NEVER SENT". Core's schema takes it, the bridge builds its stack, core designs it — it is SENT: in sentPresses
+    /// once core's design lands, its group among the sent groups, its flat prism in the lattice's key; only the edges group's
+    /// send writes it (face_region_ids + press_direction), every face group's send writes no press and no strip region. RED (run
+    /// here): a ViewerMesh-normal stand-in for the halfway has other bits.
+    func testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsSentOnceCoreTakesIt() async throws {
         let (r, m) = try await hisPad()
         let mesh = try XCTUnwrap(r.project.viewerMesh)
         let keyBefore = m.settings.designInputs
@@ -552,18 +555,30 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         XCTAssertEqual(m.rail, .group(g.id), "its tab opens")
         XCTAssertEqual(FlexibleSettingsRailView.tabs(model: m).first { $0.tab == .group(g.id) }?.detail, "1 edge")
         XCTAssertEqual(m.stripTitle(press.id), "Edge \(c.number) \u{00B7} Face 1 + Face 2", "its row names the pick and the faces")
-        // never sent
-        XCTAssertTrue(m.sentPresses.isEmpty)
-        XCTAssertFalse(m.sentSqueezeGroups.contains { $0.id == g.id })
-        XCTAssertNil(m.settings.designInputs.presses)
+        // ★ RE-PINNED (R7-E2): sent once core takes it (was: never sent)
+        try await FlexibleHisProject.waitFor(180, "core's verdict") { m.pressSupport[press.id]?.inJob == true }
+        XCTAssertTrue(m.sentPresses.contains(press.id), "★ sent")
+        XCTAssertTrue(m.sentSqueezeGroups.contains { $0.id == g.id }, "★ its group is sent")
+        XCTAssertEqual(m.settings.designInputs.presses?.map(\.id), [press.id], "★ its flat prism is in the lattice's key")
         let removed = keyBefore.faces.map(\.faceRegionID).filter { m.settings.face($0) == nil }
         print("FLEX-I2-6 the lattice's key moved for the faces that gave a strip only: \(removed)")
         XCTAssertEqual(removed.sorted(), [1, 2])
+        let mine = "Send Group \(g.number) only"
+        // (his rule "1-3 fix buttons": with four sent groups — his pad's three face groups and this one — the hold offers the
+        // first three; the edges group's own send is offered once three or fewer groups are sent — FlexibleR7E2Tests E2-9)
+        print("FLEX-I2-6 (R7-E2) sends \(G.sends(m).map(\.title)) · sent groups \(m.sentSqueezeGroups.map(\.number))")
+        XCTAssertEqual(G.sends(m).contains { $0.title == mine }, m.sentSqueezeGroups.count <= 3, "★ (R7-E2) the edges group's own send, within his three")
         for send in G.sends(m) {
             let job = try m.runJobJSON(resting: Set(send.resting))
-            XCTAssertFalse(job.contains("press_direction"), "\(send.title): no press is written")
-            let ids = try FlexibleCore.parseJobBlock(job).faces.map(\.faceRegionID)
-            XCTAssertTrue(Set(ids).isDisjoint(with: press.regions), "\(send.title): no strip in the job")
+            let block = try FlexibleCore.parseJobBlock(job)
+            if send.title == mine {
+                let e = try XCTUnwrap(block.faces.first { !$0.footprintRegionIDs.isEmpty }, "★ (R7-E2) \(send.title): the press is written")
+                XCTAssertEqual(e.footprintRegionIDs, press.regions)
+                XCTAssertEqual(Self.bits(try XCTUnwrap(e.pressDirection)), Self.bits(press.direction))
+            } else {
+                XCTAssertFalse(job.contains("press_direction"), "\(send.title): no press is written")
+                XCTAssertTrue(Set(block.faces.map(\.faceRegionID)).isDisjoint(with: press.regions), "\(send.title): no strip in the job")
+            }
         }
         // the viewer mesh's own normals (Float): on his axis-aligned pad they are exact — the same bits (printed)
         let n1 = try XCTUnwrap(mesh.faceNormal(1)), n2 = try XCTUnwrap(mesh.faceNormal(2))
@@ -729,7 +744,8 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
                 let faces = try XCTUnwrap(flex["faces"] as? [[String: Any]])
                 var byID: [Int: String] = [:]
                 for f in faces {
-                    let id = try XCTUnwrap(f["face_region_id"] as? Int)
+                    // ★ RE-PINNED (R7-E2): a press entry names its pieces (face_region_ids), the first naming it
+                    let id = try XCTUnwrap(f["face_region_id"] as? Int ?? (f["face_region_ids"] as? [Int])?.first)
                     byID[id] = String(decoding: try JSONSerialization.data(withJSONObject: f, options: [.sortedKeys]), as: UTF8.self)
                 }
                 out[send.title] = byID
@@ -737,15 +753,23 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
             return out
         }
         let before = try entries()
+        let sendsBefore = Set(G.sends(m).map(\.title))
         let p = try await pickMode(m)
         m.toggleEdgePick(try XCTUnwrap(candidate(p, [1, 2])).number)
         let why9 = try await done(m)
         XCTAssertNil(why9)
         try await G.settleAllowingRefusedStacks(m, "A1_0003 after the cut")
+        // ★ RE-PINNED (round 7, R7-E2 — AP9: the edges group is SENT once core takes its press): was "the same sends (the edges group
+        // sends nothing)"; now every send of before, and one more — the edges group's own
+        try await FlexibleHisProject.waitFor(180, "the press sent") { m.sentPresses.count == 1 }
         let after = try entries()
-        XCTAssertEqual(Set(before.keys), Set(after.keys), "the same sends (the edges group sends nothing)")
+        XCTAssertTrue(Set(before.keys).isSubset(of: Set(after.keys)), "every send of before is still offered")
+        // the edges group's own send — within his three buttons ("1-3 fix buttons"): his pad's three face groups fill them
+        let added = Set(after.keys).subtracting(sendsBefore)
+        print("FLEX-I2-9 (R7-E2) sends before \(sendsBefore.sorted()) · after \(Set(after.keys).sorted()) · sent groups \(m.sentSqueezeGroups.count)")
+        XCTAssertEqual(added.count, sendsBefore.count < 3 ? 1 : 0, "★ the edges group's own send, when his three leave room: \(added)")
         var same = 0
-        for (send, ids) in before {
+        for (send, ids) in before where after[send] != nil {
             for id in [0, 3, 4, 5] where ids[id] != nil {
                 XCTAssertEqual(after[send]?[id], ids[id], "\(send): face \(id)'s entry byte-identical")
                 same += 1

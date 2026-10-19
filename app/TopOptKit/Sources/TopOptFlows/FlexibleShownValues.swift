@@ -173,7 +173,7 @@ struct FlexibleShownValues {
         for v in values.values { for x in v { if case .depth(let d) = x { maxDepth = max(maxDepth, d) } } }
         // ONE SCALE FOR DRAWN AND BUILDABLE: coloured against the same maximum
         if checkID == nil, !m.editingDepth {
-            for d in m.designs.values where d.refusal == nil {
+            for (k, d) in m.designs where d.refusal == nil && k.region > FlexibleStageModel.syntheticPressMax {   // ★ R7-E2: faces' only
                 maxDepth = max(maxDepth, d.targetDepthRange?.upperBound ?? 0, d.buildableDepthRange?.upperBound ?? 0)
             }
         }

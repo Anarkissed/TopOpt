@@ -242,6 +242,7 @@ struct FlexibleEdgeGroupRows: View {
     /// ★ R7-E2: the press's one warning line beyond core's refusal and a lattice stop, and its 1–3 fixes (each one undo step).
     @ViewBuilder private func pressWarningRow(_ p: FlexiblePress, _ w: (line: String, fixes: [FlexiblePressFix])) -> some View {
         let sent = model.sentPresses.contains(p.id)
+        let label = p.strip?.label ?? p.id.uuidString
         VStack(alignment: .leading, spacing: 4) {
             if sent {
                 FlexCaption(text: w.line).accessibilityIdentifier("flexible-edge-press-note")
@@ -267,6 +268,10 @@ struct FlexibleEdgeGroupRows: View {
                 }
             }
         }
+        // its frame and its words reach the page (the hosted tests read them, as the toast's)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressLine-\(label)": g.frame(in: .global), "pressLine:\(label):" + w.line: .zero])
+        }.allowsHitTesting(false))
     }
 
     /// ★ R7-E1: the flat prism's rows — the same numbers as the chip and the knob's boxes on the model (one store: the press).

@@ -264,7 +264,15 @@ public enum FlexibleSqueezeGroups {
     /// press stacks — core names a press stack by its first region, so `pressOf` maps that region, and the press's synthetic key,
     /// to the press). Core refuses one stack pressed twice in a job (one_profile_per_stack): each such press leaves the job, said.
     public static func pressPinches(_ conflicts: [FlexConflictInfo], _ s: FlexibleStageSettings, pressOf: [Int: UUID]) -> [(a: UUID, b: UUID)] {
-        []   // ★ R7-E2 STUB
+        var seen = Set<String>()
+        var out: [(a: UUID, b: UUID)] = []
+        for c in conflicts {
+            guard let a = pressOf[c.faceA], let b = pressOf[c.faceB], a != b, let pa = s.press(a), let pb = s.press(b),
+                  id(pa) == id(pb) else { continue }
+            guard seen.insert([a.uuidString, b.uuidString].sorted().joined(separator: "|")).inserted else { continue }
+            out.append((a, b))
+        }
+        return out
     }
 
     /// The faces each face is pinched with (both directions).

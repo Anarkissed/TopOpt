@@ -184,8 +184,10 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public internal(set) var pressRefusals: [UUID: String] = [:]
     /// ★ R7-E1: M2's strips read through were said (once per session).
     var legacyStripsSaid = false
-    /// ★ R7-E2: the ruling's angled-estimate sentence was popped (once per session, when a side press first goes into the job).
+    /// ★ R7-E2: the ruling's angled-estimate sentence was popped (once per session, when a side press first goes into the job), or
+    /// waits for the toast up now to clear.
     var sideSentenceSaid = false
+    var sideSentencePending = false
     /// ★ R7-E2: core's stack conflicts among the faces AND the registered presses (a press stack named by its first region) — the
     /// presses' own (FlexibleSqueezeGroups.pressPinches); the faces' pinches keep reading `conflicts`, unchanged.
     @Published public internal(set) var pressConflicts: [FlexConflictInfo] = []
@@ -303,7 +305,13 @@ public final class FlexibleStageModel: ObservableObject {
     /// REVIEW: it clears ITSELF after `toastSeconds` — an auto-fix can land while the main page
     /// shows (no Settings page up to clear it), and the page's own clear only heard a change,
     /// so a toast set before it opened stayed under the line for the whole visit.
-    @Published public var toast: String? { didSet { scheduleToastClear(); if toast == nil, toastFix != nil { toastFix = nil } } }
+    @Published public var toast: String? {
+        didSet {
+            scheduleToastClear(); if toast == nil, toastFix != nil { toastFix = nil }
+            // ★ R7-E2: the ruling's sentence waits for the toast before it (never over another line)
+            if toast == nil, sideSentencePending { Task { @MainActor [weak self] in self?.sayAngledEstimateOnce() } }
+        }
+    }
     /// ★ ROUND 7 (M2): the toast's ONE fix (a solid tap's [Go to Lattice]); cleared with the toast.
     @Published public var toastFix: FlexibleToastFix?
     /// ★ ROUND 7 (M2): the Flexible-only sectors' numbers for this session (FlexibleSectorNumbers), seeded from the store.
@@ -921,14 +929,17 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     public func key(_ region: Int) -> FlexFaceKey? {
-        settings.face(region).map { FlexFaceKey(region: region, rotation: $0.rotationDeg) }
+        // ★ R7-E2 (FlexibleSquishTarget): a press's synthetic key names its press stack (rotation 0)
+        if region <= Self.syntheticPressMax { return pressID(forKey: region) != nil ? FlexFaceKey(region: region, rotation: 0) : nil }
+        return settings.face(region).map { FlexFaceKey(region: region, rotation: $0.rotationDeg) }
     }
 
     public func stack(_ region: Int) -> FlexStackInfo? { key(region).flatMap { stacks[$0] } }
     public func design(_ region: Int) -> FlexFaceDesignInfo? { key(region).flatMap { designs[$0] } }
 
     private func ensureStack(_ region: Int) {
-        guard sceneState == .ready, !heldWithoutFacePrism,   // ★ RULING 6: no face-prism, no stack asked
+        guard region > Self.syntheticPressMax,   // ★ R7-E2: a press's stack comes with its registration (FlexibleStageModel+FlatPrism)
+              sceneState == .ready, !heldWithoutFacePrism,   // ★ RULING 6: no face-prism, no stack asked
               let k = key(region), stacks[k] == nil, !pendingStacks.contains(k),
               stackErrors[k] == nil else { return }   // ★ no blind retry of a face core refused to stack
         pendingStacks.insert(k)
@@ -1035,7 +1046,7 @@ public final class FlexibleStageModel: ObservableObject {
         return (out, errs, false)
     }
 
-    private func scheduleDesigns(delayNS: UInt64) {
+    func scheduleDesigns(delayNS: UInt64) {
         pipelineSettings = settings
         designGeneration += 1
         let gen = designGeneration
@@ -1061,6 +1072,9 @@ public final class FlexibleStageModel: ObservableObject {
                                    uniquingKeysWith: { a, _ in a })
         let regions = self.regions
         let cuts = Dictionary(faces.map { ($0.faceRegionID, regions.cuts(of: $0.faceRegionID)) }, uniquingKeysWith: { a, _ in a })
+        // ★ R7-E2 (FlexibleSquishTarget): every registered strip press, designed on CORE's press stack through its synthetic key
+        // with the map FlexiblePressShape builds from core's frame (the job's map — one function)
+        let pressTargets = pressDesignTargets
         designTask = Task.detached(priority: .userInitiated) {
             if delayNS > 0 { try? await Task.sleep(nanoseconds: delayNS) }
             if Task.isCancelled { return }
@@ -1081,6 +1095,16 @@ public final class FlexibleStageModel: ObservableObject {
             } catch {
                 err = "\(error)"
             }
+            // ★ R7-E2: core's stack conflicts among the presses (a press stack named by its first region) — the faces' pinches keep
+            // reading `conflicts`, unchanged
+            var pressConf: [FlexConflictInfo] = []
+            if pressTargets.count > 1 {
+                pressConf = (try? await worker.withScene {
+                    try $0.conflicts(faces: pressTargets.map { $0.key.region }, rotations: pressTargets.map { _ in 0 })
+                }) ?? []
+            }
+            var pressOut: [FlexFaceKey: FlexFaceDesignInfo] = [:]
+            var pressErrs: [FlexFaceKey: String] = [:]
             if let temp {
                 let r = await Self.designEach(faces, key: { FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg) }) { f in
                     let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
@@ -1094,6 +1118,18 @@ public final class FlexibleStageModel: ObservableObject {
                 if r.cancelled { return }
                 out = r.designs
                 faceErrors = r.errors
+                // ★ R7-E2: the presses (each its own catch; their words never stand for a face's)
+                if !pressTargets.isEmpty {
+                    let pr = await Self.designEach(pressTargets, key: { $0.key }) { t in
+                        try await worker.withScene {
+                            try $0.design(materialsPath: path, materialID: mat, tempC: temp, face: t.key.region, rotation: 0, map: t.map,
+                                          weightN: t.weightN, stamp: nil, build: build)
+                        }
+                    }
+                    if pr.cancelled { return }
+                    pressOut = pr.designs
+                    pressErrs = pr.errors
+                }
                 for (k, d) in out { s[k] = d.columns.map(\.s) }
                 if err == nil, let first = faceErrors.values.first { err = first }
                 for c in checkStamps {
@@ -1125,13 +1161,14 @@ public final class FlexibleStageModel: ObservableObject {
                 }
             }
             if Task.isCancelled { return }
-            let (o, fe, ss, ch, co, er, sg) = (out, faceErrors, s, checks, conflicts, err, segs)
-            let (se, mi) = (segErrs, misses)
+            let (o, fe, ss, ch, co, er, sg) = (out.merging(pressOut) { a, _ in a }, faceErrors.merging(pressErrs) { a, _ in a }, s, checks, conflicts, err, segs)
+            let (se, mi, pc) = (segErrs, misses, pressConf)
             await MainActor.run {
                 guard gen == self.designGeneration else { return }
                 self.designsInFlight = false
                 self.designs = o
                 self.designErrors = fe
+                if self.pressConflicts != pc { self.pressConflicts = pc }
                 for (k, v) in ss { self.liveS[k] = v }
                 self.checks = ch
                 self.conflicts = co
@@ -1141,6 +1178,7 @@ public final class FlexibleStageModel: ObservableObject {
                 self.designedInputs = inputKeys
                 self.lastError = er
                 self.applyAutoFixes()
+                self.sayAngledEstimateOnce()   // ★ R7-E2: the ruling's sentence, once per session, when a side press is first sent
             }
         }
     }
@@ -1169,12 +1207,17 @@ public final class FlexibleStageModel: ObservableObject {
             recommendation = nil
             return
         }
-        let faces = settings.loadedFaces.compactMap { f -> FlexFaceRequest? in
+        let faceRequests = settings.loadedFaces.compactMap { f -> FlexFaceRequest? in
             let k = FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)
             guard stacks[k] != nil else { return nil }
             return FlexFaceRequest(face: f.faceRegionID, rotation: f.rotationDeg, map: f.map,
                                    weightN: f.weightN, stamp: f.activeStamp.flatMap { stampGrids[$0.id] })
         }
+        // ★ R7-E2: the registered presses too — Auto picks for the whole lattice, a side press keeps it to gyroid (core's own rule)
+        let presses = Self.controlStripPresses ? [] : pressDesignTargets.map {
+            FlexFaceRequest(face: $0.key.region, rotation: 0, map: $0.map, weightN: $0.weightN, stamp: nil)
+        }
+        let faces = faceRequests + presses
         guard !faces.isEmpty else { recommendation = nil; return }
         // Auto weighs every tested temperature and both families; the user's overrides
         // are applied on top (R5), never fed back as if Auto chose them.
@@ -1250,12 +1293,24 @@ public final class FlexibleStageModel: ObservableObject {
     /// — ★ BATCH B REVIEW: or the SCENE it was built on (a new grid, a new lattice region, a
     /// new bead on the main page; the shared model keeps its lattice across the session).
     public var latticeIsStale: Bool {
-        lattice.map { $0.settingsKey != settings.designInputs.hashValue || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
+        lattice.map { $0.settingsKey != latticeSettingsKey || ($0.sceneKey != nil && $0.sceneKey != openedKey) } ?? false
+    }
+
+    /// ★ R7-E2: what the lattice is keyed by — the design inputs (presses included now), and which presses are IN THE JOB (a press
+    /// whose design lands after a build makes that build stale). With none in the job: exactly designInputs' hash, as before.
+    var latticeSettingsKey: Int {
+        let base = settings.designInputs.hashValue
+        let sent = Self.controlStripPresses ? [] : sentPresses
+        guard !sent.isEmpty else { return base }
+        var h = Hasher()
+        h.combine(base)
+        for id in sent.sorted(by: { $0.uuidString < $1.uuidString }) { h.combine(id) }
+        return h.finalize()
     }
 
     /// What a build is keyed by: the settings and the scene. ★ ROUND 5: the settings WITHOUT the
     /// display-only choices (a group's colour, the weight unit) — neither re-builds the lattice.
-    private var latticeBuildKey: String { "\(settings.designInputs.hashValue)|\(openedKey ?? "")" }
+    private var latticeBuildKey: String { "\(latticeSettingsKey)|\(openedKey ?? "")" }
     /// The key the last build FAILED on.
     private var latticeFailedKey: String?
     /// ★ BATCH B REVIEW: a failed build is LATCHED against what it was built from — the main
@@ -1342,6 +1397,24 @@ public final class FlexibleStageModel: ObservableObject {
             depths[k] = dk
             extent = max(extent, st.uExtentMM, st.vExtentMM)
         }
+        // ★ R7-E2 (the ruling's item 6: "the preview lattice is graded by that press's own design along the arrow, and blended into
+        // the neighbouring faces' lattices by core's conflict rule"): each press IN THE JOB brings core's design on its press stack,
+        // built into its group's field over its synthetic key (core's assemble_density_field) — never a squish slot of the pass (the
+        // sim along the arrow is E3's)
+        var pressKeysOf: [Int: [FlexFaceKey]] = [:]
+        var pressStacks: [FlexFaceKey: FlexStackInfo] = [:]
+        if !shapeOnly, !Self.controlStripPresses {
+            let sentNow = sentPresses
+            for p in presses where sentNow.contains(p.id) {
+                guard let r = pressRegistrations[p.id] else { continue }
+                let k = FlexFaceKey(region: r.key, rotation: 0)
+                guard let d = designs[k], d.refusal == nil, d.columns.count == r.stack.columns.count else { continue }
+                pressStacks[k] = r.stack
+                designed[k] = FlexiblePinch.core(d, stack: r.stack)
+                pressure[k] = d.columns.map(\.pressureMPa)
+                pressKeysOf[FlexibleSqueezeGroups.id(p), default: []].append(k)
+            }
+        }
         // ★ D2 REVIEW: the pass's four slots never split a pinch (face 5 stood still while face 3
         // squished with five pressed faces)
         let pinchedWith = pinchedKeys(built)
@@ -1352,21 +1425,22 @@ public final class FlexibleStageModel: ObservableObject {
         let builtSet = Set(order)
         let partners = FlexibleSqueezeGroups.partners(pinches)
         let plans: [(number: Int, keys: [FlexFaceKey], pinched: Bool)] = squeezeGroups.compactMap { g in
-            let keys = order.filter { g.regions.contains($0.region) }
+            let keys = order.filter { g.regions.contains($0.region) } + (pressKeysOf[g.id] ?? [])   // ★ R7-E2: its presses in the job
             return keys.isEmpty ? nil : (g.number, keys, g.regions.contains { partners[$0] != nil })
         }
         let sims = self.sims.compactMap { sim -> FlexibleSim? in
             let keys = sim.keys.filter { builtSet.contains($0) }
             return keys.isEmpty ? nil : FlexibleSim(id: sim.id, kind: sim.kind, title: sim.title, short: sim.short, keys: keys)
         }
-        let stackOf = stacks, regions = self.regions
+        let stackOf = stacks.merging(pressStacks) { a, _ in a }, regions = self.regions   // ★ R7-E2: the presses' stacks too
         let cutsOf = Dictionary(order.map { ($0.region, regions.cuts(of: $0.region)) }, uniquingKeysWith: { a, _ in a })
         latticeGeneration += 1
         let generation = latticeGeneration
         let (builtKeys, faceNoLattice, extentMM, drawnFaces) = (order, noLattice, extent, drawn)
         let (designedSnap, pressureSnap, squishSnap, depthsSnap) = (designed, pressure, squish, depths)
+        let pressKeysSnap = Array(pressStacks.keys)
         let depthForBand = shallowest.isFinite ? shallowest : 0
-        let build = self.build, key = settings.designInputs.hashValue, temp = designTempC ?? 0
+        let build = self.build, key = latticeSettingsKey, temp = designTempC ?? 0   // ★ R7-E2: presses in the job too
         let lawInputs: (path: String, material: String, temp: Double)? = {
             guard let p = materialsPath, let m = settings.materialID, let t = designTempC else { return nil }
             return (p, m, t)
@@ -1441,9 +1515,16 @@ public final class FlexibleStageModel: ObservableObject {
                                 faceDepths[k] = d
                                 squishFaces[k] = FlexibleSquishFace(stack: st, depthsMM: d)
                             }
+                            // ★ R7-E2: each press as built too (its group's note), never one of the pass's faces
+                            var pressDepths: [FlexFaceKey: [Double?]] = [:]
+                            for k in pressKeysSnap {
+                                guard let st = stackOf[k], let sg = designedSnap[k], let p = pressureSnap[k] else { continue }
+                                pressDepths[k] = try FlexibleGroupField.asBuilt(field, stack: st, segments: sg, pressureMPa: p,
+                                                                                strainUnder: law.strainUnder)
+                            }
                             for plan in plans {
                                 let want = plan.keys.compactMap { designedSnap[$0]?.buildableDepthMM.compactMap { $0 }.max() }.max() ?? 0
-                                let got = plan.keys.compactMap { faceDepths[$0]?.compactMap { $0 }.max() }.max() ?? 0
+                                let got = plan.keys.compactMap { (faceDepths[$0] ?? pressDepths[$0])?.compactMap { $0 }.max() }.max() ?? 0
                                 if FlexibleGroupEstimate.misses(designedMM: want, asBuiltMM: got) {
                                     notes[FlexibleSim.groupID(plan.number)] =
                                         FlexibleRowCopy.groupMisses(number: plan.number, asBuiltMM: got, designedMM: want)
@@ -1523,8 +1604,11 @@ public final class FlexibleStageModel: ObservableObject {
             FlexibleSqueezeGroups.normalise(&s)
         }
         let pinches = FlexibleSqueezeGroups.pinches(conflicts, s)
+        // ★ R7-E2: the presses IN THE JOB, but those a send leaves out (one of their regions among `resting` — a press is never a
+        // resting entry); written after the face entries
+        let pressEntries = Self.controlStripPresses ? [] : pressJobEntries(excluding: resting)
         // ★ ROUND 4 (D2): what core cannot run yet (core brief) is said, never sent to be refused
-        if FlexibleSqueezeGroups.groups(s, sent: sentPresses).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
+        if FlexibleSqueezeGroups.groups(s, sent: Set(pressEntries.map(\.id))).count > 1 { throw FlexibleJob.EncodeError.squeezeGroups }
         if !pinches.isEmpty { throw FlexibleJob.EncodeError.pinch }
         let faceCount = max(file.faceCount, (project.viewerMesh?.faceIDs.max().map { Int($0) + 1 }) ?? 0)
         var inputs = FlexibleJob.Inputs(
@@ -1541,6 +1625,7 @@ public final class FlexibleStageModel: ObservableObject {
         }
         (inputs.buildDir, inputs.plateDir) = buildDirections
         inputs.pinches = pinches.map { [$0.a, $0.b] }
+        inputs.presses = pressEntries
         return try FlexibleJob.runJobJSON(inputs)
     }
 }

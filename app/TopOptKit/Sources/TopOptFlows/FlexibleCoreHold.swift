@@ -129,8 +129,12 @@ public struct FlexibleCoreHold: Equatable, Sendable {
             for g in groups {
                 let inside = Set(g.regions)
                 let ends = unique(pinches.filter { inside.contains($0.a) && inside.contains($0.b) }.map(\.b))
-                let rest = unique(pressed.filter { !inside.contains($0) } + ends)
-                guard noPinchLeft(Set(rest)), rest.count < pressed.count else { continue }
+                // ★ R7-E2: the other groups' presses in the job are left out by their markers (first regions)
+                let outPresses = groups.filter { $0.id != g.id }.flatMap(\.presses).compactMap { pressMarker?($0) }
+                let rest = unique(pressed.filter { !inside.contains($0) } + ends + outPresses)
+                let restSet = Set(rest)
+                let loadedLeft = pressed.contains { !restSet.contains($0) } || g.presses.contains { pressMarker?($0) != nil }
+                guard noPinchLeft(restSet), loadedLeft else { continue }
                 let only = "Group \(g.number) only"
                 let scope = ends.isEmpty ? only : "\(only), \(names(ends)) resting"
                 out.append(.send(resting: rest, title: "Send \(scope)", scope: scope))
@@ -154,8 +158,13 @@ extension FlexibleStageModel {
     /// What the pill reads (cheap: the filament, the groups, core's stack conflicts).
     /// ★ AP1: the groups with something SENT (a press alone in a group is not core's to run yet).
     public var coreHoldKind: FlexibleCoreHold.Kind? {
-        FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count,
-                              edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty)
+        // ★ R7-E2 RED CONTROL (FlexibleR7E2Tests): the hold before E2 — a sent press's group not counted
+        if Self.controlHoldIgnoresPresses {
+            return FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil,
+                                         groups: FlexibleSqueezeGroups.groups(settings, sent: []).count, pinches: pinches.count)
+        }
+        return FlexibleCoreHold.kind(calibrateFirst: material?.noPrediction != nil, groups: sentSqueezeGroups.count, pinches: pinches.count,
+                                     edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty)
     }
 
     /// ★ ROUND 7, M1 (5): the edges/corners groups core does not take yet (none of their presses is sent until AP9) — never
@@ -181,7 +190,8 @@ extension FlexibleStageModel {
             return FlexibleCoreHold(kind: .squeezeGroups,
                                     line: edges.isEmpty ? FlexibleCoreRun.notSentLine(.squeezeGroups) : FlexibleRowCopy.exportMakesOneEach,
                                     why: FlexibleJob.EncodeError.squeezeGroups.description + edgesWhy(edges),
-                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) }),
+                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: pinches, name: { self.displayName($0) },
+                                                                  pressMarker: { self.sentPressMarker($0) }),   // ★ R7-E2
                                     note: edges.isEmpty ? nil : FlexibleRowCopy.edgesExportSeparately)
         case .edgesBeside:
             // ★ M1 (5, the reviewer's ruling 4): ONE face group beside the edges group(s) — "This export makes Group 1 only."
@@ -206,7 +216,8 @@ extension FlexibleStageModel {
                 ? "Not sent: core can\u{2019}t press \(displayName(p[0].a)) and \(displayName(p[0].b)) at once"
                 : FlexibleCoreRun.notSentLine(.pinch)
             return FlexibleCoreHold(kind: .pinch, line: line, why: FlexibleJob.EncodeError.pinch.description,
-                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: p, name: { self.displayName($0) }))
+                                    fixes: FlexibleCoreHold.sends(groups: sentSqueezeGroups, pinches: p, name: { self.displayName($0) },
+                                                                  pressMarker: { self.sentPressMarker($0) }))
         }
     }
 

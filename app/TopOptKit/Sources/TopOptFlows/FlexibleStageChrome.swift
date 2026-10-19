@@ -132,6 +132,9 @@ public struct FlexibleStageSheet: View {
         ("Side faces are estimates",
          "A face pushed from the side uses gyroid only and is labelled estimated until "
          + "sideways test pucks are measured."),
+        // ★ R7-E2 (the reviewer's ruling of 2026-10-07, item 5 — the honest label, whole)
+        ("Angled presses are estimates",
+         "Edges and corners are pressed along their arrow. " + FlexibleRowCopy.angledEstimateSentence),
         ("Soft-over-firm layering comes later",
          "One squish profile per stack of material in this version."),
     ]

@@ -42,6 +42,17 @@ public enum FlexibleLatticeCard {
     @MainActor static func jobSummary(model m: FlexibleStageModel) -> String? {
         let groups = m.sentSqueezeGroups
         guard groups.count == 1, let g = groups.first else { return nil }
+        // ★ R7-E2 (the design's step ②: "Group 3 · 5 lb · 2 edges · bead 0.45 mm"): an edges group names its edges and corners
+        if g.kind == .edges {
+            let sent = m.sentPresses
+            let ps = g.presses.compactMap { m.press($0) }.filter { sent.contains($0.id) }
+            let corners = ps.filter { $0.strip?.kind == .corner }.count
+            let name = FlexibleRowCopy.groupName(g.number), weight = FlexibleRowCopy.squeezeValue(m.groupForce(g), unit: m.weightUnit)
+            let line = FlexibleRowCopy.edgesJobSummary(group: name, weight: weight, edges: ps.count - corners, corners: corners,
+                                                       beadMM: m.project.printParams.strutLineWidthMM)
+            return line.count <= 44 ? line
+                : [name, weight, FlexibleRowCopy.edgesDetail(edges: ps.count - corners, corners: corners)].joined(separator: " \u{00B7} ")
+        }
         let hands = m.groupHands(g).count, n = hands > 0 ? hands : g.regions.count
         let parts = [FlexibleRowCopy.groupName(g.number), FlexibleRowCopy.squeezeValue(m.groupForce(g), unit: m.weightUnit),
                      n == 1 ? "1 face" : "\(n) faces"]
@@ -306,6 +317,7 @@ struct FlexibleLatticeCardView: View {
                     .said(f.oneLine)
             }
             if !FlexibleLatticeCard.controlDropsHoldNote { FlexibleExportRows.HoldNote(run: run, size: 13) }
+            FlexibleExportRows.PressNote(run: run, size: 13)   // ★ R7-E2: a side press sent, said
             FlexibleExportRows.FixRow(run: run, compact: true)
             // ★ the review of R7-D1: Ready says what goes to core, above [Send to core] (the mockup's line); ★ R7-D3: above EVERY
             // [Send to core] the card offers (FlexibleLatticeCard.offersSend — the button below asks the same rule)

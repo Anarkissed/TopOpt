@@ -122,7 +122,15 @@ public enum FlexiblePressSupport {
 
     /// ★ THE GATE, as one pure function of the facts (every condition false keeps the press out, with its line).
     public static func verdict(_ f: Facts) -> Verdict {
-        Verdict(inJob: false, reason: .coreSupport)   // ★ R7-E2 STUB
+        func out(_ r: Reason) -> Verdict { Verdict(inJob: false, reason: r) }
+        guard f.schema, f.bridge, f.api == expectedAPI else { return out(.coreSupport) }
+        if let s = f.stacked { return out(s.isEmpty ? .designing : .notStacked(s)) }   // "" — its stack is being read
+        if let t = f.twoEntries { return out(.twoEntries(t)) }
+        if let sh = f.shared { return out(.shared(sh)) }
+        if let r = f.designRefusal { return out(.designRefused(r)) }
+        guard f.designed else { return out(.designing) }
+        if let c = f.conflict { return out(.conflict(c)) }
+        return .sent
     }
 
     // MARK: - core's side (1–3), read once
@@ -132,7 +140,7 @@ public enum FlexiblePressSupport {
     /// ★ 3: core's press API version (a test stands a 1 in for it: the RED CONTROL closes the gate).
     nonisolated(unsafe) static var apiVersion: () -> Int = { FlexibleScene.pressApiVersion }
     /// ★ 1: the schema probe (memoised; a test may stand in for it).
-    nonisolated(unsafe) static var schemaProbe: () -> Bool = { false }   // ★ R7-E2 STUB
+    nonisolated(unsafe) static var schemaProbe: () -> Bool = { probeSchema() }
     nonisolated(unsafe) private static var schemaMemo: Bool?
 
     /// Core's schema takes a face_region_ids + press_direction entry (asked once per process).
@@ -142,6 +150,27 @@ public enum FlexiblePressSupport {
         schemaMemo = v
         return v
     }
+    /// ★ THE PROBE: a whole job through core's own parse_job (TopOptKit.jobSchemaError) — 2 declared faces, one loaded entry. Its
+    /// CONTROL, the same entry naming one face_region_id (today's face entry), must parse, or the probe says nothing (false); then
+    /// the entry with face_region_ids [0, 1] + press_direction must parse too.
+    static func probeSchema() -> Bool {
+        let i = FlexibleJob.Inputs(modelPath: "part.stl", resolution: 48, beadWidthMM: 0.42, faceCount: 2,
+                                   settings: FlexibleStageSettings(materialID: "varioshore_tpu"))
+        func parses(_ entry: [String: Any]) -> Bool {
+            var block = FlexibleJob.header(i, material: "varioshore_tpu")
+            block["faces"] = [entry]
+            guard let doc = try? FlexibleJob.document(i, material: "varioshore_tpu", block: block) else { return false }
+            return TopOptKit.jobSchemaError(Data(doc.utf8)) == nil
+        }
+        guard let control = try? FlexibleJob.faceEntry(FlexibleFaceSettings(faceRegionID: 0), finish: .covered, stamps: [:]),
+              parses(control) else { return false }
+        var press = control
+        press["face_region_id"] = nil
+        press["face_region_ids"] = [0, 1]
+        press["press_direction"] = [0.0, 0.0, -1.0]
+        return parses(press)
+    }
+
     /// Tests only: forget the memo (a stand-in probe is asked again).
     static func resetSchemaMemo() { schemaMemo = nil }
 

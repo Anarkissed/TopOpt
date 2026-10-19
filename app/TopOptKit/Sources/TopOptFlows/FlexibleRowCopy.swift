@@ -272,7 +272,8 @@ public enum FlexibleRowCopy {
     /// (face region a and face region b overlap by N mm2)") reads "Edge 16 and Face 3 share 85 mm²".
     public static func faceWarning(refusalCode: String?, refusalReason: String?, unreachedColumns: Int, side: Bool,
                                    names: (Int) -> String) -> String? {
-        faceWarning(refusalCode: refusalCode, refusalReason: refusalReason, unreachedColumns: unreachedColumns, side: side)   // ★ R7-E2 STUB
+        if refusalCode == "shared_footprint", let r = refusalReason, let s = FlexibleCoreRunReport.sharedWords(r, names: names) { return s }
+        return faceWarning(refusalCode: refusalCode, refusalReason: refusalReason, unreachedColumns: unreachedColumns, side: side)
     }
     /// The number pad's title when a face with no main-page load is pressed.
     public static let askWeight = "How much weight presses here?"

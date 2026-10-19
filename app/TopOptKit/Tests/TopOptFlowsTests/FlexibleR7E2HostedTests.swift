@@ -59,6 +59,21 @@ final class FlexibleR7E2HostedTests: XCTestCase {
         addTeardownBlock { @MainActor in w.orderOut(nil); w.contentView = nil }
         return Host(window: w, view: hv, size: size, frames: frames)
     }
+    final class Box { var said: [String] = [] }
+    /// What a view DRAWS in words (FlexibleSaidKey, recorded in tests only — FlexibleRound7CardMessagesTests' helper).
+    func texts<V: View>(_ v: V, size: CGSize) -> [String] {
+        FlexibleSaid.recording = true
+        defer { FlexibleSaid.recording = false }
+        let box = Box()
+        let hv = NSHostingView(rootView: v.onPreferenceChange(FlexibleSaidKey.self) { box.said = $0 }.environment(\.colorScheme, .dark))
+        hv.frame = CGRect(origin: .zero, size: size)
+        let w = NSWindow(contentRect: hv.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        w.contentView = hv
+        hv.layoutSubtreeIfNeeded()
+        pump(0.3)
+        w.contentView = nil
+        return box.said
+    }
     func axAll(_ h: Host) -> [AX] {
         var out: [AX] = []
         let wf = h.window.frame
@@ -80,7 +95,7 @@ final class FlexibleR7E2HostedTests: XCTestCase {
 
     /// His pad on the main stage's shared model, `edges` picked at 5 kg ([Done]) and each in the job — SYNCHRONOUS, the run loop
     /// pumped (the page's Metal view publishes its projection only so).
-    func sent(_ edges: [Set<Int>] = [[3, 2]]) throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel, [FlexiblePress]) {
+    func sent(_ edges: [Set<Int>] = [[3, 2]], rest: [Int] = []) throws -> (FlexibleHisProject.Restored, FlexibleMainStage, FlexibleStageModel, [FlexiblePress]) {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let stage = FlexibleMainStage()
         stage.reduceMotion = { true }
@@ -90,6 +105,8 @@ final class FlexibleR7E2HostedTests: XCTestCase {
         m.openScene()
         XCTAssertTrue(pumpUntil(120) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil && m.geometry[$0] != nil } },
                       "the scene and stacks")
+        for f in rest { m.rest(f) }
+        if !rest.isEmpty { pumpUntil(60) { m.loadedKeys.allSatisfy { m.stacks[$0] != nil } && !m.readiness.designing } }
         m.rail = .newGroup
         m.startEdgePick()
         XCTAssertTrue(pumpUntil(240) { m.edgePick.map { !$0.loading && !$0.checking } ?? false }, "the edges and corners listed")
@@ -158,11 +175,13 @@ final class FlexibleR7E2HostedTests: XCTestCase {
         let h = host(FlexibleEdgeGroupsHostedTests.PanelHost(model: m).frame(width: FlexibleSettingsPanel.width, height: 1300, alignment: .top)
             .background(DS.Color.background.color), size: CGSize(width: FlexibleSettingsPanel.width, height: 1300))
         pump(1.5)
-        let labels = axAll(h).map(\.label)
-        print("FLEX-E2-H2 the tab's lines: \(labels.filter { $0.contains("Side") || $0.contains("Set up") || $0.contains("Twisted") })")
+        let label = try XCTUnwrap(press.strip?.label)
+        let lines = h.frames.all.keys.filter { $0.hasPrefix("pressLine:") }.sorted()
+        print("FLEX-E2-H2 the tab's press lines: \(lines) · its frame \(h.frames.all["pressLine-\(label)"]?.integral ?? .zero)")
         XCTAssertEqual(m.pressWarning(press.id)?.line, FlexibleRowCopy.sidePress, "★ the side label")
-        XCTAssertTrue(labels.contains { $0.contains(FlexibleRowCopy.sidePress) }, "★ on the tab: '\(FlexibleRowCopy.sidePress)'")
-        XCTAssertFalse(labels.contains { $0.contains(FlexibleRowCopy.pressNotSent) }, "★ never 'Set up · core support pending' once sent")
+        XCTAssertTrue(lines.contains("pressLine:\(label):" + FlexibleRowCopy.sidePress), "★ on the tab: '\(FlexibleRowCopy.sidePress)'")
+        XCTAssertLessThanOrEqual(h.frames.all["pressLine-\(label)"]?.height ?? 99, 44, "★ one line")
+        XCTAssertFalse(lines.contains { $0.hasSuffix(FlexibleRowCopy.pressNotSent) }, "★ never 'Set up · core support pending' once sent")
         XCTAssertLessThanOrEqual(FlexibleRowCopy.sidePress.count, 44)
     }
 
@@ -171,7 +190,12 @@ final class FlexibleR7E2HostedTests: XCTestCase {
     /// The ruling's sentence: popped ONCE per session (when a side press first goes into the job), never again for the next; on the
     /// limits sheet whole; under the Export step's caption once a side press is sent (its (i) the whole sentence).
     func testTheRulingsSentencePopsOncePerSession() throws {
-        let (_, stage, m, ps) = try sent([[3, 2]])
+        // (Groups 2 and 3's faces rest: the hold offers at most three sends — his rule — so the edges group's is one of them)
+        let (_, stage, m, ps) = try sent([[3, 2]], rest: [2, 3, 4, 5])
+        // (the [Done]'s own line — "Face 2 keeps the rest · Edge 14" — is up first; the sentence follows when it clears, never over it)
+        let first = m.toast
+        pumpUntil(10) { m.sideSentenceSaid && m.toast == FlexibleRowCopy.angledEstimateShort }
+        print("FLEX-E2-H3 the line up at the send: '\(first ?? "-")' · then '\(m.toast ?? "-")'")
         XCTAssertTrue(m.sideSentenceSaid, "★ said this session")
         XCTAssertEqual(m.toast, FlexibleRowCopy.angledEstimateShort, "★ the pop-up, in one line (≤ 44)")
         XCTAssertLessThanOrEqual(FlexibleRowCopy.angledEstimateShort.count, 44)
@@ -196,18 +220,27 @@ final class FlexibleR7E2HostedTests: XCTestCase {
                       "★ the limits sheet says the ruling's sentence")
         // the Export step: a send that carries a side press says it under core's line, the whole sentence behind its (i)
         let run = stage.coreRun
-        run.runner = { _, _, _, _ in FlexRunInfo(refusal: nil, receiptJSON: "{\"faces\":[{}],\"topology\":\"gyroid\"}", files: []) }
+        // (a stand-in for core: its receipt carries the press block core writes for an edge press — core run.cpp)
+        let regs = try XCTUnwrap(m.press(ps[0].id)).regions
+        run.runner = { _, _, _, _ in
+            FlexRunInfo(refusal: nil, receiptJSON: "{\"faces\":[{\"press\":{\"footprint_face_region_ids\":[\(regs.map(String.init).joined(separator: ","))],\"direction\":[-0.707107,0.707107,0],\"build_angle_deg\":90,\"side\":true}}],\"topology\":\"gyroid\"}", files: [])
+        }
         let g = try XCTUnwrap(m.squeezeGroup(ofPress: ps[0].id))
         let fix = try XCTUnwrap(m.coreHold?.fixes.first { $0.scope == "Group \(g.number) only" }, "the edges group's send")
         run.send(m, fix: fix)
         XCTAssertTrue(pumpUntil(30) { !run.isSending })
         print("FLEX-E2-H3 export: '\(run.line)' · note '\(run.pressNote ?? "-")'")
         XCTAssertEqual(run.pressNote, FlexibleRowCopy.angledEstimateShort, "★ the Export caption says it")
-        let h = host(FlexibleExportRows.PressNote(run: run).frame(width: 420), size: CGSize(width: 420, height: 120))
-        pump(0.5)
-        let ax = axAll(h)
-        XCTAssertTrue(ax.contains { $0.label.contains(FlexibleRowCopy.angledEstimateShort) }, "★ drawn under core's line")
-        XCTAssertTrue(ax.contains { $0.id == "flexible-export-press-note-info" }, "★ its (i) holds the whole sentence")
+        // what the rows DRAW (a test process builds no accessibility tree for SwiftUI: the rows say their words — FlexibleSaidKey)
+        let said = texts(FlexibleExportRows.PressNote(run: run).frame(width: 420), size: CGSize(width: 420, height: 120))
+        let card = texts(FlexibleLatticeCardView(run: run, status: stage.cornerStatus(m), state: .sent, preview: "built", width: 420, maxHeight: 900),
+                         size: CGSize(width: 460, height: 900))
+        print("FLEX-E2-H3 the note's words \(said) · in the card \(card.contains(FlexibleRowCopy.angledEstimateShort)) · core's line '\(run.line)'")
+        XCTAssertTrue(said.contains(FlexibleRowCopy.angledEstimateShort), "★ drawn under core's line")
+        XCTAssertTrue(said.contains("#flexible-export-press-note-info"), "★ its (i) holds the whole sentence")
+        XCTAssertTrue(card.contains(FlexibleRowCopy.angledEstimateShort), "★ in the corner card too")
+        XCTAssertTrue(run.line.hasSuffix("1 edge"), "★ core's line counts an edge press as an edge: '\(run.line)'")
+        XCTAssertTrue(run.info?.contains("a side press") ?? false, "★ core's receipt's press block behind the (i): '\(run.info ?? "")'")
     }
 }
 #endif

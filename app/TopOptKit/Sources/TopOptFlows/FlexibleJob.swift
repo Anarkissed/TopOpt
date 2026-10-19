@@ -113,14 +113,17 @@ public enum FlexibleJob {
 
     public static func runJobJSON(_ i: Inputs) throws -> String {
         guard let material = i.settings.materialID else { throw EncodeError.noFilament }
-        guard !i.settings.loadedFaces.isEmpty else { throw EncodeError.noLoadedFace }
+        // ★ R7-E2: an edges group sent on its own is something loaded
+        guard !i.settings.loadedFaces.isEmpty || !i.presses.isEmpty else { throw EncodeError.noLoadedFace }
         // ★ ROUND 4 (D2): core designs ONE squeeze (core brief: load cases)
-        // ★ AP1: only groups with something SENT count — no press is in the job until AP9 (Inputs.presses)
-        guard FlexibleSqueezeGroups.groups(i.settings, sent: []).count <= 1 else { throw EncodeError.squeezeGroups }
+        // ★ AP1: only groups with something SENT count — ★ R7-E2: the presses in the job (Inputs.presses)
+        guard FlexibleSqueezeGroups.groups(i.settings, sent: Set(i.presses.map(\.id))).count <= 1 else { throw EncodeError.squeezeGroups }
         guard i.pinches.isEmpty else { throw EncodeError.pinch }
         var faces: [[String: Any]] = []
         let finish = i.settings.finishMode
         for f in i.settings.faces { faces.append(try faceEntry(f, finish: finish, stamps: i.stampGrids)) }
+        // ★ R7-E2: each press AFTER the face entries (every face entry byte-identical)
+        for p in i.presses { faces += pressEntries(p, finish: finish) }
         var block = header(i, material: material)
         block["faces"] = faces
         let checks = try i.settings.checkStamps.map { c -> [String: Any] in
@@ -183,6 +186,32 @@ public enum FlexibleJob {
             e["design_stamp"] = stampEntry(g)
         }
         return e
+    }
+
+    /// ★ R7-E2: an edge or corner press as core's C1 addendum states it — ONE loaded entry: face_region_ids (its pieces, member
+    /// order), press_direction (its stored bits), the group's weight, the map core is sent (FlexiblePressShape.map) and its deepest
+    /// squish. (RED CONTROL `controlPressAsFaces`: each piece a plain face entry, no direction.)
+    static func pressEntries(_ p: PressEntry, finish: FlexibleFinish) -> [[String: Any]] {
+        func body(_ e: inout [String: Any]) {
+            e["role"] = "loaded"
+            e["skin_on"] = finish.jobSkinOn
+            e["weight_n"] = p.weightN
+            e["deepest_squish_mm"] = p.map.deepestMM
+            e["mode"] = p.map.mode
+            if p.map.mode == "centre_edge" {
+                e["curve_centre_edge"] = pairs(p.map.centreEdge)
+            } else {
+                e["curve_x"] = pairs(p.map.x)
+                e["curve_y"] = pairs(p.map.y)
+            }
+        }
+        if controlPressAsFaces {
+            return p.regions.map { r in var e: [String: Any] = ["face_region_id": r]; body(&e); return e }
+        }
+        var e: [String: Any] = p.regions.count >= 2 ? ["face_region_ids": p.regions] : ["face_region_id": p.regions.first ?? -1]
+        e["press_direction"] = [p.direction.x, p.direction.y, p.direction.z]
+        body(&e)
+        return [e]
     }
 
     static func pairs(_ c: FlexCurve) -> [[Double]] { zip(c.x, c.y).map { [$0, $1] } }

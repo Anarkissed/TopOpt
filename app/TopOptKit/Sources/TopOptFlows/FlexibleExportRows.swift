@@ -76,7 +76,19 @@ enum FlexibleExportRows {
         var size: CGFloat = 14
 
         var body: some View {
-            EmptyView()   // ★ R7-E2 STUB
+            if let note = run.pressNote {
+                HStack(spacing: DS.Space.s) {
+                    Text(note)
+                        .font(.system(size: size)).foregroundStyle(DS.Color.textSecondary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .said(note)
+                        .accessibilityIdentifier("flexible-export-press-note")
+                    Spacer(minLength: 0)
+                    FlexInfoButton(title: "Angled presses", text: FlexibleRowCopy.angledEstimateSentence, id: "flexible-export-press-note-info")
+                        .said("#flexible-export-press-note-info")
+                }
+                .frame(minHeight: FlexInfoButton<EmptyView>.target)
+            }
         }
     }
 

@@ -50,15 +50,25 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
     public let outDir: String
     public let files: [String]
     public let seconds: Double
+    /// ★ R7-E2: the job's regions in his names (a press's pieces → "Edge 16"), for core's refusals that name them.
+    public var regionNames: [Int: String] = [:]
+    /// ★ R7-E2: core's receipt's press block, one sentence per press it designed (behind the (i)), and how many of the loaded
+    /// entries are edge presses (2 regions) and corner presses (3).
+    public var pressReceipts: [String] = []
+    public var pressEdges = 0
+    public var pressCorners = 0
 
     /// The Export step's one line about core.
     public var line: String {
-        if let r = refusal { return Self.refusalLine(r) }
+        if let r = refusal { return Self.refusalLine(r, names: { regionNames[$0] ?? "Face \($0)" }) }
         var parts = ["Core designed it"]
         if let s = scope { parts.append(s) }
         if let t = topology { parts.append(t.prefix(1).uppercased() + t.dropFirst()) }
         if let c = tempC { parts.append(String(format: "%.0f \u{00B0}C", c)) }
-        parts.append(faces == 1 ? "1 face" : "\(faces) faces")
+        // ★ R7-E2: an edge or corner press is named as one ("Group 2 only · Gyroid · 2 edges"), never counted as a face
+        let plain = faces - pressEdges - pressCorners
+        if plain > 0 || pressEdges + pressCorners == 0 { parts.append(plain == 1 ? "1 face" : "\(plain) faces") }
+        if pressEdges + pressCorners > 0 { parts.append(FlexibleRowCopy.edgesDetail(edges: pressEdges, corners: pressCorners)) }
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -81,11 +91,26 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
     /// ★ R7-E2 — the reviewer's ruling (2026-10-10 19:40: "map shared_footprint to plain words, naming both presses/regions and the
     /// overlap in mm²"): a refusal with core's region ids put in his names (`names`: a region id → "Edge 16" / "Face 3").
     public static func refusalLine(_ r: FlexRefusal, names: (Int) -> String) -> String {
-        refusalLine(r)   // ★ R7-E2 STUB
+        if r.code == "shared_footprint", let s = sharedWords(r.reason, names: names) { return "Core refused it: " + s }
+        return refusalLine(r)
+    }
+
+    /// Core's shared_footprint sentence ("presses A and B share surface (face region a and face region b overlap by N mm2); …") in
+    /// his words: "Edge 16 and Face 3 share 85 mm²" (the presses named as he knows them). Core names the two in JOB order and the
+    /// app writes every face entry before the presses, so the later one (B) — the edge or corner press — is named first, as the
+    /// card's own line names it. nil: not core's sentence.
+    public static func sharedWords(_ reason: String, names: (Int) -> String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: "presses (-?\\d+) and (-?\\d+) share surface \\(face region (-?\\d+) and face region (-?\\d+) overlap by ([0-9.eE+-]+) mm2\\)"),
+              let m = re.firstMatch(in: reason, range: NSRange(location: 0, length: (reason as NSString).length)) else { return nil }
+        let ns = reason as NSString
+        func g(_ i: Int) -> String { ns.substring(with: m.range(at: i)) }
+        guard let a = Int(g(1)), let b = Int(g(2)), let mm2 = Double(g(5)) else { return nil }
+        return FlexibleRowCopy.sharedFootprint(names(b), names(a), mm2: mm2)
     }
 
     /// Read core's answer: the refusal from the result, the choices from its receipt.
-    public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double, scope: String? = nil) -> FlexibleCoreRunReport {
+    public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double, scope: String? = nil,
+                          regionNames: [Int: String] = [:]) -> FlexibleCoreRunReport {
         let receipt = (try? JSONSerialization.jsonObject(with: Data(r.receiptJSON.utf8))) as? [String: Any] ?? [:]
         let faces = (receipt["faces"] as? [Any])?.count ?? 0
         var rep = FlexibleCoreRunReport(refusal: r.refusal, faces: faces,
@@ -93,6 +118,19 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
                                         tempC: r.refusal == nil ? (receipt["nozzle_temp_c"] as? NSNumber)?.doubleValue : nil,
                                         outDir: outDir, files: r.files, seconds: seconds)
         rep.scope = scope
+        rep.regionNames = regionNames
+        // ★ R7-E2: core's receipt's press block (an edge or corner press it designed), said behind the (i)
+        for f in receipt["faces"] as? [[String: Any]] ?? [] {
+            guard let press = f["press"] as? [String: Any] else { continue }
+            let ids = (press["footprint_face_region_ids"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.intValue }
+            if ids.count >= 3 { rep.pressCorners += 1 } else if ids.count == 2 { rep.pressEdges += 1 }
+            let who = ids.first.flatMap { regionNames[$0] } ?? "A press"
+            let dir = (press["direction"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue }
+            let along = dir.map { d in "along (" + d.map { String(format: "%.2f", $0) }.joined(separator: ", ") + ")" } ?? "along its faces' normal"
+            let angle = (press["build_angle_deg"] as? NSNumber)?.doubleValue ?? 0
+            let side = (press["side"] as? Bool) == true ? ", a side press" : ""
+            rep.pressReceipts.append("\(who): pressed \(along), \(String(format: "%.1f", angle))\u{00B0} off build Z\(side).")
+        }
         return rep
     }
 }
@@ -241,6 +279,13 @@ public final class FlexibleCoreRun: ObservableObject {
         sentFix = fix
         phase = .sending
         runs += 1
+        // ★ R7-E2: a side press in the job is said under core's line (the ruling's item 5); core's refusals name his regions
+        let entries = m.pressJobEntries(excluding: Set(fix?.resting ?? []))
+        pressNote = entries.contains { m.pressStack($0.id)?.side == true } ? FlexibleRowCopy.angledEstimateShort : nil
+        var names: [Int: String] = [:]
+        for f in m.settings.faces { names[f.faceRegionID] = m.coreRegionName(f.faceRegionID) }
+        for p in m.presses { for r in p.regions { names[r] = m.coreRegionName(r) } }
+        let regionNames = names
         let runner = self.runner
         let scope = fix?.scope
         let t0 = Date()
@@ -248,7 +293,7 @@ public final class FlexibleCoreRun: ObservableObject {
             let result: Phase
             do {
                 let r = try runner(job, dir, out, materials)
-                result = .ran(FlexibleCoreRunReport.of(r, outDir: out, seconds: Date().timeIntervalSince(t0), scope: scope))
+                result = .ran(FlexibleCoreRunReport.of(r, outDir: out, seconds: Date().timeIntervalSince(t0), scope: scope, regionNames: regionNames))
             } catch {
                 result = .failed("\(error)")
             }
@@ -304,7 +349,8 @@ public final class FlexibleCoreRun: ObservableObject {
         case .ran(let r):
             if let f = r.refusal { return "\(f.reason) (\(f.code))" }
             // ★ C2 VERIFICATION: no temp path (useless on an iPad)
-            return "Core wrote its receipt, heat maps and CSVs (\(r.files.count) files). It designs the density, not the printable file yet."
+            let presses = r.pressReceipts.isEmpty ? "" : " " + r.pressReceipts.joined(separator: " ")   // ★ R7-E2
+            return "Core wrote its receipt, heat maps and CSVs (\(r.files.count) files). It designs the density, not the printable file yet." + presses
         case .notSent(_, let why): return why
         case .failed(let why): return why
         }
