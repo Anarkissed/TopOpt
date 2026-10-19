@@ -58,6 +58,8 @@ Tests were written with this batch; their red controls run inside each test and 
   `e3_run1.txt` / `e3_run2.txt`: the first runs of FlexibleR7E3Tests (run1's one failure was the test's own job read — his pad sends
   one squeeze per job — fixed in the test). Face-group sims unchanged (the
   bridge's face path is byte-for-byte the old one when no footprint is given).
+- iOS: BUILD SUCCEEDED at 60443c66; the app was not running; installed 16:18:09, NOT launched; installed dylib == built (sha256
+  8a2916f8…); strings "Lattice not tuned for this press yet" 1, "All (one after another)" 1, "deeper splits its lattice" 1.
 - Evidence (`round7/batch_e3/look/`, 13" portrait, his live pad + Edge 14 + Edge 16): E3_01 rest | full squish of the edges group with
   the chip; E3_02 [+] on; E3_03 the Lattice page's card with the selector and chip; E3_04 beside his img_edges_1018.
   Seen by looking, not fixed: the down-the-arrow camera puts the edge behind the panel at 13" portrait (backlog #6), so the squish
