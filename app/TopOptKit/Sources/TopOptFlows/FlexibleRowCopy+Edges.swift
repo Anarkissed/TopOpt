@@ -15,9 +15,9 @@ extension FlexibleRowCopy {
     /// "Edge 3" / "Corner 1" / "Fillet 9": a candidate by its number in the list.
     public static func candidateLabel(_ c: FlexibleEdgeCandidates.Candidate) -> String {
         switch c.kind {
-        case .corner: return "Corner \(c.number)"
-        case .edge: return "Edge \(c.number)"
-        case .blend: return "Fillet \(c.number)"
+        case .corner: return "Corner \(c.shownNumber)"   // ★ R7-E3 (a): the part's one number, as on its tag
+        case .edge: return "Edge \(c.shownNumber)"
+        case .blend: return "Fillet \(c.shownNumber)"
         }
     }
 
@@ -41,6 +41,10 @@ extension FlexibleRowCopy {
     /// ★ R7-E1b: an edge or corner added to an existing group, and the open edges group's own line.
     public static func edgeAdded(_ label: String, to group: String) -> String { fit("\(label) added to \(group)") }
     public static let edgeAddLine = "Tap a lit edge or corner to add it"
+    /// ★ R7-E3: the open edges group with nothing lit — a tap on the part still adds; [+] lights what can be pressed.
+    public static let edgeAddTapLine = "Tap an edge or corner, or + to see them"
+    public static let edgeAddPlus = "Show the edges and corners to add"
+    public static let edgeAddDone = "Done"
     public static func openGroup(_ name: String) -> String { fit("Open \(name)", 24) }
     /// [Done · 2 picked]
     public static func edgePickDone(_ n: Int) -> String { n == 0 ? "Done" : "Done \u{00B7} \(n) picked" }

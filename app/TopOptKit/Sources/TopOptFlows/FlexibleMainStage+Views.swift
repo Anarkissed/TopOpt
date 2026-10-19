@@ -237,7 +237,7 @@ extension FlexibleMainStage {
     public func legendCard(viewport: CGSize, bottomClearance: CGFloat, chipColumnWidth: CGFloat) -> FlexibleMainLegendLayout.Placed? {
         let kinds = legendKinds
         // ★ S1b (round 6 item 3): [Prisms]' one line rides the ONE card — which comes for it with no scale too
-        let views = legendPrismsRow ? 1 : 0
+        let views = (legendPrismsRow ? 1 : 0) + selectorRows   // ★ R7-E3: the group selector (and its chip) ride the card too
         guard !kinds.isEmpty || views > 0 else { return nil }
         let keep = FlexibleMainLegendLayout.keepOut(viewport: viewport, bottomClearance: bottomClearance,
                                                     chipColumnWidth: chipColumnWidth)

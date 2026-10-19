@@ -22,8 +22,19 @@ public struct FlexSquishPressInfo: Equatable, Sendable {
     public var face: Int
     public var rotation: Int
     public var columnPressureMPa: [Double]
+    /// ★ R7-E3 (the interim sim along a press's arrow): an edge or corner press — non-empty: it pushes ALONG `direction` (unit,
+    /// into the part) over the union of these regions, `weightN` spread evenly; `face`/`rotation`/`columnPressureMPa` unused.
+    public var footprintRegionIDs: [Int]
+    public var direction: [Double]
+    public var weightN: Double
     public init(face: Int, rotation: Int, columnPressureMPa: [Double]) {
         self.face = face; self.rotation = rotation; self.columnPressureMPa = columnPressureMPa
+        self.footprintRegionIDs = []; self.direction = []; self.weightN = 0
+    }
+    /// ★ R7-E3: a press over `footprint` along `direction` with `weightN`.
+    public init(press footprint: [Int], direction: [Double], weightN: Double) {
+        self.face = footprint.first ?? -1; self.rotation = 0; self.columnPressureMPa = []
+        self.footprintRegionIDs = footprint; self.direction = direction; self.weightN = weightN
     }
 }
 
@@ -171,6 +182,11 @@ extension FlexibleScene {
             x.face_region_id = Int32(p.face)
             x.rotation_deg = Int32(p.rotation)
             x.column_pressure_mpa = FlexConv.d(p.columnPressureMPa)
+            if !p.footprintRegionIDs.isEmpty {   // ★ R7-E3: a press along its arrow
+                x.footprint_region_ids = FlexConv.i(p.footprintRegionIDs)
+                x.direction = FlexConv.d(p.direction)
+                x.weight_n = p.weightN
+            }
             presses.push_back(x)
         }
         q.pressed = presses

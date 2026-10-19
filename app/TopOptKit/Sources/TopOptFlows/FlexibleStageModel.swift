@@ -201,6 +201,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var edgePick: FlexibleEdgePick?
     /// ★ R7-E1b: the open edges group's own pick state — its pressable edges and corners on the part; a tap ADDS one (FlexibleStageModel+EdgeAdd).
     @Published public var edgeAdd: FlexibleEdgePick?
+    /// ★ R7-E3 (his notes of 2026-10-19 ~14:40: "When in a group do *not* highlight other edges/corners. Allow users to tap them to add
+    /// OR add a "+" button"): the edges group (stored id) whose [+] is on — only then are its pressable edges and corners lit.
+    @Published public var edgeAddingGroup: Int?
     /// ★ ROUND 7 (S, 4h): on [+ New] with nothing pressed, the face a tap chose to start Group 1 while the keypad asks its
     /// weight ("How much weight presses here?"); nil when nothing is asked.
     @Published public var newGroupAsk: Int?
@@ -280,6 +283,13 @@ public final class FlexibleStageModel: ObservableObject {
     var feRequest: FlexibleFERequest?
     /// The generation whose sims were handed to the solver.
     var squishScheduled: Int?
+    /// ★ R7-E3: the current lattice's per-voxel arrays with no sim (FlexibleFERequest.base) — kept after the solver drops the request,
+    /// so an edges group's interim sim along its arrow can be solved on the CURRENT lattice whenever its presses change (the lattice is
+    /// not rebuilt for a press while sending presses is parked). ~8 B per scene voxel.
+    var feBase: FlexibleFERequest?
+    /// ★ R7-E3: per press sim id ("group-N"), the key of the presses it was scheduled for, and the ids on the solver now.
+    var pressSimKeys: [String: Int] = [:]
+    var pressSimInFlight: Set<String> = []
     /// One solve at a time, off the main thread (FlexibleSquishSolver).
     let squishSolver = FlexibleSquishSolver()
     /// Test only: keep the last FE request (the solver releases it after its last sim).

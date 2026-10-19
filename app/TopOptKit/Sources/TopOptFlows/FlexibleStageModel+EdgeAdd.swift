@@ -19,14 +19,31 @@ extension FlexibleStageModel {
     @MainActor static var controlAddMakesNewGroup = false
     @MainActor static var controlMoveKeepsForce = false
 
+    /// ★ RED CONTROL only: E1b's open group — every pressable edge and corner lit all the time (his "wayyy too busy").
+    @MainActor static var controlAlwaysLit = false
+
+    /// ★ R7-E3: the open edges group's pressable edges and corners are LIT only while its [+] is on (a tap on the part adds either way).
+    public var edgeAddLit: Bool {
+        guard let a = edgeAdd, let g = a.into else { return false }
+        return Self.controlAlwaysLit || edgeAddingGroup == g
+    }
+
+    /// [+] on the open edges group's card: lit ⇄ not lit.
+    public func toggleEdgeAdding() {
+        guard let g = edgeAdd?.into else { edgeAddingGroup = nil; return }
+        edgeAddingGroup = edgeAddingGroup == g ? nil : g
+    }
+
     /// The open edges group's pick state, read again when the open group or its presses change (nil: no edges tab, or [+ New]'s card).
     public func syncEdgeAdd() {
         // ★ found by looking (his live pad, E1b_03): read while the part was still opening, the group said "The part is still opening."
         // and lit nothing — it is read once the part is open (the page asks again then)
         guard edgePick == nil, let g = FlexibleFlatPrismUI.openEdgesGroup(self), sceneState == .ready, openedKey == currentSceneKey else {
             if edgeAdd != nil { edgeAdd = nil }
+            if edgeAddingGroup != nil, FlexibleFlatPrismUI.openEdgesGroup(self)?.id != edgeAddingGroup { edgeAddingGroup = nil }
             return
         }
+        if let a = edgeAddingGroup, a != g.id { edgeAddingGroup = nil }   // ★ R7-E3: [+] belongs to the group it was pressed on
         var a = FlexibleEdgePick(groupID: g.id, colour: FlexibleSqueezeGroups.colourChoice(of: g, in: settings))
         a.into = g.id
         a.weightKg = g.presses.compactMap { settings.press($0)?.settings.weightKg }.first { $0 > 0 }

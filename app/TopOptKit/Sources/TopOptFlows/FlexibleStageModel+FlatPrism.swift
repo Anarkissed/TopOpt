@@ -289,7 +289,8 @@ extension FlexibleStageModel {
         let n = settings.press(id)?.settings.deepestMM ?? lo
         if let reason {
             guard best != nil else { return false }   // nothing deeper fits: the refusal stands
-            let line = FlexibleRowCopy.fit("Max " + String(format: "%.1f", n) + " mm \u{00B7} " + reason)
+            let line = reason == FlexibleRowCopy.splitsTheLattice ? FlexibleRowCopy.maxDepthSplits(n)   // ★ R7-E3 (b)
+                : FlexibleRowCopy.fit("Max " + String(format: "%.1f", n) + " mm \u{00B7} " + reason)
             lastFlatStop = FlexibleFlatStop(press: id, line: line, setMM: nil, direction: direction, snap: snap)
             toast = line
             return true

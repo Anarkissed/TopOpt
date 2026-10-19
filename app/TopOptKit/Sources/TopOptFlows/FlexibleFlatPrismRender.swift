@@ -163,6 +163,11 @@ enum FlexibleFlatPrismUI {
 
     /// ★ R7-E1 REVIEW (the verifier: "on a vertical edge a sideways drag changes the ↕ value"): each angle box names its angle in
     /// his row words, not an arrow glyph.
+    /// ★ R7-E3 (carry-over (c)): the θ row (core's tip toward a face) first unless it reads "Twist" (a steep edge) — the row that
+    /// reads "Tilt" always comes first. Corners keep Up/down then Left/right. RED CONTROL `controlThetaAlwaysFirst` (E1b's order).
+    static func thetaRowFirst(corner: Bool, steep: Bool) -> Bool { controlThetaAlwaysFirst || corner || !steep }
+    nonisolated(unsafe) static var controlThetaAlwaysFirst = false
+
     static func boxLabel(tilt: Bool, corner: Bool, steep: Bool = false) -> String {
         tilt ? FlexibleRowCopy.flatTiltWord(corner: corner, steep: steep) : FlexibleRowCopy.flatTwistWord(corner: corner, steep: steep)
     }
@@ -513,10 +518,12 @@ struct FlexibleFlatPrismOverlay: View {
             }
             if here.showBoxes {
                 VStack(spacing: 4) {
-                    angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: true, corner: st.kind == .corner, steep: steep), value: shown.tilt, tilt: true)
-                        .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTiltBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
+                    // ★ R7-E3 (c): the box that reads "Tilt" first
+                    let thetaFirst = FlexibleFlatPrismUI.thetaRowFirst(corner: st.kind == .corner, steep: steep)
+                    if thetaFirst { thetaBox(id, st, label: label, steep: steep, value: shown.tilt) }
                     angleBox(id, st, key: "flat-twist-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: false, corner: st.kind == .corner, steep: steep), value: shown.twist, tilt: false)
                         .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTwistBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
+                    if !thetaFirst { thetaBox(id, st, label: label, steep: steep, value: shown.tilt) }
                 }
                 .padding(4)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(DS.Surface.panel.color.opacity(0.82)))
@@ -539,6 +546,11 @@ struct FlexibleFlatPrismOverlay: View {
             .background(Capsule().fill(DS.Surface.panel.color.opacity(0.6)))
             .liquidGlass(LiquidGlass.Tint.frost(FlexibleStageStyle.facePrismKnob, intensity: active ? 0.85 : 0.55), in: Capsule(), specular: active ? 1.3 : 1)
             .contentShape(Capsule())
+    }
+
+    private func thetaBox(_ id: UUID, _ st: FlexibleStrip, label: String, steep: Bool, value: Double) -> some View {
+        angleBox(id, st, key: "flat-tilt-\(id.uuidString)", glyph: FlexibleFlatPrismUI.boxLabel(tilt: true, corner: st.kind == .corner, steep: steep), value: value, tilt: true)
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatTiltBox-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
     }
 
     private func angleBox(_ id: UUID, _ st: FlexibleStrip, key: String, glyph: String, value: Double, tilt: Bool) -> some View {

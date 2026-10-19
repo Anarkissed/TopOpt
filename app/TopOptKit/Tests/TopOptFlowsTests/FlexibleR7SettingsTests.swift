@@ -411,7 +411,12 @@ final class FlexibleR7SettingsTests: XCTestCase {
         XCTAssertEqual(m.groupName(try XCTUnwrap(m.railGroup(g2.id))), "Thumbs")
         XCTAssertEqual(titles(m)[2], "Thumbs", "the rail's tab")
         XCTAssertTrue(FlexibleSqueezeGroupRows.rows(model: m).contains { $0.line.hasPrefix("Thumbs") }, "the group's header")
+        // ★ RE-PINNED (R7-E3, his notes of 2026-10-19 ~14:40: the Squish page has NO group selector — the name is the selector's on
+        // the Lattice page, FlexibleMainStage.groupChoices); the old picker (its red control) still carries the name
+        XCTAssertEqual(FlexibleSettingsSquish.playerSims(model: m), [], "no picker on the Squish page")
+        FlexibleSettingsSquish.controlSquishPagePicker = true
         let sims = FlexibleSettingsSquish.playerSims(model: m)
+        FlexibleSettingsSquish.controlSquishPagePicker = false
         XCTAssertTrue(sims.contains { $0.short == "Thumbs" }, "the player's picker: \(sims.map(\.short))")
         XCTAssertEqual(m.settings.designInputs, inputs, "a name never makes the lattice stale")
         XCTAssertTrue(String(decoding: try enc.encode(m.settings), as: UTF8.self).contains("groupNames"), "a name is saved")

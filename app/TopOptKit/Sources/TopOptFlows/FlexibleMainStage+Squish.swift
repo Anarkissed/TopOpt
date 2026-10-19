@@ -203,7 +203,7 @@ extension FlexibleMainStage {
         guard let o = overlay else { return nil }
         let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
         if let c = feColumnCache[f.versionKey], c.key == key { return c.values }
-        let keys = Set(m.lattice?.sims.first { $0.id == f.simID }?.keys ?? [])
+        let keys = Set(m.playLattice?.sims.first { $0.id == f.simID }?.keys ?? [])
         let ratio = 1 / Swift.max(1e-6, f.foldShare ?? 1)
         var perColumn: [FlexFaceKey: [Double?]] = [:]
         for k in o.flatStart.keys where keys.contains(k) {
@@ -322,7 +322,7 @@ extension FlexibleMainStage {
     /// ★ BATCH N VERIFICATION: each version on ITS scale — a quick field kept on screen on today's
     /// (`scaleMM`), the sequence's versions on the scale they will play on (`nextScaleMM`).
     func playAllBaseTints(_ m: FlexibleStageModel, scaleMM: Double, nextScaleMM: Double? = nil) -> [String: [Float]] {
-        guard fe.active, fe.sequence.count > 1 || !fe.retained.isEmpty, let lat = m.lattice, !controlPlayAllCombo else { return [:] }
+        guard fe.active, fe.sequence.count > 1 || !fe.retained.isEmpty, let lat = m.playLattice, !controlPlayAllCombo else { return [:] }
         var out: [String: [Float]] = [:]
         // ★ BATCH N: …and each quick field kept beside its refined version (the renderer swaps the
         // refined one's colours in with its shape, at rest) — keyed by VERSION

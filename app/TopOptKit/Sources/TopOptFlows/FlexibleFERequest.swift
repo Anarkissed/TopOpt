@@ -53,6 +53,26 @@ public struct FlexibleFERequest: Sendable {
     public let law: FlexSquishLawInfo
     public let sims: [Sim]
 
+    /// ★ R7-E3: this request with `sims` in place of its own (the per-voxel arrays shared).
+    public func with(sims: [Sim]) -> FlexibleFERequest {
+        FlexibleFERequest(generation: generation, rho: rho, skinFrac: skinFrac, resting: resting, law: law, sims: sims)
+    }
+
+    /// ★ R7-E3: the per-voxel arrays alone (no sim) — what an edges group's interim sim is solved on.
+    public var base: FlexibleFERequest { with(sims: []) }
+
+    /// ★ R7-E3 (the reviewer's AP ruling (a), the interim sim; his 2026-10-19 notes: "It should absolutely have a simulation going"):
+    /// an edges group's sim — each press pushes ALONG its arrow over its whole footprint with its force (core's solver, the current
+    /// lattice's stiffness at its own density; no column strain: 0; no core prediction to calibrate to — `targets` empty, so the field
+    /// keeps the solve's own size, cut only so it never folds). It never writes a job.
+    public static func pressSim(id: String, presses: [(regions: [Int], direction: SIMD3<Double>, weightN: Double)],
+                                voxels: Int) -> Sim {
+        Sim(id: id,
+            pressed: presses.map { FlexSquishPressInfo(press: $0.regions, direction: [$0.direction.x, $0.direction.y, $0.direction.z],
+                                                       weightN: $0.weightN) },
+            strainOp: [Float](repeating: 0, count: voxels), targets: [])
+    }
+
     /// The bridge's request for `sim`.
     public func request(_ sim: Sim, control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> FlexSquishRequestInfo {
         FlexSquishRequestInfo(pressed: sim.pressed, restingIDs: resting, rho: rho, strainOp: sim.strainOp, skinFrac: skinFrac,

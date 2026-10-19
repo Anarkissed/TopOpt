@@ -593,22 +593,44 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
   Vec3 applied{0, 0, 0};
   out.press_load_offsets.push_back(0);
   std::vector<int> pressedFaces;
-  for (const Press& p : s.pressed)
+  for (const Press& p : s.pressed) {
     for (int face : p.region.member_faces) pressedFaces.push_back(face);
+    for (const auto& r : p.footprint)   // ★ R7-E3: every region of an edge or corner press's footprint
+      for (int face : r.member_faces) pressedFaces.push_back(face);
+  }
   for (std::size_t k = 0; k < s.pressed.size(); ++k) {
     const Press& Pr = s.pressed[k];
     const fx::Stack& st = Pr.stack;
     const std::vector<double>& pc = req.pressed[k].column_pressure_mpa;
-    const Vec3 load = st.frame.load;
+    // ★ R7-E3: an edge or corner press pushes ALONG its arrow, its force spread evenly over its whole footprint
+    const bool along = Pr.has_direction;
+    const Vec3 load = along ? Pr.direction : st.frame.load;
     double F = 0.0, A = 0.0;
-    for (std::size_t col = 0; col < st.columns.size(); ++col) {
-      const double pp = col < pc.size() ? std::max(0.0, pc[col]) : 0.0;
-      F += pp * st.columns[col].area_mm2;
-      A += st.columns[col].area_mm2;
+    if (along) {
+      F = std::max(0.0, Pr.weight_n);
+      A = 1.0;
+    } else {
+      for (std::size_t col = 0; col < st.columns.size(); ++col) {
+        const double pp = col < pc.size() ? std::max(0.0, pc[col]) : 0.0;
+        F += pp * st.columns[col].area_mm2;
+        A += st.columns[col].area_mm2;
+      }
     }
     const double mean = A > 0.0 ? F / A : 0.0;
-    std::vector<int> slab = member_voxels(fe.g, *s.model, Pr.region.member_triangles);
-    if (!(control & kIgnoreCuts)) slab = topopt::cut_voxels(fe.g, slab, Pr.region.cuts);
+    std::vector<int> slab;
+    if (along && !Pr.footprint.empty()) {
+      // the union of each footprint region's slab, each cut by its OWN cuts (a voxel two regions share counts once)
+      for (const auto& r : Pr.footprint) {
+        std::vector<int> part = member_voxels(fe.g, *s.model, r.member_triangles);
+        if (!(control & kIgnoreCuts)) part = topopt::cut_voxels(fe.g, part, r.cuts);
+        slab.insert(slab.end(), part.begin(), part.end());
+      }
+      std::sort(slab.begin(), slab.end());
+      slab.erase(std::unique(slab.begin(), slab.end()), slab.end());
+    } else {
+      slab = member_voxels(fe.g, *s.model, Pr.region.member_triangles);
+      if (!(control & kIgnoreCuts)) slab = topopt::cut_voxels(fe.g, slab, Pr.region.cuts);
+    }
     std::vector<double> local(3 * N, 0.0);
     std::vector<int> touched;
     double raw = 0.0;
@@ -630,7 +652,7 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
         }
         const Vec3 at = add(ctr, mul(n, 0.5 * h));
         double pr = mean;
-        if (!(control & kUniformPressure)) {
+        if (!along && !(control & kUniformPressure)) {
           double u = 0.0, v = 0.0;
           st.frame.to_uv(at, u, v);
           const int col = st.column_at(static_cast<int>(std::floor(u / st.pitch_mm)),

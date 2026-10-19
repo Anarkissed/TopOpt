@@ -367,7 +367,9 @@ final class FlexibleSquishTests: XCTestCase {
         // squeeze's faces) — the same staleness rule
         // ★ RE-PINNED (round 7 batch F, his answer 13): the squeeze shown is the SELECTED one (his pick, else the last tapped
         // face's group, else the first — FlexibleMainStage.selectedSim)
-        XCTAssertTrue(main.contains("FlexibleLatticePreview.drawn(m.lattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,"))
+        // ★ RE-PINNED (R7-E3, his notes of 2026-10-19: the edges groups play too): the PLAYABLE lattice (the lattice's sims and the
+        // edges groups' — FlexibleStageModel.playLattice), the same staleness rule
+        XCTAssertTrue(main.contains("FlexibleLatticePreview.drawn(m.playLattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,"))
         XCTAssertTrue(main.contains("stale: m.latticeIsStale)"))
         XCTAssertFalse(try FlexibleSource.code("FlexibleStagePage.swift").contains("FlexibleLatticePreview.drawn("))
     }

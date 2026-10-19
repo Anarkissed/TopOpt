@@ -191,6 +191,30 @@ const fx::Stack& stack_of(Scene& s, int face, int rot) {
   return ref;
 }
 
+// Caller holds s.mu. ★ R7-E3: one pressed entry of a squish sim — a face (its region and stack, as before), or an edge or corner
+// press (FlexSquishPress.footprint_region_ids): its footprint's regions, its arrow, its force, and core's press stack built along
+// that arrow over that footprint (its exit faces are the anvil; core's refusal throws — the sim's failure, in core's words).
+squishfe::Press press_of(Scene& s, const FlexSquishPress& p) {
+  if (p.footprint_region_ids.empty()) return {region_of(s, p.face_region_id), stack_of(s, p.face_region_id, p.rotation_deg)};
+  if (p.direction.size() != 3)
+    throw std::invalid_argument("a press's squish needs its direction (3 components, got " + std::to_string(p.direction.size()) + ")");
+  const topopt::Vec3 d{p.direction[0], p.direction[1], p.direction[2]};
+  const double n = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  if (!(n > 1e-12) || !std::isfinite(n)) throw std::invalid_argument("a press's squish needs a non-zero direction");
+  squishfe::Press out;
+  std::vector<const topopt::ResolvedFaceRegion*> fp;
+  for (int32_t id : p.footprint_region_ids) {
+    out.footprint.push_back(region_of(s, id));
+    fp.push_back(&region_of(s, id));   // (the scene's own regions, as stack_of passes them)
+  }
+  out.region = out.footprint.front();
+  out.stack = fx::build_press_stack(s.model, fp, s.regions, s.grid, s.mask, 0, s.build, s.grid.spacing, &d);
+  out.has_direction = true;
+  out.direction = topopt::Vec3{d.x / n, d.y / n, d.z / n};
+  out.weight_n = p.weight_n;
+  return out;
+}
+
 void copy_design(const fx::FaceDesign& d, FlexFaceDesign& o) {
   const std::size_t n = d.columns.size();
   auto sz = [n](auto& v) { v.resize(n); };
@@ -1158,8 +1182,7 @@ FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRe
     {
       std::lock_guard<std::mutex> lock(s->mu);
       setup.grid = s->grid;
-      for (const FlexSquishPress& p : req.pressed)
-        setup.pressed.push_back({region_of(*s, p.face_region_id), stack_of(*s, p.face_region_id, p.rotation_deg)});
+      for (const FlexSquishPress& p : req.pressed) setup.pressed.push_back(press_of(*s, p));   // ★ R7-E3
       for (int32_t id : req.resting_region_ids) {
         const auto it = std::find_if(s->regions.begin(), s->regions.end(),
                                      [id](const topopt::ResolvedFaceRegion& r) { return r.id == id; });
@@ -1185,8 +1208,7 @@ FlexSquishSolution flexible_scene_squish_step_begin(int64_t scene, const FlexSqu
     {
       std::lock_guard<std::mutex> lock(s->mu);
       setup.grid = s->grid;
-      for (const FlexSquishPress& p : req.pressed)
-        setup.pressed.push_back({region_of(*s, p.face_region_id), stack_of(*s, p.face_region_id, p.rotation_deg)});
+      for (const FlexSquishPress& p : req.pressed) setup.pressed.push_back(press_of(*s, p));   // ★ R7-E3
       for (int32_t id : req.resting_region_ids) {
         const auto it = std::find_if(s->regions.begin(), s->regions.end(),
                                      [id](const topopt::ResolvedFaceRegion& r) { return r.id == id; });

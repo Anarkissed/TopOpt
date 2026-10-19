@@ -13,7 +13,11 @@ extension FlexibleRowCopy {
     /// The Squish page's legend row while a face is cut into sections.
     public static let sectionLegend = "Violet = lattice · tap to pick"
     /// An edge pick whose lattice on a member face lies in two places (D6).
-    public static func latticeInTwoPlaces(_ label: String) -> String { fit("\(label) · its lattice is in two places") }
+    /// ★ R7-E3 (carry-over (b), plain words for E1b's "its lattice is in two places"): the cut would split its lattice in two.
+    public static func latticeInTwoPlaces(_ label: String) -> String { fit("\(label) · \(splitsTheLattice)") }
+    public static let splitsTheLattice = "would split its lattice in two"
+    /// ★ R7-E3 (b): a depth stop for that reason — "Max 18.1 mm · deeper splits the lattice in two" was 46 characters (his rule is 44).
+    public static func maxDepthSplits(_ mm: Double) -> String { fit("Max " + String(format: "%.1f", mm) + " mm \u{00B7} deeper splits its lattice") }
     /// An edge pick on a face with no lattice under it (D6).
     public static func noLatticeAt(_ label: String) -> String { fit("No lattice at \(label) · set a face-prism") }
     /// A section's name: "Face 1 · lattice" (one section), "Face 1 · lattice A" (two or more, by position).

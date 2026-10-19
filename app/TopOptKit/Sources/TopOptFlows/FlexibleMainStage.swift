@@ -258,7 +258,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// lattice's default (its first group). One publish per pick.
     @Published public private(set) var shownSim: String?
     /// What the player can pick: the lattice's sims (each group, then all at once).
-    public var sims: [FlexibleSim] { model?.lattice?.sims ?? [] }
+    public var sims: [FlexibleSim] { model?.playLattice?.sims ?? [] }   // ★ R7-E3: and the edges groups'
     /// The player's picker: that squeeze's faces squish (the dent and the walls); the walls'
     /// field is the same lattice (a faces-only upload — FlexibleLatticeLayerInputs.facesToken).
     public func pick(_ id: String) {
@@ -270,7 +270,7 @@ public final class FlexibleMainStage: ObservableObject {
         if fe.active, loop.playing { loop.restartFromRest(reduceMotion: reduceMotion()) }
     }
     /// The lattice as the player shows it: only the picked squeeze's faces squish.
-    public var shownLattice: FlexibleGeneratedLattice? { model?.lattice?.showing(playingSim) }
+    public var shownLattice: FlexibleGeneratedLattice? { model?.playLattice?.showing(playingSim) }
     /// ★ BATCH G VERIFICATION: the squeeze on screen — the pick, or, when EVERY sim of "Play all"
     /// failed, the first group (its column squish plays; never every group's faces at once).
     var playingSim: String? { fallbackSim ?? selectedSim }   // ★ ROUND 7 (F): the selected group (first by default)
@@ -591,7 +591,7 @@ public final class FlexibleMainStage: ObservableObject {
         guard let m = current(project, stage) else { return nil }
         let fresh = m.lattice != nil && !m.latticeIsStale
         // ★ ROUND 4 (D2): the picked squeeze's faces squish
-        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.lattice?.showing(playingSim), building: m.latticeBuilding,
+        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.playLattice?.showing(playingSim), building: m.latticeBuilding,
                                                    latticeShows: latticeOn && fresh && !pageUp,
                                                    loop: fresh && !pageUp ? loop : nil,
                                                    printed: printedReady(m) && !pageUp)   // ★ X1: the printed view (★ verify: its one rule)
@@ -860,7 +860,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// group's field — `feColumnHeat`), else core's buildable depth (what the column map is coloured by); the legend's top.
     /// nil with no squish to show.
     func makeWallHeat(_ m: FlexibleStageModel, shown: FlexibleShownValues) -> FlexibleWallHeat? {
-        guard dentMaxMM > 0, let g = m.lattice?.showing(playingSim), g.keys.count == g.faces.count else { return nil }
+        guard dentMaxMM > 0, let g = m.playLattice?.showing(playingSim), g.keys.count == g.faces.count else { return nil }
         let squished = Set(g.squishedKeys)
         let slots = zip(g.keys, g.faces).filter { squished.contains($0.0) }
         guard !slots.isEmpty else { return nil }
@@ -1137,7 +1137,7 @@ public final class FlexibleMainStage: ObservableObject {
             feMeshCache = [:]
         }
         // the map is the lattice's while one is shown (X-ray only gates the walls here)
-        var drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,   // ★ ROUND 7 (F)
+        var drawn = FlexibleLatticePreview.drawn(m.playLattice?.showing(selectedSim), xray: true, building: m.latticeBuilding,   // ★ ROUND 7 (F)
                                                  checkStampShown: nil, stale: m.latticeIsStale)
         // ★ BATCH G: the squeeze groups' 3D sims (started here — the shown sim first)
         fe = feView(m, drawn: drawn)
@@ -1147,7 +1147,7 @@ public final class FlexibleMainStage: ObservableObject {
         fallbackSim = nil
         if fe.failure != nil, fe.requested.count > 1, !controlPlayAllCombo, let first = fe.requested.first {
             fallbackSim = first
-            drawn = FlexibleLatticePreview.drawn(m.lattice?.showing(first), xray: true, building: m.latticeBuilding,
+            drawn = FlexibleLatticePreview.drawn(m.playLattice?.showing(first), xray: true, building: m.latticeBuilding,
                                                  checkStampShown: nil, stale: m.latticeIsStale)
             fe = feView(m, drawn: drawn)
         }

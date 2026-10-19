@@ -7,6 +7,12 @@ extension FlexibleRowCopy {
     /// ★ R7-V: an edges/corners group has no stacks until core builds press stacks (AP9) — nothing to bend or heat yet.
     public static let noBendYet = "No bend yet · core support pending"
     public static let noHeatYet = "No heat yet · core support pending"
+    /// ★ R7-E3 (the reviewer's interim-sim conditions): an edges group plays the app's interim sim along its arrow on the current
+    /// lattice — said while it shows, so nobody reads its depths as tuned.
+    public static let latticeNotTunedForPress = "Lattice not tuned for this press yet"
+    /// ★ R7-E3: the main page's group selector — its first entry, and the card's tab when it is the card's only row.
+    public static let selectorAll = "All (one after another)"
+    public static let selectorTab = "SQUEEZE GROUP"
     /// The Heat icon's spoken value (his tap: the current group; his 3 s hold: every group).
     public static let heatGroup = "This group"
     public static let heatAll = "Every group"

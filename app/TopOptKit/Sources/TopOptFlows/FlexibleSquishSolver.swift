@@ -147,6 +147,25 @@ public final class FlexibleSquishSolver {
         pump()
     }
 
+    /// ★ R7-E3: solve `sims` (an edges group's interim sims) on the request in hand when it is `base`'s lattice (replacing sims of
+    /// the same id), else on `base` alone — after what is queued; never refined (the interim sim keeps its quick field).
+    func add(_ sims: [FlexibleFERequest.Sim], base: FlexibleFERequest, scene: FlexibleScene) {
+        guard !sims.isEmpty else { return }
+        let ids = Set(sims.map(\.id))
+        if let r = request, r.generation == base.generation {
+            request = r.with(sims: r.sims.filter { !ids.contains($0.id) } + sims)
+        } else {
+            request = base.with(sims: sims)
+            self.scene = scene
+        }
+        for s in sims {
+            failedIDs.remove(s.id)
+            refineOrder.removeAll { $0 == s.id }
+            if !order.contains(s.id) { order.append(s.id) }
+        }
+        pump()
+    }
+
     /// A pick of a sim still pending: it runs next (its refine too).
     func promote(_ id: String) {
         if let i = refineOrder.firstIndex(of: id), i > 0 {

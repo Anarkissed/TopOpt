@@ -19,6 +19,9 @@ extension FlexibleStageModel {
         if keepFERequest { keepLastFERequest(request) }
         squishScheduled = nil
         squishGeneration = request?.generation ?? lattice?.generation
+        feBase = request?.base   // ★ R7-E3: what an edges group's interim sim is solved on
+        pressSimKeys = [:]
+        pressSimInFlight = []
         if !squish.isEmpty { squish = [:] }
         if !refine.isEmpty { refine = [:] }   // ★ BATCH N: the old lattice's refines with it
     }
@@ -28,6 +31,7 @@ extension FlexibleStageModel {
     public func startSquishSims(first: String?) {
         guard let r = feRequest, let g = lattice, r.generation == g.generation, !latticeIsStale,
               squishScheduled != r.generation else {
+            startPressSims()   // ★ R7-E3: the edges groups' interim sims, once the lattice's own are on the solver
             if let first, squish[first] == .pending { squishSolver.promote(first) }
             return
         }
@@ -51,6 +55,7 @@ extension FlexibleStageModel {
             }
             self.squishSolver.schedule(r, scene: scene, first: first)
             self.feRequest = nil   // the solver holds it until its last sim
+            self.startPressSims()   // ★ R7-E3
         })
     }
 
@@ -66,6 +71,7 @@ extension FlexibleStageModel {
     func squishLanded(_ generation: Int, _ id: String, _ state: FlexibleSquishState) {
         guard controlIgnoreSquishGeneration || (generation == lattice?.generation && generation == squishGeneration) else { return }
         squish[id] = state
+        pressSimLanded(id)   // ★ R7-E3
     }
 
     // MARK: ★ BATCH N — the squish solved in steps
@@ -115,7 +121,7 @@ extension FlexibleStageModel {
 
     /// The group sims of the current lattice, in group order, with their states.
     public var squishSims: [(sim: FlexibleSim, state: FlexibleSquishState?)] {
-        (lattice?.sims ?? []).filter { if case .group = $0.kind { return true }; return false }
+        (playLattice?.sims ?? []).filter { if case .group = $0.kind { return true }; return false }   // ★ R7-E3: and the edges groups'
             .map { ($0, squish[$0.id]) }
     }
 }

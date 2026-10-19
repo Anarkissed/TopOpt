@@ -346,9 +346,10 @@ extension FlexibleRound7ViewsHostedTests {
         }
         let need = natural(shown), full = natural(note)
         snapshot(h, "R7V_review_11p_settings_player_note.png")
-        XCTAssertLessThan(drawn + 0.5, full, "premise (the RED CONTROL): '\(note)' does not fit beside the picker at 11\" portrait (\(drawn) of \(full) pt)")
+        // ★ RE-PINNED (R7-E3, his notes of 2026-10-19 ~14:40: no group picker on the Squish page): with the picker gone the WHOLE line
+        // fits at 11" portrait — drawn whole, no shorter form needed
         XCTAssertGreaterThanOrEqual(drawn + 0.5, need, "★ the line drawn ('\(shown)') is WHOLE (\(drawn) of \(need) pt)")
-        XCTAssertNotEqual(shown, note, "★ a shorter form is drawn")
+        XCTAssertEqual(shown, note, "★ the whole line, now the picker is gone (\(drawn) of \(full) pt)")
         m.views = []
         print("FLEX-R7V-RH6 11p note: '\(note)' needs \(full) pt, drawn \(drawn) pt · shown '\(shown)' needs \(need) pt")
     }

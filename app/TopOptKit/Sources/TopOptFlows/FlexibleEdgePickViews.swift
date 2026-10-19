@@ -136,8 +136,25 @@ struct FlexibleEdgeGroupRows: View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             // ★ R7-E1b (his answer: "in a group, tapping an edge/corner adds it"): the lit ones on the part are what a tap adds
             if let a = model.edgeAdd, a.into == group.id {
-                FlexCaption(text: a.loading || a.checking ? FlexibleRowCopy.edgePickLine(picked: 0, loading: true) : FlexibleRowCopy.edgeAddLine)
-                    .accessibilityIdentifier("flexible-edge-add-line")
+                // ★ R7-E3 (his notes of 2026-10-19 ~14:40): nothing else lit until [+]; a tap on an edge or corner adds it either way
+                let lit = model.edgeAddLit
+                HStack(spacing: DS.Space.s) {
+                    FlexCaption(text: !lit ? FlexibleRowCopy.edgeAddTapLine
+                                : a.loading || a.checking ? FlexibleRowCopy.edgePickLine(picked: 0, loading: true) : FlexibleRowCopy.edgeAddLine)
+                        .accessibilityIdentifier("flexible-edge-add-line")
+                    Spacer(minLength: DS.Space.xs)
+                    Button { model.toggleEdgeAdding() } label: {
+                        Group {
+                            if lit { Text(FlexibleRowCopy.edgeAddDone).font(.system(size: 13, weight: .semibold)) }
+                            else { Image(systemName: "plus").font(.system(size: 15, weight: .bold)) }
+                        }
+                        .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
+                        .background(Capsule().fill(FlexibleStageStyle.accent))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(lit ? FlexibleRowCopy.edgeAddDone : FlexibleRowCopy.edgeAddPlus)
+                    .accessibilityIdentifier("flexible-edge-add-plus")
+                }
                 if let line = a.line { FlexWarningLine(text: line, id: "flexible-edge-add-why") }
                 if let g = a.fixGroup { FlexibleEdgeFixGroupButton(model: model, group: g, kp: \.edgeAdd) }
             }
@@ -284,18 +301,17 @@ struct FlexibleEdgeGroupRows: View {
             }
         }
         .background(publish("flatRow-deepest-\(st.label)"))
-        FlexRow(corner ? FlexibleRowCopy.flatUpDownRow(into: f.map { name($0.tiltMember) } ?? "the top")
-                       : FlexibleRowCopy.flatTiltRow(toward: name(0), steep: steep),
-                info: corner ? FlexibleRowCopy.Info.flatUpDown : FlexibleRowCopy.Info.flatTilt, id: "flexible-row-tilt") {
-            angleBox(p, st, tilt: true, value: shown.tilt)
-        }
-        .background(publish("flatRow-tilt-\(st.label)"))
+        // ★ R7-E3 (carry-over (c), E1b's open question 2): the row that READS "Tilt" always comes first, then "Twist" — on a steep
+        // edge the θ row reads "Twist", so it goes second (FlexibleFlatPrismUI.tiltFirst)
+        let thetaFirst = FlexibleFlatPrismUI.thetaRowFirst(corner: corner, steep: steep)
+        if thetaFirst { thetaRow(p, st, shown, corner: corner, f: f, name: name, steep: steep) }
         FlexRow(corner ? FlexibleRowCopy.flatLeftRightRow(toward: f.flatMap { $0.twistMember }.map(name) ?? "a side")
                        : FlexibleRowCopy.flatTwistRow(end: f?.namedEnd ?? "one end", steep: steep),
                 info: corner ? FlexibleRowCopy.Info.flatLeftRight : FlexibleRowCopy.Info.flatTwist, id: "flexible-row-twist") {
             angleBox(p, st, tilt: false, value: shown.twist)
         }
         .background(publish("flatRow-twist-\(st.label)"))
+        if !thetaFirst { thetaRow(p, st, shown, corner: corner, f: f, name: name, steep: steep) }
         if let d0 = FlexibleFlatPrism.halfway(of: p), FlexiblePressAim.bits(model.flatCut(p.id)?.direction ?? p.direction) != FlexiblePressAim.bits(d0) {
             Button {
                 Task { @MainActor in if let why = await model.flatBackToHalfway(p.id) { model.toast = why } }
@@ -327,6 +343,16 @@ struct FlexibleEdgeGroupRows: View {
     /// Its frame reaches the page (the hosted tests read it): "flatRow-<row>-<label>".
     private func publish(_ key: String) -> some View {
         GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }.allowsHitTesting(false)
+    }
+
+    @ViewBuilder private func thetaRow(_ p: FlexiblePress, _ st: FlexibleStrip, _ shown: FlexibleFlatPrismUI.Shown, corner: Bool,
+                                       f: FlexibleFlatPrismAngles.Frame?, name: @escaping (Int) -> String, steep: Bool) -> some View {
+        FlexRow(corner ? FlexibleRowCopy.flatUpDownRow(into: f.map { name($0.tiltMember) } ?? "the top")
+                       : FlexibleRowCopy.flatTiltRow(toward: name(0), steep: steep),
+                info: corner ? FlexibleRowCopy.Info.flatUpDown : FlexibleRowCopy.Info.flatTilt, id: "flexible-row-tilt") {
+            angleBox(p, st, tilt: true, value: shown.tilt)
+        }
+        .background(publish("flatRow-tilt-\(st.label)"))
     }
 
     private func angleBox(_ p: FlexiblePress, _ st: FlexibleStrip, tilt: Bool, value: Double) -> some View {
@@ -369,20 +395,27 @@ struct FlexibleEdgePickOverlay: View {
     @MainActor
     static func marks(model: FlexibleStageModel, projection: CameraProjection?, keepOut: [CGRect] = [], add: Bool = false) -> [Mark] {
         guard let p = add ? model.edgeAdd : model.edgePick, !p.loading, let projection else { return [] }
+        // ★ R7-E3 (his notes of 2026-10-19 ~14:40): in a group, the other edges and corners are lit only while its [+] is on
+        if add, !model.edgeAddLit { return [] }
         // ★ R7-E1b (his answer: no list; only the pressable light up): what cannot be pressed is not drawn
         let shown = FlexibleEdgePickRules.project(p.drawn, loads: p.loads, projection: projection)
         let s = FlexibleEdgePickRules.tagTargetPt
+        // ★ R7-E3, found by looking (E3_02: two "12" tags — the one edge of the part a flat prism split in two pieces): ONE tag per
+        // number (its first piece facing the camera); every piece's line is still drawn and a tap on either reaches it
+        let owners = FlexibleEdgePickRules.tagOwners(shown) { p.candidate($0)?.shownNumber }
+        let tagOwner = Dictionary(uniqueKeysWithValues: owners.map { ($0, $0) })
         return shown.map { c in
             let picked = p.picks.contains(c.number)
             let greyed = p.greyed[c.number] != nil
             let colour = picked ? p.colour.rgba : greyed ? DS.Color.textDisabled : (p.colours[c.number]?.rgba ?? DS.Color.strokeStrong)
             var target: CGRect? = nil
-            if let t = c.tag {
+            if let t = c.tag, tagOwner[c.number] != nil || FlexibleEdgePickRules.controlTagEveryPiece {
                 let r = CGRect(x: t.x - s / 2, y: t.y - s / 2, width: s, height: s)
                 if !keepOut.contains(where: { $0.intersects(r) }) { target = r }
             }
             return Mark(number: c.number, colour: colour, picked: picked, greyed: greyed, front: c.front, projected: c,
-                        text: picked ? "✓\(c.number)" : "\(c.number)", target: target)
+                        text: picked ? "✓\(p.candidate(c.number)?.shownNumber ?? c.number)" : "\(p.candidate(c.number)?.shownNumber ?? c.number)",   // ★ R7-E3 (a)
+                        target: target)
         }
     }
 
@@ -423,7 +456,7 @@ struct FlexibleEdgePickOverlay: View {
                 }
                 .buttonStyle(.plain)
                 .position(x: m.target!.midX, y: m.target!.midY)
-                .accessibilityLabel("\(m.number)")
+                .accessibilityLabel(m.text)
                 .accessibilityIdentifier("flexible-edge-tag-\(m.number)")
             }
         }

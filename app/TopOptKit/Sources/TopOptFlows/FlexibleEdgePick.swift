@@ -71,6 +71,17 @@ public struct FlexibleEdgePick: Equatable {
 }
 
 public enum FlexibleEdgePickRules {
+    /// ★ R7-E3 RED CONTROL only: a tag on every piece (two tags with one number after a cut).
+    nonisolated(unsafe) static var controlTagEveryPiece = false
+    /// ★ R7-E3: the candidates (ids) that carry the tag of their shown number — the first facing the camera, one per number.
+    static func tagOwners(_ shown: [Projected], shownNumber: (Int) -> Int?) -> Set<Int> {
+        var tagged = Set<Int>(), out = Set<Int>()
+        for c in shown.sorted(by: { ($0.front ? 0 : 1, $0.number) < ($1.front ? 0 : 1, $1.number) }) {
+            guard c.tag != nil, let n = shownNumber(c.number), tagged.insert(n).inserted else { continue }
+            out.insert(c.number)
+        }
+        return out
+    }
 
     /// A tap reaches a candidate this close (points).
     public static let tapRadiusPt: CGFloat = 22

@@ -177,7 +177,10 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
             }
             // the chip at the arrow's head, the knob at its tail
             if let chip = mk["flatDepthChip-\(label)"], let knob = mk["flatKnob-\(label)"], let ends = FlexibleFlatPrismUI.lastArrowEnds {
-                XCTAssertLessThan(hypot(chip.midX - ends.head.x, chip.midY - ends.head.y), 40, "★ \(tag): the chip at the head")
+                // ★ RE-PINNED (R7-E3: the open edges group's [+] row — his 2026-10-19 ~14:40 note — makes the panel 26 pt taller; at
+                // mini portrait the head is then UNDER the panel and the chip slides just clear of it, never under the chrome)
+                let headUnder = chrome.contains { $0.insetBy(dx: -4, dy: -4).contains(ends.head) }
+                XCTAssertLessThan(hypot(chip.midX - ends.head.x, chip.midY - ends.head.y), headUnder ? 64 : 40, "★ \(tag): the chip at the head")
                 XCTAssertGreaterThanOrEqual(hypot(knob.midX - chip.midX, knob.midY - chip.midY), 56 - 0.5, "★ \(tag): the knob ≥ 56 pt from the head")
             }
             report.append("\(tag): " + targets.map { "\(Int($0.width))×\(Int($0.height))" }.joined(separator: " "))

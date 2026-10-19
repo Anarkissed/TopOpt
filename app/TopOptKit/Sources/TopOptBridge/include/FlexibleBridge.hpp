@@ -533,6 +533,15 @@ struct FlexSquishPress {                // one pressed face of the squeeze group
   int32_t face_region_id = -1;
   int32_t rotation_deg = 0;
   std::vector<double> column_pressure_mpa;  // parallel to the stack's columns (core's design)
+  // ★ R7-E3 (the INTERIM sim along a press's arrow — the reviewer's AP ruling (a); his 2026-10-19 notes: "the edges do not seem
+  // to actually squish when played"): an edge or corner press. Non-empty `footprint_region_ids`: the press pushes ALONG
+  // `direction` (3 components, unit, into the part) over the UNION of those regions' slabs (each region cut by its OWN cuts),
+  // `weight_n` spread evenly (no column pressures, no calibration — the field is the solve's own size); its anvil = the exit
+  // faces of core's press stack, built here from the footprint along `direction` (core's refusal is the solve's error).
+  // `face_region_id`, `rotation_deg` and `column_pressure_mpa` are then unused. Empty: a face, exactly as before.
+  std::vector<int32_t> footprint_region_ids;
+  std::vector<double> direction;
+  double weight_n = 0.0;
 };
 using FlexSquishPresses = std::vector<FlexSquishPress>;
 struct FlexSquishLaw {

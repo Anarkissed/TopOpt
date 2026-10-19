@@ -63,12 +63,15 @@ public enum FlexibleSettingsSquish {
     public static func shown(model m: FlexibleStageModel, overlay: FlexibleOverlayMesh?,
                              channels c: FlexiblePageChannels.Channels,
                              feCache: inout (key: String, dents: [Float])?) -> Shown {
-        guard let o = overlay, c.dents != nil, let g = m.playingGroup else {
+        // ★ R7-E3: an edges group has no face map (no column dent) — it plays its interim sim along the arrow
+        let edges = m.playingGroup?.kind == .edges && !FlexibleStageModel.controlNoPressSims
+        guard let o = overlay, c.dents != nil || edges, let g = m.playingGroup else {
             return Shown(dents: c.dents, exaggeration: c.exaggeration, fe: false, groupNumber: m.playingGroup?.number)
         }
         if let f = field(model: m, group: g), m.frozenExaggeration == nil {
             let shown = FlexibleShownValues(model: m, drawnLattice: nil)
-            let k = FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: f.maxSafeScale)
+            // ★ R7-E3: the interim sim at × 1 — its own size (no core prediction to scale it to), never folded
+            let k = edges ? Swift.min(1, f.maxSafeScale) : FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: f.maxSafeScale)
             let key = "\(o.mesh.flat.vertexCount)|\(o.partFlatVertices)|\(f.simID)|\(f.serial)|\(f.scale)"   // (the page drops it on a rebuild)
             let d: [Float]
             if let cached = feCache, cached.key == key { d = cached.dents } else {
@@ -77,8 +80,8 @@ public enum FlexibleSettingsSquish {
             }
             return Shown(dents: d, exaggeration: k, fe: true, groupNumber: g.number)
         }
-        return Shown(dents: columnDents(model: m, overlay: o, regions: Set(g.regions)), exaggeration: c.exaggeration,
-                     fe: false, groupNumber: g.number)
+        return Shown(dents: columnDents(model: m, overlay: o, regions: Set(g.regions)), exaggeration: edges ? 1 : c.exaggeration,
+                     fe: false, groupNumber: g.number)   // (an edges group: still, until its sim lands — the note says why)
     }
 
     /// The column preview of `regions` ONLY (each face's shown values, the page's own rule).
@@ -95,9 +98,16 @@ public enum FlexibleSettingsSquish {
 
     // MARK: the player
 
+    /// ★ RED CONTROL only: the Squish page's group picker (before his 2026-10-19 notes).
+    public static var controlSquishPagePicker = false
+
     /// The player's picker on the Settings page: each group (no "Play all" — one group plays at a
     /// time here); none with one group.
     public static func playerSims(model m: FlexibleStageModel) -> [FlexibleSim] {
+        // ★ R7-E3 (his notes of 2026-10-19 ~14:40: "Since all squish groups are selectable on the squish page, all views should only
+        // show what group is currently selected"): NO picker on the Squish page — it plays the open group; the selector is the
+        // Lattice page's (FlexibleMainGroupSelector). RED CONTROL `controlSquishPagePicker` (the old picker).
+        guard controlSquishPagePicker else { return [] }
         let groups = m.sims.filter { if case .group = $0.kind { return true }; return false }
         // ★ ROUND 7 (S, 4d): each group by HIS name (the Settings page's picker; the main page keeps "Group N")
         let named = groups.map { sim -> FlexibleSim in
@@ -135,6 +145,8 @@ public enum FlexibleSettingsSquish {
     /// failed. Nothing while he drags (the legend says "What you drew"), nor for a lattice that
     /// has no sim (shape only).
     public static func note(model m: FlexibleStageModel, fe: Bool) -> String? {
+        // ★ R7-E3: an edges group's squish is the interim sim — the chip says so while it plays
+        if fe, let g = m.playingGroup, let line = m.notTunedLine(simID: FlexibleSim.groupID(g.number)) { return line }
         if fe { return FlexibleRowCopy.settingsSimNote }
         guard m.frozenExaggeration == nil, let g = m.playingGroup else { return nil }
         guard let l = m.lattice else { return FlexibleRowCopy.settingsColumnNoLattice }

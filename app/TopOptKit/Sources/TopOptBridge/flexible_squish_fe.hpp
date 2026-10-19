@@ -23,6 +23,12 @@ namespace squishfe {
 struct Press {
   topopt::ResolvedFaceRegion region;
   topopt::flexible::Stack stack;
+  // ★ R7-E3: an edge or corner press (FlexSquishPress.footprint_region_ids) — its footprint's regions, its arrow and its force;
+  // `region` is then the footprint's first region and `stack` core's press stack (only its exit faces are read: the anvil).
+  std::vector<topopt::ResolvedFaceRegion> footprint;
+  bool has_direction = false;
+  topopt::Vec3 direction{0, 0, 0};
+  double weight_n = 0.0;
 };
 
 struct Setup {

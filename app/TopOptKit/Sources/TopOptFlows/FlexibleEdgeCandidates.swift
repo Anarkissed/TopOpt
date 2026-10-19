@@ -131,6 +131,14 @@ public struct FlexibleEdgeCandidates {
         public let offered: Bool
         /// Why not offered (one line); nil when offered.
         public let why: String?
+        /// ★ R7-E3 (E1b's check, carry-over (a): "with an edges group open, the on-part numbers stop matching the card's press names"):
+        /// the number SHOWN — on the part's tag and in the press's name ("Edge 16") — the same before and after a flat prism cuts its
+        /// faces into pieces: the rank of this edge or corner OF THE PART (its faces, not its pieces; a split edge's pieces share it).
+        /// `number` stays the unique id of this piece-level candidate. nil: `number` (a hand-made candidate in a test).
+        public var shown: Int? = nil
+        public var shownNumber: Int { Self.controlPieceNumbers ? number : (shown ?? number) }
+        /// ★ RED CONTROL only: E1b's numbers (by pieces — renumbered after every split).
+        nonisolated(unsafe) public static var controlPieceNumbers = false
     }
 
     /// A flat (core's normal spread) at most this many degrees.
@@ -214,6 +222,7 @@ public struct FlexibleEdgeCandidates {
         struct Raw {
             let kind: Kind; let members: [Int]; let point: SIMD3<Double>; let polylines: [[SIMD3<Double>]]
             var turnDeg = 0.0
+            var segments: [FlexibleMeet.Segment] = []
         }
         var corners: [Raw] = [], edges: [Raw] = []
 
@@ -234,9 +243,10 @@ public struct FlexibleEdgeCandidates {
 
         // edges: creased seams
         for pair in creased.sorted() {
-            let pls = FlexibleMeet.chain(meet.creasedSegments(pair, facts: facts, creaseCos: creaseCos))
+            let segs = meet.creasedSegments(pair, facts: facts, creaseCos: creaseCos)
+            let pls = FlexibleMeet.chain(segs)
             guard let mid = FlexibleMeet.midpoint(pls) else { continue }
-            edges.append(Raw(kind: .edge, members: [pair.a, pair.b], point: mid, polylines: pls))
+            edges.append(Raw(kind: .edge, members: [pair.a, pair.b], point: mid, polylines: pls, segments: segs))
         }
 
         // blends: two flats ≥ 15° apart joined by a chain of curved pieces through smooth seams
@@ -278,12 +288,39 @@ public struct FlexibleEdgeCandidates {
             if kl != kr { return kl.lexicographicallyPrecedes(kr) }
             return l.members.lexicographicallyPrecedes(r.members)
         }
+        // ★ R7-E3 (carry-over (a)): the SHOWN numbers — the same rule over the part's edges and corners by their FACES (a piece's faces;
+        // an uncut region's are its own), so a flat prism's cut, which splits an edge into pieces, never renumbers them. Each identity's
+        // point is its pieces' segments chained back together (an edge's middle as before the cut); on a part with no cut, every
+        // identity is one candidate and the shown numbers ARE the numbers.
+        func faces(_ r: Int) -> [Int] { (meet.piece(r)?.faces ?? [r]).sorted() }
+        func identity(_ raw: Raw) -> [[Int]] { [[raw.kind == .corner ? 0 : raw.kind == .edge ? 1 : 2]] + Set(raw.members.map(faces)).sorted { $0.lexicographicallyPrecedes($1) } }
+        func shownNumbers(_ raws: [Raw], offset: Int) -> [[[Int]]: Int] {
+            var groups: [[[Int]]: [Raw]] = [:]
+            for r in raws { groups[identity(r), default: []].append(r) }
+            let points: [([[Int]], SIMD3<Double>)] = groups.map { id, rs in
+                guard rs.count > 1 else { return (id, rs[0].point) }
+                let segs = rs.flatMap(\.segments)
+                let p = segs.isEmpty ? nil : FlexibleMeet.midpoint(FlexibleMeet.chain(segs))
+                return (id, p ?? rs.map(\.point).min { key($0).lexicographicallyPrecedes(key($1)) }!)
+            }
+            let sorted = points.sorted { l, r in
+                let kl = key(l.1), kr = key(r.1)
+                if kl != kr { return kl.lexicographicallyPrecedes(kr) }
+                return l.0.lexicographicallyPrecedes(r.0) { $0.lexicographicallyPrecedes($1) }
+            }
+            var out: [[[Int]]: Int] = [:]
+            for (i, e) in sorted.enumerated() { out[e.0] = offset + i + 1 }
+            return out
+        }
+        let cornerShown = shownNumbers(corners, offset: 0)
+        let edgeShown = shownNumbers(edges, offset: Set(corners.map(identity)).count)
         var out: [Candidate] = []
         for raw in corners.sorted(by: order) + edges.sorted(by: order) {
             let chain: Set<Int> = raw.kind == .blend ? Set(raw.members.dropFirst().dropLast()) : []
             let why = whyNot(raw.members, chain: chain, turnDeg: raw.turnDeg)
             out.append(Candidate(number: out.count + 1, kind: raw.kind, members: raw.members, point: raw.point,
-                                 polylines: raw.polylines, offered: why == nil, why: why))
+                                 polylines: raw.polylines, offered: why == nil, why: why,
+                                 shown: (raw.kind == .corner ? cornerShown : edgeShown)[identity(raw)]))
         }
         let appPairs = meet.facePairs
         return FlexibleEdgeCandidates(candidates: out, unread: nil, creasedPairs: creased,

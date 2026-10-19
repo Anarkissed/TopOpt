@@ -277,9 +277,12 @@ public struct FlexibleMainLegends: View {
     /// whichever is under the finger); the caret folds it to a column of bars (tap to open).
     @ViewBuilder private func card(_ kinds: [FlexibleReadKind], _ p: FlexibleMainLegendLayout.Placed) -> some View {
         if p.expanded {
-            LatticeLegendChrome(tab: kinds.isEmpty ? Self.prismsOnlyTab : drilled != nil ? "TAP THE PART TO READ" : "TAP TO READ",
+            LatticeLegendChrome(tab: kinds.isEmpty ? (main.legendPrismsRow ? Self.prismsOnlyTab : FlexibleRowCopy.selectorTab)
+                                    : drilled != nil ? "TAP THE PART TO READ" : "TAP TO READ",
                                 width: p.frame.width, minimized: $main.legendMinimized, info: main.cardInfo) {
                 VStack(alignment: .leading, spacing: 12) {
+                    // ★ R7-E3 (his notes of 2026-10-19): the squeeze-group selector, first on the card — Play and every view follow it
+                    if main.groupSelectorShown { FlexibleMainGroupSelector(main: main, loop: main.loop) }
                     ForEach(kinds) { k in content(k) }
                     // ★ S1b (round 6 item 3): [Prisms]' one line — the Settings page's own row, at this page's k
                     // ★ ROUND 7, M1: the face-prism's row (the picked group's lattice face-prisms — no squish ×k here)

@@ -1,5 +1,72 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## ★ Round 7 · R7-E3 — edges groups SQUISH when played; the group selector on the Lattice page; one number per edge; nothing lit until [+] (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `383f79d2` (R7-E2 PARKED). NOT pushed. App + our bridge files only; core
+untouched; no #354/main file edited. Sending presses to core stays PARKED (`FlexibleBackend.sendsPresses` off).
+
+### What you will see now, in plain words
+- **An edges group squishes when you press Play** (your "the edges do not seem to actually squish"). Why it did not: with sending
+  parked, the lattice's sims had one per FACE group only — nothing for an edges group. Now the app's interim sim (core's solver on the
+  current lattice, as the reviewer ruled) pushes along each press's arrow over its whole flat-prism footprint with the group's force.
+  On your pad (Edge 14 + Edge 16 at 5 kg) the footprint moves 5.3 / 5.6 mm, 98 % of it along the arrow. It is never sent and never
+  written into a job. While it shows, one line says **"Lattice not tuned for this press yet"**.
+- **Squish page**: no group picker any more; Play, Bend and the views show only the open group — an edges group too.
+- **Lattice page**: the selector is the first thing on the legend card — **"All (one after another)"** then each group by its name
+  (edges groups too). Play and every view follow it; the 3-second Heat hold still shows all. The chip sits under it when an edges
+  group is picked.
+- **One number per edge or corner**: the number on the part is the number in the card's name, before and after a flat prism cuts the
+  faces (it was renumbered after every cut). Two pieces of one cut edge share one number and one tag.
+- **In an edges group nothing else is lit.** A tap on an edge or corner still adds it; **[+]** lights the ones you can add, **[Done]**
+  turns them off.
+- Plain words: **"Max 18.1 mm · deeper splits its lattice"** (was "its lattice is in two places"). The row that reads **Tilt is always
+  first**, then Twist (rows and the boxes on the part).
+- Not in this batch: **Heat** for an edges group still has no colours (its footprint has no column map on the page yet); the X-ray
+  bend prism for an edges group; Bend shows the sim's full pose on the Squish page (the same field) but has no own test.
+
+### His words → fix → test (each RED control asserted red, inside its test)
+1. "the edges do not seem to actually squish when played … It should absolutely have a simulation going" → bridge
+   `FlexSquishPress.footprint_region_ids / direction / weight_n` (push along the arrow over the union of the footprint's regions, each
+   cut by its own cuts; anvil = core's press stack's exit faces), `FlexibleStageModel+PressSim.swift` (one sim "group-N" per edges
+   group, solved on the current lattice's arrays, re-solved when its presses change; `playLattice`), `FlexibleSquishSolver.add` →
+   `FlexibleR7E3Tests.testAnEdgesGroupSquishesAlongItsArrowOnBothPages` (the request carries the footprint ids, d's bits and the force;
+   the field moves each footprint along its arrow; every send's job byte-identical before/after; the chip only on the edges group;
+   RED `controlNoPressSims`: no sim, nothing to play).
+2. "the group selector on the legend … the Lattice page requires the squish group selector" → `FlexibleMainGroupSelector.swift` →
+   same test (All + each group by name; a pick is the page's squeeze; RED `controlNoGroupSelector`).
+3. "Since all squish groups are selectable on the squish page, all views should only show what group is currently selected" →
+   `playerSims` returns none → same test (RED `controlSquishPagePicker`).
+4. "When in a group do *not* highlight other edges/corners … OR add a "+" button" → `edgeAddLit`, `toggleEdgeAdding`, the [+] row →
+   `testOneNumberOnThePartAndTheCardAndNothingLitUntilPlus` (RED `controlAlwaysLit`).
+5. E1b check (a): "the on-part numbers stop matching the card's press names" → `Candidate.shownNumber` (ranked by the part's faces,
+   not its pieces) → same test (24 candidates after Edge 14's cut, 0 mismatched; RED `controlPieceNumbers`: 14 mismatched).
+   Found by looking (E3_02 first run): two "12" tags on one cut edge → `FlexibleEdgePickRules.tagOwners`, one tag per number (same test).
+6. (b) plain words, (c) Tilt first → `testPlainWordsForTheSplitAndTiltFirst` (RED `controlThetaAlwaysFirst`).
+Found by looking (E3_03): the Mac render drew a pop-up chrome round the selector → the label alone (`fixedPopUpChrome`, macOS only).
+Tests were written with this batch; their red controls run inside each test and were seen red (no separate stub run — budget).
+
+### Re-pins (ours, attributed in each line)
+- `FlexibleR7SettingsTests` (the Squish page picker's name → the old picker as its red control), `FlexibleRound7ViewsHostedTests`
+  (11" player note: with no picker the whole line fits), `FlexibleSquishTests` (source pin: `m.playLattice?.showing(selectedSim)`),
+  `FlexibleFlatPrismHostedTests` (mini portrait: the [+] row makes the panel 26 pt taller; the head is under it and the chip slides
+  just clear — 48 pt from the head, bound 64 only when the head is under the chrome).
+
+### Raw runs — `round7/batch_e3/` (runner and chunk logs in the session scratchpad `e3/`)
+- Targeted, 3 chunks (the classes that touch or source-pin the changed files): 74 + 92 + 77 cases; failures = the 4 re-pins above
+  (then re-run: see `e3_rerun.txt`). Goldens: det identical 38 · DIFFERS 0; unseeded identical 32 · DIFFERS 0 · PART-SKIP 1.
+  The 16 stage-job hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_e3.txt`, re-run after the re-pins).
+  `e3_run1.txt` / `e3_run2.txt`: the first runs of FlexibleR7E3Tests (run1's one failure was the test's own job read — his pad sends
+  one squeeze per job — fixed in the test). Face-group sims unchanged (the
+  bridge's face path is byte-for-byte the old one when no footprint is given).
+- Evidence (`round7/batch_e3/look/`, 13" portrait, his live pad + Edge 14 + Edge 16): E3_01 rest | full squish of the edges group with
+  the chip; E3_02 [+] on; E3_03 the Lattice page's card with the selector and chip; E3_04 beside his img_edges_1018.
+  Seen by looking, not fixed: the down-the-arrow camera puts the edge behind the panel at 13" portrait (backlog #6), so the squish
+  reads best in the numbers; the field is cut to 0.056 of the raw solve so it never folds (the raw 5 kg solve on the soft pad is huge).
+
+### Open questions
+1. Heat and the X-ray bend prism for an edges group: build them on the interim sim now, or wait for the back-end phase?
+2. The interim sim keeps ONE solve (no stepped refine) and is cut so it never folds — fine as the interim?
+
 ## ★ Round 7 · R7-E2 PARKED — edge and corner presses are the shape only; nothing about them goes to core until the back-end phase (2026-10-19) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `c77b19fb` (R7-E1b). NOT pushed. App only; core untouched; no #354/main file
