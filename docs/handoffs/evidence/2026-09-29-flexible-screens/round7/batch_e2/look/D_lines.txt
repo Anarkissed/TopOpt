@@ -1,0 +1,5 @@
+[Done] ["Edge 14"]: stored
+sent: ["Edge 14 in the job"]
+after the twist: landed true
+twist 15° at 10.6 mm: stored · line Twisted · squish shape up to 16% off · N 16.319726708638694% · map both
+D01_13p_twisted_15_line.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 14": true, "Edge 16": false] · toast -

@@ -1,6 +1,211 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · the review of R7-E1 — what the two verifiers found on the flat prism, what is fixed, and what still waits (2026-10-19) (read this first)
+## ★ Round 7 · R7-E2 — edges and corners are SENT to core: the press is designed on core's own press stack, the lattice is graded along its arrow, one group per export said first (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `668a975c` (the review of R7-E1). NOT pushed. Commits:
+- `31788815` — the tests FIRST, against stubs (red run `round7/batch_e2/e2_red_run.txt`; the bridge's real parts and the stubs'
+  state are that commit's sources).
+- `ff69ec2f` — the code: edge and corner presses sent to core.
+- `3cfbc86f` — found by looking (1–4): the lattice's temperature, the twist's line, the fixes' order, the side label's colour.
+- `9950bf17` — found by looking (5) and found by the suite: a press whose arrow moved waits for core's new stack; the main page
+  builds once, after Auto's answer; two re-pins.
+- this commit — this section and the evidence (`round7/batch_e2/`).
+App only: core untouched (#361 `099dcaed`); the bridge is ours (it now copies a press entry's pieces and arrow into core's job
+block and hands back core's run stacks and field); WorkspacePlaceholder / ProjectModel / MetalMeshView not touched.
+
+### What you will see now, in plain words
+- **An edge or corner press now goes to core.** Once core takes it (it stacks it, designs it, and nothing else is in its way), its
+  arrow on the Squish page turns SOLID (it was dashed: "not sent yet"). While it is not in the job the arrow stays dashed and the
+  card says why in one line.
+- **The card's lines under the press's name**: core refused it (alone) — or, otherwise, a lattice stop about your last change
+  ("Twist stops at 7° · lattice ends") AND under it the press's own line, the first that applies: not in the job and why ("Set up ·
+  core support pending" only while core's side cannot take presses at all; "Set up · core is designing it" for the second it takes;
+  "Edge 16 and Face 3 share 85 mm²" with its fixes …) › a twist core cannot follow closely ("Twisted · squish shape up to 16% off",
+  orange) › core's side label ("Side press · gyroid only · estimate", a plain grey caption).
+- **The lattice under an edge press is core's design along its arrow.** The main Lattice page's lattice under Edge 16 is core's
+  field over the press, blended into the faces' lattices by core's rule (the firmer wins between groups). On your pad this is a
+  DENSE band right across the pad — see "A finding" below: core's press column runs through the whole part.
+- **One group per export, said first.** With your Top group and an edges group both ready, the Lattice button's card says "core
+  runs one squeeze group at a time" and offers [Send Group 1 only] [Send Group 2 only]. The faces' send carries no edge press;
+  the edges group's send carries every edge press and rests the faces. With only the edges group, step ② reads e.g.
+  "Group 1 · 11 lb · 2 edges · bead 0.45 mm".
+- **Angled presses are estimates, said once.** The first time a side press goes into the job one line pops: "Angled presses are
+  estimates until measured"; the Export caption says the same under core's line (the ruling's whole sentence behind its (i)),
+  and About Flexible… lists it.
+- **A twist says how close core gets.** Core has no "flat cut" map (you said not to ask for it), so a twisted edge is sent as the
+  closest map core has; the card says how far off it is, from core's own columns: your Edge 16 twisted (typed 15°, the lattice lands
+  it at 7°) is "up to 16% off"; untwisted it is 0.5 % and nothing is said.
+- **Two presses can never share surface.** If a face is pressed whole while an edge press's piece lies on it, the edge press is
+  kept out of the job with "Edge 16 and Face 3 share 85 mm²" and up to three fixes, the gentlest first ([Shallower] when it helps,
+  [Face 3 rests], [Remove Edge 16]); core's own refusal of the same reads the same.
+
+### A finding (core's verdict, nothing changed — the reviewer is asked)
+On your pad an edge press's column, as core builds it (`build_press_stack`), runs from the press's surface to the far side of
+the part: Edge 14 / Edge 16 at 45° are **52 columns of 136.5–140.1 mm** (the pad's diagonal), every one **too soft** for 5 kg
+over that length, so core designs them at its densest buildable density (**ρ 0.362**) over **4,082 voxels** each. The lattice
+under the edges group is therefore a dense band crossing the pad diagonally — with both edges, an X (`look/C01`, `C03`–`C07`).
+The built lattice is exactly core's: 0 voxels differ from firmer(core's Top field, core's edges-group field). Whether that is
+what should show, or a core need (a press column bounded, e.g. to the prism's depth), is question 1. #361 was not asked
+anything (your 2026-10-18 answer).
+
+### Why, and where this differs from the design (judge:final, R7-E2)
+- **Core's map modes, not a "flat cut" (your answer: do not ask #361 yet).** Core's squish map has only both = X·Y, either and
+  centre_edge. An untwisted edge is sent as "both": the axis along the edge at 1, the axis across a tent of 16 straight points a
+  side peaking at the edge's own coordinate (core's to_uvt of the edge's ends) — core's curve rounds only the two segments beside
+  the peak. Which of core's X / Y is "across" is read from core's frame, never assumed: on your 20 mm Edge 16, core's X is along
+  the edge below 10 mm deep and across it above (the footprint is 20 mm long and 2h wide). A corner is centre_edge, straight.
+- **A tipped corner stays centre_edge** (the design said "the closest product, X ramp × Y tent"): over a triangle a product of
+  two curves is a poorer fit than core's edge-distance roof; its line says how far off it is, from core's columns.
+- **"How far off" counts both ways** (|S·h − δ|, not only where core squishes more than the flat prism).
+- **The twist's line comes before the side label** (the design had the side label first): on your pad every edge press is a side
+  press (more than 15° off build Z), so the twist's honest line would never show; the side label shows when there is no twist.
+- **The pop-up is one line** ("Angled presses are estimates until measured", ≤ 44 — your rule); the ruling's whole sentence is on
+  About Flexible… and behind the Export caption's (i).
+- **A press left out of a send is left out, never rested.** "Send Group 1 only" carries no edge press: core takes a press only as
+  a loaded entry (a resting entry names one region), so the edges group's presses are simply not in that job — said behind the
+  (i).
+- **loadedKeys stays the faces'.** The design had the pipeline iterate "faces + registered presses" through loadedKeys; 100+
+  readers take loadedKeys as faces (the dent, the walls, readiness, the settle waits), so the presses are designed beside them
+  through their own list, with their own catch per press.
+- **No FlexFaceGeometry for a press key yet**: nothing draws on a press's frame in E2 (its heat, bend and curves are E3/E4).
+- **A tilted single-face press (AP1) is not sent** (no flat prism; never registered) and stays out of the lattice's key, so its
+  bytes and the goldens' do not move.
+
+### Found by looking (the pictures on your pad, `look/`) — each fixed, each with a test and its red control
+1. **The lattice was built at the wrong temperature.** The lattice pictures' log showed it designed at 190 °C while Auto had gone on to choose
+   220 °C (the press registering asks Auto again, so its answer lands later than before): the designs moved, the lattice stayed
+   and was not called stale. A lattice designed at another family or temperature is stale now, and the main page never builds
+   while core's designs are in flight. → `FlexibleR7E2Tests.testALatticeDesignedAtAnotherTemperatureIsStale` (RED first,
+   `e2_red_look.txt`: 3 failures; RED CONTROL inside: the rule before reads 190 vs 220 as current). After it: gyroid 220 °C, 0
+   voxels differ from core's fields.
+2. **The twist's honest line was hidden** (`D01`): "Twist stops at 7° · lattice ends" took the card's only line, so "Twisted ·
+   squish shape up to 16% off" never showed. Both lines show now (core's refusal still says alone).
+3. **The filled button deleted** (`E01`): the shared-surface fixes were [Remove Edge 14] [Face 3 rests] — the first, filled one
+   removes your press. Now the gentlest first: [Shallower] › [Face 3 rests] › [Remove Edge 14].
+4. **The side label looked like a warning**: "Side press · gyroid only · estimate" is a fact, now a grey caption; orange only for
+   a press not in the job or a twist more than 2 % off.
+5. **"Not sent · Core can't build this press" for half a second after a twist** (`look/D_lines_before_fix5.txt`, sampled every
+   0.5 s): the design
+   asked on the press's OLD synthetic key landed on the re-opened scene ("face region −1013 is not declared in the job"). A
+   registration counts now only for the press's own pieces and arrow on the scene that is open; until the new one lands the card
+   says "Set up · core is designing it", no design is asked on the old key and nothing is written. →
+   `FlexibleR7E2Tests.testAPressWhoseArrowMovedWaitsForCoresNewStack` (RED first against a stub of the rule before,
+   `e2_red_e12.txt`: 6 failures, all the fix's own; its RED CONTROL, read at the same moment — any registration counts — has the
+   old key −1002 "in the job" with the new arrow; green: key none, "Set up · core is designing it", then in the job on the new key).
+
+### Found by the suite (its first run, at `3cfbc86f`)
+That run (1,053 cases: 940 passed, 108 skipped, 5 failed — the known refine line and 4 from (1) above; `e2_suite1_failures.txt`)
+showed what (1) does to the main page: its first build, made at Auto's opening guess, was stale a second later and built again —
+FlexibleMainPageRound4Tests read "Building…" where Ready was due (2 tests). The main page now also waits for Auto's answer while
+Auto decides the temperature or the family: ONE build, at the temperature the designs end at. Both FlexibleMainPageRound4Tests
+pass unchanged; E2-11's source pin covers the guard. Two tests read the page before its lattice had landed (it used to be built
+early, at the wrong temperature): re-pinned below. Runs after the fixes: `e2_found_by_suite_runs.txt` (50 cases, 0 failed).
+
+### The tests → the code (RED first)
+Your pad is A1_0003 with the Top's 20 mm face-prism (the whole pad latticed), Fast; where a test rests Faces 2–5 the Face 3 +
+Face 2 edge is numbered "Edge 14" in the list (your Edge 16 otherwise) — the same edge.
+| what | test | RED at the stubs |
+|---|---|---|
+| **The press is a design target** (Edge 16, 5 kg): its key −1040 names it — key(r), target(r) (faceRegionID = the key), setTarget through the press (regions[0] restored); designs[key] on core's press stack (52 columns), its S core's squish_fraction of the press's map; core's load is press_unit(d) bit for bit. **RED CONTROL**: the first member's own stack is along its face's normal, 45.0° off | `FlexibleR7E2Tests.testAPressIsADesignTarget` | red: no design key |
+| **The default map is the flat prism in core's numbers**: Edge 16 at 6 mm — core's Y across (20 × 12 mm), 104 columns, off 0.0000 %, the rim to 0 within 2e-15; at 14 mm core's X across (28 × 20 mm), 234 columns, off 0.16 %, the rim within 0.0016. The cube's corner at halfway, centre_edge: 10.1 % at 10 mm (1.08 pitches over h), 3.4 % at 20 mm (0.72) — the column grid's error, shrinking with h. **RED CONTROL**: X assumed along the edge at 14 mm: 94.6 % off | `…testTheDefaultMapIsTheFlatPrismInCoresNumbers` | red: no shape |
+| **A twist says how far off**: typed 15° on Edge 16 at 10.6 mm lands at 7.0° (the lattice — "Twist stops at 7° · lattice ends"); N = 16.3 % → "Twisted · squish shape up to 16% off"; untwisted 0.46 % → the side label. **RED CONTROL**: silent | `…testATwistSaysHowFarOff` | red |
+| **Sent only when core takes it**: the gate, pure — each of 9 conditions false keeps the press out with its own line ("Set up · core support pending", "Edge 16 · arrow doesn't push into Face 3", "Not sent · Face 3 is pressed twice", "Edge 16 and Face 3 share 85 mm²", "Set up · core is designing it", "Not sent · no squish data", "Edge 16 and Edge 18 press one stack"); the probe with its control. On your pad the edges group's send: 7 entries, the press LAST — face_region_ids [2000001, 2000002] (member order), press_direction's bits, deepest 3, the design's map — read back by core's own parser. **RED CONTROLS**: an API of 1 closes the gate; an encoder writing the pieces as plain faces states no footprint, no direction | `…testAPressIsSentOnlyWhenCoreTakesIt` | red |
+| **The ruling's bit test**: the cube's corner along −(1,1,1)/√3 (load −0x1.279a74590331dp-1 three times) — 29 columns, frame, columns, exit links (faces 0, 2, 4) ≡ core's run's A5 stack, 0 lines differing; your pad's Top corner — 10 columns, 0 differing. **RED CONTROLS**: the same press with its direction one ulp off is another stack; one column's entry_t + 1 ulp is caught | `…testCubeCornerFrameColumnsAndExitLinksMatchCoreToTheBit` | red: no press in the job |
+| **shared_footprint in plain words**: Face 3 pressed whole beside the edge press: "Edge 14 and Face 3 share 85 mm²" (84.85 = 20 × 4.24), out of the job, [Face 3 rests] [Remove Edge 14] — each one undo step, back in the job (or gone); core's own refusal of a job with both → "Core refused it: Edge 14 and Face 3 share 85 mm²"; the face's warning line the same. **RED CONTROL**: core's raw sentence ("presses 3 and 2000001 share surface (face region …") | `…testSharedFootprintInPlainWords` | red |
+| **The lattice is graded along the arrow**: the built field ≡ core's fields (the Top's, and the press's over its key) firmer per voxel; 4,082 voxels under the press, all 4,082 differ from E1's lattice. **RED CONTROL**: presses stripped (E1's rule) — E1's lattice | `…testTheLatticeIsGradedAlongTheArrow` | red: "face −1099 has no design yet" |
+| **The rim default**: the cube's edge (384 columns) and corner (29) at 3 mm: 0 beyond-data columns | `…testRimDefault` | red: no design |
+| **One group per export, said first**: Group 1 (the Top) beside the edges group (two edges): the squeeze-groups hold; [Send Group 1 only] carries no press (the Top loaded), [Send Group 2 only] both presses and no loaded face; the edges group alone: step ② "Group 1 · 11 lb · 2 edges · bead 0.45 mm" (the groups renumber when the Top rests). **RED CONTROL**: the hold before E2 — no notice | `…testOneGroupPerExportSaid` | red |
+| **Face presses unchanged**: C1's pad's run job ≡ the golden; with a press, 40 lines inserted after the face entries, 0 face lines changed. Control: +0.001 kg moves one line | `…testFacePressesUnchanged` | red |
+| **Hosted**: the arrow solid when sent, dashed when core's side is closed ("Set up · core support pending") | `FlexibleR7E2HostedTests.testTheArrowIsSolidWhenSentAndDashedOtherwise` | red |
+| **Hosted**: the tab's one line, sent untwisted: "Side press · gyroid only · estimate" (one line, 14 pt) | `…testTheSideLabelLine` | red |
+| **Hosted**: the ruling's sentence pops once per session; on About Flexible…; under the Export caption and in the corner card, its (i) the whole sentence; core's line counts an edge press as "1 edge" | `…testTheRulingsSentencePopsOncePerSession` | red |
+| **Found by looking (1)**: a lattice designed at another temperature / family is stale; the main page waits for designs in flight | `FlexibleR7E2Tests.testALatticeDesignedAtAnotherTemperatureIsStale` | red (`e2_red_look.txt`) |
+| **Found by looking (5)**: a press whose arrow moved waits for core's new stack | `…testAPressWhoseArrowMovedWaitsForCoresNewStack` | red (`e2_red_e12.txt`) |
+
+Our own new tests corrected after their first green run (each said in the test): E2-2's corner bar is 1.5 pitches over h (core's
+edge fraction is a cell-centre distance); E2-3 reads the stored twist (the lattice lands a typed 15° at 7.0°); E2-7 / E2-9 read
+Group 1's own regions; EH3 waits for the line before it to clear; E2-6 undoes through the page's own undo
+(`FlexibleStagePage.history` — a bare `performUndo` leaves the designs behind; it timed out once the fixes' order changed).
+
+### Re-pins (our own tests only; each attributed inside the test)
+- `FlexibleEdgeGroupsTests` (6) "SAVED, NEVER SENT" → sent once core takes it (in sentPresses, its group sent, its flat prism in
+  the lattice's key, only the edges group's send writes it); with your pad's three face groups your "1–3 fix buttons" leave no room
+  for a fourth send — asserted as such (question 2). (9) a press entry names its pieces (face_region_ids); the sends of before are
+  still offered, the edges group's own when your three leave room.
+- `FlexibleBatchCVerifyTests.testTappingStressShowsItInTheDefaultView` and
+  `FlexibleR7M1Tests.testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst` (found by the suite): each read the page
+  before its lattice had landed — the lattice used to be built early, at Auto's first temperature; each waits for the current
+  lattice now (Stress: 38,041 pixels move on the tap, its control 0; M1: the preview pill and its sends as before).
+- No #354 test touched.
+
+### The bytes and the runs (raw: `round7/batch_e2/e2_runs.txt`)
+- **The targeted run** at `9950bf17` (08:54–10:50): **188 TopOptFlowsTests classes** (`e2_suite_classes.txt`: every Flexible*
+  class, every class that pins a touched file, the goldens, + LatticeStaleTypeTests, ProjectStoreTests, UndoHistoryTests,
+  LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, BottomBarMeasurementTests, LatticeIncludeGateTests), 16
+  chunks of 12: **1,054 cases — 945 passed, 108 skipped (env-gated probes), 1 failed**: the known FlexibleBatchNVerifyTests refine
+  line. No signal; LatticeStaleTypeTests 6/6; no tracked file rewritten.
+- The first run of the same suite at `3cfbc86f` (06:48–08:43): 1,053 cases — 940 passed, 108 skipped, 5 failed (the refine line
+  and the 4 "found by the suite" above, `e2_suite1_failures.txt`) → `9950bf17`.
+- **TopOptKitTests Flexible*** (the bridge's own: FlexibleBridgeTests, FlexibleSliceProbe, FlexibleSquishFETests,
+  FlexibleSquishModulusTests, FlexibleSquishStepsTests, FlexibleTimingProbe): **37 passed, 2 skipped, 0 failed**.
+- **Goldens, 0 DIFFERS in both modes**: with SWIFT_DETERMINISTIC_HASHING=1, 38 identical; unseeded, 32 identical + 1 PART-SKIP
+  (13 tests, 0 failures each) — the counts of every round-7 step. Every face entry keeps its bytes.
+- **The 16 stage-job hashes**: `stage_job_hashes_e2.txt` is byte-identical (cmp, whole file) to R7-E1's review's
+  `stage_job_hashes_e1r.txt`. No moved byte to attribute: no hashed job carries an edge press.
+- **The E2 tests**: FlexibleR7E2Tests 12 + FlexibleR7E2HostedTests 3 = **15 cases, 15 passed** (in the run above; red runs:
+  `e2_red_run.txt` at the stubs, `e2_red_look.txt`, `e2_red_e12.txt`).
+- **iOS**: BUILD SUCCEEDED at `9950bf17`; the app was not running → nothing terminated; installed 10:55:10, **NOT launched**;
+  installed dylib == built (sha256 c61e80fb…, cmp identical); the batch's strings present ("Angled presses are estimates until
+  measured", "Side press", "squish shape up to", "core is designing it"), the new symbols too; no "Strip width".
+
+### The pictures (`round7/batch_e2/look/`, the PAGE as it draws — its own renderer under its own chrome; not device screenshots)
+Your pad (A1_0003, the Top's 20 mm face-prism), Faces 2–5 resting, Fast, at 13" portrait unless said.
+- `A01_13p_edges_group_sent_side_label_solid_arrow.png` — Edge 14 + Edge 16 sent (5 kg): both arrows SOLID, the tab's caption
+  "Side press · gyroid only · estimate", the pop-up "Angled presses are estimates until measured"; `A01b_…` beside your
+  img_edges_1018 (then "Strip width 15 mm / Set up · core support pending"). `A02_11l_…` the same at 11" landscape.
+- `A03_13p_core_side_closed_dashed_pending.png` — core's side closed (an API stub of 1, the red control): dashed, "Set up · core
+  support pending".
+- `B01_card_group1_beside_edges_group.png` — the Lattice button's card with Group 1 (the Top) beside the edges group: "Not sent:
+  core runs one squeeze group at a time", [Send Group 1 only] [Send Group 2 only]. `B02_card_edges_group_alone_step2.png` — the
+  edges group alone: step ② "Group 1 · 11 lb · 2 edges · bead 0.45 mm".
+- `C01_lattice_E2_graded_along_the_arrow.png` / `C02_lattice_E1_presses_stripped.png` — the main page's lattice with the presses
+  sent / stripped (E1); `C05` / `C06` the same with X-ray. `C03` / `C04` the density at mid-height (z ≈ 10 mm), one grey scale for
+  both (black = no lattice); `C07` the two slices side by side: E2's dense diagonal band is core's press field (ρ 0.362). 8,008 of
+  53,248 lattice voxels move E1 → E2. Lines: `C_lines.txt` (core's fields: the Top's ρ 0.143–0.170; each press's 0.362 over 4,082
+  voxels; stacks 136.5–140.1 mm; 52 too soft).
+- `D01_13p_twisted_15_line.png` — Edge 14 twisted (typed 15°, landed 7°): "Twist stops at 7° · lattice ends" and under it
+  "Twisted · squish shape up to 16% off".
+- `E01_13p_shared_footprint_words_and_fixes.png` — Face 3 pressed whole beside Edge 14: "Edge 14 and Face 3 share 85 mm²", [Face 3
+  rests] [Remove Edge 14], the arrow dashed.
+
+### Not done, and why
+- **The dense band** under an edge press on your pad is core's press column (question 1); nothing app-side bounds it (one source —
+  core).
+- **A fourth send**: with three face groups and an edges group, your 1–3 fix buttons leave no button for the edges group's own send
+  (question 2).
+- **The twist** is "both" with an along ramp: 16 % off on your Edge 16 at 7°; the honest line ships (your answer). No flat_cut asked.
+- **The rim fade** is not built (the flat prism is 0 at the rim by construction; the rim default test passes: 0 beyond-data
+  columns) — waiting on the reviewer's §17(b).
+- **The press's heat, Bend and curves** on its own frame (no FlexFaceGeometry for a press key): E3 / E4.
+- **The top line stays "Ready: Save & Exit builds the lattice"** while a press is kept out of the job (shared surface): the lattice
+  builds without it and the press's card says why, with its fixes (`E01`).
+- **The fix buttons' second (dark) button** draws its hairline edge as two short vertical lines beside the capsule in these
+  renders (`E01`, and the card's [Send Group 2 only] in `B01`) — the shared corner-pair style, not E2's; to be judged in the
+  simulator.
+
+### Questions
+1. **(Reviewer)** Core's press column runs to the far side of the part (136–140 mm on your pad at 45°), so every column is too soft
+   and the lattice under an edge press is a dense band across the pad (an X with two edges). Show it as core's verdict, or a core
+   need — bound a press column (e.g. to the prism's depth or the lattice region)? (#361 not asked.)
+2. **(Reviewer / you)** With three face groups and an edges group the edges group's send has no button (1–3 fixes). A fourth button,
+   a "More…" row, or the edges group first?
+3. **(Reviewer)** §17(b), the rim fade: superseded by the flat prism (0 at the rim by construction)?
+4. **(Reviewer)** Keep the two deviations: a tipped corner stays centre_edge; N counts both ways.
+5. **(You)** "Twisted · squish shape up to 16% off" at 7° on Edge 16 — enough said, or keep twists out of the job above some N?
+6. **(Reviewer)** The shared-surface check runs across groups: your Face 3 pressed whole sits in Group 1, Edge 14 in Group 2 —
+   never in one send — and Edge 14 is still kept out (both would press that surface in the lattice). Keep it across groups?
+
+## ★ Round 7 · the review of R7-E1 — what the two verifiers found on the flat prism, what is fixed, and what still waits (2026-10-19) (the step before R7-E2 above)
 
 Two verifiers looked at R7-E1 on your pad, your live project (Balanced) and your simulator project: one by the numbers, one by
 the pictures the page itself draws. They found two blockers and six bigger problems. Both blockers and five of the six are fixed,

@@ -1,0 +1,126 @@
+# R7-E2 — the raw runs (task 2026-09-29-flexible-screens, round 7). Paths relative to the repo.
+
+## 1. The targeted suite at 9950bf17 (188 TopOptFlowsTests classes, e2_suite_classes.txt; chunks of 12, --skip-build)
+=== chunk 1 rc 0 passed 70 failed 0 skipped 13 signal-lines 0 start 08:54:52 end 08:59:54 classes BottomBarMeasurementTests FlexibleAngledGoldenRecorder FlexibleAngledGoldenTests FlexibleBatchBReviewTests FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Probe FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleBatchMDentTests FlexibleBatchMGroupTests
+=== chunk 2 rc 1 passed 38 failed 1 skipped 13 signal-lines 0 start 08:59:54 end 09:24:01 classes FlexibleBatchMLegendTests FlexibleBatchMProbe FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleBatchNEvidenceProbe FlexibleBatchNProbe FlexibleBatchNRefineTests FlexibleBatchNVerifyTests FlexibleBatchVEvidenceProbe FlexibleBatchVHostedTests FlexibleChromeLayoutTests
+=== chunk 3 rc 0 passed 71 failed 0 skipped 2 signal-lines 0 start 09:24:01 end 09:28:44 classes FlexibleChromeStateTests FlexibleCoreClaimTests FlexibleCornerPairTests FlexibleCurveEditTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassPerfTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleFaceChipTests
+=== chunk 4 rc 0 passed 48 failed 0 skipped 4 signal-lines 0 start 09:28:44 end 09:31:16 classes FlexibleFaceCommitTests FlexibleFacePickTests FlexibleFlatPrismEngineTests FlexibleFlatPrismEvidenceProbe FlexibleFlatPrismHostedTests FlexibleFlatPrismSeamTests FlexibleFlatPrismTests FlexibleGeometryOnlyLatticeTests FlexibleGroupFieldPerfTests FlexibleGroupPaletteEvidenceProbe FlexibleGroupPaletteHostedTests FlexibleGroupPaletteTests
+=== chunk 5 rc 0 passed 35 failed 0 skipped 3 signal-lines 0 start 09:31:16 end 09:33:24 classes FlexibleH39HostedTests FlexibleH39HotfixHookTests FlexibleH40OtherStagesDigestProbe FlexibleH40ShadowTests FlexibleInPassCompositeTests FlexibleLatticeEvidenceProbe FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeIsProtectedTests FlexibleLatticePassPerfTests
+=== chunk 6 rc 0 passed 75 failed 0 skipped 0 signal-lines 0 start 09:33:24 end 09:36:25 classes FlexibleLatticePassTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4HostedTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainPrismEqualityTests
+=== chunk 7 rc 0 passed 75 failed 0 skipped 0 signal-lines 0 start 09:36:25 end 09:37:38 classes FlexibleMainStageTests FlexibleMainViewsTests FlexibleMeetReviewTests FlexibleMeetTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePinchTests FlexiblePressAimReviewTests FlexiblePressAimTests FlexiblePressFixturesTests FlexiblePressProbeTripwireTests
+=== chunk 8 rc 0 passed 55 failed 0 skipped 14 signal-lines 0 start 09:37:38 end 09:46:30 classes FlexiblePressReframeTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7D2ReviewEvidenceProbe FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewEvidenceProbe FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E2EvidenceProbe
+=== chunk 9 rc 0 passed 49 failed 0 skipped 8 signal-lines 0 start 09:46:30 end 09:50:27 classes FlexibleR7E2HostedTests FlexibleR7E2Tests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7M1EvidenceProbe FlexibleR7M1Tests FlexibleR7M1VerifyEvidenceProbe FlexibleR7M1VerifyTests FlexibleR7M2EvidenceProbe FlexibleR7MergeTests FlexibleR7REvidenceProbe FlexibleR7RHostedTests
+=== chunk 10 rc 0 passed 48 failed 0 skipped 5 signal-lines 0 start 09:50:27 end 10:04:41 classes FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1EvidenceProbe FlexibleR7X1HostedTests FlexibleR7X1Tests FlexibleR7X1VerifyEvidenceProbe FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests
+=== chunk 11 rc 0 passed 63 failed 0 skipped 12 signal-lines 0 start 10:04:41 end 10:12:02 classes FlexibleRound5EvidenceProbe FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6EvidenceProbe FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CalloutHostedTests FlexibleRound7CardMessagesTests FlexibleRound7D1ResendTests FlexibleRound7D1ReviewEvidenceProbe
+=== chunk 12 rc 0 passed 34 failed 0 skipped 25 signal-lines 0 start 10:12:02 end 10:20:56 classes FlexibleRound7D1ReviewHostedTests FlexibleRound7D1ReviewTests FlexibleRound7DesignEvidenceProbe FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7FitHostedTests FlexibleRound7OtherStagesProbe FlexibleRound7ScreenEvidenceProbe FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7SelectionsEvidenceProbe FlexibleRound7SelectionsHookTests
+=== chunk 13 rc 0 passed 60 failed 0 skipped 4 signal-lines 0 start 10:20:56 end 10:37:24 classes FlexibleRound7SelectionsHostedTests FlexibleRound7ViewsEvidenceProbe FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests FlexibleS1VerifyTests FlexibleS1bMainTagsTests FlexibleSectorMigrationTests FlexibleSectorStoreTests FlexibleSelectionsListTests FlexibleSettingsMigrationTests
+=== chunk 14 rc 0 passed 72 failed 0 skipped 0 signal-lines 0 start 10:37:24 end 10:41:18 classes FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCoarsenTests
+=== chunk 15 rc 0 passed 60 failed 0 skipped 5 signal-lines 0 start 10:41:18 end 10:49:25 classes FlexibleSquishCopyTests FlexibleSquishEvidenceProbe FlexibleSquishPerfProbe FlexibleSquishPlayAllTests FlexibleSquishPlayerTests FlexibleSquishSolverTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleStageCapsuleTests FlexibleStageTests FlexibleSurfaceNavTests FlexibleTopLayerHostedTests
+=== chunk 16 rc 0 passed 92 failed 0 skipped 0 signal-lines 0 start 10:49:25 end 10:50:37 classes FlexibleTopLayerTests LatticeIncludeGateTests LatticeSettingsPersistTests LatticeStaleTypeTests ProjectStoreTests SmoothingPageRound2Tests UndoHistoryTests ViewerTests
+DONE
+TOTAL cases 1054 passed 945 failed 1 skipped 108 signal-lines 0
+failed cases:
+Test Case '-[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker]' failed.
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is drawn whole (118.5 of 151.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is drawn whole (110.5 of 147.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is drawn whole (117.5 of 145.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn whole (117.5 of 128.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn whole (117.0 of 134.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn whole (118.5 of 133.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whole (145.5 of 151.0 pt)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole (144.0 of 147.0 pt)
+LatticeStaleTypeTests cases passed: 6
+
+## 2. The first run of the same suite at 3cfbc86f (found 4 failures → 9950bf17; e2_suite1_failures.txt)
+=== chunk 1 rc 1 passed 69 failed 1 skipped 13 signal-lines 0 start 06:48:51 end 06:53:03 classes BottomBarMeasurementTests FlexibleAngledGoldenRecorder FlexibleAngledGoldenTests FlexibleBatchBReviewTests FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Probe FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleBatchMDentTests FlexibleBatchMGroupTests
+=== chunk 2 rc 1 passed 38 failed 1 skipped 13 signal-lines 0 start 06:53:03 end 07:17:06 classes FlexibleBatchMLegendTests FlexibleBatchMProbe FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleBatchNEvidenceProbe FlexibleBatchNProbe FlexibleBatchNRefineTests FlexibleBatchNVerifyTests FlexibleBatchVEvidenceProbe FlexibleBatchVHostedTests FlexibleChromeLayoutTests
+=== chunk 3 rc 0 passed 71 failed 0 skipped 2 signal-lines 0 start 07:17:06 end 07:21:46 classes FlexibleChromeStateTests FlexibleCoreClaimTests FlexibleCornerPairTests FlexibleCurveEditTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassPerfTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleFaceChipTests
+=== chunk 4 rc 0 passed 48 failed 0 skipped 4 signal-lines 0 start 07:21:46 end 07:24:12 classes FlexibleFaceCommitTests FlexibleFacePickTests FlexibleFlatPrismEngineTests FlexibleFlatPrismEvidenceProbe FlexibleFlatPrismHostedTests FlexibleFlatPrismSeamTests FlexibleFlatPrismTests FlexibleGeometryOnlyLatticeTests FlexibleGroupFieldPerfTests FlexibleGroupPaletteEvidenceProbe FlexibleGroupPaletteHostedTests FlexibleGroupPaletteTests
+=== chunk 5 rc 0 passed 35 failed 0 skipped 3 signal-lines 0 start 07:24:12 end 07:26:19 classes FlexibleH39HostedTests FlexibleH39HotfixHookTests FlexibleH40OtherStagesDigestProbe FlexibleH40ShadowTests FlexibleInPassCompositeTests FlexibleLatticeEvidenceProbe FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeIsProtectedTests FlexibleLatticePassPerfTests
+=== chunk 6 rc 1 passed 73 failed 2 skipped 0 signal-lines 0 start 07:26:19 end 07:29:15 classes FlexibleLatticePassTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4HostedTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainPrismEqualityTests
+=== chunk 7 rc 0 passed 75 failed 0 skipped 0 signal-lines 0 start 07:29:15 end 07:30:29 classes FlexibleMainStageTests FlexibleMainViewsTests FlexibleMeetReviewTests FlexibleMeetTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePinchTests FlexiblePressAimReviewTests FlexiblePressAimTests FlexiblePressFixturesTests FlexiblePressProbeTripwireTests
+=== chunk 8 rc 0 passed 55 failed 0 skipped 14 signal-lines 0 start 07:30:29 end 07:39:18 classes FlexiblePressReframeTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7D2ReviewEvidenceProbe FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewEvidenceProbe FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E2EvidenceProbe
+=== chunk 9 rc 1 passed 47 failed 1 skipped 8 signal-lines 0 start 07:39:18 end 07:43:03 classes FlexibleR7E2HostedTests FlexibleR7E2Tests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7M1EvidenceProbe FlexibleR7M1Tests FlexibleR7M1VerifyEvidenceProbe FlexibleR7M1VerifyTests FlexibleR7M2EvidenceProbe FlexibleR7MergeTests FlexibleR7REvidenceProbe FlexibleR7RHostedTests
+=== chunk 10 rc 0 passed 48 failed 0 skipped 5 signal-lines 0 start 07:43:03 end 07:57:13 classes FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1EvidenceProbe FlexibleR7X1HostedTests FlexibleR7X1Tests FlexibleR7X1VerifyEvidenceProbe FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests
+=== chunk 11 rc 0 passed 63 failed 0 skipped 12 signal-lines 0 start 07:57:13 end 08:04:35 classes FlexibleRound5EvidenceProbe FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6EvidenceProbe FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CalloutHostedTests FlexibleRound7CardMessagesTests FlexibleRound7D1ResendTests FlexibleRound7D1ReviewEvidenceProbe
+=== chunk 12 rc 0 passed 34 failed 0 skipped 25 signal-lines 0 start 08:04:35 end 08:13:28 classes FlexibleRound7D1ReviewHostedTests FlexibleRound7D1ReviewTests FlexibleRound7DesignEvidenceProbe FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7FitHostedTests FlexibleRound7OtherStagesProbe FlexibleRound7ScreenEvidenceProbe FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7SelectionsEvidenceProbe FlexibleRound7SelectionsHookTests
+=== chunk 13 rc 0 passed 60 failed 0 skipped 4 signal-lines 0 start 08:13:28 end 08:29:54 classes FlexibleRound7SelectionsHostedTests FlexibleRound7ViewsEvidenceProbe FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests FlexibleS1VerifyTests FlexibleS1bMainTagsTests FlexibleSectorMigrationTests FlexibleSectorStoreTests FlexibleSelectionsListTests FlexibleSettingsMigrationTests
+=== chunk 14 rc 0 passed 72 failed 0 skipped 0 signal-lines 0 start 08:29:54 end 08:33:49 classes FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCoarsenTests
+=== chunk 15 rc 0 passed 60 failed 0 skipped 5 signal-lines 0 start 08:33:49 end 08:41:58 classes FlexibleSquishCopyTests FlexibleSquishEvidenceProbe FlexibleSquishPerfProbe FlexibleSquishPlayAllTests FlexibleSquishPlayerTests FlexibleSquishSolverTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleStageCapsuleTests FlexibleStageTests FlexibleSurfaceNavTests FlexibleTopLayerHostedTests
+=== chunk 16 rc 0 passed 92 failed 0 skipped 0 signal-lines 0 start 08:41:58 end 08:43:10 classes FlexibleTopLayerTests LatticeIncludeGateTests LatticeSettingsPersistTests LatticeStaleTypeTests ProjectStoreTests SmoothingPageRound2Tests UndoHistoryTests ViewerTests
+DONE
+TOTAL cases 1053 passed 940 failed 5 skipped 108 signal-lines 0
+
+## 3. TopOptKitTests Flexible* (the bridge's own) at 9950bf17
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testAutoGivesASentenceAndReasons]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testBoxTopFaceFrameAndLinkedEnd]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testCalibrateFirstDesignIsRefusedWithReason]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testCatalogueOffersOnlyTestedTemperatures]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testCheckStampUsesTheDesignedDensities]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testCurveSamplesAreCoreStress]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testDesignComesFromCore]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testInverseRoundTripsThroughForward]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testJobBlockReadsBackThroughCoresParser]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testPenCurveErrorIsCoresSentence]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testPenCurvePassesThroughItsPoints]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testRotationTurnsTheFrame]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testSameStackConflictNamesBothFaces]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testStampGridForceCheck]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testTableValueThroughTheBridge]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testTemperatureNoteComesFromCore]' passed.
+Test Case '-[TopOptKitTests.FlexibleBridgeTests testUntestedTemperatureIsRefusedNotInterpolated]' passed.
+Test Case '-[TopOptKitTests.FlexibleSliceProbe testPrintSlice]' skipped.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testAQueuedSimKeepsItsWholeBudget]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testASideSqueezeDoesNotGlueThePadToItsRest]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testCoarseningRule]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testDisplayToleranceIsEnough]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testFreeFreeFieldDoesNotDependOnTheAnchors]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testLoadsSumToTheDesignForce]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testPinchMovesBothFacesInAndBulgesTheSides]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testRestingFaceIsHeld]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testSolverPostureIsRestored]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testStampPressIsLocal]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testSymmetricPadGivesASymmetricField]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishFETests testTopPressBulgesEveryFreeSide]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishModulusTests testPrintTheLawsNumbers]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishModulusTests testTheLawIsTheSecantOfCoresCurve]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testAStepIsTheLinearProblemAndASessionEnds]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testASymmetricPadStaysSymmetric]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testOnlyAnUndampedSolveStopsAnIncrement]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testTheFreeSidesStillBulge]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testTheOverSquishedZoneFirmsUpAndNothingInverts]' passed.
+Test Case '-[TopOptKitTests.FlexibleSquishStepsTests testTheSteppedLawIsCoresCurveUpToItsDataThenDensifies]' passed.
+Test Case '-[TopOptKitTests.FlexibleTimingProbe testPrintTimings]' skipped.
+passed 37 failed 0 skipped 2
+
+## 4. Goldens (FlexibleAngledGoldenTests)
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · cases passed 13 failed 0
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · cases passed 13 failed 0
+
+## 5. The 16 stage-job hashes
+start 10:52:10
+golden det exit 0 10:52:27
+golden unseeded exit 0 10:52:44
+hashes exit 0 10:53:43
+hashes cmp vs e1r: identical
+ALLDONE 10:53:43
+
+## 6. iOS
+** BUILD SUCCEEDED **
+app was not running (launchctl list: no com.nadim.topopt) → nothing terminated; simctl install at 10:55:10; NOT launched
+built     sha256 c61e80fb083e8bf0527f1b41fa95607290c2a26f8b24ef6bee4f82f6366a3e76
+installed sha256 c61e80fb083e8bf0527f1b41fa95607290c2a26f8b24ef6bee4f82f6366a3e76
+string 'Angled presses are estimates until measured': 1
+string 'Side press': 1
+string 'squish shape up to': 2
+string 'core is designing it': 1
+symbol controlStaleRegistrationCounts: 7 · autoInFlight: 2 · 'Strip width': 0
+
+## 7. The E2 tests (after the fixes) — see e2_green_run.txt, e2_found_by_suite_runs.txt; red runs: e2_red_run.txt (stubs), e2_red_look.txt, e2_red_e12.txt
+
+## 8. The evidence probe (FlexibleR7E2EvidenceProbe, FLEX_E2_DIR) at 9950bf17
+Test Case '-[TopOptFlowsTests.FlexibleR7E2EvidenceProbe testA_EdgesGroupSent]' passed.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2EvidenceProbe testB_CardStepTwo]' passed.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2EvidenceProbe testC_LatticeGradedAlongTheArrow]' passed.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2EvidenceProbe testD_TwistLine]' passed.
+Test Case '-[TopOptFlowsTests.FlexibleR7E2EvidenceProbe testE_SharedFootprintWords]' passed.

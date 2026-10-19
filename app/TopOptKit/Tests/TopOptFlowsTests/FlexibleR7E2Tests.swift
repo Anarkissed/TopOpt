@@ -654,7 +654,7 @@ final class FlexibleR7E2Tests: XCTestCase {
 
     // MARK: - E2-12 (found by looking)
 
-    /// ★ FOUND BY LOOKING (the evidence probe's twisted Edge 16, round7/batch_e2/look/D_lines.txt): for half a second after the
+    /// ★ FOUND BY LOOKING (the evidence probe's twisted Edge 16, round7/batch_e2/look/D_lines_before_fix5.txt): for half a second after the
     /// twist the card said "Not sent · Core can't build this press" — core's "face region −1013 is not declared in the job", a
     /// design asked on the OLD key landing on the re-opened scene. The moment the arrow moves the old registration is not the
     /// press's: no design key, no design asked on it, "Set up · core is designing it", no press written; then core's new stack,
