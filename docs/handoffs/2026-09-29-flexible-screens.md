@@ -58,6 +58,8 @@ reaches a job (`FlexibleBackend.sendsPresses` stays off; the chip "Lattice not t
 - Evidence (`look/`, 13" portrait, his live pad, Edge 16): E5_01 [Top] with chip, knob and boxes; E5_02 Heat on the footprint at
   the full squish with the legend and the chip; E5_03 X-ray's bend prism and its 2.6 mm tag; E5_04 Stamp turn 0°.
   Seen, not fixed: in E5_01 the depth chip sits on the across curve's middle point; in E5_03 the prism's tag overlaps "along".
+- iOS: BUILD SUCCEEDED at 52ad6c03; the app WAS running → terminated, then installed 19:10:18, NOT launched; installed dylib ==
+  built (sha256 522b0c7f…); the batch's strings present ("Squish along the arrow" 1, "turning it away counts up" 1).
 
 ### Open questions
 1. The skin couples an edge's two faces strongly: a side drawn at 0.15 still moves 75 % as far as the other. Fine for the interim,
