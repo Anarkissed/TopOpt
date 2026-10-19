@@ -107,6 +107,24 @@ public enum FlexibleGroupField {
                                  origin: first.origin, density: rho, owner: owner), shared)
     }
 
+    /// ★ R7-E2 FIX (the verify: core's press column runs to the far side of the part — a 10.6 mm flat prism on Edge 16 re-densified
+    /// a 140 mm diagonal, Face 5's slab included): a press's voxels (owner = its synthetic key) PAST its flat prism's plane
+    /// (height > h along the arrow) are under no face (0) — the press grades only the volume he set; another group's firmer wins
+    /// there as before.
+    public static func clipToPresses(_ f: FlexDensityField, cuts: [Int: FlexibleFlatPrism.Cut]) -> FlexDensityField {
+        guard !cuts.isEmpty, !controlPressFieldWhole else { return f }
+        var rho = f.density, owner = f.owner
+        for k in 0..<f.nz { for j in 0..<f.ny { for i in 0..<f.nx {
+            let n = f.index(i, j, k)
+            guard n < rho.count, n < owner.count, rho[n] > 0, let c = cuts[owner[n]] else { continue }
+            let p = f.origin + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * f.spacing
+            if c.height(p) > c.depthMM { rho[n] = 0; owner[n] = -1 }
+        } } }
+        return FlexDensityField(nx: f.nx, ny: f.ny, nz: f.nz, spacing: f.spacing, origin: f.origin, density: rho, owner: owner)
+    }
+    /// ★ RED CONTROL only: E2 as built — core's whole press column in the preview.
+    nonisolated(unsafe) static var controlPressFieldWhole = false
+
     /// The density at model point `p` (the voxel holding it), nil off the grid.
     static func sample(_ f: FlexDensityField, _ p: SIMD3<Double>) -> Float? {
         guard f.spacing > 0 else { return nil }

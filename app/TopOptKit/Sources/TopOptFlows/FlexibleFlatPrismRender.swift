@@ -160,6 +160,8 @@ enum FlexibleFlatPrismUI {
     static var lastArrowSolid: [String: Bool] = [:]
     /// ★ R7-E1 REVIEW, RED CONTROL only: the knob only at the arrow's true tail (off the screen in his working views: no knob).
     static var controlKnobAtTailOnly = false
+    /// ★ RED CONTROL only (R7-E2 FIX): the chip as E1 placed it (on the head; hidden when no nudge ≤ 60 pt is clear).
+    static var controlChipAsBuilt = false
 
     /// ★ R7-E1 REVIEW (the verifier: "on a vertical edge a sideways drag changes the ↕ value"): each angle box names its angle in
     /// his row words, not an arrow glyph.
@@ -327,17 +329,40 @@ struct FlexibleFlatPrismOverlay: View {
         }
         let len = simd_length(a.anchor - a.tail)
         // the chip at the head, nudged the least way until its whole box is clear (the set moves with it)
+        // ★ R7-E2 FIX (the verify at 13" portrait: at 3 mm the chip sat ON the prism and hid it): it starts just PAST the head along
+        // the arrow (≤ 36 pt), beside the prism, not on it
+        var h0 = h
+        if chipDrag == nil, !UI.controlChipAsBuilt, let an = proj.project(SIMD3<Float>(a.anchor)) {
+            let dx = h.x - an.x, dy = h.y - an.y, l = hypot(dx, dy)
+            if l > 4 {
+                let ux = dx / l, uy = dy / l
+                let s = Swift.min(Swift.abs(ux) * UI.chipSize.width / 2 + Swift.abs(uy) * UI.chipSize.height / 2 + 4, 36)
+                h0 = CGPoint(x: h.x + ux * s, y: h.y + uy * s)
+            }
+        }
         var off = CGVector.zero
-        if chipDrag == nil, !fits(UI.rect(h, UI.chipSize)) {
+        if chipDrag == nil, !fits(UI.rect(h0, UI.chipSize)) {
+            var found = false
             search: for r in [CGFloat(18), 27, 36, 48, 60] {
                 for k in 0..<8 {
                     let ang = Double(k) * .pi / 4 - .pi / 2
                     let o = CGVector(dx: r * CGFloat(cos(ang)), dy: r * CGFloat(sin(ang)))
-                    if fits(UI.rect(CGPoint(x: h.x + o.dx, y: h.y + o.dy), UI.chipSize)) { off = o; break search }
+                    if fits(UI.rect(CGPoint(x: h0.x + o.dx, y: h0.y + o.dy), UI.chipSize)) { off = o; found = true; break search }
+                }
+            }
+            // ★ R7-E2 FIX (the verify: after a tilt on his live project the chip was not drawn at all — the depth's handle gone):
+            // never hidden — parked at the nearest clear point back along the arrow toward its tail
+            if !found, !UI.controlChipAsBuilt {
+                park: for f in stride(from: 0.1, through: 1.0, by: 0.1) {
+                    let p0 = CGPoint(x: h0.x + (t.x - h0.x) * f, y: h0.y + (t.y - h0.y) * f)
+                    for o in [CGVector.zero, CGVector(dx: 0, dy: -30), CGVector(dx: 0, dy: 30), CGVector(dx: -56, dy: 0), CGVector(dx: 56, dy: 0)] {
+                        let p = CGPoint(x: p0.x + o.dx, y: p0.y + o.dy)
+                        if fits(UI.rect(p, UI.chipSize)) { off = CGVector(dx: p.x - h0.x, dy: p.y - h0.y); break park }
+                    }
                 }
             }
         }
-        let head = CGPoint(x: h.x + off.dx, y: h.y + off.dy)
+        let head = CGPoint(x: h0.x + off.dx, y: h0.y + off.dy)
         // the knob: ON the arrow (it drags the arrow's tail) — at the tail, or the farthest clear point along it, clear of the chip
         var knobLen = knobDrag?.len ?? len
         func along(_ l: Double) -> CGPoint? { proj.project(SIMD3<Float>(a.anchor - c.direction * l)) }

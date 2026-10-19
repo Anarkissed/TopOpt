@@ -158,6 +158,15 @@ extension FlexibleRowCopy {
     public static let angledEstimateShort = "Angled presses are estimates until measured"
     /// ★ HIS ANSWER (2026-10-18 ~16:50): the twist ships with its honest line — how far core's profile is off the flat prism.
     public static func twistOff(_ percent: Double) -> String { fit("Twisted \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
+    /// ★ R7-E2 FIX: a press neither twisted nor tipped whose map core's columns follow less closely than 2 %.
+    public static func shapeOff(_ percent: Double) -> String { fit("Squish shape up to \(Int(percent.rounded()))% off") }
+    /// ★ R7-E2 FIX: core's "too soft / too firm / beyond data" columns of a press, as a face's card says them.
+    public static func pressUnreached(_ n: Int) -> String { fit("Can't reach this squish on \(n) columns") }
+    /// The same, with how far off the shape is.
+    /// `word`: "twisted" / "tipped" when he moved it off halfway, else "shape" ("Can't reach on 109 columns · twisted 16% off").
+    public static func pressUnreached(_ n: Int, offPercent: Double, word: String = "shape") -> String {
+        fit("Can't reach on \(n) columns \u{00B7} \(word) \(Int(offPercent.rounded()))% off")
+    }
     /// A corner core's map cannot follow within 2 %.
     public static func cornerOff(_ percent: Double) -> String { fit("Tipped \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
     /// Step ② for an edges group: "Group 3 · 5 lb · 2 edges · bead 0.45 mm" (its weight, its edges and corners, the bead).

@@ -55,6 +55,8 @@ public enum FlexibleFix: Hashable, Sendable {
     /// ★ BATCH E REVIEW: "[Lattice under both]" — the same edit for every pressed face said to have
     /// no lattice under it, in one tap (one undo step).
     case latticeUnderAll([Int])
+    /// ★ R7-E2 FIX: a fix of an edge or corner press kept out of the job ([Shallower] [Face 3 rests] [Remove Edge 16]).
+    case pressFix(FlexiblePressFix)
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -68,6 +70,7 @@ public enum FlexibleFix: Hashable, Sendable {
         case .keepApart: return "Keep apart"
         case .latticeUnder: return "Lattice under it"
         case .latticeUnderAll(let rs): return FlexibleLatticeUnder.allTitle(rs.count)
+        case .pressFix(let f): return f.title
         }
     }
 }
@@ -87,6 +90,9 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
         case noLatticeUnder
         /// The last build failed on these settings and this scene (core's words; batch B review).
         case buildFailed
+        /// ★ R7-E2 FIX: an edge or corner press core's gate keeps out of the job — a blocker (Exit would build without it),
+        /// with its 1–3 fixes.
+        case pressKeptOut
     }
     /// Stable across recomputes: the kind and the faces it names (the pop-up shows a NEW one).
     public let id: String
@@ -107,6 +113,7 @@ public struct FlexibleIssue: Equatable, Identifiable, Sendable {
     public var named: [Int] {
         var out: [Int] = region.map { [$0] } ?? []
         for f in fixes { if case .rest(let r) = f, !out.contains(r) { out.append(r) } }
+        for f in fixes { if case .pressFix(.rest(let r, _)) = f, !out.contains(r) { out.append(r) } }   // ★ R7-E2 FIX
         for f in fixes { if case .latticeUnderAll(let rs) = f { for r in rs where !out.contains(r) { out.append(r) } } }   // ★ batch E review
         return out
     }
@@ -259,6 +266,10 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// ★ R7-E2: edge and corner presses IN THE JOB (FlexiblePressSupport) — something IS pressed, so "no pressed face" does not
         /// block an edges group sent on its own.
         public var sentPresses = 0
+        /// ★ R7-E2 FIX: the presses kept out of the job (not while core designs them, not while core's side is closed).
+        public var keptOut: [KeptOut] = []
+        /// ★ R7-E2 FIX: an edges group (a miss it causes cannot be joined: a group is faces OR edges).
+        public var groupIsEdges: (Int) -> Bool = { _ in false }
 
         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
                     withData: (id: String, name: String)?, pressed: [Face],
@@ -273,6 +284,17 @@ public struct FlexibleReadiness: Equatable, Sendable {
             self.name = name; self.removable = removable; self.inherited = inherited
             self.buildFailure = buildFailure
             self.anyFilament = anyFilament; self.suggested = suggested
+        }
+    }
+
+    /// ★ R7-E2 FIX: a press kept out of the job — its name, the gate's line, its fixes.
+    public struct KeptOut: Equatable, Sendable {
+        public let id: UUID
+        public let label: String
+        public let line: String
+        public let fixes: [FlexiblePressFix]
+        public init(id: UUID, label: String, line: String, fixes: [FlexiblePressFix]) {
+            self.id = id; self.label = label; self.line = line; self.fixes = fixes
         }
     }
 
@@ -379,6 +401,14 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      oneLine: "Still designing — Exit builds it when it lands",
                                      blocking: false, fixes: []))
         }
+        // ★ R7-E2 FIX (the verify: a press kept out showed only on its own card; the top line stayed "Ready" and Exit built
+        // without it): each kept-out press is a blocker carrying its card's fixes (Remove is always one)
+        for k in i.keptOut {
+            let fixes = (k.fixes.isEmpty ? [.remove(k.id, label: k.label)] : k.fixes).prefix(3).map { FlexibleFix.pressFix($0) }
+            out.append(FlexibleIssue(id: "pressKeptOut|\(k.id.uuidString)", kind: .pressKeptOut, region: nil,
+                                     oneLine: k.line, blocking: true, fixes: Array(fixes),
+                                     pill: FlexibleRowCopy.fit("Fix: \(k.label) is left out", 44)))
+        }
         if let e = i.buildFailure {
             out.append(FlexibleIssue(id: "buildFailed", kind: .buildFailed, region: nil,
                                      oneLine: buildFailedLine(e), blocking: false, fixes: []))
@@ -391,7 +421,8 @@ public struct FlexibleReadiness: Equatable, Sendable {
                                      oneLine: FlexibleRowCopy.groupCompetes(number: m.number, asBuiltMM: m.asBuiltMM,
                                                                             designedMM: m.designedMM, firmer: m.firmerNumber),
                                      blocking: false,
-                                     fixes: [.joinGroups(from: m.groupID, into: m.firmerID), .keepApart],
+                                     fixes: i.groupIsEdges(m.groupID) || i.groupIsEdges(m.firmerID) ? [.keepApart]   // ★ R7-E2 FIX
+                                        : [.joinGroups(from: m.groupID, into: m.firmerID), .keepApart],
                                      pill: FlexibleRowCopy.groupMissesEstimate(number: m.number, asBuiltMM: m.asBuiltMM, designedMM: m.designedMM)))
         }
         if i.pressed.count > FlexibleSquishField.maxFaces {
@@ -566,6 +597,19 @@ extension FlexibleStageModel {
         i.issueKey = { [weak self] r in self?.issueKey(r) ?? "\(r)" }   // ★ ROUND 7 (S, 4f f)
         i.facePrisms = !noFacePrismKnown   // ★ ROUND 7, M1 VERIFY
         i.sentPresses = Self.controlStripPresses ? 0 : sentPresses.count   // ★ R7-E2
+        if !Self.controlKeptOutUnsaid {   // ★ R7-E2 FIX
+            i.keptOut = (settings.presses ?? []).compactMap { p in
+                guard let st = p.strip, let v = pressSupport[p.id], !v.inJob else { return nil }
+                switch v.reason {
+                case .designing?, .coreSupport?, nil: return nil
+                default: break
+                }
+                guard let w = pressWarning(p.id), !w.line.isEmpty else { return nil }
+                return FlexibleReadiness.KeptOut(id: p.id, label: st.label, line: w.line, fixes: w.fixes)
+            }
+            let gs = squeezeGroups
+            i.groupIsEdges = { id in gs.first { $0.id == id }?.kind == .edges }
+        }
         if squeezeGroups.count > 1 {
             i.groupMisses = groupMisses
             let gs = squeezeGroups
@@ -575,4 +619,6 @@ extension FlexibleStageModel {
     }
 
     public var readiness: FlexibleReadiness { FlexibleReadiness.evaluate(readinessInputs) }
+    /// ★ RED CONTROL only (R7-E2 FIX): a press kept out is said only on its own card.
+    nonisolated(unsafe) static var controlKeptOutUnsaid = false
 }

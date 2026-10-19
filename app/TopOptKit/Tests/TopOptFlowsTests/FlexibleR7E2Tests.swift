@@ -262,13 +262,16 @@ final class FlexibleR7E2Tests: XCTestCase {
         let line = m.pressWarning(press.id)?.line
         print("FLEX-E2-3 twisted 15°: '\(line ?? "-")' · N \(n)% · map \(m.pressMap(press.id).map { "\($0.mode) x \($0.x.y.count) pts y \($0.y.y.count) pts" } ?? "-")")
         XCTAssertGreaterThan(n, S.warnPercent, "premise: a 15° twist is more than 2 % off a product map")
-        XCTAssertEqual(line, FlexibleRowCopy.twistOff(n), "★ the card says how far off: '\(FlexibleRowCopy.twistOff(n))'")
+        // ★ RE-PINNED (R7-E2 FIX, both verifies: core's "can't reach" is said too — one line with the twist's number)
+        let u = d.tooFirm + d.tooSoft + d.beyondData
+        let want = u > 0 ? FlexibleRowCopy.pressUnreached(u, offPercent: n, word: "twisted") : FlexibleRowCopy.twistOff(n)
+        XCTAssertEqual(line, want, "★ the card says how far off: '\(want)'")
         XCTAssertLessThanOrEqual(line?.count ?? 99, 44)
         // ★ RED CONTROL: silent
         S.controlSilent = true
         let silent = m.pressWarning(press.id)?.line
         S.controlSilent = false
-        XCTAssertFalse(silent?.hasPrefix("Twisted") ?? false, "★ RED CONTROL: a silent twist says nothing of its shape")
+        XCTAssertFalse(silent?.contains("% off") ?? false, "★ RED CONTROL: a silent twist says nothing of its shape")
     }
 
     // MARK: - E2-4
@@ -517,9 +520,16 @@ final class FlexibleR7E2Tests: XCTestCase {
         let b = m.build
         let topField = try await m.frameWorker.withScene { try $0.densityField(faces: top.map(\.region), rotations: top.map(\.rotation), build: b) }
         let pressField = try await m.frameWorker.withScene { try $0.densityField(faces: [key], rotations: [0], build: b) }
-        let expect = FlexibleGroupField.firmer([topField, pressField]).field
-        XCTAssertEqual(built.density, expect.density, "★ the lattice is core's fields, the press's over its key, the firmer per voxel")
-        let under = pressField.density.indices.filter { pressField.density[$0] > 0 }
+        // ★ RE-PINNED (R7-E2 FIX, the verify's blocker: core's press column ran 140 mm through the part): the press's field is
+        // clipped to its flat prism (FlexibleGroupField.clipToPresses) before the firmer per voxel
+        let cut = try XCTUnwrap(FlexibleFlatPrism.cut(of: try XCTUnwrap(m.press(press.id))))
+        let first = try XCTUnwrap(m.press(press.id)?.regions.first)
+        let clippedPress = FlexibleGroupField.clipToPresses(pressField, cuts: [key: cut, first: cut])
+        let expect = FlexibleGroupField.firmer([topField, clippedPress]).field
+        XCTAssertEqual(built.density, expect.density, "★ the lattice is core's fields, the press's over its key inside its flat prism, the firmer per voxel")
+        let whole = FlexibleGroupField.firmer([topField, pressField]).field
+        let under = clippedPress.density.indices.filter { clippedPress.density[$0] > 0 }
+        let past = pressField.density.indices.filter { pressField.density[$0] > 0 && clippedPress.density[$0] <= 0 }
         XCTAssertGreaterThan(under.count, 0, "premise: core's press field grades voxels")
         // ★ RED CONTROL: E1's rule — presses stripped from the lattice's key and from its build
         FlexibleStageModel.controlStripPresses = true
@@ -531,6 +541,13 @@ final class FlexibleR7E2Tests: XCTestCase {
         print("FLEX-E2-7 his pad, Edge 16: voxels under the press \(under.count) · differing from E1's lattice \(moved) · lattice voxels \(built.density.filter { $0 >= 0 }.count)")
         XCTAssertNotEqual(e1.density, built.density, "★ RED CONTROL: stripped, the lattice is E1's")
         XCTAssertGreaterThan(moved, 0, "★ under Edge 16 the lattice now follows core's design along the arrow")
+        // ★ R7-E2 FIX: past the flat prism nothing moves from E1's lattice; RED CONTROL: E2 as built (the whole column) moved it
+        let movedPast = past.filter { built.density[$0] != e1.density[$0] }.count
+        let wholeMovedPast = past.filter { whole.density[$0] != e1.density[$0] }.count
+        print("FLEX-E2-7 FIX past the flat prism: press voxels \(past.count) · moved from E1 \(movedPast) · E2 as built moved \(wholeMovedPast)")
+        XCTAssertGreaterThan(past.count, 0, "premise: core's press field reaches past the flat prism")
+        XCTAssertEqual(movedPast, 0, "★ past Edge 16's flat prism the lattice is E1's")
+        XCTAssertGreaterThan(wholeMovedPast, 0, "★ RED CONTROL: core's whole column re-densified voxels far past the flat prism")
     }
 
     // MARK: - E2-8

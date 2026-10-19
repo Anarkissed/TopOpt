@@ -236,7 +236,8 @@ public enum FlexibleRowCopy {
     /// A group that squishes less than it was designed for, because another group's material is
     /// firmer there (the player's line): "Group 2 squishes 1.2 of 3.0 mm · firmer wins".
     public static func groupMisses(number: Int, asBuiltMM: Double, designedMM: Double) -> String {
-        fit(String(format: "%@ squishes %.1f of %.1f mm · firmer wins", groupName(number), asBuiltMM, designedMM))
+        // ★ R7-E2 FIX (the verify: 45 characters, cut mid-word on the player line): ≤ 44 for Groups 1–9
+        fit(String(format: "%@: %.1f of %.1f mm squish · firmer wins", groupName(number), asBuiltMM, designedMM))
     }
     /// ★ D2 REVIEW: said BEFORE Exit, when separate groups compete for material (the pop-up and
     /// the top line): "Group 1 would squish ~0.3 of 2.6 mm: Group 2 needs firmer material".
@@ -246,7 +247,7 @@ public enum FlexibleRowCopy {
     }
     /// The same, short (the Settings page's top line: "Ready · …").
     public static func groupMissesEstimate(number: Int, asBuiltMM: Double, designedMM: Double) -> String {
-        String(format: "%@ squishes ~%.1f of %.1f mm · firmer wins", groupName(number), asBuiltMM, designedMM)
+        fit(String(format: "%@: ~%.1f of %.1f mm squish · firmer wins", groupName(number), asBuiltMM, designedMM))
     }
     /// A pressed face pinched with another of its group (two segments).
     public static func pinched(with other: String) -> String { fit("Pinched with \(fit(other, 16)) · two halves") }
