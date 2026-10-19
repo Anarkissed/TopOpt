@@ -25,9 +25,17 @@ final class FlexibleR7E1bEvidenceProbe: XCTestCase {
     struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let frames: Frames }
     var log: [String] = []
 
+    /// ★ R7-E2 PARKED (2026-10-19): E2's own tests run with the presses SENT (FlexibleBackend.sendsPresses on — off in the app
+    /// until the back-end phase; FlexibleR7E2ParkTests proves the off side).
+    override func setUp() {
+        super.setUp()
+        FlexibleBackend.sendsPresses = true
+    }
+
     override func tearDown() {
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
         FlexibleStageModel.controlStripPresses = false
+        FlexibleBackend.sendsPresses = false
         super.tearDown()
     }
 

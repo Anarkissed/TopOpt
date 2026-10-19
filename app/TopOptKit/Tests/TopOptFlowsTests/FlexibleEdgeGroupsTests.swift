@@ -522,6 +522,9 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
     /// send writes it (face_region_ids + press_direction), every face group's send writes no press and no strip region. RED (run
     /// here): a ViewerMesh-normal stand-in for the halfway has other bits.
     func testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsSentOnceCoreTakesIt() async throws {
+        // ★ R7-E2 PARKED (2026-10-19): this re-pin is E2's — run with the presses SENT (off in the app until the back-end phase)
+        FlexibleBackend.sendsPresses = true
+        defer { FlexibleBackend.sendsPresses = false }
         let (r, m) = try await hisPad()
         let mesh = try XCTUnwrap(r.project.viewerMesh)
         let keyBefore = m.settings.designInputs
@@ -732,6 +735,9 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
     /// of every send that gave no strip (faces 0, 3, 4, 5) is BYTE-identical before and after; the faces that gave one
     /// (1, 2) are their rests now (stated, printed).
     func testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries() async throws {
+        // ★ R7-E2 PARKED (2026-10-19): this re-pin is E2's — run with the presses SENT (off in the app until the back-end phase)
+        FlexibleBackend.sendsPresses = true
+        defer { FlexibleBackend.sendsPresses = false }
         let (r, m) = try await hisPad()
         try await G.settleAllowingRefusedStacks(m, "A1_0003")   // the sends as the Export step reads them, settled
         func entries() throws -> [String: [Int: String]] {

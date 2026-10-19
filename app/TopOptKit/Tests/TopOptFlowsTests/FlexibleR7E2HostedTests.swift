@@ -26,8 +26,16 @@ final class FlexibleR7E2HostedTests: XCTestCase {
     struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let frames: Frames }
     struct AX { let id: String; let label: String; let frame: CGRect }
 
+    /// ★ R7-E2 PARKED (2026-10-19): E2's own tests run with the presses SENT (FlexibleBackend.sendsPresses on — off in the app
+    /// until the back-end phase; FlexibleR7E2ParkTests proves the off side).
+    override func setUp() {
+        super.setUp()
+        FlexibleBackend.sendsPresses = true
+    }
+
     override func tearDown() {
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
+        FlexibleBackend.sendsPresses = false
         super.tearDown()
     }
 

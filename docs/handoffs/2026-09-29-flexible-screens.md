@@ -1,6 +1,78 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · R7-E1b — his notes of 2026-10-19 on E1: no list, a deleted face no longer greys its edges, add to an existing edges group, the purple prism, Tilt = up/down, the furthest possible with a red line (2026-10-19) (read this first)
+## ★ Round 7 · R7-E2 PARKED — edge and corner presses are the shape only; nothing about them goes to core until the back-end phase (2026-10-19) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `c77b19fb` (R7-E1b). NOT pushed. App only; core untouched; no #354/main file
+edited. His words (2026-10-19): "Please finalize the sending edges to core as soon as possible - as we are more focussed on the
+front-end now. The back-end will come AFTER we have implemented the actual process."
+
+### What you will see now, in plain words
+- An edge or corner press is **the shape only**: the flat prism, its arrow (dashed), its handles, Deepest squish / Twist / Tilt and
+  their limits all work as in E1b. Each press card says one grey line: **"Shape only · core support comes later"**.
+- **Nothing about a press reaches core**: core does not design it, Auto does not weigh it, the lattice ignores it, and no job or
+  export writes it. So the diagonal dense band across the part is gone, and your face groups' squish is what it was before E2.
+  On your pad with Edge 14 + Edge 16 the lattice is bit-identical to E1's (53,248 voxels, 0 differ).
+- His line was 45 characters (his rule is 44), so it reads "Shape only · core support comes later". "Shape only" already
+  means "for now".
+
+### How (one switch)
+`FlexibleBackend.sendsPresses` (new `FlexibleBackend.swift`, **off**). When it is off: FlexiblePressSupport's gate keeps every
+press out with `.backendLater`, so `sentPresses` is empty (the run job, the export's sends, the readiness, the hold and the
+lattice's press fields all read it). `pressDesignTargets` is empty, so core is asked for no press design, press conflicts or Auto
+request. `designInputs` strips the presses, which is E1's lattice key. The card shows the line as a plain caption (`warn` false).
+Kept for the front-end: `registerPresses`, which reads core's stack for the limits and the halfway arrow, as in E1. Turning it on
+gives back R7-E2 exactly as built.
+
+### His words → fix → test (each RED control asserted red)
+1. "finalize the sending edges to core … the back-end will come AFTER" → the switch, off → `FlexibleR7E2ParkTests`:
+   `testTheSwitchOffKeepsEveryPressOutOfTheJobWithOneLine` (the gate with all of core's facts true is still out, with the line,
+   ≤ 44; RED: switch on → in the job) and `testHisPadsEdgePressesReachNoRequestToCore` (his pad with his live lattice + an edges
+   group of Edge 16 + Edge 18: not sent, not designed by core, not in the lattice's key, no press design held; every send's job
+   has no `press_direction` / `face_region_ids` and is byte-identical to E1's rule (presses stripped); both cards say the line;
+   RED: switch on → "designed by core 2", "in the lattice's key"). Red-first run against stubs:
+   `round7/batch_e2park/e2park_red_run.txt` (7 failures).
+- E2's own tests run with the switch **on** (setUp): FlexibleR7E2Tests 12/12, FlexibleR7E2HostedTests 3/3, the E2 and E1b
+  evidence probes. Also the two E2 re-pins in FlexibleEdgeGroupsTests (`…IsSentOnceCoreTakesIt`,
+  `testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries`), which turn it on inside the test. No other re-pin.
+
+### Raw runs: `round7/batch_e2park/e2park_runs.txt`
+- Targeted (one run, all green): FlexibleR7E2ParkTests 2, FlexibleR7E2Tests 12, FlexibleEdgeGroupsTests 9,
+  FlexibleSquishCopyTests 2 and FlexibleLatticeIsProtectedTests 5 (they source-pin the copy and settings files),
+  FlexibleR7M1Tests 9, FlexiblePressSaveTests 8, FlexibleR7E1bTests 4 = 51 passed, 0 failed; FlexibleR7E2HostedTests 3 passed.
+- Goldens (FlexibleAngledGoldenTests): det identical 38 · DIFFERS 0; unseeded identical 32 · DIFFERS 0 · PART-SKIP 1.
+- The 16 stage-job hashes: cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_e2park.txt`).
+- Evidence (`round7/batch_e2park/look/`, 13" portrait, the shipping renderer + hosted chrome):
+  - P01: the Squish page with the edges group, both cards saying the line, the arrows dashed.
+  - P02: P01 beside his img_edges_1018.
+  - P03: the main Lattice page's lattice with the edges group: no diagonal band, only the Top's graded patch.
+  - Seen by looking, already in the backlog (nothing new from this batch): the "Face N keeps the rest · Edge 14" lines (#7), and
+    Edge 14's prism mostly under the panel at the home view (#5).
+
+### The back-end backlog: E2's 18 findings (parked; for the back-end phase)
+The half-done fix is on branch **`claude/flexible-screens-e2fix-wip` (25c0aa30, untested; do NOT merge)**. Turn the switch on to
+work on them.
+- UX check: (1) BLOCKER: an edge press re-densifies the lattice along a 140 mm diagonal, far outside its flat prism (core's
+  press column runs to the far side). (2) Major: a face group's squish is halved by the edges group, with no warning before
+  Exit and a 45-character line cut off (`FlexibleStageModel+Groups.swift:116` still passes `sent: []`). (3) Major: edge/corner
+  cards hide core's "can't reach" verdict, which face cards show. (4) Major: the honest-shape line is hidden for the worst case,
+  an untipped corner (53.8 % off at 3 mm). (5) Major: a press kept out of the job is not a blocker (the pill stays Ready).
+  (6) Major: at 13" portrait the flat prism is still hard to see or grab (chip over the prism, half under the panel, the chip
+  lost after a tilt; E1's overlay). (7) Minor: the legend pill covers Edge 18's prism. (8) Minor: two boxes per angle, and the
+  strip-era "keeps the rest" lines. (9) Minor: small visible defects (clipped rail tab, arrow through the chip's digits, a 0.6°
+  twist range on his live project, "gyroid only" unexplained, solid vs dashed not in a legend, hairlines on the dark button).
+- Correctness check: (10) Major: the card hides tooSoft/tooFirm (52/52 columns too soft on every default edge press).
+  (11) Major: a corner at the default depth is 54 % off core's map with no honest line. (12) Minor: the edges-beside (i)
+  says "core does not take edge or corner presses yet" (true again while parked). (13) Minor: `faceWarning(names:)` is not
+  wired. (14) Minor: the shared-surface pre-check is stricter than core across groups (Q6). (15) Minor: with three face groups
+  sent, the edges group cannot be exported (the re-pins lock that in; Q2). (16) Minor: an edge whose line is unknown is sent
+  with a uniform map, silently. (17) Minor: the corner acceptance bar was loosened from 1 to 1.5 pitches without being listed as
+  a deviation. (18) Minor: stale comments say presses are never sent (accurate again while parked).
+
+### Open questions
+- None for this batch. E2's six questions (core's press column, a fourth send, §17(b), the two deviations, twists, the shared
+  check across groups) wait for the back-end phase.
+
+## ★ Round 7 · R7-E1b — his notes of 2026-10-19 on E1: no list, a deleted face no longer greys its edges, add to an existing edges group, the purple prism, Tilt = up/down, the furthest possible with a red line (2026-10-19)
 
 Branch `claude/flexible-screens` (PR #362), on top of `4f735cff` (R7-E2, which he PAUSED before its verify). NOT pushed. App only;
 core untouched; no #354/main file edited. **E2's verify follows this batch** (E2 still works: FlexibleR7E2HostedTests 3/3 after

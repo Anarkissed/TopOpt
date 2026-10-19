@@ -26,9 +26,17 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
     struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let frames: Frames }
     var log: [String] = []
 
+    /// ★ R7-E2 PARKED (2026-10-19): E2's own tests run with the presses SENT (FlexibleBackend.sendsPresses on — off in the app
+    /// until the back-end phase; FlexibleR7E2ParkTests proves the off side).
+    override func setUp() {
+        super.setUp()
+        FlexibleBackend.sendsPresses = true
+    }
+
     override func tearDown() {
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
         FlexibleStageModel.controlStripPresses = false
+        FlexibleBackend.sendsPresses = false
         super.tearDown()
     }
 
@@ -255,6 +263,83 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
         return out
     }
     func reopened(_ m: FlexibleStageModel) { pumpUntil(180) { m.sceneState == .ready && m.openedKey == m.currentSceneKey }; pump(1) }
+
+    // MARK: - R7-E2 PARKED (2026-10-19): the switch OFF, as the app ships
+
+    /// P: his pad, the edges group (Edge 16 + Edge 18, 5 kg) with the switch OFF (the app as it ships now): the Squish page's card
+    /// says "Shape only · core support comes later", the arrow dashed, the flat prism and its handles drawn; then the main Lattice
+    /// page's lattice — the same as with the presses stripped (E1's rule), density field compared voxel for voxel.
+    func testP_ParkedShapeOnly() throws {
+        guard Self.dir != nil else { throw XCTSkip("FLEX_E2_DIR") }
+        FlexibleBackend.sendsPresses = false
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let (r, s, m) = try open(rest: [2, 3, 4, 5])
+        let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.p13)
+        pump(3)
+        m.rail = .newGroup
+        m.startEdgePick()
+        XCTAssertTrue(pumpUntil(240) { m.edgePick.map { !$0.loading && !$0.checking } ?? false }, "listed")
+        let pk = try XCTUnwrap(m.edgePick)
+        var labels: [String] = []
+        for f in [Set([3, 2]), Set([3, 4])] {
+            let c = try XCTUnwrap(FlexibleM2Fixtures.edge(m, pk, faces: f), "edge \(f.sorted())")
+            m.toggleEdgePick(c.number)
+            labels.append(FlexibleRowCopy.candidateLabel(c))
+        }
+        m.setEdgePickWeight(5)
+        let why = run { await m.finishEdgePick() }
+        reopened(m)
+        let ps = labels.compactMap { l in m.presses.last { $0.strip?.label == l } }
+        XCTAssertEqual(ps.count, 2)
+        pumpUntil(120) { ps.allSatisfy { m.pressKey($0.id) != nil } }
+        pump(2)
+        let press = try XCTUnwrap(ps.first)
+        if let g = m.squeezeGroup(ofPress: press.id) { m.rail = .group(g.id) }
+        m.selectedPress = press.id
+        pump(4)
+        setCam(h, az: .pi / 4, el: .pi / 6)
+        log.append("[Done] \(labels): \(why ?? "stored") · sent \(m.sentPresses.count) · designed by core \(m.pressDesignTargets.count) · lines \(ps.map { m.pressWarning($0.id).map { "\($0.line) warn \($0.warn)" } ?? "-" })")
+        let a = try shot("P01_13p_edges_group_shape_only_dashed.png", h)
+        if let a { try beside(a, "P02_his_img_edges_1018_beside_shape_only.png") }
+        h.window.orderOut(nil)
+        func build(_ tag: String) throws -> FlexDensityField? {
+            m.discardLattice()
+            s.didExitSettings()
+            s.apply(r.project, owned: true, pageUp: false)
+            pumpUntil(300) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+            s.heat = false
+            s.refresh()
+            pump(1)
+            log.append("\(tag): lattice \(m.lattice != nil) · error \(m.latticeError ?? "-") · sent \(m.sentPresses.count) · \(m.lattice?.topology ?? "-") \(m.lattice?.tempC ?? 0) °C")
+            return m.lastCombinedField
+        }
+        let off = try build("switch OFF")
+        let offLayer = s.layer(r.project, stage: .lattice, pageUp: false)
+        FlexibleStageModel.controlStripPresses = true
+        let e1 = try build("E1's rule (presses stripped)")
+        FlexibleStageModel.controlStripPresses = false
+        if let off, let e1 {
+            let differ = zip(off.density, e1.density).filter { $0 != $1 }.count
+            log.append("density field switch OFF vs E1's rule: \(off.density.count) voxels, \(differ) differ · owner differ \(zip(off.owner, e1.owner).filter { $0 != $1 }.count)")
+            XCTAssertEqual(differ, 0, "★ the lattice is E1's")
+        }
+        let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let cam = FlexibleRound6Tests.Cam(name: "front-right", azimuth: .pi / 4, elevation: 0.62, zoom: 1)
+        if let layer = offLayer {
+            let mr = try FlexibleRound6EvidenceProbe().renderer(
+                mesh: try XCTUnwrap(s.mesh(r.project, on: .lattice)), tints: s.tints(r.project, on: .lattice, roles: [:], stress: nil),
+                dents: s.dents(r.project, on: .lattice), scale: s.dentScale(r.project, on: .lattice), bodyAlpha: s.bodyAlpha(r.project, on: .lattice) ?? 1,
+                settle: settle, cam: cam, device: device, items: [], layer: layer)
+            let bg = DS.Color.background
+            if var px = mr.renderOffscreen(size: 1400, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)) {
+                for k in stride(from: 0, to: px.count, by: 4) { px.swapAt(k, k + 2); px[k + 3] = 255 }
+                let ctx = try XCTUnwrap(CGContext(data: &px, width: 1400, height: 1400, bitsPerComponent: 8, bytesPerRow: 1400 * 4,
+                                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+                try writePNG(try XCTUnwrap(ctx.makeImage()), "P03_lattice_switch_off_with_edges_group.png")
+            }
+        } else { log.append("!! no lattice layer") }
+        flush("P_lines.txt")
+    }
 
     // MARK: - the pictures
 

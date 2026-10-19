@@ -92,6 +92,9 @@ extension FlexibleRowCopy {
     }
     /// A press is saved, never sent until core builds press stacks (AP9).
     public static let pressNotSent = "Set up \u{00B7} core support pending"
+    /// ★ R7-E2 PARKED (his words 2026-10-19: "The back-end will come AFTER …"): a press is the shape only for now — kept out of
+    /// every request to core (FlexibleBackend.sendsPresses off). His line was 45 characters; "for now" is what "Shape only" says.
+    public static let pressShapeOnly = "Shape only \u{00B7} core support comes later"
 
     // MARK: ★ R7-E1 — the flat prism's words (his rule: one line, ≤ 44 characters)
     public static let insideEdge = "An inside edge \u{00B7} no flat prism"

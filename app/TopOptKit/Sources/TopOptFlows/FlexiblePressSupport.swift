@@ -70,6 +70,8 @@ public enum FlexiblePressSupport {
     public enum Reason: Equatable, Sendable {
         /// Core's side cannot take presses (its schema, the bridge or its press API): "Set up · core support pending".
         case coreSupport
+        /// ★ R7-E2 PARKED: the app does not send presses until the back-end phase (FlexibleBackend.sendsPresses off).
+        case backendLater
         /// Core would not stack it on the open scene (its refusal, in plain words).
         case notStacked(String)
         /// A region would be in two entries.
@@ -92,6 +94,7 @@ public enum FlexiblePressSupport {
             guard let r = reason else { return nil }
             switch r {
             case .coreSupport: return FlexibleRowCopy.pressNotSent
+            case .backendLater: return FlexibleRowCopy.pressShapeOnly
             case .notStacked(let s), .twoEntries(let s), .designRefused(let s), .conflict(let s): return s
             case .shared(let f): return f.line
             case .designing: return FlexibleRowCopy.pressDesigning
@@ -113,16 +116,20 @@ public enum FlexiblePressSupport {
         public var designed: Bool
         public var designRefusal: String?
         public var conflict: String?
+        /// ★ R7-E2 PARKED: the app sends presses (FlexibleBackend.sendsPresses).
+        public var backend: Bool
         public init(schema: Bool, bridge: Bool, api: Int, stacked: String?, twoEntries: String?, shared: FlexibleSharedFootprint?,
-                    designed: Bool, designRefusal: String?, conflict: String?) {
+                    designed: Bool, designRefusal: String?, conflict: String?, backend: Bool = true) {
             self.schema = schema; self.bridge = bridge; self.api = api; self.stacked = stacked; self.twoEntries = twoEntries
             self.shared = shared; self.designed = designed; self.designRefusal = designRefusal; self.conflict = conflict
+            self.backend = backend
         }
     }
 
     /// ★ THE GATE, as one pure function of the facts (every condition false keeps the press out, with its line).
     public static func verdict(_ f: Facts) -> Verdict {
         func out(_ r: Reason) -> Verdict { Verdict(inJob: false, reason: r) }
+        guard f.backend else { return out(.backendLater) }   // ★ R7-E2 PARKED: the shape only until the back-end phase
         guard f.schema, f.bridge, f.api == expectedAPI else { return out(.coreSupport) }
         if let s = f.stacked { return out(s.isEmpty ? .designing : .notStacked(s)) }   // "" — its stack is being read
         if let t = f.twoEntries { return out(.twoEntries(t)) }

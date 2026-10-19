@@ -29,6 +29,13 @@ final class FlexibleR7E2Tests: XCTestCase {
     typealias G = FlexibleAngledGoldens
     typealias S = FlexiblePressShape
 
+    /// ★ R7-E2 PARKED (2026-10-19): E2's own tests run with the presses SENT (FlexibleBackend.sendsPresses on — off in the app
+    /// until the back-end phase; FlexibleR7E2ParkTests proves the off side).
+    override func setUp() {
+        super.setUp()
+        FlexibleBackend.sendsPresses = true
+    }
+
     override func tearDown() {
         FlexiblePressShape.controlAcrossIsY = false
         FlexiblePressShape.controlSilent = false
@@ -37,6 +44,7 @@ final class FlexibleR7E2Tests: XCTestCase {
         FlexibleStageModel.controlHoldIgnoresPresses = false
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
         FlexibleCore.controlNoRunStacks = false
+        FlexibleBackend.sendsPresses = false
         super.tearDown()
     }
 

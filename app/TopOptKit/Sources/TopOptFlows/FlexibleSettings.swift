@@ -232,7 +232,8 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted
         // face press: no flat prism) still cannot change it, and a project without presses keys as before (nil either way).
         let flat = (c.presses ?? []).filter { $0.strip != nil }
-        c.presses = flat.isEmpty || Self.controlStripPresses ? nil : flat   // (RED CONTROL only: E1's rule, all stripped)
+        // ★ R7-E2 PARKED (FlexibleBackend.sendsPresses off): E1's rule — no press reaches the lattice's key
+        c.presses = flat.isEmpty || Self.controlStripPresses || !FlexibleBackend.sendsPresses ? nil : flat
         return c
     }
 

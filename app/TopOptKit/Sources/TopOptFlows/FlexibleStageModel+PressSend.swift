@@ -100,7 +100,8 @@ extension FlexibleStageModel {
 
     /// ★ What the design pipeline designs for each registered strip press: its key, its map, its weight (the pipeline's snapshot).
     var pressDesignTargets: [(id: UUID, key: FlexFaceKey, map: FlexMap, weightN: Double)] {
-        (settings.presses ?? []).compactMap { p in
+        guard FlexibleBackend.sendsPresses else { return [] }   // ★ R7-E2 PARKED: no press is asked of core (designs, conflicts, Auto)
+        return (settings.presses ?? []).compactMap { p in
             guard p.strip != nil, let k = pressDesignKey(p.id), let map = pressMap(p.id), p.settings.weightKg > 0 else { return nil }
             return (p.id, k, map, p.settings.weightN)
         }
@@ -122,7 +123,7 @@ extension FlexibleStageModel {
         let strips = (s.presses ?? []).filter { $0.strip != nil }
         guard !strips.isEmpty else { return [:] }
         let core = (FlexiblePressSupport.schemaTakesPresses(), FlexiblePressSupport.bridgeBuildsPress, FlexiblePressSupport.apiVersion())
-        var key = "\(s.faces.hashValue)|\(s.presses.hashValue)|\(regions.key)|\(core)|\(FlexiblePressShape.controlSilent)"
+        var key = "\(s.faces.hashValue)|\(s.presses.hashValue)|\(regions.key)|\(core)|\(FlexiblePressShape.controlSilent)|\(FlexibleBackend.sendsPresses)"
         for p in strips {
             let k = pressDesignKey(p.id)
             key += "|\(p.id.uuidString):\(k?.region ?? 0):\(pressRefusals[p.id] ?? "")"
@@ -155,7 +156,8 @@ extension FlexibleStageModel {
                 }
             }
             let facts = FlexiblePressSupport.Facts(schema: core.0, bridge: core.1, api: core.2, stacked: stacked, twoEntries: twice,
-                                                   shared: shared[p.id], designed: designed, designRefusal: refusal, conflict: pinches[p.id])
+                                                   shared: shared[p.id], designed: designed, designRefusal: refusal, conflict: pinches[p.id],
+                                                   backend: FlexibleBackend.sendsPresses)
             out[p.id] = FlexiblePressSupport.verdict(facts)
         }
         pressSupportMemo = (key, out)
@@ -226,6 +228,7 @@ extension FlexibleStageModel {
         guard let p = settings.press(id), let st = p.strip else { return nil }
         if let v = pressSupport[id], !v.inJob {
             if case .shared(let sh)? = v.reason { return (sh.line, sharedFixes(p, sh), true) }
+            if case .backendLater? = v.reason { return (FlexibleRowCopy.pressShapeOnly, [], false) }   // ★ R7-E2 PARKED: said plainly
             return (v.line ?? FlexibleRowCopy.pressNotSent, [], true)
         }
         if let off = pressOffPercent(id), let shape = pressShape(id) {
