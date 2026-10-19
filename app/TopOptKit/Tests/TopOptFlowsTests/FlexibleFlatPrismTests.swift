@@ -430,5 +430,13 @@ final class FlexibleFlatPrismTests: XCTestCase {
         XCTAssertEqual(stop, .cross(-1))
         XCTAssertEqual(A.line(try XCTUnwrap(stop), strip: st, name: { "Face \($0)" }), "The flat prism must cross all 3 faces")
         XCTAssertNil(A.check(st, d: try XCTUnwrap(st.halfway), h: 5, limits: A.Limits(loads: [])), "the halfway crosses all three")
+        // (added after looking at the corner's picture: its row read "Corner 2 · Face 3 + Face 1 + Face…") — a corner's row
+        // names its three faces whole, in one line
+        let press = try await F.commit(m, try XCTUnwrap(F.corner(m, pick)))
+        let title = m.stripTitle(press.id)
+        print("FLEX-E1-C corner row: \(title)")
+        XCTAssertFalse(title.contains("\u{2026}"), "★ the corner's row is whole: \(title)")
+        XCTAssertLessThanOrEqual(title.count, 34)
+        XCTAssertTrue(title.hasPrefix(try XCTUnwrap(press.strip?.label) + " \u{00B7} Faces "), title)
     }
 }

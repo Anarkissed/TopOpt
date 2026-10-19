@@ -173,5 +173,74 @@ final class FlexibleFlatPrismEvidenceProbe: XCTestCase {
             try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("E1_evidence_lines.txt"), atomically: true, encoding: .utf8)
         }
     }
+
+    /// The corner (Face 1 + Face 3 + Face 2) at its halfway; and his Group 3 (Edge 16 + Edge 18 at 15 mm, M2's saved form)
+    /// read through, beside his img_edges_1018.
+    func testEvidenceCornerAndHisGroup3ReadThrough() async throws {
+        guard let dir = Self.dir else { throw XCTSkip("FLEX_E1_EVIDENCE_DIR") }
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let size = Self.sizes[0].1
+        // ── the corner
+        do {
+            let (r, m) = try await F.hisLivePad(self)
+            let pick = try await F.M2.pickMode(m)
+            let c = try XCTUnwrap(F.corner(m, pick, faces: [1, 3, 2]), "the corner of Face 1, Face 3 and Face 2")
+            let press = try await F.commit(m, c)
+            m.selectedPress = press.id
+            let st = try XCTUnwrap(press.strip)
+            let cut = try XCTUnwrap(FlexibleFlatPrism.cut(of: press))
+            let legs = (0..<3).compactMap { FlexibleFlatPrism.reach(st, member: $0, cut) }
+            let f = FlexibleFlatPrismUI.frame(m, press.id)
+            lines.append("\(st.label): halfway \(press.direction) · legs \(legs.map { String(format: "%.2f", $0) }) mm at \(cut.depthMM) mm · up/down into \(f.map { FlexibleFlatPrismUI.memberName(m, st, $0.tiltMember) } ?? "-") · left/right toward \(f.flatMap { $0.twistMember }.map { FlexibleFlatPrismUI.memberName(m, st, $0) } ?? "-")")
+            try write("E1_13p_\(st.label.replacingOccurrences(of: " ", with: ""))_corner_1_3_2.png", m, r.project, cam: Self.his, size: size, device: device) {
+                $0.previewFlatCut(press.id, depthMM: 6, direction: nil)
+            }
+            m.flatPreview = nil
+        }
+        // ── his Group 3 in M2's saved form, read through
+        let (r, m) = try await F.hisLivePad(self)
+        let pick = try await F.M2.pickMode(m)
+        let e16 = try XCTUnwrap(F.M2.edge(m, pick, faces: [3, 2])), e18 = try XCTUnwrap(F.M2.edge(m, pick, faces: [3, 4]))
+        m.toggleEdgePick(e16.number); m.toggleEdgePick(e18.number)
+        let why = try await F.M2.done(m, kg: 5 * 0.45359237)
+        XCTAssertNil(why)
+        var flex = try XCTUnwrap(r.project.lattice.flexible)
+        flex.presses = flex.presses?.map { p in var q = p; q.strip?.widthMM = 15; q.strip?.halfway = nil; q.settings.deepestMM = 3; return q }
+        let r2 = try FlexiblePressFixtures.a1Project(3, self, facePrism: false)
+        _ = try FlexibleR7M1Fixtures.hisLiveLattice(r2.project)
+        r2.project.lattice.flexible = flex
+        r2.project.seedUndoBaseline()
+        let m2 = try await FlexibleAngledGoldens.openModel(self, r2.project, "his Group 3, M2's form")
+        try await FlexibleSquishFixture.settle(m2, "his Group 3, M2's form")
+        let g = try XCTUnwrap(m2.squeezeGroups.first { $0.kind == .edges })
+        m2.rail = .group(g.id)
+        m2.selectedPress = g.presses.first
+        for p in m2.presses where p.strip != nil {
+            let st = try XCTUnwrap(p.strip)
+            let cut = try XCTUnwrap(FlexibleFlatPrism.cut(of: p))
+            lines.append("read through: \(st.label) widthMM \(st.widthMM ?? -1) → \(String(format: "%.4f", cut.depthMM)) mm deep · reach \((0..<2).compactMap { FlexibleFlatPrism.reach(st, member: $0, cut) }.map { String(format: "%.4f", $0) }) · toast \(m2.toast ?? "-")")
+        }
+        try write("E1_13p_his_Group3_read_through.png", m2, r2.project, cam: Self.his, size: size, device: device)
+        // beside his screenshot
+        let mine = try XCTUnwrap(CGImageSourceCreateWithURL(dir.appendingPathComponent("E1_13p_his_Group3_read_through.png") as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        let hisURL = URL(fileURLWithPath: "/private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-flexible-screens-track-9be87b/34b04738-a268-4a5a-ae7c-a988b298b7e9/scratchpad/r7e/img_edges_1018.png")
+        if let src = CGImageSourceCreateWithURL(hisURL as CFURL, nil), let his = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+            let h = mine.height, hw = Int(Double(his.width) * Double(h) / Double(his.height))
+            let W = hw + mine.width + 24
+            let ctx = try XCTUnwrap(CGContext(data: nil, width: W, height: h, bitsPerComponent: 8, bytesPerRow: W * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            ctx.setFillColor(CGColor(gray: 0, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: W, height: h))
+            ctx.draw(his, in: CGRect(x: 0, y: 0, width: hw, height: h))
+            ctx.draw(mine, in: CGRect(x: hw + 24, y: 0, width: mine.width, height: h))
+            let img = try XCTUnwrap(ctx.makeImage())
+            let url = dir.appendingPathComponent("E1_his_img_edges_1018_beside_the_read_through.png")
+            let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(dest, img, nil)
+            XCTAssertTrue(CGImageDestinationFinalize(dest))
+            lines.append("wrote E1_his_img_edges_1018_beside_the_read_through.png")
+        }
+        print("FLEX-E1-EVIDENCE-2 " + lines.joined(separator: "\n  "))
+        try? (lines.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("E1_evidence_lines_2.txt"), atomically: true, encoding: .utf8)
+    }
 }
 #endif

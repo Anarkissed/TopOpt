@@ -261,7 +261,15 @@ extension FlexibleStageModel {
             if let r = project.faceRegions.region(m.root), r.isCut { return FlexibleRowCopy.faceName(sector: r.name, face: m.face) }
             return "Face \(m.face)"
         }
-        return FlexibleRowCopy.fit(st.label + " \u{00B7} " + names.joined(separator: " + "), 34)
+        let full = st.label + " \u{00B7} " + names.joined(separator: " + ")
+        if full.count <= 34 { return full }
+        // ★ R7-E1 (looking at the corner's picture: "Corner 2 · Face 3 + Face 1 + Face…"): three whole faces read "Faces 3 + 1 + 2"
+        let numbers = names.compactMap { n -> String? in n.hasPrefix("Face ") && Int(n.dropFirst(5)) != nil ? String(n.dropFirst(5)) : nil }
+        if numbers.count == names.count {
+            let short = st.label + " \u{00B7} Faces " + numbers.joined(separator: " + ")
+            if short.count <= 34 { return short }
+        }
+        return FlexibleRowCopy.fit(full, 34)
     }
 
     /// ★ The face-keeps-the-rest lines of press `id`: one per member face whose rest a face group holds.
