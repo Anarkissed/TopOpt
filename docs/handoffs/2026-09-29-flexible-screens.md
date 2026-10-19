@@ -74,6 +74,9 @@ edited. **Front-end only, by your ruling of 2026-10-19 ~14:50**: nothing of the 
   `E4_03` Stamp: the Fingertip folded over Edge 16, slid toward one end, its handle beside the chip; `E4_04` E4_02 beside your
   img_edges_1018.
 
+- iOS: BUILD SUCCEEDED at 43025f72; the app WAS running → terminated, then installed 17:41:35, NOT launched; installed dylib ==
+  built (sha256 69007e6e…); the batch's strings present ("flexible-row-press-shape", "View 45°").
+
 ### Open questions
 1. The stamp's turn reads **90°** when a stamp's length is its long side (so its long side lies along the edge). Keep, or show 0°
    for "long side along the edge" whatever the stamp's own axes?
