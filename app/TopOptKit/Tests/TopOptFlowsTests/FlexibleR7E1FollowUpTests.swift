@@ -217,7 +217,18 @@ final class FlexibleR7E1FollowUpTests: XCTestCase {
         let fix = try inputs(true), control = try inputs(false)
         print("FLEX-E1-CR his live Balanced pad: added \(fix.coreOutside.count) (control \(control.coreOutside.count)) · mask identical \(fix.mask == control.mask) · ρ identical \(fix.rho == control.rho)")
         XCTAssertEqual(fix, control, "★ his pad: the inputs are byte-identical under the corner rule")
-        XCTAssertEqual(fix.coreOutside.count, 4604, "★ the top-lid fix's 4 604 voxels, each one outside by core's rule")
+        // ★ RE-PINNED (U1, his img_1020_10 — the rods): the builder now puts back the voxel columns core left out on the pad's
+        // x = y diagonal; each put-back column's top voxel (outside by core's rule, beside the lattice now) joins through this
+        // same fill. The top-lid fix's own 4 604 are unchanged (measured with the seam fill off), plus one per such column.
+        let noSeam = try FlexibleLatticeBuilder.inputs(field: field, part: part, topology: b.topology, beadsPerWall: b.beadsPerWall,
+                                                       beadWidthMM: b.beadWidthMM, buildDir: m.sceneInfo?.buildDir ?? SIMD3(0, 0, 1),
+                                                       skinOffFaces: [], finish: m.settings.finishMode, seamFill: false)
+        XCTAssertEqual(noSeam.coreOutside.count, 4604, "★ the top-lid fix's 4 604 voxels, each one outside by core's rule")
+        let extra = fix.coreOutside.subtracting(noSeam.coreOutside)
+        XCTAssertTrue(noSeam.coreOutside.isSubset(of: fix.coreOutside))
+        XCTAssertTrue(extra.allSatisfy { v in let i = v % field.nx, j = (v / field.nx) % field.ny; return i == j && v / (field.nx * field.ny) == field.nz - 1 },
+                      "★ the extra ones: the put-back diagonal columns' top voxels (\(extra.count))")
+        XCTAssertGreaterThan(fix.seamFilled, 0)
         XCTAssertEqual(try XCTUnwrap(m.lattice).inputs, fix, "the stage built exactly these")
         await m.waitForIdle()
     }

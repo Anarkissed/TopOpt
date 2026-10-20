@@ -132,6 +132,8 @@ struct FlexibleEdgeFixGroupButton: View {
 /// corner: Up/down, Left/right) boxes, [Back to halfway] when off it, and the faces that keep the rest. ★ R7-E1 (his 2026-10-18
 /// words: "There shouldn't be a strip width."): no Strip width / Patch size row. One line per setting (≤ 44).
 struct FlexibleEdgeGroupRows: View {
+    /// ★ U1, RED CONTROL only: Shape after the angles, on the working press only (R7-E4's card).
+    nonisolated(unsafe) static var controlShapeAfterAngles = false
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
     @Binding var padTarget: String?
@@ -233,9 +235,18 @@ struct FlexibleEdgeGroupRows: View {
                 pressWarningRow(p, w)
             }
             if let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: p.id) {
-                flatRows(p, st, shown)
-                // ★ R7-E4: the press he works on — Shape [Curves | Stamp] with the curve's two views, its stamp's rows
-                if FlexibleFlatPrismUI.workingPress(model) == p.id { FlexiblePressShapeRows(model: model, press: p, strip: st, padTarget: $padTarget) }
+                // ★ U1 (his notes of 2026-10-20, img_1020_8/9: "This is an edge selection. It should be the same table as any
+                // face"): a face's order — Shape [Curves | Stamp] (and its stamp's rows), then Deepest squish — then the edge's
+                // own Tilt / Twist and [Back to halfway]; Shape on EVERY press, as every face card has it (the curve's view
+                // buttons stay on the press he works on). RED CONTROL `controlShapeAfterAngles`: R7-E4's order.
+                let working = FlexibleFlatPrismUI.workingPress(model) == p.id
+                if Self.controlShapeAfterAngles {
+                    flatRows(p, st, shown)
+                    if working { FlexiblePressShapeRows(model: model, press: p, strip: st, padTarget: $padTarget) }
+                } else {
+                    FlexiblePressShapeRows(model: model, press: p, strip: st, padTarget: $padTarget, viewButtons: working)
+                    flatRows(p, st, shown)
+                }
             }
             ForEach(model.keepsTheRest(press: p.id), id: \.self) { line in
                 Text(line).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
@@ -476,6 +487,8 @@ struct FlexiblePressShapeRows: View {
     let press: FlexiblePress
     let strip: FlexibleStrip
     @Binding var padTarget: String?
+    /// ★ U1: the curve's [Top] / [45°] buttons — only on the press he works on (U2 replaces them).
+    var viewButtons: Bool = true
 
     var body: some View {
         let stamp = press.settings.isStampShape
@@ -484,7 +497,7 @@ struct FlexiblePressShapeRows: View {
                 FlexChips(options: FlexibleRowCopy.shapeOptions, selection: stamp ? "stamp" : "curves",
                           id: "flexible-press-shape", equalWidths: false) { v in model.setPressShape(press.id, v) }
                     .fixedSize()
-                if !stamp {
+                if !stamp, viewButtons {
                     viewButton(.top, icon: "arrow.down", label: FlexibleRowCopy.pressViewTop)
                     viewButton(.deg45, icon: "rotate.3d", label: FlexibleRowCopy.pressView45)
                 }

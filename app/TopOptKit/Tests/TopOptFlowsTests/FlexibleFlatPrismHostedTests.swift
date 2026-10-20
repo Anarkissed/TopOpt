@@ -151,6 +151,11 @@ final class FlexibleFlatPrismHostedTests: XCTestCase {
     // MARK: - H2
 
     func testTheHandlesAreOnTheArrow() throws {
+        // ★ RE-PINNED (U1, his notes of 2026-10-20: "Remove the re-positioning entirely"): the page no longer turns or pans by
+        // itself; this test checks the handles' LAYOUT in the view R7-E1 / R7-E4 turned to (down the arrow, beside the panel), so
+        // it puts the camera there through that same code (`controlAutoCamera`, test-only) — as he would turn it himself
+        FlexibleStagePage.controlAutoCamera = true
+        defer { FlexibleStagePage.controlAutoCamera = false }
         let (r, m, press) = try edge16()
         let label = try XCTUnwrap(press.strip?.label)
         var report: [String] = []

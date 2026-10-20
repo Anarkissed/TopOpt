@@ -360,16 +360,16 @@ public struct FlexibleStagePage: View {
         }
         .onChange(of: model.latticeBuilding) { _ in refreshChannels() }
         // ★ R7-E1: the camera on [Done] and on selecting a flat press — D-AP-13 as ruled (down the arrow; the reviewer is asked)
-        .onChange(of: model.flatCameraRequest) { id in turnToFlatPress(id) }
+        .onChange(of: model.flatCameraRequest) { id in if Self.autoCamera { turnToFlatPress(id) } else { clearFlatCameraRequest(id) } }
         // ★ R7-E4: [Top] / [45°] beside a flat press's Shape row
         .onChange(of: model.pressViewRequest) { r in turnToPressCurve(r) }
-        .onAppear { turnToFlatPress(model.flatCameraRequest) }   // (a [Done] made before the page showed)
+        .onAppear { if Self.autoCamera { turnToFlatPress(model.flatCameraRequest) } else { clearFlatCameraRequest(model.flatCameraRequest) } }   // (a [Done] made before the page showed)
         // ★ R7-E1 REVIEW: a press the camera already holds is not turned to again (a late second turn after [Done] undid his view)
         // ★ R7-E1b: the open edges group's lit edges, read again when the group, its presses or the opened part change
         .task(id: FlexibleFlatPrismUI.openEdgesGroup(model).map { ["\($0.id)", model.sceneState == .ready ? model.openedKey ?? "" : "opening"] + $0.presses.map(\.uuidString) }) {
             model.syncEdgeAdd()
         }
-        .onChange(of: model.selectedPress) { id in if FlexibleFlatPrismUI.openEdgesGroup(model) != nil, id != flatTurnHold { turnToFlatPress(id) } }
+        .onChange(of: model.selectedPress) { id in if Self.autoCamera, FlexibleFlatPrismUI.openEdgesGroup(model) != nil, id != flatTurnHold { turnToFlatPress(id) } }
         .onReceive(model.objectWillChange.debounce(for: .milliseconds(16), scheduler: RunLoop.main)) { _ in
             refreshChannels()
         }
@@ -475,8 +475,9 @@ public struct FlexibleStagePage: View {
     private func rebuildOverlay() {
         // ★ ROUND 5 (S2): cut to the 3D sim's grid while its field moves the part (a big flat
         // triangle bends with it), as the main page's overlay is
-        overlayEdge = FlexibleSettingsSquish.overlayEdge(model: model)
-        overlay = overlayEdge.map { FlexiblePageChannels.overlay(model: model, maxEdgeMM: $0) } ?? FlexiblePageChannels.overlay(model: model)
+        overlayEdge = FlexibleSettingsSquish.pageEdge(model: model)   // ★ U1: cut fine for the column preview too
+        let cap = FlexibleSettingsSquish.overlayEdge(model: model) != nil ? FlexibleOverlayMesh.maxSubTriangles : FlexibleSettingsSquish.columnMaxTriangles
+        overlay = overlayEdge.map { FlexiblePageChannels.overlay(model: model, maxEdgeMM: $0, maxTriangles: cap) } ?? FlexiblePageChannels.overlay(model: model)
         feDents = nil
         refreshChannels()
     }
@@ -538,7 +539,7 @@ public struct FlexibleStagePage: View {
         var c = Self.composeTints(model: model, overlay: overlay)
         // ★ ROUND 5 (S2): only the SELECTED face's group squishes — its 3D field when current, else
         // its faces' columns (FlexibleSettingsSquish)
-        if FlexibleSettingsSquish.overlayEdge(model: model) != overlayEdge { rebuildOverlay(); return }
+        if FlexibleSettingsSquish.pageEdge(model: model) != overlayEdge { rebuildOverlay(); return }
         let group = model.playingGroup
         FlexibleSettingsSquish.startSims(model: model, group: group)
         let sq = FlexibleSettingsSquish.shown(model: model, overlay: overlay, channels: c, feCache: &feDents)
@@ -619,7 +620,22 @@ public struct FlexibleStagePage: View {
         }
         let g = loads.count >= 2 ? FlexibleFixPopup.cameraRegion(load: loads[0], other: loads[1], settle: settle)
             : loads.first.flatMap { FlexibleFixPopup.cameraRegion(load: $0, settle: settle) }
-        if turnCamera, let g { camera.snap(to: g, animated: !reduceMotion) }
+        if turnCamera, Self.autoCamera, let g { camera.snap(to: g, animated: !reduceMotion) }
+    }
+
+    /// ★ ROUND 7, U1 (his notes of 2026-10-20: "Edge selections change the angle of the 3d view for some reason … Sometimes it
+    /// happens when I input a value … Remove the re-positioning entirely."): on this page the camera moves only when HE moves
+    /// it (the gizmo, a drag, Home, the curve's own view buttons he taps) — never by itself: not on [Done] or a press added
+    /// (R7-E1's turn down the arrow), not on selecting a press (a tap on its card's box selects it: R7-E4's pan beside the
+    /// panel), not when a fix pop-up opens. RED CONTROL `controlAutoCamera`: R7-E1 / R7-E4's turns and the pop-up's.
+    @MainActor static var controlAutoCamera = false
+    @MainActor static var autoCamera: Bool { controlAutoCamera }
+
+    /// The model's one-shot request is consumed without turning (so a later page never acts on a stale one).
+    private func clearFlatCameraRequest(_ id: UUID?) {
+        guard let id else { return }
+        flatTurnHold = id
+        if model.flatCameraRequest == id { model.flatCameraRequest = nil }
     }
 
     private func regionsFaces(_ r: Int) -> [Int] { model.regions.faces(of: r, mesh: project.viewerMesh) }

@@ -225,6 +225,9 @@ struct FlexiblePressCurveLayer: View {
         let label: String
     }
 
+    /// ★ U1, RED CONTROL only: the "Across" / "Along" words at the curves' end handles (R7-E4).
+    nonisolated(unsafe) static var controlCurveWords = false
+
     /// What is drawn for press `id` (pure: the hosted tests read it).
     static func drawn(model m: FlexibleStageModel, press id: UUID, projection: CameraProjection?) -> [Drawn] {
         guard let p = m.press(id), let st = p.strip, !p.settings.isStampShape, let c = m.flatCut(id) else { return [] }
@@ -235,8 +238,11 @@ struct FlexiblePressCurveLayer: View {
             }
         }
         var out: [Drawn] = []
-        if let b = FlexiblePressCurveBaselines.across(st, c) { out.append(Drawn(id: "across", axis: .across, baseline: b, label: "Across")) }
-        if let b = FlexiblePressCurveBaselines.along(st, c) { out.append(Drawn(id: "along", axis: .along, baseline: b, label: "Along")) }
+        // ★ U1 (his notes of 2026-10-20, img_1020_8: "What does "long" and "cross" mean here? … It should be the same table as
+        // any face"): no word at the curve's end handle (its first letter hid under the point); RED CONTROL `controlCurveWords`
+        let across = Self.controlCurveWords ? "Across" : "", along = Self.controlCurveWords ? "Along" : ""
+        if let b = FlexiblePressCurveBaselines.across(st, c) { out.append(Drawn(id: "across", axis: .across, baseline: b, label: across)) }
+        if let b = FlexiblePressCurveBaselines.along(st, c) { out.append(Drawn(id: "along", axis: .along, baseline: b, label: along)) }
         return out
     }
 

@@ -96,6 +96,22 @@ public enum FlexibleSettingsSquish {
                                                                      keys: Array(depths.keys)))   // ★ ROUND 7 (M2)
     }
 
+    /// ★ U1 (his notes of 2026-10-20, img_1020_7: the Top stayed flat while Face 3's side bent): the Squish page's overlay is
+    /// cut fine for the COLUMN preview too — at the loaded stacks' pitch (≥ 2 mm), at most `columnMaxTriangles` — so a big flat
+    /// triangle of the part over a pocket (his Top is two) follows the ramp instead of standing on its far corners. The 3D sim
+    /// keeps its own grid (`overlayEdge`). nil before a stack lands. Another GROUP's pressed map still stands still (round 5's
+    /// rule, pinned by FlexibleRound5SquishExitTests / FlexibleRound7ViewsTests). RED CONTROL `controlColumnFlatNeighbours`:
+    /// uncut (before U1).
+    public static func pageEdge(model m: FlexibleStageModel) -> Double? {
+        if let e = overlayEdge(model: m) { return e }
+        if controlColumnFlatNeighbours { return nil }
+        let pitches = m.loadedKeys.compactMap { m.stacks[$0]?.pitchMM }.filter { $0 > 0 }
+        return pitches.min().map { Swift.max($0, 2) }
+    }
+    /// (the page recomputes the dent and the tints on every change: kept small — his pad's 28 000 mm² at ~3 mm)
+    static let columnMaxTriangles = 12_000
+    public static var controlColumnFlatNeighbours = false
+
     // MARK: the player
 
     /// ★ RED CONTROL only: the Squish page's group picker (before his 2026-10-19 notes).

@@ -139,6 +139,44 @@ extension FlexibleStageModel {
         if saving { save() }
     }
 
+    /// ★ ROUND 7, U1 (his notes of 2026-10-20: "When moving the stamp, you shouldn't be able to move it *off* of the actual
+    /// model. As long as a part of it squishes the model … that is ok … I lost a stamp that way."): a drag of the stamp's
+    /// handle to `target` (face u, v mm). Kept where some part of its outline still covers the face — at least one of the
+    /// face's columns inside it; partly off is fine. Off the face entirely: it stops at the furthest place toward `target`
+    /// that still presses (from the column nearest `target`, so a stamp lost before this comes back on its next drag).
+    public func moveStamp(_ r: Int, to target: SIMD2<Double>, save saving: Bool = false) {
+        guard let p = settings.face(r)?.designStamp else { return }
+        let c = stack(r).map { Self.keptOnFace(target, stamp: p, stack: $0) } ?? target
+        updateStamp(r, save: saving) { q in q.centreU = c.x; q.centreV = c.y }
+    }
+
+    /// Whether a stamp centred at `c` covers at least one of the face's columns (its centre inside the stamp's outline —
+    /// the ellipse the page draws: width × length, turned by `rotationDeg`).
+    nonisolated static func stampPresses(_ c: SIMD2<Double>, stamp p: FlexibleStampPlacement, stack st: FlexStackInfo) -> Bool {
+        let a = Swift.max(p.widthMM / 2, 1e-6), b = Swift.max(p.lengthMM / 2, 1e-6)
+        let th = p.rotationDeg * .pi / 180, cs = cos(th), sn = sin(th)
+        return st.columns.contains { col in
+            let du = col.uMM - c.x, dv = col.vMM - c.y
+            let lx = du * cs + dv * sn, ly = -du * sn + dv * cs
+            return (lx / a) * (lx / a) + (ly / b) * (ly / b) <= 1
+        }
+    }
+
+    /// `target` if the stamp still presses there, else the furthest point toward it from the column nearest it that does.
+    /// RED CONTROL `controlStampLeavesFace`: `target` always (before U1).
+    nonisolated static func keptOnFace(_ target: SIMD2<Double>, stamp p: FlexibleStampPlacement, stack st: FlexStackInfo) -> SIMD2<Double> {
+        if controlStampLeavesFace || st.columns.isEmpty || stampPresses(target, stamp: p, stack: st) { return target }
+        let near = st.columns.min { simd_length_squared(SIMD2($0.uMM, $0.vMM) - target) < simd_length_squared(SIMD2($1.uMM, $1.vMM) - target) }!
+        let anchor = SIMD2(near.uMM, near.vMM)
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<32 {
+            let mid = (lo + hi) / 2
+            if stampPresses(anchor + (target - anchor) * mid, stamp: p, stack: st) { lo = mid } else { hi = mid }
+        }
+        return anchor + (target - anchor) * lo
+    }
+    nonisolated(unsafe) static var controlStampLeavesFace = false
+
     /// Where the Stamp face's stamp presses, per column 0…1 — nil for a Curves face or before
     /// the grid is laid. ★ SMOOTHED (verification of D1): the stamp's sharp cover, a 0/1 step
     /// one column wide, was drawn as a ROW OF TEETH — each dent corner is the mean of the four
@@ -442,10 +480,8 @@ struct FlexibleFaceStampHandle: View {
                 guard abs(det) > 1e-6 else { return }
                 let d = CGVector(dx: g.translation.width, dy: g.translation.height)
                 let a = (d.dx * ay.dy - d.dy * ay.dx) / det, b = (ax.dx * d.dy - ax.dy * d.dx) / det
-                model.updateStamp(s.region, save: false) { p in
-                    p.centreU = st.x + Double(a) * 10
-                    p.centreV = st.y + Double(b) * 10
-                }
+                // ★ U1: never entirely off the face (FlexibleStageModel.moveStamp)
+                model.moveStamp(s.region, to: SIMD2(st.x + Double(a) * 10, st.y + Double(b) * 10))
             }
             .onEnded { _ in
                 dragging = nil

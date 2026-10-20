@@ -121,6 +121,8 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     /// winding) puts OUTSIDE the part — exactly the voxels the mask-to-surface fill added (core's own lattice voxels are inside
     /// by construction). The (i) skips them (FlexibleFaceStats.rows). Not sampled by the shader.
     public var coreOutside: Set<Int> = []
+    /// ★ U1: how many voxels core left out between lattice of one region the builder put back (the "rods"' holes).
+    public var seamFilled: Int = 0
 }
 
 public enum FlexibleLatticeField {
@@ -392,7 +394,8 @@ public enum FlexibleLatticeBuilder {
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
                               sdfMaxDim: Int = 128,
                               maskToSurface: Bool = true,
-                              cornerRule: Bool = true) throws -> FlexibleLatticeInputs {
+                              cornerRule: Bool = true,
+                              seamFill: Bool = true) throws -> FlexibleLatticeInputs {
         guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
         else { throw Refusal(description: "The density field is empty — design a face first.") }
         let n = field.density.count
@@ -441,6 +444,33 @@ public enum FlexibleLatticeBuilder {
         // crossing up to half a voxel INSIDE the wall: a groove cut into a face no face-prism names (a synthetic L: 640 of 7,056
         // wall points within a voxel of the corner). Such a voxel is not added (the lattice face keeps core's half-voxel there,
         // one voxel wide, as before the fill); every other fill voxel is added as before (his pad: all 4,604, unchanged).
+        // ★ ROUND 7, U1 (his notes of 2026-10-20, img_1020_10: "Why are there rods in the middle of the lattice structure?"):
+        // core's field leaves whole voxel COLUMNS Empty inside the part where a voxel centre lies exactly on an edge two of
+        // the part's triangles share (his pad's top and bottom are each two triangles split along x = y; at Balanced six
+        // columns on that diagonal, every layer, came back Empty — owner −1 — between lattice voxels of ONE face-prism).
+        // Each such column cut a 1 mm hole straight through the lattice; the walls ended at it with their violet cut faces:
+        // the "rods". A voxel core left out whose two face-neighbours along one axis are lattice of the SAME region, and
+        // whose centre the part encloses by core's own rule (`coreEncloses`, the rule core meant to apply), joins the mask
+        // (its ρ is already flood-filled). A one-voxel wall between two DIFFERENT regions, or outside the part, is kept.
+        // `seamFill: false` is a test's RED CONTROL only (the holes as core gives them).
+        var seamFilled = 0
+        if seamFill, field.owner.count == n {
+            var cand: [Int] = []
+            for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+                let v = (k * ny + j) * nx + i
+                guard mask[v] < 0.5 else { continue }
+                func between(_ a: Int?, _ b: Int?) -> Bool {
+                    guard let a, let b, mask[a] >= 0.5, mask[b] >= 0.5 else { return false }
+                    return field.owner[a] >= 0 && field.owner[a] == field.owner[b]
+                }
+                let xs = between(i > 0 ? v - 1 : nil, i < nx - 1 ? v + 1 : nil)
+                let ys = between(j > 0 ? v - nx : nil, j < ny - 1 ? v + nx : nil)
+                let zs = between(k > 0 ? v - nx * ny : nil, k < nz - 1 ? v + nx * ny : nil)
+                if xs || ys || zs { cand.append(v) }
+            } } }
+            let inside = coreEncloses(cand, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
+            for (c, v) in cand.enumerated() where inside[c] { mask[v] = 1; seamFilled += 1 }
+        }
         var added = Set<Int>()
         if maskToSurface {
             var cand: [(v: Int, from: Int, solid: [Int])] = []
@@ -512,6 +542,6 @@ public enum FlexibleLatticeBuilder {
             honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
             buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
             rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
-            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added)
+            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added, seamFilled: seamFilled)
     }
 }

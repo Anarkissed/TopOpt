@@ -84,7 +84,7 @@ public struct FlexibleOverlayMesh {
     }
     /// The most sub-triangles one kept triangle is cut into (2^14), and in all.
     static let maxSubdivisionDepth = 14
-    static let maxSubTriangles = 400_000
+    public static let maxSubTriangles = 400_000
 
     /// The part's own mesh (minus the pressed regions) plus one quad per column of every face.
     ///
@@ -93,7 +93,8 @@ public struct FlexibleOverlayMesh {
     /// is dropped; only the pieces inside a pressed region go. So the part's own surface runs
     /// right up to the map along the cut, and never under it.
     public static func build(part: ViewerMesh, faces: [FlexibleOverlayFace],
-                             splitPlanes: [Int: [RegionCut]] = [:], maxEdgeMM: Double? = nil) -> FlexibleOverlayMesh {
+                             splitPlanes: [Int: [RegionCut]] = [:], maxEdgeMM: Double? = nil,
+                             maxTriangles: Int = maxSubTriangles) -> FlexibleOverlayMesh {
         var pos = part.positions
         var idx: [Int32] = []
         var fid: [Int32] = []
@@ -112,7 +113,7 @@ public struct FlexibleOverlayMesh {
             }
             let each = Swift.max(e, 1e-3)
             let estimate = area / (0.25 * each * each)
-            return estimate > Double(maxSubTriangles) ? each * (estimate / Double(maxSubTriangles)).squareRoot() : each
+            return estimate > Double(maxTriangles) ? each * (estimate / Double(maxTriangles)).squareRoot() : each
         }
         var subSource: [Int] = [], subCorners: [SIMD3<Double>] = [], subOf: [Int] = [], subBary: [SIMD3<Double>] = []
         let unit = [SIMD3<Double>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]

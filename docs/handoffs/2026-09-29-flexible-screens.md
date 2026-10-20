@@ -1,5 +1,84 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## ★ Round 7 · U1 — your notes of 2026-10-20: the Top bends with the side, a stamp stays on the model, an edge card reads like a face's, the camera stays put, no rods in the lattice (2026-10-20) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `f1362eb3` (R7-E5). NOT pushed (you said hold). App only; core untouched; no
+#354/main file edited. **Front-end only**: sending edges to core (C1) comes after U2, as you ordered ("Send to core should be done
+*after* all the other fixes"); `FlexibleBackend.sendsPresses` stays off. Judged on YOUR pad as you left it at 13:46 today
+(copied from the simulator, never written: `round7/batch_u1/his_live_1020`).
+
+### What you will see now, in plain words
+- **Bend (Squish page)**: when a side is pressed, the Top over its pocket now bends with it (your img_1020_7). On your pad Face 3's
+  stamp moves its top row 6.15 mm and the Top beside it now follows by 4.12 mm (it was 0).
+- **A stamp can no longer leave the model.** Drag it as far as you like: it stops while part of it still presses the face (partly
+  off is fine). Your Four-fingertips stamp dragged far left stops with its centre 32 mm past Face 3's edge. A stamp you already
+  lost comes back onto the face on your next drag. (An edge's stamp already stayed on the edge's length.)
+- **An edge's card is a face's table**: Shape [Curves | Stamp] first (with its stamp rows), then Deepest squish, then the edge's own
+  Tilt, Twist and [Back to halfway] — on every edge in the group. No "Pressed / Rests" (an edge press is always pressed). The curve
+  handles no longer carry the clipped words "long" / "cross" (they were "Along" / "Across" with the first letter under the point).
+- **The camera moves only when you move it** on the Squish page: not on [Done], not when a press is added or selected, not when you
+  type a value, not when a fix pop-up opens. (The [↓] / [45°] buttons still turn it because you tap them; U2 replaces them with the
+  2D / 3D modal.)
+- **No rods in the lattice** (your img_1020_10). **Why they were there, in one sentence:** core's voxel grid left whole columns of
+  voxels empty where a voxel centre lies exactly on the diagonal that splits your pad's top and bottom into two triangles, so each
+  empty column cut a 1 mm hole straight through the lattice and the walls ended at it with their violet cut faces — the "rods". The
+  preview now puts those voxels back (only voxels core left out, inside the part by core's own rule, between lattice of ONE region).
+  Core's own export would still have the holes — sent to the reviewer as a core bug.
+
+### His words → fix → test (`FlexibleU1Tests`, his 10-20 pad; each RED control asserted red inside its test)
+1. "the top wall doesn't bend with it" → the Squish page's overlay is now cut fine for the column preview too
+   (`FlexibleSettingsSquish.pageEdge`: the stacks' pitch, ≥ 2 mm, at most 12 000 triangles; the 3D sim keeps its own grid): the Top
+   is two triangles and took the ramp only at its corners (0 at the edge's ends and the far side). `testTheTopBendsWithTheSide`:
+   side 6.15 mm, Top over the pocket 4.12 mm; RED `controlColumnFlatNeighbours`: 0.00. Another GROUP's pressed map still stands
+   still (round 5's rule; my first build dragged those too and five pins went red — reverted, see the question below).
+   Found by the suite: a 60 000-triangle cap made the page slow enough that a hosted click missed (FlexibleLatticeSectionsHostedTests)
+   → 12 000.
+2. "you shouldn't be able to *remove* it from the model entirely" → `FlexibleStageModel.moveStamp` / `keptOnFace` (FlexibleFaceStamp):
+   kept while a column of the face lies inside the stamp's outline, else the furthest point toward the finger that still presses.
+   `testAStampNeverLeavesTheModel`: (60, 10) unchanged; (−300, 10) → (−32.23, 9.91), presses, 1 mm further would not; (50, 400) too;
+   an edge stamp dragged ±1000 mm stays on the span. RED `controlStampLeavesFace`: (−300, 10), lost.
+3. "What does long and cross mean … It should be the same table as any face" → `FlexiblePressCurveLayer.drawn` labels empty
+   (RED `controlCurveWords`: "Across", "Along"); `FlexibleEdgeGroupRows`: Shape (every press) before Deepest squish
+   (RED `controlShapeAfterAngles`: R7-E4's order, Shape on the working press only). Hosted at 13" portrait: Edge 12 Shape y 778 <
+   Deepest 826, Edge 9 1098 < 1146; RED: Edge 12 no Shape, Edge 9 Shape below Deepest.
+4. "Remove the re-positioning entirely" → `FlexibleStagePage.autoCamera` off: [Done]'s / an added press's request is consumed without a
+   turn, selecting a press pans nothing, the pop-up never turns the camera. Hosted: select another press, [Done]'s request, a typed
+   depth → camera identical (az 0.785, el 0.524, distance 214.6, target (50, 50, 10)); RED `controlAutoCamera`: it turns.
+6. "Why are there rods in the middle of the lattice structure?" → `FlexibleLatticeBuilder.inputs(seamFill:)` (FlexibleLatticeField).
+   `testNoRodsInTheLattice`: core's field on your pad has 6 empty columns on x = y ((3,3) (12,12) (20,20) (23,23) (26,26) (29,29)),
+   all 20 layers, owner −1; after: 0 holes, 114 voxels put back, the page's mask == the builder's, every changed voxel was core's −1.
+   RED `seamFill: false`: the 6 columns.
+
+### Re-pins (attributed)
+- `FlexibleR7E1FollowUpTests.testHisLivePadIsUnchangedByTheCornerRule`: 4 604 → 4 608 added voxels — the 4 extra are the put-back
+  diagonal columns' top voxels joining through the same top-lid fill; the 4 604 still hold with the seam fill off.
+- `FlexibleFlatPrismHostedTests.testTheHandlesAreOnTheArrow`: checks the handles' layout in R7-E1/E4's turned view, so it now puts
+  the camera there itself (through `controlAutoCamera`, test-only), as you would turn it.
+- `FlexibleR7E1ReviewHostedTests.testAPopUpAfterDoneKeepsTheTurn`: now asserts the camera stays where you left it after [Done] and the
+  pop-up (the target drifts 0.16 mm with the redrawn part's centre — no pan); RED: both turns.
+
+### Raw runs — `round7/batch_u1/u1_runs.txt` (app/TopOptKit, --scratch-path /tmp/r7x20-build)
+- New class `FlexibleU1Tests` 4/4 (every red control red). Targeted, ONE pass over the 59 classes that touch or pin the changed
+  files (3 chunks: 132 / 137 / 67 tests): 16 failures in 7 tests — the 4 "another group's face stands still" (my first build
+  dragged other groups' maps: reverted), the 3 re-pins above, and FlexibleLatticeSectionsHostedTests' click (passes at f1362eb3 with
+  my changes set aside; the 60 000-triangle overlay slowed the page → capped at 12 000, then green). Re-runs of those: all green;
+  final tree re-run (U1, Round5SquishExit, Round7Views, R7X1, the pop-up test, LatticeSectionsHosted): 29/29.
+- Goldens: FlexibleAngledGoldenTests 0 DIFFERS both modes (38 identical deterministic; 32 + 1 PART-SKIP unseeded); the 16 stage-job
+  hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_u1.txt`). (Run once, before the two later changes — both are
+  the Squish page's overlay only; nothing of a job moved.)
+
+### Evidence (`round7/batch_u1/look/`, 13" portrait, your 10-20 pad)
+- `U1_01` Bend, Face 3's stamp: the Top's rim dips with the side. `U1_02` Group 2: Edge 12 and Edge 9 cards read Shape → Deepest →
+  Tilt → Twist → [Back to halfway]. `U1_03` the stamp dragged far off — it stops at Face 3's left end (under the panel in this
+  view; its numbers above). `U1_04` the lattice, cropped to where the two frames differ: before (left: the cut faces on the
+  diagonal) | after.
+
+### Open questions
+1. A face pressed in ANOTHER group lying over this face's pocket (e.g. a pressed Top beside a pressed side): should it bend with the
+   side too? Today it stands still (your round-5 rule "only that group's faces dent"); on your pad the Top is not a pressed face, so
+   it bends.
+2. The [↓] / [45°] buttons still move the camera when tapped — they go in U2 (the 2D / 3D modal). Fine until then?
+
 ## ★ Round 7 · R7-E5 — edges groups: Heat on the flat prism's footprint, X-ray's bend prism, Play presses where you drew; the stamp turn from its long side; [Top] keeps the handles (2026-10-19) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `c5a65af1` (R7-E4). NOT pushed. App + our bridge files only; core untouched; no

@@ -119,25 +119,30 @@ final class FlexibleR7E1ReviewHostedTests: XCTestCase {
     /// V1. The page is up; [Done] on Face 3 + Face 2 turns the camera to the press (D-AP-13's view). Once the scene settles the fix
     /// pop-up fires by itself — it is SHOWN, and the camera stays on the press. RED CONTROL (E1): the pop-up turns it away.
     func testAPopUpAfterDoneKeepsTheTurn() throws {
+        // ★ RE-PINNED (U1, his notes of 2026-10-20: "Edge selections change the angle of the 3d view … Remove the re-positioning
+        // entirely"): neither [Done] nor the pop-up that fires after it moves the camera — it stays where he left it. RED CONTROL:
+        // R7-E1's turn down the arrow with the pop-up's own turn (`controlAutoCamera` + `controlPopupTurnsCamera`).
+        defer { FlexibleStagePage.controlAutoCamera = false; FlexibleStagePage.controlPopupTurnsCamera = false }
         for control in [true, false] {
             FlexibleStagePage.controlPopupTurnsCamera = control
+            FlexibleStagePage.controlAutoCamera = control
             let (r, m) = try openPad()
             let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.p13)
             pump(3)
-            let press = try pickEdge(m)
-            let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-            let g = try XCTUnwrap(FlexibleFlatPrismUI.camera(press: press, settle: settle), "D-AP-13's view")
+            let cm = try XCTUnwrap(cameraModel(h), "the page's camera")
+            let before = (az: cm.camera.azimuth, el: cm.camera.elevation, t: cm.camera.target)
+            _ = try pickEdge(m)
             let popped = pumpUntil(60) { h.frames.all["popup"] != nil }
             pump(2)
-            let cm = try XCTUnwrap(cameraModel(h), "the page's camera")
-            let want = g.orientation(currentAzimuth: cm.camera.azimuth)
-            print("FLEX-E1R-V1 control \(control): pop-up \(popped) · camera az \(cm.camera.azimuth) el \(cm.camera.elevation) · D-AP-13 \(g.id) az \(want.azimuth) el \(want.elevation)")
+            print("FLEX-E1R-V1 control \(control): pop-up \(popped) · camera az \(cm.camera.azimuth) el \(cm.camera.elevation) · before az \(before.az) el \(before.el)")
             XCTAssertTrue(popped, "the case: a pop-up fires by itself after [Done] on his pad")
-            let off = abs(remainder(Double(cm.camera.azimuth - want.azimuth), 2 * .pi)) + abs(Double(cm.camera.elevation - want.elevation))
+            let off = abs(remainder(Double(cm.camera.azimuth - before.az), 2 * .pi)) + abs(Double(cm.camera.elevation - before.el))
+            // (the target may follow the redrawn part's centre by a fraction of a mm — 0.16 mm here — never a pan)
+            if !control { XCTAssertLessThan(Double(simd_length(cm.camera.target - before.t)), 0.5, "★ no pan") }
             if control {
-                XCTAssertGreaterThan(off, 0.2, "★ RED CONTROL: the pop-up turned the camera away from the press")
+                XCTAssertGreaterThan(off, 0.2, "★ RED CONTROL: the camera turned by itself")
             } else {
-                XCTAssertLessThan(off, 0.02, "★ the camera stays on the new flat prism")
+                XCTAssertLessThan(off, 0.02, "★ the camera stays where he left it")
             }
         }
     }

@@ -20,7 +20,8 @@ public enum FlexiblePageChannels {
     /// own triangles, which no cut crosses).
     /// `maxEdgeMM` (the MAIN page, batch C verification): the part's triangles cut that fine for
     /// the Stress colours (FlexibleOverlayMesh.Subdivision — the dent's geometry is unchanged).
-    public static func overlay(model: FlexibleStageModel, maxEdgeMM: Double? = nil) -> FlexibleOverlayMesh? {
+    public static func overlay(model: FlexibleStageModel, maxEdgeMM: Double? = nil,
+                               maxTriangles: Int = FlexibleOverlayMesh.maxSubTriangles) -> FlexibleOverlayMesh? {
         guard let part = model.project.viewerMesh else { return nil }
         let regions = model.regions
         let faces: [FlexibleOverlayFace] = model.loadedKeys.compactMap { k in
@@ -30,7 +31,7 @@ public enum FlexiblePageChannels {
         }
         let planes = FlexibleFacePieces.planes(of: regions, mesh: part)
         guard !faces.isEmpty || !planes.isEmpty else { return nil }
-        return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes, maxEdgeMM: maxEdgeMM)
+        return FlexibleOverlayMesh.build(part: part, faces: faces, splitPlanes: planes, maxEdgeMM: maxEdgeMM, maxTriangles: maxTriangles)
     }
 
     /// ★ ROUND 7 (M2): which drawn part triangles stay still for which pressed key — the SOLID rest of a face only partly
