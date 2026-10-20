@@ -67,6 +67,9 @@ Branch `claude/flexible-screens` (PR #362), on top of `f1362eb3` (R7-E5). NOT pu
   hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_u1.txt`). (Run once, before the two later changes — both are
   the Squish page's overlay only; nothing of a job moved.)
 
+- iOS: BUILD SUCCEEDED at ff3e4473; the app WAS running → terminated, then installed 15:52:30, NOT launched; installed dylib ==
+  built (sha256 ec65a908…); the batch's symbols present (keptOnFace, pageEdge, controlAutoCamera).
+
 ### Evidence (`round7/batch_u1/look/`, 13" portrait, your 10-20 pad)
 - `U1_01` Bend, Face 3's stamp: the Top's rim dips with the side. `U1_02` Group 2: Edge 12 and Edge 9 cards read Shape → Deepest →
   Tilt → Twist → [Back to halfway]. `U1_03` the stamp dragged far off — it stops at Face 3's left end (under the panel in this
