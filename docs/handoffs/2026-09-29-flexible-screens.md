@@ -63,6 +63,12 @@ does not go to core? Please go ahead and finalize the send to core now." His ord
 - The 16 stage-job hashes are cmp-identical to `stage_job_hashes_e1r.txt`. No byte moved: no golden or hash fixture carries an edge
   press, so nothing needs attributing.
 
+- After the commit, found in the installed build's strings: the Shape (i) still said "Shape only for now — core support comes
+  later." It now says core designs the flat prism and your curves/stamp shape where Play pushes (core does not take them yet).
+  Re-run: FlexibleC1Tests (the switch), FlexibleSquishCopyTests, FlexibleU2Tests, FlexibleR7E1bTests — 10 passed.
+- iOS: BUILD SUCCEEDED at the C1 follow-up; the app was not running; installed 17:55:33, NOT launched; installed dylib == built
+  (sha256 39047476…); "core support comes later" 0 times in it, "the edge's ends not found" present.
+
 ### Pictures (`round7/batch_c1/look/`, 13" portrait, your 10-20 pad)
 - C01: the Squish page, Group 2 held at full squish. Left is the interim (dashed arrow, "core support pending", the chip). Right is
   C1 (solid arrow, core's lines, no chip).
