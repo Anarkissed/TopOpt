@@ -293,6 +293,10 @@ public final class FlexibleStageModel: ObservableObject {
     var feBase: FlexibleFERequest?
     /// ★ R7-E3: per press sim id ("group-N"), the key of the presses it was scheduled for, and the ids on the solver now.
     var pressSimKeys: [String: Int] = [:]
+    /// ★ C1 (his words of 2026-10-20: "finalize the send to core now"): the presses whose CORE design the current lattice carries —
+    /// each its press stack and core's depth per column there (as built in the combined field, else core's design): what its edges
+    /// group's sim is calibrated to (Play, Bend, Heat), and the chip "Lattice not tuned for this press yet" goes. Set with the lattice.
+    var latticeTunedPresses: [UUID: FlexibleFEField.Target] = [:]
     var pressSimInFlight: Set<String> = []
     /// One solve at a time, off the main thread (FlexibleSquishSolver).
     let squishSolver = FlexibleSquishSolver()
@@ -1455,6 +1459,7 @@ public final class FlexibleStageModel: ObservableObject {
         var pressKeysOf: [Int: [FlexFaceKey]] = [:]
         var pressStacks: [FlexFaceKey: FlexStackInfo] = [:]
         var pressCuts: [Int: FlexibleFlatPrism.Cut] = [:]   // ★ R7-E2 FIX: each press grades only its flat prism
+        var pressIDOf: [FlexFaceKey: UUID] = [:]   // ★ C1: which press each press key is (its tuned target)
         if !shapeOnly, !Self.controlStripPresses {
             let sentNow = sentPresses
             for p in presses where sentNow.contains(p.id) {
@@ -1462,6 +1467,7 @@ public final class FlexibleStageModel: ObservableObject {
                 let k = FlexFaceKey(region: r.key, rotation: 0)
                 guard let d = designs[k], d.refusal == nil, d.columns.count == r.stack.columns.count else { continue }
                 pressStacks[k] = r.stack
+                pressIDOf[k] = p.id
                 // core names a voxel's owner by its stack's face_region_id (a press stack: its first piece) — both keys
                 if let c = FlexibleFlatPrism.cut(of: p) { pressCuts[r.key] = c; if let first = p.regions.first { pressCuts[first] = c } }
                 designed[k] = FlexiblePinch.core(d, stack: r.stack)
@@ -1492,7 +1498,7 @@ public final class FlexibleStageModel: ObservableObject {
         let generation = latticeGeneration
         let (builtKeys, faceNoLattice, extentMM, drawnFaces) = (order, noLattice, extent, drawn)
         let (designedSnap, pressureSnap, squishSnap, depthsSnap) = (designed, pressure, squish, depths)
-        let pressKeysSnap = Array(pressStacks.keys), pressCutsSnap = pressCuts
+        let pressKeysSnap = Array(pressStacks.keys), pressCutsSnap = pressCuts, pressIDSnap = pressIDOf
         let depthForBand = shallowest.isFinite ? shallowest : 0
         let build = self.build, key = latticeSettingsKey, temp = designTempC ?? 0   // ★ R7-E2: presses in the job too
         let lawInputs: (path: String, material: String, temp: Double)? = {
@@ -1524,6 +1530,7 @@ public final class FlexibleStageModel: ObservableObject {
                 var shared = 0
                 var faceDepths = depthsSnap, squishFaces = squishSnap
                 var notes: [String: String] = [:]
+                var pressDepths: [FlexFaceKey: [Double?]] = [:]   // ★ C1: each press as built (combined field), else core's design
                 if shapeOnly {
                     // ★ core's mask, the drawn map's density inside the printable band (a voxel
                     // under two faces — a pinch, two groups — takes the firmer)
@@ -1571,7 +1578,6 @@ public final class FlexibleStageModel: ObservableObject {
                                 squishFaces[k] = FlexibleSquishFace(stack: st, depthsMM: d)
                             }
                             // ★ R7-E2: each press as built too (its group's note), never one of the pass's faces
-                            var pressDepths: [FlexFaceKey: [Double?]] = [:]
                             for k in pressKeysSnap {
                                 guard let st = stackOf[k], let sg = designedSnap[k], let p = pressureSnap[k] else { continue }
                                 pressDepths[k] = try FlexibleGroupField.asBuilt(field, stack: st, segments: sg, pressureMPa: p,
@@ -1609,6 +1615,14 @@ public final class FlexibleStageModel: ObservableObject {
                                                  law: law, generation: generation)
                 }
                 let feBuilt = fe
+                // ★ C1: the presses core designed and this lattice carries — their sims calibrate to these depths
+                var tuned: [UUID: FlexibleFEField.Target] = [:]
+                for k in pressKeysSnap {
+                    guard let id = pressIDSnap[k], let st = stackOf[k],
+                          let d = pressDepths[k] ?? designedSnap[k]?.buildableDepthMM else { continue }
+                    tuned[id] = FlexibleFEField.Target(stack: st, depthsMM: d, pinched: [])
+                }
+                let tunedSnap = tuned
                 let faceList = builtKeys.compactMap { squishFaces[$0] }
                 let g = FlexibleGeneratedLattice(inputs: inputs, faces: faceList, keys: builtKeys, columnDepths: faceDepths,
                                                  columnNoLattice: faceNoLattice, extentMM: extentMM, generation: generation,
@@ -1621,6 +1635,7 @@ public final class FlexibleStageModel: ObservableObject {
                 let kept = keep ? combined : nil
                 await MainActor.run {
                     self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false
+                    self.latticeTunedPresses = Self.controlNoTune ? [:] : tunedSnap   // ★ C1
                     self.latticeLanded(feBuilt)   // ★ BATCH G: a new lattice — its own squish sims
                 }
             } catch {
@@ -1636,7 +1651,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// Test control only: how separate squeezes are combined (the rule: the firmer wins).
     var controlCombine: @Sendable ([FlexDensityField]) -> (field: FlexDensityField, shared: Int) = { FlexibleGroupField.firmer($0) }
 
-    public func discardLattice() { lattice = nil; latticeLanded(nil) }
+    public func discardLattice() { lattice = nil; latticeTunedPresses = [:]; latticeLanded(nil) }
+    /// ★ RED CONTROL only (C1): the lattice carries no press's design for its sim (the interim sim, uncalibrated, and the chip).
+    nonisolated(unsafe) static var controlNoTune = false
 
     /// Test control only: the next builds throw this (a builder or core refusal on the build).
     var controlFailBuild: String?

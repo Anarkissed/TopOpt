@@ -210,7 +210,8 @@ final class FlexibleR7E5EvidenceProbe: XCTestCase {
     /// softer, Play held at the full squish, [45°]); 3 X-ray: the bend as a prism into the model; 4 Stamp: the turn box reads 0°.
     func testE5_HisLivePad() throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_E5_DIR") }
-        XCTAssertFalse(FlexibleBackend.sendsPresses, "premise: the app's switch (presses not sent)")
+        FlexibleBackend.sendsPresses = false   // ★ C1: these pictures are of the interim sim (the switch off; on by default now)
+        defer { FlexibleBackend.sendsPresses = true }
         let r = try FlexibleHisProject.restore(FlexibleTopLayerFixtures.liveDir, asSaved: true)
         addTeardownBlock { r.cleanup() }
         let s = FlexibleMainStage()

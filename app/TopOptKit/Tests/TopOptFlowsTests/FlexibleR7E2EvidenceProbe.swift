@@ -36,7 +36,7 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
     override func tearDown() {
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
         FlexibleStageModel.controlStripPresses = false
-        FlexibleBackend.sendsPresses = false
+        FlexibleBackend.sendsPresses = true   // ★ C1: the default
         super.tearDown()
     }
 
@@ -271,7 +271,7 @@ final class FlexibleR7E2EvidenceProbe: XCTestCase {
     /// page's lattice — the same as with the presses stripped (E1's rule), density field compared voxel for voxel.
     func testP_ParkedShapeOnly() throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_E2_DIR") }
-        FlexibleBackend.sendsPresses = false
+        FlexibleBackend.sendsPresses = false   // the parked picture (C1: tearDown restores the default, on)
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let (r, s, m) = try open(rest: [2, 3, 4, 5])
         let h = host(FlexibleStagePage(project: r.project, model: m, onExit: {}), size: Self.p13)

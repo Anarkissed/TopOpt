@@ -211,7 +211,8 @@ final class FlexibleR7E3EvidenceProbe: XCTestCase {
     /// the selector on Group 3 and its chip; 4 picture 1 beside his img_edges_1018.
     func testE3_HisLivePad() throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_E3_DIR") }
-        XCTAssertFalse(FlexibleBackend.sendsPresses, "premise: the app's switch (presses not sent)")
+        FlexibleBackend.sendsPresses = false   // ★ C1: these pictures are of the interim sim (the switch off; on by default now)
+        defer { FlexibleBackend.sendsPresses = true }
         let r = try FlexibleHisProject.restore(FlexibleTopLayerFixtures.liveDir, asSaved: true)
         addTeardownBlock { r.cleanup() }
         let s = FlexibleMainStage()
@@ -278,6 +279,64 @@ final class FlexibleR7E3EvidenceProbe: XCTestCase {
         log.append("main card: choices \(s.groupChoices.map(\.title)) · picked \(s.groupChoiceID ?? "-") · chip '\(s.notTunedChip ?? "-")' · shown \(s.groupSelectorShown) · sims \(s.sims.map(\.id))")
         try viewShot("E3_03_13p_main_card_selector_group3_chip.png", card)
         flush("E3_lines.txt")
+    }
+
+    // MARK: - C1 (his words of 2026-10-20: "finalize the send to core now"): his 10-20 pad, Group 2 = Edge 12 + Edge 9
+
+    /// One run of his 10-20 pad with the switch as given: the Squish page, Group 2 open, Play held at the full squish (a shot), then
+    /// the main page's legend card with the selector on Group 2.
+    func c1Run(sends: Bool, tag: String) throws -> (full: CGImage?, card: Host?) {
+        FlexibleBackend.sendsPresses = sends
+        let r = try FlexibleHisProject.restore(FlexibleU1Tests.liveDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        XCTAssertTrue(pumpUntil(180) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } }, "scene")
+        let strips = m.presses.filter { $0.strip != nil }
+        pumpUntil(240) { strips.allSatisfy { m.pressKey($0.id) != nil } }
+        if sends { pumpUntil(300) { strips.allSatisfy { m.pressSupport[$0.id].map { $0.inJob || $0.reason != .designing } ?? false } } }
+        pumpUntil(60) { !m.readiness.designing }
+        s.didExitSettings()
+        s.apply(r.project, owned: true, pageUp: false)
+        XCTAssertTrue(pumpUntil(400) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }, "lattice")
+        let g = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .edges }, "his Group 2")
+        let id = FlexibleSim.groupID(g.number)
+        m.startSquishSims(first: id)
+        XCTAssertTrue(pumpUntil(500) { m.squish[id] != nil && m.squish[id] != .pending }, "Group 2's sim")
+        let f = m.squish[id]?.field
+        log.append("\(tag): sent \(m.sentPresses.count) · tuned \(m.latticeTunedPresses.count) · sim scale \(f?.scale ?? -1) uncalibrated \(f?.uncalibrated ?? true)"
+                   + " · cards \(strips.map { "\($0.strip!.label): '\(m.pressWarning($0.id)?.line ?? "-")'" }) · chip '\(m.notTunedLine(simID: id) ?? "-")'")
+        let loop = FlexibleSquishLoop()
+        m.views.insert(.play)
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
+        pump(3)
+        m.rail = .group(g.id)
+        m.selectedPress = g.presses.first
+        pump(3)
+        loop.hold(1)
+        log.append("\(tag) squish page: note '\(FlexibleSettingsSquish.note(model: m, fe: FlexibleSettingsSquish.field(model: m, group: g) != nil) ?? "-")'")
+        let full = try shot("C1_tmp_\(tag).png", h, settle: 2)
+        if let d = Self.dir { try? FileManager.default.removeItem(at: d.appendingPathComponent("C1_tmp_\(tag).png")) }
+        h.window.orderOut(nil)
+        s.pick(id)
+        let settle = r.project.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let card = host(FlexibleMainLegends(main: s, mode: .constant(.groups), projection: nil, settle: settle, bottomClearance: 0, chipColumnWidth: 0)
+            .frame(width: Self.p13.width, height: Self.p13.height).background(DS.Color.background.color), size: Self.p13)
+        log.append("\(tag) main card: picked \(s.groupChoiceID ?? "-") · chip '\(s.notTunedChip ?? "-")'")
+        return (full, card)
+    }
+
+    func testC1_HisPad1020_SentToCore() throws {
+        guard Self.dir != nil else { throw XCTSkip("FLEX_E3_DIR") }
+        defer { FlexibleBackend.sendsPresses = true }
+        let a = try c1Run(sends: false, tag: "interim")
+        let b = try c1Run(sends: true, tag: "core")
+        if let l = a.full, let r = b.full { try pair(l, r, "C1_01_13p_group2_full_squish_interim_left_core_right.png") }
+        if let c = b.card { _ = try viewShot("C1_02_13p_main_card_group2_no_chip.png", c) }
+        flush("C1_lines.txt")
     }
 }
 #endif

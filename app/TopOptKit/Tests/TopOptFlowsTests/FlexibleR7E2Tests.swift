@@ -44,7 +44,7 @@ final class FlexibleR7E2Tests: XCTestCase {
         FlexibleStageModel.controlHoldIgnoresPresses = false
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
         FlexibleCore.controlNoRunStacks = false
-        FlexibleBackend.sendsPresses = false
+        FlexibleBackend.sendsPresses = true   // ★ C1: the default
         super.tearDown()
     }
 
@@ -317,7 +317,8 @@ final class FlexibleR7E2Tests: XCTestCase {
             if !["schema", "bridge", "api 1"].contains(what) { XCTAssertTrue(lines.insert(line).inserted, "\(what): its own line") }
         }
         XCTAssertEqual(FlexiblePressSupport.verdict(cases[0].1).line, FlexibleRowCopy.pressNotSent, "core's side closed: 'Set up · core support pending'")
-        XCTAssertEqual(FlexiblePressSupport.verdict(cases[5].1).line, "Edge 16 and Face 3 share 85 mm\u{00B2}")
+        // ★ RE-PINNED (C1, E2 verify major 5: shared_footprint in plain words — "share 85 mm²" did not say two presses push one spot)
+        XCTAssertEqual(FlexiblePressSupport.verdict(cases[5].1).line, "Edge 16 overlaps Face 3's press (85 mm\u{00B2})")
         XCTAssertTrue(FlexiblePressSupport.schemaTakesPresses(), "★ core's schema takes face_region_ids + press_direction (the probe, its control parsing)")
 
         // his pad: rest Groups 2 and 3 so the job's one group is the edges group alone
@@ -452,7 +453,7 @@ final class FlexibleR7E2Tests: XCTestCase {
         let piece = try XCTUnwrap(m.press(press.id)?.regions.first { m.regions.faces(of: $0, mesh: m.project.viewerMesh) == [3] })
         let area = F.M2.area(m, piece, face: 3)
         print("FLEX-E2-6 shared: '\(v.line ?? "-")' · \(sh.mm2) mm² (Edge 16's piece on Face 3: \(area)) · fixes \(m.pressWarning(press.id)?.fixes.map(\.title) ?? [])")
-        XCTAssertEqual(v.line, "\(label) and Face 3 share \(Int(area.rounded())) mm\u{00B2}", "★ in his words")
+        XCTAssertEqual(v.line, "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ in his words")
         XCTAssertLessThanOrEqual(v.line?.count ?? 99, 44)
         XCTAssertFalse(m.sentPresses.contains(press.id), "★ the pre-check stops the send")
         XCTAssertFalse(try m.runJobJSON(resting: Set(m.coreHold?.fixes.first?.resting ?? [])).contains("press_direction"), "★ no press is written")
@@ -500,12 +501,12 @@ final class FlexibleR7E2Tests: XCTestCase {
         let line = FlexibleCoreRunReport.refusalLine(refusal, names: { m.coreRegionName($0) })
         let raw = FlexibleCoreRunReport.refusalLine(refusal)
         print("FLEX-E2-6 core's refusal: '\(refusal.reason)' → '\(line)' · RED CONTROL '\(raw)'")
-        XCTAssertEqual(line, "Core refused it: " + "\(label) and Face 3 share \(Int(area.rounded())) mm\u{00B2}", "★ core's refusal in his words")
+        XCTAssertEqual(line, "Core refused it: " + "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ core's refusal in his words")
         XCTAssertTrue(raw.contains("face region") || raw.contains("presses"), "★ RED CONTROL: core's raw sentence")
         XCTAssertFalse(line.contains("face region"))
         let warn = FlexibleRowCopy.faceWarning(refusalCode: refusal.code, refusalReason: refusal.reason, unreachedColumns: 0, side: false,
                                                names: { m.coreRegionName($0) })
-        XCTAssertEqual(warn, "\(label) and Face 3 share \(Int(area.rounded())) mm\u{00B2}", "★ the face's warning line too")
+        XCTAssertEqual(warn, "\(label) overlaps Face 3's press (\(Int(area.rounded())) mm\u{00B2})"   /* ★ RE-PINNED (C1): plain words */, "★ the face's warning line too")
     }
 
     // MARK: - E2-7

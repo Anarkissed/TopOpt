@@ -125,6 +125,10 @@ final class FlexibleR7E3Tests: XCTestCase {
     // MARK: - (iii) the edges group squishes along its arrow; (i)/(ii) the selector; the chip; no job written
 
     func testAnEdgesGroupSquishesAlongItsArrowOnBothPages() async throws {
+        // ★ RE-PINNED (C1, his words of 2026-10-20 "finalize the send to core now"): presses are sent by default; this pins the
+        // INTERIM sim, now the fallback — the switch off (C1's FlexibleC1Tests pins the sent, calibrated sim)
+        FlexibleBackend.sendsPresses = false
+        defer { FlexibleBackend.sendsPresses = true }
         let r = try FlexiblePressFixtures.a1Project(3, self, facePrism: true)
         let stage = FlexibleMainStage()
         stage.reduceMotion = { false }

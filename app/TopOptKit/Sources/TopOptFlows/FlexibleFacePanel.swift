@@ -327,7 +327,8 @@ struct FlexibleFaceRows: View {
             unreached = d.map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0
         }
         return FlexibleRowCopy.faceWarning(refusalCode: d?.refusal?.code, refusalReason: d?.refusal.map { model.text($0.reason) },
-                                           unreachedColumns: unreached, side: model.stack(r)?.side ?? false)
+                                           unreachedColumns: unreached, side: model.stack(r)?.side ?? false,
+                                           names: { model.coreRegionName($0) })   // ★ C1 (E2 verify minor 13): core's ids in his names
     }
 
     /// ★ D2 REVIEW: the card's weight line — only where the face's weight is not its group's one

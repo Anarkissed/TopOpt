@@ -96,9 +96,9 @@ extension FlexibleRowCopy {
     }
     /// A press is saved, never sent until core builds press stacks (AP9).
     public static let pressNotSent = "Set up \u{00B7} core support pending"
-    /// ★ R7-E2 PARKED (his words 2026-10-19: "The back-end will come AFTER …"): a press is the shape only for now — kept out of
-    /// every request to core (FlexibleBackend.sendsPresses off). His line was 45 characters; "for now" is what "Shape only" says.
-    public static let pressShapeOnly = "Shape only \u{00B7} core support comes later"
+    /// (★ C1, his words of 2026-10-20 "finalize the send to core now": R7-E2 PARKED's "Shape only · core support comes later" is gone.)
+    /// ★ C1 (E2 verify minor 16): an edge whose two ends are not known is never sent with a uniform map.
+    public static let pressEdgeNotFound = "Not sent \u{00B7} the edge's ends not found"
 
     // MARK: ★ R7-E1 — the flat prism's words (his rule: one line, ≤ 44 characters)
     public static let insideEdge = "An inside edge \u{00B7} no flat prism"
@@ -142,12 +142,13 @@ extension FlexibleRowCopy {
 
     // MARK: ★ R7-E2 — sent to core (his rule: one line, ≤ 44; the reviewer's: shared_footprint in plain words)
 
-    /// Two entries share surface (core's A3): "Edge 16 and Face 3 share 85 mm²".
+    /// Two entries share surface (core's A3), in plain words (★ C1, E2 verify major 5 — "share 85 mm²" did not say two presses push
+    /// the same spot): "Edge 16 overlaps Face 3's press (85 mm²)".
     public static func sharedFootprint(_ a: String, _ b: String, mm2: Double) -> String {
         let n = String(format: "%.0f", mm2.rounded())
-        let tail = " share \(n) mm\u{00B2}"
-        let room = maxChars - tail.count - " and ".count
-        return fit(fit(a, room / 2) + " and " + fit(b, room - Swift.min(a.count, room / 2)) + tail)
+        let tail = "'s press (\(n) mm\u{00B2})"
+        let room = maxChars - tail.count - " overlaps ".count
+        return fit(fit(a, room / 2) + " overlaps " + fit(b, room - Swift.min(a.count, room / 2)) + tail)
     }
     /// A press core is designing (its stack read, its design not in yet).
     public static let pressDesigning = "Set up \u{00B7} core is designing it"

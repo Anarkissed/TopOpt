@@ -35,7 +35,7 @@ final class FlexibleR7E2HostedTests: XCTestCase {
 
     override func tearDown() {
         FlexiblePressSupport.apiVersion = { FlexibleScene.pressApiVersion }
-        FlexibleBackend.sendsPresses = false
+        FlexibleBackend.sendsPresses = true   // ★ C1: the default
         super.tearDown()
     }
 

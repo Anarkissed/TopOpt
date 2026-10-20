@@ -1,6 +1,84 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · U2 — your notes of 2026-10-20, item 5: the curve window — [2D] and [3D] replace [↓] and [45°] (2026-10-20) (read this first)
+## ★ Round 7 · C1 — edge and corner presses are SENT to core now; E2's fix finished (2026-10-20) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `04dfa058` (U2). NOT pushed (his HOLD). App only; core untouched; no #354/main
+file edited. His words (2026-10-20): "the edge/corner squishes barely squish, is there a reason for that? Is that mainly because it
+does not go to core? Please go ahead and finalize the send to core now." His order: after U1 and U2 (both still in and green).
+
+### What you will see now, in plain words
+- Edge and corner presses go to core. The arrow is solid. The card no longer says "Shape only · core support comes later".
+  Instead it gives core's verdict. On your 10-20 pad: Edge 12 "Can't reach on 72 columns · twisted 29% off", and Edge 9 "Can't
+  reach this squish on 66 columns".
+- The lattice under each press is core's design along its arrow, but only inside the flat prism you drew. E2's dense band through
+  the whole part is gone. On your pad 2,936 voxels changed inside the two flat prisms and 0 changed outside them.
+- "Lattice not tuned for this press yet" is gone once core has designed the lattice for the group. Play, Bend and Heat for an edges
+  group are now scaled to core's numbers on its press stacks. The old interim sim is used only when the switch is off.
+- **Deeper, measured on your pad (Group 2):** Edge 12 went from 1.68 to 2.68 mm and Edge 9 from 1.90 to 2.98 mm, the deepest
+  squish along each arrow as Play shows it.
+- **Why it was shallow before (one sentence):** the interim sim had no number from core to scale to, so the page showed the raw
+  solve cut down to 18% of its size, the cut that stops the part from folding on screen.
+- **Still not core's full depth:** core asked for 28× the solve. The page's no-fold cut held it to 0.40×. Core designs Edge 12 to
+  5.6 mm and Edge 9 to 3.3 mm, out of your 9.5 mm and 6.5 mm. This is a question for the reviewer (below).
+- A press kept out of the job is now a blocker in the top line, with its fixes (it no longer says "Ready"). Overlap reads in plain
+  words: "Edge 14 overlaps Face 3's press (85 mm²)". If a face group is squished less because of an edges group, the Squish page
+  says so before Exit. A corner shows how far off it is even when not tipped: "… shape 54% off".
+
+### How
+- `FlexibleBackend.sendsPresses` is kept and is now **on** by default. Off still gives E1's rule, and the card says "Set up · core
+  support pending". The parked E2 fix (`claude/flexible-screens-e2fix-wip`, 25c0aa30) is merged as it was (`c1ed202d`, no
+  conflicts) and finished here.
+- New: `latticeTunedPresses` holds, for each press, core's press stack and its as-built depths, set when the lattice lands. The edges
+  group's sim (`FlexibleFERequest.pressSim(targets:)`) is calibrated to them as a face group's sim is. The chip shows only while a
+  press is untuned. An edge with unknown ends is kept out ("Not sent · the edge's ends not found"), never sent with a flat map. With
+  the switch off, a kept-out press is not a blocker. The face card's warning now uses your names (`faceWarning(names:)` wired).
+
+### E2's 18 findings
+- Fixed: (1) blocker, the band through the part (clipToPresses); (2) the face group's squish halved without a word (groupEstimate
+  counts the presses; the line fits in 44); (3)/(10) core's "can't reach" on the card; (4)/(11) the honest shape line for any press
+  over 2%; (5) kept-out press = blocker, in plain words; (12) the edges (i) gives the press's own reason; (13) names wired; (16) an
+  edge with unknown ends is kept out; (18) stale comments.
+- Partly fixed: (6) the depth chip sits beside the prism and is never hidden. The camera turn the verifier suggested is NOT built:
+  your U1 rule is that the camera moves only when you move it.
+- Open: (7)/(8)/(9) minor visual items; (14)/(15)/(17) reviewer questions (E2's Q6, Q2 and the corner bar).
+
+### Tests (red controls asserted red inside each)
+- New `FlexibleC1Tests` (3), on your 10-20 pad:
+  - the switch is on and the old line is gone (red: switch off keeps the press out);
+  - Group 2 is sent, tuned, deeper and clipped (red: untuned brings the chip back; the interim run is the comparison);
+  - an edge with no ends is kept out (red: E2's uniform map).
+- `FlexibleR7E2FixTests` (F1–F4, from the WIP; red controls inside).
+- Re-pins, attributed to his C1 words:
+  - E2Tests: the plain overlap words; the clip in E2-7; can't-reach and twist lines.
+  - E2Hosted: the card's line.
+  - E2Park: off is now explicit and says "core support pending".
+  - PressStamp: the switch is on.
+  - E3/E5: their interim-sim tests now turn the switch off (this is the fallback).
+  - EdgeGroups and the probes restore the default, on.
+
+### Runs (`round7/batch_c1/c1_runs.txt`)
+- 66 targeted classes, once: 418 tests, 1 skipped, 1 failed. The failure is the known Play ring (FlexibleRound7ViewsHostedTests,
+  display). No signal lines. LatticeStaleTypeTests in.
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded).
+- The 16 stage-job hashes are cmp-identical to `stage_job_hashes_e1r.txt`. No byte moved: no golden or hash fixture carries an edge
+  press, so nothing needs attributing.
+
+### Pictures (`round7/batch_c1/look/`, 13" portrait, your 10-20 pad)
+- C01: the Squish page, Group 2 held at full squish. Left is the interim (dashed arrow, "core support pending", the chip). Right is
+  C1 (solid arrow, core's lines, no chip).
+- C02: the Lattice page's card, Group 2 selected, no chip.
+- Looking at C01: from the home view the deeper squish is hard to see. The numbers above are the evidence.
+
+### Not done / questions
+- (Reviewer) The no-fold cut (k·gmax ≤ 0.5) and the band (≤ 2×) still decide how deep an edge squish looks. Core asked for 28×. Is
+  that acceptable, or should an edges group's Play follow core's design depth?
+- (Reviewer) The as-built target with the clip is near 0 on Edge 9. Inside the wedge the lattice is core's design, and past it the
+  face groups' lattice. Should the target be core's own design depth instead?
+- Not sent to core: a press's own curves and stamp. Core is sent the flat prism's map, and Play's push still follows your drawing.
+  This is the E4 back-end backlog: core's F × M map and stamps on core's grid.
+- E2's Q2 (a fourth send), Q6 (overlap checked across groups), and the corner bar loosened to 1.5 pitches.
+
+## ★ Round 7 · U2 — your notes of 2026-10-20, item 5: the curve window — [2D] and [3D] replace [↓] and [45°] (2026-10-20) (the step before C1 above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `efc412a0` (U1). NOT pushed (you said hold). App only; core untouched; no
 #354/main file edited. **Front-end only**: sending edges to core (C1) is next, after this step, as you ordered;

@@ -524,7 +524,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
     func testAPickedEdgeBecomesAPressAtCoresHalfwayInTheNewGroupAndIsSentOnceCoreTakesIt() async throws {
         // ★ R7-E2 PARKED (2026-10-19): this re-pin is E2's — run with the presses SENT (off in the app until the back-end phase)
         FlexibleBackend.sendsPresses = true
-        defer { FlexibleBackend.sendsPresses = false }
+        defer { FlexibleBackend.sendsPresses = true }   // ★ C1: the default
         let (r, m) = try await hisPad()
         let mesh = try XCTUnwrap(r.project.viewerMesh)
         let keyBefore = m.settings.designInputs
@@ -737,7 +737,7 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
     func testEdgesGroupsRoundTripAndOtherFacesKeepTheirJobEntries() async throws {
         // ★ R7-E2 PARKED (2026-10-19): this re-pin is E2's — run with the presses SENT (off in the app until the back-end phase)
         FlexibleBackend.sendsPresses = true
-        defer { FlexibleBackend.sendsPresses = false }
+        defer { FlexibleBackend.sendsPresses = true }   // ★ C1: the default
         let (r, m) = try await hisPad()
         try await G.settleAllowingRefusedStacks(m, "A1_0003")   // the sends as the Export step reads them, settled
         func entries() throws -> [String: [Int: String]] {

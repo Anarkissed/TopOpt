@@ -601,7 +601,7 @@ extension FlexibleStageModel {
             i.keptOut = (settings.presses ?? []).compactMap { p in
                 guard let st = p.strip, let v = pressSupport[p.id], !v.inJob else { return nil }
                 switch v.reason {
-                case .designing?, .coreSupport?, nil: return nil
+                case .designing?, .coreSupport?, .backendLater?, nil: return nil   // ★ C1: the switch off is no blocker (E1's rule)
                 default: break
                 }
                 guard let w = pressWarning(p.id), !w.line.isEmpty else { return nil }

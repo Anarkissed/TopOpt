@@ -65,14 +65,16 @@ public struct FlexibleFERequest: Sendable {
     /// an edges group's sim — each press pushes ALONG its arrow over its whole footprint with its force (core's solver, the current
     /// lattice's stiffness at its own density; no column strain: 0; no core prediction to calibrate to — `targets` empty, so the field
     /// keeps the solve's own size, cut only so it never folds). It never writes a job.
-    public static func pressSim(id: String, presses: [PressPush], voxels: Int) -> Sim {
+    /// ★ C1: `targets` — core's depths on each press stack once the lattice carries core's design for the group (calibrated to them,
+    /// as a face group's sim); empty: the interim sim.
+    public static func pressSim(id: String, presses: [PressPush], voxels: Int, targets: [FlexibleFEField.Target] = []) -> Sim {
         Sim(id: id,
             pressed: presses.map { q in
                 var x = FlexSquishPressInfo(press: q.regions, direction: [q.direction.x, q.direction.y, q.direction.z], weightN: q.weightN)
                 x.pushXYZ = q.pushXYZ; x.pushWeight = q.pushWeight   // ★ R7-E5: where it presses follows his drawing
                 return x
             },
-            strainOp: [Float](repeating: 0, count: voxels), targets: [])
+            strainOp: [Float](repeating: 0, count: voxels), targets: targets)
     }
 
     /// ★ R7-E3 + R7-E5: one press of an edges group's interim sim — its footprint, its arrow, its force, and (R7-E5) its drawn shape

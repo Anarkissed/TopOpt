@@ -3,10 +3,10 @@
 //
 // ★ WHAT IT IS. A press he aims at an angle: a tilted face press (one region), an EDGE (two connected
 // regions) or a CORNER (three or more). It is an INPUT, like a face's settings: nothing here is a frame,
-// a column or a design — core computes every one of those (one source of truth: core). Until the bridge
-// builds a press's stack (batch AP9) a press is saved and drawn, never sent: core's job carries no
-// press_direction before then, and `designInputs` strips the list so a press that cannot be built can
-// never change (or stale) the lattice.
+// a column or a design — core computes every one of those (one source of truth: core). An edge or corner
+// press is SENT (R7-E2, finalized in C1) once FlexiblePressSupport's gate lets it in (`sentPresses`): its
+// job entry carries face_region_ids + press_direction and `designInputs` keeps it; a press the gate keeps
+// out (or with FlexibleBackend.sendsPresses off) never changes (or stales) the lattice.
 //
 // ★ WHERE IT LIVES. `FlexibleStageSettings.presses`, an OPTIONAL list that is nil — never [] — when it is
 // empty (`setPresses`): synthesized Codable omits a nil, so every project saved before presses decodes

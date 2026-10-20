@@ -4,6 +4,9 @@
 // designs, Auto, the preview lattice, the run job and the export — so the lattice, the face groups' squish and every job byte are
 // what they were before E2 (E1's rule). The flat prism, its handles and its limits stay (the front-end). The press card says one
 // plain line. E2's own tests run with the switch ON. RED CONTROL in each test, asserted red: the switch on.
+// ★ RE-PINNED (C1, his words of 2026-10-20: "Please go ahead and finalize the send to core now"): the switch is KEPT and ON by
+// default; these tests turn it OFF to pin that it still keeps every press out, and the card's line off is "Set up · core support
+// pending" ("Shape only · core support comes later" is gone).
 
 import XCTest
 @testable import TopOptFlows
@@ -13,8 +16,14 @@ import TopOptKit
 final class FlexibleR7E2ParkTests: XCTestCase {
     typealias G = FlexibleAngledGoldens
 
-    override func tearDown() {
+    override func setUp() {
+        super.setUp()
+        XCTAssertTrue(FlexibleBackend.sendsPresses, "★ C1: on by default")
         FlexibleBackend.sendsPresses = false
+    }
+
+    override func tearDown() {
+        FlexibleBackend.sendsPresses = true   // ★ C1: the default
         FlexibleStageModel.controlStripPresses = false
         super.tearDown()
     }
@@ -26,11 +35,11 @@ final class FlexibleR7E2ParkTests: XCTestCase {
             FlexiblePressSupport.Facts(schema: true, bridge: true, api: FlexiblePressSupport.expectedAPI, stacked: nil, twoEntries: nil,
                                        shared: nil, designed: true, designRefusal: nil, conflict: nil, backend: backend)
         }
-        XCTAssertFalse(FlexibleBackend.sendsPresses, "★ off until the back-end phase")
+        XCTAssertFalse(FlexibleBackend.sendsPresses, "★ turned off by this test (C1: on by default)")
         let v = FlexiblePressSupport.verdict(facts(FlexibleBackend.sendsPresses))
         XCTAssertFalse(v.inJob, "★ never in the job")
         XCTAssertEqual(v.reason, .backendLater)
-        XCTAssertEqual(v.line, "Shape only \u{00B7} core support comes later")
+        XCTAssertEqual(v.line, FlexibleRowCopy.pressNotSent, "★ C1: the shape-only line is gone")
         XCTAssertLessThanOrEqual(v.line?.count ?? 99, FlexibleRowCopy.maxChars, "his rule: one line")
         // RED CONTROL: the switch on
         let red = FlexiblePressSupport.verdict(facts(true))
@@ -74,8 +83,7 @@ final class FlexibleR7E2ParkTests: XCTestCase {
         XCTAssertEqual(ignored(), [], "★ the switch off: no press reaches core")
         for p in strips {
             let w = try XCTUnwrap(m.pressWarning(p.id), "\(p.strip?.label ?? "") has its line")
-            XCTAssertEqual(w.line, FlexibleRowCopy.pressShapeOnly, "★ the card's one plain line")
-            XCTAssertFalse(w.warn, "★ said plainly, not as a warning")
+            XCTAssertEqual(w.line, FlexibleRowCopy.pressNotSent, "★ C1: the card's line off (the shape-only line is gone)")
             XCTAssertTrue(w.fixes.isEmpty)
         }
         // every send's job: no press written, and the bytes of E1's rule

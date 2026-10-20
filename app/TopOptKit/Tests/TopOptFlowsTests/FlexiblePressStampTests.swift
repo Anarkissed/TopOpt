@@ -14,7 +14,7 @@ final class FlexiblePressStampTests: XCTestCase {
 
     override func tearDown() {
         S.controlFreeDrag = false
-        FlexibleBackend.sendsPresses = false
+        FlexibleBackend.sendsPresses = true   // ★ C1: the default
         super.tearDown()
     }
 
@@ -64,7 +64,9 @@ final class FlexiblePressStampTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(S.centre(cs, cseed)), cs.members[0].origin, "★ a corner stamp's centre == the vertex")
         XCTAssertEqual(S.dragged(cs, cseed, by: SIMD3(5, 5, 5)), cseed, "★ a corner stamp only resizes and turns")
         // front-end only: with the switch off nothing of the press reaches core (E2 PARKED's gate)
-        XCTAssertFalse(FlexibleBackend.sendsPresses, "★ his ruling: the stamp waits for the back-end phase")
+        // ★ RE-PINNED (C1, his words of 2026-10-20 "finalize the send to core now"): the switch is on; core is sent the flat prism's
+        // map (the stamp's rasterised press on core's grid is still the back-end backlog)
+        XCTAssertTrue(FlexibleBackend.sendsPresses, "★ C1: presses are sent")
         // RED CONTROL: the face handle's free (u, v) drag moves it off the edge
         S.controlFreeDrag = true
         let red = S.dragged(st, seed, by: across * 7)

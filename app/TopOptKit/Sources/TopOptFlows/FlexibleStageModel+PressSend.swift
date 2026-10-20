@@ -87,6 +87,8 @@ extension FlexibleStageModel {
     public func pressMap(_ id: UUID) -> FlexMap? {
         guard let p = settings.press(id), let r = pressRegistrations[id], let h = FlexibleFlatPrism.depth(of: p),
               let sh = pressShape(id) else { return nil }
+        // ★ C1 (E2 verify minor 16): an edge whose two ends are not known has no map (never sent "both" flat × flat, ~100 % off)
+        guard sh.corner || sh.endsUVT.count >= 2 || Self.controlUniformMapForNoEnds else { return nil }
         return FlexiblePressShape.map(r.stack, apexT: r.apexT, depthMM: h, press: sh)
     }
 
@@ -123,10 +125,10 @@ extension FlexibleStageModel {
         let strips = (s.presses ?? []).filter { $0.strip != nil }
         guard !strips.isEmpty else { return [:] }
         let core = (FlexiblePressSupport.schemaTakesPresses(), FlexiblePressSupport.bridgeBuildsPress, FlexiblePressSupport.apiVersion())
-        var key = "\(s.faces.hashValue)|\(s.presses.hashValue)|\(regions.key)|\(core)|\(FlexiblePressShape.controlSilent)|\(FlexibleBackend.sendsPresses)"
+        var key = "\(s.faces.hashValue)|\(s.presses.hashValue)|\(regions.key)|\(core)|\(FlexiblePressShape.controlSilent)|\(FlexibleBackend.sendsPresses)|\(Self.controlUniformMapForNoEnds)"
         for p in strips {
             let k = pressDesignKey(p.id)
-            key += "|\(p.id.uuidString):\(k?.region ?? 0):\(pressRefusals[p.id] ?? "")"
+            key += "|\(p.id.uuidString):\(k?.region ?? 0):\(pressRefusals[p.id] ?? ""):\(pressRegistrations[p.id]?.endsUVT.count ?? -1)"   // ★ C1: ends
             if let k {
                 let d = designs[k]
                 key += ":\(d == nil ? "-" : (d?.refusal?.code ?? "ok")):\(designErrors[k] ?? "")"
@@ -142,6 +144,8 @@ extension FlexibleStageModel {
             let k = pressDesignKey(p.id)
             var stacked: String? = nil
             if let why = pressRefusals[p.id] { stacked = why } else if k == nil { stacked = "" }
+            // ★ C1 (E2 verify minor 16): registered, but an edge without its two ends has no map — kept out, said
+            if stacked == nil, k != nil, pressRegistrations[p.id] != nil, pressMap(p.id) == nil { stacked = FlexibleRowCopy.pressEdgeNotFound }
             let twice = p.regions.first(where: two.contains).map { FlexibleRowCopy.pressTwoEntries(displayName($0)) }
             var refusal: String? = nil, designed = false
             if let k {
@@ -228,7 +232,6 @@ extension FlexibleStageModel {
         guard let p = settings.press(id), let st = p.strip else { return nil }
         if let v = pressSupport[id], !v.inJob {
             if case .shared(let sh)? = v.reason { return (sh.line, sharedFixes(p, sh), true) }
-            if case .backendLater? = v.reason { return (FlexibleRowCopy.pressShapeOnly, [], false) }   // ★ R7-E2 PARKED: said plainly
             return (v.line ?? FlexibleRowCopy.pressNotSent, [], true)
         }
         // ★ R7-E2 FIX (both verifies): core's "can't reach" verdict, as a face's card says it, and how far off core's map is for
@@ -252,6 +255,9 @@ extension FlexibleStageModel {
         if pressStack(id)?.side == true { return (FlexibleRowCopy.sidePress, [], false) }
         return nil
     }
+
+    /// ★ RED CONTROL only (C1): E2's uniform map for an edge whose ends are unknown.
+    nonisolated(unsafe) static var controlUniformMapForNoEnds = false
 
     /// ★ RED CONTROL only (R7-E2 FIX): the card's line as E2 built it (no unreached line; the off line only when twisted or tipped).
     nonisolated(unsafe) static var controlPressLineAsBuilt = false

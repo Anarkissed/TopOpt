@@ -94,7 +94,7 @@ public enum FlexiblePressSupport {
             guard let r = reason else { return nil }
             switch r {
             case .coreSupport: return FlexibleRowCopy.pressNotSent
-            case .backendLater: return FlexibleRowCopy.pressShapeOnly
+            case .backendLater: return FlexibleRowCopy.pressNotSent   // ★ C1: the shape-only line is gone
             case .notStacked(let s), .twoEntries(let s), .designRefused(let s), .conflict(let s): return s
             case .shared(let f): return f.line
             case .designing: return FlexibleRowCopy.pressDesigning

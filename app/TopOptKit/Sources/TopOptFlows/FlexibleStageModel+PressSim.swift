@@ -9,6 +9,10 @@
 // footprint (the strip pieces the flat cut made), with the group's force; no column, frame or design for the press is asked of core;
 // no prediction to calibrate to, so the field keeps the solve's own size (cut only so it never folds). It NEVER writes a job (nothing
 // here touches the job or the export), and the chip "Lattice not tuned for this press yet" shows while it plays (FlexibleRowCopy).
+// ★ C1 (his words of 2026-10-20: "the edge/corner squishes barely squish … Is that mainly because it does not go to core? Please go
+// ahead and finalize the send to core now."): with the presses SENT (FlexibleBackend.sendsPresses on), once the lattice carries
+// core's design for every press of the group (latticeTunedPresses), the same sim is CALIBRATED to core's depths on each press stack,
+// as a face group's is — Play, Bend and Heat show core's squish, the chip goes; the uncalibrated interim sim is only the fallback.
 // ★ ONE ID PER GROUP: "group-N" (the tab's number), like a face group's sim, so the Squish page's player, the main page's selector,
 // "All (one after another)" and the views find it exactly as a face group's. Solved again when the group's presses change (pieces,
 // arrow bits, depth, force) or a new lattice lands — never while one is still solving for that group.
@@ -26,6 +30,10 @@ extension FlexibleStageModel {
         let sim: FlexibleSim
         let presses: [FlexibleFERequest.PressPush]
         let key: Int
+        /// ★ C1: core's depths on each press stack when the lattice carries core's design for EVERY press of the group (the sim is
+        /// calibrated to them, as a face group's is); empty: the interim sim (its own size, the chip).
+        var targets: [FlexibleFEField.Target] = []
+        var tuned: Bool { !targets.isEmpty }
     }
 
     /// Every edges group with a flat-prism press that has a footprint and a force — what plays along its arrow.
@@ -40,8 +48,12 @@ extension FlexibleStageModel {
                 return FlexibleFERequest.PressPush(regions: p.regions, direction: p.direction, weightN: p.settings.weightN,
                                                    pushXYZ: s.xyz, pushWeight: s.weight)
             }
+            // ★ C1: core's design for every press of the group in this lattice — the sim reads core's press stacks
+            let tuned = ps.compactMap { latticeTunedPresses[$0.id] }
+            let targets = tuned.count == ps.count ? tuned : []
             var h = Hasher()
             h.combine(lattice?.generation)
+            h.combine(targets.count)
             h.combine(openedKey)
             for (p, q) in zip(ps, pushes) {
                 h.combine(p.regions)
@@ -55,7 +67,7 @@ extension FlexibleStageModel {
             let labels = ps.compactMap { $0.strip?.label }
             let sim = FlexibleSim(id: FlexibleSim.groupID(g.number), kind: .group(g.number),
                                   title: FlexibleRowCopy.simTitle(name: name, names: labels), short: name, keys: [])
-            return PressSimWant(sim: sim, presses: pushes, key: h.finalize())
+            return PressSimWant(sim: sim, presses: pushes, key: h.finalize(), targets: targets)
         }
     }
 
@@ -103,7 +115,7 @@ extension FlexibleStageModel {
             pressSimInFlight.insert(w.sim.id)
             if refine[w.sim.id] != nil { refine[w.sim.id] = nil }
             squish[w.sim.id] = .pending
-            todo.append(FlexibleFERequest.pressSim(id: w.sim.id, presses: w.presses, voxels: base.rho.count))
+            todo.append(FlexibleFERequest.pressSim(id: w.sim.id, presses: w.presses, voxels: base.rho.count, targets: w.targets))
         }
         guard !todo.isEmpty else { return }
         squishSolver.onResult = { [weak self] gen, id, state in self?.squishLanded(gen, id, state) }
@@ -133,8 +145,10 @@ extension FlexibleStageModel {
 
     /// ★ THE CHIP (the reviewer's interim-sim conditions): "Lattice not tuned for this press yet" while an edges group's squish is the
     /// interim sim (the lattice is not designed for its presses — always, while sending presses is parked). nil for a face group.
+    /// ★ C1: gone once core designed the lattice for every press of the group (the sim then plays core's design).
     public func notTunedLine(simID: String?) -> String? {
-        isPressSim(simID) ? FlexibleRowCopy.latticeNotTunedForPress : nil
+        guard let simID, let w = pressSimWants.first(where: { $0.sim.id == simID }) else { return nil }
+        return w.tuned ? nil : FlexibleRowCopy.latticeNotTunedForPress
     }
 }
 

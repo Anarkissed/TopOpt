@@ -210,7 +210,8 @@ final class FlexibleR7E4EvidenceProbe: XCTestCase {
     /// [45°]; 3 Stamp: the default stamp slid along Edge 16 ([45°]); 4 picture 2 beside his img_edges_1018.
     func testE4_HisLivePad() throws {
         guard Self.dir != nil else { throw XCTSkip("FLEX_E4_DIR") }
-        XCTAssertFalse(FlexibleBackend.sendsPresses, "premise: the app's switch (presses not sent)")
+        FlexibleBackend.sendsPresses = false   // ★ C1: these pictures are of the interim sim (the switch off; on by default now)
+        defer { FlexibleBackend.sendsPresses = true }
         let r = try FlexibleHisProject.restore(FlexibleTopLayerFixtures.liveDir, asSaved: true)
         addTeardownBlock { r.cleanup() }
         let s = FlexibleMainStage()
