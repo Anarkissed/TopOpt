@@ -29,6 +29,9 @@ public enum FlexibleGroupEstimate {
         public let segments: FlexiblePinch.Segments
         /// Its pressure per column (MPa, core's design).
         public let pressureMPa: [Double]
+        /// ★ R7-E2 FIX: a press's flat prism — only the volume he set (height ≤ h along its arrow) is its lattice.
+        public var wedge: FlexibleFlatPrism.Cut?
+        func holds(_ p: SIMD3<Double>) -> Bool { wedge.map { $0.height(p) <= $0.depthMM } ?? true }
         public init(region: Int, stack: FlexStackInfo, cuts: [RegionCut], segments: FlexiblePinch.Segments, pressureMPa: [Double]) {
             self.region = region; self.stack = stack; self.cuts = cuts; self.segments = segments; self.pressureMPa = pressureMPa
         }
@@ -84,6 +87,7 @@ public enum FlexibleGroupEstimate {
                     var t = col.entryT + 0.5 * stepMM
                     while t < col.entryT + span {
                         let p = FlexibleStackMembership.point(st, column: c, t: t)
+                        guard f.holds(p) else { t += stepMM; continue }
                         var rho = own
                         for o in others {
                             guard let r = density(of: o, at: p), r > rho else { continue }
@@ -111,7 +115,7 @@ public enum FlexibleGroupEstimate {
     /// nil where none does or that column has no lattice.
     static func density(of g: Group, at p: SIMD3<Double>) -> Double? {
         var best: (depth: Double, rho: Double)?
-        for f in g.faces {
+        for f in g.faces where f.holds(p) {
             guard let hit = FlexibleStackMembership.hit(p, f.stack, cuts: f.cuts), hit.col < f.segments.buildableDensity.count
             else { continue }
             let rho = f.segments.buildableDensity[hit.col]

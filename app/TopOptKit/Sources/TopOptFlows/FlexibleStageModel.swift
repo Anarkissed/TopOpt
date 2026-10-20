@@ -1098,7 +1098,7 @@ public final class FlexibleStageModel: ObservableObject {
         let cuts = Dictionary(faces.map { ($0.faceRegionID, regions.cuts(of: $0.faceRegionID)) }, uniquingKeysWith: { a, _ in a })
         // ★ R7-E2 (FlexibleSquishTarget): every registered strip press, designed on CORE's press stack through its synthetic key
         // with the map FlexiblePressShape builds from core's frame (the job's map — one function)
-        let pressTargets = pressDesignTargets
+        let pressTargets = pressDesignTargets, pressEst = pressEstimates
         designTask = Task.detached(priority: .userInitiated) {
             if delayNS > 0 { try? await Task.sleep(nanoseconds: delayNS) }
             if Task.isCancelled { return }
@@ -1178,8 +1178,8 @@ public final class FlexibleStageModel: ObservableObject {
                                                          stacks: stackSnap, cuts: cuts, law: law)
                     // ★ D2 REVIEW: separate groups — which will squish less than designed once the
                     // lattice carries them all (the firmer wins), said BEFORE Exit
-                    misses = try Self.groupEstimate(settings: snapshot, designs: out, segments: segs,
-                                                    stacks: stackSnap, cuts: cuts, law: law)
+                    misses = try Self.groupEstimate(settings: snapshot, designs: out.merging(pressOut) { a, _ in a }, segments: segs,
+                                                    stacks: stackSnap, cuts: cuts, law: law, presses: pressEst)   // ★ R7-E2 FIX
                 } catch {
                     if err == nil { err = "\(error)" }
                 }
@@ -1454,6 +1454,7 @@ public final class FlexibleStageModel: ObservableObject {
         // sim along the arrow is E3's)
         var pressKeysOf: [Int: [FlexFaceKey]] = [:]
         var pressStacks: [FlexFaceKey: FlexStackInfo] = [:]
+        var pressCuts: [Int: FlexibleFlatPrism.Cut] = [:]   // ★ R7-E2 FIX: each press grades only its flat prism
         if !shapeOnly, !Self.controlStripPresses {
             let sentNow = sentPresses
             for p in presses where sentNow.contains(p.id) {
@@ -1461,6 +1462,8 @@ public final class FlexibleStageModel: ObservableObject {
                 let k = FlexFaceKey(region: r.key, rotation: 0)
                 guard let d = designs[k], d.refusal == nil, d.columns.count == r.stack.columns.count else { continue }
                 pressStacks[k] = r.stack
+                // core names a voxel's owner by its stack's face_region_id (a press stack: its first piece) — both keys
+                if let c = FlexibleFlatPrism.cut(of: p) { pressCuts[r.key] = c; if let first = p.regions.first { pressCuts[first] = c } }
                 designed[k] = FlexiblePinch.core(d, stack: r.stack)
                 pressure[k] = d.columns.map(\.pressureMPa)
                 pressKeysOf[FlexibleSqueezeGroups.id(p), default: []].append(k)
@@ -1489,7 +1492,7 @@ public final class FlexibleStageModel: ObservableObject {
         let generation = latticeGeneration
         let (builtKeys, faceNoLattice, extentMM, drawnFaces) = (order, noLattice, extent, drawn)
         let (designedSnap, pressureSnap, squishSnap, depthsSnap) = (designed, pressure, squish, depths)
-        let pressKeysSnap = Array(pressStacks.keys)
+        let pressKeysSnap = Array(pressStacks.keys), pressCutsSnap = pressCuts
         let depthForBand = shallowest.isFinite ? shallowest : 0
         let build = self.build, key = latticeSettingsKey, temp = designTempC ?? 0   // ★ R7-E2: presses in the job too
         let lawInputs: (path: String, material: String, temp: Double)? = {
@@ -1543,9 +1546,10 @@ public final class FlexibleStageModel: ObservableObject {
                             }
                             fields.append(FlexibleGroupField.assemble(mask: mask!, faces: fs))
                         } else {
-                            fields.append(try await worker.withScene {
+                            let f = try await worker.withScene {
                                 try $0.densityField(faces: plan.keys.map(\.region), rotations: plan.keys.map(\.rotation), build: build)
-                            })
+                            }
+                            fields.append(FlexibleGroupField.clipToPresses(f, cuts: pressCutsSnap))   // ★ R7-E2 FIX
                         }
                     }
                     guard !fields.isEmpty else { throw TopOptError(message: "No pressed face has a design yet.") }

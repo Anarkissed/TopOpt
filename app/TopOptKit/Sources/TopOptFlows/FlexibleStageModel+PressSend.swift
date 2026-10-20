@@ -231,15 +231,30 @@ extension FlexibleStageModel {
             if case .backendLater? = v.reason { return (FlexibleRowCopy.pressShapeOnly, [], false) }   // ★ R7-E2 PARKED: said plainly
             return (v.line ?? FlexibleRowCopy.pressNotSent, [], true)
         }
+        // ★ R7-E2 FIX (both verifies): core's "can't reach" verdict, as a face's card says it, and how far off core's map is for
+        // ANY press past 2 % (an untipped corner at 3 mm was 54 % off and silent) — one line, both when both apply
+        let unreached = Self.controlPressLineAsBuilt ? 0 : pressDesign(id).map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0
+        var offLine: String?, offN: Double?, word = "shape"
         if let off = pressOffPercent(id), let shape = pressShape(id) {
             let tipped = st.kind == .corner
                 && FlexibleFlatPrism.halfway(of: p).map { FlexiblePressAim.bits($0) != FlexiblePressAim.bits(p.direction) } ?? false
-            if FlexiblePressShape.twisted(shape) || tipped,
-               let line = FlexiblePressShape.line(offPercent: off, corner: st.kind == .corner) { return (line, [], true) }
+            let named = FlexiblePressShape.twisted(shape) || tipped
+            if named || !Self.controlPressLineAsBuilt, let line = FlexiblePressShape.line(offPercent: off, corner: st.kind == .corner) {
+                offLine = named ? line : FlexibleRowCopy.shapeOff(off)
+                offN = off
+                if named { word = st.kind == .corner ? "tipped" : "twisted" }
+            }
         }
+        if unreached > 0 {
+            return (offN.map { FlexibleRowCopy.pressUnreached(unreached, offPercent: $0, word: word) } ?? FlexibleRowCopy.pressUnreached(unreached), [], true)
+        }
+        if let l = offLine { return (l, [], true) }
         if pressStack(id)?.side == true { return (FlexibleRowCopy.sidePress, [], false) }
         return nil
     }
+
+    /// ★ RED CONTROL only (R7-E2 FIX): the card's line as E2 built it (no unreached line; the off line only when twisted or tipped).
+    nonisolated(unsafe) static var controlPressLineAsBuilt = false
 
     /// The 1–3 fixes of a shared surface, the gentlest first (the first is the filled button): [Shallower] (only when a shallower
     /// flat prism shares none), [Face 3 rests] (the other is a loaded face), [Remove Edge 16] (found by looking: Remove sat first, a

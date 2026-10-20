@@ -186,8 +186,17 @@ final class FlexibleR7E2HostedTests: XCTestCase {
         let label = try XCTUnwrap(press.strip?.label)
         let lines = h.frames.all.keys.filter { $0.hasPrefix("pressLine:") }.sorted()
         print("FLEX-E2-H2 the tab's press lines: \(lines) · its frame \(h.frames.all["pressLine-\(label)"]?.integral ?? .zero)")
-        XCTAssertEqual(m.pressWarning(press.id)?.line, FlexibleRowCopy.sidePress, "★ the side label")
-        XCTAssertTrue(lines.contains("pressLine:\(label):" + FlexibleRowCopy.sidePress), "★ on the tab: '\(FlexibleRowCopy.sidePress)'")
+        // ★ RE-PINNED (R7-E2 FIX, both verifies: core's "can't reach" ranks above the side label, as on a face's card): on his pad
+        // every column of Edge 16 is too soft, so the tab says that; the side label is E2's line (the control) and shows where core
+        // reaches every column
+        let d = try XCTUnwrap(m.pressDesign(press.id))
+        let n = d.tooFirm + d.tooSoft + d.beyondData
+        let want = n > 0 ? FlexibleRowCopy.pressUnreached(n) : FlexibleRowCopy.sidePress
+        XCTAssertEqual(m.pressWarning(press.id)?.line, want, "★ the card's line")
+        XCTAssertTrue(lines.contains("pressLine:\(label):" + want), "★ on the tab: '\(want)'")
+        FlexibleStageModel.controlPressLineAsBuilt = true
+        XCTAssertEqual(m.pressWarning(press.id)?.line, FlexibleRowCopy.sidePress, "E2's line: the side label")
+        FlexibleStageModel.controlPressLineAsBuilt = false
         XCTAssertLessThanOrEqual(h.frames.all["pressLine-\(label)"]?.height ?? 99, 44, "★ one line")
         XCTAssertFalse(lines.contains { $0.hasSuffix(FlexibleRowCopy.pressNotSent) }, "★ never 'Set up · core support pending' once sent")
         XCTAssertLessThanOrEqual(FlexibleRowCopy.sidePress.count, 44)

@@ -167,7 +167,7 @@ extension FlexibleStageModel {
                                      edgesBeside: !unsentEdgeGroups.isEmpty && !sentSqueezeGroups.isEmpty)
     }
 
-    /// ★ ROUND 7, M1 (5): the edges/corners groups core does not take yet (none of their presses is sent until AP9) — never
+    /// ★ ROUND 7, M1 (5): the edges/corners groups with no press in the job (since R7-E2: each kept out by its own gate reason) — never
     /// dropped from an export without a word.
     public var unsentEdgeGroups: [FlexibleSqueezeGroup] {
         let sent = Set(sentSqueezeGroups.map(\.id))
@@ -231,6 +231,10 @@ extension FlexibleStageModel {
         guard !edges.isEmpty else { return "" }
         let names = edges.map { exportName($0) }
         let who = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
-        return " \(who) (edges and corners) \(names.count == 1 ? "is" : "are") not in this export: core does not take edge or corner presses yet."
+        // ★ R7-E2 FIX (the verify: core does take presses since E2): the first kept-out press's own reason; "core does not take …
+        // yet" only when core's side is closed
+        let out = edges.lazy.flatMap(\.presses).compactMap { self.pressSupport[$0] }.first { !$0.inJob && $0.reason != .coreSupport }
+        let why = out?.line.flatMap { $0.isEmpty ? nil : $0 } ?? "core does not take edge or corner presses yet"
+        return " \(who) (edges and corners) \(names.count == 1 ? "is" : "are") not in this export: \(why)."
     }
 }

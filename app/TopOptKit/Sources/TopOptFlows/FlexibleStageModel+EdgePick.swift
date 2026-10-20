@@ -12,7 +12,7 @@
 // FlexibleFlatPrism), the face's own squeeze group KEEPS THE REST (its settings moved onto the rest, re-expressed through core's
 // frames), and each pick becomes an AP1 FlexiblePress over its pieces, aimed at core's halfway over its WHOLE member faces
 // (stored on its area at pick time — never re-aimed from the pieces), 3 mm deep, in the new group, at the group's one force he
-// typed. SAVED, NOT WRITTEN TO ANY JOB (`sentPresses` stays empty until AP9; `designInputs` strips presses), so no face
+// typed. SAVED; since R7-E2 WRITTEN to the job once FlexiblePressSupport's gate lets it in (`sentPresses`), so no face
 // press's job changes except the faces that gave a piece (their entry is their rest now).
 // ★ CORE BEFORE THE CUT. The strips' halfway and core's verdict on them are asked of a scene opened on the regions AFTER
 // the cut, before anything is committed (`changeStrips`), so the cut and its presses are one edit and one undo step;

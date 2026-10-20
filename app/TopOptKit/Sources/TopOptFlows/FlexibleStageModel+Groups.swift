@@ -112,11 +112,22 @@ extension FlexibleStageModel {
     /// group will squish less than it was designed for once the lattice carries every group.
     nonisolated static func groupEstimate(settings: FlexibleStageSettings, designs: [FlexFaceKey: FlexFaceDesignInfo],
                                           segments: [FlexFaceKey: FlexiblePinch.Segments], stacks: [FlexFaceKey: FlexStackInfo],
-                                          cuts: [Int: [RegionCut]], law: FlexiblePinch.Law) throws -> [FlexibleGroupEstimate.Miss] {
-        let gs = FlexibleSqueezeGroups.groups(settings, sent: [])   // ★ AP1: a press is not designed until AP9
+                                          cuts: [Int: [RegionCut]], law: FlexiblePinch.Law,
+                                          presses: [UUID: PressEstimate] = [:]) throws -> [FlexibleGroupEstimate.Miss] {
+        // ★ R7-E2 FIX (the verify: an edges group halved Group 1's squish and the Squish page said Ready): every press core
+        // designed counts, over its flat prism only (as the preview lattice builds it)
+        let designed = Set(presses.compactMap { designs[$0.value.key]?.refusal == nil ? $0.key : nil })
+        let gs = FlexibleSqueezeGroups.groups(settings, sent: designed)
         guard gs.count > 1 else { return [] }
         let groups = gs.map { g in
-            FlexibleGroupEstimate.Group(id: g.id, number: g.number, faces: g.regions.compactMap { r -> FlexibleGroupEstimate.Face? in
+            FlexibleGroupEstimate.Group(id: g.id, number: g.number, faces: g.presses.compactMap { id -> FlexibleGroupEstimate.Face? in
+                guard let e = presses[id], let d = designs[e.key], d.refusal == nil, d.columns.count == e.stack.columns.count
+                else { return nil }
+                var f = FlexibleGroupEstimate.Face(region: e.key.region, stack: e.stack, cuts: [],
+                                                   segments: FlexiblePinch.core(d, stack: e.stack), pressureMPa: d.columns.map(\.pressureMPa))
+                f.wedge = e.cut
+                return f
+            } + g.regions.compactMap { r -> FlexibleGroupEstimate.Face? in
                 guard let f = settings.face(r) else { return nil }
                 let k = FlexFaceKey(region: r, rotation: f.rotationDeg)
                 guard let st = stacks[k], let d = designs[k], d.refusal == nil else { return nil }
@@ -126,6 +137,22 @@ extension FlexibleStageModel {
             })
         }
         return try FlexibleGroupEstimate.estimate(groups, strainUnder: law.strainUnder)
+    }
+
+    /// ★ R7-E2 FIX: a press as the groups' estimate reads it — its design key, core's press stack, its flat prism.
+    struct PressEstimate: Sendable {
+        let key: FlexFaceKey
+        let stack: FlexStackInfo
+        let cut: FlexibleFlatPrism.Cut?
+    }
+    /// The presses the estimate reads (registered on core's press stack).
+    var pressEstimates: [UUID: PressEstimate] {
+        var out: [UUID: PressEstimate] = [:]
+        for p in settings.presses ?? [] where p.strip != nil {
+            guard let r = pressRegistrations[p.id] else { continue }
+            out[p.id] = PressEstimate(key: FlexFaceKey(region: r.key, rotation: 0), stack: r.stack, cut: FlexibleFlatPrism.cut(of: p))
+        }
+        return out
     }
 
     /// The miss of group `groupID` (nil: it squishes as designed, or one group).
