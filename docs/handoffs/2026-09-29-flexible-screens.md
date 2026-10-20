@@ -46,6 +46,8 @@ Branch `claude/flexible-screens` (PR #362), on top of `efc412a0` (U1). NOT pushe
   is closed).
 - Goldens: FlexibleAngledGoldenTests 0 DIFFERS both modes (38 identical deterministic; 32 + 1 PART-SKIP unseeded); the 16
   stage-job hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_u2.txt`).
+- iOS: BUILD SUCCEEDED at bf538c86; the app was NOT running; installed 16:31:26, NOT launched; installed dylib == built (sha256
+  eeb0b46a…); the batch's strings present (FlexiblePressCurveModal, "Edit the curves in 3D").
 
 ### Evidence (`round7/batch_u2/look/`, 13" portrait, your 10-20 pad, Edge 12, the curves bent in the window for the picture)
 - `U2_01` 2D: two tables. `U2_02` 3D: one table, both curves crossing, the gizmo. `U2_03` Front: the across curve head-on.
