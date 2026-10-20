@@ -176,6 +176,9 @@ extension FlexibleRowCopy {
     /// The curve's two views, as the icons' spoken labels.
     public static let pressViewTop = "View from the top"
     public static let pressView45 = "View 45\u{00B0} from the side"
+    /// ★ U2: [2D] / [3D] — the curve window, as the buttons' spoken labels.
+    public static let pressCurves2D = "Edit the curves in 2D"
+    public static let pressCurves3D = "Edit the curves in 3D"
     /// The flat press's stamp row: "Stamp · Palm on the edge" (a corner: "on the corner").
     public static func pressStamp(name: String, corner: Bool) -> String {
         let tail = corner ? " on the corner" : " on the edge"

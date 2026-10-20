@@ -1,0 +1,90 @@
+# U2 runs (app/TopOptKit, --scratch-path /tmp/r7x20-build) — at efc412a0 + the working tree
+### runner.log
+start 16:11:55 efc412a0 + working tree
+build exit 0 16:12:07
+u2 exit 0 16:12:55
+chunk1 exit 0 16:17:28
+chunk2 exit 0 16:26:54
+golden det exit 0 16:27:10
+golden unseeded exit 0 16:27:27
+hashes exit 0 16:28:23
+hashes cmp vs e1r: identical
+ALLDONE 16:28:23
+### u2
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-20 16:12:09.951.
+Test Suite 'Selected tests' passed at 2026-10-20 16:12:09.951.
+Test Suite 'FlexibleU2Tests' passed at 2026-10-20 16:12:54.701.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 44.589 (44.590) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-20 16:12:54.701.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 44.589 (44.590) seconds
+Test Suite 'Selected tests' passed at 2026-10-20 16:12:54.701.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 44.589 (44.591) seconds
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-20 16:12:54.806.
+Test Suite 'Selected tests' passed at 2026-10-20 16:12:54.806.
+### chunk1
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-20 16:12:56.496.
+Test Suite 'Selected tests' passed at 2026-10-20 16:12:56.496.
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-20 16:13:30.620.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 33.968 (33.969) seconds
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-20 16:13:38.551.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 7.931 (7.932) seconds
+Test Suite 'FlexibleR7E1ReviewTests' passed at 2026-10-20 16:14:31.591.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 53.039 (53.039) seconds
+Test Suite 'FlexibleR7E2ParkTests' passed at 2026-10-20 16:14:36.425.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 4.834 (4.834) seconds
+Test Suite 'FlexibleR7E2Tests' passed at 2026-10-20 16:15:22.982.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 46.556 (46.557) seconds
+Test Suite 'FlexibleR7E5Tests' passed at 2026-10-20 16:15:49.022.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 26.039 (26.040) seconds
+Test Suite 'FlexibleRound5SettingsVerifyTests' passed at 2026-10-20 16:15:51.779.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 2.756 (2.757) seconds
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-20 16:16:24.812.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 33.032 (33.033) seconds
+Test Suite 'FlexibleRowCopyTests' passed at 2026-10-20 16:16:25.413.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.600 (0.601) seconds
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-20 16:16:25.432.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.019 (0.019) seconds
+Test Suite 'FlexibleU1Tests' passed at 2026-10-20 16:17:28.284.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 62.852 (62.852) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-20 16:17:28.284.
+	 Executed 69 tests, with 0 failures (0 unexpected) in 271.627 (271.634) seconds
+Test Suite 'Selected tests' passed at 2026-10-20 16:17:28.284.
+	 Executed 69 tests, with 0 failures (0 unexpected) in 271.627 (271.635) seconds
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-20 16:17:28.401.
+Test Suite 'Selected tests' passed at 2026-10-20 16:17:28.401.
+### chunk2
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-20 16:17:30.171.
+Test Suite 'Selected tests' passed at 2026-10-20 16:17:30.171.
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-20 16:17:36.121.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 5.795 (5.795) seconds
+Test Suite 'FlexibleFlatPrismHostedTests' passed at 2026-10-20 16:18:41.771.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 65.650 (65.650) seconds
+Test Suite 'FlexibleR7E1ReviewHostedTests' passed at 2026-10-20 16:23:28.662.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 286.891 (286.891) seconds
+Test Suite 'FlexibleR7E2HostedTests' passed at 2026-10-20 16:23:50.106.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 21.444 (21.444) seconds
+Test Suite 'FlexibleR7MergeTests' passed at 2026-10-20 16:24:17.033.
+Test Suite 'FlexibleR7SettingsHostedTests' passed at 2026-10-20 16:26:53.904.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 156.871 (156.872) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-20 16:26:53.904.
+	 Executed 14 tests, with 1 test skipped and 0 failures (0 unexpected) in 563.576 (563.579) seconds
+Test Suite 'Selected tests' passed at 2026-10-20 16:26:53.904.
+	 Executed 14 tests, with 1 test skipped and 0 failures (0 unexpected) in 563.576 (563.580) seconds
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-20 16:26:54.031.
+Test Suite 'Selected tests' passed at 2026-10-20 16:26:54.031.
+### FLEX-U2 lines
+FLEX-U2 before [TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0]] · OK [1.0, 0.4, 1.0] [1.0, 0.6, 1.0] · one undo → [TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0]]
+  RED live edits: after Cancel across [1.0, 0.4, 1.0]; after OK + one undo [TopOptFlows.FlexiblePressCurveBaselines.Axis.along: [1.0, 1.0], TopOptFlows.FlexiblePressCurveBaselines.Axis.across: [1.0, 0.4, 1.0]]
+FLEX-U2 U2 row: shape 778-822 · 2D 356,800 · 3D 404,800 · [↓] false · [45°] false
+  RED old buttons: shape 778-822 · 2D - · 3D - · [↓] true · [45°] true
+  U2 2D: window (206.0, 394.0, 620.0, 588.0) · across (222.0, 455.0, 588.0, 208.0) · along (222.0, 675.0, 588.0, 208.0) · 3D table false
+  RED one table: ["curveTable-both"]
+  Front: across span 236.2 pt rise 106.3 pt · along span 8.4 pt
+  Top: along span 235.9 pt rise 106.3 pt · across span 14.5 pt
+FLEX-U2 U2 3D: Front: across span·view 0.000 up·view 0.000, along span·view 1.000 · Top: along 0.050 0.000, across span·view 0.999
+  RED model angle: Front: across span·view 0.632 up·view 0.769, along span·view 0.091 · Top: along 0.079 0.666, across span·view 0.742
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+### golden_det: 38 identical, 0 DIFFERS, 0 PART-SKIP
+### golden_unseeded: 32 identical, 0 DIFFERS, 1 PART-SKIP
+### note: FlexibleRound7ViewsReviewHostedTests is an extension of FlexibleRound7ViewsHostedTests, so the chunk2 filter ran none of it (not run this step)

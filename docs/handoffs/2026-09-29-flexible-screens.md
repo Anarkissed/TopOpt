@@ -1,6 +1,68 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · U1 — your notes of 2026-10-20: the Top bends with the side, a stamp stays on the model, an edge card reads like a face's, the camera stays put, no rods in the lattice (2026-10-20) (read this first)
+## ★ Round 7 · U2 — your notes of 2026-10-20, item 5: the curve window — [2D] and [3D] replace [↓] and [45°] (2026-10-20) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `efc412a0` (U1). NOT pushed (you said hold). App only; core untouched; no
+#354/main file edited. **Front-end only**: sending edges to core (C1) is next, after this step, as you ordered;
+`FlexibleBackend.sendsPresses` stays off. Judged on YOUR pad of 10-20 (`round7/batch_u1/his_live_1020`, never written).
+
+### What you will see now, in plain words
+- An edge's **Shape** row reads `Shape [Curves | Stamp] [2D] [3D]` on one line — the [↓] and [45°] buttons are gone.
+- **[2D]** opens a window over everything: the edge's two curves in **two tables, one above the other** — "Across the edge ·
+  Face 1 → Face 4" (white) and "Along the edge" (cyan). Each is edited as before: drag a point, tap the line to add one, tap a
+  point for its ×. The bottom line of a table is the deepest squish (the flat face), the dashed top line is no squish.
+- **[3D]** opens the same window with **both curves on one table**, crossing at their middles as on the part, without the part,
+  facing you straight (not the squish view's angle). It has its own **gizmo**: **Front shows the across curve head-on, Top shows
+  the along curve head-on** (the other one, seen edge-on there, is a faint line and cannot be grabbed by mistake). Drag the
+  table or the gizmo to turn it; Home returns to the first view. [2D | 3D] at the window's top switches without losing edits.
+- **[OK]** closes and keeps the edits — one undo step for the whole window. **[Cancel]** closes and the press is exactly what it
+  was before the window opened (nothing is written while the window is open).
+- The camera of the page never moves for any of this.
+
+### His words → change → test (`FlexibleU2Tests`, your 10-20 pad; each RED control asserted red inside its test)
+- "Get rid of the down and 45 degree buttons. There should only be 2D or 3D view" → `FlexiblePressShapeRows`: [2D] / [3D] (44 pt
+  each, same width as before). Hosted at 13" portrait, Edge 12: Shape row y 778–822, [2D] at (356, 800), [3D] at (404, 800), no
+  [↓] / [45°]. RED `controlOldViewButtons`: [↓] / [45°] back, no [2D] / [3D].
+- "a modal over everything … the two curves in two different tables, one on top of the other" → `FlexiblePressCurveModalView`
+  (FlexiblePressCurveModal.swift), drawn on top of the whole Squish page; `FlexibleCurveTable2D` reuses the curve editor
+  unchanged. Hosted: window (206, 394, 620 × 588); across table y 455–663 above along y 675–883, both inside it, no 3D table.
+  RED `controlOneTable`: one table.
+- "both curves … on the same table in 3D, intersecting as they do in the model, but without the model … Keep the position gizmo
+  so that the front shows one view head-on, and the top shows the other" → `FlexibleCurveTable3D` + `curves3D`: the across curve
+  runs down Y, the along curve along Z, both rise along +X (the one direction square to both Front and Top), crossing at their
+  middles. Front: across seen at 236 pt with its full height, along 8 pt (edge-on, not grabbable); Top: along 236 pt, across 15 pt.
+  RED `controlModelAngle` (the curves at the part's own angle): Front / Top no longer head-on (up·view 0.77 / 0.67).
+- "press OK to close the modal or cancel to revert to what it was beforehand" → a draft (`curveDraft`): Cancel writes nothing;
+  OK writes both curves in ONE edit and seals ONE undo step. Test: Cancel → as before; OK → both kept; one undo → both back.
+  RED `controlLiveEdits` (each drag written at once): Cancel keeps the drag; after OK one undo leaves the earlier drag.
+- Found by looking (U2_03/04): at the stage's 45° lens the edge-on curve spread 19 pt across the head-on curve's middle point and
+  took its touches → a long lens (17°) and the edge-on curve is not mounted for editing in that view.
+
+### Raw runs — `round7/batch_u2/u2_runs.txt` (app/TopOptKit, --scratch-path /tmp/r7x20-build), ONE pass
+- `FlexibleU2Tests` 3/3. The classes that touch or pin the changed files, 2 chunks: 69 tests / 14 tests (1 evidence skip), 0
+  failures, no re-pin (U1, PressCurve, R7E5, R7E1Review, R7E2Park, R7E2, Round5SettingsVerify, Round6, RowCopy, SquishCopy,
+  EdgeGroups; hosted FlatPrism, R7E1Review, R7E2, R7Merge, R7Settings, EdgeGroups). Not run: `FlexibleRound7ViewsReviewHostedTests`
+  (it is an extension of FlexibleRound7ViewsHostedTests, so the filter matched nothing; the page change is inert while the window
+  is closed).
+- Goldens: FlexibleAngledGoldenTests 0 DIFFERS both modes (38 identical deterministic; 32 + 1 PART-SKIP unseeded); the 16
+  stage-job hashes cmp-identical to `stage_job_hashes_e1r.txt` (`stage_job_hashes_u2.txt`).
+
+### Evidence (`round7/batch_u2/look/`, 13" portrait, your 10-20 pad, Edge 12, the curves bent in the window for the picture)
+- `U2_01` 2D: two tables. `U2_02` 3D: one table, both curves crossing, the gizmo. `U2_03` Front: the across curve head-on.
+  `U2_04` Top: the along curve head-on. (The test pictures draw the part behind the window undimmed — the offscreen composite;
+  in the app the whole page sits under the window's dark veil.)
+
+### Open questions
+1. Both curves rise to the RIGHT in their head-on views (that is what lets Front show one and Top the other). If you would rather
+   see them rise UP, the along curve would be head-on from Right instead of Top. Keep Front / Top?
+2. Each curve is drawn the same length in 3D (the true 13 mm across beside a ~100 mm along was too small to drag); the heights
+   share one scale. OK, or true proportions?
+3. The curves are still drawn and draggable ON THE PART too (you said the window is "better than doing it ON the model itself").
+   Should the curves on the part become display-only, or go?
+4. A corner: 2D shows its ONE curve in one table (core holds one curve for a corner); 3D shows it on two of its sides, one
+   head-on from Front, one from Top. Faces are unchanged (their curves stay on the face). Want the same window for faces?
+
+## ★ Round 7 · U1 — your notes of 2026-10-20: the Top bends with the side, a stamp stays on the model, an edge card reads like a face's, the camera stays put, no rods in the lattice (2026-10-20)
 
 Branch `claude/flexible-screens` (PR #362), on top of `f1362eb3` (R7-E5). NOT pushed (you said hold). App only; core untouched; no
 #354/main file edited. **Front-end only**: sending edges to core (C1) comes after U2, as you ordered ("Send to core should be done

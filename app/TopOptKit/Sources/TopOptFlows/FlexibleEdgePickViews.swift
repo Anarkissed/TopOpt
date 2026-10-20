@@ -21,7 +21,7 @@ extension FlexibleRowCopy.Info {
     public static let flatUpDown = "Tips the arrow more into the top face or more into the sides. 0° is halfway between the faces."
     public static let flatLeftRight = "Swings the arrow between the two side faces. 0° is halfway between the faces."
     /// ★ R7-E4: the flat press's Shape row, its stamp.
-    public static let pressShape = "Curves: two curves inside the flat prism — across the edge (one side on each face) and along it. They start as the flat prism itself; drag a point toward the part for softer there. A curve never passes the flat face. The two buttons turn the view: from the top, and 45° up from the side the arrow comes from. Stamp: ONE stamp that sits on the edge (a corner: on its point); drag its handle along the edge. Shape only for now — core support comes later."
+    public static let pressShape = "Curves: two curves inside the flat prism — across the edge (one side on each face) and along it. They start as the flat prism itself; drag a point toward the part for softer there. A curve never passes the flat face. [2D] and [3D] open the curves in a window over everything: 2D as two tables, one above the other; 3D on one table, turned with the cube — Front shows the across curve head-on, Top the along curve. OK keeps your changes, Cancel puts them back. Stamp: ONE stamp that sits on the edge (a corner: on its point); drag its handle along the edge. Shape only for now — core support comes later."
     public static let pressStamp = "What presses the edge. It sits on the edge and slides only along it; a corner's stays on its point, and only its size and turn change."
     public static let pressStampTurn = "Turns the stamp on the edge: 0° lays its long side along the edge; turning it away counts up."
 }
@@ -487,7 +487,7 @@ struct FlexiblePressShapeRows: View {
     let press: FlexiblePress
     let strip: FlexibleStrip
     @Binding var padTarget: String?
-    /// ★ U1: the curve's [Top] / [45°] buttons — only on the press he works on (U2 replaces them).
+    /// ★ U1: the curve's buttons — only on the press he works on (★ U2: [2D] / [3D], each opening the curve window).
     var viewButtons: Bool = true
 
     var body: some View {
@@ -498,8 +498,14 @@ struct FlexiblePressShapeRows: View {
                           id: "flexible-press-shape", equalWidths: false) { v in model.setPressShape(press.id, v) }
                     .fixedSize()
                 if !stamp, viewButtons {
-                    viewButton(.top, icon: "arrow.down", label: FlexibleRowCopy.pressViewTop)
-                    viewButton(.deg45, icon: "rotate.3d", label: FlexibleRowCopy.pressView45)
+                    if FlexiblePressCurveModal.controlOldViewButtons {   // (RED CONTROL: R7-E4's [↓] / [45°])
+                        viewButton(.top, icon: "arrow.down", label: FlexibleRowCopy.pressViewTop)
+                        viewButton(.deg45, icon: "rotate.3d", label: FlexibleRowCopy.pressView45)
+                    } else {
+                        // ★ U2 (his notes of 2026-10-20, item 5): only [2D] / [3D] — each opens the curves in a window over everything
+                        modalButton(.flat2D, label: FlexibleRowCopy.pressCurves2D)
+                        modalButton(.table3D, label: FlexibleRowCopy.pressCurves3D)
+                    }
                 }
             }
         }
@@ -546,6 +552,22 @@ struct FlexiblePressShapeRows: View {
         }
     }
 
+    private func modalButton(_ mode: FlexiblePressCurveDraft.Mode, label: String) -> some View {
+        Button { model.openCurveModal(press.id, mode) } label: {
+            Text(mode == .flat2D ? "2D" : "3D").font(.system(size: 13, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(DS.Color.fillSubtle.color))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressCurves-\(mode.rawValue)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("flexible-press-curves-\(mode.rawValue)")
+    }
+
     private func viewButton(_ v: FlexiblePressCurveBaselines.View, icon: String, label: String) -> some View {
         Button { model.showPressCurve(press.id, v) } label: {
             Group {
@@ -559,6 +581,9 @@ struct FlexiblePressShapeRows: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressView-\(v.rawValue)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
         .accessibilityIdentifier("flexible-press-view-\(v.rawValue)")
     }
 }

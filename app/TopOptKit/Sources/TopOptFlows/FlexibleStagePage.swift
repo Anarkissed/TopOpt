@@ -285,6 +285,10 @@ public struct FlexibleStagePage: View {
                         .transition(.opacity)
                         .zIndex(30)
                 }
+                // ★ U2 (his notes of 2026-10-20, item 5): the curve window, over everything
+                if let d = model.curveDraft, let p = model.press(d.press), let st = p.strip, !p.settings.isStampShape {
+                    FlexiblePressCurveModalView(model: model, draft: d, strip: st).zIndex(60)
+                }
             }
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["page": g.frame(in: .global)])
