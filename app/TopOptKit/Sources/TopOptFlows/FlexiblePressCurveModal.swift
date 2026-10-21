@@ -15,6 +15,9 @@
 // rise along +X — the one direction square to the gizmo's Front AND Top — so [Front] shows the across curve head-on and [Top] the
 // along curve (a corner: its curve on two of its sides, one head-on from each). Each span is drawn the same length (the true
 // 13 mm across beside a 100 mm along was too small to drag); the heights are the same scale for both.
+// ★ U21 B (his notes of 2026-10-21, Img16 finally, 27.png): the window fills 80 % of the screen (FlexibleCurveWindowLayout; the
+// 3D camera fits by aspect), and a legend column beside the charts carries [Mirror] (Left → Right / Right → Left) per curve and
+// [Copy] between the two (FlexibleCurveMirror) — draft only, as every drag; a corner has none.
 
 import SwiftUI
 import simd
@@ -33,6 +36,8 @@ public struct FlexiblePressCurveDraft: Equatable {
     /// The press's curves when the window opened ([Cancel] returns to these — nothing was written).
     public let before: [FlexiblePressCurveBaselines.Axis: FlexCurve]
     public var curves: [FlexiblePressCurveBaselines.Axis: FlexCurve]
+    /// ★ U21 B: bumped by each [Mirror] / [Copy] — the tables clear their selected point (their selection is private state).
+    public var resets: Int = 0
 }
 
 public enum FlexiblePressCurveModal {
@@ -260,7 +265,43 @@ extension FlexibleStageModel {
 
 // MARK: - the window
 
+/// ★ U21 B CURVE-WINDOW-80 (his notes of 2026-10-21, Img16 finally: "Please also expand the modal to fill 80% of the screen, going
+/// overtop most assets. This is especially required for the 3D view."): the window is 0.8 × the screen, centred on it; the 2D
+/// tables share its height (≥ 140 pt each), the 3D table fills the rest, and the 3D camera fits by aspect (a taller-than-wide table
+/// widens its vertical lens so the square table fits its WIDTH, never clipped nor under the gizmo when turned).
+enum FlexibleCurveWindowLayout {
+    static let fraction: CGFloat = 0.8
+    /// The legend column beside the charts (Mirror / Copy).
+    static let column: CGFloat = 168
+    static let minChart: CGFloat = 140
+    static let min3D: CGFloat = 240
+    /// The legend's buttons: 44 pt tall, 8 pt apart.
+    static let button: CGFloat = 44, buttonGap: CGFloat = 8
+
+    /// ★ RED CONTROL only: the window before U21 (620 pt wide at most, its height its content, charts 170 pt, 3D ≤ 460 pt).
+    nonisolated(unsafe) static var controlOldWindowSize = false
+    /// ★ RED CONTROL only: the 3D table's camera keeps its vertical lens in a taller-than-wide table (the square table clips).
+    nonisolated(unsafe) static var controlNoAspectFit = false
+
+    /// The window in the reader's own space: 0.8 × the screen (the reader's size + its safe-area insets), centred on the screen.
+    static func card(size: CGSize, insets: EdgeInsets) -> CGRect {
+        let sw = size.width + insets.leading + insets.trailing, sh = size.height + insets.top + insets.bottom
+        let w = (fraction * sw).rounded(), h = (fraction * sh).rounded()
+        return CGRect(x: sw / 2 - insets.leading - w / 2, y: sh / 2 - insets.top - h / 2, width: w, height: h)
+    }
+
+    /// The 3D table's camera for a table of `size`: in a taller-than-wide table the vertical lens widens by height ÷ width, so the
+    /// table's horizontal lens is the camera's own (the fit is by the smaller side).
+    static func fitted(_ c: OrbitCamera, size: CGSize) -> OrbitCamera {
+        guard !controlNoAspectFit, size.width > 0, size.height > size.width else { return c }
+        var out = c
+        out.fovY = 2 * atan(tan(c.fovY / 2) * Float(size.height / size.width))
+        return out
+    }
+}
+
 /// ★ U2: the window over everything — the press's curves in 2D (stacked tables) or 3D (one table, the gizmo), [Cancel] / [OK].
+/// ★ U21 B: 80 % of the screen; the Mirror / Copy legend column beside the charts (none for a corner).
 struct FlexiblePressCurveModalView: View {
     @ObservedObject var model: FlexibleStageModel
     let draft: FlexiblePressCurveDraft
@@ -269,6 +310,8 @@ struct FlexiblePressCurveModalView: View {
     @StateObject private var camera: OrbitCameraModel
     /// (tests only) the open window's 3D camera — the one its gizmo turns.
     @MainActor static weak var shownCamera: OrbitCameraModel?
+    typealias Axis = FlexiblePressCurveBaselines.Axis
+    typealias L = FlexibleCurveWindowLayout
 
     init(model: FlexibleStageModel, draft: FlexiblePressCurveDraft, strip: FlexibleStrip?) {
         self.model = model
@@ -284,14 +327,23 @@ struct FlexiblePressCurveModalView: View {
                 Color.black.opacity(0.6).ignoresSafeArea()
                     .contentShape(Rectangle()).onTapGesture {}
                     .accessibilityHidden(true)
-                card(width: Swift.min(geo.size.width - 2 * PageChrome.edge, 620), height: geo.size.height)
+                if L.controlOldWindowSize {   // (RED CONTROL: the window before U21)
+                    card(width: Swift.min(geo.size.width - 2 * PageChrome.edge, 620), height: nil, old3D: Swift.min(460, Swift.max(300, geo.size.height - 360)))
+                } else {
+                    let r = L.card(size: geo.size, insets: geo.safeAreaInsets)
+                    card(width: r.width, height: r.height, old3D: nil)
+                        .position(x: r.midX, y: r.midY)
+                }
             }
         }
         .onAppear { Self.shownCamera = camera }
         .accessibilityIdentifier("flexible-curve-modal")
     }
 
-    private func card(width: CGFloat, height: CGFloat) -> some View {
+    private var isFace: Bool { strip == nil }
+    private var pair: (top: Axis, bottom: Axis)? { FlexibleCurveMirror.copyPair(face: isFace, strip: strip) }
+
+    private func card(width: CGFloat, height: CGFloat?, old3D: CGFloat?) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: DS.Space.s) {
                 Text(FlexiblePressCurveModal.title(draft.press.map { model.stripTitle($0) } ?? draft.face.map { model.displayName($0) } ?? ""))
@@ -302,16 +354,25 @@ struct FlexiblePressCurveModalView: View {
                           equalWidths: false) { v in model.setCurveModalMode(FlexiblePressCurveDraft.Mode(rawValue: v) ?? .flat2D) }
                     .fixedSize()
             }
-            if draft.mode == .flat2D {
-                ForEach(strip.map { FlexiblePressCurveModal.tables2D($0, names: draft.press.map { model.stripFaceNames($0) } ?? []) }
-                        ?? FlexiblePressCurveModal.faceTables2D()) { t in
-                    FlexibleCurveTable2D(table: t, curves: draft.curves) { a, c in model.setDraftCurve(a, c) }
+            HStack(alignment: .top, spacing: DS.Space.l) {
+                if draft.mode == .flat2D {
+                    VStack(alignment: .leading, spacing: DS.Space.m) {
+                        ForEach(strip.map { FlexiblePressCurveModal.tables2D($0, names: draft.press.map { model.stripFaceNames($0) } ?? []) }
+                                ?? FlexiblePressCurveModal.faceTables2D()) { t in
+                            FlexibleCurveTable2D(table: t, curves: draft.curves, resetToken: draft.resets,
+                                                 chartHeight: old3D == nil ? nil : 170) { a, c in model.setDraftCurve(a, c) }
+                        }
+                    }
+                    if let p = pair, !L.controlOldWindowSize { column2D(p) }
+                } else {
+                    FlexibleCurveTable3D(camera: camera, curves3D: strip.map { FlexiblePressCurveModal.curves3D($0, cut: draft.press.flatMap { model.flatCut($0) }) }
+                                            ?? FlexiblePressCurveModal.faceCurves3D(), face: isFace,
+                                         curves: draft.curves, height: old3D, resetToken: draft.resets,
+                                         showsLegend: pair == nil || L.controlOldWindowSize) { a, c in model.setDraftCurve(a, c) }
+                    if let p = pair, !L.controlOldWindowSize { column3D(p) }
                 }
-            } else {
-                FlexibleCurveTable3D(camera: camera, curves3D: strip.map { FlexiblePressCurveModal.curves3D($0, cut: draft.press.flatMap { model.flatCut($0) }) }
-                                        ?? FlexiblePressCurveModal.faceCurves3D(), face: strip == nil,
-                                     curves: draft.curves, height: Swift.min(460, Swift.max(300, height - 360))) { a, c in model.setDraftCurve(a, c) }
             }
+            .frame(maxHeight: height == nil ? nil : .infinity, alignment: .top)
             Text(FlexiblePressCurveModal.hint).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.m) {
                 Spacer()
@@ -321,6 +382,9 @@ struct FlexiblePressCurveModalView: View {
                         .background(Capsule().fill(DS.Color.fillSelected.color))
                 }
                 .buttonStyle(.plain)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveCancel": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 .accessibilityIdentifier("flexible-curve-modal-cancel")
                 Button { model.closeCurveModal(keep: true) } label: {
                     Text(FlexiblePressCurveModal.ok).font(.system(size: 15, weight: .semibold))
@@ -328,23 +392,121 @@ struct FlexiblePressCurveModalView: View {
                         .background(Capsule().fill(FlexibleStageStyle.accent))
                 }
                 .buttonStyle(.plain)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveOK": g.frame(in: .global)])
+                }.allowsHitTesting(false))
                 .accessibilityIdentifier("flexible-curve-modal-ok")
             }
         }
         .padding(DS.Space.l)
-        .frame(width: width)
+        .frame(width: width, height: height, alignment: .top)
         .background(RoundedRectangle(cornerRadius: DS.Radius.dialog, style: .continuous).fill(DS.Color.chipSolid.color))
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.dialog, style: .continuous).strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveModal": g.frame(in: .global)])
         }.allowsHitTesting(false))
     }
+
+    // MARK: the legend column (U21 B CURVE-MIRROR)
+
+    /// A curve's short name for the spoken labels ("X", "Across").
+    private func name(_ a: Axis) -> String {
+        if isFace { return a == .along ? "X" : "Y" }
+        switch a { case .across: return "across"; case .along: return "along"; case .corner: return "corner" }
+    }
+
+    /// 2D: [Mirror] beside each chart (its colour dot), [Copy] between the two.
+    private func column2D(_ p: (top: Axis, bottom: Axis)) -> some View {
+        VStack(alignment: .leading, spacing: L.buttonGap) {
+            mirrorBlock(p.top, head: FlexibleRowCopy.curveMirror)
+            Spacer(minLength: L.buttonGap)
+            copyBlock(p)
+            Spacer(minLength: L.buttonGap)
+            mirrorBlock(p.bottom, head: FlexibleRowCopy.curveMirror)
+        }
+        .frame(width: L.column)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveLegend": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityIdentifier("flexible-curve-legend")
+    }
+
+    /// 3D: each curve's block named by the curve (its colour dot, "head-on from Top / Front"), then [Copy].
+    private func column3D(_ p: (top: Axis, bottom: Axis)) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.l) {
+            mirrorBlock(p.top, head: FlexiblePressCurveModal.legend(p.top, face: isFace))
+            mirrorBlock(p.bottom, head: FlexiblePressCurveModal.legend(p.bottom, face: isFace))
+            copyBlock(p)
+            Spacer(minLength: 0)
+        }
+        .frame(width: L.column)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveLegend": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityIdentifier("flexible-curve-legend")
+    }
+
+    private func mirrorBlock(_ a: Axis, head: String) -> some View {
+        let c = draft.curves[a] ?? FlexiblePressCurveBaselines.ones
+        return VStack(alignment: .leading, spacing: L.buttonGap) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle().fill(FlexiblePressCurveModal.tint(a)).frame(width: 8, height: 8)
+                Text(head).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            actionButton(FlexibleRowCopy.curveMirrorLR, id: "mirror-\(a.rawValue)-lr",
+                         spoken: FlexibleRowCopy.curveMirrorSpoken(name(a), leftToRight: true),
+                         enabled: FlexibleCurveMirror.changes(c, .leftToRight)) { model.mirrorDraftCurve(a, .leftToRight) }
+            actionButton(FlexibleRowCopy.curveMirrorRL, id: "mirror-\(a.rawValue)-rl",
+                         spoken: FlexibleRowCopy.curveMirrorSpoken(name(a), leftToRight: false),
+                         enabled: FlexibleCurveMirror.changes(c, .rightToLeft)) { model.mirrorDraftCurve(a, .rightToLeft) }
+        }
+    }
+
+    private func copyBlock(_ p: (top: Axis, bottom: Axis)) -> some View {
+        let same = (draft.curves[p.top] ?? FlexiblePressCurveBaselines.ones) == (draft.curves[p.bottom] ?? FlexiblePressCurveBaselines.ones)
+        return VStack(alignment: .leading, spacing: L.buttonGap) {
+            Text(FlexibleRowCopy.curveCopy).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+            actionButton(isFace ? FlexibleRowCopy.curveCopyXY : FlexibleRowCopy.curveCopyAcrossAlong, id: "copy-down",
+                         spoken: FlexibleRowCopy.curveCopySpoken(name(p.top), name(p.bottom)), enabled: !same) {
+                model.copyDraftCurve(from: p.top, to: p.bottom)
+            }
+            actionButton(isFace ? FlexibleRowCopy.curveCopyYX : FlexibleRowCopy.curveCopyAlongAcross, id: "copy-up",
+                         spoken: FlexibleRowCopy.curveCopySpoken(name(p.bottom), name(p.top)), enabled: !same) {
+                model.copyDraftCurve(from: p.bottom, to: p.top)
+            }
+        }
+    }
+
+    private func actionButton(_ label: String, id: String, spoken: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: L.button)
+                .background(Capsule().fill(DS.Color.fillSelected.color))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveAction-\(id)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityLabel(spoken)
+        .accessibilityIdentifier("flexible-curve-\(id)")
+    }
 }
 
 /// ★ U2 2D: one flat table — its curve(s) with FlexibleCurveEditor unchanged (drag a point, tap the line to add one, × deletes).
+/// ★ U21 B: the chart shares the window's height (≥ 140 pt); `resetToken` clears the selected point after a Mirror / Copy.
 struct FlexibleCurveTable2D: View {
     let table: FlexiblePressCurveModal.Table
     let curves: [FlexiblePressCurveBaselines.Axis: FlexCurve]
+    var resetToken: Int = 0
+    /// nil: the chart fills its share of the window (U21 B); a number: that height (the red control's old window).
+    var chartHeight: CGFloat? = nil
     let onChange: (FlexiblePressCurveBaselines.Axis, FlexCurve) -> Void
     @State private var selected: [FlexiblePressCurveBaselines.Axis: Int] = [:]
 
@@ -364,8 +526,11 @@ struct FlexibleCurveTable2D: View {
                     }
                 }
                 .coordinateSpace(name: FlexibleStageSpace.name)
+                .background(GeometryReader { c in
+                    Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveChart-\(table.id)": c.frame(in: .global)])
+                }.allowsHitTesting(false))
             }
-            .frame(height: 170)
+            .frame(minHeight: chartHeight ?? FlexibleCurveWindowLayout.minChart, maxHeight: chartHeight ?? .infinity)
             HStack {
                 Text(table.ends.0)
                 Spacer()
@@ -374,6 +539,7 @@ struct FlexibleCurveTable2D: View {
             .font(.system(size: 11, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
             .padding(.horizontal, FlexiblePressCurveModal.flatMargin.width - 8)
         }
+        .onChange(of: resetToken) { _ in selected = [:] }
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveTable-\(table.id)": g.frame(in: .global)])
         }.allowsHitTesting(false))
@@ -383,22 +549,33 @@ struct FlexibleCurveTable2D: View {
 
 /// ★ U2 3D: both curves on ONE table, the flat face as the table, its own camera (drag the table or the gizmo to turn it; the
 /// gizmo's Front and Top show each curve head-on). The model is not drawn.
+/// ★ U21 B: the table fills the window's rest; its camera fits by aspect (FlexibleCurveWindowLayout.fitted); small L / R tags at
+/// each curve's ends (Mirror's left and right); the legend moved into the column beside it (kept under it for a corner).
 struct FlexibleCurveTable3D: View {
     @ObservedObject var camera: OrbitCameraModel
     let curves3D: [FlexiblePressCurveModal.Curve3D]
     /// ★ X20b: a face's X / Y (the legend's words).
     var face: Bool = false
     let curves: [FlexiblePressCurveBaselines.Axis: FlexCurve]
-    let height: CGFloat
+    /// nil: the table fills the window's rest (U21 B); a number: that height (the red control's old window).
+    var height: CGFloat? = nil
+    var resetToken: Int = 0
+    /// The legend under the table (a corner, which has no column).
+    var showsLegend: Bool = true
     let onChange: (FlexiblePressCurveBaselines.Axis, FlexCurve) -> Void
     @State private var selected: [String: Int] = [:]
     @State private var dragLast: CGPoint?
+
+    /// The projection the table draws and edits with (tests read the same).
+    static func projection(_ c: OrbitCamera, _ size: CGSize) -> CameraProjection {
+        CameraProjection(camera: FlexibleCurveWindowLayout.fitted(c, size: size), viewportSize: size)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 GeometryReader { g in
-                    let pr = CameraProjection(camera: camera.camera, viewportSize: g.size)
+                    let pr = Self.projection(camera.camera, g.size)
                     ZStack {
                         RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.fillSubtle.color)
                             .gesture(DragGesture(minimumDistance: 2)
@@ -427,30 +604,53 @@ struct FlexibleCurveTable3D: View {
                     }.allowsHitTesting(false))
                     .accessibilityIdentifier("flexible-curve-modal-gizmo")
             }
-            .frame(height: height)
-            HStack(spacing: DS.Space.m) {
-                ForEach(Array(Set(curves3D.map(\.axis))).sorted { $0.rawValue < $1.rawValue }, id: \.self) { a in
-                    HStack(spacing: 6) {
-                        Circle().fill(FlexiblePressCurveModal.tint(a)).frame(width: 8, height: 8)
-                        Text(FlexiblePressCurveModal.legend(a, face: face)).font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+            .frame(minHeight: height ?? FlexibleCurveWindowLayout.min3D, maxHeight: height ?? .infinity)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveView3D": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            if showsLegend {
+                HStack(spacing: DS.Space.m) {
+                    ForEach(Array(Set(curves3D.map(\.axis))).sorted { $0.rawValue < $1.rawValue }, id: \.self) { a in
+                        HStack(spacing: 6) {
+                            Circle().fill(FlexiblePressCurveModal.tint(a)).frame(width: 8, height: 8)
+                            Text(FlexiblePressCurveModal.legend(a, face: face)).font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                        }
                     }
                 }
             }
         }
+        .onChange(of: resetToken) { _ in selected = [:] }
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveTable3D": g.frame(in: .global)])
         }.allowsHitTesting(false))
         .accessibilityIdentifier("flexible-curve-table-3d")
     }
 
-    /// The table: the flat face (x = 0) as a grid square under the curves, and a short arrow for "softer" (+X).
-    private func table(_ ctx: inout GraphicsContext, _ pr: CameraProjection) {
+    /// The table's square in table space (the flat face x = 0, padded around the curves): its four corners.
+    static func tableCorners(_ curves3D: [FlexiblePressCurveModal.Curve3D]) -> [SIMD3<Double>] {
         let pts = curves3D.flatMap { $0.baseline.points }
-        guard let f = pts.first else { return }
+        guard let f = pts.first else { return [] }
         let lo = pts.reduce(f) { simd_min($0, $1) }, hi = pts.reduce(f) { simd_max($0, $1) }
         let pad = 0.12
-        let y0 = lo.y - pad, y1 = hi.y + pad, z0 = lo.z - pad, z1 = hi.z + pad
+        return [SIMD3(0, lo.y - pad, lo.z - pad), SIMD3(0, lo.y - pad, hi.z + pad), SIMD3(0, hi.y + pad, hi.z + pad), SIMD3(0, hi.y + pad, lo.z - pad)]
+    }
+
+    /// Where a curve's L / R tag sits: just past its end, out along the curve on screen (nil when seen edge-on).
+    static func endTags(_ c: FlexiblePressCurveModal.Curve3D, _ pr: CameraProjection) -> (l: CGPoint, r: CGPoint)? {
+        guard c.axis != .corner, FlexiblePressCurveModal.editable(c, pr),
+              let a = pr.project(SIMD3<Float>(c.baseline.at(0))), let b = pr.project(SIMD3<Float>(c.baseline.at(1))) else { return nil }
+        let d = hypot(b.x - a.x, b.y - a.y)
+        guard d > 1 else { return nil }
+        let ux = (b.x - a.x) / d, uy = (b.y - a.y) / d, k: CGFloat = 14
+        return (CGPoint(x: a.x - ux * k, y: a.y - uy * k), CGPoint(x: b.x + ux * k, y: b.y + uy * k))
+    }
+
+    /// The table: the flat face (x = 0) as a grid square under the curves, and a short arrow for "softer" (+X).
+    private func table(_ ctx: inout GraphicsContext, _ pr: CameraProjection) {
+        let cs = Self.tableCorners(curves3D)
+        guard cs.count == 4 else { return }
+        let y0 = cs[0].y, y1 = cs[2].y, z0 = cs[0].z, z1 = cs[2].z
         func s(_ y: Double, _ z: Double, _ x: Double = 0) -> CGPoint? { pr.project(SIMD3<Float>(Float(x), Float(y), Float(z))) }
         var fill = Path()
         if let a = s(y0, z0), let b = s(y0, z1), let c = s(y1, z1), let d = s(y1, z0) { fill.addLines([a, b, c, d]); fill.closeSubpath() }
@@ -468,6 +668,13 @@ struct FlexibleCurveTable3D: View {
             var l = Path()
             if let a = pr.project(SIMD3<Float>(c.baseline.at(0))), let b = pr.project(SIMD3<Float>(c.baseline.world(0.5, 1))) { l.move(to: a); l.addLine(to: b) }
             ctx.stroke(l, with: .color(FlexiblePressCurveModal.tint(c.axis).opacity(0.45)), lineWidth: 2)
+        }
+        // ★ U21 B: L / R at each curve's ends (what Mirror's left and right mean on this table)
+        for c in curves3D {
+            guard let t = Self.endTags(c, pr) else { continue }
+            let tint = FlexiblePressCurveModal.tint(c.axis)
+            ctx.draw(Text("L").font(.system(size: 11, weight: .bold)).foregroundColor(tint), at: t.l)
+            ctx.draw(Text("R").font(.system(size: 11, weight: .bold)).foregroundColor(tint), at: t.r)
         }
     }
 }

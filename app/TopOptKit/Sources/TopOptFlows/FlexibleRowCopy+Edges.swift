@@ -192,6 +192,23 @@ extension FlexibleRowCopy {
     /// ★ X20b: a face's two tables in the curve window.
     public static let faceCurveX = "X curve \u{00B7} along the face's X edge"
     public static let faceCurveY = "Y curve \u{00B7} along the face's Y edge"
+    /// ★ U21 B (his notes of 2026-10-21, Img16 finally: "good single or dual named buttons … to the side like a legend"): the
+    /// curve window's legend column — [Mirror] beside each chart, [Copy] between the two.
+    public static let curveMirror = "Mirror"
+    public static let curveMirrorLR = "Left \u{2192} Right"
+    public static let curveMirrorRL = "Right \u{2192} Left"
+    public static let curveCopy = "Copy"
+    /// A face: X is the top chart, Y the bottom one.
+    public static let curveCopyXY = "X \u{2192} Y \u{2193}"
+    public static let curveCopyYX = "Y \u{2192} X \u{2191}"
+    /// An edge: across is the top chart, along the bottom one.
+    public static let curveCopyAcrossAlong = "Across \u{2192} Along"
+    public static let curveCopyAlongAcross = "Along \u{2192} Across"
+    /// The buttons' spoken labels.
+    public static func curveMirrorSpoken(_ curve: String, leftToRight: Bool) -> String {
+        "Mirror the \(curve) curve: copy its \(leftToRight ? "left" : "right") half onto the \(leftToRight ? "right" : "left")"
+    }
+    public static func curveCopySpoken(_ from: String, _ to: String) -> String { "Copy the \(from) curve onto the \(to) curve" }
     /// The flat press's stamp row: "Stamp · Palm on the edge" (a corner: "on the corner").
     public static func pressStamp(name: String, corner: Bool) -> String {
         let tail = corner ? " on the corner" : " on the edge"

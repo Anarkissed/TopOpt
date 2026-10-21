@@ -460,7 +460,95 @@ E(2). `FlexibleR7RHostedTests`' red control (F's 32 pt) kept: the confirm reads 
 - F12's hold re-announces the project's change every 150 ms (at most 5 s) and holds the model's save meanwhile; the clean way
   would be an undo-merge hook in ProjectModel (#354's file; not asked). On the reviewer's list.
 
-## ★ Round 7 · U21 batch C — the Lattice page's two handles: "+" for expand, kept apart, dragging the right way (2026-10-21) (read this first)
+## ★ Round 7 · U21 batch B — the curves window: 80 % of the screen, Mirror and Copy buttons beside the charts (2026-10-21) (side lane, cherry-picked after batch D above)
+
+Side branch `claude/flexible-screens-u21-side` (after batch C, to be cherry-picked onto `claude/flexible-screens`). NOT pushed
+(your HOLD). App only; core untouched; no #354/main file edited; no new hook. No core item for the CORE LIST from this batch.
+Judged on your l-bracket's Face 6 (your 27.png window; `round7/batch_u21_c/his_live_1021_lbracket`) and your pad of 10-21
+(Face 3; copied read-only to `round7/batch_u21_b/his_live_1021_pad`).
+
+Your note ("Img16 finally", 27.png): "in the curves should have some buttons available to make things a little easier for the
+user - please figure out good single or dual named buttons for them. Place them to the side like a legend. Please also expand the
+modal to fill 80% of the screen, going overtop most assets. This is especially required for the 3D view."
+
+### What you will see now, in plain words
+- **The window fills 80 % of the screen**, centred, over the page (13" portrait: 826 × 1102 pt, was 620 × 588). In 2D the two
+  charts share the height (427 pt each, was 170). In 3D the table fills the rest (610 × 942 pt, was 588 × 481).
+- **A column on the right, like a legend:**
+  - **Mirror** beside each chart, marked with that curve's colour dot: [Left → Right] copies the left half onto the right, and
+    [Right → Left] does the reverse.
+  - **Copy** between the two charts: [X → Y ↓] / [Y → X ↑] for a face, and [Across → Along] / [Along → Across] for an edge.
+  - A button that would change nothing is greyed. For example, once a curve is symmetric, its Mirror buttons grey out.
+  - A corner has one curve, so its window has no buttons.
+- **In 3D** the same column names each curve ("X · head-on from Top", "Y · head-on from Front") above its Mirror buttons. Small
+  **L / R** tags at each curve's ends show which half is "left" on the table.
+- **The 3D table always fits.** It stays inside its view and clear of the gizmo at every 45° turn. Before, a tall table would
+  have cut off the sides of the square.
+- **Nothing is saved until OK.** The buttons change only what the window shows, just like dragging a point. [OK] keeps it as one
+  undo step. [Cancel] leaves the face or edge exactly as it was.
+
+### What was wrong (one sentence each)
+- Buttons: the window had only the point-by-point editor; there was no way to copy a half or a whole curve.
+- Size: the card was capped at 620 pt wide, each chart at 170 pt and the 3D table at 460 pt (measured 60 % × 43 % of 13" portrait).
+
+### What changed (code)
+- `FlexibleCurveMirror` (new, pure):
+  - `mirrored(curve, side)` keeps the source half's points bit-exact and places their reflection (x → 1 − x) on the other half.
+  - The middle point is yours if one sits within core's 0.01 gap of ½ (your y, moved to ½). Otherwise it takes core's own
+    curve value at ½ (`pen_curve_values`).
+  - Kept points within the gap of the middle are dropped.
+  - `changes(...)` decides which buttons are greyed.
+- `FlexibleStageModel.mirrorDraftCurve` / `copyDraftCurve` write the window's draft only. Each one bumps `curveDraft.resets`, which
+  clears the tables' selected point (passed into `FlexibleCurveTable2D` / `FlexibleCurveTable3D` as `resetToken`).
+- `FlexibleCurveWindowLayout`:
+  - The card is 0.8 × (the reader's size + its safe-area insets), centred on the screen, zIndex 60 as before.
+  - The 2D charts get at least 140 pt each and share the rest. The 3D table gets at least 240 pt and fills the rest.
+  - `fitted(camera, size)`: in a table taller than it is wide, the vertical lens widens by height ÷ width, so the camera fits
+    the square table by its width.
+- The 3D legend under the table moved into the column (kept under the table for a corner, which has no column).
+- New copy lines in `FlexibleRowCopy+Edges` (all ≤ 16 characters).
+
+### Tests (red controls asserted red inside each)
+- `FlexibleR7U21BCurveTests` (5):
+  - **Your Face 6 X, Left → Right:** x [0, 0.04724, 0.5, 0.95276, 1], y [0, 0.78134, 1, 0.78134, 0]. The kept points are
+    bit-exact. Core's curve asymmetry goes from 0.03101 to 2.2e-16, core accepts the result, and it is greyed afterwards.
+    RED `controlNaiveFlip` (y read backwards on the same x): asymmetry 0.03373.
+  - **The gap:** a point at 0.495 beside one at 0.5 is dropped. A lone 0.495 becomes the middle, keeping its y. 0.49 / 0.5 / 0.51
+    is accepted by core.
+  - **Your pad's Face 3 X (no middle point):** symmetric both ways, kept points bit-exact, middle = core's 0.59348. Core's curve
+    on the kept half moves 0.0091 (Left → Right) and 0.1057 (Right → Left), both asserted at 10 % and ≤ 0.11.
+  - **Copy:** exact. A corner has no Copy and no Mirror. The labels are short.
+  - **On your pad (Face 3):** Mirror and Copy reach only the draft, and the reset token bumps. Cancel leaves the face as it was.
+    OK keeps it, and one Undo brings back both curves. RED `controlActionWritesAtOnce`: after Cancel, X was still mirrored.
+- Hosted (`FlexibleU2Tests/testU21B…`, 3), your l-bracket, Group 1, Face 6 as in 27.png:
+  - **80 %:** the window is 0.8 × the screen ±2 pt and centred, at 13" portrait and 13" landscape, in 2D and 3D. At 13p the
+    2D tables are 465 pt each (≥ 0.25 × 1376) and the 3D table is 59.1 % × 68.4 % of the screen. RED `controlOldWindowSize`:
+    620 × 588 (60.1 % × 42.7 %).
+  - **Column:** right of the charts; buttons 44 pt tall and 8 pt apart. Each Mirror sits beside its own chart; Copy sits
+    between them. A real click on [Left → Right] mirrors the draft's X, and Face 6 stays untouched until OK.
+  - **The smallest iPad, landscape (1133 × 744):** charts 174 pt (≥ 140); Cancel and OK inside the window.
+  - **3D at 13p:** turned 45° (and every 45° step), the table's corners and both curves (floor and full rise) stay inside the
+    table's view and clear of the gizmo. RED `controlNoAspectFit`: drawn from x −2 to 612 pt in a 610 pt view.
+- U2 (OK/Cancel, 3D head-on, Shape row + window) and X20b's face window still pass unchanged. No re-pin.
+
+### Runs (`round7/batch_u21_b/u21b_runs.txt`, app/TopOptKit, --scratch-path /tmp/r7u21-side-build)
+- 16 classes once: the batch's 2 (the hosted ones run inside FlexibleU2Tests), plus the pins of the touched files: U2, X20b,
+  RowCopy, PressCurve, EdgeGroups (+Hosted), FlatPrism (+Hosted, Engine), R7E1Review (+Hosted), R7E2 (+Hosted),
+  FlexibleSquishCopyTests and LatticeStaleTypeTests. Result: **88 tests, 0 failures, 1 skipped** (EdgeGroupsHosted
+  `testEvidenceOnHisPad`, an evidence probe that skips without its env), no signal lines.
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded).
+- The 16 stage-job hashes (`stage_job_hashes_u21b.txt`) are cmp-identical, whole file, to e1r's, X20b's and batch C fix 2's.
+  The window never touches a job.
+- No iOS build or install in this step (the integrator does it).
+
+### Pictures (`round7/batch_u21_b/look/`, 13" portrait, your l-bracket, Face 6)
+- U21B_01: 2D, your curves as saved. The column on the right: Mirror (cyan dot) beside X, Copy between, Mirror (white dot)
+  beside Y.
+- U21B_02: after [Left → Right] on X (the right shoulder now 0.78134, as the left).
+- U21B_03: 3D at the opening view. X's Mirror Left → Right is greyed (X already symmetric). L / R tags on both curves.
+- U21B_04: 3D turned 45°. The table stays inside, clear of the gizmo.
+
+## ★ Round 7 · U21 batch C — the Lattice page's two handles: "+" for expand, kept apart, dragging the right way (2026-10-21) (the batch before B above)
 
 Side branch `claude/flexible-screens-u21-side` (from `a639ed42`, to be cherry-picked onto `claude/flexible-screens`). NOT pushed
 (your HOLD). App only; core untouched; no #354/main file edited (#354's `LatticeSlabExpand.separated` is simply no longer called
@@ -613,7 +701,7 @@ buffer between the two so that tapping one doesn't open the other."
 - The very first frame lays a handle out with an 88 pt estimate. The next frame uses the measured width, so a box can settle by a
   few points when a face is first picked.
 
-## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (read this first)
+## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (the step before U21 above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
 #354/main file edited. Judged on your 10-20 pad (`round7/batch_u1/his_live_1020`).
