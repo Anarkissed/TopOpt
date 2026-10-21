@@ -1,5 +1,75 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
+## CORE LIST: for after the redesign (a running list; the reviewer's ruling of 2026-10-21 18:09, A)
+
+Your words of 2026-10-21 14:08: "Nothing else is going to be done in core or in any other area of the app until this redesign
+is complete. Once that's done, we will provide a list of things required for core to update/change/fix". This is that list.
+Nothing here is being changed now; no warning card stands in for any of it. Line numbers are at `a639ed42` (core is read only).
+Each item: what core does, where, the evidence, your numbers.
+
+1. **Seam holes ("rods") along a diagonal two part triangles share.** `core/src/voxel/voxelize.cpp:338-351`: the column's
+   point-in-triangle test is "boundary-inclusive" on each triangle's own edge functions, with no tie rule. A column centre that
+   lies exactly on the diagonal shared by two triangles of one face can come out a hair outside BOTH (most likely: the shared edge
+   is computed from each triangle's own vertex order, so the rounding differs; not yet traced in core), so that face adds no crossing; the winding fill
+   (`:361-389`, `above != 0`) then reads the whole column as Empty. Your pad at **Balanced**: 6 empty columns on x = y,
+   **(3,3) (12,12) (20,20) (23,23) (26,26) (29,29)**, all 20 layers, owner -1 (114 voxels). **Fast and Fine are clean.** The app
+   puts those voxels back for the preview only (`FlexibleLatticeBuilder.inputs(seamFill:)`, U1, `testNoRodsInTheLattice`;
+   RED `seamFill: false` = the 6 columns); core's own output keeps the holes. The same bug is behind the E1 review's "Balanced
+   diagonal holes" (one-voxel holes along your Top's triangle diagonal) and the lattice stop's two tolerances (two voxels at the
+   entry, one voxel's diagonal inside: re-measure both once this is fixed). Fix needed: a watertight tie rule (e.g. top-left)
+   in the edge test.
+2. **Edge and corner curves and stamps are not sent.** Core's Flexible block takes faces only: `core/src/flexible/job_block.cpp:76-78`
+   (the block's keys) and `:208-211` (a face's keys: `curve_x`, `curve_y`, `curve_centre_edge`, `design_stamp`). A press reaches
+   core as a face entry with `face_region_ids` + `press_direction`, built on `build_press_stack`
+   (`core/src/flexible/faces.cpp:648`); its map is the flat prism's (your drawn curves and stamp are display only: Play pushes
+   along them, core does not read them). Missing in core: (a) the F × M map (a press's own force times its curves'
+   multipliers on core's press grid); (b) a stamp laid on a PRESS stack (`stamp_on_columns` / `design_face` with
+   `design_stamp`, `core/src/flexible/field.cpp:245-282`, and `check_stamp`, `:393`, take a face stack only); (c) a flat cut:
+   core's squish map has only both (X·Y), either and centre_edge (no "flat_cut" anywhere in core/), so an edge is sent as
+   "both" with a tent across it and a tipped corner as centre_edge (R7-E2: Edge 16 twisted 7° is 16 % off; an untipped corner
+   at 3 mm is 53.8 % off core's map).
+3. **squish_envelope (how far the lattice may be squished), with your decisions of 2026-10-17.** Core has no such answer: the only
+   limit it knows is the tested strain per curve row (`strain_max_measured`, read at `core/src/flexible/data.cpp:368-372`;
+   `CurveSet::strain_limit`, `core/src/flexible/squish.cpp:92-96`). Your decisions: past the tested strain use textbook
+   densification, MARKED as an estimate; the softest tested lattice only; at least 2 cells through the depth and across the face;
+   Auto's family. Until then nothing in the app stands in as the limit (ruling G); today a 23 mm squish through a 25 mm slab
+   (about 90 %) is accepted.
+4. **Does the export carry the C1 clip?** The app clips each group's press field to its flat prism
+   (`FlexibleStageModel.swift:1561` → `FlexibleGroupField.clipToPresses`, `FlexibleGroupField.swift:114`: your 10-20 pad, 2,936
+   voxels changed inside the two flat prisms, 0 outside). Core's own density field for a press is unclipped (the press column
+   below, item 5), and core's job runners refuse a Flexible job (`core/src/cli/run_job.cpp:9587, 10456, 11787, 11827`
+   `refuse_flexible_job`). So which field an export writes is open: it must be the clipped one. A test is owed once the
+   export path exists (ruling B, folded here: 0 press-field voxels outside the flat prism in the exported lattice).
+5. **The press column runs through the whole part.** `core/src/flexible/faces.cpp:291-309`: a column's exit is the first
+   leaving triangle along the arrow, i.e. the far side of the part; a press stack uses the same trace (`build_press_stack` →
+   `stack_impl`, `:648`, `:756`). Your pad: Edge 12 / Edge 9 at 45° run 136-140 mm diagonally, so every column is designed too
+   soft and core lays a dense band (ρ 0.362 over 4,082 voxels each) right across the pad (R7-E2 `look/C01`, `C03`-`C07`). Ask:
+   bound a press column (to the flat prism's depth, or the lattice region).
+6. **The exit crash (F15, signal 11 / 6).** A scheduled `FlexibleStageModel.scheduleDesigns` task still inside
+   `FlexibleCore.strainUnder` → `topoptbridge::flexible_strain_under` (`app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp:534`)
+   while `exit()` runs `__cxa_finalize` on the static data cache (`flexible_bridge.cpp:51-61`, `g_data`). Test noise only
+   (xctest exits after every test passed), not the iPad app. The cache is in OUR bridge, not core: the fix (never destroy the
+   cache, or join the design tasks before exit) waits with the rest.
+7. **"No include region = the whole part" as a Flexible job flag.** `core/src/flexible/job_block.cpp:399`
+   (`if (members.has_include_regions() && !members.in_include_region(...)) continue;`): with no include region every solid
+   voxel is lattice. The app gates it (ruling 6, `FlexibleCoreDoor`: no face-prism, nothing is asked of core; M1
+   `testNoFacePrismMeansNoLatticeAnywhere`: core's own Top 4,096 latticed columns vs 0). Ask: a Flexible job flag "no include
+   means no lattice".
+8. **From the U21 plan (2026-10-21).** (a) `core/src/flexible/faces.cpp:312-325` measures a column's `lattice_mm` from the job's
+   WHOLE lattice mask, so a face is credited with another face-prism's lattice on its column. Your l-bracket: **Face 5 11.8 %**
+   (its lines run up through the plate into the wall's lattice), **Face 1 36.5 %** (Face 6's lattice about 3 mm behind it on the
+   wall), **Face 7 93.8 %**: none of the three has a face-prism of its own. The app will read "latticed" from its own face-prism
+   geometry (batch E). Ask: `lattice_mm` per include region (the face's own prism). (b) No TPU in Topology's materials:
+   `core/src/materials/materials.json` lists 12 (PLA, PETG, ASA, ABS, PC, PA12, PA12_CF, PETG_CF, PP, HIPS, Resin_Standard,
+   Resin_Tough), so a Flexible project runs Topology as ABS (your pad does today). Ask: a TPU entry, or the Flexible filament
+   passed through.
+9. **Also core's, from this handoff's backlog.** (a) A pinch: two loaded faces pushing one stack from both ends are refused
+   (`core/src/flexible/run.cpp:605`, `:642-645`, `one_profile_per_stack`); the app assembles the two halves itself by core's rule
+   (`FlexibleGroupField.assemble`, round 4 D2). (b) Balanced's empty top voxel layer (the 0.21 mm sheet of the top-lid fix, the
+   same centre rule as item 1, `voxelize.cpp:361-389`) limits a twisted prism at Balanced (R7-E1 review). (c) Core designs
+   every default edge press "too soft" on 52 of 52 columns (E2 finding 10): follows from item 5. (d) Core's design for a press
+   ignores its drawn curve (item 2), so "how close core's profile is" can only measure the flat prism.
+
 ## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
