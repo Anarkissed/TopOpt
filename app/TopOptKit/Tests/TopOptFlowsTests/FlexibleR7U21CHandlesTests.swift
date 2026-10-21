@@ -7,8 +7,12 @@
 //   HANDLE-ICONS     testTheTwoIconsAreDifferentGlyphsFromOneSource, testTheCaptionsCarryTheHandleIcons (+ hosted)
 //   HANDLE-GAP       testImg6KnobLeftOfFloorKeepsTheUnitsApart, testSweepSixteenDirectionsBothScreens,
 //                    testTheBoxMovesBeforeTheKnobFlips (+ hosted on his l-bracket)
-//   EXPAND-DRAG-DIR  testAPushedDiscStillDragsOutward, testAShortProjectionPointingLeftDragsOutward
+//                    testNoRoomForTwentyFourPointsHidesTheExpandHandle (fix round 1)
+//   EXPAND-DRAG-DIR  testAPushedDiscStillDragsOutward, testAShortProjectionPointingLeftDragsOutward (the formula; the wiring:
+//                    hosted testOnHisLBracketDraggingThePlusOutwardGrowsTheExpand)
 import XCTest
+import SwiftUI
+import AppKit
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -44,9 +48,31 @@ final class FlexibleR7U21CHandlesTests: XCTestCase {
                       "★ the captions read the discs' source")
         XCTAssertEqual(FlexibleSelectionsCopy.depthCaption, "Depth mm")
         XCTAssertEqual(FlexibleSelectionsCopy.expandCaption, "Expand mm")
-        // ★ RED CONTROL: today's caption row is text only
-        let today = "            Text(FlexibleSelectionsCopy.depthCaption).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)"
-        XCTAssertFalse(today.contains("FlexibleHandleCaption"), "★ RED CONTROL: the text-only caption carries no icon")
+        // the captions drawn: each carries its icon (FIX ROUND 1: the old red control here was a string literal, never red)
+        XCTAssertEqual(captionIcons(), ["selCaptionIcon-depth", "selCaptionIcon-expand"], "★ both captions draw their handle's icon")
+        // ★ RED CONTROL: today's caption is text only (the switch draws today's caption) — no icon
+        FlexibleHandleCaption.controlTextOnly = true
+        defer { FlexibleHandleCaption.controlTextOnly = false }
+        XCTAssertEqual(captionIcons(), [], "★ RED CONTROL: the text-only captions draw no icon")
+    }
+
+    /// The two captions hosted alone (offscreen), the icon frames they publish.
+    private func captionIcons() -> [String] {
+        final class Box { var keys: [String] = [] }
+        let box = Box()
+        let root = VStack { FlexibleHandleCaption(kind: .depth); FlexibleHandleCaption(kind: .expand) }
+            .onPreferenceChange(FlexibleKeepOutKey.self) { v in box.keys = v.keys.filter { $0.hasPrefix("selCaptionIcon-") }.sorted() }
+        let hv = NSHostingView(rootView: root)
+        hv.frame = CGRect(x: 0, y: 0, width: 200, height: 80)
+        let w = NSWindow(contentRect: CGRect(x: -20000, y: -20000, width: 200, height: 80), styleMask: [.borderless],
+                         backing: .buffered, defer: false)
+        w.contentView = hv
+        w.orderFrontRegardless()
+        defer { w.orderOut(nil); w.contentView = nil }
+        hv.layoutSubtreeIfNeeded()
+        let end = Date().addingTimeInterval(0.5)
+        while Date() < end { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+        return box.keys
     }
 
     // MARK: HANDLE-GAP
@@ -138,6 +164,32 @@ final class FlexibleR7U21CHandlesTests: XCTestCase {
         XCTAssertGreaterThan(old.depth.rect.maxX, v.width, "★ RED CONTROL: today's depth box runs off the screen")
     }
 
+    /// FIX ROUND 1 (the checker): the list open right next to the floor, the knob pointing into it, the screen's edge on the
+    /// other side — no place gives 24 pt. Then the expand handle is HIDDEN (the open list's Expand box carries the same number),
+    /// never drawn closer than 24 pt.
+    func testNoRoomForTwentyFourPointsHidesTheExpandHandle() throws {
+        let v = Self.p13
+        let list = CGRect(x: 0, y: 0, width: 800, height: v.height)
+        let f = CGPoint(x: 950, y: 650), raw = CGPoint(x: 920, y: 650)
+        let l = H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v, keepOut: [list])
+        if let e = l.expand {
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(l.gap), H.unitGap, "★ shown only ≥ 24 pt apart")
+            XCTAssertFalse(e.rect.intersects(list))
+        }
+        XCTAssertNil(l.expand, "★ no room for 24 pt here: the expand handle is hidden")
+        XCTAssertTrue(CGRect(origin: .zero, size: v).contains(l.depth.rect), "the depth handle stays, on screen")
+        // with room (the list closed) the same floor and knob give ≥ 24 pt
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v).gap), H.unitGap)
+        // ★ RED CONTROL: the batch's first fallback (the best gap below 24 pt, quietly) drew the two units touching, off the list
+        // (so the layer's under-the-list rule did not hide it either)
+        H.controlQuietFallback = true
+        defer { H.controlQuietFallback = false }
+        let q = H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v, keepOut: [list])
+        let qe = try XCTUnwrap(q.expand, "★ RED CONTROL: the quiet fallback still drew the expand handle")
+        XCTAssertLessThan(try XCTUnwrap(q.gap), H.unitGap, "★ RED CONTROL: …under 24 pt from the depth handle (\(q.gap ?? 0))")
+        XCTAssertFalse(qe.rect.intersects(list), "★ RED CONTROL: …and off the list, so nothing hid it")
+    }
+
     // MARK: EXPAND-DRAG-DIR
 
     /// The disc drawn pushed out (72 pt) while the true knob is 20 pt from the floor and 10 mm further out projects at 39 pt
@@ -151,11 +203,13 @@ final class FlexibleR7U21CHandlesTests: XCTestCase {
         XCTAssertGreaterThan(H.dragExpand(seed: 0, translation: CGSize(width: 40, height: 0), knob: raw, outward: CGPoint(x: 60, y: 0)), 0)
         // a long projection: the 10 mm sets mm per point
         XCTAssertEqual(H.dragExpand(seed: 0, translation: CGSize(width: 30, height: 0), knob: raw, outward: CGPoint(x: 80, y: 0)), 5, accuracy: 1e-9)
-        // ★ RED CONTROL: today the drag read out − DRAWN disc: backwards
+        // ★ RED CONTROL (the formula half only): today's formula fed the drawn disc by hand goes backwards. The layer's wiring —
+        // which point the drag really reads — is pinned by the hosted drag on his l-bracket
+        // (FlexibleR7U21CHandlesHostedTests.testOnHisLBracketDraggingThePlusOutwardGrowsTheExpand).
         H.controlOldDrag = true
         defer { H.controlOldDrag = false }
         let old = H.dragExpand(seed: 0, translation: CGSize(width: 40, height: 0), knob: drawn, outward: out)
-        XCTAssertLessThan(old, 0, "★ RED CONTROL: today the same drag shrank it (\(old) mm)")
+        XCTAssertLessThan(old, 0, "★ RED CONTROL: today's formula on the drawn disc shrinks it (\(old) mm)")
     }
 
     /// A knob pointing LEFT whose 10 mm projects short (15 pt): a −40 pt drag (outward, to the left) grows the expand.

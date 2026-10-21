@@ -90,8 +90,25 @@ public enum FlexibleLatticeHandles {
         }
         return LatticeSlabExpand.snapped(LatticeSlabExpand.clamp(seed + d))
     }
-    /// RED CONTROL (U21 EXPAND-DRAG-DIR): today's rule — out − knob with the plain-horizontal fallback.
+    /// RED CONTROL (U21 EXPAND-DRAG-DIR): today's code path — the layer passes the DRAWN disc and the rule is out − knob with the
+    /// plain-horizontal fallback.
     nonisolated(unsafe) static var controlOldDrag = false
+    /// RED CONTROL (U21 fix round 1): the layer's wiring alone back on the drawn disc (the new rule kept) — the checker's mutation.
+    nonisolated(unsafe) static var controlDrawnDiscWiring = false
+
+    /// The expand handle's axis as the layer drew it (layer-local points): the TRUE knob, 10 mm out, the drawn disc.
+    public struct ExpandAxis: Equatable, Sendable { public let raw: CGPoint?; public let out: CGPoint?; public let drawn: CGPoint }
+    /// ★ U21 fix round 1: each expand disc's drag as the page last built it — the very closures its DragGesture calls (with
+    /// the axis it was built on). The hosted test drives them on his l-bracket (synthetic mouse drags reach nothing in an
+    /// offscreen window), so a change in which point the page's drag reads goes red there. Nothing in the page reads it.
+    public struct LiveDrag {
+        public let axis: ExpandAxis
+        public let changed: @MainActor (CGSize) -> Void
+        public let ended: @MainActor () -> Void
+    }
+    nonisolated(unsafe) static var liveDrags: [String: LiveDrag] = [:]
+    /// Filed only while a test asks (the closures hold the page's project and stage; the app never keeps them).
+    nonisolated(unsafe) static var recordLiveDrags = false
 
     /// The model-space points a handle needs (from #354's own plane): the floor (the knob), 10 mm deeper, the face's
     /// centre, and the expand knob with a point 10 mm further out.
@@ -185,11 +202,18 @@ public enum FlexibleLatticeHandles {
 
     /// RED CONTROL (U21 HANDLE-GAP): today's rule — #354's 72 pt disc floor (separated), both boxes to the right, a 92 pt box.
     nonisolated(unsafe) static var controlOldLayout = false
+    /// RED CONTROL (U21 fix round 1): the batch's first fallback — with no place ≥ 24 pt, the best gap below 24 pt (or the
+    /// expand pushed ignoring the list), drawn quietly.
+    nonisolated(unsafe) static var controlQuietFallback = false
 
     /// HANDLE-GAP (pure): each handle is one unit (44 pt disc + its REAL box width, 44 pt tall); each box on the side away
     /// from the other handle; the expand disc pushed along its own direction in 4 pt steps (≤ 240 pt from the floor) until
     /// the units are ≥ 24 pt apart, inside the viewport and off `keepOut`. If that cannot be had, the boxes move (both right,
     /// both left, the other way round) before the knob ever flips to the other side of the floor (the last resort).
+    /// ★ FIX ROUND 1: when NO place gives 24 pt (the open list beside the floor, the screen's edge on the other side), the
+    /// expand handle is HIDDEN (`expand == nil`) — never drawn closer (his "tapping one doesn't open the other"); the open
+    /// list's Expand box carries the same number. When the depth unit itself cannot fit the screen either way, only the
+    /// expand unit has to.
     /// With no expand knob (group scope): the depth box right, or left when right runs off the viewport.
     /// (#354's `LatticeSlabExpand.separated` is no longer called here; it is not edited.)
     public static func layout(floor f: CGPoint, rawKnob: CGPoint?, depthBox: CGFloat, expandBox: CGFloat,
@@ -213,6 +237,7 @@ public enum FlexibleLatticeHandles {
             return [away] + all.filter { $0 != away }
         }
         var best: (layout: Layout, gap: CGFloat)?
+        let depthCanFit = fits(depthUnit(left: false).rect) || fits(depthUnit(left: true).rect)
         for flip in [false, true] {
             let dir = flip ? CGVector(dx: -u.dx, dy: -u.dy) : u
             for arr in arrangements(dir.dx) {
@@ -222,12 +247,19 @@ public enum FlexibleLatticeHandles {
                     let a = depthUnit(left: arr.depthLeft)
                     let b = Unit(disc: k, boxOnLeft: arr.expandLeft, boxWidth: expandBox)
                     let g = gap(a.rect, b.rect)
-                    let ok = fits(a.rect) && fits(b.rect) && !keepOut.contains { $0.intersects(b.rect) }
+                    let ok = (fits(a.rect) || (!depthCanFit && !controlQuietFallback)) && fits(b.rect)
+                        && !keepOut.contains { $0.intersects(b.rect) }
                     if g >= unitGap && ok { return Layout(depth: a, expand: b, flipped: flip) }
                     if ok, g > (best?.gap ?? -.infinity) { best = (Layout(depth: a, expand: b, flipped: flip), g) }
                     t += pushStep
                 }
             }
+        }
+        guard controlQuietFallback else {
+            // no place ≥ 24 pt: the expand handle hidden; the depth box on the side that fits
+            let right = depthUnit(left: false)
+            return Layout(depth: !fits(right.rect) && fits(depthUnit(left: true).rect) ? depthUnit(left: true) : right,
+                          expand: nil, flipped: false)
         }
         if let best { return best.layout }
         // nothing fits the viewport at all (the part at the screen's edge): the away boxes, pushed as far as allowed

@@ -504,7 +504,7 @@ buffer between the two so that tapping one doesn't open the other."
   is shorter than 30 pt, #354's 0.05 mm/pt applies, still along that direction.
 
 ### Tests (red controls asserted red inside each)
-- `FlexibleR7U21CHandlesTests` (7):
+- `FlexibleR7U21CHandlesTests` (8):
   - **icons:** the pair, and not rotated twins (red: the old pair is caught); the discs and captions read the one source.
   - **captions** carry the icons (red: today's text-only line).
   - **Img6, knob left of the floor:** gap 27 pt, depth box right, expand box left (red: today's rule, −68 pt, the expand box on the
@@ -513,10 +513,21 @@ buffer between the two so that tapping one doesn't open the other."
     flipped; all on screen. Red: today's rule is under 24 pt in 3,600 of them.
   - **near the edge:** the box moves before the knob flips; the knob flips only when pointing into the edge; the expand stays off
     the open list (red: today's depth box runs off the screen).
-  - **drag direction:** a pushed disc (drawn 72, true 20, out 39) still grows on an outward drag (red: −12.1 mm, it shrank). A short
-    projection pointing left: −40 pt grows it (red: it shrank).
-- `FlexibleR7U21CHandlesHostedTests` (2): the whole page, offscreen, 13" portrait, your l-bracket at the probe's worst view (az 1.57,
+  - **drag direction (the formula only):** a pushed disc (drawn 72, true 20, out 39) still grows on an outward drag; today's
+    formula fed the drawn point by hand gives −12.1 mm (this is the formula, not the page's code path — the hosted drag below
+    pins which point the page really reads). A short projection pointing left: −40 pt grows it (today's formula: it shrank).
+  - **no room for 24 pt** (fix round 1): the list open right beside the floor, the knob pointing into it, the screen's edge on
+    the other side: the "+" handle is hidden (the open list's Expand box has the same number), never drawn closer. Red: the
+    first version's fallback drew the two units touching, off the list, so nothing hid it.
+  - **captions** (fix round 1): the two captions drawn offscreen publish their icons; red: `controlTextOnly` draws none (the
+    first version's red here was a string literal and could not go red).
+- `FlexibleR7U21CHandlesHostedTests` (3): the whole page, offscreen, 13" portrait, your l-bracket at the probe's worst view (az 1.57,
   el 0.25).
+  - **The drag, on the page (fix round 1, the checker's blocker):** the "+" disc's own drag (the closures its DragGesture calls,
+    as the page last built them) driven 40 pt outward in 12 steps, the page re-drawing between them: Expand −3.0 → +7.28 mm,
+    exactly what the true knob predicts (the drawn disc would give −1.0). Reds, asserted: the page's wiring alone put back on
+    the drawn (pushed) disc (the checker's mutation) → −1.0 mm; today's code path (drawn disc + today's formula) → −5.0 mm, it
+    shrank. I also made the checker's exact edit in the source once: this test went red (−1.0 vs +7.28), then restored.
   - The units are 27.0 pt apart (each box grown 6 pt top and bottom to its 44 pt band). Expand box left, depth box right.
   - A click on the depth disc opens no keypad. Each box opens its own keypad (positive controls).
   - Both caption icons sit over their list boxes.
@@ -538,6 +549,26 @@ buffer between the two so that tapping one doesn't open the other."
   their boxes. (Heat is on in this saved project.)
 - U21C_02: the red control, today's layout. Your Img6 exactly: the expand box drawn across the depth disc.
 
+### Fix round 1 (the checker's review)
+- The checker reverted the page's drag wiring to the drawn disc and every test stayed green: nothing pinned which point the drag
+  reads. Now the hosted drag on your l-bracket does (above), with that exact revert as its red control
+  (`controlDrawnDiscWiring`). The "+" disc's drag is now two closures the DragGesture calls; while a test asks
+  (`recordLiveDrags`) the page also files them, with the axis they were built on, in `FlexibleLatticeHandles.liveDrags`
+  (nothing in the page reads it back; the app never files them), and the test drives those.
+  Why not the mouse: synthetic mouse drags reach nothing in the offscreen test window — neither the handle nor the camera's own
+  pan moved, with NSEvent- and CGEvent-built events (clicks do work). Two tries, then this.
+- When no place gives 24 pt the "+" handle is now hidden instead of drawn closer (`layout` returns no expand unit; red switch
+  `controlQuietFallback`). In the sweep (6,720 layouts) this never happens; it needs the open list right beside the floor.
+- The caption test's red is a real switch now.
+- Runs (`round7/batch_u21_c/u21c_fix1_runs.txt`): the same 19 classes, **95 tests, 0 failures, 0 skipped, no signal lines**;
+  goldens 38 identical / 0 DIFFERS (deterministic) and 32 identical / 0 DIFFERS / 1 PART-SKIP (unseeded); the 16 stage-job
+  hashes (`stage_job_hashes_u21c_fix1.txt`) cmp-identical, whole file, to e1r's, X20b's and this batch's first set.
+
+### Answer for you (please say)
+- "include it next to the input in the modal": I read "the modal" as the Selections list, where each box now has its icon over
+  it. The keypad that opens when you tap a box is #354's and is still titled "Expand" with no "+". If you meant the keypad, that
+  is a #354 change (a new hook); say so and it goes on the list.
+
 ### Not done / notes
 - Shown only on this page's face-prism handles. The edge flat prism's chip/knob (1–10 pt) and knob/box (~19 pt) gaps are not
   touched (plan, HANDLE-PAIRS-AUDIT, batch F).
@@ -547,7 +578,7 @@ buffer between the two so that tapping one doesn't open the other."
 - The very first frame lays a handle out with an 88 pt estimate. The next frame uses the measured width, so a box can settle by a
   few points when a face is first picked.
 
-## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (the step before U21 batch C)
+## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
 #354/main file edited. Judged on your 10-20 pad (`round7/batch_u1/his_live_1020`).

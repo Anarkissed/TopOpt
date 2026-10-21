@@ -113,6 +113,75 @@ final class FlexibleR7U21CHandlesHostedTests: XCTestCase {
         flush("U21C_hosted_lines.txt")
     }
 
+    /// ★ EXPAND-DRAG-DIR on his page (FIX ROUND 1, the checker's blocker: nothing pinned which point the page's drag reads).
+    /// The "+" disc's OWN drag closure — the very one its DragGesture calls, as the page last built it
+    /// (`FlexibleLatticeHandles.liveDrags`) — is driven 40 pt outward (along the true knob → 10 mm out, as projected) in 12
+    /// steps with the page re-drawing between them, then released: the expand grows by what the TRUE knob predicts.
+    /// (Synthetic mouse drags reach nothing in this offscreen window — neither SwiftUI's DragGesture nor the camera's pan —
+    /// tried with NSEvent and CGEvent-built events; clicks do. So the closure is driven, not the mouse.)
+    /// RED controls, both asserted: the wiring alone back on the DRAWN (pushed) disc (`controlDrawnDiscWiring`: the checker's
+    /// mutation — the result leaves the true prediction), and today's code path (`controlOldDrag`: it shrank).
+    func testOnHisLBracketDraggingThePlusOutwardGrowsTheExpand() throws {
+        FlexibleLatticeHandles.recordLiveDrags = true
+        defer { FlexibleLatticeHandles.recordLiveDrags = false; FlexibleLatticeHandles.liveDrags = [:] }
+        let (r, h, s, ref) = try hisLBracket()
+        let p = r.project
+        let kE = "handle-expand-\(ref.key)"
+        let seed = -3.0
+        func dragOut(_ label: String) throws -> (mm: Double, truePred: Double, drawnPred: Double) {
+            p.writeLatticeExpandMM(ref, mm: seed)
+            let cm = try XCTUnwrap(cameraModel(h))
+            var c = cm.camera
+            c.setOrientation(azimuth: 1.57, elevation: 0.25)   // (a re-draw at the worst view)
+            cm.adopt(c)
+            pump(1.5)
+            XCTAssertEqual(p.latticeExpandMM(ref), seed, accuracy: 1e-9, "premise: Expand back at his −3.0 mm")
+            XCTAssertNil(s.faceUI.dragging, "premise: no drag in progress")
+            let ax0 = try XCTUnwrap(FlexibleLatticeHandles.liveDrags[kE], "the expand disc's drag, as the page built it").axis
+            let raw0 = try XCTUnwrap(ax0.raw, "the true knob"), out0 = try XCTUnwrap(ax0.out, "10 mm out")
+            let v = CGVector(dx: out0.x - raw0.x, dy: out0.y - raw0.y)
+            let len = hypot(v.dx, v.dy)
+            XCTAssertGreaterThan(len, 1, "premise: the knob has a direction on screen")
+            let T: CGFloat = 40
+            let t = CGSize(width: v.dx / len * T, height: v.dy / len * T)
+            var last = ax0
+            for i in 1...12 {
+                let f = CGFloat(i) / 12
+                let live = try XCTUnwrap(FlexibleLatticeHandles.liveDrags[kE], "the drag closure at step \(i)")
+                last = live.axis
+                live.changed(CGSize(width: t.width * f, height: t.height * f))
+                pump(0.08)
+            }
+            try XCTUnwrap(FlexibleLatticeHandles.liveDrags[kE]).ended()
+            pump(0.5)
+            XCTAssertNil(s.faceUI.dragging, "the drag ended (one undo step)")
+            let mm = p.latticeExpandMM(ref)
+            // the predictions from the axis the last step was built with (the knob moves out as the expand grows)
+            let raw = try XCTUnwrap(last.raw), out = try XCTUnwrap(last.out)
+            let truePred = FlexibleLatticeHandles.dragExpand(seed: seed, translation: t, knob: raw, outward: out)
+            let drawnPred = FlexibleLatticeHandles.dragExpand(seed: seed, translation: t, knob: last.drawn, outward: out)
+            log.append("\(label): at the start true knob \(raw0) · 10 mm out \(out0) (\(len) pt) · drawn disc \(ax0.drawn) · drag \(t); at the last step true knob \(raw) · out \(out) · drawn \(last.drawn) → Expand \(seed) → \(mm) mm (predicted: true knob \(truePred), drawn disc \(drawnPred))")
+            return (mm, truePred, drawnPred)
+        }
+        let now = try dragOut("now")
+        XCTAssertGreaterThan(now.mm, seed + 0.5, "★ a drag of the \"+\" outward grows the expand (\(now.mm))")
+        XCTAssertEqual(now.mm, now.truePred, accuracy: 0.05, "★ by what the TRUE knob → out predicts")
+        XCTAssertGreaterThan(abs(now.truePred - now.drawnPred), 1.0, "premise: this view tells the true knob from the drawn disc")
+
+        // ★ RED CONTROL 1: the page's wiring alone back on the drawn (pushed) disc — the checker's mutation
+        FlexibleLatticeHandles.controlDrawnDiscWiring = true
+        let wired = try dragOut("RED CONTROL drawn-disc wiring")
+        FlexibleLatticeHandles.controlDrawnDiscWiring = false
+        XCTAssertGreaterThan(abs(wired.mm - wired.truePred), 1.0, "★ RED CONTROL: wired to the drawn disc it leaves the true prediction (\(wired.mm) vs \(wired.truePred))")
+
+        // ★ RED CONTROL 2: today's code path (the drawn disc and today's formula) — the same outward drag shrank it
+        FlexibleLatticeHandles.controlOldDrag = true
+        let old = try dragOut("RED CONTROL today's drag")
+        FlexibleLatticeHandles.controlOldDrag = false
+        XCTAssertLessThan(old.mm, seed, "★ RED CONTROL: today the outward drag shrank the expand (\(old.mm))")
+        flush("U21C_hosted_drag_lines.txt")
+    }
+
     /// ★ RED CONTROL for the captions (a fresh page: the caption row is drawn once per page).
     func testRedControlTheCaptionsWereTextOnly() throws {
         FlexibleHandleCaption.controlTextOnly = true

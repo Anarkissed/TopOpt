@@ -432,16 +432,20 @@ public struct FlexibleOnModelLayer: View {
         var spec = FlexibleSelectionsList.expandSpec
         spec.value = mm
         // ★ U21 EXPAND-DRAG-DIR: the drag reads the TRUE knob → out (the disc is drawn pushed out; RED: the drawn disc)
-        let dragKnob = FlexibleLatticeHandles.controlOldDrag ? unit.disc : h.rawKnob
+        let dragKnob = FlexibleLatticeHandles.controlOldDrag || FlexibleLatticeHandles.controlDrawnDiscWiring ? unit.disc : h.rawKnob
+        let changed: @MainActor (CGSize) -> Void = { t in
+            if ui.dragging == nil { main.beginHandleDrag(project, key: key); ui.seed = mm }
+            project.writeLatticeExpandMM(ref, mm: FlexibleLatticeHandles.dragExpand(seed: ui.seed ?? mm, translation: t,
+                                                                                    knob: dragKnob, outward: h.out))
+        }
+        let ended: @MainActor () -> Void = { main.endHandleDrag(project, cardsChanged: cardsChanged); ui.seed = nil }
+        if FlexibleLatticeHandles.recordLiveDrags { FlexibleLatticeHandles.liveDrags[key] = .init(axis: .init(raw: h.rawKnob, out: h.out, drawn: unit.disc),
+                                                      changed: changed, ended: ended) }
         return handleUnit(unit, key: key,
             disc: FlexibleHandleDisc(symbol: FlexibleLatticeHandles.expandSymbol, active: ui.dragging == key)
                 .gesture(DragGesture(minimumDistance: 2)
-                    .onChanged { d in
-                        if ui.dragging == nil { main.beginHandleDrag(project, key: key); ui.seed = mm }
-                        project.writeLatticeExpandMM(ref, mm: FlexibleLatticeHandles.dragExpand(seed: ui.seed ?? mm, translation: d.translation,
-                                                                                                knob: dragKnob, outward: h.out))
-                    }
-                    .onEnded { _ in main.endHandleDrag(project, cardsChanged: cardsChanged); ui.seed = nil })
+                    .onChanged { d in changed(d.translation) }
+                    .onEnded { _ in ended() })
                 .accessibilityLabel("Expand handle")
                 .accessibilityIdentifier("flexible-handle-expand-\(ref.key)"),
             box: FlexNumberBox(key: key, title: "Expand", spec: spec, padTarget: $ui.padTarget, allowsNegative: true,
