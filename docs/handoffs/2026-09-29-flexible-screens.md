@@ -62,6 +62,8 @@ Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushe
   never touch a job.
 - After the runs, the face Shape (i) said the curves were "drawn on the face"; it now describes the window and the indent. Re-ran
   RowCopy + SquishCopy + SettingsRound4: 20/20.
+- iOS: BUILD SUCCEEDED at 66dac928. The app was not running. Installed 21:32:38, NOT launched. The installed dylib matches the build
+  (sha256 610237ea…), and the new strings are in it ("deeper folds", the face's "X curve" table, FlexibleIndent).
 
 ### Pictures (`round7/batch_x20b/look/`, 13" portrait, your 10-20 pad; the test turns the camera for the picture, the page never does)
 - X20b_01: Face 3 on Curves. Its indent is drawn on the side (outline, half, deepest zone), with no handles. Shape `[Curves | Stamp] [2D] [3D]`.
