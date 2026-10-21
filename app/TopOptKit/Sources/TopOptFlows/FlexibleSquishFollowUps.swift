@@ -47,10 +47,12 @@ extension FlexibleStageModel {
     /// ★ RED CONTROL: today's trash (R7-S) — the group goes at once.
     @MainActor static var controlTrashDeletesAtOnce = false
 
-    /// The group trash: it ASKS ("Delete Group 2?" in the panel's header); nothing changes until [Delete].
+    /// The group trash: it ASKS ("Delete Group 2?" — ★ U21: in place, on the group's trash; FlexibleConfirmInPlace); nothing
+    /// changes until [Delete].
     public func askDeleteGroup(_ groupID: Int) {
         guard squeezeGroups.contains(where: { $0.id == groupID }) else { groupDeleteAsk = nil; return }
         if Self.controlTrashDeletesAtOnce { groupDeleteAsk = nil; removeGroup(groupID); return }
+        dropInPlaceAsks()   // ★ U21: one ask at a time
         groupDeleteAsk = groupID
     }
     /// [Delete]: the group asked about is deleted (R7-S's delete: one undo step).

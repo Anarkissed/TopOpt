@@ -150,6 +150,58 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
         XCTAssertEqual(p.latticeSlabDepthMM(.face(group: c, face: 3), in: c), 25, accuracy: 1e-9, "with its depth")
     }
 
+    // MARK: ★ U21 (DEL-CONFIRM, his Img13): [Cancel] takes the trash's place; [Delete] a line down and to the left
+
+    func testU21LatticePageTrashCancelInPlace() throws {
+        let (r, h, s, c) = try flexibleStage(Self.sizes[0].1)
+        let p = r.project
+        func measure() throws -> (trash: CGRect, cancel: CGRect?, delete: CGRect?) {
+            let t = try XCTUnwrap(h.frames.all["selTrash-\(c.uuidString)"], "Group C's trash")
+            click(h, CGPoint(x: t.midX, y: t.midY))
+            _ = pumpUntil(3) { s.faceUI.deleteAsk == c }
+            pump(0.3)
+            return (t, h.frames.all["deleteCancel"], h.frames.all["deleteConfirm"])
+        }
+        // RED CONTROL: the old placement — no [Cancel] on the trash
+        FlexibleConfirmInPlace.controlOldPlacement = true
+        let red = try measure()
+        s.faceUI.deleteAsk = nil; pump(0.5)
+        FlexibleConfirmInPlace.controlOldPlacement = false
+        print("FLEX-U21-D6 RED (old) trash \(red.trash.integral) · cancel \(red.cancel.map { "\($0.integral)" } ?? "-")")
+        XCTAssertNil(red.cancel, "RED CONTROL: no [Cancel] where the trash was")
+        let a = try measure()
+        print("FLEX-U21-D6 trash \(a.trash.integral) · cancel \(a.cancel.map { "\($0.integral)" } ?? "-") · delete \(a.delete.map { "\($0.integral)" } ?? "-")")
+        XCTAssertEqual(s.faceUI.deleteAsk, c, "★ the trash asks")
+        let cancel = try XCTUnwrap(a.cancel, "★ [Cancel] where the trash was")
+        let del = try XCTUnwrap(a.delete, "[Delete]")
+        XCTAssertEqual(cancel.midX, a.trash.midX, accuracy: 1, "★ [Cancel] centred on the trash")
+        XCTAssertEqual(cancel.midY, a.trash.midY, accuracy: 1)
+        XCTAssertTrue(del.maxY <= cancel.minY + 0.5 || del.minY >= cancel.maxY - 0.5, "★ [Delete] on another line (the list's header line)")
+        XCTAssertLessThanOrEqual(del.maxX, cancel.minX - FlexibleConfirmLayout.gap + 0.5, "★ and to the left, ≥ 24 pt clear")
+        click(h, CGPoint(x: a.trash.midX, y: a.trash.midY))   // the same spot again
+        XCTAssertTrue(pumpUntil(3) { s.faceUI.deleteAsk == nil }, "★ a second tap on the spot only cancels")
+        XCTAssertNotNil(p.selection.groups.first { $0.id == c }, "★ Group C still there")
+        // the chip's trash: the same rule
+        s.tapFace(p, face: 3, point: nil, mesh: try XCTUnwrap(p.viewerMesh))
+        _ = pumpUntil(3) { h.frames.all["chipTrash"] != nil }
+        pump(0.8)
+        let t = try XCTUnwrap(h.frames.all["chipTrash"], "the chip's trash")
+        click(h, CGPoint(x: t.midX, y: t.midY))
+        _ = pumpUntil(3) { s.faceUI.deleteAsk == c }
+        pump(0.3)
+        XCTAssertTrue(s.faceUI.deleteAskInChip, "premise: the chip asks")
+        let cc = try XCTUnwrap(h.frames.all["deleteCancel"], "★ the chip: [Cancel] where its trash was")
+        let cd = try XCTUnwrap(h.frames.all["deleteConfirm"], "the chip's [Delete]")
+        print("FLEX-U21-D6 chip trash \(t.integral) · cancel \(cc.integral) · delete \(cd.integral)")
+        XCTAssertEqual(cc.midX, t.midX, accuracy: 1, "★ the chip: [Cancel] centred on its trash")
+        XCTAssertEqual(cc.midY, t.midY, accuracy: 1)
+        XCTAssertTrue(cd.maxY <= cc.minY + 0.5 || cd.minY >= cc.maxY - 0.5, "★ the chip: [Delete] on another line")
+        XCTAssertLessThanOrEqual(cd.maxX, cc.minX - FlexibleConfirmLayout.gap + 0.5, "★ the chip: to the left, ≥ 24 pt clear")
+        click(h, CGPoint(x: t.midX, y: t.midY))
+        XCTAssertTrue(pumpUntil(3) { s.faceUI.deleteAsk == nil }, "★ the chip: a second tap on the spot only cancels")
+        XCTAssertNotNil(p.selection.groups.first { $0.id == c })
+    }
+
     // MARK: S3 + S4
 
     func testTheHandlesNumberIsTheListsAndTheInfoOpensHisFour() throws {

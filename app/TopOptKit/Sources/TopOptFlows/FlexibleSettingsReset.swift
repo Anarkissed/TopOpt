@@ -86,9 +86,11 @@ extension FlexibleStageModel {
         newGroupAsk = nil
         rail = .newGroup
         selectedRegion = nil
-        save()   // one undo step (the project's snapshot history)
+        if Self.controlResetSealsAtOnce { save() } else { persist() }   // one undo step (the project's snapshot history)
         // the strips given back: the part re-opens on its whole faces
         if sceneState == .ready, openedKey != currentSceneKey { openScene() }
+        // ★ U21 (UNDO-GHOST): the re-opened scene's write joins the reset's step — one Undo brings everything back
+        if !Self.controlResetSealsAtOnce { sealAfterReopen() }
     }
 
     /// ★ RED CONTROL: round 5's Reset all (the main page's loads read in again; the strips left cut).

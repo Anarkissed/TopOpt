@@ -174,17 +174,27 @@ struct FlexibleEdgeGroupRows: View {
         let selected = model.selectedPress == p.id
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: DS.Space.s) {
+                let asking = model.pressRemoveAsk == p.id   // ★ U21: the trash's question is on this line
                 Image(systemName: p.kind == .corner ? "cube" : "line.diagonal")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(model.groupColour(group).color)
+                    .opacity(asking ? 0 : 1)
                 Text(model.stripTitle(p.id))
                     .font(.system(size: 14, weight: .medium)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
+                    .opacity(asking ? 0 : 1)
                 Spacer(minLength: DS.Space.xs)
-                Button { model.removePress(p.id) } label: {
+                // ★ U21 (DEL-CONFIRM, his Img13): the trash ASKS in place — [Keep] where it was, [Remove] to its left
+                Button { model.askRemovePress(p.id) } label: {
                     Image(systemName: "trash").font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(DS.Color.textTertiary.color).frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .modifier(FlexibleConfirmInPlace(asking: model.pressRemoveAsk == p.id,
+                                                 question: FlexibleConfirmCopy.removeAsk(p.strip?.label ?? model.stripTitle(p.id)),
+                                                 destructive: FlexibleConfirmCopy.remove, confirmKey: "pressRemoveConfirm",
+                                                 keepKey: "pressRemoveKeep", questionID: "flexible-press-remove-ask",
+                                                 confirm: { model.confirmRemovePress() }, cancel: { model.keepPress() }))
+                .background(FlexibleConfirmInPlace.publish("pressRemove-\(p.strip?.label ?? "")"))
                 .accessibilityLabel("Remove \(p.strip?.label ?? "the press")")
                 .accessibilityIdentifier("flexible-edge-press-remove-\(p.strip?.label ?? "")")
             }

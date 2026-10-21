@@ -823,6 +823,7 @@ public struct FlexibleStagePage: View {
     /// "Squeeze 10–12 kg", the pencil seeded 12 and the next press asked for the pad.
     @MainActor
     static func history(undo: Bool, project: ProjectModel, model: FlexibleStageModel) {
+        model.historyWillRestore()   // ★ U21 (UNDO-GHOST): what this step brings back
         if undo { project.performUndo() } else { project.performRedo() }
         model.refreshMainPageLoads()
         model.historyRestored()   // ★ AP1 review: a press card follows the history

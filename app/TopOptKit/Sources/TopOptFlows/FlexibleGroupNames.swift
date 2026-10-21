@@ -206,8 +206,8 @@ struct FlexibleGroupNameField: View {
 }
 
 /// ★ 4d: the trash on a group's header — 44 pt, always there; it deletes the group (one undo step).
-/// ★ ROUND 7 (F, his answer: "Group trash should confirm deletion."): it ASKS first — one line in the panel's header,
-/// "Delete Group 2? · [Delete] [Keep]" (FlexibleSettingsPanel.groupDeleteConfirm).
+/// ★ ROUND 7 (F, his answer: "Group trash should confirm deletion."): it ASKS first — "Delete Group 2? · [Delete] [Keep]".
+/// ★ U21: in place (FlexibleConfirmInPlace): [Keep] on this trash, [Delete] to its left (it asked in the panel's top line).
 struct FlexibleGroupTrashButton: View {
     @ObservedObject var model: FlexibleStageModel
     let groupID: Int
@@ -221,6 +221,11 @@ struct FlexibleGroupTrashButton: View {
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // ★ U21 (DEL-CONFIRM, his Img13): the ask moved from the panel's top line onto this trash — [Keep] where it was
+        .modifier(FlexibleConfirmInPlace(asking: model.groupDeleteAsk == groupID, question: FlexibleRowCopy.deleteGroupAsk(name),
+                                         destructive: FlexibleRowCopy.deleteGroupConfirm, confirmKey: "groupDeleteConfirm",
+                                         keepKey: "groupDeleteKeep", questionID: "flexible-group-delete-ask",
+                                         confirm: { model.confirmDeleteGroup() }, cancel: { model.keepGroup() }))
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRemove-\(number)": g.frame(in: .global)])
         }.allowsHitTesting(false))

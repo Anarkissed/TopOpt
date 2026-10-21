@@ -112,8 +112,10 @@ struct FlexibleFaceChip: View {
         if let g = FlexibleFaceCommits.group(gid, project) {
             if ui.roleOpen == gid { roleLine(g) } else { titleLine(g) }
             if ui.deleteAsk == gid, ui.deleteAskInChip {
+                // ★ U21: one line in the face line's place — the chip keeps its size, so [Cancel] stays where its trash was
                 FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
-                                      cancel: { ui.deleteAsk = nil })
+                                      oneLine: !FlexibleConfirmInPlace.controlOldPlacement)
+                    .frame(minHeight: 44)
             } else if ui.keepClearAsk == gid {
                 askLine(FlexibleSelectionsCopy.keepClearAsk, yes: FlexibleSelectionsCopy.keepClear, id: "flexible-chip-keepclear-ask") {
                     ui.keepClearAsk = nil
@@ -184,6 +186,9 @@ struct FlexibleFaceChip: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // ★ U21 (DEL-CONFIRM, his Img13): [Cancel] takes the trash's place; the question and [Delete] go under it
+                .modifier(FlexibleCancelInPlace(asking: ui.deleteAsk == g.id && ui.deleteAskInChip, keepKey: "deleteCancel",
+                                                cancel: { ui.deleteAsk = nil }))
                 .background(publish("chipTrash"))
                 .accessibilityLabel("Delete \(g.name), here and in Topology")
                 .accessibilityIdentifier("flexible-chip-trash")

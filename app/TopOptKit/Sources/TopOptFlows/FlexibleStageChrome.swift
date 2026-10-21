@@ -183,7 +183,24 @@ public struct FlexibleStageSheet: View {
                     }
                 }
                 Divider().overlay(Color.white.opacity(0.10))
-                if confirming {
+                // ★ U21 (DEL-CONFIRM, his Img13: "is the 'cancel' button where the delete button was and the OK button somewhere
+                // else so it requires a move to confirm?"): [Cancel] takes the button's own place; the warning and the red
+                // [Delete Flexible lattice] go on the lines under it
+                Button { confirming = true } label: {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: "trash")
+                        Text("Delete Flexible lattice and choose again")
+                    }
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(DS.Color.warning.color)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("lattice-mode-delete")
+                .modifier(FlexibleCancelInPlace(asking: confirming, keepKey: "latticeModeDeleteCancel", cancel: { confirming = false }))
+                .background(FlexibleConfirmInPlace.publish("latticeModeDelete"))
+                // (always laid out, shown only while asking: the sheet keeps its size, so [Cancel] stays on the button's spot)
+                Group {
                     VStack(alignment: .leading, spacing: DS.Space.s) {
                         Text("This removes the filament, every loaded face, curve and stamp set "
                              + "in Flexible, and asks which kind of lattice to use again. It "
@@ -191,34 +208,21 @@ public struct FlexibleStageSheet: View {
                             .font(.system(size: 14))
                             .foregroundStyle(DS.Color.warning.color)
                             .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: DS.Space.m) {
-                            Button("Cancel") { confirming = false }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(DS.Color.textSecondary.color)
-                            Button { onDelete() } label: {
-                                Text("Delete Flexible lattice")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .padding(.vertical, DS.Space.s)
-                                    .padding(.horizontal, DS.Space.l)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(DS.Color.warning.color)
-                            .accessibilityIdentifier("lattice-mode-delete-confirm")
+                        Button { onDelete() } label: {
+                            Text("Delete Flexible lattice")
+                                .font(.system(size: 15, weight: .semibold))
+                                .padding(.vertical, DS.Space.s)
+                                .padding(.horizontal, DS.Space.l)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(DS.Color.warning.color)
+                        .background(Group { if confirming { FlexibleConfirmInPlace.publish("latticeModeDeleteConfirm") } })
+                        .accessibilityIdentifier("lattice-mode-delete-confirm")
                     }
-                } else {
-                    Button { confirming = true } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "trash")
-                            Text("Delete Flexible lattice and choose again")
-                        }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(DS.Color.warning.color)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("lattice-mode-delete")
                 }
+                .opacity(confirming ? 1 : 0)
+                .allowsHitTesting(confirming)
+                .accessibilityHidden(!confirming)
             }
             .padding(DS.Space.xl4)
             .frame(maxWidth: 720)

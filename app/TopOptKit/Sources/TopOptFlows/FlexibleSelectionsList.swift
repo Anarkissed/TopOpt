@@ -87,7 +87,16 @@ public struct FlexibleSelectionsList: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
+            // ★ U21 (DEL-CONFIRM): a trash's ask takes the header's line — the same height, so nothing moves and [Cancel] stays
+            // exactly where the trash was
+            if !collapsed, let id = ui.deleteAsk, !ui.deleteAskInChip, let g = groups.first(where: { $0.id == id }),
+               !FlexibleConfirmInPlace.controlOldPlacement {
+                FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
+                                      oneLine: true)
+                    .frame(height: Self.lineHeight)
+            } else {
+                header
+            }
             if !collapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
                 if groups.isEmpty {
@@ -156,7 +165,7 @@ public struct FlexibleSelectionsList: View {
         let isPicked = picked == g.id
         VStack(alignment: .leading, spacing: 0) {
             groupLine(g, picked: isPicked)
-            if ui.deleteAsk == g.id, !ui.deleteAskInChip { deleteConfirm(g) }
+            if ui.deleteAsk == g.id, !ui.deleteAskInChip, FlexibleConfirmInPlace.controlOldPlacement { deleteConfirm(g) }   // (red control)
             if isPicked { openRows(g) }
         }
         .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
@@ -196,6 +205,9 @@ public struct FlexibleSelectionsList: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // ★ U21 (DEL-CONFIRM, his Img13): [Cancel] takes the trash's place; the question and [Delete] go under it
+                .modifier(FlexibleCancelInPlace(asking: ui.deleteAsk == g.id && !ui.deleteAskInChip, keepKey: "deleteCancel",
+                                                cancel: { ui.deleteAsk = nil }))
                 .background(publish("selTrash-\(g.id.uuidString)"))
                 .accessibilityLabel("Delete \(g.name), here and in Topology")
                 .accessibilityIdentifier("flexible-sel-trash-\(g.id.uuidString)")
@@ -205,10 +217,9 @@ public struct FlexibleSelectionsList: View {
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
-    /// "Delete Group C here and in Topology?" [Delete] [Cancel] — his answer: the trash confirms.
+    /// "Delete Group C here and in Topology?" [Delete] — his answer: the trash confirms (★ U21: [Cancel] on the trash itself).
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
-        FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
-                              cancel: { ui.deleteAsk = nil })
+        FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) })
             .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
     }
 
@@ -428,14 +439,50 @@ struct FlexibleInfoButton: View {
     }
 }
 
-/// The trash's confirm, one line: the question and [Delete] [Cancel].
+/// The trash's confirm: the question on its own line, whole, and [Delete] under it on the LEFT (the chip); in the Selections list
+/// one line in the header's place (`oneLine`). ★ U21 (DEL-CONFIRM, his Img13: "is
+/// the 'cancel' button where the delete button was and the OK button somewhere else so it requires a move to confirm?"): [Cancel]
+/// is on the trash itself (FlexibleCancelInPlace) — a second tap on the trash only cancels; [Delete] is a line down and to the left.
 struct FlexibleDeleteConfirm: View {
     let name: String
     let delete: () -> Void
-    let cancel: () -> Void
+    /// ★ U21: the Selections list's ask — [Delete] then the question on ONE line, in the list header's place (the list never
+    /// grows, so the trash's spot — now [Cancel] — never moves).
+    var oneLine = false
     // ★ LOOKED AT (13" portrait: "Delete Group C here and…" cut in the list, "…in Topolog…" in the chip): the question on its
-    // own line, whole; [Cancel] [Delete] under it
+    // own line, whole
     var body: some View {
+        if oneLine { line } else { stacked }
+    }
+
+    private var deleteButton: some View {
+        Button(action: delete) {
+            Text(FlexibleSelectionsCopy.delete).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                .padding(.horizontal, DS.Space.m).frame(height: 36)
+                .background(Capsule().fill(DS.Color.danger.color))
+                .frame(height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["deleteConfirm": g.frame(in: .global)]) }
+            .allowsHitTesting(false))
+        .accessibilityIdentifier("flexible-delete-confirm")
+    }
+
+    private var line: some View {
+        HStack(spacing: DS.Space.s) {
+            deleteButton
+            Text(FlexibleSelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("flexible-delete-question")
+        }
+        .padding(.horizontal, DS.Space.m)
+        .background(DS.Color.danger.opacity(0.12).color)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("flexible-delete-ask")
+    }
+
+    private var stacked: some View {
         VStack(alignment: .leading, spacing: 0) {
             // ★ the review of R7-D2: never fixed-size (a 50-character question widened the 348 pt list and cut every trash)
             Text(FlexibleSelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
@@ -443,26 +490,10 @@ struct FlexibleDeleteConfirm: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, DS.Space.s).padding(.horizontal, DS.Space.xs)
                 .accessibilityIdentifier("flexible-delete-question")
-        HStack(spacing: DS.Space.s) {
-            Spacer(minLength: DS.Space.xs)
-            Button(action: cancel) {
-                Text(FlexibleSelectionsCopy.cancel).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .padding(.horizontal, DS.Space.m).frame(height: 44).contentShape(Rectangle())
+            HStack(spacing: DS.Space.s) {
+                deleteButton
+                Spacer(minLength: DS.Space.xs)
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("flexible-delete-cancel")
-            Button(action: delete) {
-                Text(FlexibleSelectionsCopy.delete).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                    .padding(.horizontal, DS.Space.m).frame(height: 36)
-                    .background(Capsule().fill(DS.Color.danger.color))
-                    .frame(height: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["deleteConfirm": g.frame(in: .global)]) }
-                .allowsHitTesting(false))
-            .accessibilityIdentifier("flexible-delete-confirm")
-        }
         }
         .padding(.horizontal, DS.Space.s)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.danger.opacity(0.12).color))

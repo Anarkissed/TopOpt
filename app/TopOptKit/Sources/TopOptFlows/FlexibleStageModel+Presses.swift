@@ -144,7 +144,14 @@ extension FlexibleStageModel {
     /// press the history took away closes.
     public func historyRestored() {
         if let id = selectedPress, settings.press(id) == nil { selectedPress = nil }
+        // ★ U21 (UNDO-GHOST): an undone delete opens its tab again with its face selected (FlexibleSettingsOpenGroup)
+        let before = historyBefore
+        if restoreRailAfterHistory() { return }
         syncRail()   // ★ ROUND 7 (S, 4f): the open tab stays on its members through an undo / redo too
+        // ★ U21: a face this step took away (a redone take-out) is not left selected
+        if !Self.controlUndoKeepsMovedTab, let r = selectedRegion, settings.face(r) == nil, before?.faces.contains(r) == true {
+            selectedRegion = Self.appearSelection(self)
+        }
     }
 
     // MARK: inputs between two of core's frames (FlexiblePressReframe)

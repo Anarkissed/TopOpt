@@ -159,8 +159,14 @@ final class FlexibleRound5SettingsHostedTests: XCTestCase {
             pump(0.5)
             XCTAssertNotNil(local(h, "faceRemove-\(FlexibleHisProject.topA)"), "\(tag): top A has the trash")
             snapshot(h, "S_\(tag)_group1_topA_trash.png")
+            // ★ RE-PINNED (U21 batch D — his notes of 2026-10-21, Img13: "I accidentally deleted a face (which I shouldn't be able
+            // to do with a single click …"; the reviewer's ruling E(2)): the take-out ASKS first — [Keep] where it was, [Take out]
+            // to its left; a click there deletes top A
             try click(h, "faceRemove-\(FlexibleHisProject.topA)")
-            XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "\(tag): a click deletes top A")
+            XCTAssertNotNil(m.settings.face(FlexibleHisProject.topA), "\(tag): one click only asks")
+            XCTAssertNotNil(local(h, "faceRemoveKeep"), "\(tag): [Keep] in place")
+            try click(h, "faceRemoveConfirm")
+            XCTAssertNil(m.settings.face(FlexibleHisProject.topA), "\(tag): [Take out] deletes top A")
             m.select(FlexibleHisProject.topB)
             pump(0.5)
             XCTAssertNotNil(local(h, "faceRemove-\(FlexibleHisProject.topB)"), "\(tag): top B has the trash")

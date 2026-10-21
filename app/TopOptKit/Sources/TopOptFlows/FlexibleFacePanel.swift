@@ -167,28 +167,32 @@ struct FlexibleFaceRows: View {
     }
 
     /// The card's first row: the face's dot and name, as the list row, at its height.
-    private func header<C: View>(_ r: Int, pressed: Bool?, @ViewBuilder control: () -> C) -> some View {
+    private func header<C: View>(_ r: Int, pressed: Bool?, hidden: Bool = false, @ViewBuilder control: () -> C) -> some View {
         HStack(spacing: DS.Space.s) {
             Circle()
                 .fill(Self.dot(model: model, region: r).color)
                 .frame(width: 10, height: 10)
-            FlexRow(name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") { control() }
+                .opacity(hidden ? 0 : 1)   // ★ U21: the take-out's question is on this line
+            FlexRow(hidden ? "" : name(r), info: FlexibleRowCopy.Info.face, id: "flexible-row-face") { control() }
         }
         .frame(minHeight: FlexibleFaceList.rowHeight)
     }
 
     @ViewBuilder private func markedRows(_ r: Int, _ f: FlexibleFaceSettings) -> some View {
-        header(r, pressed: f.isLoaded) {
+        let asking = model.faceRemoveAsk == r
+        header(r, pressed: f.isLoaded, hidden: asking) {
             FlexChips(options: FlexibleRowCopy.roleOptions, selection: f.role, id: "flexible-role", equalWidths: false) { v in
                 if v == "loaded" { pressOrAsk(r) } else { model.rest(r) }
             }
             .fixedSize()
+            .opacity(asking ? 0 : 1).allowsHitTesting(!asking)   // ★ U21: the row hides [Pressed|Rests] while it asks
             // ★ ROUND 5 (S6, img 3: "All faces should be deletable"): the trash on EVERY face — a
             // split sector, a face a main-page group holds (it leaves the Flexible setup; the main
             // page's group is untouched and its re-sync no longer brings it back)
             // ★ ROUND 7 (F, his answer: the face row's trash looks different from the group's): a smaller TAKE-OUT glyph
             // (it only takes this face out of the squish; the group's trash deletes a group)
-            Button { model.removeFace(r) } label: {
+            // ★ U21 (DEL-CONFIRM, his Img13): the take-out ASKS in place — [Keep] where the ⊖ was, [Take out] to its left
+            Button { model.askRemoveFace(r) } label: {
                 // ★ ROUND 7 REVIEW (R, his rule: 44 pt targets): the glyph as F drew it, a 44 pt target round it (F: 32), and
                 // in the secondary grey (the tertiary read faint beside "Rests")
                 Image(systemName: FlexibleTrashGlyphs.face).font(.system(size: FlexibleTrashGlyphs.faceSize))
@@ -197,6 +201,10 @@ struct FlexibleFaceRows: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .modifier(FlexibleConfirmInPlace(asking: asking, question: FlexibleConfirmCopy.takeOutAsk(name(r)),
+                                             destructive: FlexibleConfirmCopy.takeOut, confirmKey: "faceRemoveConfirm",
+                                             keepKey: "faceRemoveKeep", questionID: "flexible-face-remove-ask",
+                                             confirm: { model.confirmRemoveFace() }, cancel: { model.keepFace() }))
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceRemove-\(r)": g.frame(in: .global)])
             }.allowsHitTesting(false))

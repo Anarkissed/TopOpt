@@ -389,9 +389,12 @@ struct FlexibleGroupTabHeader: View {
         let kg = row?.kg ?? 0
         VStack(alignment: .leading, spacing: DS.Space.xxs) {
             HStack(spacing: DS.Space.s) {
+                let asking = model.groupDeleteAsk == group.id   // ★ U21: the trash's question is on this line
                 Circle().fill(model.groupColour(group).color).frame(width: 12, height: 12)
+                    .opacity(asking ? 0 : 1)
                 // ★ ROUND 7 (S, 4d): his name — a tap renames it (one line, 16 characters at most)
                 FlexibleGroupNameField(model: model, group: group)
+                    .opacity(asking ? 0 : 1).allowsHitTesting(!asking)
                 Spacer(minLength: DS.Space.xs)
                 // ★ ROUND 7 (S, 4d): the trash on EVERY group (the only one's too), 44 pt — it deletes the group
                 if row?.removable == true {

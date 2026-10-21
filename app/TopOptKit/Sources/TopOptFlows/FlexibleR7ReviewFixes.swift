@@ -158,6 +158,9 @@ extension FlexibleStageModel {
     /// 3 s hold) goes too — the page's opening look, no colour.
     func reviewAfterEdit() {
         if let id = groupDeleteAsk, !Self.controlAskOutlivesGroup, !squeezeGroups.contains(where: { $0.id == id }) { groupDeleteAsk = nil }
+        // ★ U21 (DEL-CONFIRM): a take-out / press-trash ask goes with its face / press
+        if let r = faceRemoveAsk, settings.face(r) == nil { faceRemoveAsk = nil }
+        if let p = pressRemoveAsk, settings.press(p) == nil { pressRemoveAsk = nil }
         if squeezeGroups.isEmpty, views.heatScope == .all, !FlexibleMainStage.controlEmptyMainFix {
             var v = views
             v.insert(.heatOff); v.remove(.heatAll)
@@ -166,6 +169,7 @@ extension FlexibleStageModel {
     }
     /// A tab change: the question asked on another group's tab goes.
     func dropDeleteAskOffItsTab() {
+        dropInPlaceAsks()   // ★ U21: a tab change drops a take-out / press / Reset all / pop-up ask
         guard let id = groupDeleteAsk, !Self.controlAskOutlivesGroup, rail != .group(id) else { return }
         groupDeleteAsk = nil
     }

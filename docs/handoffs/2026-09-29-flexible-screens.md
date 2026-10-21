@@ -70,7 +70,104 @@ Each item: what core does, where, the evidence, your numbers.
    every default edge press "too soft" on 52 of 52 columns (E2 finding 10): follows from item 5. (d) Core's design for a press
    ignores its drawn curve (item 2), so "how close core's profile is" can only measure the flat prism.
 
-## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (read this first)
+## ★ Round 7 · U21 batch D — your notes of 2026-10-21, Img13: every delete asks first, in place; Undo puts the panel back; one Undo after a Lattice-page trash (2026-10-21) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `eff5a922` (the CORE LIST above). NOT pushed (your HOLD). App only; core
+untouched; no #354/main file edited, no new hook. Judged on your live projects of 10-21 (`round7/batch_u21/his_live_1021_pad`,
+`his_live_1021_lbracket`, committed). Nothing installed (the integrator builds and installs).
+
+Your note (Img13): "I accidentally deleted a face (which I shouldn't be able to do with a single click - why isn't there a
+confirmation button that is required? And if there is, is the "cancel" button where the delete button was and the OK button
+somewhere else so it requires a move to confirm?) Then I hit undo and now it shows the bend on the model but it is not actually
+showing the face in the modal anymore? That's clearly a bug."
+
+### What you will see now
+- **Every delete asks first, and the cancel button lands exactly where you tapped.** Tap the ⊖ on a face row: the row turns into
+  "Take Face 6 out? [Take out] [Keep]". **[Keep] sits on the ⊖'s spot**, so a second tap there only cancels; the red
+  [Take out] is at least 24 pt to its left, so confirming needs a move. The same for an edge or corner's trash ("Remove Edge 12?
+  [Remove] [Keep]"), a group's trash ("Delete Group 1? [Delete] [Keep]", now on the group's own line, not the panel's top line),
+  Reset all ("Reset every setting here? [Reset] [Cancel]") and a pop-up's [Remove Face N] / [Remove Edge 12] (the button turns into
+  [Keep], [Remove] appears to its left: two taps with a move, your words beating the one-tap-fix rule for deletes). Tapping the
+  part, another row or another tab drops the question.
+- **On the Lattice page** the Selections trash and the chip's trash turn into [Cancel] in place; [Delete] and the question go on
+  another line (in the list, the header's line, so nothing moves under your finger). "Delete Flexible lattice and choose again"
+  turns into [Cancel] in place, the warning and the red button under it.
+- **Undo puts the panel back as it was.** On your l-bracket: take out Face 6 (Group 1's only face) and Undo: Group 1 opens again
+  with Face 6 selected and its card showing (before: [+ New] stayed open while Group 1's bend played, your 23.png). On your pad:
+  take out Face 5, Undo: Face 5 is selected again (before: Face 3). Delete Group 1 (Faces 5 + 3), Undo: Group 1 opens again,
+  Face 5 selected (before: the edges group's tab). Reset all, Undo: everything comes back with Group 1 open (before: one Undo
+  brought nothing back, the reset's follow-up write took it). Redo still takes the face out again ([+ New]).
+- **Taking a face out is its own undo step.** Change Deepest to 9, take the face out, change something else: Undo, Undo gives the
+  face back with Deepest 9 (before, the three folded together).
+- **One toolbar Undo after a Lattice-page trash** brings the group back with its Squish entries (F12; the reviewer's ruling E(2)).
+
+### What was wrong (one sentence each)
+- Four deletes on the Squish page (face ⊖, edge trash, the pop-up's two Remove fixes) had no confirm at all, and the confirms that
+  existed put Cancel somewhere other than where you tapped.
+- Undo restored your settings but not the panel: the tab a delete had moved (to [+ New]) and the face it took out are not part of
+  the undo history, so the bend of Group 1 played with no face open; the probe confirmed it once an edit before the ⊖ was
+  included, as in your session (`probe_first.txt`).
+- After a Lattice-page trash (and after Reset all) the stage re-opens on the new lattice and re-files the face entries about
+  0.5 s later; that write was sealed as its own undo step, so the first Undo took it instead of your delete.
+- The take-out neither sealed the edits before it nor saved after it.
+
+### How (code)
+- `FlexibleConfirmInPlace.swift` (new): the ask modifier (Keep's centre aligned to the tapped control's centre by an alignment
+  guide; the red button 24 pt left), `FlexibleCancelInPlace` (the Lattice page), the labels, and the model's asks
+  (`faceRemoveAsk`, `pressRemoveAsk`, `resetAsk`, `fixRemoveAsk`, one at a time, dropped by a tap, a row pick or a tab change).
+- UNDO-GHOST: `railKeep` is known before the first edit; `syncRail` remembers the tab and face (and press) a delete moved or
+  cleared (`railReturn`); the page's Undo/Redo (`historyWillRestore` → `restoreRailAfterHistory`) opens them again when that step
+  brought the members back; `playingGroup`'s first-group default untouched (your 10-14 rule).
+- F12 / Reset all: `sealAfterReopen` keeps the delete's step open until the re-opened scene's own write has landed in it, then
+  seals (the project would seal a change alone 400 ms after it; the change is re-announced every 150 ms meanwhile, at most 5 s).
+  The carry itself needs core's re-opened scene (the new lattice sections are core's), so it cannot run inside the trash. No
+  ProjectModel hook.
+- `removeFace`: seals before, saves after.
+
+### Tests (each RED control asserted red inside its test)
+`FlexibleU21DeleteUndoTests` (9, his live 10-21 copies):
+- `testTakeOutOnlyFaceThenUndoReopensItsGroup` (l-bracket): after Undo Group 1 open, Face 6 selected, its card (working 2000008),
+  Deepest 7 kept; Redo → [+ New], nothing selected; Undo again → Group 1. RED `controlUndoKeepsMovedTab` (= the plan's seeded
+  probe): rail newGroup · playing Group 1 · working nil (your 23.png).
+- `testTakeOutSelectedFaceThenUndoReselectsIt` (pad, Face 5 of 5 + 3): selected 5 after Undo. RED: 3.
+- `testGroupTrashThenUndoReopensTheGroup` (pad): after Undo and the scene re-open the faces group (5, 3), Face 5 selected. RED:
+  Group 2 (the edges group).
+- `testResetAllThenUndoReopensTheGroup` (pad): 1 undo step for the reset; Undo → Group 1, Face 5, faces [5, 3, 2000021, 2000020].
+  RED (`controlUndoKeepsMovedTab` + `controlResetSealsAtOnce`): 2 steps, one Undo → still empty, [+ New].
+- `testOneToolbarUndoRestoresTheTrashedGroup` (pad, Lattice page, Group C): faces after the trash [5, 3, 2000021, 2000020,
+  2000065, 2000066, 2000067] (the re-open's carry); ONE `performUndo` → Group C back, faces [5, 3, 2000021, 2000020], undo steps
+  0 → 0. RED `controlDeferredCarry`: Group C not back, steps 1.
+- `testFaceTakeOutAsksFirst` / `testPressTrashAsksFirst` (Edge 12, then Edge 9) / `testPopupRemoveAsksFirst`: asked, nothing removed,
+  [Keep] / a tap elsewhere / a tab change drop it, the confirm removes. RED `controlRemoveAtOnce`: removed at once.
+- `testTakeOutIsItsOwnUndoStep`: one Undo → Face 5 still out (the later edit undone); two → Face 5 back with Deepest 9. RED
+  `controlRemoveFaceNoSeal`: one Undo → Face 5 back at 5.5 (all folded).
+Hosted, 13" portrait:
+- `FlexibleU2Tests.testU21ConfirmKeepSitsOnTheTappedControl` (pad of 10-21): Keep's centre on the control's (face ⊖ 386,748 →
+  Keep 376–440; group trash 394 → 384–448; Reset all 369–440 → Keep 372–437; Edge 12's trash 434 → 424–488), the red button
+  ≥ 24 pt left of Keep in all four, 44 pt tall; a second click on the same spot only cancels, nothing removed; [Take out]
+  removes Face 5. RED `FlexibleConfirmInPlace.controlOldPlacement`: Keep at 312–376 for the ⊖ at 386–430 (off the spot).
+- `FlexibleRound7SelectionsHostedTests.testU21LatticePageTrashCancelInPlace`: Group C's trash 322,811 → [Cancel] 312–376 (same
+  centre), [Delete] on the header line (36–102, y 672); the chip's trash 691,114 → [Cancel] 681–746, [Delete] 411–478 a line down;
+  a second click cancels. RED: no [Cancel] on the trash.
+Re-pins: `FlexibleRound5SettingsHostedTests` (the trash click now asks; [Take out] deletes top A) — your 10-21 Img13 note + ruling
+E(2). `FlexibleR7RHostedTests`' red control (F's 32 pt) kept: the confirm reads `FlexibleTargets.least` / `side(32)`.
+
+### Runs (`round7/batch_u21_d/u21_d_runs.txt`)
+- 60 targeted classes (the batch's, the classes that pin the files it touched, the eight the plan names, FlexibleSquishCopyTests,
+  LatticeStaleTypeTests), 5 chunks: **405 tests, 1 skipped, 12 failures in 3 tests** = the R5 trash re-pin (8), R's red control
+  (3, fixed in code), the known Play ring (1). No signal. Re-runs after the fixes: 19/19, 19/19, 15/15.
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 + 1 PART-SKIP, 0 DIFFERS (unseeded).
+- The 16 stage-job hashes are cmp-identical to `stage_job_hashes_x20b.txt` (whole file). No job byte moved.
+- Evidence `round7/batch_u21_d/look/` (13" portrait, your 10-21 pad): the four asks (`U21_D1`–`D4`) and after [Take out] (`D5`);
+  `probe_first.txt` (the seeded probe on today's code).
+
+### Not done / open
+- F12's hold: an edit you make within that ~0.5–1 s (before the re-opened scene lands) joins the trash's step; an action that
+  seals its own step (another delete, Undo) still seals at once.
+- The pop-up's Remove ask when Remove is the pop-up's only (first) fix: [Remove] sits left of the pop-up's own edge (not met on
+  your projects).
+
+## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (the step before U21 batch D above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
 #354/main file edited. Judged on your 10-20 pad (`round7/batch_u1/his_live_1020`).

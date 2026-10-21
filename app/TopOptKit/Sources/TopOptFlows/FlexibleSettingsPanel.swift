@@ -15,7 +15,8 @@
 // the *left* side of the modal so enough groups can fit"): the Face | More chips became a RAIL of
 // folder tabs down the panel's left side (FlexibleSettingsRail) — [Model], one per squeeze group,
 // [Rests], [+] — with the open tab beside it. The panel is 480 pt wide: the rail takes 72 + 8, the
-// tab keeps round 4's 372 pt (`contentWidth`), so every row measured at 372 still fits. ★ S5: [Reset all] in the header, with a one-line confirm.
+// tab keeps round 4's 372 pt (`contentWidth`), so every row measured at 372 still fits. ★ S5: [Reset all] in the header, with a one-line confirm
+// (★ U21: in place — [Cancel] where [Reset all] was, [Reset] to its left).
 
 import SwiftUI
 import TopOptDesign
@@ -29,8 +30,6 @@ struct FlexibleSettingsPanel: View {
     static let width: CGFloat = 480
     /// The open tab's width beside the rail — round 4's 372 pt, so every one-line row still fits.
     static let contentWidth: CGFloat = width - 2 * DS.Space.ml - FlexibleSettingsRailView.width - DS.Space.s
-    /// ★ S5: the header's Reset all asks once, in one line, before it resets.
-    @State private var confirmingReset = false
     /// The selected card's height and the scroll's own, as laid out: when either changes (the
     /// stamp's rows, a design's warning line; the fix pop-up taking the top of the page) the card
     /// is brought back into view — a reveal made before them left it cut off.
@@ -39,10 +38,8 @@ struct FlexibleSettingsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
-            // ★ ROUND 7 (F): a group's trash asks here too, in the header's place
-            if confirmingReset { resetConfirm }
-            else if let id = model.groupDeleteAsk, let g = model.railGroup(id) { groupDeleteConfirm(g) }
-            else { header }
+            // ★ U21 (DEL-CONFIRM, his Img13): Reset all and a group's trash ask IN PLACE (FlexibleConfirmInPlace) — the header stays
+            header
             if !minimized {
                 // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
                 ScrollViewReader { proxy in
@@ -122,8 +119,10 @@ struct FlexibleSettingsPanel: View {
     private var header: some View {
         HStack(spacing: DS.Space.xs) {
             Circle().fill(FlexibleStageStyle.accent).frame(width: 8, height: 8)
+                .opacity(model.resetAsk ? 0 : 1)   // ★ U21: Reset all's question is on this line
             Text(Self.title).font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(DS.Color.textPrimary.color)
+                .opacity(model.resetAsk ? 0 : 1)
             // folded: which face the page is on, so the header still says it
             if minimized, let r = model.selectedRegion {
                 Text("· \(model.faceName(r))").font(.system(size: 15, weight: .medium))
@@ -133,7 +132,7 @@ struct FlexibleSettingsPanel: View {
             Spacer()
             // ★ ROUND 5 (S5): "Reset all" — every input back to a brand-new setup (asked once; undoable)
             if !minimized {
-                Button { confirmingReset = true } label: {
+                Button { model.askResetAll() } label: {
                     Text(FlexibleSettingsExit.resetButton)
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
                         .padding(.horizontal, 10).frame(height: 30)
@@ -144,6 +143,10 @@ struct FlexibleSettingsPanel: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .modifier(FlexibleConfirmInPlace(asking: model.resetAsk, question: FlexibleSettingsExit.resetAsk,
+                                                 destructive: FlexibleSettingsExit.resetConfirm, keep: FlexibleSettingsExit.resetCancel,
+                                                 confirmKey: "resetConfirm", keepKey: "resetCancel", questionID: "flexible-reset-ask",
+                                                 confirm: { model.confirmResetAll() }, cancel: { model.keepAll() }))
                 .background(GeometryReader { g in
                     Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetAll": g.frame(in: .global)])
                 }.allowsHitTesting(false))
@@ -162,86 +165,6 @@ struct FlexibleSettingsPanel: View {
             .accessibilityLabel(minimized ? "Show the settings" : "Minimise the settings")
             .accessibilityIdentifier("flexible-panel-minimize")
         }
-    }
-}
-
-extension FlexibleSettingsPanel {
-    /// ★ ROUND 7 (F, his answer: "Group trash should confirm deletion."): "Delete Group 2? [Delete] [Keep]", one line in
-    /// the header's place, as Reset all asks.
-    func groupDeleteConfirm(_ g: FlexibleSqueezeGroup) -> some View {
-        HStack(spacing: DS.Space.s) {
-            Image(systemName: FlexibleTrashGlyphs.group).font(.system(size: 13, weight: .bold))
-                .foregroundStyle(DS.Color.warning.color)
-            Text(FlexibleRowCopy.deleteGroupAsk(model.groupName(g))).font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).minimumScaleFactor(0.85)
-                .accessibilityIdentifier("flexible-group-delete-ask")
-            Spacer(minLength: DS.Space.xs)
-            Button { model.confirmDeleteGroup() } label: {
-                Text(FlexibleRowCopy.deleteGroupConfirm).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
-                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(GeometryReader { gr in
-                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupDeleteConfirm": gr.frame(in: .global)])
-            }.allowsHitTesting(false))
-            .accessibilityIdentifier("flexible-group-delete-confirm")
-            Button { model.keepGroup() } label: {
-                Text(FlexibleRowCopy.deleteGroupKeep).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(Capsule().fill(DS.Color.fillSubtle.color))
-                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(GeometryReader { gr in
-                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupDeleteKeep": gr.frame(in: .global)])
-            }.allowsHitTesting(false))
-            .accessibilityIdentifier("flexible-group-delete-keep")
-        }
-        .frame(minHeight: 36)
-    }
-
-    /// ★ S5: the one-line confirm, in the header's place: "Reset every setting here? [Reset] [Cancel]".
-    var resetConfirm: some View {
-        HStack(spacing: DS.Space.s) {
-            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
-                .foregroundStyle(DS.Color.warning.color)
-            Text(FlexibleSettingsExit.resetAsk).font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).minimumScaleFactor(0.85)
-                .accessibilityIdentifier("flexible-reset-ask")
-            Spacer(minLength: DS.Space.xs)
-            Button { confirmingReset = false; model.resetAll() } label: {
-                Text(FlexibleSettingsExit.resetConfirm).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(Capsule().fill(DS.Color.danger.color.opacity(0.55)))
-                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(GeometryReader { g in
-                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["resetConfirm": g.frame(in: .global)])
-            }.allowsHitTesting(false))
-            .accessibilityIdentifier("flexible-reset-confirm")
-            Button { confirmingReset = false } label: {
-                Text(FlexibleSettingsExit.resetCancel).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, 12).frame(height: 32)
-                    .background(Capsule().fill(DS.Color.fillSubtle.color))
-                    .frame(minWidth: FlexibleTargets.least, minHeight: FlexibleTargets.least)   // ★ R: a 44 pt target
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("flexible-reset-cancel")
-        }
-        .frame(minHeight: 36)
     }
 }
 

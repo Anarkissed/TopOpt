@@ -150,7 +150,7 @@ public final class FlexibleStageModel: ObservableObject {
     public let project: ProjectModel
     public let materialsPath: String?
     public let library: FlexibleStampLibrary?
-    private let persist: () -> Void
+    let persist: () -> Void
     private let worker = FlexibleWorker()
     /// The bridge worker, for tests that read core through the same open scene.
     var workerForTests: FlexibleWorker { worker }
@@ -216,6 +216,18 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ ROUND 7 (S, 4f): the open tab's members as they were after the last change (FlexibleSettingsOpenGroup) — the tab
     /// stays on them through the next one.
     var railKeep: FlexibleRailKeep?
+    /// ★ U21 (UNDO-GHOST, his Img13: "Then I hit undo and now it shows the bend on the model but it is not actually showing the
+    /// face in the modal anymore"): the tab and the face (and press) a delete or Reset all moved or cleared, remembered by
+    /// `syncRail` — the page's Undo / Redo opens them again once their members are back (`restoreRailAfterHistory`). Survives
+    /// the history's scene re-open; only Undo / Redo reads it.
+    var railReturn: FlexibleRailKeep?
+    var railReturnSelected: Int?
+    var railReturnPress: UUID?
+    /// ★ U21: the faces and presses just before the page's Undo / Redo (`historyWillRestore`) — a remembered tab opens again only
+    /// when this history step brought its members back.
+    var historyBefore: (faces: Set<Int>, presses: Set<UUID>)?
+    /// ★ U21 (F12): a delete's undo step held open until the re-opened scene's write lands in it (`sealAfterReopen`).
+    var stepHold: Task<Void, Never>?
     /// ★ ROUND 7 (S, verify): the last group (or [Rests]) tab he had open — a face no group holds, tapped on [Model], opens
     /// it (its card offers [Press it] there), never Group 1 by default.
     var lastWorkTab: FlexibleRailTab?
@@ -268,6 +280,12 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public var views: FlexibleStageViews = FlexibleStageModel.openingViews
     /// ★ ROUND 7 (F, his answer 2: "Group trash should confirm deletion."): the group whose trash asks "Delete Group 2?".
     @Published public var groupDeleteAsk: Int?
+    /// ★ U21 (DEL-CONFIRM, his Img13): the face whose ⊖ asks "Take Face 6 out?", the press whose trash asks "Remove Edge 12?",
+    /// Reset all's ask, and the fix pop-up's Remove fix asking (its `FlexibleFixPopup.id`) — each in place (FlexibleConfirmInPlace).
+    @Published public var faceRemoveAsk: Int?
+    @Published public var pressRemoveAsk: UUID?
+    @Published public var resetAsk = false
+    @Published public var fixRemoveAsk: String?
     /// Test control only (round 6): a view toggle stored in the settings (the red control of the rule above).
     var controlViewsInSettings = false
     @Published public private(set) var lastError: String?
@@ -428,6 +446,9 @@ public final class FlexibleStageModel: ObservableObject {
     }
 
     public func edit(_ change: (inout FlexibleStageSettings) -> Void, recompute: Bool = true) {
+        // ★ U21 (UNDO-GHOST): the open tab's members are known before the first change (never nil: an edit that empties the
+        // tab — his only face taken out — moves it to [+ New], and Undo can bring it back)
+        if railKeep == nil, !Self.controlUndoKeepsMovedTab { railKeep = captureRail() }
         var s = settings
         change(&s)
         guard s != settings else { return }
@@ -448,7 +469,7 @@ public final class FlexibleStageModel: ObservableObject {
 
     /// Every edit reaches the disk shortly after it is made, not only on Exit: a kill
     /// between edits must not lose the drawing (the lattice stage's own 2026-09-02 rule).
-    private var saveTask: Task<Void, Never>?
+    var saveTask: Task<Void, Never>?   // (★ U21: `sealAfterReopen` cancels it — its seal would split the held step)
     private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task { @MainActor [weak self] in
@@ -707,6 +728,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// faces at 10 kg each, which made the conflicts and the '7 faces' refusal). Pressing is
     /// explicit: [Press it] / [It rests here] in the panel, or the main page's groups.
     public func tapFace(_ face: Int, point: SIMD3<Double>? = nil) {
+        dropInPlaceAsks()   // ★ U21: a tap on the part drops a delete's ask
         // ★ ROUND 6 ITEM 2: in pick mode a tap never selects a face (the page hit-tests the edges and corners first)
         if edgePick != nil { return }
         // a split face resolves to the sector holding the point (the Surface stage's rule)
@@ -761,6 +783,7 @@ public final class FlexibleStageModel: ObservableObject {
     /// whole face), so the rows below edit it and the part shows it selected.
     public func select(_ region: Int) {
         if edgePick != nil { return }   // ★ ROUND 6 ITEM 2: pick mode selects no face
+        dropInPlaceAsks()   // ★ U21: a tap elsewhere drops a delete's ask
         curvePoint = nil
         selectedRegion = region
         followSelection()   // ★ ROUND 7 (S, 4f b): a row picked is his pick — its tab opens
@@ -932,6 +955,8 @@ public final class FlexibleStageModel: ObservableObject {
         actionSerial += 1
         let held = !mainPageLoads.canRemove(region)
         let left = partsLeft(without: region)
+        // ★ U21 (DEL-CONFIRM): the take-out is its OWN undo step — the edits before it sealed, and it saved (sealed) after
+        if !Self.controlRemoveFaceNoSeal { project.sealUndoStep() }
         edit { s in
             s.removeFace(region)
             if held, !s.isRemoved(region) { s.removedRegions = (s.removedRegions ?? []) + [region] }
@@ -941,6 +966,7 @@ public final class FlexibleStageModel: ObservableObject {
         purgeFaceCaches(region)
         // ★ ROUND 7 (S, 4f d): the OPEN group's first face, else none — never Group 1's
         if selectedRegion == region { selectedRegion = Self.appearSelection(self) }
+        if !Self.controlRemoveFaceNoSeal { save() }
         return true
     }
 

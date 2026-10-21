@@ -73,9 +73,12 @@ struct FlexibleSqueezeGroupHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: DS.Space.s) {
+                let asking = model.groupDeleteAsk == row.id   // ★ U21: the trash's question is on this line
                 Circle().fill(model.groupColour(number: row.number).color)
                     .frame(width: 10, height: 10)
+                    .opacity(asking ? 0 : 1)
                 Text(row.line)
+                    .opacity(asking ? 0 : 1)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
@@ -94,6 +97,7 @@ struct FlexibleSqueezeGroupHeader: View {
                               onNote: { model.toast = $0 }) { v in
                     model.setGroupForce(row.id, kg: unit.toKg(v))
                 }
+                .opacity(asking ? 0 : 1).allowsHitTesting(!asking)
                 // ★ ROUND 7 (S, 4d): the trash, 44 pt, on every group — it deletes the group
                 if row.removable {
                     FlexibleGroupTrashButton(model: model, groupID: row.id, number: row.number, name: model.groupName(number: row.number))

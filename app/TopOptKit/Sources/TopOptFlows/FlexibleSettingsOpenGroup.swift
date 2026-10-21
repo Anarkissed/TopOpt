@@ -128,6 +128,7 @@ extension FlexibleStageModel {
             if t != rail { rail = t }
             return
         }
+        let before = railKeep, selected = selectedRegion, press = selectedPress
         let t = railKeep.map(resolveRail) ?? validRail
         if t != rail {
             rail = t   // railChanged keeps the selection inside it and remembers its members
@@ -135,6 +136,66 @@ extension FlexibleStageModel {
             keepSelectionInOpenTab(railKeep, fillEmpty: false)   // (nothing selected stays so: an edit selects nothing)
             railKeep = captureRail()
         }
+        noteRailReturn(before, selected: selected, press: press)
+    }
+
+    // MARK: ★ U21 (UNDO-GHOST) — Undo puts the panel back
+
+    /// ★ RED CONTROL: today's — Undo keeps the tab a delete moved ([+ New]) and selects nothing (his 23.png); railKeep is not
+    /// known before the first edit.
+    @MainActor static var controlUndoKeepsMovedTab = false
+    /// ★ RED CONTROL: today's take-out — no seal before, no save after (it folds into the edits around it).
+    @MainActor static var controlRemoveFaceNoSeal = false
+
+    /// After a change: when it took members of the open tab away (a delete, Reset all, a redo of one) AND moved the tab or
+    /// cleared / re-pointed the selection, the tab and the face (and press) as they were are remembered for Undo.
+    func noteRailReturn(_ k: FlexibleRailKeep?, selected: Int?, press: UUID?) {
+        guard !Self.controlUndoKeepsMovedTab, let k else { return }
+        let s = settings
+        let gone = k.regions.contains { s.face($0) == nil } || k.presses.contains { s.press($0) == nil }
+            || (selected.map { k.known.contains($0) && s.face($0) == nil } ?? false)
+        let moved = rail != k.tab || selectedRegion != selected || selectedPress != press
+        guard gone, moved else { return }
+        railReturn = k
+        railReturnSelected = selected
+        railReturnPress = press
+    }
+
+    /// The page's Undo / Redo is about to restore (FlexibleStagePage.history): what is set now.
+    public func historyWillRestore() {
+        historyBefore = (Set(settings.faces.map(\.faceRegionID)), Set(presses.map(\.id)))
+    }
+
+    /// ★ After the page's Undo / Redo: the tab a delete moved opens again, with the face it took out (or cleared) selected — when
+    /// this history step brought the remembered members back. true: done (the caller skips syncRail).
+    func restoreRailAfterHistory() -> Bool {
+        let before = historyBefore
+        historyBefore = nil
+        guard !Self.controlUndoKeepsMovedTab, let k = railReturn else { return false }
+        let faces = Set(settings.faces.map(\.faceRegionID)), pressIDs = Set(presses.map(\.id))
+        let sel = railReturnSelected, press = railReturnPress
+        guard !k.regions.isEmpty || !k.presses.isEmpty || sel != nil else { return false }
+        let back = k.regions.allSatisfy(faces.contains) && k.presses.allSatisfy(pressIDs.contains) && (sel.map(faces.contains) ?? true)
+        let cameBack = before.map { b in
+            k.regions.contains { !b.faces.contains($0) } || k.presses.contains { !b.presses.contains($0) }
+                || (sel.map { !b.faces.contains($0) } ?? false)
+        } ?? true
+        guard back, cameBack else { return false }
+        reviewAfterEdit()
+        railReturn = nil; railReturnSelected = nil; railReturnPress = nil
+        let t = resolveRail(k)   // the group (or Rests) that holds the members now
+        if t != rail { rail = t }   // (railChanged keeps the selection inside it)
+        if let r = sel, admitsSelection(r) {
+            if selectedRegion != r { selectedRegion = r }
+        } else if selectedRegion == nil {
+            selectedRegion = Self.appearSelection(self)
+        }
+        // the press: the remembered one when the tab holds it; one the tab does not hold goes (a reused group id)
+        let held: Set<UUID> = { if case .group(let id) = rail, let g = railGroup(id) { return Set(g.presses) }; return [] }()
+        if let p = press, held.contains(p) { selectedPress = p }
+        else if let p = selectedPress, !held.contains(p) { selectedPress = nil }
+        railKeep = captureRail()
+        return true
     }
 
     // MARK: (b) the explicit picks

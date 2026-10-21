@@ -238,6 +238,97 @@ final class FlexibleU2Tests: XCTestCase {
         flush("U2_lines_row_window.txt")
     }
 
+    // MARK: ★ U21 (DEL-CONFIRM, his Img13) — [Keep] sits on the tapped control; the red button a move away (his 10-21 pad)
+
+    func click(_ h: Host, _ p: CGPoint) {
+        for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let e = NSEvent.mouseEvent(with: t, location: NSPoint(x: p.x, y: h.size.height - p.y), modifierFlags: [],
+                                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            h.window.sendEvent(e)
+            pump(0.06)
+        }
+        pump(0.6)
+    }
+
+    struct Asked { let control: CGRect; let keep: CGRect?; let confirm: CGRect?
+        var keepOnSpot: Bool { keep.map { abs($0.midX - control.midX) <= 1 && abs($0.midY - control.midY) <= 1 } ?? false }
+        var clear: Bool { if let k = keep, let c = confirm { return c.maxX <= k.minX - FlexibleConfirmLayout.gap + 0.5 }; return false }
+        var line: String { "control \(control.integral) · keep \(keep.map { "\($0.integral)" } ?? "-") · red \(confirm.map { "\($0.integral)" } ?? "-") · on spot \(keepOnSpot) · ≥24 pt clear \(clear)" }
+    }
+
+    /// Click `controlKey`, measure the ask, then click the SAME spot again (a double tap): it only cancels.
+    func ask(_ h: Host, _ controlKey: String, keep: String, confirm: String, secondTap: Bool = true, picture: String? = nil,
+             asking: () -> Bool, kept: () -> Bool) throws -> Asked {
+        let c = try XCTUnwrap(h.frames.all[controlKey], "the control \(controlKey)")
+        click(h, CGPoint(x: c.midX, y: c.midY))
+        XCTAssertTrue(pumpUntil(3, asking), "★ \(controlKey) asks first")
+        pump(0.4)
+        let a = Asked(control: c, keep: h.frames.all[keep], confirm: h.frames.all[confirm])
+        if let picture { try shot(picture, h, settle: 0.2) }
+        XCTAssertTrue(kept(), "★ \(controlKey): nothing removed before the confirm")
+        guard secondTap else { return a }
+        click(h, CGPoint(x: c.midX, y: c.midY))   // the same spot again
+        XCTAssertTrue(pumpUntil(3) { !asking() }, "★ \(controlKey): a second tap on the spot only cancels")
+        XCTAssertTrue(kept(), "★ \(controlKey): still there")
+        return a
+    }
+
+    func testU21ConfirmKeepSitsOnTheTappedControl() async throws {
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.padDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle(); FlexibleConfirmInPlace.controlOldPlacement = false }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his pad of 10-21")
+        let faces = try XCTUnwrap(m.squeezeGroups.first { $0.regions.contains(5) }, "premise: Faces 5 + 3")
+        let edges = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .edges }, "premise: his edges group")
+        let e12 = try XCTUnwrap(m.presses.first { $0.strip?.label == "Edge 12" })
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: FlexibleSquishLoop(), onExit: {}), size: Self.p13)
+        pump(3)
+        m.rail = .group(faces.id); m.select(5); pump(1.5)
+        var lines: [String] = []
+        let face = try ask(h, "faceRemove-5", keep: "faceRemoveKeep", confirm: "faceRemoveConfirm", picture: "U21_D1_13p_face_take_out_asks.png",
+                           asking: { m.faceRemoveAsk == 5 }, kept: { m.settings.face(5) != nil })
+        lines.append("face ⊖: " + face.line)
+        let group = try ask(h, "groupRemove-\(faces.number)", keep: "groupDeleteKeep", confirm: "groupDeleteConfirm", picture: "U21_D2_13p_group_trash_asks.png",
+                            asking: { m.groupDeleteAsk == faces.id }, kept: { m.railGroup(faces.id) != nil })
+        lines.append("group trash: " + group.line)
+        let reset = try ask(h, "resetAll", keep: "resetCancel", confirm: "resetConfirm", picture: "U21_D3_13p_reset_all_asks.png",
+                            asking: { m.resetAsk }, kept: { m.settings.face(5) != nil })
+        lines.append("Reset all: " + reset.line)
+        m.rail = .group(edges.id); m.selectedPress = e12.id; pump(1.5)
+        let press = try ask(h, "pressRemove-Edge 12", keep: "pressRemoveKeep", confirm: "pressRemoveConfirm", picture: "U21_D4_13p_edge_trash_asks.png",
+                            asking: { m.pressRemoveAsk == e12.id }, kept: { m.settings.press(e12.id) != nil })
+        lines.append("edge trash: " + press.line)
+        for (name, a) in [("face ⊖", face), ("group trash", group), ("Reset all", reset), ("edge trash", press)] {
+            XCTAssertTrue(a.keepOnSpot, "★ \(name): [Keep] centred on the tapped control ±1 pt (\(a.line))")
+            XCTAssertTrue(a.clear, "★ \(name): the red button ≥ 24 pt left of [Keep] (\(a.line))")
+            if let k = a.keep { XCTAssertGreaterThanOrEqual(k.height, 44 - 0.5, "\(name): a 44 pt target") }
+        }
+        // the confirm itself: [Take out] removes Face 5
+        m.rail = .group(faces.id); m.select(5); pump(1.5)
+        let c5 = try XCTUnwrap(h.frames.all["faceRemove-5"])
+        click(h, CGPoint(x: c5.midX, y: c5.midY))
+        let red5 = try XCTUnwrap(h.frames.all["faceRemoveConfirm"], "[Take out]")
+        click(h, CGPoint(x: red5.midX, y: red5.midY))
+        XCTAssertTrue(pumpUntil(3) { m.settings.face(5) == nil }, "★ [Take out]: Face 5 leaves the squish")
+        try shot("U21_D5_13p_after_take_out.png", h, settle: 0.2)   // (Face 3's card now)
+        // RED CONTROL: the old placement — Keep past the red button, off the tapped spot
+        FlexibleConfirmInPlace.controlOldPlacement = true
+        m.select(3); pump(1.2)
+        let red = try ask(h, "faceRemove-3", keep: "faceRemoveKeep", confirm: "faceRemoveConfirm", secondTap: false,
+                          asking: { m.faceRemoveAsk == 3 }, kept: { m.settings.face(3) != nil })
+        m.keepFace()
+        FlexibleConfirmInPlace.controlOldPlacement = false
+        lines.append("RED old placement (face ⊖): " + red.line)
+        XCTAssertFalse(red.keepOnSpot, "RED CONTROL: [Keep] off the tapped spot")
+        log = lines
+        flush("u21_d_confirm_lines.txt")
+    }
+
     // MARK: the harness (the R7-E5 probe's)
 
     func pump(_ s: Double) {

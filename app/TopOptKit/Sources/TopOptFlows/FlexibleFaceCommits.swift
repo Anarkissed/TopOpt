@@ -389,7 +389,8 @@ enum FlexibleFaceCommits {
     /// The trash, after its confirm: the group goes — here and for Topology — with its lattice entries; ONE undo step
     /// (`project.performUndo()` restores it all). Returns what it took (the message's name and its [Undo]).
     @discardableResult
-    static func delete(_ gid: UUID, project p: ProjectModel) -> Deleted? {
+    /// `sealAfter` false (★ U21, F12): the step stays open — the caller folds the Squish page's carry into it, then seals.
+    static func delete(_ gid: UUID, project p: ProjectModel, sealAfter: Bool = true) -> Deleted? {
         guard let idx = p.selection.groups.firstIndex(where: { $0.id == gid }), !isLocked(gid, p) else { return nil }
         let g = p.selection.groups[idx]
         let refs = p.latticeSelectableRefs(g)
@@ -414,7 +415,7 @@ enum FlexibleFaceCommits {
             p.lattice.selectableDepthMM.removeValue(forKey: r.key)
             p.lattice.selectableExpandMM.removeValue(forKey: r.key)
         }
-        p.sealUndoStep()
+        if sealAfter { p.sealUndoStep() }
         return taken
     }
 

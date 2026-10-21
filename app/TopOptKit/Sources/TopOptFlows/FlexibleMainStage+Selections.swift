@@ -168,12 +168,29 @@ extension FlexibleMainStage {
     func confirmDelete(project: ProjectModel, cardsChanged: () -> Void) {
         guard let gid = faceUI.deleteAsk else { return }
         faceUI.deleteAsk = nil
-        guard let taken = FlexibleFaceCommits.delete(gid, project: project) else { return }
+        let join = !Self.controlDeferredCarry
+        guard let taken = FlexibleFaceCommits.delete(gid, project: project, sealAfter: !join) else { return }
         faceUI.deleted = taken
         revalidatePick(project)
         faceUI.say(FlexibleSelectionsCopy.deleted(taken.group.name), undo: true)
         model?.refreshMainPageLoads()
+        if join { joinTheStageWriteToTrash(project) }
         cardsChanged()
+    }
+
+    /// ★ RED CONTROL (F12): today's — the Squish page's carry lands ~0.5 s later, with the re-opened scene, as its OWN undo step
+    /// (the first toolbar Undo took it, not the trash).
+    @MainActor static var controlDeferredCarry = false
+
+    /// ★ U21 · F12 (the reviewer's ruling E(2): "the carry's re-filing must JOIN the trash's undo step (or register none) so ONE
+    /// toolbar Undo restores the group with no ghost"): the trash's step stays OPEN while the stage re-opens on the new lattice
+    /// and makes its own write (M2's carry of the face entries onto the lattice sections the trash changed, the main page's
+    /// loads) — that write lands IN it, and the step is sealed after (`FlexibleStageModel.sealAfterReopen`). The carry needs
+    /// core's re-opened scene (the new sections are core's), so it cannot run inside the trash itself.
+    func joinTheStageWriteToTrash(_ project: ProjectModel) {
+        guard let m = model, m.project === project else { project.sealUndoStep(); return }
+        projectChanged()   // the re-open now (its 250 ms debounce would wait out the hold)
+        m.sealAfterReopen()
     }
 
     /// The message's [Undo]: the group, its faces, its role and its depths come back exactly (FlexibleFaceCommits.restore).
