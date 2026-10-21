@@ -193,7 +193,7 @@ private struct FlexibleLatticeCardMount: View {
         // ★ ROUND 7, the review of R7-D1: a blocker's 1–3 fixes in the card's Core row (the callout's own buttons — one tap,
         // not "Show the fix" then the fix); Ready says what goes to core; a failed run can be sent again
         let fixes: AnyView? = (st == .fix ? s.fix : nil).map { issue in
-            AnyView(FlexibleCalloutButtons(model: model, issue: issue, close: {}, squish: {
+            AnyView(FlexibleCalloutButtons(model: model, issue: issue, scope: "card", close: {}, squish: {
                 chrome.foldAll()
                 FlexibleBlockerCallout.goToSquish(openFix: { main.openFix() }, openSquish: openSquish)
             }))

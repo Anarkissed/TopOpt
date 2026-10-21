@@ -329,6 +329,197 @@ final class FlexibleU2Tests: XCTestCase {
         flush("u21_d_confirm_lines.txt")
     }
 
+    // MARK: ★ U21 FIX ROUND 1 — the check's blocker and should-fix items, hosted (13" portrait, his projects of 10-21)
+
+    func padModel() async throws -> (FlexibleHisProject.Restored, FlexibleStageModel) {
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.padDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in
+            await m.waitForIdle()
+            FlexibleStageModel.controlRemoveAtOnce = false
+            FlexibleConfirmInPlace.controlRedAlwaysLeading = false
+            FlexibleStageModel.controlTakeOutFullName = false
+            FlexibleStageSheet.controlBlankBlock = false
+        }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his pad of 10-21")
+        return (r, m)
+    }
+
+    /// The Lattice page's callout (and the card's Core row: the same view), the Squish page's pop-up and the edges card's warning
+    /// row: a Remove fix asks in place — [Keep] on the button, the red [Remove] ≥ 24 pt away and INSIDE its row (to the right for
+    /// the row's first fix). RED: the code before (removed at once); the red always on the left (a first fix's leaves its row).
+    func testU21FixRowsRemoveAskInPlace() async throws {
+        let (_, m) = try await padModel()
+        let e12 = try XCTUnwrap(m.presses.first { $0.strip?.label == "Edge 12" }, "premise: his Edge 12")
+        let pf = FlexiblePressFix.remove(e12.id, label: "Edge 12")
+        let second = FlexibleIssue(id: "u21-a", kind: .refused, region: 5, oneLine: "Face 5 can't be squished here", blocking: true,
+                                   fixes: [.rest(5), .remove(5)])
+        let first = FlexibleIssue(id: "u21-b", kind: .pressKeptOut, region: nil, oneLine: "Edge 12 is kept out of the job", blocking: true,
+                                  fixes: [.pressFix(pf)])
+        let popupFirst = FlexibleIssue(id: "u21-c", kind: .refused, region: 5, oneLine: "Face 5 can't be squished here", blocking: true,
+                                       fixes: [.remove(5), .rest(5)])
+        var pad: String? = nil
+        let padBinding = Binding<String?>(get: { pad }, set: { pad = $0 })
+        let view = VStack(alignment: .leading, spacing: 40) {
+            FlexibleCalloutButtons(model: m, issue: second, close: {}, squish: {})
+                .background(FlexibleConfirmInPlace.publish("rowCalloutSecond"))
+            FlexibleCalloutButtons(model: m, issue: first, scope: "card", close: {}, squish: {})
+                .background(FlexibleConfirmInPlace.publish("rowCardFirst"))
+            FlexibleFixPopup(model: m, issue: popupFirst, padTarget: padBinding, onDone: {})
+                .background(FlexibleConfirmInPlace.publish("rowPopup"))
+            FlexiblePressFixButtons(model: m, fixes: [pf])
+                .background(FlexibleConfirmInPlace.publish("rowPress"))
+        }
+        .padding(40).frame(width: 600, alignment: .topLeading).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(DS.Color.background.color)
+        let h = host(view, size: Self.p13)
+        pump(1.5)
+        struct Case { let name, control, row, scope: String; let first: Bool; let asking: String; let kept: () -> Bool }
+        let cases: [Case] = [
+            Case(name: "callout [Remove Face 5] (second)", control: "callout-remove-5", row: "rowCalloutSecond", scope: "callout", first: false,
+                 asking: FlexibleFixAsk.key("callout", "remove-5"), kept: { m.settings.face(5) != nil }),
+            Case(name: "card [Remove Edge 12] (first)", control: "card-press-fix-" + pf.id, row: "rowCardFirst", scope: "card", first: true,
+                 asking: FlexibleFixAsk.key("card", "press-fix-" + pf.id), kept: { m.settings.press(e12.id) != nil }),
+            Case(name: "pop-up [Remove Face 5] (first)", control: "fix-remove-5", row: "rowPopup", scope: "popup", first: true,
+                 asking: FlexibleFixAsk.key("popup", "remove-5"), kept: { m.settings.face(5) != nil }),
+            Case(name: "warning row [Remove Edge 12] (first)", control: "press-" + pf.id, row: "rowPress", scope: "pressFix", first: true,
+                 asking: FlexibleFixAsk.key("pressFix", pf.id), kept: { m.settings.press(e12.id) != nil }),
+        ]
+        var lines: [String] = []
+        func run(_ c: Case) throws -> (Asked, CGRect) {
+            let row = try XCTUnwrap(h.frames.all[c.row], c.row)
+            let a = try ask(h, c.control, keep: c.scope + "RemoveKeep", confirm: c.scope + "RemoveConfirm",
+                            asking: { m.fixRemoveAsk == c.asking }, kept: c.kept)
+            return (a, row)
+        }
+        for c in cases {
+            let (a, row) = try run(c)
+            let red = a.confirm ?? .zero
+            let side = c.first ? (red.minX >= (a.keep?.maxX ?? 0) + FlexibleConfirmLayout.gap - 0.5) : a.clear
+            let inside = red.minX >= row.minX - 0.5
+            lines.append("\(c.name): \(a.line) · row x \(Int(row.minX))…\(Int(row.maxX)) · red \(c.first ? "right" : "left") clear \(side) · inside \(inside)")
+            XCTAssertTrue(a.keepOnSpot, "★ \(c.name): [Keep] on the tapped button (\(a.line))")
+            XCTAssertTrue(side, "★ \(c.name): the red button ≥ 24 pt from [Keep] (\(a.line))")
+            XCTAssertTrue(inside, "★ \(c.name): the red button inside its row (red \(red.integral), row \(row.integral))")
+        }
+        // the confirm itself (the warning row): [Remove] removes Edge 12
+        let pc = try XCTUnwrap(h.frames.all["press-" + pf.id])
+        click(h, CGPoint(x: pc.midX, y: pc.midY))
+        let rr = try XCTUnwrap(h.frames.all["pressFixRemoveConfirm"], "[Remove]")
+        try shot("U21_D6_13p_fix_rows_remove_asks.png", h, settle: 0.2)
+        click(h, CGPoint(x: rr.midX, y: rr.midY))
+        lines.append("after the [Remove] click at \(rr.integral): ask \(m.fixRemoveAsk ?? "nil")")
+        XCTAssertNil(m.fixRemoveAsk, "★ the [Remove] click lands (the ask closes)")
+        // (the strip removal is an async main-actor task: awaited, not pumped — a nested run loop never runs the main actor's jobs)
+        try await FlexibleHisProject.waitFor(60, "★ [Remove]: Edge 12 goes") { m.settings.press(e12.id) == nil }
+        XCTAssertNil(m.settings.press(e12.id), "★ [Remove]: Edge 12 goes")
+        pump(0.5)
+        // RED CONTROL 1: a first fix's red button on the left leaves its row
+        FlexibleConfirmInPlace.controlRedAlwaysLeading = true
+        let (ra, rrow) = try run(cases[2])
+        FlexibleConfirmInPlace.controlRedAlwaysLeading = false
+        lines.append("RED red always left (pop-up first fix): \(ra.line) · row x \(Int(rrow.minX))")
+        XCTAssertLessThan(ra.confirm?.minX ?? 0, rrow.minX, "RED CONTROL: the red [Remove] outside the pop-up's row")
+        // RED CONTROL 2: the code before this round — the callout's [Remove Face 5] on one tap
+        FlexibleStageModel.controlRemoveAtOnce = true
+        let c5 = try XCTUnwrap(h.frames.all["callout-remove-5"])
+        click(h, CGPoint(x: c5.midX, y: c5.midY))
+        FlexibleStageModel.controlRemoveAtOnce = false
+        XCTAssertNil(m.settings.face(5), "RED CONTROL: the callout's [Remove Face 5] removed at once")
+        lines.append("RED one tap (callout): Face 5 removed at once \(m.settings.face(5) == nil)")
+        log = lines
+        flush("u21_d_fix_rows_lines.txt")
+    }
+
+    /// His screenshot's state (22.png): the l-bracket, Group 1 = Face 6 (its section "Face 6 · lattice"), the ⊖ tapped — the
+    /// question stays inside the panel (the check: it likely drew over the Group tab). RED: the whole section name in the question.
+    func testU21TakeOutAskFitsThePanelOnHisLBracket() async throws {
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.lbracketDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle(); FlexibleStageModel.controlTakeOutFullName = false }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his l-bracket of 10-21")
+        let face = 2000008
+        let g = try XCTUnwrap(m.squeezeGroups.first { $0.regions == [face] }, "premise: Group 1 = Face 6")
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: FlexibleSquishLoop(), onExit: {}), size: Self.p13)
+        pump(3)
+        m.rail = .group(g.id); m.select(face); pump(1.5)
+        var lines: [String] = ["row name: \(m.displayName(face))"]
+        func measure(_ picture: String?) throws -> (q: CGRect, panel: CGRect, rail: CGRect?) {
+            let a = try ask(h, "faceRemove-\(face)", keep: "faceRemoveKeep", confirm: "faceRemoveConfirm", secondTap: false, picture: picture,
+                            asking: { m.faceRemoveAsk == face }, kept: { m.settings.face(face) != nil })
+            let q = try XCTUnwrap(h.frames.all["faceRemoveConfirmQuestion"], "the question")
+            let panel = try XCTUnwrap(h.frames.all["panel"], "the panel")
+            lines.append("\(a.line) · question \(q.integral) · panel \(panel.integral) · rail \(h.frames.all["rail"].map { "\($0.integral)" } ?? "-")")
+            m.keepFace(); pump(0.6)
+            return (q, panel, h.frames.all["rail"])
+        }
+        let a = try measure("U21_D7_13p_lbracket_take_out_asks.png")
+        XCTAssertGreaterThanOrEqual(a.q.minX, a.panel.minX + 4, "★ the question inside the panel (question \(a.q.integral), panel \(a.panel.integral))")
+        let rail = try XCTUnwrap(a.rail, "the rail")
+        XCTAssertGreaterThanOrEqual(a.q.minX, rail.maxX + 8, "★ clear of the rail's tabs (question x \(Int(a.q.minX)), rail ends \(Int(rail.maxX)))")
+        // RED CONTROL: the whole section name
+        FlexibleStageModel.controlTakeOutFullName = true
+        let red = try measure(nil)
+        FlexibleStageModel.controlTakeOutFullName = false
+        lines.append("RED whole name: question x \(Int(red.q.minX)) vs panel x \(Int(red.panel.minX))")
+        XCTAssertLessThan(red.q.minX, a.q.minX - 30, "RED CONTROL: the whole name reaches \(Int(a.q.minX - red.q.minX)) pt further left")
+        XCTAssertLessThan(red.q.minX, (red.rail ?? rail).maxX + 8, "RED CONTROL: the whole name runs into the rail's tabs (his 22.png state)")
+        log = lines
+        flush("u21_d_lbracket_take_out_lines.txt")
+    }
+
+    /// "Delete Flexible lattice" (the Lattice page's sheet): [Cancel] centred on the button; the glass ends under the button until
+    /// it asks (the check: a blank block). RED: the blank block (the glass reaching the hidden lines).
+    func testU21DeleteLatticeSheetCancelOnTheButton() throws {
+        var deleted = 0
+        // (the sheet's own window: the page's full-screen size, as the app presents it)
+        let h = host(FlexibleStageSheet(onDelete: { deleted += 1 }, onClose: {}).frame(width: Self.p13.width, height: Self.p13.height), size: Self.p13)
+        addTeardownBlock { @MainActor in FlexibleStageSheet.controlBlankBlock = false }
+        pump(1.2)
+        let b = try XCTUnwrap(h.frames.all["latticeModeDelete"], "the button")
+        let glass = try XCTUnwrap(h.frames.all["stageSheetGlass"], "the glass")
+        var lines = ["button \(b.integral) · glass \(glass.integral) (not asking)"]
+        XCTAssertLessThanOrEqual(glass.maxY - b.maxY, DS.Space.xl4 + 1, "★ the glass ends under the button (no blank block)")
+        XCTAssertGreaterThanOrEqual(glass.maxY - b.maxY, DS.Space.xl4 - 1)
+        try shot("U21_D8_13p_delete_sheet_before.png", h, settle: 0.2)
+        click(h, CGPoint(x: b.midX, y: b.midY))
+        pump(0.4)
+        let c = try XCTUnwrap(h.frames.all["latticeModeDeleteCancel"], "[Cancel]")
+        let red = try XCTUnwrap(h.frames.all["latticeModeDeleteConfirm"], "[Delete Flexible lattice]")
+        let g2 = try XCTUnwrap(h.frames.all["stageSheetGlass"])
+        let b2 = try XCTUnwrap(h.frames.all["latticeModeDelete"])
+        lines.append("asking: button \(b2.integral) · cancel \(c.integral) · red \(red.integral) · glass \(g2.integral)")
+        try shot("U21_D9_13p_delete_sheet_asks.png", h, settle: 0.2)
+        XCTAssertEqual(b2.midY, b.midY, accuracy: 1, "★ the button did not move")
+        XCTAssertEqual(c.midX, b.midX, accuracy: 1, "★ [Cancel] centred on the button (x)")
+        XCTAssertEqual(c.midY, b.midY, accuracy: 1, "★ [Cancel] centred on the button (y)")
+        XCTAssertGreaterThanOrEqual(red.minY, c.maxY, "★ the red button on a line under it (a move)")
+        XCTAssertGreaterThanOrEqual(g2.maxY, red.maxY, "★ the glass reaches the red button while asking")
+        XCTAssertEqual(deleted, 0, "nothing deleted yet")
+        click(h, CGPoint(x: c.midX, y: c.midY))   // the same spot again: Cancel
+        pump(0.4)
+        XCTAssertNil(h.frames.all["latticeModeDeleteCancel"], "★ a second tap on the spot only cancels")
+        XCTAssertEqual(deleted, 0)
+        // RED CONTROL: the blank block
+        FlexibleStageSheet.controlBlankBlock = true
+        let h2 = host(FlexibleStageSheet(onDelete: {}, onClose: {}).frame(width: Self.p13.width, height: Self.p13.height), size: Self.p13)
+        pump(1.2)
+        let rb = try XCTUnwrap(h2.frames.all["latticeModeDelete"]), rg = try XCTUnwrap(h2.frames.all["stageSheetGlass"])
+        lines.append("RED blank block: glass bottom \(Int(rg.maxY - rb.maxY)) pt under the button")
+        XCTAssertGreaterThan(rg.maxY - rb.maxY, DS.Space.xl4 + 40, "RED CONTROL: the blank block under the button")
+        FlexibleStageSheet.controlBlankBlock = false
+        log = lines
+        flush("u21_d_sheet_lines.txt")
+    }
+
     // MARK: the harness (the R7-E5 probe's)
 
     func pump(_ s: Double) {

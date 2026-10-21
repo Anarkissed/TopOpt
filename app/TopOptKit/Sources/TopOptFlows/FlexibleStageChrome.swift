@@ -110,6 +110,7 @@ public struct FlexibleStageSheet: View {
     public let onDelete: () -> Void
     public let onClose: () -> Void
     @State private var confirming = false
+    @State private var askTop: CGFloat = 0
 
     public init(onDelete: @escaping () -> Void, onClose: @escaping () -> Void) {
         self.onDelete = onDelete
@@ -223,16 +224,42 @@ public struct FlexibleStageSheet: View {
                 .opacity(confirming ? 1 : 0)
                 .allowsHitTesting(confirming)
                 .accessibilityHidden(!confirming)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: FlexibleSheetAskTopKey.self, value: g.frame(in: .named(Self.space)).minY)
+                })
             }
             .padding(DS.Space.xl4)
             .frame(maxWidth: 720)
             .fixedSize(horizontal: false, vertical: true)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
-                .fill(DS.Surface.sheet.color))
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1))
-            .shadow(color: .black.opacity(0.45), radius: 40, y: 18)
+            .coordinateSpace(name: Self.space)
+            .onPreferenceChange(FlexibleSheetAskTopKey.self) { askTop = $0 }
+            // ★ U21 FIX ROUND 1 (the check: "the sheet carries a blank block when not asking"): the warning's lines stay laid out
+            // (so [Cancel] lands on the button's own spot), but the sheet's glass ends under the button until it asks — the
+            // hidden lines are not drawn as an empty block
+            .background(alignment: .top) {
+                RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
+                    .fill(DS.Surface.sheet.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.45), radius: 40, y: 18)
+                    .frame(height: Self.glassHeight(confirming: confirming, askTop: askTop))
+                    .background(FlexibleConfirmInPlace.publish("stageSheetGlass"))
+            }
         }
         .accessibilityIdentifier("flexible-stage-sheet")
     }
+
+    private static let space = "flexible-stage-sheet"
+    /// ★ RED CONTROL (hosted, U21 fix round 1): the glass always reaches the hidden lines (the blank block).
+    @MainActor static var controlBlankBlock = false
+    /// The glass's height: the whole sheet while asking; else down to the button plus the sheet's bottom margin.
+    @MainActor static func glassHeight(confirming: Bool, askTop: CGFloat) -> CGFloat? {
+        guard !confirming, !controlBlankBlock, askTop > 0 else { return nil }
+        return askTop - DS.Space.l + DS.Space.xl4
+    }
+}
+
+private struct FlexibleSheetAskTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

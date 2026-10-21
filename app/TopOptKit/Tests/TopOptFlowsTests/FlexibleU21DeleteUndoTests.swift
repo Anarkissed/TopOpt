@@ -42,6 +42,7 @@ final class FlexibleU21DeleteUndoTests: XCTestCase {
         FlexibleStageModel.controlRemoveAtOnce = false
         FlexibleMainStage.controlDeferredCarry = false
         FlexibleStageModel.controlResetSealsAtOnce = false
+        FlexibleStageModel.controlTakeOutFullName = false
         super.tearDown()
     }
 
@@ -266,6 +267,8 @@ final class FlexibleU21DeleteUndoTests: XCTestCase {
         m.pressRemoveAsk = p.id   // an ask on a press already gone
         m.confirmRemovePress()
         XCTAssertNil(m.pressRemoveAsk)
+        // (fix round 1, the check's flake: Edge 12's strip removal re-opens the scene — wait for it before the red branch)
+        try await FlexibleSquishFixture.settle(m, "after Edge 12's removal (the scene re-open)")
         // RED CONTROL: today's one tap
         let q = try XCTUnwrap(m.presses.first { $0.strip?.label == "Edge 9" })
         FlexibleStageModel.controlRemoveAtOnce = true
@@ -283,7 +286,7 @@ final class FlexibleU21DeleteUndoTests: XCTestCase {
         XCTAssertTrue(FlexibleFixPopup.removes(.pressFix(.remove(UUID(), label: "Edge 12"))))
         XCTAssertFalse(FlexibleFixPopup.removes(.rest(5)))
         FlexibleFixPopup.tap(fix, model: m, onDone: { closed += 1 })
-        XCTAssertEqual(m.fixRemoveAsk, FlexibleFixPopup.id(fix), "★ [Remove Face 5] asks in place")
+        XCTAssertEqual(m.fixRemoveAsk, FlexibleFixAsk.key(FlexibleFixPopup.scope, FlexibleFixPopup.id(fix)), "★ [Remove Face 5] asks in place")
         XCTAssertNotNil(m.settings.face(5), "★ nothing removed yet"); XCTAssertEqual(closed, 0, "the pop-up stays")
         // a non-deleting fix applies at once
         FlexibleFixPopup.tap(.rest(3), model: m, onDone: { closed += 1 })
@@ -292,6 +295,56 @@ final class FlexibleU21DeleteUndoTests: XCTestCase {
         FlexibleStageModel.controlRemoveAtOnce = true
         FlexibleFixPopup.tap(fix, model: m, onDone: { closed += 1 })
         XCTAssertNil(m.settings.face(5), "RED CONTROL: removed at once")
+    }
+
+    // MARK: ★ U21 FIX ROUND 1 — the check's two one-tap deletes left: the Lattice page's callout / card Core row and the edges
+    // card's warning row (his Img13 note: "I shouldn't be able to do with a single click"; ruling E(2))
+
+    func testLatticeCalloutAndPressRowRemoveAskFirst() async throws {
+        let (_, _, m) = try await open(Self.padDir, "his pad of 10-21")
+        let e12 = try XCTUnwrap(m.presses.first { $0.strip?.label == "Edge 12" }, "premise: his Edge 12")
+        var closed = 0
+        // the callout / the card's Core row: [Face 5 rests] [Remove Face 5] (FlexibleReadiness.restOrRemove's pair)
+        let issue = FlexibleIssue(id: "u21-test", kind: .refused, region: 5, oneLine: "Face 5 can't be squished here", blocking: true,
+                                  fixes: [.rest(5), .remove(5)])
+        let buttons = FlexibleBlockerCallout.buttons(issue, pressNeedsWeight: { _ in false })
+        XCTAssertEqual(buttons, [.apply(.rest(5)), .apply(.remove(5))])
+        for scope in ["callout", "card"] {
+            FlexibleCalloutButtons.tap(.apply(.remove(5)), model: m, scope: scope, close: { closed += 1 })
+            XCTAssertEqual(m.fixRemoveAsk, FlexibleFixAsk.key(scope, "remove-5"), "★ \(scope): [Remove Face 5] asks in place")
+            XCTAssertNotNil(m.settings.face(5), "★ \(scope): nothing removed before [Remove]"); XCTAssertEqual(closed, 0, "\(scope) stays open")
+            m.rail = .model; m.rail = .group(1)   // a tab change drops it
+            XCTAssertNil(m.fixRemoveAsk, "★ \(scope): the ask drops")
+        }
+        // a kept-out press's [Remove Edge 12] in the callout (FlexibleReadiness :407) and in the edges card's warning row
+        let pf = FlexiblePressFix.remove(e12.id, label: "Edge 12")
+        FlexibleCalloutButtons.tap(.apply(.pressFix(pf)), model: m, scope: "callout", close: { closed += 1 })
+        XCTAssertEqual(m.fixRemoveAsk, FlexibleFixAsk.key("callout", "press-fix-" + pf.id), "★ the kept-out press's [Remove] asks")
+        m.tapPressFix(pf)
+        XCTAssertEqual(m.fixRemoveAsk, FlexibleFixAsk.key("pressFix", pf.id), "★ the warning row's [Remove Edge 12] asks (one ask at a time)")
+        await m.waitForIdle()
+        XCTAssertNotNil(m.settings.press(e12.id), "★ nothing removed before [Remove]")
+        XCTAssertEqual(closed, 0)
+        // the other fixes still apply on one tap
+        FlexibleCalloutButtons.tap(.apply(.rest(3)), model: m, scope: "callout", close: { closed += 1 })
+        XCTAssertEqual(m.settings.face(3)?.isLoaded, false, "[Face 3 rests]: one tap, as before"); XCTAssertEqual(closed, 1)
+        // RED CONTROL: the code before this fix round (both paths applied at once)
+        FlexibleStageModel.controlRemoveAtOnce = true
+        FlexibleCalloutButtons.tap(.apply(.remove(5)), model: m, scope: "callout", close: { closed += 1 })
+        XCTAssertNil(m.settings.face(5), "RED CONTROL: the callout's [Remove Face 5] removed at once")
+        m.tapPressFix(pf)
+        FlexibleStageModel.controlRemoveAtOnce = false
+        try await FlexibleHisProject.waitFor(60, "Edge 12 removed at once") { m.settings.press(e12.id) == nil }
+        XCTAssertNil(m.settings.press(e12.id), "RED CONTROL: the warning row's [Remove Edge 12] removed at once")
+    }
+
+    func testTakeOutQuestionNamesTheFaceOnly() {
+        XCTAssertEqual(FlexibleConfirmCopy.takeOutAsk("Face 6 \u{00B7} lattice"), "Take Face 6 out?", "★ his l-bracket's section suffix dropped")
+        XCTAssertEqual(FlexibleConfirmCopy.takeOutAsk("Face 5"), "Take Face 5 out?")
+        XCTAssertEqual(FlexibleConfirmCopy.takeOutAsk("Top A"), "Take Top A out?")
+        FlexibleStageModel.controlTakeOutFullName = true
+        XCTAssertEqual(FlexibleConfirmCopy.takeOutAsk("Face 6 \u{00B7} lattice"), "Take Face 6 \u{00B7} lattice out?", "RED CONTROL: the whole name")
+        FlexibleStageModel.controlTakeOutFullName = false
     }
 
     func testTakeOutIsItsOwnUndoStep() async throws {

@@ -9,7 +9,9 @@
 // the red button's trailing edge at least `gap` (24 pt) left of Keep's leading edge, so confirming needs a move. A tap elsewhere
 // (another face, a row, the part) or a tab change drops the ask (`dropInPlaceAsks`). Applied to: the face row's take-out (⊖),
 // an edge / corner press's trash, a group's trash (it asked in the panel's top line before), Reset all, the fix pop-up's
-// [Remove Face N] / a kept-out press's [Remove] (two taps with a move: his words beat the one-tap-fix rule for deletes), and on
+// [Remove Face N] / a kept-out press's [Remove] (two taps with a move: his words beat the one-tap-fix rule for deletes) — and,
+// fix round 1, the same Remove fixes in the edges card's warning row and the Lattice page's callout / card Core row
+// (`FlexibleFixAsk`) — and on
 // the Lattice page the Selections trash, the chip's trash and "Delete Flexible lattice" (there [Cancel] takes the control's
 // place and the question with [Delete] goes on the lines under it — a list row has no room on the left).
 // ★ UNDO (UNDO-GHOST) and the take-out's own undo step live in FlexibleStageModel (railReturn, removeFace); ONE undo step for
@@ -29,7 +31,14 @@ extension HorizontalAlignment {
 enum FlexibleConfirmCopy {
     static let keep = "Keep"
     static let cancel = "Cancel"
-    static func takeOutAsk(_ name: String) -> String { "Take \(name) out?" }
+    /// ★ U21 FIX ROUND 1 (the check: his l-bracket's "Face 6 · lattice" made the line overflow the card onto the Group tab):
+    /// the face's own name only — a lattice-section suffix (" · lattice A") is dropped from the question (the face stays
+    /// selected and pulsing on the part, so which one is never in doubt).
+    static func takeOutAsk(_ name: String) -> String {
+        if FlexibleStageModel.controlTakeOutFullName { return "Take \(name) out?" }
+        let short = name.components(separatedBy: " \u{00B7} ").first ?? name
+        return "Take \(short) out?"
+    }
     static let takeOut = "Take out"
     static func removeAsk(_ name: String) -> String { "Remove \(name)?" }
     static let remove = "Remove"
@@ -53,12 +62,18 @@ struct FlexibleConfirmInPlace: ViewModifier {
     let confirmKey: String
     let keepKey: String
     var questionID: String? = nil
+    /// ★ U21 FIX ROUND 1 (the check: "[Remove] left of the pop-up's own edge when Remove is the first fix"): the FIRST button of
+    /// a left-aligned fix row has nothing to its left, so its red button goes to the RIGHT of [Keep] (the same ≥ 24 pt move; the
+    /// row's other fixes step back while it asks).
+    var redOnTrailing: Bool = false
     let confirm: () -> Void
     let cancel: () -> Void
 
     /// ★ RED CONTROL (hosted): the old placement — the question, [Delete] then [Keep] at the row's trailing end, Keep NOT on the
     /// tapped spot.
     @MainActor static var controlOldPlacement = false
+    /// ★ RED CONTROL (hosted, U21 fix round 1): the red button always on the left — a first fix's [Remove] leaves its row.
+    @MainActor static var controlRedAlwaysLeading = false
 
     func body(content: Content) -> some View {
         content
@@ -97,9 +112,14 @@ struct FlexibleConfirmInPlace: ViewModifier {
                 Text(q).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).fixedSize()
                     .padding(.trailing, DS.Space.s)
+                    .background(Self.publish(confirmKey + "Question"))
                     .accessibilityIdentifier(questionID ?? "flexible-confirm-question")
             }
-            if Self.controlOldPlacement {
+            if redOnTrailing, !Self.controlRedAlwaysLeading, !Self.controlOldPlacement {
+                keepButton.alignmentGuide(.flexKeepCentre) { $0[HorizontalAlignment.center] }
+                Color.clear.frame(width: FlexibleConfirmLayout.gap, height: 1)
+                red
+            } else if Self.controlOldPlacement {
                 // (the red control: Keep last, past the red button, its centre off the tapped spot)
                 red
                 Color.clear.frame(width: DS.Space.s, height: 1)
@@ -159,6 +179,8 @@ struct FlexibleCancelInPlace: ViewModifier {
 extension FlexibleStageModel {
     /// ★ RED CONTROL: today's one-tap deletes (the face's ⊖, a press's trash, the pop-up's Remove fixes go at once).
     @MainActor static var controlRemoveAtOnce = false
+    /// ★ RED CONTROL (U21 fix round 1): the take-out question with the whole section name ("Take Face 6 · lattice out?").
+    nonisolated(unsafe) static var controlTakeOutFullName = false
 
     /// Every in-place ask goes (a tap elsewhere, a tab change, another ask).
     func dropInPlaceAsks() {
@@ -208,10 +230,61 @@ extension FlexibleStageModel {
     }
     public func keepAll() { resetAsk = false }
 
-    /// The pop-up's Remove fix (`FlexibleFixPopup.id`): the button turns into [Keep], [Remove] to its left.
+    /// A Remove fix (`FlexibleFixAsk.key`: where it is shown + the fix's id): the button turns into [Keep], [Remove] beside it.
     func askFixRemove(_ id: String) {
         dropInPlaceAsks(); groupDeleteAsk = nil
         fixRemoveAsk = id
+    }
+}
+
+// MARK: - ★ U21 FIX ROUND 1: every Remove FIX asks, wherever it is shown
+
+/// The check found two more one-tap deletes after batch D: the Lattice page's blocker callout and the Lattice card's Core row
+/// ([Remove Face N] on a "can't be squished here" refusal, a kept-out press's [Remove Edge N]) and the edges card's warning row
+/// ([Remove Edge 16] of a shared surface). Every place that shows a fix routes its tap through here, so a Remove asks in place
+/// the same way everywhere (his Img13 note; ruling E(2)).
+enum FlexibleFixAsk {
+    /// The ask's key: the place the button is shown ("popup", "callout", "card", "pressFix") and the fix's id — one ask at a time.
+    static func key(_ scope: String, _ id: String) -> String { "\(scope):\(id)" }
+
+    /// The modifier for a fix button that may delete: [Keep] on the button, the red [Remove] a move away (to the right for the
+    /// row's first button). Frames "<scope>RemoveKeep" / "<scope>RemoveConfirm".
+    @MainActor
+    static func confirm(model: FlexibleStageModel, scope: String, id: String, first: Bool, apply: @escaping () -> Void) -> FlexibleConfirmInPlace {
+        let k = key(scope, id)
+        return FlexibleConfirmInPlace(asking: model.fixRemoveAsk == k, question: nil, destructive: FlexibleConfirmCopy.remove,
+                                      confirmKey: scope + "RemoveConfirm", keepKey: scope + "RemoveKeep", redOnTrailing: first,
+                                      confirm: { model.fixRemoveAsk = nil; apply() },
+                                      cancel: { if model.fixRemoveAsk == k { model.fixRemoveAsk = nil } })
+    }
+
+    /// While one of `scope`'s Remove fixes asks, the row's OTHER buttons step back (the red button may sit on their place).
+    @MainActor
+    static func stepsBack(model: FlexibleStageModel, scope: String, id: String) -> Bool {
+        guard let a = model.fixRemoveAsk, a.hasPrefix(scope + ":") else { return false }
+        return a != key(scope, id)
+    }
+
+    /// The row went away: its ask goes with it (never another place's).
+    @MainActor
+    static func drop(model: FlexibleStageModel, scope: String) {
+        if let a = model.fixRemoveAsk, a.hasPrefix(scope + ":") { model.fixRemoveAsk = nil }
+    }
+}
+
+extension FlexibleStageModel {
+    /// ★ U21 FIX ROUND 1: an edges card warning row's fix ([Shallower] [Face 3 rests] [Remove Edge 16]) — Remove asks first, the
+    /// others apply at once (each one undo step, as before).
+    func tapPressFix(_ f: FlexiblePressFix, scope: String = "pressFix") {
+        if case .remove = f, !Self.controlRemoveAtOnce {
+            askFixRemove(FlexibleFixAsk.key(scope, f.id))
+            return
+        }
+        applyPressFixNow(f)
+    }
+
+    func applyPressFixNow(_ f: FlexiblePressFix) {
+        Task { @MainActor in if let why = await self.applyPressFix(f) { self.toast = why } }
     }
 }
 

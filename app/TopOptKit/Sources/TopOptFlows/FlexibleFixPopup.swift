@@ -48,7 +48,7 @@ struct FlexibleFixPopup: View {
             HStack(spacing: DS.Space.s) {
                 ForEach(Array(issue.fixes.prefix(3).enumerated()), id: \.offset) { i, fix in
                     // ★ U21: while a Remove fix asks, the other fixes step back (its [Remove] sits to the left of its [Keep])
-                    let hidden = model.fixRemoveAsk != nil && model.fixRemoveAsk != Self.id(fix)
+                    let hidden = FlexibleFixAsk.stepsBack(model: model, scope: Self.scope, id: Self.id(fix))
                     fixButton(fix, primary: i == 0)
                         .opacity(hidden ? 0 : 1).allowsHitTesting(!hidden)
                         // each button's frame reaches the page (a hosted test clicks it)
@@ -64,7 +64,7 @@ struct FlexibleFixPopup: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.warning.color.opacity(0.6), lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
         .accessibilityIdentifier("flexible-fix-popup")
-        .onDisappear { if model.fixRemoveAsk != nil { model.fixRemoveAsk = nil } }
+        .onDisappear { FlexibleFixAsk.drop(model: model, scope: Self.scope) }
     }
 
     @ViewBuilder private func fixButton(_ fix: FlexibleFix, primary: Bool) -> some View {
@@ -105,12 +105,11 @@ struct FlexibleFixPopup: View {
             Button { Self.tap(fix, model: model, onDone: onDone) } label: { label }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("flexible-fix-\(Self.id(fix))")
-                // ★ U21 (DEL-CONFIRM, his Img13 + the plan's decision): a Remove fix asks in place — [Keep] where it was
-                .modifier(FlexibleConfirmInPlace(asking: model.fixRemoveAsk == Self.id(fix), question: nil,
-                                                 destructive: FlexibleConfirmCopy.remove, confirmKey: "fixRemoveConfirm",
-                                                 keepKey: "fixRemoveKeep",
-                                                 confirm: { model.fixRemoveAsk = nil; Self.apply(fix, to: model); onDone() },
-                                                 cancel: { model.fixRemoveAsk = nil }))
+                // ★ U21 (DEL-CONFIRM, his Img13 + the plan's decision): a Remove fix asks in place — [Keep] where it was, the
+                // red [Remove] beside it (to the right when it is the first fix: fix round 1)
+                .modifier(FlexibleFixAsk.confirm(model: model, scope: Self.scope, id: Self.id(fix), first: primary) {
+                    Self.apply(fix, to: model); onDone()
+                })
         }
     }
 
@@ -125,10 +124,13 @@ struct FlexibleFixPopup: View {
 
     /// The fix button's tap: a deleting fix ASKS in place (two taps with a move: his words of 2026-10-21 beat the one-tap-fix
     /// rule for deletes); any other fix applies at once and the pop-up closes.
+    /// The pop-up's ask scope (`FlexibleFixAsk`).
+    static let scope = "popup"
+
     @MainActor
-    static func tap(_ fix: FlexibleFix, model: FlexibleStageModel, onDone: () -> Void) {
+    static func tap(_ fix: FlexibleFix, model: FlexibleStageModel, scope: String = scope, onDone: () -> Void) {
         if removes(fix), !FlexibleStageModel.controlRemoveAtOnce {
-            model.askFixRemove(id(fix))
+            model.askFixRemove(FlexibleFixAsk.key(scope, id(fix)))
             return
         }
         apply(fix, to: model)

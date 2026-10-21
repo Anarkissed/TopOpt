@@ -286,22 +286,7 @@ struct FlexibleEdgeGroupRows: View {
                 FlexWarningLine(text: w.line, id: "flexible-edge-press-warning")
             }
             if !w.fixes.isEmpty {
-                HStack(spacing: DS.Space.s) {
-                    ForEach(Array(w.fixes.prefix(3).enumerated()), id: \.offset) { i, f in
-                        Button {
-                            Task { @MainActor in if let why = await model.applyPressFix(f) { model.toast = why } }
-                        } label: {
-                            Text(f.title).font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
-                                .lineLimit(1).minimumScaleFactor(0.8)
-                                .padding(.horizontal, 12).frame(minHeight: 44)
-                                .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
-                                .overlay(FlexibleCornerPairStyle.secondaryEdge(i == 0))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("flexible-press-fix-\(f.id)")
-                    }
-                }
+                FlexiblePressFixButtons(model: model, fixes: w.fixes)
             }
         }
         // its frame and its words reach the page (the hosted tests read them, as the toast's)
@@ -583,5 +568,36 @@ struct FlexiblePressShapeRows: View {
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressView-\(v.rawValue)": g.frame(in: .global)])
         }.allowsHitTesting(false))
         .accessibilityIdentifier("flexible-press-view-\(v.rawValue)")
+    }
+}
+
+/// ★ R7-E2's warning-row fixes ([Shallower] [Face 3 rests] [Remove Edge 16]), each one undo step. ★ U21 FIX ROUND 1 (the check:
+/// [Remove Edge 16] here deleted on one tap): Remove asks in place like every delete (FlexibleFixAsk; his Img13 note, ruling
+/// E(2)); the others apply on one tap.
+struct FlexiblePressFixButtons: View {
+    @ObservedObject var model: FlexibleStageModel
+    let fixes: [FlexiblePressFix]
+    static let scope = "pressFix"
+
+    var body: some View {
+        HStack(spacing: DS.Space.s) {
+            ForEach(Array(fixes.prefix(3).enumerated()), id: \.offset) { i, f in
+                let back = FlexibleFixAsk.stepsBack(model: model, scope: Self.scope, id: f.id)
+                Button { model.tapPressFix(f, scope: Self.scope) } label: {
+                    Text(f.title).font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                        .overlay(FlexibleCornerPairStyle.secondaryEdge(i == 0))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-press-fix-\(f.id)")
+                .modifier(FlexibleFixAsk.confirm(model: model, scope: Self.scope, id: f.id, first: i == 0) { model.applyPressFixNow(f) })
+                .opacity(back ? 0 : 1).allowsHitTesting(!back)
+                .background(FlexibleConfirmInPlace.publish("press-\(f.id)"))
+            }
+        }
+        .onDisappear { FlexibleFixAsk.drop(model: model, scope: Self.scope) }
     }
 }

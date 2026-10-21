@@ -106,9 +106,13 @@ struct FlexibleBlockerCalloutView: View {
 /// ★ ROUND 7, the review of R7-D1: the callout's 1–3 fix buttons, shared with the Lattice card's Core row (the review: "With
 /// a fix pending, the card adds a tap … 'Show the fix' only opens the callout, so fixing takes two taps; his rule is 1–3
 /// fixes shown at once") — the same buttons, applied the same way (FlexibleFixPopup.apply), "Fix in Squish ›" for a weight.
+/// ★ U21 FIX ROUND 1 (the check: [Remove Face N] / [Remove Edge N] here deleted on one tap): a Remove fix asks in place, the
+/// same as the Squish page's pop-up (FlexibleFixAsk; his Img13 note, ruling E(2)); every other fix still applies on one tap.
 struct FlexibleCalloutButtons: View {
     @ObservedObject var model: FlexibleStageModel
     let issue: FlexibleIssue
+    /// "callout" (the blocker callout) or "card" (the Lattice card's Core row): where the ask lives.
+    var scope: String = "callout"
     let close: () -> Void
     let squish: () -> Void
 
@@ -116,16 +120,39 @@ struct FlexibleCalloutButtons: View {
         let buttons = FlexibleBlockerCallout.buttons(issue, pressNeedsWeight: { model.pressNeedsWeight($0) })
         HStack(spacing: DS.Space.s) {
             ForEach(Array(buttons.enumerated()), id: \.offset) { i, b in
-                switch b {
-                case .squish:
-                    FlexibleCornerPairStyle.big(FlexibleBlockerCallout.squishTitle, primary: i == 0, id: "flexible-callout-squish", action: squish)
-                case .apply(let f):
-                    FlexibleCornerPairStyle.big(f.title { model.displayName($0) }, primary: i == 0, id: "flexible-callout-\(FlexibleFixPopup.id(f))") {
-                        FlexibleFixPopup.apply(f, to: model)
-                        close()
+                let id = Self.id(b)
+                let back = FlexibleFixAsk.stepsBack(model: model, scope: scope, id: id)
+                Group {
+                    switch b {
+                    case .squish:
+                        FlexibleCornerPairStyle.big(FlexibleBlockerCallout.squishTitle, primary: i == 0, id: "flexible-callout-squish", action: squish)
+                    case .apply(let f):
+                        FlexibleCornerPairStyle.big(f.title { model.displayName($0) }, primary: i == 0, id: "flexible-callout-\(id)") {
+                            Self.tap(b, model: model, scope: scope, close: close)
+                        }
+                        .modifier(FlexibleFixAsk.confirm(model: model, scope: scope, id: id, first: i == 0) {
+                            FlexibleFixPopup.apply(f, to: model); close()
+                        })
                     }
                 }
+                .opacity(back ? 0 : 1).allowsHitTesting(!back)
+                .background(FlexibleConfirmInPlace.publish("\(scope)-\(id)"))
             }
         }
+        .onDisappear { FlexibleFixAsk.drop(model: model, scope: scope) }
+    }
+
+    static func id(_ b: FlexibleBlockerCallout.Button) -> String {
+        switch b {
+        case .squish: return "squish"
+        case .apply(let f): return FlexibleFixPopup.id(f)
+        }
+    }
+
+    /// A fix button's tap: a Remove asks (the callout stays open); any other fix applies and the callout closes.
+    @MainActor
+    static func tap(_ b: FlexibleBlockerCallout.Button, model: FlexibleStageModel, scope: String, close: () -> Void) {
+        guard case .apply(let f) = b else { return }
+        FlexibleFixPopup.tap(f, model: model, scope: scope, onDone: close)
     }
 }
