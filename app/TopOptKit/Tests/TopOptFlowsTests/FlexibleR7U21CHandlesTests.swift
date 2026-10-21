@@ -8,8 +8,10 @@
 //   HANDLE-GAP       testImg6KnobLeftOfFloorKeepsTheUnitsApart, testSweepSixteenDirectionsBothScreens,
 //                    testTheBoxMovesBeforeTheKnobFlips (+ hosted on his l-bracket)
 //                    testNoRoomForTwentyFourPointsHidesTheExpandHandle (fix round 1)
+//                    testAKnobFarFromTheFloorIsStillDrawn, testAnExpandBeingDraggedIsNeverHidden (fix round 2)
 //   EXPAND-DRAG-DIR  testAPushedDiscStillDragsOutward, testAShortProjectionPointingLeftDragsOutward (the formula; the wiring:
-//                    hosted testOnHisLBracketDraggingThePlusOutwardGrowsTheExpand)
+//                    hosted testOnHisLBracketDraggingThePlusOutwardGrowsTheExpand; the gesture → closures line:
+//                    testTheGestureCallsTheDrawnClosures, fix round 2)
 import XCTest
 import SwiftUI
 import AppKit
@@ -190,10 +192,100 @@ final class FlexibleR7U21CHandlesTests: XCTestCase {
         XCTAssertFalse(qe.rect.intersects(list), "★ RED CONTROL: …and off the list, so nothing hid it")
     }
 
+    /// FIX ROUND 2 (the checker's blocker): the push loop started at the true knob's distance and ran only while ≤ 240 pt, so a
+    /// knob projected farther than 240 pt from the floor (his l-bracket at a 2× pinch with |expand| > ~23 mm, or an outward drag
+    /// at zoom) found no place at all and the '+' was HIDDEN. Now the true knob is always tried: 16 directions × 200–600 pt on a
+    /// 2000 pt screen, and the checker's own probe (floor (600,700), knob straight left at 244/260/300 pt, 13" portrait).
+    func testAKnobFarFromTheFloorIsStillDrawn() throws {
+        let big = CGSize(width: 2000, height: 2000), f = CGPoint(x: 1000, y: 1000)
+        var n = 0
+        for i in 0..<16 {
+            let a = CGFloat(i) * .pi / 8
+            for r in stride(from: CGFloat(200), through: 600, by: 4) {
+                let raw = CGPoint(x: f.x + cos(a) * r, y: f.y + sin(a) * r)
+                let l = H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: big)
+                let e = try XCTUnwrap(l.expand, "★ dir \(i) r \(r): the '+' is drawn")
+                XCTAssertGreaterThanOrEqual(try XCTUnwrap(l.gap), H.unitGap, "★ dir \(i) r \(r)")
+                XCTAssertFalse(l.flipped, "dir \(i) r \(r)")
+                if r > H.pushMax {
+                    XCTAssertEqual(hypot(e.disc.x - raw.x, e.disc.y - raw.y), 0, accuracy: 1e-6,
+                                   "★ beyond the push range the '+' sits ON the true knob (dir \(i) r \(r))")
+                }
+                n += 1
+            }
+        }
+        print("FLEX-U21C-6 far sweep: \(n) layouts, every '+' drawn")
+        let checker = CGPoint(x: 600, y: 700)
+        for r: CGFloat in [200, 236, 240, 244, 260, 300] {
+            let l = H.layout(floor: checker, rawKnob: CGPoint(x: checker.x - r, y: checker.y), depthBox: 82, expandBox: 88, viewport: Self.p13)
+            XCTAssertNotNil(l.expand, "★ the checker's probe, r = \(r) pt: drawn")
+        }
+        // ★ RED CONTROL: fix round 1's loop (t from d0 while ≤ 240 pt) hides it from 244 pt on
+        H.controlCappedPushLoop = true
+        defer { H.controlCappedPushLoop = false }
+        for r: CGFloat in [244, 260, 300] {
+            XCTAssertNil(H.layout(floor: checker, rawKnob: CGPoint(x: checker.x - r, y: checker.y), depthBox: 82, expandBox: 88,
+                                  viewport: Self.p13).expand, "★ RED CONTROL: fix round 1 hid it at r = \(r) pt")
+        }
+        XCTAssertNotNil(H.layout(floor: checker, rawKnob: CGPoint(x: checker.x - 240, y: checker.y), depthBox: 82, expandBox: 88,
+                                 viewport: Self.p13).expand, "the control still draws it at 240 pt (only the far side broke)")
+    }
+
+    /// FIX ROUND 2: the '+' under his finger is never taken away mid-drag — SwiftUI does not end a drag on a view it removed, so
+    /// the undo step, the drag's X-ray and `dragging` would stay set. With `dragging`, the no-room case and a true knob dragged
+    /// off the screen both still draw the expand unit (on the true knob's line, the away boxes).
+    func testAnExpandBeingDraggedIsNeverHidden() throws {
+        let v = Self.p13
+        let list = CGRect(x: 0, y: 0, width: 800, height: v.height)
+        let f = CGPoint(x: 950, y: 650), raw = CGPoint(x: 920, y: 650)
+        XCTAssertNil(H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v, keepOut: [list]).expand,
+                     "not dragging: hidden (fix round 1's rule, kept)")
+        let held = H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v, keepOut: [list], dragging: true)
+        let e = try XCTUnwrap(held.expand, "★ dragging: the '+' stays")
+        XCTAssertEqual((e.disc.y - f.y) / max(1e-9, hypot(e.disc.x - f.x, e.disc.y - f.y)), 0, accuracy: 1e-6, "on the knob's own line")
+        XCTAssertLessThan(e.disc.x, f.x, "…on the knob's side (left)")
+        // dragged past the screen's left edge (1,070 pt out; the flip would land past the right edge too)
+        let off = CGPoint(x: -120, y: 650)
+        XCTAssertNil(H.layout(floor: f, rawKnob: off, depthBox: 82, expandBox: 88, viewport: v).expand, "not dragging: no place, hidden")
+        let farOff = try XCTUnwrap(H.layout(floor: f, rawKnob: off, depthBox: 82, expandBox: 88, viewport: v, dragging: true).expand,
+                                   "★ dragging past the screen's edge: still drawn (off screen, the gesture keeps it)")
+        XCTAssertEqual(farOff.disc.x, off.x, accuracy: 1e-6, "…on the true knob")
+        // ★ RED CONTROL: fix round 1 ignored the drag — the same cases hid it under his finger
+        H.controlHideWhileDragging = true
+        defer { H.controlHideWhileDragging = false }
+        XCTAssertNil(H.layout(floor: f, rawKnob: raw, depthBox: 82, expandBox: 88, viewport: v, keepOut: [list], dragging: true).expand,
+                     "★ RED CONTROL: hidden mid-drag")
+        XCTAssertNil(H.layout(floor: f, rawKnob: off, depthBox: 82, expandBox: 88, viewport: v, dragging: true).expand,
+                     "★ RED CONTROL: hidden mid-drag past the edge")
+    }
+
+    /// FIX ROUND 2 (the checker's should_fix): the hosted drag drives the page's closures; this pins that the '+' disc's
+    /// DragGesture calls exactly those closures, that the layer tells the layout which handle is dragged, and that the open
+    /// list does not hide the dragged '+'.
+    func testTheGestureCallsTheDrawnClosures() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/TopOptFlows/FlexibleOnModelLayer.swift")
+        let src = try String(contentsOf: url, encoding: .utf8)
+        func pinned(_ s: String) -> [String] {
+            let lines = [".onChanged { d in changed(d.translation) }", ".onEnded { _ in ended() }",
+                         "dragging: ui.dragging == \"handle-expand-\\(plane.ref.key)\"",
+                         "ui.dragging == \"handle-expand-\\(h.plane.ref.key)\" || !Self.underList(e.rect, under)"]
+            return lines.filter { !s.contains($0) }
+        }
+        XCTAssertEqual(pinned(src), [], "★ the layer's lines")
+        // ★ RED CONTROL: the batch's first wiring (the gesture inline, reading the drawn disc) fails the pin
+        let inline = src.replacingOccurrences(of: ".onChanged { d in changed(d.translation) }",
+                                              with: ".onChanged { d in project.writeLatticeExpandMM(ref, mm: FlexibleLatticeHandles.dragExpand(seed: mm, translation: d.translation, knob: unit.disc, outward: h.out)) }")
+        XCTAssertEqual(pinned(inline).count, 1, "★ RED CONTROL: an inline gesture is caught")
+    }
+
     // MARK: EXPAND-DRAG-DIR
 
-    /// The disc drawn pushed out (72 pt) while the true knob is 20 pt from the floor and 10 mm further out projects at 39 pt
-    /// (the probe's first view of his l-bracket): a +40 pt drag outward grows the expand.
+    /// GREEN CHECK of the formula (fix round 2 relabel, the checker's should_fix): the disc drawn pushed out (72 pt) while the
+    /// true knob is 20 pt from the floor and 10 mm further out projects at 39 pt (the probe's first view of his l-bracket): a
+    /// +40 pt drag outward grows the expand. Fed the TRUE knob, today's formula gives the same numbers, so this test cannot go
+    /// red on the formula alone; its red half is the drawn point fed by hand. The real pins: testAShortProjectionPointingLeft…
+    /// (red on today's formula) and the hosted drag on his l-bracket (red on today's wiring).
     func testAPushedDiscStillDragsOutward() {
         let raw = CGPoint(x: 20, y: 0), drawn = CGPoint(x: 72, y: 0), out = CGPoint(x: 39, y: 0)
         let grown = H.dragExpand(seed: 0, translation: CGSize(width: 40, height: 0), knob: raw, outward: out)

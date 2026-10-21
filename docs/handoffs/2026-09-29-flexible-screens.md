@@ -477,7 +477,9 @@ buffer between the two so that tapping one doesn't open the other."
   list and the handle on the part read as one thing.
 - **The two handles never touch.** There is always at least 24 pt of clear space between them, counting each box's full 44 pt tap
   band. Each box sits on the side away from the other handle (in your Img6 view: `−3.0 mm [+]   [⇕] 9.0 mm`). A tap on one can no
-  longer open the other.
+  longer open the other. If no spot on screen gives 24 pt (the open list right beside the floor with the screen's edge on the
+  other side, or the "+" pointing off the screen), the "+" handle is hidden rather than drawn closer; the list's Expand box
+  holds the same number. While you are dragging the "+" it is never hidden, even off the screen.
 - **Dragging the "+" outward always grows the expand.** In some views it used to shrink it.
 
 ### What was wrong (one sentence each)
@@ -504,7 +506,7 @@ buffer between the two so that tapping one doesn't open the other."
   is shorter than 30 pt, #354's 0.05 mm/pt applies, still along that direction.
 
 ### Tests (red controls asserted red inside each)
-- `FlexibleR7U21CHandlesTests` (8):
+- `FlexibleR7U21CHandlesTests` (11; fix round 2 added three, below under "Fix round 2"):
   - **icons:** the pair, and not rotated twins (red: the old pair is caught); the discs and captions read the one source.
   - **captions** carry the icons (red: today's text-only line).
   - **Img6, knob left of the floor:** gap 27 pt, depth box right, expand box left (red: today's rule, −68 pt, the expand box on the
@@ -513,9 +515,10 @@ buffer between the two so that tapping one doesn't open the other."
     flipped; all on screen. Red: today's rule is under 24 pt in 3,600 of them.
   - **near the edge:** the box moves before the knob flips; the knob flips only when pointing into the edge; the expand stays off
     the open list (red: today's depth box runs off the screen).
-  - **drag direction (the formula only):** a pushed disc (drawn 72, true 20, out 39) still grows on an outward drag; today's
-    formula fed the drawn point by hand gives −12.1 mm (this is the formula, not the page's code path — the hosted drag below
-    pins which point the page really reads). A short projection pointing left: −40 pt grows it (today's formula: it shrank).
+  - **drag direction (the formula only):** a pushed disc (drawn 72, true 20, out 39) still grows on an outward drag — a GREEN
+    check (fix round 2): fed the true knob, today's formula gives the same numbers, so it cannot go red on the formula alone;
+    its only red is today's formula fed the drawn point by hand (−12.1 mm), not the page's code path. The real pins: a short
+    projection pointing left, −40 pt grows it (red: today's formula shrank it), and the hosted drag below (red: today's wiring).
   - **no room for 24 pt** (fix round 1): the list open right beside the floor, the knob pointing into it, the screen's edge on
     the other side: the "+" handle is hidden (the open list's Expand box has the same number), never drawn closer. Red: the
     first version's fallback drew the two units touching, off the list, so nothing hid it.
@@ -558,11 +561,41 @@ buffer between the two so that tapping one doesn't open the other."
   Why not the mouse: synthetic mouse drags reach nothing in the offscreen test window — neither the handle nor the camera's own
   pan moved, with NSEvent- and CGEvent-built events (clicks do work). Two tries, then this.
 - When no place gives 24 pt the "+" handle is now hidden instead of drawn closer (`layout` returns no expand unit; red switch
-  `controlQuietFallback`). In the sweep (6,720 layouts) this never happens; it needs the open list right beside the floor.
+  `controlQuietFallback`). In the sweep (6,720 layouts) this never happens. (Fix round 2: this round's version also hid it
+  whenever the true knob projected more than 240 pt from the floor — a zoomed view — which the sweep, stopping at 200 pt,
+  never reached. Fixed below.)
 - The caption test's red is a real switch now.
 - Runs (`round7/batch_u21_c/u21c_fix1_runs.txt`): the same 19 classes, **95 tests, 0 failures, 0 skipped, no signal lines**;
   goldens 38 identical / 0 DIFFERS (deterministic) and 32 identical / 0 DIFFERS / 1 PART-SKIP (unseeded); the 16 stage-job
   hashes (`stage_job_hashes_u21c_fix1.txt`) cmp-identical, whole file, to e1r's, X20b's and this batch's first set.
+
+### Fix round 2 (the checker's second review)
+- What was wrong: round 1's layout hid the "+" whenever its true knob landed more than 240 pt from the depth floor on screen. The
+  push loop started at the knob's own distance and ran only while ≤ 240 pt, so beyond that it found no place and took the new
+  "hide" path. On your l-bracket 10 mm is about 39 pt at the normal framing (the most the knob reaches is ~226 pt, so your Img6
+  view was safe), but at a 2× pinch any expand above ~23 mm hid it, and dragging the "+" outward at zoom would have made it vanish
+  under your finger (SwiftUI does not end a drag on a view it removed, so the undo step and the drag's X-ray would stay on).
+- What changed: the true knob is always tried, however far out (beyond 240 pt the "+" sits on the true knob; the push only ever
+  moves it outward, up to 240 pt). And while you drag the "+" it is never hidden — not by "no room", not by the screen's edge, not
+  by the open list; with no spot it stays on the knob's own line. (`layout(…, dragging:)`; the layer passes which handle is dragged.)
+- Tests, in `FlexibleR7U21CHandlesTests` (red controls asserted red inside each):
+  - `testAKnobFarFromTheFloorIsStillDrawn`: 16 directions × 200–600 pt on a 2000 pt screen (1,616 layouts): every "+" drawn,
+    ≥ 24 pt, never flipped, on the true knob beyond 240 pt; and the checker's own probe (floor (600, 700), knob straight left at
+    200/236/240/244/260/300 pt, 13" portrait): all drawn. Red: `controlCappedPushLoop` (round 1's loop) hides it at 244/260/300.
+  - `testAnExpandBeingDraggedIsNeverHidden`: the no-room case and a knob dragged 1,070 pt off the screen are hidden when idle, drawn
+    while dragged (on the knob's line / on the true knob). Red: `controlHideWhileDragging` (round 1) hides both mid-drag.
+  - `testTheGestureCallsTheDrawnClosures` (the checker's should_fix): a source pin that the "+" disc's DragGesture calls exactly
+    the closures the hosted drag drives (`.onChanged { d in changed(d.translation) }`, `.onEnded { _ in ended() }`) and that the
+    layer passes `dragging` and keeps the dragged "+" over the open list. Red: the gesture written inline (reading the drawn disc)
+    is caught.
+  - Mutation, made once in the source and restored: round 1's loop and no drag guard, every control off → both new layout tests
+    went red (`r 244.0: the '+' is drawn`; `dragging: the '+' stays`), 2 tests 2 failures.
+  - `testAPushedDiscStillDragsOutward` is relabelled a green check of the formula (it cannot go red on the formula alone).
+- No new picture: at your Img6 view the knob is ~20 pt from the floor, so the drawn layout is the same as U21C_01.
+- Runs (`round7/batch_u21_c/u21c_fix2_runs.txt`): the same 19 classes, **98 tests, 0 failures, 0 skipped, no signal
+  lines** (the hosted drag unchanged: −3.0 → +7.28 mm; reds −1.0 / −5.0); goldens 38 identical / 0 DIFFERS (deterministic) and
+  32 identical / 0 DIFFERS / 1 PART-SKIP (unseeded); the 16 stage-job hashes (`stage_job_hashes_u21c_fix2.txt`) cmp-identical,
+  whole file, to e1r's, X20b's and fix round 1's. No iOS build or install in this step.
 
 ### Answer for you (please say)
 - "include it next to the input in the modal": I read "the modal" as the Selections list, where each box now has its icon over
@@ -570,6 +603,8 @@ buffer between the two so that tapping one doesn't open the other."
   is a #354 change (a new hook); say so and it goes on the list.
 
 ### Not done / notes
+- Optional, not in your note (the checker's idea): when the "+" is pushed far from the real knob (up to 240 pt), a short leader line
+  from the "+" to the knob on the prism would show what it moves. Not done; say if you want it.
 - Shown only on this page's face-prism handles. The edge flat prism's chip/knob (1–10 pt) and knob/box (~19 pt) gaps are not
   touched (plan, HANDLE-PAIRS-AUDIT, batch F).
 - The plan's literal drag numbers (drawn 72, true 20, out 60) do not reverse on today's code: 60 − 72 projects short, so today

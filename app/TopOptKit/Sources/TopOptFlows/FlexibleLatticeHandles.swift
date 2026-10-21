@@ -205,6 +205,11 @@ public enum FlexibleLatticeHandles {
     /// RED CONTROL (U21 fix round 1): the batch's first fallback — with no place ≥ 24 pt, the best gap below 24 pt (or the
     /// expand pushed ignoring the list), drawn quietly.
     nonisolated(unsafe) static var controlQuietFallback = false
+    /// RED CONTROL (U21 fix round 2): fix round 1's push loop — from the true knob's distance only while ≤ 240 pt, so a knob
+    /// projected farther than 240 pt found no place and was hidden.
+    nonisolated(unsafe) static var controlCappedPushLoop = false
+    /// RED CONTROL (U21 fix round 2): fix round 1 ignored the drag — the '+' could be hidden under his finger mid-drag.
+    nonisolated(unsafe) static var controlHideWhileDragging = false
 
     /// HANDLE-GAP (pure): each handle is one unit (44 pt disc + its REAL box width, 44 pt tall); each box on the side away
     /// from the other handle; the expand disc pushed along its own direction in 4 pt steps (≤ 240 pt from the floor) until
@@ -214,10 +219,14 @@ public enum FlexibleLatticeHandles {
     /// expand handle is HIDDEN (`expand == nil`) — never drawn closer (his "tapping one doesn't open the other"); the open
     /// list's Expand box carries the same number. When the depth unit itself cannot fit the screen either way, only the
     /// expand unit has to.
+    /// ★ FIX ROUND 2: the true knob is ALWAYS tried, even when it projects farther than 240 pt from the floor (then it is drawn
+    /// on the true knob; the push only ever moves it out, up to 240 pt). And while the '+' is being DRAGGED (`dragging`) it is
+    /// never hidden: with no place it is drawn on the knob's own line (pushed to 24 pt if that is on its line, else on the
+    /// true knob), even off the screen — SwiftUI does not end a drag on a view it removed.
     /// With no expand knob (group scope): the depth box right, or left when right runs off the viewport.
     /// (#354's `LatticeSlabExpand.separated` is no longer called here; it is not edited.)
     public static func layout(floor f: CGPoint, rawKnob: CGPoint?, depthBox: CGFloat, expandBox: CGFloat,
-                              viewport: CGSize, keepOut: [CGRect] = []) -> Layout {
+                              viewport: CGSize, keepOut: [CGRect] = [], dragging: Bool = false) -> Layout {
         if controlOldLayout { return oldLayout(floor: f, rawKnob: rawKnob) }
         let bounds = CGRect(origin: .zero, size: viewport)
         func fits(_ r: CGRect) -> Bool { bounds.contains(r) }
@@ -242,7 +251,8 @@ public enum FlexibleLatticeHandles {
             let dir = flip ? CGVector(dx: -u.dx, dy: -u.dy) : u
             for arr in arrangements(dir.dx) {
                 var t = d0
-                while t <= pushMax + 1e-6 {
+                let tEnd = controlCappedPushLoop ? pushMax : max(pushMax, d0)
+                while t <= tEnd + 1e-6 {
                     let k = CGPoint(x: f.x + dir.dx * t, y: f.y + dir.dy * t)
                     let a = depthUnit(left: arr.depthLeft)
                     let b = Unit(disc: k, boxOnLeft: arr.expandLeft, boxWidth: expandBox)
@@ -256,10 +266,22 @@ public enum FlexibleLatticeHandles {
             }
         }
         guard controlQuietFallback else {
-            // no place ≥ 24 pt: the expand handle hidden; the depth box on the side that fits
             let right = depthUnit(left: false)
-            return Layout(depth: !fits(right.rect) && fits(depthUnit(left: true).rect) ? depthUnit(left: true) : right,
-                          expand: nil, flipped: false)
+            let depth = !fits(right.rect) && fits(depthUnit(left: true).rect) ? depthUnit(left: true) : right
+            if dragging && !controlHideWhileDragging {
+                // under his finger: kept on the knob's own line, the away boxes; the screen and the list do not count
+                let arr = arrangements(u.dx)[0]
+                let a = depthUnit(left: arr.depthLeft)
+                var t = d0
+                while t <= max(pushMax, d0) + 1e-6 {
+                    let b = Unit(disc: CGPoint(x: f.x + u.dx * t, y: f.y + u.dy * t), boxOnLeft: arr.expandLeft, boxWidth: expandBox)
+                    if gap(a.rect, b.rect) >= unitGap { return Layout(depth: a, expand: b, flipped: false) }
+                    t += pushStep
+                }
+                return Layout(depth: a, expand: Unit(disc: raw, boxOnLeft: arr.expandLeft, boxWidth: expandBox), flipped: false)
+            }
+            // no place ≥ 24 pt: the expand handle hidden; the depth box on the side that fits
+            return Layout(depth: depth, expand: nil, flipped: false)
         }
         if let best { return best.layout }
         // nothing fits the viewport at all (the part at the screen's edge): the away boxes, pushed as far as allowed

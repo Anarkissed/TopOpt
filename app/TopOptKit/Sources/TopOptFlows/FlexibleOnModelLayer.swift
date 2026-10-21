@@ -337,7 +337,8 @@ public struct FlexibleOnModelLayer: View {
             let layout = FlexibleLatticeHandles.layout(floor: f, rawKnob: raw,
                                                        depthBox: handleBoxWidths["handle-depth-\(plane.ref.key)"] ?? est,
                                                        expandBox: handleBoxWidths["handle-expand-\(plane.ref.key)"] ?? est,
-                                                       viewport: v, keepOut: under.map { [$0] } ?? [])
+                                                       viewport: v, keepOut: under.map { [$0] } ?? [],
+                                                       dragging: ui.dragging == "handle-expand-\(plane.ref.key)")
             return HandleSpot(plane: plane, floor: f, deeper: local(frame.project(geo.deeper), origin), rawKnob: raw,
                               out: geo.expandOut.flatMap { local(frame.project($0), origin) }, layout: layout)
         }
@@ -356,7 +357,10 @@ public struct FlexibleOnModelLayer: View {
             let group: Bool = { if case .group = scope { return true } else { return false } }()
             ForEach(handleSpots(scope, frame: frame, origin: origin, viewport: v), id: \.plane.id) { h in
                 if !Self.underList(h.layout.depth.rect, under) { depthHandle(h, group: group ? gid : nil) }
-                if let e = h.layout.expand, !Self.underList(e.rect, under) { expandHandle(h, unit: e) }
+                // the '+' under his finger is never removed mid-drag (fix round 2), not even by the open list
+                if let e = h.layout.expand, ui.dragging == "handle-expand-\(h.plane.ref.key)" || !Self.underList(e.rect, under) {
+                    expandHandle(h, unit: e)
+                }
             }
         }
     }
