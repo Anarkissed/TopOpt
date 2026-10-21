@@ -189,6 +189,9 @@ extension FlexibleRowCopy {
     /// ★ U2: [2D] / [3D] — the curve window, as the buttons' spoken labels.
     public static let pressCurves2D = "Edit the curves in 2D"
     public static let pressCurves3D = "Edit the curves in 3D"
+    /// ★ X20b: a face's two tables in the curve window.
+    public static let faceCurveX = "X curve \u{00B7} along the face's X edge"
+    public static let faceCurveY = "Y curve \u{00B7} along the face's Y edge"
     /// The flat press's stamp row: "Stamp · Palm on the edge" (a corner: "on the corner").
     public static func pressStamp(name: String, corner: Bool) -> String {
         let tail = corner ? " on the corner" : " on the edge"

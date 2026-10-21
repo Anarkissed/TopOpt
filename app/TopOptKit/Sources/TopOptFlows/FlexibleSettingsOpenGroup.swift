@@ -329,7 +329,12 @@ extension FlexibleStageOverlays {
         return WorkingFace(region: r, geometry: g, face: f)
     }
 
-    /// The curve editors drawn (the face and its axes); nil: none (no working face, or a Stamp face).
+    /// ★ X20b: the curve editors mounted ON THE PART for face `f` — none (his answer of 2026-10-20 ~19:10: the curves left the part;
+    /// the indent shows instead, FlexibleIndent); RED CONTROL `FlexibleIndent.controlCurvesOnPart`: both, as before.
+    static func curveEditorsOnPart(_ f: FlexibleFaceSettings) -> [String] { FlexibleIndent.controlCurvesOnPart ? curveAxes(f) : [] }
+
+    /// The face whose drawn shape is shown on the part (its axes; ★ X20b: as its indent, not editable); nil: none (no working
+    /// face, or a Stamp face).
     @MainActor
     static func curveEditors(model m: FlexibleStageModel) -> (region: Int, axes: [String])? {
         guard let w = workingFace(model: m) else { return nil }

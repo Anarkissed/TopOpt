@@ -286,8 +286,11 @@ public struct FlexibleStagePage: View {
                         .zIndex(30)
                 }
                 // ★ U2 (his notes of 2026-10-20, item 5): the curve window, over everything
-                if let d = model.curveDraft, let p = model.press(d.press), let st = p.strip, !p.settings.isStampShape {
+                if let d = model.curveDraft, let id = d.press, let p = model.press(id), let st = p.strip, !p.settings.isStampShape {
                     FlexiblePressCurveModalView(model: model, draft: d, strip: st).zIndex(60)
+                } else if let d = model.curveDraft, let r = d.face, model.settings.face(r)?.isStampShape == false {
+                    // ★ X20b (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME 2D/3D curve window")
+                    FlexiblePressCurveModalView(model: model, draft: d, strip: nil).zIndex(60)
                 }
             }
             .background(GeometryReader { g in
@@ -1085,7 +1088,13 @@ struct FlexibleStageOverlays: View {
             if let w = Self.workingFace(model: model) {
                 let r = w.region, g = w.geometry, f = w.face
                 // ★ ROUND 4: Curves or Stamp — never both; the Stamp face's handle is below
-                ForEach(Self.curveAxes(f), id: \.self) { axis in
+                // ★ X20b (his answer of 2026-10-20 ~19:10: "On-part curves: REMOVE them from the part, but show the indent when
+                // selected like the stamp"): the face's indent, display only — its curves are edited in the 2D / 3D window
+                if !FlexibleIndent.controlCurvesOnPart, !f.isStampShape {
+                    FlexibleIndentLayer(lines: FlexibleIndent.face(model: model, region: r), projection: proj.projection,
+                                        clip: clip ?? keepOut, pose: pose)
+                }
+                ForEach(Self.curveEditorsOnPart(f), id: \.self) { axis in
                     FlexibleCurveEditor(projection: proj.projection,
                                         baseline: (axis == "x" ? g.baselineX : g.baselineY).posed(pose),   // ★ F: from the bent face
                                         curve: axis == "x" ? f.curveX : f.curveY,

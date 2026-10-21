@@ -516,16 +516,7 @@ public struct FlexibleOverlayMesh {
                 for j in 0..<3 where wv[j] != 0 {
                     u += wv[j] * uvt[3 * (src + j)]; w += wv[j] * uvt[3 * (src + j) + 1]; t += wv[j] * uvt[3 * (src + j) + 2]
                 }
-                let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
-                let iuC = min(max(iu, 0), st.nu - 1), ivC = min(max(iv, 0), st.nv - 1)
-                // a vertex on the face's own edge sits half a pitch outside the last column
-                guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1, st.nu > 0, st.nv > 0 else { return nil }
-                let col = st.cell[ivC * st.nu + iuC]
-                guard col >= 0, col < d.count, let dd = d[col], dd > 0 else { return nil }
-                let c = st.columns[col]
-                let span = c.exitT - c.entryT
-                guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
-                return (dd, max(0, min(1, (c.exitT - t) / span)))
+                return Self.rampValue(u: u, w: w, t: t, d: d, st: st)
             }
             if let s = subdivision {
                 // ★ each drawn vertex: the linear blend of its KEPT triangle's corner dents — the
@@ -554,6 +545,46 @@ public struct FlexibleOverlayMesh {
             }
         }
         return out
+    }
+
+    /// The dent's ramp at (u, w, t) in stack `st`'s frame: its column's depth and the share of it here (the face full, the far end
+    /// none) — nil where the stack does not move the point.
+    static func rampValue(u: Double, w: Double, t: Double, d: [Double?], st: FlexStackInfo) -> (dd: Double, r: Double)? {
+        guard st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return nil }
+        let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
+        let iuC = min(max(iu, 0), st.nu - 1), ivC = min(max(iv, 0), st.nv - 1)
+        // a vertex on the face's own edge sits half a pitch outside the last column
+        guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1 else { return nil }
+        let col = st.cell[ivC * st.nu + iuC]
+        guard col >= 0, col < d.count, let dd = d[col], dd > 0 else { return nil }
+        let c = st.columns[col]
+        let span = c.exitT - c.entryT
+        guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
+        return (dd, max(0, min(1, (c.exitT - t) / span)))
+    }
+
+    /// ★ X20b (his answer of 2026-10-20 ~16:05: a face pressed by ANOTHER group lying over the squished lattice BENDS ALONG too —
+    /// any surface over the squished lattice moves with it, whichever group; supersedes round 5's "another group's face stands
+    /// still" for this case): the column quads of `riders` (faces NOT dented by `depths`) ride each dented face's ramp where they lie
+    /// over its stack — a quad vertex placed in the stack's frame from its own point (`origins[k]`: core's from_uv(0, 0) of `k`; the
+    /// frame's X, Y and load). Added to `out`.
+    public func addRiders(_ out: inout [Float], depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
+                          origins: [FlexFaceKey: SIMD3<Double>], riders: [FlexFaceKey]) {
+        let n = mesh.flat.vertexCount
+        let pos = mesh.flat.positions
+        for (k, d) in depths {
+            guard let st = stacks[k], let o = origins[k] else { continue }
+            for r in riders where depths[r] == nil {
+                guard let start = flatStart[r], let rs = stacks[r] else { continue }
+                for v in start..<Swift.min(start + rs.columns.count * 6, n) {
+                    let p = SIMD3<Double>(Double(pos[3 * v]), Double(pos[3 * v + 1]), Double(pos[3 * v + 2])) - o
+                    guard let x = Self.rampValue(u: simd_dot(p, st.xAxis), w: simd_dot(p, st.yAxis), t: simd_dot(p, st.load), d: d, st: st)
+                    else { continue }
+                    let dd = x.dd * x.r
+                    out[v * 3] += Float(st.load.x * dd); out[v * 3 + 1] += Float(st.load.y * dd); out[v * 3 + 2] += Float(st.load.z * dd)
+                }
+            }
+        }
     }
 
     /// Corner i (build order: (iu, iv), (iu+1, iv), (iu+1, iv+1), (iu, iv+1)) of a column

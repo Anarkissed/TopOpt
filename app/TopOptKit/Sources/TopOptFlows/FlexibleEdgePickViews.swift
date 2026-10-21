@@ -553,19 +553,7 @@ struct FlexiblePressShapeRows: View {
     }
 
     private func modalButton(_ mode: FlexiblePressCurveDraft.Mode, label: String) -> some View {
-        Button { model.openCurveModal(press.id, mode) } label: {
-            Text(mode == .flat2D ? "2D" : "3D").font(.system(size: 13, weight: .bold))
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(DS.Color.fillSubtle.color))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["pressCurves-\(mode.rawValue)": g.frame(in: .global)])
-        }.allowsHitTesting(false))
-        .accessibilityLabel(label)
-        .accessibilityIdentifier("flexible-press-curves-\(mode.rawValue)")
+        FlexibleCurveModalButton(mode: mode, id: "flexible-press-curves", label: label) { model.openCurveModal(press.id, mode) }
     }
 
     private func viewButton(_ v: FlexiblePressCurveBaselines.View, icon: String, label: String) -> some View {

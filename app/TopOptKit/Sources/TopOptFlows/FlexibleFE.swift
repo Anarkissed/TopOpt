@@ -28,6 +28,9 @@ public enum FlexibleFE {
     /// s · gmax ≤ this: x = p + s·u(p) is injective (the planes never cross), det ≥ 0.125, and the
     /// fixed-point inverse converges geometrically.
     public static let safeGradient = 0.5
+    /// ★ X20b: an edges group's sim at core's full design depth keeps det(I + k·∇u) ≥ this over the part — the only cut left
+    /// there (a TRUE fold: a cell turned inside out), said when it bites.
+    public static let trueFoldDet = 0.1
     /// The inverse map's fixed-point iterations (GPU and Swift twin alike) and its early exit.
     public static let pullbackIterations = 8
     public static let pullbackTolMM: Float = 1e-3

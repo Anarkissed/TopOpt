@@ -24,7 +24,11 @@ import TopOptKit
 /// ★ U2: the open window's draft (FlexibleStageModel.curveDraft).
 public struct FlexiblePressCurveDraft: Equatable {
     public enum Mode: String, CaseIterable, Hashable, Sendable { case flat2D = "2d", table3D = "3d" }
-    public let press: UUID
+    /// The press (nil: a face's curves — `face`).
+    public let press: UUID?
+    /// ★ X20b (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME 2D/3D curve window"): the face whose curves are open
+    /// (its X curve under `.along`, its Y curve under `.across` — the press's own storage keys: curveX / curveY).
+    public var face: Int? = nil
     public var mode: Mode
     /// The press's curves when the window opened ([Cancel] returns to these — nothing was written).
     public let before: [FlexiblePressCurveBaselines.Axis: FlexCurve]
@@ -52,6 +56,13 @@ public enum FlexiblePressCurveModal {
         /// The words under the table's two ends (t = 0, t = 1).
         let ends: (String, String)
         static func == (a: Table, b: Table) -> Bool { a.id == b.id && a.axes == b.axes && a.title == b.title }
+    }
+
+    /// ★ X20b: a face's 2D tables, top to bottom: its X curve, then its Y curve (each its own table).
+    static func faceTables2D() -> [Table] {
+        if controlOneTable { return [Table(id: "both", axes: [.along, .across], title: "X and Y", ends: ("", ""))] }
+        return [Table(id: "x", axes: [.along], title: FlexibleRowCopy.faceCurveX, ends: ("Corner", "X end")),
+                Table(id: "y", axes: [.across], title: FlexibleRowCopy.faceCurveY, ends: ("Corner", "Y end"))]
     }
 
     /// ★ The 2D tables, top to bottom: an edge's across then along (each its own table); a corner's one curve.
@@ -91,6 +102,17 @@ public enum FlexiblePressCurveModal {
     /// ★ The 3D table's curves (table space): the flat face is the plane x = 0, every curve rises along +X. An edge: ACROSS runs
     /// down Y (head-on from Front), ALONG runs along Z (head-on from Top), crossing at their middles. A corner: its one curve on two
     /// sides meeting at the corner tip (the origin) — one down Y, one along Z.
+    /// ★ X20b: a face's 3D table — its Y curve down Y (head-on from Front), its X curve along Z (head-on from Top), crossing at
+    /// their middles, as an edge's.
+    static func faceCurves3D() -> [Curve3D] {
+        let up = SIMD3<Double>(1, 0, 0), h = span / 2
+        func line(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> FlexibleCurveBaseline {
+            FlexibleCurveBaseline(points: (0...32).map { simd_mix(a, b, SIMD3(repeating: Double($0) / 32)) }, up: up, amplitudeMM: rise)
+        }
+        return [Curve3D(id: "y", axis: .across, baseline: line(SIMD3(0, h, 0), SIMD3(0, -h, 0))),
+                Curve3D(id: "x", axis: .along, baseline: line(SIMD3(0, 0, -h), SIMD3(0, 0, h)))]
+    }
+
     static func curves3D(_ st: FlexibleStrip, cut: FlexibleFlatPrism.Cut?) -> [Curve3D] {
         let up = SIMD3<Double>(1, 0, 0)
         func line(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> FlexibleCurveBaseline {
@@ -142,7 +164,8 @@ public enum FlexiblePressCurveModal {
     // MARK: copy (one line each, ≤ 44)
 
     static func title(_ strip: String) -> String { FlexibleRowCopy.fit(strip + " \u{00B7} curves") }
-    static func legend(_ a: Axis) -> String {
+    static func legend(_ a: Axis, face: Bool = false) -> String {
+        if face { return a == .along ? "X \u{00B7} head-on from Top" : "Y \u{00B7} head-on from Front" }
         switch a {
         case .across: return "Across \u{00B7} head-on from Front"
         case .along: return "Along \u{00B7} head-on from Top"
@@ -156,6 +179,15 @@ public enum FlexiblePressCurveModal {
 // MARK: - the model
 
 extension FlexibleStageModel {
+    /// ★ X20b (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME 2D/3D curve window"): a face's [2D] / [3D] — the window
+    /// opens on a draft of its X and Y curves.
+    public func openFaceCurveModal(_ r: Int, _ mode: FlexiblePressCurveDraft.Mode) {
+        guard let f = settings.face(r), !f.isStampShape else { return }
+        let now: [FlexiblePressCurveBaselines.Axis: FlexCurve] = [.along: f.curveX, .across: f.curveY]
+        curvePoint = nil
+        curveDraft = FlexiblePressCurveDraft(press: nil, face: r, mode: mode, before: now, curves: now)
+    }
+
     /// ★ U2: [2D] / [3D] — the window opens on a draft of the press's curves.
     public func openCurveModal(_ id: UUID, _ mode: FlexiblePressCurveDraft.Mode) {
         guard let p = settings.press(id), let st = p.strip, !p.settings.isStampShape else { return }
@@ -174,7 +206,10 @@ extension FlexibleStageModel {
         let m = FlexiblePressCurveBaselines.clamped(c)
         d.curves[axis] = m
         curveDraft = d
-        if FlexiblePressCurveModal.controlLiveEdits { setPressCurve(d.press, axis, m); save() }   // (RED CONTROL: written at once)
+        if FlexiblePressCurveModal.controlLiveEdits {   // (RED CONTROL: written at once)
+            if let id = d.press { setPressCurve(id, axis, m) } else if let r = d.face { setFaceCurve(r, axis, m) }
+            save()
+        }
     }
 
     /// ★ U2: [OK] (`keep`) writes every changed curve in ONE edit, sealed as ONE undo step; [Cancel] writes nothing.
@@ -183,12 +218,34 @@ extension FlexibleStageModel {
         curveDraft = nil
         guard keep, d.curves != d.before else { return }
         project.sealUndoStep()   // what came before the window is its own step
+        if let r = d.face {   // ★ X20b: a face's X and Y curves, one edit
+            edit({ s in
+                guard var f = s.face(r) else { return }
+                if let c = d.curves[.along], c != d.before[.along] { f.curveX = c }
+                if let c = d.curves[.across], c != d.before[.across] { f.curveY = c }
+                s.setFace(f)
+            }, recompute: false)
+            curveChanged(region: r)
+            save()
+            return
+        }
+        guard let id = d.press else { return }
         edit({ s in
-            guard var q = s.press(d.press), q.strip != nil else { return }
+            guard var q = s.press(id), q.strip != nil else { return }
             for a in FlexiblePressCurveBaselines.Axis.allCases { if let c = d.curves[a], c != d.before[a] { FlexiblePressCurveBaselines.set(&q, a, c) } }
             s.setPress(q)
         }, recompute: false)
         save()
+    }
+
+    /// ★ X20b: one curve of a face written at once (the window's red control only).
+    func setFaceCurve(_ r: Int, _ axis: FlexiblePressCurveBaselines.Axis, _ c: FlexCurve) {
+        edit({ s in
+            guard var f = s.face(r) else { return }
+            if axis == .across { f.curveY = c } else { f.curveX = c }
+            s.setFace(f)
+        }, recompute: false)
+        curveChanged(region: r)
     }
 
     /// The press's faces by name, in its strip's order ("Face 1", "Face 4").
@@ -207,16 +264,17 @@ extension FlexibleStageModel {
 struct FlexiblePressCurveModalView: View {
     @ObservedObject var model: FlexibleStageModel
     let draft: FlexiblePressCurveDraft
-    let strip: FlexibleStrip
+    /// The press's strip (nil: a face's curves).
+    let strip: FlexibleStrip?
     @StateObject private var camera: OrbitCameraModel
     /// (tests only) the open window's 3D camera — the one its gizmo turns.
     @MainActor static weak var shownCamera: OrbitCameraModel?
 
-    init(model: FlexibleStageModel, draft: FlexiblePressCurveDraft, strip: FlexibleStrip) {
+    init(model: FlexibleStageModel, draft: FlexiblePressCurveDraft, strip: FlexibleStrip?) {
         self.model = model
         self.draft = draft
         self.strip = strip
-        _camera = StateObject(wrappedValue: OrbitCameraModel(camera: FlexiblePressCurveModal.homeCamera(corner: strip.kind == .corner)))
+        _camera = StateObject(wrappedValue: OrbitCameraModel(camera: FlexiblePressCurveModal.homeCamera(corner: strip?.kind == .corner)))
     }
 
     var body: some View {
@@ -236,7 +294,7 @@ struct FlexiblePressCurveModalView: View {
     private func card(width: CGFloat, height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: DS.Space.s) {
-                Text(FlexiblePressCurveModal.title(model.stripTitle(draft.press)))
+                Text(FlexiblePressCurveModal.title(draft.press.map { model.stripTitle($0) } ?? draft.face.map { model.displayName($0) } ?? ""))
                     .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: DS.Space.s)
@@ -245,11 +303,13 @@ struct FlexiblePressCurveModalView: View {
                     .fixedSize()
             }
             if draft.mode == .flat2D {
-                ForEach(FlexiblePressCurveModal.tables2D(strip, names: model.stripFaceNames(draft.press))) { t in
+                ForEach(strip.map { FlexiblePressCurveModal.tables2D($0, names: draft.press.map { model.stripFaceNames($0) } ?? []) }
+                        ?? FlexiblePressCurveModal.faceTables2D()) { t in
                     FlexibleCurveTable2D(table: t, curves: draft.curves) { a, c in model.setDraftCurve(a, c) }
                 }
             } else {
-                FlexibleCurveTable3D(camera: camera, curves3D: FlexiblePressCurveModal.curves3D(strip, cut: model.flatCut(draft.press)),
+                FlexibleCurveTable3D(camera: camera, curves3D: strip.map { FlexiblePressCurveModal.curves3D($0, cut: draft.press.flatMap { model.flatCut($0) }) }
+                                        ?? FlexiblePressCurveModal.faceCurves3D(), face: strip == nil,
                                      curves: draft.curves, height: Swift.min(460, Swift.max(300, height - 360))) { a, c in model.setDraftCurve(a, c) }
             }
             Text(FlexiblePressCurveModal.hint).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
@@ -326,6 +386,8 @@ struct FlexibleCurveTable2D: View {
 struct FlexibleCurveTable3D: View {
     @ObservedObject var camera: OrbitCameraModel
     let curves3D: [FlexiblePressCurveModal.Curve3D]
+    /// ★ X20b: a face's X / Y (the legend's words).
+    var face: Bool = false
     let curves: [FlexiblePressCurveBaselines.Axis: FlexCurve]
     let height: CGFloat
     let onChange: (FlexiblePressCurveBaselines.Axis, FlexCurve) -> Void
@@ -370,7 +432,7 @@ struct FlexibleCurveTable3D: View {
                 ForEach(Array(Set(curves3D.map(\.axis))).sorted { $0.rawValue < $1.rawValue }, id: \.self) { a in
                     HStack(spacing: 6) {
                         Circle().fill(FlexiblePressCurveModal.tint(a)).frame(width: 8, height: 8)
-                        Text(FlexiblePressCurveModal.legend(a)).font(.system(size: 12, weight: .medium))
+                        Text(FlexiblePressCurveModal.legend(a, face: face)).font(.system(size: 12, weight: .medium))
                             .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                     }
                 }
@@ -407,5 +469,32 @@ struct FlexibleCurveTable3D: View {
             if let a = pr.project(SIMD3<Float>(c.baseline.at(0))), let b = pr.project(SIMD3<Float>(c.baseline.world(0.5, 1))) { l.move(to: a); l.addLine(to: b) }
             ctx.stroke(l, with: .color(FlexiblePressCurveModal.tint(c.axis).opacity(0.45)), lineWidth: 2)
         }
+    }
+}
+
+/// ★ U2 / X20b: one [2D] or [3D] button of a Shape row — a press's or (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME
+/// 2D/3D curve window") a face's; 44 pt, its keep-out frame named by `id`.
+struct FlexibleCurveModalButton: View {
+    /// ★ X20b, RED CONTROL only: a face's Shape row without [2D] / [3D] (its curves edited on the part, before X20b).
+    nonisolated(unsafe) static var controlNoFaceWindow = false
+    let mode: FlexiblePressCurveDraft.Mode
+    let id: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(mode == .flat2D ? "2D" : "3D").font(.system(size: 13, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(DS.Color.fillSubtle.color))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: [(id == "flexible-press-curves" ? "pressCurves" : "faceCurves") + "-\(mode.rawValue)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("\(id)-\(mode.rawValue)")
     }
 }

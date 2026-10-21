@@ -246,10 +246,20 @@ struct FlexiblePressCurveLayer: View {
         return out
     }
 
+    /// ★ X20b: the curve editors mounted ON THE PART for press `id` — none (his answer of 2026-10-20 ~19:10: "On-part curves: REMOVE
+    /// them from the part, but show the indent when selected like the stamp"); RED CONTROL `FlexibleIndent.controlCurvesOnPart`.
+    static func editorsOnPart(model m: FlexibleStageModel, press id: UUID, projection: CameraProjection?) -> [Drawn] {
+        FlexibleIndent.controlCurvesOnPart ? drawn(model: m, press: id, projection: projection) : []
+    }
+
     var body: some View {
         if let id = FlexibleFlatPrismUI.workingPress(model), let p = model.press(id) {
             ZStack {
-                ForEach(Self.drawn(model: model, press: id, projection: projection)) { d in
+                // ★ X20b: the working press's indent on the part, display only (Curves; a Stamp shows its own outline)
+                if !FlexibleIndent.controlCurvesOnPart, !p.settings.isStampShape {
+                    FlexibleIndentLayer(lines: FlexibleIndent.press(model: model, id: id), projection: projection, clip: clip ?? keepOut)
+                }
+                ForEach(Self.editorsOnPart(model: model, press: id, projection: projection)) { d in
                     FlexibleCurveEditor(projection: projection, baseline: d.baseline,
                                         curve: FlexiblePressCurveBaselines.multipliers(p, d.axis),
                                         label: d.label, tint: FlexibleStageStyle.onPart,

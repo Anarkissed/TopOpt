@@ -297,6 +297,8 @@ public final class FlexibleStageModel: ObservableObject {
     /// each its press stack and core's depth per column there (as built in the combined field, else core's design): what its edges
     /// group's sim is calibrated to (Play, Bend, Heat), and the chip "Lattice not tuned for this press yet" goes. Set with the lattice.
     var latticeTunedPresses: [UUID: FlexibleFEField.Target] = [:]
+    /// ★ X20b, RED CONTROL only: C1's targets — each press AS BUILT in the combined field (his Edge 9 near 0).
+    nonisolated(unsafe) static var controlAsBuiltTargets = false
     var pressSimInFlight: Set<String> = []
     /// One solve at a time, off the main thread (FlexibleSquishSolver).
     let squishSolver = FlexibleSquishSolver()
@@ -1619,7 +1621,10 @@ public final class FlexibleStageModel: ObservableObject {
                 var tuned: [UUID: FlexibleFEField.Target] = [:]
                 for k in pressKeysSnap {
                     guard let id = pressIDSnap[k], let st = stackOf[k],
-                          let d = pressDepths[k] ?? designedSnap[k]?.buildableDepthMM else { continue }
+                          // ★ X20b (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH"): core's own design depth,
+                          // not the press as built in the combined field (C1's reviewer question 2); RED CONTROL `controlAsBuiltTargets`
+                          let d = Self.controlAsBuiltTargets ? (pressDepths[k] ?? designedSnap[k]?.buildableDepthMM)
+                                                             : (designedSnap[k]?.buildableDepthMM ?? pressDepths[k]) else { continue }
                     tuned[id] = FlexibleFEField.Target(stack: st, depthsMM: d, pinched: [])
                 }
                 let tunedSnap = tuned

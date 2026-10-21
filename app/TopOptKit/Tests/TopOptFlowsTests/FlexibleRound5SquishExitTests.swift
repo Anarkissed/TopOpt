@@ -58,10 +58,19 @@ final class FlexibleRound5SquishExitTests: XCTestCase {
             let all = Self.quadMotion(try XCTUnwrap(c.dents), overlay: o, model: m)
             report.append("\(m.faceName(sel)) selected: " + moved.sorted { $0.key < $1.key }.map { "\(m.faceName($0.key)) \(String(format: "%.2f", $0.value))" }.joined(separator: " · ")
                           + " | round 4: " + all.sorted { $0.key < $1.key }.map { "\(m.faceName($0.key)) \(String(format: "%.2f", $0.value))" }.joined(separator: " · "))
+            // ★ RE-PIN (X20b, his answer of 2026-10-20 ~16:05: a face pressed by ANOTHER group lying over the squished lattice
+            // BENDS ALONG too — supersedes round 5's "another group's face stands still" for this case): another group's map moves
+            // only by the playing group's own ramp where it lies over its lattice — never more than the playing group's faces
+            let deepest = moved.filter { mine.contains($0.key) }.values.max() ?? 0
             for (region, d) in moved {
                 if mine.contains(region) { XCTAssertGreaterThan(d, 0.05, "\(m.faceName(region)) is in the playing group: it dents") }
-                else { XCTAssertEqual(d, 0, "\(m.faceName(region)) is another group's: it stands still") }
+                else { XCTAssertLessThanOrEqual(d, deepest + 1e-4, "\(m.faceName(region)) is another group's: it rides the playing group's ramp, no more") }
             }
+            // round 5's rule, kept as a control (FlexibleSettingsSquish.controlOtherGroupStill): another group's map stood still
+            FlexibleSettingsSquish.controlOtherGroupStill = true
+            let still = Self.quadMotion(try XCTUnwrap(FlexibleSettingsSquish.shown(model: m, overlay: o, channels: c, feCache: &cache).dents), overlay: o, model: m)
+            FlexibleSettingsSquish.controlOtherGroupStill = false
+            for (region, d) in still where !mine.contains(region) { XCTAssertEqual(d, 0, "control (round 5): \(m.faceName(region)) stood still") }
             // ★ RED CONTROL: round 4's page dented every group's faces at once
             XCTAssertTrue(all.filter { !mine.contains($0.key) }.values.contains { $0 > 0.05 }, "control: the old dent moved the other group too")
         }

@@ -13,6 +13,10 @@
 // ahead and finalize the send to core now."): with the presses SENT (FlexibleBackend.sendsPresses on), once the lattice carries
 // core's design for every press of the group (latticeTunedPresses), the same sim is CALIBRATED to core's depths on each press stack,
 // as a face group's is — Play, Bend and Heat show core's squish, the chip goes; the uncalibrated interim sim is only the fallback.
+// ★ X20b (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH (e.g. Edge 12 5.6 mm, Edge 9 3.3 mm)"): the
+// tuned sim's targets are core's own design depths (not the press as built), it is solved PER PRESS and each press scaled to its
+// design depth (FlexibleFERequest.solve → FlexibleFEField.designDepth) — no band, no ½ cut, shown at × 1; only a true fold (a part
+// cell turned inside out) would cut it, and the chip says so.
 // ★ ONE ID PER GROUP: "group-N" (the tab's number), like a face group's sim, so the Squish page's player, the main page's selector,
 // "All (one after another)" and the views find it exactly as a face group's. Solved again when the group's presses change (pieces,
 // arrow bits, depth, force) or a new lattice lands — never while one is still solving for that group.
@@ -148,7 +152,10 @@ extension FlexibleStageModel {
     /// ★ C1: gone once core designed the lattice for every press of the group (the sim then plays core's design).
     public func notTunedLine(simID: String?) -> String? {
         guard let simID, let w = pressSimWants.first(where: { $0.sim.id == simID }) else { return nil }
-        return w.tuned ? nil : FlexibleRowCopy.latticeNotTunedForPress
+        guard w.tuned else { return FlexibleRowCopy.latticeNotTunedForPress }
+        // ★ X20b: core's full design depth is shown — said only when a TRUE fold held it back
+        if let cut = squish[simID]?.field?.trueFoldCut { return FlexibleRowCopy.pressFoldCut(percent: Swift.max(1, Int((cut * 100).rounded(.down)))) }
+        return nil
     }
 }
 

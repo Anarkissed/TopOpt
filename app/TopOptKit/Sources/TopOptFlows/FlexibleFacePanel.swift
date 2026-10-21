@@ -252,9 +252,17 @@ struct FlexibleFaceRows: View {
                 // ★ ROUND 4 (D1): an either/or — Stamp shows the face's ONE stamp below (flat
                 // curves + design_stamp, the face's weight, the prism on its footprint) and the
                 // curves leave the part at once; Curves hides the stamp
-                FlexChips(options: FlexibleRowCopy.shapeOptions, selection: f.isStampShape ? "stamp" : "curves",
-                          id: "flexible-shape", equalWidths: false) { v in model.setShape(r, v) }
-                .fixedSize()
+                HStack(spacing: 4) {
+                    FlexChips(options: FlexibleRowCopy.shapeOptions, selection: f.isStampShape ? "stamp" : "curves",
+                              id: "flexible-shape", equalWidths: false) { v in model.setShape(r, v) }
+                    .fixedSize()
+                    // ★ X20b (his answer of 2026-10-20 ~19:10: "FACE presses use the SAME 2D/3D curve window"): the curves are
+                    // edited only in the window (they left the part); RED CONTROL `controlNoFaceWindow`
+                    if !f.isStampShape, !FlexibleCurveModalButton.controlNoFaceWindow {
+                        FlexibleCurveModalButton(mode: .flat2D, id: "flexible-face-curves", label: FlexibleRowCopy.pressCurves2D) { model.openFaceCurveModal(r, .flat2D) }
+                        FlexibleCurveModalButton(mode: .table3D, id: "flexible-face-curves", label: FlexibleRowCopy.pressCurves3D) { model.openFaceCurveModal(r, .table3D) }
+                    }
+                }
             }
             if f.isStampShape { FlexibleFaceStampRows(model: model, region: r, padTarget: $padTarget) }
             // ★ ROUND 5 (S3): the number in its own box — tap for the keypad, drag up / down

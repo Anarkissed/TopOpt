@@ -1,6 +1,87 @@
 # Handoff — 2026-09-29-flexible-screens (TRACK app, A1): the Flexible screens
 
-## ★ Round 7 · C1 — edge and corner presses are SENT to core now; E2's fix finished (2026-10-20) (read this first)
+## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
+#354/main file edited. Judged on your 10-20 pad (`round7/batch_u1/his_live_1020`).
+
+### What you will see now, in plain words
+- **Edge Play shows core's full depth.** On your pad, Group 2 now squishes Edge 12 by **5.58 mm** and Edge 9 by **3.33 mm**. Those
+  are core's own design depths. Before this it showed 2.68 mm and 2.98 mm. Play, Bend and Heat all show the same squish.
+- How: each press is solved on its own and scaled to core's depth for that press, then the two are added together. The old
+  one-number scaling could not give Edge 12 and Edge 9 different depths. The band and the ½ "no-fold" cut are gone for these presses.
+- The only limit left is a true fold, where a cell of the part would turn inside out. If that ever cuts the squish, a chip says
+  "Shown at N% of core's depth: deeper folds". On your pad it does not cut: the thinnest cell keeps 33% of its volume, so no chip.
+- **No curves on the part any more**, for faces and for edges. When a press is selected, its **indent** shows on the part, the way
+  a stamp shows its outline: one line where the dent starts (10%), one at half (50%), and a dashed line around the deepest zone
+  (90%). You cannot drag it there. You edit curves only in the 2D / 3D window.
+- **Faces use the same window.** A face's Shape row now reads `Shape [Curves | Stamp] [2D] [3D]`. 2D shows the X curve table above
+  the Y curve table. 3D puts both curves on one table with the gizmo (Top shows X head-on, Front shows Y head-on). OK keeps the edit
+  as one undo step. Cancel puts it back.
+- **Another group's face now bends along.** If a face from another group lies over the lattice being squished, it moves with it.
+  On your 0004 split, with Face 3 playing, Top A moves 1.08 mm and Top B 0.54 mm (both were 0 before). A face that is not over the
+  lattice stays still. (The 3D sim already moved everything; this was the column preview.)
+
+### How (code)
+- `FlexibleFERequest.solve`: for an edges group core designed, `Sim.perPress` solves one press at a time
+  (`solveRaw`). `FlexibleFEField.designDepth(parts:targets:)` sets each kᵢ so the press's deepest compression along its arrow on
+  core's press stack equals core's deepest design depth. It refines over 6 rounds so a neighbour's push is counted, then applies
+  the true-fold guard (`foldFreeScale`, det(I+∇u) ≥ `FlexibleFE.trueFoldDet` 0.1). Targets are core's design
+  (`designedSnap.buildableDepthMM`), not the press as built (C1's reviewer question 2). `FlexiblePressHeat.shownScale` is ×1 for
+  such a field; the Squish page uses it too.
+- `FlexibleIndent` (new): contour lines from data the app already has. For a face that is core's `liveS`, on the column grid. For
+  an edge or corner it is the drawn push samples (`FlexiblePressPush.samples`). Shown by `FlexibleIndentLayer`, which takes no
+  touches. The on-part editors stay only behind the red control `FlexibleIndent.controlCurvesOnPart`.
+- `FlexiblePressCurveDraft.face`, `openFaceCurveModal`, `faceTables2D` / `faceCurves3D`. The face's X curve is keyed `.along` and
+  its Y curve `.across`, the same storage as a press's curveX / curveY. `FlexibleCurveModalButton` is shared by both rows.
+- `FlexibleOverlayMesh.addRiders` (+ `rampValue`): other loaded faces' column quads ride each dented face's ramp where they lie
+  over its stack (`FlexibleSettingsSquish.columnDents`). Red control: `controlOtherGroupStill`.
+
+### Tests (red controls asserted red inside each)
+- `FlexibleX20bTests` (4):
+  - full design depth, per press, within 5% (red: C1's single scale gives 2.68 mm);
+  - the curves left the part and the indent follows the drawing (red: editors on the part);
+  - a face's window: draft, Cancel, OK, one undo (red: live edits);
+  - another group's face bends along (red: round 5's rule).
+- Hosted `FlexibleU2Tests.testX20bAFacesShapeRowOpensTheWindow` (13" portrait):
+  - the face's [2D] / [3D] on one line, inside the panel (red: no buttons);
+  - the X table above the Y table; the 3D table with its gizmo;
+  - the edge's indent, with no handles on the part.
+- Re-pins, attributed to your answer of ~16:05:
+  - `FlexibleRound5SquishExitTests` (S2 column): another group's map now moves, but never more than the playing group's faces.
+  - `FlexibleRound7ViewsTests` (4i stale): face 1 is no more than faces 4 and 2.
+  - In both, round 5's rule is kept as a control that reads 0.
+
+### Runs (`round7/batch_x20b/x20b_runs.txt`)
+- 94 targeted classes, once: 570 tests, 1 skipped, 5 failures in 3 tests.
+  - Two are the re-pins above. After re-pinning: R5SquishExit + Round7Views + X20b = 23/23.
+  - The third is the known Play ring.
+  - No signal lines.
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 + 1 PART-SKIP, 0 DIFFERS (unseeded).
+- The 16 stage-job hashes are cmp-identical to `stage_job_hashes_e1r.txt`. Nothing moved: the sim, the indent and the window
+  never touch a job.
+- After the runs, the face Shape (i) said the curves were "drawn on the face"; it now describes the window and the indent. Re-ran
+  RowCopy + SquishCopy + SettingsRound4: 20/20.
+
+### Pictures (`round7/batch_x20b/look/`, 13" portrait, your 10-20 pad; the test turns the camera for the picture, the page never does)
+- X20b_01: Face 3 on Curves. Its indent is drawn on the side (outline, half, deepest zone), with no handles. Shape `[Curves | Stamp] [2D] [3D]`.
+- X20b_02: the face's window, 2D, with the X table above the Y table.
+- X20b_03: Edge 12's indent on its flat prism (curves bent in the window), with no handles. It sits at the far corner in this view.
+
+### Not done / questions
+- (Reviewer) At core's full depth your Group 2 field reaches ‖∇u‖ 1.04 at ×1. That is past the ½ bound the Lattice page's pull-back
+  was built for, though no cell folds (det ≥ 0.33). The lattice walls may drift from the ghost where the field is steepest. Is that
+  OK, or should the pull-back take more iterations there?
+- (Reviewer) One solve per press, summed: the presses' rests anchor each solve. With no rests, a lone press anchors at its exit
+  face, not at the other press as in the joint solve. The depths are exact to core's numbers; the shape away from the presses is
+  an approximation.
+- (Seen in the hosted harness, not caused by this step; it happens the same with the old views) on your pad with the page up,
+  the face designs stayed "in flight" for more than 4 minutes. The scene's queue then held back a new drawn map, so the face kept
+  its old flat dent until the page closed. It did not happen without the page. Worth a look if you see a face's dent lag after
+  switching Stamp → Curves.
+- Core still gets only the flat prism for a press, not its curves or stamp (the E4 backlog).
+
+## ★ Round 7 · C1 — edge and corner presses are SENT to core now; E2's fix finished (2026-10-20) (the step before X20b)
 
 Branch `claude/flexible-screens` (PR #362), on top of `04dfa058` (U2). NOT pushed (his HOLD). App only; core untouched; no #354/main
 file edited. His words (2026-10-20): "the edge/corner squishes barely squish, is there a reason for that? Is that mainly because it

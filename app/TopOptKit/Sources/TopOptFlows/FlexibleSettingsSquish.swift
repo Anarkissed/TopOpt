@@ -71,7 +71,8 @@ public enum FlexibleSettingsSquish {
         if let f = field(model: m, group: g), m.frozenExaggeration == nil {
             let shown = FlexibleShownValues(model: m, drawnLattice: nil)
             // ★ R7-E3: the interim sim at × 1 — its own size (no core prediction to scale it to), never folded
-            let k = edges ? Swift.min(1, f.maxSafeScale) : FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: f.maxSafeScale)
+            // ★ X20b: core's full design depth at × 1 (only a true fold cut it, inside the field)
+            let k = edges ? FlexiblePressHeat.shownScale(f) : FlexibleShownValues.cappedExaggeration(rule: shown.uncappedExaggeration, maxSafeScale: f.maxSafeScale)
             let key = "\(o.mesh.flat.vertexCount)|\(o.partFlatVertices)|\(f.simID)|\(f.serial)|\(f.scale)"   // (the page drops it on a rebuild)
             let d: [Float]
             if let cached = feCache, cached.key == key { d = cached.dents } else {
@@ -91,16 +92,29 @@ public enum FlexibleSettingsSquish {
         for (k, vals) in shown.values where regions.contains(k.region) {
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
-        return o.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT),
-                               still: FlexiblePageChannels.stillRule(regions: m.regions, mesh: m.project.viewerMesh, overlay: o,
-                                                                     keys: Array(depths.keys)))   // ★ ROUND 7 (M2)
+        var out = o.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT),
+                                  still: FlexiblePageChannels.stillRule(regions: m.regions, mesh: m.project.viewerMesh, overlay: o,
+                                                                        keys: Array(depths.keys)))   // ★ ROUND 7 (M2)
+        // ★ X20b (his answer of 2026-10-20 ~16:05): another group's face lying over the squished lattice bends along with it
+        // (supersedes round 5's "another group's face stands still" for this case); RED CONTROL `controlOtherGroupStill`
+        guard !controlOtherGroupStill else { return out }
+        var origins: [FlexFaceKey: SIMD3<Double>] = [:]
+        for k in depths.keys {
+            guard let g = m.geometry[k], let st = m.stacks[k] else { continue }
+            origins[k] = g.corner - st.load * st.entryT(nearU: 0, v: 0)
+        }
+        let riders = m.loadedKeys.filter { depths[$0] == nil }
+        o.addRiders(&out, depths: depths, stacks: m.stacks, origins: origins, riders: riders)
+        return out
     }
+    /// ★ X20b, RED CONTROL only: round 5's rule — another group's map stands still even over the squished lattice.
+    public static var controlOtherGroupStill = false
 
     /// ★ U1 (his notes of 2026-10-20, img_1020_7: the Top stayed flat while Face 3's side bent): the Squish page's overlay is
     /// cut fine for the COLUMN preview too — at the loaded stacks' pitch (≥ 2 mm), at most `columnMaxTriangles` — so a big flat
     /// triangle of the part over a pocket (his Top is two) follows the ramp instead of standing on its far corners. The 3D sim
-    /// keeps its own grid (`overlayEdge`). nil before a stack lands. Another GROUP's pressed map still stands still (round 5's
-    /// rule, pinned by FlexibleRound5SquishExitTests / FlexibleRound7ViewsTests). RED CONTROL `controlColumnFlatNeighbours`:
+    /// keeps its own grid (`overlayEdge`). nil before a stack lands. ★ X20b: another GROUP's pressed map over the squished lattice
+    /// bends along too (`columnDents`, his answer of 2026-10-20 ~16:05). RED CONTROL `controlColumnFlatNeighbours`:
     /// uncut (before U1).
     public static func pageEdge(model m: FlexibleStageModel) -> Double? {
         if let e = overlayEdge(model: m) { return e }

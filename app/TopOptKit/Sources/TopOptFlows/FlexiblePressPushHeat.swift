@@ -107,7 +107,9 @@ public enum FlexiblePressHeat {
     }
 
     /// The size Play shows an edges group's interim sim at (the Squish page's k: its own size, never folded).
-    static func shownScale(_ f: FlexibleFEField) -> Double { Swift.min(1, f.maxSafeScale) }
+    /// ★ X20b (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH"): a field at core's design depth is shown
+    /// at × 1 — no ½ cut (only a true fold cut it, inside the field, and said).
+    static func shownScale(_ f: FlexibleFEField) -> Double { f.designDepth ? 1 : Swift.min(1, f.maxSafeScale) }
 
     /// ★ The heat of the edges groups numbered `groups` (nil: every edges group — his hold) whose interim sim is current.
     public static func entries(model m: FlexibleStageModel, groups: Set<Int>?) -> [Entry] {

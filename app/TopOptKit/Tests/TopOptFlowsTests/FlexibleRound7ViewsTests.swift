@@ -432,7 +432,17 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         }
         XCTAssertGreaterThan(movedCol(4), 1e-4, "★ stale: face 4's column dent")
         XCTAssertGreaterThan(movedCol(2), 1e-4, "★ …and face 2's (every face of the group)")
-        XCTAssertEqual(movedCol(1), 0, "another group's face stands still")
+        // ★ RE-PIN (X20b, his answer of 2026-10-20 ~16:05: a face pressed by ANOTHER group lying over the squished lattice BENDS
+        // ALONG too): face 1 lies over the pinch's lattice — it rides the group's ramp, never more than the group's own faces
+        XCTAssertLessThanOrEqual(movedCol(1), max(movedCol(4), movedCol(2)) + 1e-4, "another group's face over the lattice bends along, no more")
+        FlexibleSettingsSquish.controlOtherGroupStill = true
+        var cacheStill: (key: String, dents: [Float])?
+        let dStill = try XCTUnwrap(FlexibleSettingsSquish.shown(model: m, overlay: o2, channels: c2, feCache: &cacheStill).dents)
+        FlexibleSettingsSquish.controlOtherGroupStill = false
+        if let key = m.key(1), let start = o2.flatStart[key], let n = m.stacks[key]?.columns.count {
+            let still = (start..<(start + 6 * n)).map { v in simd_length(SIMD3(dStill[3 * v], dStill[3 * v + 1], dStill[3 * v + 2])) }.max() ?? 0
+            XCTAssertEqual(still, 0, "control (round 5's rule): it stood still")
+        }
         XCTAssertEqual(FlexibleStagePage.dentScale(views: [.bend], exaggeration: sq2.exaggeration, amount: 0), Float(sq2.exaggeration), "…at k")
         print(String(format: "FLEX-R7V-4i bend: k %.2f · face 4 %.4f face 2 %.4f the Top's part vertices %.5f mm/k · control (no Bend, amount %.2f) scale %.2f · stale columns face 4 %.3f face 2 %.3f",
                      k, f4, f2, side, mid, FlexibleStagePage.dentScale(views: [], exaggeration: k, amount: mid), movedCol(4), movedCol(2)))

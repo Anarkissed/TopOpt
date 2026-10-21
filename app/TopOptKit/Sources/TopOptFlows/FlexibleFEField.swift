@@ -66,6 +66,13 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// extension outside the part may be steeper where pieces move apart: the M2 stand's air 2.51
     /// vs 0.83 in the part).
     public private(set) var gmaxPart: Double = 0
+    /// ★ X20b (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH"): an edges group's sim scaled PER PRESS
+    /// so each press's deepest squish along its arrow is core's design depth (`designDepth(parts:targets:)`) — no band, no ½ cut;
+    /// the page shows it at ×1. Only a TRUE fold cuts it (`trueFoldCut`).
+    public private(set) var designDepth = false
+    /// ★ X20b: the share kept because a cell of the part would turn inside out past it (det(I + ∇u) < FlexibleFE.trueFoldDet);
+    /// nil: core's full design depth is shown.
+    public private(set) var trueFoldCut: Double?
     /// The largest scale the PART's own map stays injective at.
     public var partSafeScale: Double { gmaxPart > 1e-12 ? FlexibleFE.safeGradient / gmaxPart : .infinity }
     /// Identity (fields are compared by it, never by their megabytes).
@@ -215,6 +222,45 @@ public struct FlexibleFEField: Sendable, Equatable {
         return Double(g / spacing)
     }
 
+    // MARK: ★ X20b — the TRUE fold (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH")
+
+    /// The smallest det(I + k·J) over the PART's cells (all 8 corners solved), J at each cell corner (the trilinear Jacobian's
+    /// corner values, per unit s). ≤ 0: the map p ↦ p + k·u(p) turns a cell inside out there — a TRUE fold, not the ½ bound.
+    public func minDeterminant(k: Double) -> Double {
+        guard nx > 1, ny > 1, nz > 1, spacing > 0 else { return 1 }
+        let s = Float(k) / spacing
+        var m: Float = 1
+        for c in 0..<(nz - 1) { for b in 0..<(ny - 1) { for a in 0..<(nx - 1) {
+            var all = true
+            for dc in 0...1 { for db in 0...1 { for da in 0...1 where !solved[node(a + da, b + db, c + dc)] { all = false } } }
+            if !all { continue }
+            for kk in 0...1 { for j in 0...1 { for i in 0...1 {
+                let cx = (u[node(a + 1, b + j, c + kk)] - u[node(a, b + j, c + kk)]) * s + SIMD3(1, 0, 0)
+                let cy = (u[node(a + i, b + 1, c + kk)] - u[node(a + i, b, c + kk)]) * s + SIMD3(0, 1, 0)
+                let cz = (u[node(a + i, b + j, c + 1)] - u[node(a + i, b + j, c)]) * s + SIMD3(0, 0, 1)
+                m = Swift.min(m, simd_dot(cx, simd_cross(cy, cz)))
+            } } }
+        } } }
+        return Double(m)
+    }
+
+    /// The largest k ≤ `want` with det(I + k·J) ≥ `floor` over the part (the first crossing: 32 steps, then bisection).
+    public func foldFreeScale(upTo want: Double, floor: Double = FlexibleFE.trueFoldDet) -> Double {
+        guard want > 0, minDeterminant(k: want) < floor else { return want }
+        var lo = 0.0, hi = want
+        let steps = 32
+        for i in 1...steps {
+            let k = want * Double(i) / Double(steps)
+            if minDeterminant(k: k) < floor { hi = k; break }
+            lo = k
+        }
+        for _ in 0..<20 {
+            let mid = 0.5 * (lo + hi)
+            if minDeterminant(k: mid) < floor { hi = mid } else { lo = mid }
+        }
+        return lo
+    }
+
     /// ‖J‖₂ of the 3×3 matrix with columns a, b, c: √λ_max(JᵀJ) (closed-form symmetric eigenvalues).
     static func spectralNorm(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>) -> Float {
         let m00 = Double(simd_dot(a, a)), m11 = Double(simd_dot(b, b)), m22 = Double(simd_dot(c, c))
@@ -306,6 +352,63 @@ public struct FlexibleFEField: Sendable, Equatable {
         var f = scaled(by: k, uncalibrated: c.uncalibrated, asked: c.k)
         f.clamped = !c.uncalibrated && abs(banded - c.k) > 1e-9 * Swift.max(1, abs(c.k))
         f.foldShare = share
+        return f
+    }
+
+    /// ★ X20b: an edges group's field at CORE'S FULL DESIGN DEPTH — one linear solve per press (`parts`, each its press alone with
+    /// the group's rests; linear, so the group's field is Σ kᵢ·uᵢ), each kᵢ set so press i's deepest compression along its arrow on
+    /// core's press stack (`targets[i]`) is core's deepest design depth there (a few rounds, so a neighbour's push is counted). No
+    /// band and no ½ cut; only a TRUE fold (a part cell turned inside out) scales every kᵢ down, and says so (`trueFoldCut`).
+    static func designDepth(parts: [FlexibleFEField], targets: [Target]) -> FlexibleFEField? {
+        guard let first = parts.first, parts.count == targets.count,
+              parts.allSatisfy({ $0.u.count == first.u.count }) else { return nil }
+        func deepest(_ f: FlexibleFEField, _ t: Target) -> Double {
+            t.stack.columns.indices.map { f.columnCompression(stack: t.stack, col: $0, pinched: false) }.max() ?? 0
+        }
+        let want = targets.map { $0.depthsMM.compactMap { $0 }.max() ?? 0 }
+        var k = zip(parts, targets).enumerated().map { i, pt -> Double in
+            let d = deepest(pt.0, pt.1)
+            return d > 1e-9 && want[i] > 0 ? want[i] / d : 0
+        }
+        var f = first
+        f.elementE = first.elementE
+        func combine() {
+            var u = [SIMD3<Float>](repeating: .zero, count: first.u.count)
+            for (i, p) in parts.enumerated() where k[i] != 0 {
+                let ki = Float(k[i])
+                for n in u.indices { u[n] += p.u[n] * ki }
+            }
+            f.u = u
+        }
+        for _ in 0..<6 {
+            combine()
+            var moved = false
+            for i in k.indices where k[i] > 0 {
+                let d = deepest(f, targets[i])
+                guard d > 1e-9 else { continue }
+                let r = want[i] / d
+                if Swift.abs(r - 1) > 1e-3 { moved = true }
+                k[i] *= r
+            }
+            if !moved { break }
+        }
+        combine()
+        f.refreshBounds()
+        f.restsBonded = parts.contains { $0.restsBonded }
+        f.uncalibrated = k.allSatisfy { $0 == 0 }
+        f.coreRatio = 1
+        f.clamped = false
+        f.foldShare = nil
+        f.designDepth = true
+        f.scale = k.reduce(0, +)
+        let keep = f.foldFreeScale(upTo: 1)
+        if keep < 1 - 1e-6 {
+            let kf = Float(keep)
+            f.u = f.u.map { $0 * kf }
+            f.scale *= keep
+            f.trueFoldCut = keep
+            f.refreshBounds()
+        }
         return f
     }
 

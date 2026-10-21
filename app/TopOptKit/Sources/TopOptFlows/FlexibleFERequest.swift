@@ -43,7 +43,13 @@ public struct FlexibleFERequest: Sendable {
         /// Per scene voxel: its column's strain under this group (0: no stack of the group).
         public let strainOp: [Float]
         public let targets: [FlexibleFEField.Target]
+        /// ★ X20b: an edges group core designed for — one target per press (`targets[i]` ↔ `pressed[i]`); solved per press and
+        /// shown at core's full design depth (FlexibleFEField.designDepth).
+        public var perPress = false
     }
+
+    /// ★ X20b, RED CONTROL only: C1's one scalar for an edges group (k in the band, then the ½ fold cut) — his Edge 12 2.68 mm.
+    nonisolated(unsafe) public static var controlOneScalar = false
 
     public let generation: Int
     /// Per scene voxel: < 0 not lattice; else ρ.
@@ -67,14 +73,17 @@ public struct FlexibleFERequest: Sendable {
     /// keeps the solve's own size, cut only so it never folds). It never writes a job.
     /// ★ C1: `targets` — core's depths on each press stack once the lattice carries core's design for the group (calibrated to them,
     /// as a face group's sim); empty: the interim sim.
+    /// ★ X20b (his answer of 2026-10-20 ~19:10: "Edge Play shows CORE'S FULL DESIGN DEPTH"): with one target per press, `perPress`.
     public static func pressSim(id: String, presses: [PressPush], voxels: Int, targets: [FlexibleFEField.Target] = []) -> Sim {
-        Sim(id: id,
+        var sim = Sim(id: id,
             pressed: presses.map { q in
                 var x = FlexSquishPressInfo(press: q.regions, direction: [q.direction.x, q.direction.y, q.direction.z], weightN: q.weightN)
                 x.pushXYZ = q.pushXYZ; x.pushWeight = q.pushWeight   // ★ R7-E5: where it presses follows his drawing
                 return x
             },
             strainOp: [Float](repeating: 0, count: voxels), targets: targets)
+        sim.perPress = !targets.isEmpty && targets.count == presses.count && !controlOneScalar
+        return sim
     }
 
     /// ★ R7-E3 + R7-E5: one press of an edges group's interim sim — its footprint, its arrow, its force, and (R7-E5) its drawn shape
@@ -149,6 +158,28 @@ public struct FlexibleFERequest: Sendable {
     /// A failed solve is `.failure` with core's words.
     public static func solve(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
                              control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> Result<FlexibleFEField, FlexibleSquishFailure> {
+        // ★ X20b: an edges group core designed for — one solve per press, each scaled to core's design depth (linear: summed)
+        if sim.perPress, sim.pressed.count == sim.targets.count, !controlOneScalar {
+            var parts: [FlexibleFEField] = []
+            for p in sim.pressed {
+                let one = Sim(id: sim.id, pressed: [p], strainOp: sim.strainOp, targets: [])
+                switch solveRaw(one, of: r, on: scene, control: control, deadlineMS: deadlineMS) {
+                case .success(let f): parts.append(f)
+                case .failure(let e): return .failure(e)
+                }
+            }
+            guard let f = FlexibleFEField.designDepth(parts: parts, targets: sim.targets) else {
+                return .failure(FlexibleSquishFailure(why: "The presses' sims did not share one grid."))
+            }
+            return .success(f)
+        }
+        return solveRaw(sim, of: r, on: scene, control: control, deadlineMS: deadlineMS)
+            .map { $0.calibrated(to: sim.targets, band: r.law.shapeOnly ? nil : FlexibleFE.calibrationBand) }
+    }
+
+    /// One solve, its raw field (k = 1).
+    static func solveRaw(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
+                         control: Int, deadlineMS: Double) -> Result<FlexibleFEField, FlexibleSquishFailure> {
         do {
             var s = try scene.squishSolve(r.request(sim, control: control, deadlineMS: deadlineMS))
             // ★ A squeeze whose rests SLIDE leaves near-rigid modes held by one pin each; on a
@@ -163,7 +194,7 @@ public struct FlexibleFERequest: Sendable {
             guard s.ok else { return .failure(FlexibleSquishFailure(why: s.failure)) }
             var raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
             raw.restsBonded = retried
-            return .success(raw.calibrated(to: sim.targets, band: r.law.shapeOnly ? nil : FlexibleFE.calibrationBand))
+            return .success(raw)
         } catch {
             return .failure(FlexibleSquishFailure(why: "\(error)"))
         }
