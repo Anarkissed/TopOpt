@@ -69,17 +69,29 @@ public enum FlexibleLatticeHandles {
         return (LatticeSlabDepth.clamp(r.mm), r.snapped, r.didSnap)
     }
 
-    /// The expand a drag reaches from `seed`: along the knob's outward direction (projected from `knob` to `outward`, the
-    /// knob moved 10 mm out), else horizontal; #354's clamp and snap to 0.
+    /// The expand a drag reaches from `seed`: along the knob's outward direction, #354's clamp and snap to 0.
+    /// ★ ROUND 7 · U21 (EXPAND-DRAG-DIR, found tracing his Img6): `knob` is the TRUE projected knob (#354's anchor on screen),
+    /// never the disc as drawn — the drawn disc is pushed out to keep it clear of the depth handle, and out − drawn pointed
+    /// BACKWARDS in 17 of 48 views on his l-bracket (a drag out shrank the expand). The sign and the direction always come
+    /// from the unit vector knob → outward; the projected 10 mm only sets the millimetres per point, and when it projects
+    /// shorter than 30 pt the scale is #354's fixed 0.05 mm per point — still along that direction (the old fallback was
+    /// plain horizontal, so a knob pointing left dragged backwards too). No direction at all: horizontal.
     public static func dragExpand(seed: Double, translation t: CGSize, knob: CGPoint?, outward: CGPoint?) -> Double {
         var d = Double(t.width) * expandMMPerPoint
         if let a = knob, let b = outward {
             let v = CGVector(dx: b.x - a.x, dy: b.y - a.y)
             let len = hypot(v.dx, v.dy)
-            if len >= shortAxisPointsPer10MM { d = Double((t.width * v.dx + t.height * v.dy) / len / len) * 10 }
+            if controlOldDrag {
+                if len >= shortAxisPointsPer10MM { d = Double((t.width * v.dx + t.height * v.dy) / len / len) * 10 }
+            } else if len > 1e-6 {
+                let along = (t.width * v.dx + t.height * v.dy) / len
+                d = len >= shortAxisPointsPer10MM ? Double(along / len) * 10 : Double(along) * expandMMPerPoint
+            }
         }
         return LatticeSlabExpand.snapped(LatticeSlabExpand.clamp(seed + d))
     }
+    /// RED CONTROL (U21 EXPAND-DRAG-DIR): today's rule — out − knob with the plain-horizontal fallback.
+    nonisolated(unsafe) static var controlOldDrag = false
 
     /// The model-space points a handle needs (from #354's own plane): the floor (the knob), 10 mm deeper, the face's
     /// centre, and the expand knob with a point 10 mm further out.
@@ -106,6 +118,154 @@ public enum FlexibleLatticeHandles {
     }
     /// #354's own base offset for the expand knob (WorkspacePlaceholder.latticeExpandKnobBaseMM is private: the same 8 mm).
     public static let expandBaseMM: Float = 8
+
+    // MARK: - ★ ROUND 7 · U21 batch C: the two handles' icons and where they sit (his Img6 of 2026-10-21)
+    //
+    // His words: "The expand and depth icons look too similar and are more often than not too close together. … having
+    // expand be "+" and include it next to the input in the modal so that people will associate the two. … make sure that
+    // there is a large enough buffer between the two so that tapping one doesn't open the other."
+
+    /// ONE source for the two icons: the discs on the part and the Selections list's captions read these.
+    /// (Was the same SF arrow turned 90°: "arrow.up.and.down" / "arrow.left.and.right".)
+    public static let depthSymbol = "arrow.up.and.down"
+    public static let expandSymbol = "plus"
+
+    /// Two SF symbol names that are the same glyph turned (up/down ⇄ left/right …) — what he could not tell apart.
+    public static func rotatedTwins(_ a: String, _ b: String) -> Bool {
+        func bare(_ s: String) -> String {
+            var t = s
+            for w in ["up.and.down", "left.and.right", "up", "down", "left", "right", "forward", "backward"] {
+                t = t.replacingOccurrences(of: w, with: "*")
+            }
+            return t
+        }
+        return a != b && bare(a) == bare(b)
+    }
+
+    /// The disc's gap to its box (the HStack's spacing).
+    public static let boxGap: CGFloat = 8
+    /// HANDLE-GAP: the clear band between the two handle units (each = the 44 pt disc + its box, 44 pt tall).
+    public static let unitGap: CGFloat = 24
+    /// The expand knob is pushed along its own direction in these steps, at most this far from the floor.
+    public static let pushStep: CGFloat = 4
+    public static let pushMax: CGFloat = 240
+    /// A box's width before it has been measured (the widest of the two, "−3.0 mm ⇕" on his l-bracket: 88 pt).
+    public static let boxWidthEstimate: CGFloat = 88
+    /// Below this share of horizontal, the knob sits above / below the floor and both boxes go right (the usual side).
+    public static let sideDeadZone: CGFloat = 0.25
+
+    /// One handle as a touch unit: its disc (centre) and its box on one side, 44 pt tall (the box's real tap band).
+    public struct Unit: Equatable, Sendable {
+        public let disc: CGPoint
+        public let boxOnLeft: Bool
+        public let boxWidth: CGFloat
+        public var rect: CGRect {
+            let w = FlexibleLatticeHandles.hit + FlexibleLatticeHandles.boxGap + boxWidth
+            return CGRect(x: boxOnLeft ? disc.x + FlexibleLatticeHandles.hit / 2 - w : disc.x - FlexibleLatticeHandles.hit / 2,
+                          y: disc.y - FlexibleLatticeHandles.hit / 2, width: w, height: FlexibleLatticeHandles.hit)
+        }
+    }
+
+    /// Where the two handles go: the depth disc stays on the prism's floor; the expand disc is drawn at `expand.disc`
+    /// (pushed out along its own direction, or — last resort — the other way: `flipped`).
+    public struct Layout: Equatable, Sendable {
+        public let depth: Unit
+        public let expand: Unit?
+        public let flipped: Bool
+        public var gap: CGFloat? { expand.map { FlexibleLatticeHandles.gap(depth.rect, $0.rect) } }
+    }
+
+    /// The clear band between two rects: > 0 the width of the empty band between them in x or in y (the larger);
+    /// ≤ 0 they touch or overlap (minus the smaller overlap).
+    public static func gap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        let dx = max(b.minX - a.maxX, a.minX - b.maxX)
+        let dy = max(b.minY - a.maxY, a.minY - b.maxY)
+        return max(dx, dy)
+    }
+
+    /// RED CONTROL (U21 HANDLE-GAP): today's rule — #354's 72 pt disc floor (separated), both boxes to the right, a 92 pt box.
+    nonisolated(unsafe) static var controlOldLayout = false
+
+    /// HANDLE-GAP (pure): each handle is one unit (44 pt disc + its REAL box width, 44 pt tall); each box on the side away
+    /// from the other handle; the expand disc pushed along its own direction in 4 pt steps (≤ 240 pt from the floor) until
+    /// the units are ≥ 24 pt apart, inside the viewport and off `keepOut`. If that cannot be had, the boxes move (both right,
+    /// both left, the other way round) before the knob ever flips to the other side of the floor (the last resort).
+    /// With no expand knob (group scope): the depth box right, or left when right runs off the viewport.
+    /// (#354's `LatticeSlabExpand.separated` is no longer called here; it is not edited.)
+    public static func layout(floor f: CGPoint, rawKnob: CGPoint?, depthBox: CGFloat, expandBox: CGFloat,
+                              viewport: CGSize, keepOut: [CGRect] = []) -> Layout {
+        if controlOldLayout { return oldLayout(floor: f, rawKnob: rawKnob) }
+        let bounds = CGRect(origin: .zero, size: viewport)
+        func fits(_ r: CGRect) -> Bool { bounds.contains(r) }
+        func depthUnit(left: Bool) -> Unit { Unit(disc: f, boxOnLeft: left, boxWidth: depthBox) }
+        guard let raw = rawKnob else {
+            let right = depthUnit(left: false)
+            return Layout(depth: !fits(right.rect) && fits(depthUnit(left: true).rect) ? depthUnit(left: true) : right,
+                          expand: nil, flipped: false)
+        }
+        let dx = raw.x - f.x, dy = raw.y - f.y
+        let d0 = hypot(dx, dy)
+        let u = d0 > 1e-6 ? CGVector(dx: dx / d0, dy: dy / d0) : CGVector(dx: 1, dy: 0)
+        typealias Sides = (depthLeft: Bool, expandLeft: Bool)
+        func arrangements(_ ux: CGFloat) -> [Sides] {
+            let away: Sides = abs(ux) < sideDeadZone ? (false, false) : (ux > 0 ? (true, false) : (false, true))
+            let all: [Sides] = [(false, false), (true, true), (true, false), (false, true)]
+            return [away] + all.filter { $0 != away }
+        }
+        var best: (layout: Layout, gap: CGFloat)?
+        for flip in [false, true] {
+            let dir = flip ? CGVector(dx: -u.dx, dy: -u.dy) : u
+            for arr in arrangements(dir.dx) {
+                var t = d0
+                while t <= pushMax + 1e-6 {
+                    let k = CGPoint(x: f.x + dir.dx * t, y: f.y + dir.dy * t)
+                    let a = depthUnit(left: arr.depthLeft)
+                    let b = Unit(disc: k, boxOnLeft: arr.expandLeft, boxWidth: expandBox)
+                    let g = gap(a.rect, b.rect)
+                    let ok = fits(a.rect) && fits(b.rect) && !keepOut.contains { $0.intersects(b.rect) }
+                    if g >= unitGap && ok { return Layout(depth: a, expand: b, flipped: flip) }
+                    if ok, g > (best?.gap ?? -.infinity) { best = (Layout(depth: a, expand: b, flipped: flip), g) }
+                    t += pushStep
+                }
+            }
+        }
+        if let best { return best.layout }
+        // nothing fits the viewport at all (the part at the screen's edge): the away boxes, pushed as far as allowed
+        let arr = arrangements(u.dx)[0]
+        let k = CGPoint(x: f.x + u.dx * max(d0, pushMax), y: f.y + u.dy * max(d0, pushMax))
+        return Layout(depth: depthUnit(left: arr.depthLeft), expand: Unit(disc: k, boxOnLeft: arr.expandLeft, boxWidth: expandBox),
+                      flipped: false)
+    }
+
+    /// Today's rule (R7-D2 + #354's separated): the knob kept 72 pt from the floor, both boxes to the right, 92 pt wide.
+    public static func oldLayout(floor f: CGPoint, rawKnob: CGPoint?) -> Layout {
+        Layout(depth: Unit(disc: f, boxOnLeft: false, boxWidth: 92),
+               expand: rawKnob.map { Unit(disc: LatticeSlabExpand.separated(knob: $0, from: f), boxOnLeft: false, boxWidth: 92) },
+               flipped: false)
+    }
+}
+
+/// ★ U21 HANDLE-ICONS: a Selections caption over its box — the handle's own icon + "Depth mm" / "Expand mm", so the box and
+/// the disc on the part read as one thing (his "include it next to the input in the modal").
+struct FlexibleHandleCaption: View {
+    enum Kind: String { case depth, expand }
+    let kind: Kind
+    /// RED CONTROL: today's text-only caption.
+    nonisolated(unsafe) static var controlTextOnly = false
+    var body: some View {
+        HStack(spacing: 3) {
+            if !Self.controlTextOnly {
+                Image(systemName: kind == .depth ? FlexibleLatticeHandles.depthSymbol : FlexibleLatticeHandles.expandSymbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["selCaptionIcon-\(kind.rawValue)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .accessibilityHidden(true)
+            }
+            Text(kind == .depth ? FlexibleSelectionsCopy.depthCaption : FlexibleSelectionsCopy.expandCaption)
+                .lineLimit(1)
+        }
+    }
 }
 
 // MARK: - the stage's side: one undo step per drag, X-ray while it drags
@@ -135,7 +295,8 @@ extension FlexibleMainStage {
 
 // MARK: - the views
 
-/// One handle: the disc (⇕ depth / ↔ expand) at its point, and its number box beside it.
+/// One handle: the disc (⇕ depth / + expand — FlexibleLatticeHandles.depthSymbol / expandSymbol) at its point; its number box
+/// beside it, on the side the layout picks.
 struct FlexibleHandleDisc: View {
     let symbol: String
     let active: Bool

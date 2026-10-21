@@ -231,8 +231,9 @@ public struct FlexibleSelectionsList: View {
         let locked = FlexibleFaceCommits.isLocked(g.id, project)
         HStack(spacing: Self.rowSpacing) {
             Spacer(minLength: 0)
-            Text(FlexibleSelectionsCopy.depthCaption).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
-            Text(FlexibleSelectionsCopy.expandCaption).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
+            // ★ U21 HANDLE-ICONS (his Img6): the handle's own icon beside each caption, directly over its box
+            FlexibleHandleCaption(kind: .depth).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
+            FlexibleHandleCaption(kind: .expand).frame(width: FlexibleSelectionsList.boxWidth, alignment: .center)
             Color.clear.frame(width: 44, height: 1)
         }
         .font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)

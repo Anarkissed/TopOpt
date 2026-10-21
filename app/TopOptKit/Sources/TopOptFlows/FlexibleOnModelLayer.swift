@@ -8,7 +8,8 @@
 //     session; an orbit moves only the leader), with its LEADER from the chip's nearest edge to the face's centre (a 6 pt
 //     dot), re-aimed every frame;
 //   * the picked prism's NUMBERED handles (FlexibleLatticeHandles): the depth disc ⇕ at the prism's floor with its box
-//     ("25.0 mm" — the list's number, one store), and in FACE scope the expand disc ↔ with its box ("+0.0 mm"); a tap on a
+//     ("25.0 mm" — the list's number, one store), and in FACE scope the expand disc + with its box ("+0.0 mm") — ★ U21: each
+//     a unit kept ≥ 24 pt from the other, each box on the side away from the other handle (FlexibleLatticeHandles.layout); a tap on a
 //     box opens the numeric keypad, a vertical drag scrubs, the disc drags along the prism;
 //   * under [Prisms], every other lattice face-prism's number, read-only — a tap on one picks that face;
 //   * the (i)'s card (his change b — FlexibleFaceStatsPopover): below the chip when the chip's (i) opened it, beside the
@@ -43,6 +44,8 @@ public struct FlexibleOnModelLayer: View {
     /// past its kind's estimate (the role line, a confirm), so it never runs onto a keep-out, the face or the (i)'s card.
     @State private var chipMeasuredKey: String?
     @State private var chipMeasuredSize: CGSize = .zero
+    /// ★ U21 HANDLE-GAP: each handle box's REAL width as drawn (the layout places the units with it; the estimate until then).
+    @State private var handleBoxWidths: [String: CGFloat] = [:]
 
     public init(main: FlexibleMainStage, project: ProjectModel, projection: CameraProjection?, settle: simd_quatf,
                 bottomClearance: CGFloat, cards: [String: LatticeFaceCard], groupCards: [UUID: LatticeFaceCard],
@@ -71,7 +74,7 @@ public struct FlexibleOnModelLayer: View {
                 if let frame { edgeLights(scope, frame: frame, origin: origin, under: listUnder(origin: origin, viewport: v)) }
                 if let frame, let placed = chipPlaced {
                     leaders(placed.targets, chip: placed.rect, under: listUnder(origin: origin, viewport: v))
-                    handles(scope, frame: frame, origin: origin, under: listUnder(origin: origin, viewport: v))
+                    handles(scope, frame: frame, origin: origin, viewport: v, under: listUnder(origin: origin, viewport: v))
                     FlexibleFaceChip(main: main, project: project, ui: ui, scope: scope, cardsChanged: cardsChanged)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(width: placed.rect.width)
@@ -274,7 +277,7 @@ public struct FlexibleOnModelLayer: View {
         let legend = main.legendCard(viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)?.frame
         let panel = FlexibleMainPlayerSlot.openPanel(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
         let player = FlexibleMainPlayerSlot.frame(main: main, viewport: v, bottomClearance: bottomClearance, chipColumnWidth: 0)
-        let own = ownHandles ? handleRects(scope, frame: frame, origin: origin) : []
+        let own = ownHandles ? handleRects(scope, frame: frame, origin: origin, viewport: v) : []
         return FlexibleFaceChipLayout.keepOuts(viewport: v, selections: sel, legend: legend, panel: panel, player: player, own: own)
     }
 
@@ -316,45 +319,78 @@ public struct FlexibleOnModelLayer: View {
 
     // MARK: the handles
 
-    private struct HandleSpot { let plane: ProjectModel.LatticeDepthPlane; let floor: CGPoint; let deeper: CGPoint?; let knob: CGPoint?; let out: CGPoint? }
+    /// ★ U21 HANDLE-GAP: a picked prism's handles — the depth disc on its floor, the TRUE projected expand knob (`rawKnob`,
+    /// what the drag's direction reads) and the units as the layout placed them (the expand disc drawn at `layout.expand`).
+    private struct HandleSpot {
+        let plane: ProjectModel.LatticeDepthPlane; let floor: CGPoint; let deeper: CGPoint?; let rawKnob: CGPoint?; let out: CGPoint?
+        let layout: FlexibleLatticeHandles.Layout
+    }
 
-    private func handleSpots(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint) -> [HandleSpot] {
-        main.pickedPlanes(project).compactMap { plane in
+    private func handleSpots(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> [HandleSpot] {
+        let under = listUnder(origin: origin, viewport: v)
+        return main.pickedPlanes(project).compactMap { plane in
             let geo = FlexibleLatticeHandles.geometry(plane, expandMM: project.latticeExpandMM(plane.ref))
             guard let f = local(frame.project(geo.floor), origin) else { return nil }
-            var knob: CGPoint? = nil
-            if case .face = scope, let k = geo.expandKnob, let kp = local(frame.project(k), origin) {
-                knob = LatticeSlabExpand.separated(knob: kp, from: f)
-            }
-            return HandleSpot(plane: plane, floor: f, deeper: local(frame.project(geo.deeper), origin), knob: knob,
-                              out: geo.expandOut.flatMap { local(frame.project($0), origin) })
+            var raw: CGPoint? = nil
+            if case .face = scope, let k = geo.expandKnob, let kp = local(frame.project(k), origin) { raw = kp }
+            let est = FlexibleLatticeHandles.boxWidthEstimate
+            let layout = FlexibleLatticeHandles.layout(floor: f, rawKnob: raw,
+                                                       depthBox: handleBoxWidths["handle-depth-\(plane.ref.key)"] ?? est,
+                                                       expandBox: handleBoxWidths["handle-expand-\(plane.ref.key)"] ?? est,
+                                                       viewport: v, keepOut: under.map { [$0] } ?? [])
+            return HandleSpot(plane: plane, floor: f, deeper: local(frame.project(geo.deeper), origin), rawKnob: raw,
+                              out: geo.expandOut.flatMap { local(frame.project($0), origin) }, layout: layout)
         }
     }
 
-    private func handleRects(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint) -> [CGRect] {
-        handleSpots(scope, frame: frame, origin: origin).flatMap { h -> [CGRect] in
-            var r = [CGRect(x: h.floor.x - 22, y: h.floor.y - 22, width: 44 + 8 + 96, height: 44)]
-            if let k = h.knob { r.append(CGRect(x: k.x - 22, y: k.y - 22, width: 44 + 8 + 96, height: 44)) }
-            return r
+    /// The handles' touch units (disc + box, 44 pt tall) — what the chip keeps off and what `underList` tests: one set of rects.
+    private func handleRects(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> [CGRect] {
+        handleSpots(scope, frame: frame, origin: origin, viewport: v).flatMap { h -> [CGRect] in
+            [h.layout.depth.rect] + (h.layout.expand.map { [$0.rect] } ?? [])
         }
     }
 
-    @ViewBuilder private func handles(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, under: CGRect?) -> some View {
+    @ViewBuilder private func handles(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize,
+                                      under: CGRect?) -> some View {
         if let gid = scope.groupID, !FlexibleFaceCommits.isLocked(gid, project) {
             let group: Bool = { if case .group = scope { return true } else { return false } }()
-            ForEach(handleSpots(scope, frame: frame, origin: origin), id: \.plane.id) { h in
-                if !Self.underList(h.floor, under) { depthHandle(h, group: group ? gid : nil) }
-                if let k = h.knob, !Self.underList(k, under) { expandHandle(h, at: k) }
+            ForEach(handleSpots(scope, frame: frame, origin: origin, viewport: v), id: \.plane.id) { h in
+                if !Self.underList(h.layout.depth.rect, under) { depthHandle(h, group: group ? gid : nil) }
+                if let e = h.layout.expand, !Self.underList(e.rect, under) { expandHandle(h, unit: e) }
             }
         }
     }
 
-    /// A handle (its disc and its box to the right) would sit on the open list.
-    static func underList(_ p: CGPoint, _ under: CGRect?) -> Bool {
+    /// A handle's unit (its disc and its box, on whichever side) would sit on the open list.
+    static func underList(_ unit: CGRect, _ under: CGRect?) -> Bool {
         guard let u = under else { return false }
-        let r = CGRect(x: p.x - FlexibleLatticeHandles.hit / 2, y: p.y - FlexibleLatticeHandles.hit / 2,
-                       width: FlexibleLatticeHandles.hit + DS.Space.s + 92, height: FlexibleLatticeHandles.hit)
-        return r.intersects(u)
+        return unit.intersects(u)
+    }
+
+    /// The disc and its box in the unit's order (box on the left: [box][disc]), centred on the unit's rect, its real width
+    /// measured for the next layout, its disc's and unit's frames published (the hosted tests click them).
+    @ViewBuilder private func handleUnit<Disc: View, Box: View>(_ unit: FlexibleLatticeHandles.Unit, key: String,
+                                                                 disc: Disc, box: Box) -> some View {
+        let measuredDisc = disc.background(GeometryReader { g in
+            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["handleDisc-\(key)": g.frame(in: .global)])
+        }.allowsHitTesting(false))
+        HStack(spacing: FlexibleLatticeHandles.boxGap) {
+            if unit.boxOnLeft { box; measuredDisc } else { measuredDisc; box }
+        }
+        .fixedSize()
+        .background(GeometryReader { g in
+            Color.clear
+                .preference(key: FlexibleKeepOutKey.self, value: ["handleUnit-\(key)": g.frame(in: .global)])
+                .onAppear { noteHandleWidth(key, g.size.width) }
+                .onChange(of: g.size.width) { noteHandleWidth(key, $0) }
+        }.allowsHitTesting(false))
+        .position(x: unit.rect.midX, y: unit.rect.midY)
+    }
+
+    private func noteHandleWidth(_ key: String, _ unitWidth: CGFloat) {
+        let box = unitWidth - FlexibleLatticeHandles.hit - FlexibleLatticeHandles.boxGap
+        guard box > 0, abs((handleBoxWidths[key] ?? 0) - box) > 0.5 else { return }
+        handleBoxWidths[key] = box
     }
 
     private func depthHandle(_ h: HandleSpot, group: UUID?) -> some View {
@@ -365,8 +401,8 @@ public struct FlexibleOnModelLayer: View {
                                                        minExtrudableWidthMM: project.printParams.strutLineWidthMM)
         var spec = FlexibleSelectionsList.depthSpec
         spec.value = mm
-        return HStack(spacing: DS.Space.s) {
-            FlexibleHandleDisc(symbol: "arrow.up.and.down", active: ui.dragging == key)
+        return handleUnit(h.layout.depth, key: key,
+            disc: FlexibleHandleDisc(symbol: FlexibleLatticeHandles.depthSymbol, active: ui.dragging == key)
                 .gesture(DragGesture(minimumDistance: 2)
                     .onChanged { d in
                         if ui.dragging == nil { main.beginHandleDrag(project, key: key); ui.seed = mm }
@@ -379,45 +415,41 @@ public struct FlexibleOnModelLayer: View {
                     }
                     .onEnded { _ in main.endHandleDrag(project, cardsChanged: cardsChanged); ui.seed = nil })
                 .accessibilityLabel("Depth handle")
-                .accessibilityIdentifier("flexible-handle-depth-\(ref.key)")
-            FlexNumberBox(key: key, title: "Depth", spec: spec, padTarget: $ui.padTarget, twin: "list-depth-\(ref.key)",
+                .accessibilityIdentifier("flexible-handle-depth-\(ref.key)"),
+            box: FlexNumberBox(key: key, title: "Depth", spec: spec, padTarget: $ui.padTarget, twin: "list-depth-\(ref.key)",
                           shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: false), hitHeight: FlexNumberBox.target) { v in
                 var s = main.facePick
                 FlexibleFaceCommits.setDepth(v, ref: group == nil ? ref : nil, group: gid, project: project, session: &s)
                 main.facePick = s
                 cardsChanged()
-            }
-        }
-        .fixedSize()
-        .position(x: h.floor.x + (FlexibleLatticeHandles.hit + DS.Space.s + 92) / 2 - FlexibleLatticeHandles.hit / 2, y: h.floor.y)
+            })
     }
 
-    private func expandHandle(_ h: HandleSpot, at k: CGPoint) -> some View {
+    private func expandHandle(_ h: HandleSpot, unit: FlexibleLatticeHandles.Unit) -> some View {
         let ref = h.plane.ref, gid = h.plane.groupID
         let key = "handle-expand-\(ref.key)"
         let mm = project.latticeExpandMM(ref)
         var spec = FlexibleSelectionsList.expandSpec
         spec.value = mm
-        return HStack(spacing: DS.Space.s) {
-            FlexibleHandleDisc(symbol: "arrow.left.and.right", active: ui.dragging == key)
+        // ★ U21 EXPAND-DRAG-DIR: the drag reads the TRUE knob → out (the disc is drawn pushed out; RED: the drawn disc)
+        let dragKnob = FlexibleLatticeHandles.controlOldDrag ? unit.disc : h.rawKnob
+        return handleUnit(unit, key: key,
+            disc: FlexibleHandleDisc(symbol: FlexibleLatticeHandles.expandSymbol, active: ui.dragging == key)
                 .gesture(DragGesture(minimumDistance: 2)
                     .onChanged { d in
                         if ui.dragging == nil { main.beginHandleDrag(project, key: key); ui.seed = mm }
                         project.writeLatticeExpandMM(ref, mm: FlexibleLatticeHandles.dragExpand(seed: ui.seed ?? mm, translation: d.translation,
-                                                                                                knob: k, outward: h.out))
+                                                                                                knob: dragKnob, outward: h.out))
                     }
                     .onEnded { _ in main.endHandleDrag(project, cardsChanged: cardsChanged); ui.seed = nil })
                 .accessibilityLabel("Expand handle")
-                .accessibilityIdentifier("flexible-handle-expand-\(ref.key)")
-            FlexNumberBox(key: key, title: "Expand", spec: spec, padTarget: $ui.padTarget, allowsNegative: true,
+                .accessibilityIdentifier("flexible-handle-expand-\(ref.key)"),
+            box: FlexNumberBox(key: key, title: "Expand", spec: spec, padTarget: $ui.padTarget, allowsNegative: true,
                           twin: "list-expand-\(ref.key)", shownOverride: FlexibleLatticeHandles.boxNumber(mm, signed: true),
                           hitHeight: FlexNumberBox.target) { v in
                 FlexibleFaceCommits.setExpand(v, ref: ref, group: gid, project: project)
                 cardsChanged()
-            }
-        }
-        .fixedSize()
-        .position(x: k.x + (FlexibleLatticeHandles.hit + DS.Space.s + 92) / 2 - FlexibleLatticeHandles.hit / 2, y: k.y)
+            })
     }
 
     // MARK: [Prisms]' numbers (read-only; a tap picks that face)

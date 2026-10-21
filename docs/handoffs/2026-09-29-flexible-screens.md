@@ -460,7 +460,94 @@ E(2). `FlexibleR7RHostedTests`' red control (F's 32 pt) kept: the confirm reads 
 - F12's hold re-announces the project's change every 150 ms (at most 5 s) and holds the model's save meanwhile; the clean way
   would be an undo-merge hook in ProjectModel (#354's file; not asked). On the reviewer's list.
 
-## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (the step before U21 batch D above)
+## ★ Round 7 · U21 batch C — the Lattice page's two handles: "+" for expand, kept apart, dragging the right way (2026-10-21) (read this first)
+
+Side branch `claude/flexible-screens-u21-side` (from `a639ed42`, to be cherry-picked onto `claude/flexible-screens`). NOT pushed
+(your HOLD). App only; core untouched; no #354/main file edited (#354's `LatticeSlabExpand.separated` is simply no longer called
+here). No core item for the CORE LIST from this batch. Judged on your l-bracket ("l bracket large", copied read-only on 10-21:
+`round7/batch_u21_c/his_live_1021_lbracket`), Group B · Face 6 at your Img6 numbers (Depth 9.0 mm, Expand −3.0 mm).
+
+Your note (Img6): "The expand and depth icons look too similar and are more often than not too close together. … having expand be
+"+" and include it next to the input in the modal so that people will associate the too. … make sure that there is a large enough
+buffer between the two so that tapping one doesn't open the other."
+
+### What you will see now, in plain words
+- **Expand is a "+"**, depth keeps its up/down arrow. Before, both were the same arrow turned 90°.
+- **The same two icons sit in the Selections list**, beside "Depth mm" and "Expand mm", right over their boxes. So the box in the
+  list and the handle on the part read as one thing.
+- **The two handles never touch.** There is always at least 24 pt of clear space between them, counting each box's full 44 pt tap
+  band. Each box sits on the side away from the other handle (in your Img6 view: `−3.0 mm [+]   [⇕] 9.0 mm`). A tap on one can no
+  longer open the other.
+- **Dragging the "+" outward always grows the expand.** In some views it used to shrink it.
+
+### What was wrong (one sentence each)
+- Icons: both discs used one SF arrow at two angles (`arrow.up.and.down` / `arrow.left.and.right`), and the list's captions were
+  text only.
+- Gap: the discs were kept 72 pt apart centre to centre, but each box was always drawn to the right of its disc, with the expand
+  handle on top. In 28 of 48 views of your l-bracket a disc lay under the other handle's box, and a click on the depth disc opened
+  the **Expand** keypad (reproduced, below). The layout also assumed a 92 pt box, so the discs were drawn 2–5 pt off.
+- Drag: the expand drag took its direction from the disc *as drawn*. That disc had been pushed out, so the direction came out
+  reversed in 17 of 48 views. When that direction was short, it fell back to plain left-right, which ignores which way the knob points.
+
+### What changed (code)
+- `FlexibleLatticeHandles.depthSymbol` / `expandSymbol` (`"arrow.up.and.down"` / `"plus"`) are the one source. The discs and the
+  new `FlexibleHandleCaption` (the list's caption row in `FlexibleSelectionsList`) both read them.
+- `FlexibleLatticeHandles.layout(floor:rawKnob:depthBox:expandBox:viewport:keepOut:)` is pure:
+  - Each handle is one unit: the 44 pt disc, 8 pt, then its measured box width, 44 pt tall.
+  - Each box goes on the side away from the other handle.
+  - The expand disc is pushed along its own direction in 4 pt steps (at most 240 pt) until the units are ≥ 24 pt apart, on screen
+    and off the open list.
+  - If that fails, the boxes move first (both right, both left, swapped). Flipping the knob to the other side is the last resort.
+- `FlexibleOnModelLayer` draws each unit as `[box][disc]` or `[disc][box]`, centred on its rect. It measures each box's real width
+  for the next layout. The chip's keep-outs (`handleRects`) and `underList` use the same unit rects.
+- `dragExpand` now takes its sign and direction from the TRUE knob → 10 mm out. The projection sets only the mm per point; when it
+  is shorter than 30 pt, #354's 0.05 mm/pt applies, still along that direction.
+
+### Tests (red controls asserted red inside each)
+- `FlexibleR7U21CHandlesTests` (7):
+  - **icons:** the pair, and not rotated twins (red: the old pair is caught); the discs and captions read the one source.
+  - **captions** carry the icons (red: today's text-only line).
+  - **Img6, knob left of the floor:** gap 27 pt, depth box right, expand box left (red: today's rule, −68 pt, the expand box on the
+    depth disc; the switch `controlOldLayout` gives today's layout).
+  - **the sweep:** 16 directions × 0–200 pt × 5 floor spots × 13"/11" × two box widths = 6,720 layouts. Worst gap 24.0 pt; never
+    flipped; all on screen. Red: today's rule is under 24 pt in 3,600 of them.
+  - **near the edge:** the box moves before the knob flips; the knob flips only when pointing into the edge; the expand stays off
+    the open list (red: today's depth box runs off the screen).
+  - **drag direction:** a pushed disc (drawn 72, true 20, out 39) still grows on an outward drag (red: −12.1 mm, it shrank). A short
+    projection pointing left: −40 pt grows it (red: it shrank).
+- `FlexibleR7U21CHandlesHostedTests` (2): the whole page, offscreen, 13" portrait, your l-bracket at the probe's worst view (az 1.57,
+  el 0.25).
+  - The units are 27.0 pt apart (each box grown 6 pt top and bottom to its 44 pt band). Expand box left, depth box right.
+  - A click on the depth disc opens no keypad. Each box opens its own keypad (positive controls).
+  - Both caption icons sit over their list boxes.
+  - RED: today's layout (−44.0 pt) → a click on the depth disc opened `handle-expand-…:6`. A fresh page with text-only captions
+    has no icon frames.
+
+### Runs (`round7/batch_u21_c/u21c_runs.txt`, app/TopOptKit, --scratch-path /tmp/r7u21-side-build)
+- 19 classes, once: the batch's 2, the pins of the three touched files (FaceChip, FaceCommit, LatticeHandles,
+  LatticeIsProtected (+Hosted), MainPrismEquality, R7D2Review (+Hosted), R7E1FollowUp (+Hosted), Round7DesignIntegration
+  (+Hosted), Round7SelectionsHook, Round7SelectionsHosted, SelectionsList), FlexibleSquishCopyTests and LatticeStaleTypeTests.
+  Result: **93 tests, 0 failures, 0 skipped, no signal lines.** No re-pin was needed.
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 identical, 0 DIFFERS, 1 PART-SKIP (unseeded).
+- The 16 stage-job hashes (`stage_job_hashes_u21c.txt`) are cmp-identical, whole file, to `stage_job_hashes_e1r.txt` and to
+  X20b's `stage_job_hashes_x20b.txt`. The handles never touch a job.
+- No iOS build or install in this step (the integrator does it).
+
+### Pictures (`round7/batch_u21_c/look/`, 13" portrait, your l-bracket, Face 6 at 9.0 / −3.0 mm, the view where the knob lies left of the floor as in your 16.png)
+- U21C_01: now. `−3.0 mm [+]` left, `[⇕] 9.0 mm` right, clear apart. The list's captions read `⇕ Depth mm` / `+ Expand mm` over
+  their boxes. (Heat is on in this saved project.)
+- U21C_02: the red control, today's layout. Your Img6 exactly: the expand box drawn across the depth disc.
+
+### Not done / notes
+- Shown only on this page's face-prism handles. The edge flat prism's chip/knob (1–10 pt) and knob/box (~19 pt) gaps are not
+  touched (plan, HANDLE-PAIRS-AUDIT, batch F).
+- The plan's literal drag numbers (drawn 72, true 20, out 60) do not reverse on today's code: 60 − 72 projects short, so today
+  falls back to left-right. The red case uses the probe's first l-bracket view (out 39 pt), where today does reverse. The plan's
+  numbers are kept as a green check.
+- The very first frame lays a handle out with an 88 pt estimate. The next frame uses the measured width, so a box can settle by a
+  few points when a face is first picked.
+
+## ★ Round 7 · X20b — your answers of 2026-10-20: edge Play at core's full depth, curves off the part, faces in the curve window, another group's face bends along (2026-10-20) (the step before U21 batch C)
 
 Branch `claude/flexible-screens` (PR #362), on top of `597eca0c` (C1). NOT pushed (your HOLD). App only; core untouched; no
 #354/main file edited. Judged on your 10-20 pad (`round7/batch_u1/his_live_1020`).
