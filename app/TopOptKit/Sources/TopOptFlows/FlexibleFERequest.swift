@@ -108,6 +108,17 @@ public struct FlexibleFERequest: Sendable {
         return r
     }
 
+    /// ★ MANUAL (M1, his orders of 2026-10-22 ~02:30: "The views become what the app assumes based on your values"): every sim
+    /// solved at HIS lattice's own stiffness — no column strain and no core depth to calibrate to (`targets` empty: the solve's own
+    /// size, cut only so it never folds, as the interim edge sim). The per-voxel ρ is already his (FlexibleManualField).
+    public var manualEstimate: FlexibleFERequest {
+        var r = with(sims: sims.map { s in
+            Sim(id: s.id, pressed: s.pressed, strainOp: [Float](repeating: 0, count: s.strainOp.count), targets: [])
+        })
+        r.hold = hold
+        return r
+    }
+
     /// ★ R7-E3: the per-voxel arrays alone (no sim) — what an edges group's interim sim is solved on.
     public var base: FlexibleFERequest { with(sims: []) }
 

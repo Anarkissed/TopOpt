@@ -237,7 +237,10 @@ struct FlexibleFaceRows: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("flexible-row-curved-not-yet")
         }
-        if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }
+        // ★ MANUAL (M1): "can't reach your curve" is Auto's check on core's design — gone in Manual
+        if !model.isManual {
+            if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }
+        }
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
             let fromGroup = f.weightFrom != nil && e?.groupID == f.weightFrom
@@ -425,7 +428,8 @@ struct FlexibleMorePanel: View {
             } else {
                 FlexRow(FlexibleRowCopy.temperatureNoData, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp")
             }
-            if !calibrateFirst {
+            // ★ MANUAL (M1): Auto's lattice pick and Auto's line are gone in Manual (his type is on [Model])
+            if !calibrateFirst, !model.isManual {
                 FlexRow(FlexibleRowCopy.topology, info: FlexibleRowCopy.Info.topology, id: "flexible-row-topology") {
                     FlexChips(options: FlexibleRowCopy.topologyOptions, selection: model.settings.topology,
                               id: "flexible-topology", equalWidths: false) { v in model.edit { $0.topology = v } }
@@ -435,11 +439,16 @@ struct FlexibleMorePanel: View {
             // ★ ROUND 4 (img 7): Auto's reasoning and the physics open BELOW their titles, behind
             // a caret (the (i) popover floated them beside the panel)
             let auto = autoLine
-            FlexDisclosureRow(auto.text, id: "flexible-row-auto", warning: auto.warning) {
-                FlexibleAutoPane(model: model)
+            if !model.isManual {
+                FlexDisclosureRow(auto.text, id: "flexible-row-auto", warning: auto.warning) {
+                    FlexibleAutoPane(model: model)
+                }
             }
-            FlexDisclosureRow(FlexibleRowCopy.physics, id: "flexible-row-physics") {
-                FlexiblePhysicsPane(model: model)
+            // ★ MANUAL (M1): "Physics · 1-bead walls" is Auto's rule — in Manual the walls are his (the Walls line on [Model])
+            if !model.isManual {
+                FlexDisclosureRow(FlexibleRowCopy.physics, id: "flexible-row-physics") {
+                    FlexiblePhysicsPane(model: model)
+                }
             }
         }
     }

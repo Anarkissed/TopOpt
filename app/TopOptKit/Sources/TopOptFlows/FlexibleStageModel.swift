@@ -1600,9 +1600,13 @@ public final class FlexibleStageModel: ObservableObject {
         let worker = self.worker
         let failWith = controlFailBuild
         let combine = controlCombine
+        // ★ MANUAL (M1, his orders of 2026-10-22 ~02:30): in Manual the lattice is HIS — every lattice voxel at his density (the
+        // owning group's own, else the part's), his type, his walls; core's mask and owners kept. nil in Auto (nothing changes)
+        let manualSnap = settings.isManual && !Self.controlManualLatticeOff ? settings.manual : nil
+        let manualOwners = manualSnap == nil ? [:] : manualOwnerGroups()
         // ★ BATCH G: the squish sims' law, rests and (shape only) weights — every group a sim
         let feLaw: FlexSquishLawInfo? = materialsPath.map {
-            FlexSquishLawInfo(materialsPath: $0, materialID: settings.materialID ?? "", topology: build.topology,
+            FlexSquishLawInfo(materialsPath: $0, materialID: settings.materialID ?? "", topology: manualSnap?.part.topology ?? build.topology,
                               tempC: designTempC ?? 0, shapeOnly: shapeOnly)
         }
         let feResting = settings.faces.filter { $0.role == "resting" }.map(\.faceRegionID)
@@ -1681,9 +1685,12 @@ public final class FlexibleStageModel: ObservableObject {
                         }
                     }
                 }
+                if let ms = manualSnap { field = FlexibleManualField.field(field, manual: ms, ownerGroups: manualOwners) }
                 let inputs = try FlexibleLatticeBuilder.inputs(
-                    field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
-                    beadWidthMM: build.beadWidthMM, buildDir: buildDir,
+                    field: field, part: part, topology: manualSnap?.part.topology ?? build.topology, beadsPerWall: build.beadsPerWall,
+                    beadWidthMM: build.beadWidthMM,
+                    wallMM: manualSnap.map { FlexibleManualMath.wallMM($0.part, beadWidthMM: build.beadWidthMM) },
+                    buildDir: buildDir,
                     pressCuts: shapeOnly ? [:] : pressCutsSnap,   // ★ R7-U21 H (EDGE-LOOK): the presses' seams
                     skinOffFaces: [], finish: finish)
                 // ★ BATCH G: what the squish sims need, made HERE — the combined field is not kept
@@ -1703,6 +1710,8 @@ public final class FlexibleStageModel: ObservableObject {
                     fe = FlexibleFERequest.build(field: field, inputs: inputs, sims: sims, faces: fs, resting: feResting,
                                                  law: law, generation: generation)
                     fe?.hold = feHold
+                    // ★ MANUAL (M1): the views are the app's estimate from HIS lattice — no core design to scale them to
+                    if manualSnap != nil { fe = fe?.manualEstimate }
                 }
                 let feBuilt = fe
                 // ★ C1: the presses core designed and this lattice carries — their sims calibrate to these depths
@@ -1728,7 +1737,7 @@ public final class FlexibleStageModel: ObservableObject {
                 let kept = keep ? combined : nil
                 await MainActor.run {
                     self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false
-                    self.latticeTunedPresses = Self.controlNoTune ? [:] : tunedSnap   // ★ C1
+                    self.latticeTunedPresses = Self.controlNoTune || manualSnap != nil ? [:] : tunedSnap   // ★ C1 (★ MANUAL: none)
                     self.latticeLanded(feBuilt)   // ★ BATCH G: a new lattice — its own squish sims
                 }
             } catch {

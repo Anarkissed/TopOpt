@@ -130,6 +130,12 @@ struct FlexibleSettingsPanel: View {
                     .lineLimit(1)
             }
             Spacer()
+            // ★ MANUAL (M1, his words of 2026-10-22: "at the very top of the Squish modal, it should have a toggle that says manual or
+            // auto"): on the header line itself (it hides while Reset all asks on this line)
+            if !minimized {
+                FlexibleManualToggle(model: model)
+                    .opacity(model.resetAsk ? 0 : 1).allowsHitTesting(!model.resetAsk)
+            }
             // ★ ROUND 5 (S5): "Reset all" — every input back to a brand-new setup (asked once; undoable)
             if !minimized {
                 Button { model.askResetAll() } label: {

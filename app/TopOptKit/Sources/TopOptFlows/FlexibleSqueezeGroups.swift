@@ -137,6 +137,8 @@ public enum FlexibleSqueezeGroups {
         s.groupColours = canonical(remapColours(shownColours(s, ids: order), rank: rank), groups: groups(s))
         // ★ ROUND 7 (S, 4d): each group's NAME goes with it to its new number too (a group gone drops its name)
         s.groupNames = remapNames(s.groupNames, rank: rank)
+        // ★ MANUAL (M1): a group's own lattice goes with it to its new number too (a group gone drops it); nil stays nil
+        if let g = s.manual?.groups { s.manual?.groups = FlexibleManualSettings.remap(g, rank: rank) }
     }
 
     /// Move a pressed face into the group stored as `groupID`. ★ D2 REVIEW: `hand` — the faces

@@ -220,6 +220,13 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// Flexible): nothing is read in; a face he presses himself still takes its Load group's weight and re-syncs it. OPTIONAL,
     /// omitted when nil (old projects encode byte-identical); never part of the lattice's key (`designInputs`).
     public var readsMainPageGroups: Bool?
+    /// ★ ROUND 7 · MANUAL, part M1 (his orders of 2026-10-22 ~02:30: "implement the manual add-on. Remove any of the auto processes
+    /// and make it as simple to understand as possible"; his picks: "SCOPE = whole part (lattice type, cell size, density % / walls in
+    /// beads) + optional per-group override"): the lattice HE sets. nil ⇒ Auto, never touched (every save before it decodes, and
+    /// Auto's job bytes and lattice key are unchanged). `on == false` ⇒ Auto, his values kept for later. Only the APP reads it: the
+    /// lattice on screen, the sims and the views (CORE LIST item 11 — a Flexible job carries no fixed lattice). In the lattice's key
+    /// (`designInputs`) only while on. OPTIONAL, omitted when nil.
+    public var manual: FlexibleManualSettings?
 
     /// ★ ROUND 7 · U21 (batch A): a brand-new Flexible setup — nothing read in from the Topology page (his Img7).
     public static func newSetup(materialID: String? = nil) -> FlexibleStageSettings {
@@ -249,6 +256,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
         c.weightUnit = nil
         c.readsMainPageGroups = nil   // ★ U21 (batch A): how the open reads the main page, not an input of the lattice
+        c.manual = c.manual?.on == true || Self.controlManualOffInDesignInputs ? c.manual : nil   // ★ MANUAL (M1): Auto keys as before
         c.links = Self.controlLinksInDesignInputs ? c.links : nil   // ★ U21 (batch I): a link tells the sim what holds the lattice — never the lattice's key
         // ★ R7-E2 (AP9): an edge or corner press (a flat prism) is built into the lattice now — core builds its stack, designs it,
         // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted
@@ -263,6 +271,11 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     nonisolated(unsafe) static var controlStripPresses = false
     /// ★ RED CONTROL only (FlexibleI2AttachTests): the links left in the lattice's key (a link would rebuild the lattice).
     nonisolated(unsafe) static var controlLinksInDesignInputs = false
+    /// ★ RED CONTROL only (FlexibleM1ManualTests): his manual values kept in the lattice's key while Auto is on.
+    nonisolated(unsafe) static var controlManualOffInDesignInputs = false
+
+    /// ★ MANUAL (M1): Manual is on.
+    public var isManual: Bool { manual?.on == true }
 
     /// The model-wide finish (nil or an unknown value ⇒ Covered).
     public var finishMode: FlexibleFinish { finish.flatMap(FlexibleFinish.init(rawValue:)) ?? .covered }

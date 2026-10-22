@@ -464,7 +464,7 @@ public enum FlexibleLatticeBuilder {
     /// (an inside corner); `false` is a test's RED CONTROL only (the fill as 0d8ae925 made it).
     /// ★ R7-U21 H (EDGE-LOOK): `pressCuts` — the presses' flat-prism planes by owner key (FlexibleGroupField.pressSeam).
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
-                              beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
+                              beadsPerWall: Int, beadWidthMM: Double, wallMM: Double? = nil, buildDir: SIMD3<Double>,
                               pressCuts: [Int: FlexibleFlatPrism.Cut] = [:],
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
                               finish: FlexibleFinish = .covered,
@@ -616,7 +616,9 @@ public enum FlexibleLatticeBuilder {
         }
         let sdfGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
                                values: sdf.values)
-        let t = Float(Double(beadsPerWall) * beadWidthMM)
+        // ★ MANUAL (M1): `wallMM` — his walls (beads × the bead width, a fraction allowed: his type + cell + density decide it), so
+        // the gyroid's L = 3.0915·t/ρ and the honeycomb's d = 2t/ρ̄ come out at HIS cell; nil: whole beads, as before
+        let t = Float(wallMM ?? Double(beadsPerWall) * beadWidthMM)
         let meanRho = Float(assignedSum / Double(assignedN))
         let topo: FlexibleLatticeInputs.Topology = topology == "honeycomb" ? .honeycomb : .gyroid
         return FlexibleLatticeInputs(

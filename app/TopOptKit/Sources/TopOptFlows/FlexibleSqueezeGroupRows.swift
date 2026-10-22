@@ -106,7 +106,7 @@ struct FlexibleSqueezeGroupHeader: View {
                                id: "flexible-group-\(row.number)-info")
             }
             .frame(minHeight: 44)
-            if let miss = row.miss {
+            if let miss = row.miss, !model.isManual {   // ★ MANUAL (M1): Auto's check, gone in Manual
                 FlexWarningLine(text: miss, id: "flexible-group-\(row.number)-miss")
                     .padding(.leading, 18)
             }

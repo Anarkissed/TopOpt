@@ -91,6 +91,15 @@ Each item: what core does, where, the evidence, your numbers.
      mostly bends); kRef 1.705 (the same as today's k, R3), shown ×1 max |u| 8.63 mm.
    Core's design still squeezes every column against Face 2, so on your bracket core's design and the sim disagree until (a).
 
+11. **A fixed lattice HE sets (Manual, round 7 · M1).** Core's Flexible block takes `material_id, nozzle_temp_c, topology, feel,
+   beads_per_wall, min_extrudable_width_mm, regions, faces, check_stamps` and nothing else (`core/src/flexible/job_block.cpp:76-81`;
+   `beads_per_wall` must be 1 or 2, `:105-107`); core always DESIGNS the density from the faces' curves (`field.cpp`
+   `design_face`). There is no way to say "this region is gyroid, 9 mm cell, 15 % (1 bead), no design". So Manual lives in the
+   app only: the preview, Save & Exit's build, TAP TO READ, the (i) and the sims use his values; the job stays Auto's bytes.
+   Your pad: Manual seeded at gyroid 9 mm / 15.5 % / 1 bead (Auto's built lattice: 789 different densities, mean 15.2 %). Ask: a
+   per include region (or per squeeze group) `manual` lattice — type, cell (or beads), density — that skips the design and is
+   what the export prints; a wall that is not a whole bead refused with its nearest whole bead.
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
@@ -109,6 +118,67 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · MANUAL, part M1 — the Manual | Auto toggle, your lattice values, the lattice and the views (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed. Not installed (the installer does that). App only; core untouched; no
+#354/main file edited; no new hook. Your words of 02:30: "implement the manual add-on … The views become what the app assumes
+based on your values, so cards should say that when a view is selected."
+
+### What you will see (Squish page)
+- **[Manual | Auto] on the card's top line**, next to [Reset all]. Auto is the default: an Auto project looks, builds and sends
+  exactly what it did before (job bytes, goldens and the 16 stage-job hashes identical).
+- **Manual, on [Model]**: "LATTICE · YOU SET IT" and four lines: Lattice [Gyroid | Honeycomb], Cell size, Density %, Walls
+  (beads). Change the cell or the density and the walls follow; change the walls and the density follows; change the type and
+  the cell and walls stay (the density follows).
+- **Walls that are not a whole bead**: one orange line, "Walls 1.4 beads · not a whole bead" (or "Walls under 1 bead · too thin
+  to print"), with [Make it 1 bead] — one tap.
+- **Switching to Manual starts from what Auto last built**, so nothing jumps: on your pad gyroid, 9 mm, 15 %, 1 bead. Switching
+  back to Auto keeps your values for next time.
+- **Each group**: one quiet line "Lattice · same as the part" [Set its own]. Tap it and the group gets its own four lines;
+  [Use the part's] drops them.
+- **Gone in Manual** (Auto's): More's Lattice [Auto | Gyroid | Honeycomb], Auto's line ("Auto: Face 5 needs more weight…"),
+  "Physics · 1-bead walls", a group's "squishes less than designed" line, a face's "can't reach your curve" line.
+- **The lattice on screen is yours** (the preview, Save & Exit's build, TAP TO READ, the (i)): every lattice cell at your density
+  (a group's own where set), your type, your walls.
+- **Views in Manual**: one line at the top of the open tab, e.g. "Bend · what your lattice does at 5 lb", "Play · …",
+  "X-ray · bend estimated from your lattice", "Heat · estimated from your lattice". The sims are solved on your lattice's own
+  stiffness (they are no longer scaled to core's design).
+
+### Decisions made here (yours to overturn)
+- The toggle sits on the header line, not on a row of its own (no extra height on the card).
+- A fresh Manual: Auto's type, the built lattice's average density, 1 bead, the cell rounded to 0.5 mm.
+- Limits: density 5–90 % (what the lattice can draw), cell 2–60 mm, the walls box 1–8 beads.
+- A group's own TYPE or WALLS are saved and shown, but the screen draws one type and one wall thickness for the whole part (the
+  part's); a group's own density IS drawn. Drawing a second type in one part needs the shader changed (not done).
+
+### Not done here (the next Manual parts)
+- The depths, the curves and Deepest squish are still editable, and the heat colours and depth chips are still core's design
+  numbers. Turning them into the app's read-only prediction from your lattice is the next part.
+- The main page's card has no view line yet (the Squish card has it).
+
+### Tests (`FlexibleM1ManualTests`, 7, your pad and your l-bracket; red controls asserted red inside)
+Auto by default and byte-identical (RED: your values left in Auto's key, the key moves); the values round-trip (and through the
+project's lattice settings); walls ↔ density both ways (core's own cell-size relation); the bead warning + one-tap fix; a group's
+own lattice and its removal (and renumbering); the lattice built from your values (your pad: only 20 % and 30 % in the field,
+Group 1's 117,831 cells at its own 20 %; RED: core's design, graded again); the view line in Manual only. The tests were written
+after the code in this part, so their red evidence is the in-test red controls.
+
+### Runs (`round7/manual_m1/m1_runs.txt`)
+- The 54 classes that touch or pin the changed files (incl. the 7 new tests and the render probe): 317 passed, 1 failed, 19
+  skipped. The failure is the batch I one below (re-run once: same). A first run with the toggle on a row of its own had 4
+  failures (two source pins, two 11" landscape fits); fixed by putting the toggle on the header line.
+- Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes: cmp-identical to batch I's install (`stage_job_hashes_m1.txt`).
+
+### Renders (`round7/manual_m1/`, 13" portrait, your pad)
+`M1_01` the card in Auto (as today) · `M1_02` the card in Manual · `M1_03` Group 1 with its own lattice (2 beads, 31 %) ·
+`M1_04` Bend on in Manual with its line (the bend is on the pinched side faces, out of this camera).
+
+### Found, not mine (open)
+- `FlexibleSettingsPageHostedTests.testTheSelectedFacesRowsAreOnThePanelOnHisProject` fails at 11" landscape "as opened" (the
+  selected face's card 16 pt below the panel's fold). Cause: batch I's "Held by …" line on the group header (I1); with that line
+  hidden the test passes, with the Manual toggle hidden it still fails. This class was not in batch I's runs.
 
 ## ★ Round 7 · U21 batch I installed — the Attach tool, parts I1 + I2 + I3 together (2026-10-22) (read this first)
 

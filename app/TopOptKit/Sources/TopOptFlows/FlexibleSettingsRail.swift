@@ -321,9 +321,13 @@ struct FlexibleRailContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
+            // ★ MANUAL (M1, "The views become what the app assumes based on your values, so cards should say that when a view is
+            // selected"): one line, Manual only, a view on
+            // (only in the stack when it says something: an empty item still took the stack's spacing in Auto)
+            if model.manualViewLine != nil { FlexibleManualViewLine(model: model) }
             switch model.rail {
             case .model:
-                FlexibleModelTab(model: model)
+                FlexibleModelTab(model: model, padTarget: $padTarget)
             case .group(let id):
                 if let g = model.railGroup(id) {
                     FlexibleGroupTab(model: model, group: g, padTarget: $padTarget)
@@ -347,9 +351,13 @@ struct FlexibleRailContent: View {
 /// physics), every one with a working default.
 struct FlexibleModelTab: View {
     @ObservedObject var model: FlexibleStageModel
+    /// ★ MANUAL (M1): the keypad slot of his lattice's number boxes.
+    @Binding var padTarget: String?
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             FlexibleModelRows(model: model)
+            // ★ MANUAL (M1, his picks of 2026-10-22: "Model card: lattice type, cell size, density % / walls in beads"): in Manual only
+            if model.isManual { FlexibleManualPartSection(model: model, padTarget: $padTarget) }
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
             FlexSectionTitle(text: FlexibleRowCopy.moreTitle)
             FlexibleMorePanel(model: model)
@@ -417,7 +425,10 @@ struct FlexibleGroupTabHeader: View {
             FlexRow(FlexibleRowCopy.colourRow, info: FlexibleRowCopy.Info.colour, id: "flexible-row-colour") {
                 FlexibleColourSwatches(model: model, group: group)
             }
-            if let miss = row?.miss { FlexWarningLine(text: miss, id: "flexible-group-\(group.number)-miss") }
+            // ★ MANUAL (M1): the "squishes less than designed" check is Auto's — gone in Manual
+            if let miss = row?.miss, !model.isManual { FlexWarningLine(text: miss, id: "flexible-group-\(group.number)-miss") }
+            // ★ MANUAL (M1): one quiet line — the group's lattice is the part's, or its own (four lines)
+            if model.isManual { FlexibleManualGroupRow(model: model, group: group, padTarget: $padTarget) }
             // ★ U21 · I1 (his answer of 2026-10-21 ~15:35: "The card always says what holds it"): one quiet line, read only
             FlexibleHoldLine(model: model, group: group)
         }
