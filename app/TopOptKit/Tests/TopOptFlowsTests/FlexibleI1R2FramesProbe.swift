@@ -5,7 +5,7 @@
 // R2 is behind a TEST-ONLY switch: the solver's existing control bits 2048 (every Rest bonded) | 32768 (no far anvil) — the
 // rule for an UNBALANCED group (a balanced one would keep its non-anvil Rests sliding); nothing of it is in the app.
 // His live pad of 10-21 (Rests on the bottom sections), the Squish page at 13" portrait, Play held at FULL load at ×1, the SAME
-// camera for every frame, refines off (the quick linear field in both, apples to apples). Frames only with FLEX_I1_DIR=<dir>.
+// camera for every frame (v2: from the side, raised, the panel collapsed; + his l-bracket links on/off from behind), refines off (the quick linear field in both, apples to apples). Frames only with FLEX_I1_DIR=<dir>.
 #if canImport(AppKit) && canImport(MetalKit)
 import XCTest
 import SwiftUI
@@ -88,13 +88,18 @@ final class FlexibleI1R2FramesProbe: XCTestCase {
         m.views.insert(.play)
         let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
         pump(3)
-        // ONE camera for every frame: from below and to the side (the Rests on the bottom, the pressed sides, the edge)
+        // ★ v2 (the first frames were unreadable: the camera below the part, the panel over half of it): ONE camera for both
+        // frames, from the SIDE at a raised angle (across the Face 5 ↔ Face 3 pinch, a little toward Face 5, the thumb), the
+        // Squish panel collapsed to its header line
+        try collapsePanel(h)
         var cam: OrbitCamera?
-        if let cm = cameraModel(h) {
+        if let cm = cameraModel(h), let mesh = r.project.viewerMesh, let n5 = mesh.faceNormal(5) {
             var c = cm.camera
-            let ae = OrbitCamera.azimuthElevation(forDirection: simd_normalize(SIMD3<Float>(-0.8, -1.1, -0.8)), currentAzimuth: c.azimuth)
+            let eye = sideEye(n5, toward: 0.45, side: 0.8, up: 0.6)
+            log.append(String(format: "v2 camera: Face 5 normal (%.2f %.2f %.2f) · eye (%.2f %.2f %.2f)", n5.x, n5.y, n5.z, eye.x, eye.y, eye.z))
+            let ae = OrbitCamera.azimuthElevation(forDirection: eye, currentAzimuth: c.azimuth)
             c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
-            c.distance *= 2.0
+            c.distance *= 1.25
             cm.adopt(c)
             cam = c
         }
@@ -107,21 +112,118 @@ final class FlexibleI1R2FramesProbe: XCTestCase {
             loop.hold(1)
             pump(0.5)
             if let c = cam, let cm = cameraModel(h) { cm.adopt(c); log.append("\(name): camera az \(cm.camera.azimuth) el \(cm.camera.elevation) d \(cm.camera.distance)") }
-            log.append("\(name): playing \(m.playingGroup.map { m.groupName($0) } ?? "-") · ×\(loop.exaggeration) · held \(loop.held)")
+            log.append("\(name): playing \(m.playingGroup.map { m.groupName($0) } ?? "-") · ×\(loop.exaggeration) · held \(loop.held) · panel collapsed \(h.frames.all["panelScroll"] == nil)")
             try shot(name, h, settle: 2.5)
         }
         let faceGroup = groups.first { $0.kind == .faces }
-        let edges = groups.first { $0.kind == .edges }
-        if let g = faceGroup { try frame(g, "I1_R2_01_13p_\(slug(m.groupName(g)))_TODAY.png") }
-        if let g = edges { try frame(g, "I1_R2_03_13p_\(slug(m.groupName(g)))_TODAY.png") }
+        // ★ v2: only Group 1 (Group 2 is byte-identical under both rules — its lines above say so)
+        if let g = faceGroup { try frame(g, "I1_R2_01_13p_\(slug(m.groupName(g)))_TODAY_v2.png") }
         // ★ the R2 rule (NOT shipped): every Rest bonded, the far anvil removed — the same lattice, the sims solved again
         m.squishSolver.controlBits = FlexibleFE.bondedRests | 32768
         m.latticeLanded(m.lastFERequest)
         try solveAll("R2")
-        if let g = faceGroup { try frame(g, "I1_R2_02_13p_\(slug(m.groupName(g)))_R2.png") }
-        if let g = edges { try frame(g, "I1_R2_04_13p_\(slug(m.groupName(g)))_R2.png") }
+        if let g = faceGroup { try frame(g, "I1_R2_02_13p_\(slug(m.groupName(g)))_R2_v2.png") }
         m.squishSolver.controlBits = 0
-        flush("I1_R2_lines.txt")
+        flush("I1_R2_lines_v2.txt")
+    }
+
+    // ★ v2: HIS l-bracket, the 4 border walls linked vs not (FlexibleI3FramesProbe's scene), seen from the side, a little below
+    // and behind, so Face 2's (the plate's underside) bow reads in silhouette; the panel collapsed; Play ×1 at full load; the same camera for both
+    func testLBracketLinksFromBehind() throws {
+        guard Self.dir != nil else { throw XCTSkip("frames only with FLEX_I1_DIR") }
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.lbracketDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.keepFERequest = true
+        m.squishSolver.controlNoRefine = true
+        m.openScene()
+        XCTAssertTrue(pumpUntil(180) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } }, "scene")
+        pumpUntil(60) { !m.readiness.designing }
+        s.didExitSettings()
+        s.apply(r.project, owned: true, pageUp: false)
+        XCTAssertTrue(pumpUntil(400) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }, "lattice")
+        let g = try XCTUnwrap(m.squeezeGroups.first)
+        let id = FlexibleSim.groupID(g.number)
+        func solved(_ what: String) {
+            m.startSquishSims(first: id)
+            XCTAssertTrue(pumpUntil(600) { m.squish[id] != nil && m.squish[id] != .pending }, "\(what): the sim")
+            if let f = m.squish[id]?.field {
+                let face6 = f.sample(SIMD3<Float>(75, 0, 87.5)).x, face2 = f.sample(SIMD3<Float>(100, 0, 87.5)).x
+                log.append(String(format: "%@: bc %@ · k %.3f · shown u_x Face 6 %.2f mm · Face 2 %.2f mm · max|u| %.2f mm · line '%@'",
+                                  what, f.bcMode, f.scale, face6, face2, f.maxDisplacement, m.holdLine(g)))
+            } else { log.append("\(what): \(m.squish[id]?.failure ?? "no sim")") }
+        }
+        solved("NO LINK (as saved)")
+        let loop = FlexibleSquishLoop()
+        m.views.insert(.play)
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
+        pump(3)
+        try collapsePanel(h)
+        var cam: OrbitCamera?
+        // Face 6 is the latticed plate's TOP and Face 2 its UNDERSIDE (the sim's x is the plate's thickness: Face 6 at x 75, Face 2
+        // at x 100; on screen the plate lies flat, the upright at the back, the plate running to the front). A first try from
+        // behind and above hid the underside; so: from the RIGHT, a little BELOW and a little from BEHIND (the screen's world,
+        // y up), the plate's bottom edge in silhouette — where Face 2's bow shows
+        if let cm = cameraModel(h) {
+            var c = cm.camera
+            let eye = simd_normalize(SIMD3<Float>(1, -0.22, -0.3))
+            log.append(String(format: "v2 camera: eye (%.2f %.2f %.2f) · from the right, a little below and behind", eye.x, eye.y, eye.z))
+            let ae = OrbitCamera.azimuthElevation(forDirection: eye, currentAzimuth: c.azimuth)
+            c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+            c.distance *= 1.3
+            cm.adopt(c)
+            cam = c
+        }
+        func frame(_ name: String) throws {
+            m.rail = .group(g.id)
+            if let r0 = g.regions.first { m.select(r0) }
+            pump(1.5)
+            if let c = cam, let cm = cameraModel(h) { cm.adopt(c) }
+            loop.exaggeration = 1
+            loop.hold(1)
+            pump(0.5)
+            if let c = cam, let cm = cameraModel(h) { cm.adopt(c) }
+            log.append("\(name): playing \(m.playingGroup.map { m.groupName($0) } ?? "-") · ×\(loop.exaggeration) · held \(loop.held) · line '\(m.holdLine(g))' · panel collapsed \(h.frames.all["panelScroll"] == nil)")
+            try shot(name, h, settle: 2.5)
+        }
+        try frame("I1_R2_05_13p_lbracket_NO_LINK_behind_v2.png")
+        let w = try XCTUnwrap(FlexibleLatticeWalls.walls(project: r.project, key: LatticeSelectableRef.face(group: FlexibleI2AttachTests.groupB, face: 6).key))
+        FlexibleFaceCommits.addSuggested(lattice: w.key, sides: try XCTUnwrap(w.suggestion(linked: [])), project: r.project)
+        m.relinkIfNeeded()
+        solved("4 LINKED WALLS")
+        try frame("I1_R2_06_13p_lbracket_4_LINKED_behind_v2.png")
+        flush("I1_R2_lbracket_lines_v2.txt")
+    }
+
+    /// An eye direction (y up) `toward` along the face normal `n`, `side` across it (horizontal), `up` above.
+    func sideEye(_ n: SIMD3<Float>, toward: Float, side: Float, up: Float) -> SIMD3<Float> {
+        let y = SIMD3<Float>(0, 1, 0)
+        var a = n - simd_dot(n, y) * y
+        if simd_length(a) < 0.3 { a = SIMD3<Float>(1, 0, 0) }   // a top/bottom face: its "side" is any horizontal
+        a = simd_normalize(a)
+        let t = simd_normalize(simd_cross(y, a))
+        return simd_normalize(toward * a + side * t + up * y)
+    }
+
+    /// The Squish panel folded to its header line: a click on its chevron (just right of [Reset all]); asserted folded.
+    func collapsePanel(_ h: Host) throws {
+        let reset = try XCTUnwrap(h.frames.all["resetAll"], "the panel's [Reset all]")
+        XCTAssertNotNil(h.frames.all["panelScroll"], "premise: the panel open")
+        click(h, CGPoint(x: reset.maxX + 28, y: reset.midY))
+        pump(1.0)
+        XCTAssertNil(h.frames.all["panelScroll"], "★ the panel collapsed")
+    }
+    func click(_ h: Host, _ p: CGPoint) {
+        let loc = NSPoint(x: p.x, y: h.size.height - p.y)
+        for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let e = NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: h.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            h.window.sendEvent(e)
+            pump(0.06)
+        }
     }
 
     func slug(_ s: String) -> String { s.lowercased().replacingOccurrences(of: " ", with: "") }
