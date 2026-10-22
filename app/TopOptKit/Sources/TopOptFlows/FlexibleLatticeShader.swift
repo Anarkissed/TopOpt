@@ -71,7 +71,8 @@ enum FlexibleLatticeShader {
         float4 shape;                 // x = topology (0 gyroid, 1 honeycomb), y = t, z = Lmin, w = Lmax
         float4 shape2;                // x = honeycomb d, y = skinMM, z = max steps, w = 1: THE PRINTED VIEW (X1)
         float4 buildDir;              // xyz
-        float4 rmO, rmN;              // (ρ, mask) grid: xyz = voxel-(0,0,0) centre, w = spacing; dims xyz
+        float4 rmO, rmN;              // (ρ, mask) grid: xyz = voxel-(0,0,0) centre, w = spacing; dims xyz; ★ U21 H: rmN.w = 1:
+                                      // the volume is rgba (z = ρ across a press's plane, w = the press side's share)
         float4 dsO, dsN;              // (part SDF, skin distance) grid
         float4 squish;                // x = s (MeshRenderer.flexScale), y = face count, z = 1: column walls ignored
         float4 march;                 // x = step factor, y = step cap in cells, z = min step mm, w = 1: early-out
@@ -249,6 +250,110 @@ enum FlexibleLatticeShader {
         return abs(0.5f * d - n) - 0.5f * t;
     }
 
+    // ── ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great") ─────────────────────────
+    // FlexibleLatticeField.seamSheet, the twin. A press's column is cut at its flat prism's plane by voxel centre, so ρ jumps
+    // up to 4.66 ladder rungs inside one voxel there and the ladder blended ACROSS the jump shredded a band along the plane.
+    // When the (ρ, mask) volume carries the seam (rmN.w = 1: z = ρ carried across the plane, w = the press side's share),
+    // a cell with a seam corner (z ≠ x) draws each side's OWN gyroid from its own same-side trilinear (each with its own
+    // ∇ρ), meeting at σ = smoothstep(trilinear share) — ½ on the plane's true position — with the whole gradient. Any
+    // other cell: flx_wall, exactly as before. The step cap follows the finer side in play.
+    static float flx_ladder_sheet(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p,
+                                  thread float3& grad, thread float& k, thread float& Lcur) {
+        float t = U.shape.y;
+        bool rhoIn = rhoRaw > 0.05f && rhoRaw < 0.9f;
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float Lraw = 3.0915f * t / rho;
+        float L = min(max(Lraw, U.shape.z), U.shape.w);
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(L / U.shape.z));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float dwdj = 6.0f * x * (1.0f - x) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f);
+        float La = U.shape.z * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = U.shape.z * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float ka = 2 * M_PI_F / La, kb = 2 * M_PI_F / Lb;
+        Lcur = w < 1.0f ? La : Lb;
+        float g = 0.0f, gA = 0.0f, gB = 0.0f;
+        float3 gr;
+        grad = float3(0.0f);
+        if (w < 1.0f) { gA = flx_gyroid(p, ka, gr); g += (1.0f - w) * gA; grad += (1.0f - w) * gr; }
+        if (w > 0.0f) { gB = flx_gyroid(p, kb, gr); g += w * gB; grad += w * gr; }
+        if (w > 0.0f && w < 1.0f && rhoIn && Lraw > U.shape.z && Lraw < U.shape.w && j > 0.0f) {
+            float3 gradJ = -(\(FlexibleLatticeField.ladderStepsPerOctave)f / M_LN2_F) * gradRho / rho;
+            grad += (gB - gA) * dwdj * gradJ;
+        }
+        k = (1.0f - w) * ka + w * kb;
+        return g;
+    }
+
+    // trilinear of 8 corners (x fastest) and its gradient, 0 along a clamped axis (FlexibleLatticeField.trilinear)
+    static float flx_tri8(thread const float* c, float fx, float fy, float fz, float3 u, float4 N, float h, thread float3& gr) {
+        float c00 = c[0] * (1 - fx) + c[1] * fx, c10 = c[2] * (1 - fx) + c[3] * fx;
+        float c01 = c[4] * (1 - fx) + c[5] * fx, c11 = c[6] * (1 - fx) + c[7] * fx;
+        float c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        float gx = ((c[1] - c[0]) * (1 - fy) + (c[3] - c[2]) * fy) * (1 - fz) + ((c[5] - c[4]) * (1 - fy) + (c[7] - c[6]) * fy) * fz;
+        float gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz;
+        float gz = c1v - c0v;
+        if (u.x < 0.0f || u.x > N.x - 1.0f) gx = 0.0f;
+        if (u.y < 0.0f || u.y > N.y - 1.0f) gy = 0.0f;
+        if (u.z < 0.0f || u.z > N.z - 1.0f) gz = 0.0f;
+        gr = float3(gx, gy, gz) / h;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+
+    static float flx_wall_seam(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                               thread float& Lcur) {
+        if (U.rmN.w < 0.5f || U.shape.x > 0.5f) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        float4 c[8] = { T.read(uint3(uint(i0), uint(j0), uint(k0))), T.read(uint3(uint(i1), uint(j0), uint(k0))),
+                        T.read(uint3(uint(i0), uint(j1), uint(k0))), T.read(uint3(uint(i1), uint(j1), uint(k0))),
+                        T.read(uint3(uint(i0), uint(j0), uint(k1))), T.read(uint3(uint(i1), uint(j0), uint(k1))),
+                        T.read(uint3(uint(i0), uint(j1), uint(k1))), T.read(uint3(uint(i1), uint(j1), uint(k1))) };
+        bool seam = false;
+        float inC[8], outC[8], phC[8];
+        for (int q = 0; q < 8; q++) {
+            if (c[q].z != c[q].x) seam = true;
+            bool pressSide = c[q].w >= 0.5f;
+            inC[q] = pressSide ? c[q].x : c[q].z;
+            outC[q] = pressSide ? c[q].z : c[q].x;
+            phC[q] = c[q].w;
+        }
+        if (!seam) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+        float3 gIn, gOut, gPh;
+        float rIn = flx_tri8(inC, fx, fy, fz, u, N, O.w, gIn);
+        float rOut = flx_tri8(outC, fx, fy, fz, u, N, O.w, gOut);
+        float ph = clamp(flx_tri8(phC, fx, fy, fz, u, N, O.w, gPh), 0.0f, 1.0f);
+        float sigma = ph * ph * (3.0f - 2.0f * ph);
+        float3 dSigma = (ph > 0.0f && ph < 1.0f ? 6.0f * ph * (1.0f - ph) : 0.0f) * gPh;
+        float t = U.shape.y;
+        float3 grA, grB;
+        float kA, kB, LA, LB;
+        float G, k;
+        float3 grad;
+        if (sigma <= 0.0f) {
+            G = flx_ladder_sheet(U, rOut, gOut, p, grad, k, Lcur);
+        } else if (sigma >= 1.0f) {
+            G = flx_ladder_sheet(U, rIn, gIn, p, grad, k, Lcur);
+        } else {
+            float a = flx_ladder_sheet(U, rOut, gOut, p, grA, kA, LA);
+            float b = flx_ladder_sheet(U, rIn, gIn, p, grB, kB, LB);
+            G = (1.0f - sigma) * a + sigma * b;
+            grad = (1.0f - sigma) * grA + sigma * grB + (b - a) * dSigma;
+            k = (1.0f - sigma) * kA + sigma * kB;
+            Lcur = min(LA, LB);
+        }
+        return abs(G) / max(length(grad), 0.05f * k) - 0.5f * t;
+    }
+
     // ── ★ ROUND 7, X1 — THE PRINTED SOLID (FlexibleLatticeField.printedSolid, the twin) ──────
     // His words (2026-10-14): "The lattice should be visible without x-ray on as long as finish is set to something
     // that isn't 'covered' … If lattice is on without x-ray view, we see the lattice plus the solid." With X-ray off the
@@ -267,7 +372,7 @@ enum FlexibleLatticeShader {
         float3 gRho;
         float2 rm = flx_sample2g(rmT, U.rmO, U.rmN, p, gRho);
         float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
-        float wall = flx_wall(U, rm.x, gRho, p, Lcur);
+        float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);   // ★ U21 H: the press seam (flx_wall elsewhere)
         float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
         float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         float dSkin = U.shape2.y - ds.y;
@@ -307,11 +412,11 @@ enum FlexibleLatticeShader {
             float S = flx_printed_solid(dRegion, dPart, dSkin);
             float lb = min(max(dRegion, max(dPart, dSkin)), S);
             if (lb > far) { Lcur = 1e30f; return lb; }
-            float wall = flx_wall(U, rm.x, gRho, p, Lcur);
+            float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
             return min(max(max(wall, dRegion), max(dPart, dSkin)), S);
         }
         if (dRegion > far) { Lcur = 1e30f; return max(dRegion, max(dPart, dSkin)); }
-        float wall = flx_wall(U, rm.x, gRho, p, Lcur);
+        float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
         return max(max(wall, dRegion), max(dPart, dSkin));
     }
 

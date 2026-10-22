@@ -1661,7 +1661,9 @@ public final class FlexibleStageModel: ObservableObject {
                 }
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: build.topology, beadsPerWall: build.beadsPerWall,
-                    beadWidthMM: build.beadWidthMM, buildDir: buildDir, skinOffFaces: [], finish: finish)
+                    beadWidthMM: build.beadWidthMM, buildDir: buildDir,
+                    pressCuts: shapeOnly ? [:] : pressCutsSnap,   // ★ R7-U21 H (EDGE-LOOK): the presses' seams
+                    skinOffFaces: [], finish: finish)
                 // ★ BATCH G: what the squish sims need, made HERE — the combined field is not kept
                 // (D-R4-19); the solver releases it after the last sim
                 var fe: FlexibleFERequest?

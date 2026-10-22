@@ -320,6 +320,91 @@ a side wall and it shows that there IS lattice behind it? That's definitely a bu
   gives the notice.
 - A tap without a point (only tests use it) keeps the old route.
 
+## ★ Round 7 · U21 batch H — your notes of 2026-10-21, Img3: the edge press's lattice joins the face lattice cleanly (2026-10-22) (side lane, after checkpoint 1 below)
+
+Side branch `claude/flexible-screens-u21-side2` (to be cherry-picked onto `claude/flexible-screens`). NOT pushed (your HOLD).
+NOT installed (the integrator installs). App only; core untouched; no #354/main file edited; no new hook. No CORE LIST item.
+Judged on your pad of 10-21 (`round7/batch_u21/his_live_1021_pad`, Group 2 = Edge 12 + Edge 9), lattice built through the page.
+
+Your note (Img3, 13.png): "Edges/corners don't look great".
+
+### What you will see now
+- Where an edge or corner press's lattice meets the face lattice (the flat prism's slanted face), the walls run on across the
+  join. The shredded, speckled fringe along the slanted side is gone, at rest and at your mid-way pause (s 0.5).
+- The press's finer, brighter cells still end at the flat prism, and the colours are unchanged: that is core's design.
+- Evidence: `round7/batch_u21_h/h_his13_beside_before_after.png` (your 13.png beside before/after crops at s 0 and s 0.5);
+  the full frames `h_after_front-left-close_s0.png` and `h_after_front-left-close_s50.png` (the before frames are the plan
+  probe's, same camera).
+
+### What was wrong (one sentence each)
+- The app cuts a press's lattice at its flat prism's plane voxel by voxel (C1's clip), so the density jumps from the press's
+  0.18–0.32 to the face lattice's 0.14 inside one 1.04 mm voxel, up to 4.66 cell-size steps at once. The lattice drew all of
+  those steps inside that voxel, which shredded a 1–1.5 mm band. Along lines through the plane that was 0.215 thin fragments
+  per mm, against 0.005 away from it.
+- Found while looking at the first fix's frames: at the part's outer faces, the voxels the builder fills in carried a press's
+  density but no owner, so they were treated as face lattice and smeared the join there.
+
+### What changed (code)
+- `FlexibleGroupField.pressSeam` (new): for every voxel within 2.5 voxels of a press's plane:
+  - the other side's density, carried across the plane along the arrow;
+  - the press side's share, by the plane's true position (a ramp of ±1 voxel, ½ on the plane).
+
+  Density itself is never changed.
+- `FlexibleLatticeBuilder.inputs(pressCuts:)` stores them as `FlexibleLatticeInputs.rhoAcross` / `pressSide`. The owner now
+  follows density through the builder's two fills.
+- `FlexibleStageModel` changes one call: it passes its press cuts.
+- `FlexibleLatticeField.seamSheet` (Swift) and `flx_wall_seam` (Metal, the twin):
+  - In a cell with a seam, each side draws its own gyroid from its own same-side interpolation, with its own density gradient.
+  - The two sides meet across the plane on a smoothstep of the share, with the whole gradient.
+  - Every other cell is drawn exactly as before.
+- `FlexibleLatticePass` uploads the seam in the (ρ, mask) volume's spare channels (rgba32Float, `rmN.w = 1`). A lattice
+  without a press keeps today's rg32Float volume.
+- Red control `FlexibleLatticeField.controlLadderAcrossCliffs` brings back today's field.
+- Not as the plan wrote it:
+  - The plan's candidate was a hard switch with no density-gradient term. Its numbers: fragments 3.7× the control (probe),
+    and in theory about 15 cut slivers per 150 lines at any hard seam.
+  - The blend across ±1 voxel passes both gates instead.
+  - FIX-2 was dropped as planned.
+
+### Tests (tests first; red-first run `round7/batch_u21_h/h_red_first_run.txt`: the three pad gates red on today's field)
+- `FlexibleR7U21EdgeLookTests` (your pad):
+  - `testThePressCliffDrawsNoFragments`: fragments in the ±1.5 mm band are now 2 in 452 mm (0.0044/mm), against 0.0046/mm in
+    the control. Bar: ≤ 1.5× the control. RED (today's ladder): 0.2145/mm, 46×.
+  - `testTheJunctionKeepsTheGradientBounded`: |∇G|/k in the band is p99 2.496, max 10.7. Bar: p99 ≤ 2.5. RED: p99 13.3,
+    max 65.4.
+    - Tries recorded: a ±1.5 voxel ramp, 2.79; a ±0.5 voxel ramp, 3.57; a share by geometry beside the column, 3.06; a C1
+      trapezoid ease, 2.74.
+    - The owner fix brought it from 2.68 to 2.496 (just under the bar).
+  - `testSmoothDensityIsUntouched`:
+    - 2,000 random points in cells with no seam, plus the 47 cliffs (> 1 step) away from the presses: 0 differ, bit for bit.
+    - A lattice without presses has no seam.
+    - RED (a 40-voxel band): 46 differ.
+  - `testEvidenceRenders`: the frames above. It runs only with `EDGE_LOOK_DIR` set.
+- `FlexibleLatticePassTests.testCliffParityAndCoverage` (a synthetic tilted press on the test box):
+  - GPU against Swift: 0.28 µm (bar 5 µm) over 278 points, all in seam cells. RED (the ladder): 22 mm.
+  - The shipped march against a fine one: 0.172 % / 0.192 % of pixels on another wall (bar 1 %). RED (half-cell cap):
+    3.45 % / 3.02 %.
+- Also measured once while fixing (not a kept test): on your pad the GPU matched Swift to 0.1 µm over 4,530 seam points.
+
+### Runs (`round7/batch_u21_h/u21h_runs.txt`)
+- The 31 classes that touch or pin the changed files, plus FlexibleSquishCopyTests and LatticeStaleTypeTests, in chunks of 10:
+  211 tests, 1 failure, 3 skipped (the two usual evidence skips + this batch's render test), 0 signal lines.
+- The one failure was a source pin: `FlexibleSettingsRound4Tests:369` reads `skinOffFaces: [], finish: finish)` in
+  `FlexibleStageModel.swift`. The new `pressCuts` parameter now comes before `skinOffFaces`, so that line is byte-identical
+  again (no test edited).
+- Re-run after that change (FlexibleSettingsRound4Tests, FlexibleR7U21EdgeLookTests, FlexibleSquishCopyTests,
+  testCliffParityAndCoverage): 21 tests, 0 failures, 1 skipped (the render test).
+- Goldens (FlexibleAngledGoldenTests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes (`stage_job_hashes_u21h.txt`) are cmp-identical (whole file) to x20b's and to checkpoint 1's
+  `stage_job_hashes_u21_integ1.txt`. No job byte moved: this is drawing only.
+- Both were run before the argument-order change, which is a call site only.
+
+### Left open
+- The press's ENDS along its edge (where core's press column stops sideways) are still a plain density step. The plan measured
+  only the plane, and core's column footprint is not known to the app as a plane.
+- The seam adds 8 texture reads per field sample wherever a press seam exists, and two gyroids in the ±1 voxel blend. Frame
+  time was not measured (lean mode).
+
 ## ★ Round 7 · U21 checkpoint 1 — batches D, G, C and B together, installed (2026-10-22) (read this first)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). App only; core untouched; no #354/main file edited.

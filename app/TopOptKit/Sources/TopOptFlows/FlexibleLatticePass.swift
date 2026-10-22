@@ -562,8 +562,14 @@ final class FlexibleLatticePass {
         ref.mask = mask
         ref.partSDF = Self.halfRounded(f.partSDF)
         ref.skinDist = Self.halfRounded(skin)
+        // ★ R7-U21 H (EDGE-LOOK): a press seam rides in the (ρ, mask) volume's z, w (rgba32Float; rmN.w = 1); none (or the
+        // red control) keeps today's rg32Float volume and field exactly
+        if FlexibleLatticeField.controlLadderAcrossCliffs || !(ref.rhoAcross.map { Self.sameGrid($0, f.rho) } ?? false)
+            || !(ref.pressSide.map { Self.sameGrid($0, f.rho) } ?? false) {
+            ref.rhoAcross = nil; ref.pressSide = nil
+        }
         referenceInputs = ref
-        rmTex = makeVolume(f.rho, mask)
+        if let ac = ref.rhoAcross, let sd = ref.pressSide { rmTex = makeVolume4(f.rho, mask, ac, sd) } else { rmTex = makeVolume(f.rho, mask) }
         dsTex = makeHalfVolume(f.partSDF, skin)
         faces = Array(l.faces.prefix(FlexibleSquishField.maxFaces))
         columnTex = faces.map { makeColumns($0) ?? emptyColumns }
@@ -724,6 +730,28 @@ final class FlexibleLatticePass {
         return tex
     }
 
+    /// ★ R7-U21 H (EDGE-LOOK): (ρ, mask, ρ across the press's plane, press side share) as one rgba32Float volume — the
+    /// same integer `read()` per corner returns all four (FlexibleLatticeShader.flx_wall_seam).
+    private func makeVolume4(_ a: FlexGrid, _ b: FlexGrid, _ c: FlexGrid, _ e: FlexGrid) -> MTLTexture? {
+        let n = a.nx * a.ny * a.nz
+        guard a.nx > 0, a.ny > 0, a.nz > 0, a.values.count == n, b.values.count == n, c.values.count == n, e.values.count == n,
+              a.spacing > 0 else { return nil }
+        var packed = [Float](repeating: 0, count: 4 * n)
+        for i in 0..<n { packed[4 * i] = a.values[i]; packed[4 * i + 1] = b.values[i]; packed[4 * i + 2] = c.values[i]; packed[4 * i + 3] = e.values[i] }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba32Float
+        d.width = a.nx; d.height = a.ny; d.depth = a.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        packed.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, a.nx, a.ny, a.nz), mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!, bytesPerRow: a.nx * 16, bytesPerImage: a.nx * a.ny * 16)
+        }
+        return tex
+    }
+
     /// The (SDF, skin) pair as one rg16Float volume, sampled with the hardware filter.
     private func makeHalfVolume(_ a: FlexGrid, _ b: FlexGrid) -> MTLTexture? {
         let n = a.nx * a.ny * a.nz
@@ -812,7 +840,8 @@ final class FlexibleLatticePass {
         u.shape = SIMD4(f.topology == .gyroid ? 0 : 1, f.wallMM, f.lMinMM, f.lMaxMM)
         u.shape2 = SIMD4(f.honeycombCellMM, f.skinMM, Self.maxSteps, 0)
         u.buildDir = SIMD4(f.buildDir, 0)
-        (u.rmO, u.rmN) = (SIMD4(f.rho.c0, f.rho.spacing), SIMD4(Float(f.rho.nx), Float(f.rho.ny), Float(f.rho.nz), 0))
+        (u.rmO, u.rmN) = (SIMD4(f.rho.c0, f.rho.spacing), SIMD4(Float(f.rho.nx), Float(f.rho.ny), Float(f.rho.nz),
+                                                                   f.rhoAcross != nil && f.pressSide != nil ? 1 : 0))   // ★ U21 H: the seam
         (u.dsO, u.dsN) = (SIMD4(f.partSDF.c0, f.partSDF.spacing),
                           SIMD4(Float(f.partSDF.nx), Float(f.partSDF.ny), Float(f.partSDF.nz), 0))
         var fu = [FaceUniforms](repeating: .zero, count: FlexibleSquishField.maxFaces)

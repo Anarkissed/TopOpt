@@ -125,6 +125,90 @@ public enum FlexibleGroupField {
     /// ★ RED CONTROL only: E2 as built — core's whole press column in the preview.
     nonisolated(unsafe) static var controlPressFieldWhole = false
 
+    /// ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great"). `clipToPresses` cuts a press's
+    /// column at its flat prism's plane BY VOXEL CENTRE, so the combined ρ jumps from the press's design (up to 0.32 on his
+    /// pad) to the face lattice's 0.14 across ONE voxel, on a staircase: the gyroid ladder ran through up to 4.66 rungs inside
+    /// that voxel and shredded a 1–1.5 mm band along the plane (FlexibleR7U21EdgeLookTests). The seam's SUB-VOXEL clip, for
+    /// the field to draw two lattices meeting AT the plane (FlexibleLatticeField.seamWall):
+    ///  * `across` — per voxel within `seamBandVoxels` of a press's plane, the OTHER side's ρ carried across it: a press
+    ///    voxel takes the value just past the plane along the arrow (the face lattice's), a voxel past the plane takes the
+    ///    press's value just inside it (core's press column is one ρ along the arrow). Everywhere else `across` = ρ, which
+    ///    is how the field knows a cell holds no seam (and draws it exactly as before).
+    ///  * `side` — the press side's share by the plane's TRUE position: 1 well inside, 0 well past, a ramp over ±
+    ///    `seamRampVoxels` voxels around the plane (its trilinear ½ crossing is the plane, not the voxel staircase).
+    /// nil when no voxel has a seam. `rho` is the builder's filled ρ, `owner` the combined field's carried through the same
+    /// fills, on the same grid (x fastest, `origin` its corner). ρ itself is never changed: the colours stay core's design.
+    public static func pressSeam(rho: [Float], owner: [Int], nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, spacing h: Double,
+                                 cuts: [Int: FlexibleFlatPrism.Cut]) -> (across: [Float], side: [Float])? {
+        let n = nx * ny * nz
+        guard !cuts.isEmpty, h > 0, rho.count == n, owner.count == n else { return nil }
+        let band = (controlSeamBandVoxels ?? seamBandVoxels) * h
+        let ramp = seamRampVoxels * h
+        typealias Plane = (key: Int, cut: FlexibleFlatPrism.Cut, dir: SIMD3<Double>, len: Double)
+        // sorted keys: a voxel past two planes takes the same one every run (no hash order)
+        let planes: [Plane] = cuts.keys.sorted().map { key in
+            let c = cuts[key]!, l = simd_length(c.direction)
+            return (key, c, l > 1e-12 ? c.direction / l : c.direction, Swift.max(l, 1e-12))
+        }
+        var byKey: [Int: Plane] = [:]
+        for p in planes { byKey[p.key] = p }
+        func centre(_ v: Int) -> SIMD3<Double> {
+            origin + SIMD3(Double(v % nx) + 0.5, Double((v / nx) % ny) + 0.5, Double(v / (nx * ny)) + 0.5) * h
+        }
+        func past(_ c: Plane, _ p: SIMD3<Double>) -> Double { (c.cut.height(p) - c.cut.depthMM) / c.len }
+        func voxel(_ p: SIMD3<Double>) -> Int? {
+            let q = (p - origin) / h
+            let i = Int(q.x.rounded(.down)), j = Int(q.y.rounded(.down)), k = Int(q.z.rounded(.down))
+            guard i >= 0, j >= 0, k >= 0, i < nx, j < ny, k < nz else { return nil }
+            return (k * ny + j) * nx + i
+        }
+        func share(_ d: Double) -> Float { Float(Swift.min(1, Swift.max(0, 0.5 - 0.5 * d / ramp))) }
+        var across = rho, side = [Float](repeating: 0, count: n)
+        var any = false
+        for v in 0..<n {
+            let p = centre(v)
+            if let c = byKey[owner[v]], past(c, p) <= 0 {
+                // a press voxel (its centre on the press's side of the plane; a fill past the plane is not one)
+                let d = past(c, p)
+                side[v] = share(d)
+                guard d >= -band else { continue }
+                var s = -d + 0.25 * h
+                while s <= -d + 1.5 * h {
+                    if let w = voxel(p + c.dir * s), past(c, centre(w)) > 0 {
+                        if rho[w] != rho[v] { across[v] = rho[w]; any = true }
+                        break
+                    }
+                    s += 0.25 * h
+                }
+                continue
+            }
+            for c in planes {
+                let d = past(c, p)
+                guard d > 0, d <= band else { continue }
+                // past this press's plane: the press's own value just inside it, where its column is
+                var s = d + 0.25 * h, found: Int?
+                while s <= d + 1.5 * h {
+                    if let w = voxel(p - c.dir * s), past(c, centre(w)) <= 0 {
+                        if owner[w] == c.key { found = w }
+                        break
+                    }
+                    s += 0.25 * h
+                }
+                guard let w = found else { continue }
+                side[v] = share(d)
+                if rho[w] != rho[v] { across[v] = rho[w]; any = true }
+                break
+            }
+        }
+        return any ? (across, side) : nil
+    }
+    /// The band (voxels either side of a press's plane) that carries the other side's ρ, and the half-width of the side
+    /// share's ramp. The ramp saturates inside the band, so a cell at the band's edge is plain ladder on both sides.
+    public static let seamBandVoxels: Double = 2.5
+    public static let seamRampVoxels: Double = 1
+    /// ★ RED CONTROL only (FlexibleR7U21EdgeLookTests.testSmoothDensityIsUntouched): a band this many voxels wide.
+    nonisolated(unsafe) static var controlSeamBandVoxels: Double?
+
     /// The density at model point `p` (the voxel holding it), nil off the grid.
     static func sample(_ f: FlexDensityField, _ p: SIMD3<Double>) -> Float? {
         guard f.spacing > 0 else { return nil }

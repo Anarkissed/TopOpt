@@ -546,6 +546,91 @@ final class FlexibleLatticePassTests: XCTestCase {
         }
     }
 
+    // MARK: ★ R7-U21 H — the press seam on the GPU (his Img3 of 2026-10-21: "Edges/corners don't look great")
+
+    /// The box with a press: a tilted flat prism (apex at the box's top edge, 12 mm deep) whose voxels carry 0.34 against
+    /// the box's 0.15…0.35 ramp — the cliff at the plane — and its seam (FlexibleGroupField.pressSeam).
+    static func seamBox() -> (f: FlexibleLatticeInputs, cut: FlexibleFlatPrism.Cut) {
+        var f = Fx.boxInputs(.gyroid)
+        let g = f.rho, h = Double(g.spacing)
+        let cut = FlexibleFlatPrism.Cut(apex: SIMD3(0, 0, 20), direction: simd_normalize(SIMD3(0.45, 0.55, -0.70)), depthMM: 12)
+        var rho = g.values, owner = [Int](repeating: 1, count: rho.count)
+        let origin = SIMD3<Double>(g.c0) - SIMD3(repeating: 0.5 * h)
+        for k in 0..<g.nz { for j in 0..<g.ny { for i in 0..<g.nx {
+            let n = (k * g.ny + j) * g.nx + i
+            let p = SIMD3<Double>(g.c0) + SIMD3(Double(i), Double(j), Double(k)) * h
+            if cut.height(p) >= 0, cut.height(p) <= cut.depthMM { rho[n] = 0.34; owner[n] = 99 }
+        } } }
+        f.rho = FlexGrid(nx: g.nx, ny: g.ny, nz: g.nz, c0: g.c0, spacing: g.spacing, values: rho)
+        let seam = FlexibleGroupField.pressSeam(rho: rho, owner: owner, nx: g.nx, ny: g.ny, nz: g.nz, origin: origin, spacing: h,
+                                                cuts: [99: cut])!
+        f.rhoAcross = FlexGrid(nx: g.nx, ny: g.ny, nz: g.nz, c0: g.c0, spacing: g.spacing, values: seam.across)
+        f.pressSide = FlexGrid(nx: g.nx, ny: g.ny, nz: g.nz, c0: g.c0, spacing: g.spacing, values: seam.side)
+        return (f, cut)
+    }
+
+    /// The GPU's seam (flx_wall_seam) equals the Swift twin (FlexibleLatticeField.seamSheet) at points straddling the plane,
+    /// within `parityMM`; and the shipped march lands on the same walls as a fine one there (T11's depth half, the same
+    /// bar). RED CONTROLS: the Swift ladder across the cliff (today's field) misses the GPU; a half-cell step cap exceeds
+    /// the bar.
+    func testCliffParityAndCoverage() throws {
+        let device = try Fx.device()
+        let pass = try FlexibleLatticePass(device: device)
+        let (box, cut) = Self.seamBox()
+        pass.upload(Fx.layer(box, token: 1))
+        let f = try XCTUnwrap(pass.referenceInputs)
+        XCTAssertNotNil(f.rhoAcross, "the seam reaches the GPU")
+        let dir = SIMD3<Float>(cut.direction)
+        let pts = Fx.probePoints(1200).compactMap { q -> SIMD3<Float>? in
+            let on = SIMD3<Float>(cut.onPlane(SIMD3<Double>(q)))
+            let p = on + dir * (6 * (simd_fract(q.x * 7.31) - 0.5))
+            return p.x > 1 && p.y > 1 && p.z > 1 && p.x < 39 && p.y < 39 && p.z < 19 ? p : nil
+        }
+        let gpu = try XCTUnwrap(pass.probe(pts))
+        var worst: Float = 0, inSeam = 0, mixed = 0
+        for (i, p) in pts.enumerated() {
+            worst = max(worst, abs(gpu[i] - FlexibleLatticeField.lattice(at: p, f)))
+            if FlexibleLatticeField.seamSheet(p, f) != nil { inSeam += 1 }
+            let side = f.pressSide!.sample(p)
+            if side > 0.05 && side < 0.95 { mixed += 1 }
+        }
+        FlexibleLatticeField.controlLadderAcrossCliffs = true
+        let missOld = pts.indices.map { abs(gpu[$0] - FlexibleLatticeField.lattice(at: pts[$0], f)) }.max() ?? 0
+        FlexibleLatticeField.controlLadderAcrossCliffs = false
+        print("FLEX-SEAM parity: max |gpu − swift| = \(worst) mm over \(pts.count) points (\(inSeam) in a seam cell, \(mixed) where the sides blend); RED CONTROL (the ladder across the cliff) misses by \(missOld) mm")
+        XCTAssertLessThanOrEqual(worst, Self.parityMM, "the GPU seam drifted from FlexibleLatticeField.seamSheet")
+        XCTAssertGreaterThan(inSeam, 200); XCTAssertGreaterThan(mixed, 50)
+        XCTAssertGreaterThan(missOld, 0.1, "★ RED CONTROL: the probe must tell the seam from the ladder across the cliff")
+        // the march across the seam (T11's depth half on this box)
+        let size = 384
+        for (fname, fr) in [("page", Frame.page()), ("generic", Frame.generic())] {
+            let own = (factor: pass.stepFactor, minStep: pass.minStepMM)
+            pass.stepFactor = 0.2; pass.stepCapOverride = 0.02; pass.minStepMM = 0.005; pass.stepBudget = 30000
+            pass.earlyOut = false
+            let ref = try renderGBuffer(pass, device: device, frame: fr, size: size)
+            pass.stepFactor = own.factor; pass.stepCapOverride = nil; pass.minStepMM = own.minStep; pass.stepBudget = FlexibleLatticePass.maxSteps
+            pass.earlyOut = true
+            func deeper(_ g: GBufferRead) -> (bad: Int, both: Int) {
+                var bad = 0, both = 0
+                for i in 0..<(size * size) where g.alpha[i] >= 128 && ref.alpha[i] >= 128 {
+                    both += 1
+                    if abs(g.eyeZ[i] - ref.eyeZ[i]) > 0.05 { bad += 1 }
+                }
+                return (bad, both)
+            }
+            let shipped = deeper(try renderGBuffer(pass, device: device, frame: fr, size: size))
+            pass.stepCapOverride = 0.5
+            let half = deeper(try renderGBuffer(pass, device: device, frame: fr, size: size))
+            pass.stepCapOverride = nil
+            print(String(format: "FLEX-SEAM march %@: %d of %d px differ by > 0.05 mm (%.3f %%); RED CONTROL (half-cell cap) %d (%.3f %%)",
+                         fname, shipped.bad, shipped.both, 100 * Double(shipped.bad) / Double(max(1, shipped.both)),
+                         half.bad, 100 * Double(half.bad) / Double(max(1, half.both))))
+            XCTAssertGreaterThan(shipped.both, 1000)
+            XCTAssertLessThanOrEqual(Double(shipped.bad), Self.depthBar * Double(shipped.both), "\(fname): the march lands on the wrong wall at the seam")
+            XCTAssertGreaterThan(Double(half.bad), Self.depthBar * Double(half.both), "★ RED CONTROL: \(fname): a half-cell cap must exceed the bar")
+        }
+    }
+
     // MARK: T13 — one upload per token
 
     @MainActor

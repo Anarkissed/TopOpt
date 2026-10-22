@@ -123,6 +123,11 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     public var coreOutside: Set<Int> = []
     /// ★ U1: how many voxels core left out between lattice of one region the builder put back (the "rods"' holes).
     public var seamFilled: Int = 0
+    /// ★ R7-U21 H (EDGE-LOOK, his Img3): at a press's flat-prism plane, the OTHER side's ρ carried across it (= ρ where a
+    /// voxel holds no seam) and the press side's share by the plane's true position (FlexibleGroupField.pressSeam). nil:
+    /// no press seam — the field is exactly the ladder as before. Same grid as `rho`.
+    public var rhoAcross: FlexGrid? = nil
+    public var pressSide: FlexGrid? = nil
 }
 
 public enum FlexibleLatticeField {
@@ -221,10 +226,80 @@ public enum FlexibleLatticeField {
         return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * f.wallMM
     }
 
+    /// ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great"): THE SEAM AT A PRESS'S PLANE.
+    /// In a cell with a press seam (a corner whose `rhoAcross` differs from ρ) the field no longer ladder-blends ACROSS the
+    /// jump: each side keeps its own gyroid, from its OWN same-side interpolation — the press side's ρ (ρ at the press's
+    /// voxels, the press's value carried across at the voxels past the plane) and the face side's (the reverse), each a
+    /// trilinear of continuous values with its own ∇ρ (so each is exactly the ladder its side draws next door). The two
+    /// sheets meet at the plane's TRUE position — σ = smoothstep of the trilinear side share, ½ on the plane, not the voxel
+    /// staircase — with the whole gradient (incl. (G_press − G_face)·∇σ), so walls run on across the seam instead of
+    /// ending in slivers. nil: no seam in this cell (the ladder exactly as before). The MSL's `flx_wall_seam` is the twin.
+    public static func seamSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (G: Float, grad: SIMD3<Float>, k: Float)? {
+        guard !controlLadderAcrossCliffs, let ac = f.rhoAcross, let sd = f.pressSide else { return nil }
+        let g = f.rho
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let idx = [(i0, j0, k0), (i1, j0, k0), (i0, j1, k0), (i1, j1, k0), (i0, j0, k1), (i1, j0, k1), (i0, j1, k1), (i1, j1, k1)]
+        var inC = [Float](repeating: 0, count: 8), outC = inC, phiC = inC
+        var seam = false
+        for (c, (i, j, k)) in idx.enumerated() {
+            let r = g.at(i, j, k), a = ac.at(i, j, k), s = sd.at(i, j, k)
+            if a != r { seam = true }
+            inC[c] = s >= 0.5 ? r : a; outC[c] = s >= 0.5 ? a : r; phiC[c] = s
+        }
+        guard seam else { return nil }
+        let inn = trilinear(inC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let out = trilinear(outC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let phi = trilinear(phiC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let x = Swift.min(Swift.max(phi.value, 0), 1)
+        let sigma = x * x * (3 - 2 * x)
+        let dSigma = (x > 0 && x < 1 ? 6 * x * (1 - x) : 0) * phi.grad
+        if sigma <= 0 { let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f); return (a.G, a.grad, a.k) }
+        if sigma >= 1 { let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f); return (b.G, b.grad, b.k) }
+        let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f)
+        let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f)
+        return ((1 - sigma) * a.G + sigma * b.G, (1 - sigma) * a.grad + sigma * b.grad + (b.G - a.G) * dSigma,
+                (1 - sigma) * a.k + sigma * b.k)
+    }
+    /// The trilinear of eight corner values (x fastest: 000, 100, 010, 110, 001, …) and its gradient (mm⁻¹), 0 along a
+    /// clamped axis — `sampleWithGradient`'s arithmetic.
+    static func trilinear(_ c: [Float], _ fx: Float, _ fy: Float, _ fz: Float, _ u: SIMD3<Float>, _ nx: Int, _ ny: Int, _ nz: Int,
+                          _ h: Float) -> (value: Float, grad: SIMD3<Float>) {
+        let c00 = c[0] * (1 - fx) + c[1] * fx, c10 = c[2] * (1 - fx) + c[3] * fx
+        let c01 = c[4] * (1 - fx) + c[5] * fx, c11 = c[6] * (1 - fx) + c[7] * fx
+        let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
+        var gx = ((c[1] - c[0]) * (1 - fy) + (c[3] - c[2]) * fy) * (1 - fz) + ((c[5] - c[4]) * (1 - fy) + (c[7] - c[6]) * fy) * fz
+        var gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz
+        var gz = c1v - c0v
+        if u.x < 0 || u.x > Float(nx - 1) { gx = 0 }
+        if u.y < 0 || u.y > Float(ny - 1) { gy = 0 }
+        if u.z < 0 || u.z > Float(nz - 1) { gz = 0 }
+        return (c0v * (1 - fz) + c1v * fz, SIMD3(gx, gy, gz) / h)
+    }
+    /// ★ RED CONTROL only (FlexibleR7U21EdgeLookTests, FlexibleLatticePassTests): the ladder blended ACROSS the press's
+    /// cliff, as before EDGE-LOOK (the seam grids ignored; the pass uploads without them).
+    nonisolated(unsafe) public static var controlLadderAcrossCliffs = false
+
+    /// The sheet the gyroid wall is drawn from at p: the seam's where a cell holds one, else the ladder's.
+    public static func sheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (G: Float, grad: SIMD3<Float>, k: Float) {
+        if let s = seamSheet(p, f) { return s }
+        let r = sampleWithGradient(f.rho, p)
+        let s = gyroidSheet(p, rhoRaw: r.value, gradRho: r.grad, f)
+        return (s.G, s.grad, s.k)
+    }
+
     public static func wall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
         let t = f.wallMM
         switch f.topology {
         case .gyroid:
+            if let s = seamSheet(p, f) { return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t }
             let s = sampleWithGradient(f.rho, p)
             return gyroidWall(p, rhoRaw: s.value, gradRho: s.grad, f)
         case .honeycomb:
@@ -387,8 +462,10 @@ public enum FlexibleLatticeBuilder {
     /// SURFACE (below). `maskToSurface: false` is a test's RED CONTROL only — the mask as core gives it.
     /// ★ R7-E1 (the top-lid fix's check): `cornerRule` — an outside voxel with a SOLID, non-lattice face-neighbour is not added
     /// (an inside corner); `false` is a test's RED CONTROL only (the fill as 0d8ae925 made it).
+    /// ★ R7-U21 H (EDGE-LOOK): `pressCuts` — the presses' flat-prism planes by owner key (FlexibleGroupField.pressSeam).
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, buildDir: SIMD3<Double>,
+                              pressCuts: [Int: FlexibleFlatPrism.Cut] = [:],
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
                               finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
@@ -417,6 +494,9 @@ public enum FlexibleLatticeBuilder {
         }
         var head = 0
         let nx = field.nx, ny = field.ny, nz = field.nz
+        // ★ R7-U21 H (EDGE-LOOK): the owner follows ρ through the fills, so a filled voxel carrying a press's ρ is that
+        // press's voxel to the seam (FlexibleGroupField.pressSeam); read by nothing else
+        var own = field.owner.count == n ? field.owner : [Int](repeating: -1, count: n)
         while head < queue.count {
             let v = queue[head]; head += 1
             let i = v % nx, j = (v / nx) % ny, k = v / (nx * ny)
@@ -424,7 +504,7 @@ public enum FlexibleLatticeBuilder {
                 let a = i + di, b = j + dj, c = k + dk
                 guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
                 let w = (c * ny + b) * nx + a
-                if rho[w] <= 0 { rho[w] = rho[v]; queue.append(w) }
+                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; queue.append(w) }
             }
         }
         // ★ ROUND 7 — THE MASK REACHES THE SURFACE (his report of 2026-10-18: "the top isn't being bent or removed when I
@@ -498,13 +578,16 @@ public enum FlexibleLatticeBuilder {
             let inside = coreEncloses(asked, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
             for (n, c) in cand.enumerated() where !inside[n] {
                 if cornerRule, c.solid.contains(where: { inside[at[$0]!] }) { continue }   // a solid, non-lattice neighbour
-                mask[c.v] = 1; rho[c.v] = rho[c.from]; added.insert(c.v)   // decided on core's mask alone
+                mask[c.v] = 1; rho[c.v] = rho[c.from]; own[c.v] = own[c.from]; added.insert(c.v)   // decided on core's mask alone
             }
         }
         let sp = Float(field.spacing)
         let c0 = SIMD3<Float>(field.origin) + SIMD3<Float>(repeating: 0.5 * sp)   // core's origin is the CORNER
         let rhoGrid = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: rho)
         let maskGrid = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mask)
+        // ★ R7-U21 H (EDGE-LOOK): the presses' seams, on ρ as filled (ρ itself unchanged)
+        let seam = FlexibleGroupField.pressSeam(rho: rho, owner: own, nx: nx, ny: ny, nz: nz, origin: field.origin,
+                                                spacing: field.spacing, cuts: pressCuts)
 
         // The part's signed distance and the skinned surfaces' distance, on the preview's
         // own occupancy grid (LatticePreviewOccupancy — the same code the octet preview uses).
@@ -542,6 +625,8 @@ public enum FlexibleLatticeBuilder {
             honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
             buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
             rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
-            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added, seamFilled: seamFilled)
+            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added, seamFilled: seamFilled,
+            rhoAcross: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.across) },
+            pressSide: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.side) })
     }
 }
