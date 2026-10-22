@@ -75,6 +75,84 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
+## ★ Round 7 · U21 batch F — your notes of 2026-10-21, Img8 / Img9 / Img10: one depth number, the chip clear, Auto says what it takes (2026-10-22)
+
+Branch `claude/flexible-screens` (PR #362), on top of batch E (`ac56f208`). NOT pushed (your HOLD). App only; core untouched; no
+#354/main file edited; no new hook. NOT installed (the integrator does it).
+
+Your notes: Img9 "I set the squish to 7 in the modal and it shows 14 next to the model … If it can't go to a depth, ensure that the
+depth it reverts to is labelled correctly in both areas." Img8 "the chip here is covering the icon to drag out the depth of the face
+prism. Please ensure a buffer between the values and the dragging icon." Img10 "Why can't 'auto' ever meet my curve? … What does it
+take to meet my curve?"
+
+### What you will see
+- The face you work on shows ONE number on the model: its depth chip. Where core builds less than you asked, the chip reads
+  **"↓ 0.6 of 7.0 mm"** in orange and the card's orange line reads **"Reaches 0.6 of 7.0 mm · 4549 columns short"** (your bracket,
+  10 lb). Your box keeps 7 (nothing is clamped). The Prisms view's tags and the Auto pane's per-face line ("Core builds 0.6 of 7.0 mm
+  here.") use the same number. Where core reaches your depth, everything stays "7.0 mm".
+- X-ray's bend tag is gone from the face whose chip shows (it sat on the chip, over the drag handle). Any other tag reads real mm (your
+  7 reads 7.0, never 14.0) and stays 12 pt off the chip and off the Prisms tags.
+- The legend row says **"Prism = your drawing ×2"** before Save & Exit (it is your drawing scaled up); with the 3D sim it keeps
+  "Prism = bend at full load".
+- A Stamp face's hand handle keeps 24 pt between its 44 pt touch area and the chip's whole capsule (it overlapped by ≈ 12 pt sideways).
+- Auto out of reach says what it takes, from core's own counts: **"Auto: Face 6 needs more weight or less depth"** (your bracket at
+  7 mm), "… needs less weight or more depth", or "Auto: Edge 12 is past the tested squish". Nothing changes your weight or depth.
+
+### What was wrong (one sentence each)
+- The bend tag printed the prism's size as DRAWN (×k): 14 = 7 × 2, 15 = 3 × 5; it was anchored 0.1 mm from the chip's anchor, so it
+  covered the chip in 16 of 16 views.
+- Nothing on the model or card said what core builds when it falls short (0.64 mm on your bracket at 3, 7 and 23 mm).
+- Auto's line only said "can't meet your curve"; core's failure list (which face, too firm or too soft) never reached it.
+- The stamp handle kept 56 pt from the chip's centre, not from its 93 pt capsule.
+
+### What changed (code)
+- `FlexibleStageModel+Reached.swift` (new): `reached(region:)` / `reachedDepthMM(region:)` = the max of core's buildable depths over
+  the face's columns (the pinched halves' segments when pinched), nil when core reaches the depth (± 0.05 mm), no lattice of its own,
+  or a refusal; `shortColumns` is the card's count; `depthLabel`; `autoBlocker` (the failure with the most columns out of reach and
+  its dominant count; a press by its label, a lattice section by its face).
+- Chip (`FlexibleDepthChips.chipText`), card (`FlexibleFaceRows.warning` → `FlexibleRowCopy.reaches`), Prisms tags
+  (`FlexibleStageViewTags.floors`), Auto pane (`FlexiblePanes`), Auto row (`FlexibleRowCopy.autoLine(blocker:)`).
+- `FlexibleBendPrism.tag(_:k:excluding:)`: ÷ k, the working face's corners skipped (`chipFace`); the page's `shortOfDrawn` reads true
+  mm; the tag is drawn only when `tagClear` of the chip's frame and the Prisms tags. Legend: `legendBendRow(short:drawing:k:)`.
+- `FlexibleFaceStampHandle.handlePoint(…, chipSize:)`: rect to rect, ≥ 24 pt.
+- The plan's "drop the solid-under-map discount": there is no such discount in the app (Auto's verdict is core's; the probe found
+  solid_under_map 0 on both projects), so nothing was removed; none is added.
+- Red controls: `FlexibleBendPrism.controlScaledTag`, `.controlTagOnWorkingFace`, `FlexibleStageModel.controlNoReached`,
+  `FlexibleRowCopy.controlBendRowAlwaysBend`, `FlexibleFaceStampHandle.controlCentreGap`.
+
+### Tests (`FlexibleU21OneDepthNumberTests`, 12, your l-bracket and your pad of 10-21; red asserted inside)
+- testTheBendLabelReadsTrueMillimetres (7 mm, k 2: 7.0 mm; RED 14.0 mm) · testTheWorkingFaceHasOneNumber (no tag; RED: the tag 0.10 mm
+  from the chip's anchor) · testAnUnreachedFaceSaysTheSameReachedDepthInEveryPlace (core 0.636 mm, 4549 short: chip, card, Prisms tag,
+  Auto pane all "0.6 of 7.0 mm", box 7; RED "Can't reach your curve on 4549 columns" / "7.0 mm") · testAReachedFaceKeepsItsPlainLabels
+  (dome, 20 lb, 0.5 mm: ok 4560, plain "0.5 mm") · testShortOfDrawnReadsTrueDepth (0.6 true drawn ×12: short; RED 7.2 hides it) ·
+  testTheColumnPreviewLegendSaysDrawing (RED "bend at full load") · testStampHandleKeepsTwentyFourPointsOffTheChip (smallest gap 24.4 pt
+  over 120 placements; RED −12.5 pt) · testAutoSaysWhatItTakes ("Auto: Face 6 needs more weight or less depth"; RED "can't meet your
+  curve") · testAutoNamesTheSoftFace (pad at 0.1 mm: "Auto: Face 3 needs less weight or more depth", soft 1824) ·
+  testAutoNamesTheBlockingPress (pad, dome at 2 mm, faces meet: "Auto: Edge 12 is past the tested squish", beyond 11) ·
+  testTheDefaultDomeCanPass (bracket, dome, 20 lb, 0.5 mm: "Auto: Gyroid at 190 °C") · testCopyFits (≤ 44).
+- On the page (`FlexibleU2Tests.testU21OneDepthNumberOnThePage`, your bracket, his LEFT view, Prisms + X-ray as your 19.png): chip
+  frame collected (the U2 harness now reads FlexibleViewMarksKey), no bend tag at 7 mm or 3 mm; RED: today's tag within 12 pt of the chip.
+- Re-pins (attributed to Img9 / Img8): FlexibleR7X1VerifyTests (÷ k), FlexibleSettingsVerifyD1Tests (the handle's line),
+  FlexibleR7M1VerifyTests (red control's line), FlexibleRound6HostedTests (the Prisms tag's text), FlexibleSqueezeGroupsReviewTests
+  (the pinch warning: same count, the halves'), FlexibleBatchCHookTests (its 1,400-character window was already short at HEAD: 2,400).
+
+### Runs (`round7/batch_u21_f/u21_f_runs.txt`)
+- 48 classes (this batch's, every class that touches or pins the changed files, FlexibleSquishCopyTests, LatticeStaleTypeTests): 305
+  passed, 5 failed (the known Play ring + the four re-pins above), 3 skipped (picture probes), no signal. After the re-pins: 37/37.
+- Goldens: 38 identical / 0 DIFFERS (deterministic); 32 + 1 PART-SKIP / 0 DIFFERS (unseeded).
+- The 16 stage-job hashes (`stage_job_hashes_u21f.txt`) cmp-identical, whole file, to batch E's and x20b's. No job byte moved.
+- Pictures (`look/`, 13" portrait, your l-bracket): U21_F1 Img9 at 7 mm (chip "↓ 0.6 of 7.0 mm", no 14), U21_F2 Img8 at 3 mm (chip
+  clear, no 15), U21_F3 3 mm with no face selected, X-ray only (the tag reads 3.0 mm, not 15.0).
+
+### Open
+- The edge flat prism's chip/knob (1–10 pt) and knob/boxes (≈ 19 pt) gaps are left as they are (plan: follow-up, HANDLE-PAIRS reduced).
+- The wider "0.6 of 7.0 mm" chip can tuck its left end under the panel's edge (U21_F1/F2): the keep-out rule tests the chip's centre
+  with a 22 pt margin. Hiding it there would leave nothing on the model; say if you want it nudged clear instead.
+- With no face selected, X-ray's tag still reads your drawing (3.0 mm) before Save & Exit, as the legend row says; core's 0.6 is on the
+  card and the chip.
+- The bend tag keeps clear of the face chip only, not of an edge group's flat-prism chips.
+- Your 10-22 Manual add-on removes Auto's "can't meet your curve" checks later; this row is what Auto says until then.
+
 ## ★ Round 7 · U21 batch E — your notes of 2026-10-21, Img11 / Img12 / Img14: one lattice rule, one notice for every face (2026-10-22)
 
 Branch `claude/flexible-screens` (PR #362), on top of checkpoint 1 (`706d73c5`). NOT pushed (your HOLD). App only; core untouched;

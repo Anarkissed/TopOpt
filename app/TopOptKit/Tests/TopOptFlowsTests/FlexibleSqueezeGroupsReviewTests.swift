@@ -110,7 +110,14 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
             let whole = d.tooFirm + d.tooSoft + d.beyondData
             let line = FlexibleFaceRows.warning(model: m, region: r)
             print("FLEX-REVIEW face \(r) warning: '\(line ?? "nil")' · halves \(halves) · core's whole column \(whole)")
-            XCTAssertEqual(line, halves > 0 ? "Can't reach your curve on \(halves) columns" : nil)
+            // ★ RE-PINNED (U21 batch F, his Img9 of 2026-10-21: "labelled correctly in both areas"): core's reached depth on the
+            // same count — the halves'
+            if let x = m.reached(region: r) {
+                XCTAssertEqual(x.shortColumns, halves, "the one count: the halves'")
+                XCTAssertEqual(line, FlexibleRowCopy.reaches(x.reachedMM, of: x.deepestMM, short: halves))
+            } else {
+                XCTAssertEqual(line, halves > 0 ? "Can't reach your curve on \(halves) columns" : nil)
+            }
             // ★ RED CONTROL: D2 counted core's whole-column design
             XCTAssertNotEqual(halves, whole, "control: the whole column's count differs")
             XCTAssertEqual(whole, 832, "control: D2 said 832 on face \(r)")
@@ -119,7 +126,8 @@ final class FlexibleSqueezeGroupsReviewTests: XCTestCase {
         let topA = try XCTUnwrap(m.design(FlexibleHisProject.topA))
         let n = topA.tooFirm + topA.tooSoft + topA.beyondData
         XCTAssertEqual(FlexibleFaceRows.warning(model: m, region: FlexibleHisProject.topA),
-                       FlexibleRowCopy.faceWarning(refusalCode: nil, refusalReason: nil, unreachedColumns: n,
+                       m.reached(region: FlexibleHisProject.topA).map { FlexibleRowCopy.reaches($0.reachedMM, of: $0.deepestMM, short: n) }   // ★ U21 batch F
+                       ?? FlexibleRowCopy.faceWarning(refusalCode: nil, refusalReason: nil, unreachedColumns: n,
                                                    side: m.stack(FlexibleHisProject.topA)?.side ?? false))
     }
 

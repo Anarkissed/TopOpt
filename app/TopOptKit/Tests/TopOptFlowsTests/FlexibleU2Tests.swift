@@ -23,7 +23,7 @@ final class FlexibleU2Tests: XCTestCase {
     typealias Axis = FlexiblePressCurveBaselines.Axis
     static var dir: URL? { ProcessInfo.processInfo.environment["FLEX_U2_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) } }
     static let p13 = CGSize(width: 1032, height: 1376)
-    final class Frames { var all: [String: CGRect] = [:] }
+    final class Frames { var all: [String: CGRect] = [:]; var marks: [String: CGRect] = [:] }   // ★ U21 batch F: + what the layers drew
     struct Host { let window: NSWindow; let view: NSView; let size: CGSize; let frames: Frames }
     var log: [String] = []
 
@@ -541,6 +541,78 @@ final class FlexibleU2Tests: XCTestCase {
         flush("u21_e_notice_lines.txt")
     }
 
+    /// ★ U21 batch F (his Img9 / Img8 of 2026-10-21, his l-bracket, 13" portrait, Prisms + X-ray as in his 19.png): ONE number on
+    /// the working face (its chip, "0.6 of 7.0 mm" where core builds short), no bend tag over it; with no face selected the tag
+    /// reads true mm. RED (today's tag kept on the working face): the tag's frame on the chip's.
+    func testU21OneDepthNumberOnThePage() async throws {
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.lbracketDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        addTeardownBlock { @MainActor in FlexibleBendPrism.controlTagOnWorkingFace = false }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his l-bracket of 10-21")
+        let face = 2000008
+        if let g = m.squeezeGroup(of: face) { m.rail = .group(g.id) }
+        func depth(_ mm: Double) async throws {
+            m.edit { st in guard var f = st.face(face) else { return }; f.deepestMM = mm; st.setFace(f) }
+            try await FlexibleSquishFixture.settle(m, "\(mm) mm")
+            try await FlexibleHisProject.waitFor(120, "Auto") { !m.autoInFlight && !m.designsInFlight && !m.readiness.designing }
+        }
+        try await depth(7)
+        m.views = [.heatOff, .prisms, .xray]
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: FlexibleSquishLoop(), onExit: {}), size: Self.p13)
+        pump(3)
+        // his 19.png's camera: the LEFT view, a little from above (the plate's top and its prism in sight)
+        func leftView() throws {
+            let cm = try XCTUnwrap(cameraModel(h), "the page's camera")
+            cm.snap(toID: "Left", animated: false)
+            var cam = cm.camera
+            cam.setOrientation(azimuth: cam.azimuth, elevation: 0.2)
+            cm.adopt(cam)
+            pump(1.5)
+        }
+        try leftView()
+        var lines: [String] = []
+        func state(_ name: String) -> String {
+            let chip = h.frames.marks["depthChip-\(face)"], tag = h.frames.marks["bendTag"]
+            let over = chip.flatMap { c in tag.map { $0.intersects(c.insetBy(dx: -12, dy: -12)) } } ?? false
+            return "\(name): chip \(chip.map { "\($0.integral)" } ?? "-") '\(FlexibleDepthChips.chipText(m.settings.face(face)?.deepestMM ?? 0, reached: m.reached(region: face)))' · bend tag \(tag.map { "\($0.integral)" } ?? "none") · within 12 pt of the chip \(over) · card '\(FlexibleFaceRows.warning(model: m, region: face) ?? "-")' · prisms tag \(h.frames.marks["tag-\(face)"].map { "\($0.integral)" } ?? "-")"
+        }
+        XCTAssertTrue(pumpUntil(5) { h.frames.marks["depthChip-\(face)"] != nil }, "★ the chip's frame is collected")
+        try shot("U21_F1_13p_img9_7mm_prisms_xray.png", h, settle: 0.6)
+        lines.append(state("Img9 7 mm"))
+        XCTAssertNil(h.frames.marks["bendTag"], "★ no bend tag over the working face's chip (Img9's 14)")
+        // RED CONTROL: today's tag on the working face, on the chip
+        FlexibleBendPrism.controlTagOnWorkingFace = true
+        m.views = [.heatOff, .prisms, .xray, .bend]; pump(0.6); m.views = [.heatOff, .prisms, .xray]   // (re-run the page's channels)
+        XCTAssertTrue(pumpUntil(4) { h.frames.marks["bendTag"] != nil }, "RED CONTROL: today's tag shows")
+        let redChip = try XCTUnwrap(h.frames.marks["depthChip-\(face)"]), redTag = try XCTUnwrap(h.frames.marks["bendTag"])
+        lines.append("RED (today) " + state("7 mm"))
+        XCTAssertTrue(redTag.intersects(redChip.insetBy(dx: -12, dy: -12)), "RED CONTROL: the tag on the chip (the drag handle)")
+        FlexibleBendPrism.controlTagOnWorkingFace = false
+        m.views = [.heatOff, .prisms, .xray, .bend]; pump(0.6); m.views = [.heatOff, .prisms, .xray]
+        XCTAssertTrue(pumpUntil(4) { h.frames.marks["bendTag"] == nil }, "★ gone again")
+        try await depth(3)
+        pump(1)
+        try leftView()   // (the edit's re-settle turned the camera back)
+        try shot("U21_F2_13p_img8_3mm_prisms_xray.png", h, settle: 0.6)
+        lines.append(state("Img8 3 mm"))
+        XCTAssertNotNil(h.frames.marks["depthChip-\(face)"], "★ the chip (the drag handle) shows")
+        XCTAssertNil(h.frames.marks["bendTag"], "★ nothing over it (Img8)")
+        // no face selected, X-ray alone: the prism keeps its number, in true mm
+        m.selectedRegion = nil
+        m.views = [.heatOff, .xray]
+        pump(1.5)
+        try leftView()
+        try shot("U21_F3_13p_3mm_no_face_selected.png", h, settle: 0.6)
+        lines.append(state("3 mm, no face selected"))
+        log = lines
+        flush("u21_f_depth_lines.txt")
+    }
+
     /// "Delete Flexible lattice" (the Lattice page's sheet): [Cancel] centred on the button; the glass ends under the button until
     /// it asks (the check: a blank block). RED: the blank block (the glass reaching the hidden lines).
     func testU21DeleteLatticeSheetCancelOnTheButton() throws {
@@ -609,7 +681,8 @@ final class FlexibleU2Tests: XCTestCase {
     }
     func host<V: View>(_ v: V, size: CGSize) -> Host {
         let frames = Frames()
-        let root = AnyView(v.onPreferenceChange(FlexibleKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
+        let root = AnyView(v.onPreferenceChange(FlexibleKeepOutKey.self) { frames.all = $0 }
+            .onPreferenceChange(FlexibleViewMarksKey.self) { frames.marks = $0 }.environment(\.colorScheme, .dark))
         let hv = NSHostingView(rootView: root)
         hv.frame = CGRect(origin: .zero, size: size)
         _ = NSApplication.shared

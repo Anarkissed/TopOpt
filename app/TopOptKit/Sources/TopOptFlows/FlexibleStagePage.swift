@@ -264,7 +264,7 @@ public struct FlexibleStagePage: View {
                 // (batch B review: the placement the tests measure is the one the page calls)
                 // ★ ROUND 6: …and while a view is on (its row), with no dent too — ONE card
                 if FlexibleLegend.shows(hasDent: dentRows, views: model.views, sections: FlexibleLegend.sectionRow(model))   // ★ R7 MERGE: heat drawn; ★ M2: the sections' row
-                    || FlexibleLegend.shows(hasDent: false, views: [], bendPrism: bendTag != nil) {   // ★ X1 VERIFY: the prism's row
+                    || FlexibleLegend.shows(hasDent: false, views: [], bendPrism: bendTag != nil || !bendPrism.isEmpty) {   // ★ X1 VERIFY: the prism's row
                     legend(in: geo.size)
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
@@ -591,9 +591,11 @@ public struct FlexibleStagePage: View {
         // ★ X1: his X-ray — the current group's bend as a prism into the model, at full depth
         let prism = Self.xrayItems(model: model, overlay: overlay, dents: c.dents, k: c.exaggeration, views: model.views)
         if prism != bendPrism { bendPrism = prism }
-        let tag = FlexibleBendPrism.tag(prism.first)
+        // ★ U21 batch F (his Img9: "it shows 14 next to the model"): true mm (÷ k); none for the face whose chip shows (Img8)
+        let tag = FlexibleBendPrism.tag(prism.first, k: c.exaggeration, excluding: FlexibleBendPrism.chipFace(model: model))
         if tag != bendTag { bendTag = tag }
-        let short = tag.map { FlexibleBendPrism.shortOfDrawn(model: model, depthMM: $0.depthMM) } ?? false
+        let short = FlexibleBendPrism.tag(prism.first, k: c.exaggeration, excluding: nil)   // (every face's deepest, true mm)
+            .map { FlexibleBendPrism.shortOfDrawn(model: model, depthMM: $0.depthMM) } ?? false
         if short != bendShort { bendShort = short }
         // ★ ITEM 9: a NEW blocking issue HIS last action caused opens the pop-up at once
         let r = model.readiness
@@ -900,7 +902,8 @@ public struct FlexibleStagePage: View {
                 FlexibleLegend(model: model, drawnLattice: nil, drilled: legendDrilled,
                                reading: legendDrilled ? reading : nil, hasDent: dentRows,   // ★ R7-V; ★ R7 MERGE: heat drawn
                                k: Int(FlexibleStageVolumes.prismK(dentExaggeration).rounded()),
-                               bendPrism: bendTag != nil, bendShort: bendShort,   // ★ X1 VERIFY
+                               bendPrism: bendTag != nil || !bendPrism.isEmpty, bendShort: bendShort,   // ★ X1 VERIFY
+                               bendDrawing: !playingFE, bendK: Int(dentExaggeration.rounded()),   // ★ U21 batch F: his drawing ×k
                                pressHeatTopMM: pressHeatTop)   // ★ R7-E5
                     .overlay(alignment: .top) {
                         HStack(spacing: 0) {
@@ -1143,18 +1146,38 @@ struct FlexibleStageOverlays: View {
             FlexibleStageViewTagsLayer(model: model, projection: proj.projection, k: FlexibleStageVolumes.prismK(exaggeration), keepOut: keepOut,
                                        clip: clip, pose: pose)
             // ★ X1 VERIFY (his rule: numbers are boxes): the bend prism's deepest mm, at its floor — never under the chrome
-            if let t = bendTag, let pt = proj.projection?.project(t.anchor), !keepOut.contains(where: { $0.contains(pt) }) {
+            // ★ U21 batch F (SQUISH-CHIP-COVER, his Img8): and ≥ 12 pt off the depth chip's frame (the drag handle)
+            if let t = bendTag, let pt = proj.projection?.project(t.anchor), !keepOut.contains(where: { $0.contains(pt) }),
+               FlexibleBendPrism.controlTagOnWorkingFace
+                || FlexibleBendPrism.tagClear(pt, chips: Self.chipFrames(model: model, projection: proj.projection, k: exaggeration, pose: pose)
+                                                + Self.floorTagFrames(model: model, projection: proj.projection, k: exaggeration, keepOut: keepOut, pose: pose)) {
                 Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .padding(.horizontal, 10).padding(.vertical, 5)
                     .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
                         .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color.opacity(0.7), lineWidth: 1)))
                     .allowsHitTesting(false)
+                    .background(GeometryReader { g in   // ★ U21 batch F: named for the hosted tests (never on the chip)
+                        Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["bendTag": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
                     .position(pt)
                     .accessibilityLabel("Bend \(t.text)")
                     .accessibilityIdentifier("flexible-bend-prism-tag")
             }
         }
+    }
+
+    /// ★ U21 batch F: the depth chip's frame on screen (where FlexibleDepthChips sits it), [] with no chip.
+    @MainActor static func chipFrames(model: FlexibleStageModel, projection: CameraProjection?, k: Double, pose: FlexibleBendPose?) -> [CGRect] {
+        guard FlexibleBendPrism.chipFace(model: model) != nil, let h = FlexibleDepthChips.handle(model: model, k: k, pose: pose),
+              let p = projection?.project(h.anchor) else { return [] }
+        return [FlexibleDepthChips.frame(at: p, model: model)]
+    }
+    /// ★ U21 batch F: the Prisms view's floor tags as placed — a face's number already written there (one number per spot).
+    @MainActor static func floorTagFrames(model: FlexibleStageModel, projection: CameraProjection?, k: Double, keepOut: [CGRect],
+                                          pose: FlexibleBendPose?) -> [CGRect] {
+        FlexibleStageViewTags.tags(model: model, k: FlexibleStageVolumes.prismK(k), projection: projection, keepOut: keepOut, pose: pose)
+            .map(FlexibleStageViewTags.frame)
     }
 
     /// The curves drawn on a face: both (X and Y, combined) under Curves, none under Stamp —
@@ -1368,6 +1391,9 @@ struct FlexibleLegend: View {
     /// ★ X1 VERIFY: X-ray's bend prism (its legend row), and whether the bend is well short of the curve he drew.
     var bendPrism = false
     var bendShort = false
+    /// ★ U21 batch F (DEPTH-LABEL): the prism is his drawing ×k (no 3D sim) — the row says so.
+    var bendDrawing = false
+    var bendK = 1
     /// ★ R7-E5: an edges group's heat on the legend — its line and top end (nil: the faces' "What you drew" scale).
     var pressHeatTopMM: Double? = nil
     /// The tab row's height — the only part of the legend that takes a tap (the padding above
@@ -1437,7 +1463,9 @@ struct FlexibleLegend: View {
             if model.views.contains(.prisms) { FlexibleLegendViewRows.prisms(k: k) }
             if model.views.contains(.groups) { FlexibleLegendViewRows.groups(model: model) }
             if Self.sectionRow(model) { FlexibleLegendViewRows.sections }   // ★ ROUND 7 (M2)
-            if bendPrism, !FlexibleBendPrism.controlFirstBuild { FlexibleLegendViewRows.bend(short: bendShort) }   // ★ X1 VERIFY
+            if bendPrism, !FlexibleBendPrism.controlFirstBuild {   // ★ X1 VERIFY
+                FlexibleLegendViewRows.bend(short: bendShort, drawing: bendDrawing, k: bendK)   // ★ U21 batch F: "your drawing ×2"
+            }
         }
         .frame(width: 236)
         .padding(DS.Space.ml)

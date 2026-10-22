@@ -150,7 +150,15 @@ enum FlexibleStageViewTags {
         let working = FlexibleStageOverlays.workingRegion(model: m)
         let key = "\(k)|\(working ?? -1)|\(m.settings.hashValue)|\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)|\(m.rail)"
             + "|\(FlexibleStageOverlays.controlGateOnSelectionOnly)|\(pose?.key ?? "rest")|\(FlexibleBendPose.controlInsideStays)"
-        if let c = floorCache, c.key == key { return c.floors }
+        // ★ U21 batch F (DEPTH-LABEL, his Img9: "labelled correctly in both areas"): a face core builds short reads "0.6 of 7.0 mm"
+        // — the card's and the chip's one number (FlexibleStageModel.reached; core's designs land after the floors are cached)
+        func labelled(_ fs: [Floor]) -> [Floor] {
+            fs.map { f in
+                guard let d = m.settings.face(f.region)?.deepestMM else { return f }
+                return Floor(region: f.region, columns: f.columns, text: m.depthLabel(region: f.region, deepestMM: d), anchor: f.anchor)
+            }
+        }
+        if let c = floorCache, c.key == key { return labelled(c.floors) }
         var out: [Floor] = []
         for f in m.settings.loadedFaces where f.faceRegionID != working && open.map({ $0.contains(f.faceRegionID) }) ?? true {
             let r = f.faceRegionID
@@ -162,7 +170,7 @@ enum FlexibleStageViewTags {
             out.append(Floor(region: r, columns: st.columns.count, text: String(format: "%.1f mm", f.deepestMM), anchor: h.anchor))
         }
         floorCache = (key, out)
-        return out
+        return labelled(out)
     }
 
     /// ★ ROUND 7 (S, 4g): the faces whose mm tags show — the open group's (an edges group's: none; [Model], [Rests] and
@@ -293,6 +301,7 @@ struct FlexibleStageViewTagsLayer: View {
                 Button { FlexibleStageViewTags.tap(t, model: model) } label: {
                     Text(t.text).font(.system(size: 12, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1).fixedSize()   // ★ U21 batch F: "0.6 of 7.0 mm" whole, never cut by the 84 pt hit area
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Capsule().fill(DS.Surface.panel.color.opacity(0.85))
                             .overlay(Capsule().strokeBorder(FlexibleStageStyle.facePrismKnob.color, lineWidth: 1)))

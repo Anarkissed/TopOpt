@@ -113,7 +113,9 @@ final class FlexibleBatchCHookTests: XCTestCase {
         XCTAssertEqual(page.components(separatedBy: ".onTapGesture { legendDrilled.toggle(); reading = nil }").count - 1, 1,
                        "one tap target drills in (and out)")
         let placed = try XCTUnwrap(page.range(of: "@ViewBuilder private func legend(in size: CGSize) -> some View {"))
-        let legendBody = String(page[placed.upperBound...].prefix(1400))
+        // ★ RE-PINNED (U21 batch F, his Img9 of 2026-10-21: the legend's bend row says "your drawing ×k"; the window had already
+        // fallen short of the tab at 1,790 characters before this batch): 2,400 characters
+        let legendBody = String(page[placed.upperBound...].prefix(2400))
         let tab = try XCTUnwrap(legendBody.range(of: ".frame(height: FlexibleLegend.tabHeight)"))
         let tap = try XCTUnwrap(legendBody.range(of: ".onTapGesture { legendDrilled.toggle(); reading = nil }"))
         XCTAssertLessThan(tab.lowerBound, tap.lowerBound, "the tap target is the tab row's height")

@@ -75,7 +75,9 @@ final class FlexibleR7M1VerifyTests: XCTestCase {
         XCTAssertTrue(controlLine.hasPrefix("Ready"), "★ RED CONTROL: 'Ready · No lattice under …'")
         XCTAssertNotNil(controlFix, "★ RED CONTROL: [Fix]")
         XCTAssertTrue(controlPops, "★ RED CONTROL: the pop-up at once")
-        XCTAssertEqual(controlWarning, "Can't reach your curve on 4096 columns", "★ RED CONTROL: the verify's orange line")
+        // ★ RE-PINNED (U21 batch F, his Img9 of 2026-10-21: "If it can't go to a depth, ensure that the depth it reverts to is
+        // labelled correctly in both areas"): the orange line names core's reached depth now ("Reaches 5.7 of 12.0 mm · 4096 columns short")
+        XCTAssertTrue(controlWarning?.hasSuffix("4096 columns short") ?? false, "★ RED CONTROL: the verify's orange line (\(controlWarning ?? "nil"))")
         print("FLEX-R7M1V-V1 no face-prism: designs \(m.designs.count) · shown max \(shown.maxDepth) dent \(shown.showsDent) · line '\(r.oneLine)' · control max \(control.maxDepth) line '\(controlLine)'")
     }
 

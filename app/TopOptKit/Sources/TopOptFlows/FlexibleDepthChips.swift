@@ -89,7 +89,7 @@ struct FlexibleDepthChips: View {
                let h = Self.handle(model: model, k: k, pose: pose), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
-                chip(f.deepestMM, arrow: arrowAngle(proj, h, at: p))
+                chip(f.deepestMM, reached: model.frozenExaggeration == nil ? model.reached(region: r) : nil, arrow: arrowAngle(proj, h, at: p))   // ★ U21 batch F: one number
                     // ★ ROUND 7 (S): what is drawn, by name (the hosted tests read it: no face's chip on an edges tab)
                     .background(GeometryReader { g in
                         Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["depthChip-\(r)": g.frame(in: .global)])
@@ -150,19 +150,41 @@ struct FlexibleDepthChips: View {
     /// ★ ROUND 4 (D1, his explicit request, img 2): the lattice stage's depth knob — its
     /// face-prism purple glass (`latticeDepthKnob`'s frost of the density ramp's 0.6 stop) —
     /// with the true mm on it; brighter while dragged, as the knob is.
-    private func chip(_ mm: Double, arrow: Angle) -> some View {
+    /// ★ U21 batch F (DEPTH-LABEL, his Img9: "If it can't go to a depth, ensure that the depth it reverts to is labelled correctly
+    /// in both areas"): when core builds short, "0.6 of 7.0 mm" in the warning tint — the card's numbers (one source,
+    /// FlexibleStageModel.reached); his box keeps 7.
+    private func chip(_ mm: Double, reached: FlexibleReached?, arrow: Angle) -> some View {
         let active = model.frozenExaggeration != nil
+        let text = Self.chipText(mm, reached: reached)
         return HStack(spacing: 5) {
             Image(systemName: "arrow.down").font(.system(size: 12, weight: .bold)).rotationEffect(arrow)
-            Text(String(format: "%.1f mm", mm)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+            Text(text).font(.system(size: 13, weight: .semibold)).monospacedDigit()
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(reached == nil ? Color.white : DS.Color.warning.color)
+        .accessibilityLabel("Deepest squish \(text)")
         .padding(.horizontal, 12)
         .frame(minHeight: 44)
         .liquidGlass(LiquidGlass.Tint.frost(FlexibleStageStyle.facePrismKnob, intensity: active ? 0.85 : 0.55),
                      in: Capsule(), specular: active ? 1.3 : 1)
         .contentShape(Capsule())
         .accessibilityIdentifier("flexible-depth-chip")
+    }
+
+    /// The chip's number: his depth, or core's "0.6 of 7.0 mm" when it builds short (no number while he drags: his own).
+    static func chipText(_ mm: Double, reached: FlexibleReached?) -> String {
+        reached.map { FlexibleRowCopy.reachedOf($0.reachedMM, $0.deepestMM) } ?? String(format: "%.1f mm", mm)
+    }
+
+    /// ★ U21 batch F (SQUISH-CHIP-COVER): the chip's size on screen for its text — 12 pt padding each side, the 12 pt arrow, a 5 pt
+    /// gap, 13 pt semibold digits (≈ 7.6 pt each), 44 pt tall; never under the 93 pt his "7.0 mm" chip measured.
+    static func size(text: String) -> CGSize { CGSize(width: max(93, 41 + CGFloat(text.count) * 7.6), height: 44) }
+    /// The chip's frame around its anchor — what the bend tag and the stamp handle keep clear of.
+    @MainActor
+    static func frame(at p: CGPoint, model: FlexibleStageModel? = nil) -> CGRect {
+        let text = model.flatMap { m in FlexibleStageOverlays.workingRegion(model: m).flatMap { r in
+            m.settings.face(r).map { chipText($0.deepestMM, reached: m.frozenExaggeration == nil ? m.reached(region: r) : nil) } } } ?? "00.0 mm"
+        let sz = size(text: text)
+        return CGRect(x: p.x - sz.width / 2, y: p.y - sz.height / 2, width: sz.width, height: sz.height)
     }
 
     /// The icon points along the projected load (down for a top face, sideways for a side) —

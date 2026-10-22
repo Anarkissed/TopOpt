@@ -394,12 +394,35 @@ struct FlexibleFaceStampHandle: View {
     /// chip on screen, pushed straight away from it (up-left when they coincide), with a leader
     /// to the stamp's centre; its drag is relative, so where it sits does not move the stamp.
     static let minGap: CGFloat = 56
-    static func handlePoint(centre c: CGPoint, chip: CGPoint?) -> CGPoint {
+    /// ★ U21 batch F (HANDLE-PAIRS-AUDIT, his Img8: "the chip here is covering the icon to drag out the depth of the face prism.
+    /// Please ensure a buffer between the values and the dragging icon."): rect to rect — the handle's 44 pt hit square keeps
+    /// `rectGap` off the chip's whole capsule (`chipSize`; a 93 pt "7.0 mm" chip). The old 56 pt centre rule left the two
+    /// overlapping ≈ 12 pt sideways.
+    static let hitSize: CGFloat = 44
+    static let rectGap: CGFloat = 24
+    static let defaultChipSize = CGSize(width: 93, height: 44)
+    /// Test control only (U21 batch F): the old centre-to-centre rule.
+    static var controlCentreGap = false
+    static func handlePoint(centre c: CGPoint, chip: CGPoint?, chipSize: CGSize = defaultChipSize) -> CGPoint {
         guard let q = chip, q.x.isFinite, q.y.isFinite else { return c }
         let dx = c.x - q.x, dy = c.y - q.y, d = hypot(dx, dy)
-        guard d < minGap else { return c }
         let dir = d > 1 ? CGVector(dx: dx / d, dy: dy / d) : CGVector(dx: -0.7071, dy: -0.7071)
-        return CGPoint(x: q.x + dir.dx * minGap, y: q.y + dir.dy * minGap)
+        if controlCentreGap {
+            guard d < minGap else { return c }
+            return CGPoint(x: q.x + dir.dx * minGap, y: q.y + dir.dy * minGap)
+        }
+        // clear when the centres are this far apart on either axis
+        let ax = chipSize.width / 2 + hitSize / 2 + rectGap, ay = chipSize.height / 2 + hitSize / 2 + rectGap
+        if abs(dx) >= ax || abs(dy) >= ay { return c }
+        // else pushed straight away from the chip, just far enough
+        let tx = abs(dir.dx) > 1e-6 ? ax / abs(dir.dx) : .infinity, ty = abs(dir.dy) > 1e-6 ? ay / abs(dir.dy) : .infinity
+        let t = min(tx, ty) + 0.5
+        return CGPoint(x: q.x + dir.dx * t, y: q.y + dir.dy * t)
+    }
+    /// The gap between the handle's hit square at `h` and the chip's capsule at `q` (negative: they overlap).
+    static func gap(handle h: CGPoint, chip q: CGPoint, chipSize: CGSize = defaultChipSize) -> CGFloat {
+        let gx = abs(h.x - q.x) - chipSize.width / 2 - hitSize / 2, gy = abs(h.y - q.y) - chipSize.height / 2 - hitSize / 2
+        return max(gx, gy)
     }
 
     /// What is drawn: ONLY the selected face's stamp, and only while its shape is Stamp — one
@@ -422,13 +445,14 @@ struct FlexibleFaceStampHandle: View {
         let placed = Self.placements(model.settings, selected: FlexibleStageOverlays.workingRegion(model: model))   // ★ ROUND 7 (S, 4g)
         let vp = projection?.viewportSize ?? .zero
         let chip = placed.isEmpty ? nil : FlexibleDepthChips.handle(model: model, k: k, pose: pose).flatMap { projection?.project($0.anchor) }   // ★ R: the chip at the full bend
+        let chipSize = chip.map { FlexibleDepthChips.frame(at: $0, model: model).size } ?? Self.defaultChipSize   // ★ U21 batch F: its real width
         ZStack {
             Canvas { ctx, size in
                 FlexibleChromeClip.apply(&ctx, size: size, holes: clip ?? keepOut)   // ★ BATCH V (m19)
                 for s in placed {
                     // the leader from a handle kept off the chip to the stamp's centre
                     if let c = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)) {
-                        let h = Self.handlePoint(centre: c, chip: chip)
+                        let h = Self.handlePoint(centre: c, chip: chip, chipSize: chipSize)
                         if h != c {
                             var lead = Path(); lead.move(to: c); lead.addLine(to: h)
                             ctx.stroke(lead, with: .color(FlexibleStageStyle.onPart.opacity(0.7)), lineWidth: 1.5)
@@ -450,7 +474,7 @@ struct FlexibleFaceStampHandle: View {
             .allowsHitTesting(false)
             ForEach(placed, id: \.stamp.id) { s in
                 if let c = screen(world(s.region, s.stamp.centreU, s.stamp.centreV)),
-                   case let q = Self.handlePoint(centre: c, chip: chip),
+                   case let q = Self.handlePoint(centre: c, chip: chip, chipSize: chipSize),
                    FlexibleDepthChipLayout.shows(q, dragging: dragging != nil, keepOut: keepOut, viewport: vp) {
                     Image(systemName: "hand.point.up.left.fill")
                         .font(.system(size: 12, weight: .bold))

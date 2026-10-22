@@ -463,7 +463,10 @@ final class FlexibleRound6HostedTests: XCTestCase {
         XCTAssertTrue(tags.allSatisfy { open.contains($0.region) }, "only the open group's tags: \(tags.map(\.region)) ⊆ \(open)")
         for t in tags {
             let f = try XCTUnwrap(m.settings.face(t.region))
-            XCTAssertEqual(t.text, String(format: "%.1f mm", f.deepestMM), "face \(t.region): his deepest, read-only")
+            // ★ RE-PINNED (U21 batch F, his Img9 of 2026-10-21: "labelled correctly in both areas"): where core builds short the tag
+            // reads its reached depth "12.8 of 22.5 mm" — the card's and the chip's one number; his deepest otherwise
+            XCTAssertEqual(t.text, m.depthLabel(region: t.region, deepestMM: f.deepestMM), "face \(t.region): his deepest, read-only")
+            XCTAssertTrue(t.text.hasSuffix(String(format: "%.1f mm", f.deepestMM)), "face \(t.region): his deepest stays written")
         }
         for (i, a) in tags.enumerated() { for b in tags[(i + 1)...] {
             XCTAssertFalse(FlexibleStageViewTags.frame(a).intersects(FlexibleStageViewTags.frame(b)), "tags \(a.region) and \(b.region) never overlap")

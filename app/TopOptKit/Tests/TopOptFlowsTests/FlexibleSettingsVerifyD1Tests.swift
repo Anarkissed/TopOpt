@@ -244,7 +244,9 @@ final class FlexibleSettingsVerifyD1Tests: XCTestCase {
         XCTAssertLessThan(old, 44, "control: from above the old handle sat on the chip")
         XCTAssertGreaterThanOrEqual(now, 44)
         let src = try FlexibleSource.code("FlexibleFaceStamp.swift")
-        XCTAssertTrue(src.contains("case let q = Self.handlePoint(centre: c, chip: chip)"), "the handle is mounted there")
+        // ★ RE-PINNED (U21 batch F, his Img8 of 2026-10-21: "Please ensure a buffer between the values and the dragging icon"):
+        // the rule is rect to rect now (≥ 24 pt off the chip's real width)
+        XCTAssertTrue(src.contains("case let q = Self.handlePoint(centre: c, chip: chip, chipSize: chipSize)"), "the handle is mounted there")
     }
 
     // MARK: - a Stamp face's dent has no teeth; its prism stands on a smooth outline (ux)

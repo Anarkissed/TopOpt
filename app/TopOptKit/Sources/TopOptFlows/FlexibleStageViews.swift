@@ -221,13 +221,13 @@ enum FlexibleLegendViewRows {
     /// ★ X1 VERIFY: X-ray's bend prism — "▮ Prism = bend at full load" (the swatch is the prism's own glass), "…, less than
     /// drawn" when the sim's bend is well short of his curve.
     @MainActor
-    static func bend(short: Bool) -> some View {
+    static func bend(short: Bool, drawing: Bool = false, k: Int = 1) -> some View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: 2).fill(Color(red: Double(FlexibleBendPrism.tint.x), green: Double(FlexibleBendPrism.tint.y),
                                                          blue: Double(FlexibleBendPrism.tint.z)).opacity(0.85))
                 .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(DS.Color.textPrimary.color, lineWidth: 1))
                 .frame(width: 10, height: 12)
-            Text(FlexibleRowCopy.legendBendRow(short: short))
+            Text(FlexibleRowCopy.legendBendRow(short: short, drawing: drawing, k: k))   // ★ U21 batch F
                 .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).minimumScaleFactor(0.8)
         }

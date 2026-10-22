@@ -337,12 +337,12 @@ struct FlexibleFaceRows: View {
         // "No lattice under it" row says what matters)
         if model.noFacePrismKnown { return nil }
         let d = model.design(r)
-        let unreached: Int
-        if let k = model.key(r), let sg = model.segments[k] {
-            unreached = sg.status.filter { $0 == "too_soft" || $0 == "too_firm" || $0 == "beyond_data" }.count
-        } else {
-            unreached = d.map { $0.tooFirm + $0.tooSoft + $0.beyondData } ?? 0
+        // ★ U21 batch F (DEPTH-LABEL, his Img9: "If it can't go to a depth, ensure that the depth it reverts to is labelled
+        // correctly in both areas"): core's buildable depth, the chip's own number — "Reaches 0.6 of 7.0 mm · 4549 columns short"
+        if d?.refusal == nil, let x = model.reached(region: r) {
+            return FlexibleRowCopy.reaches(x.reachedMM, of: x.deepestMM, short: x.shortColumns)
         }
+        let unreached = model.shortColumns(region: r)
         return FlexibleRowCopy.faceWarning(refusalCode: d?.refusal?.code, refusalReason: d?.refusal.map { model.text($0.reason) },
                                            unreachedColumns: unreached, side: model.stack(r)?.side ?? false,
                                            names: { model.coreRegionName($0) })   // ★ C1 (E2 verify minor 13): core's ids in his names
@@ -450,7 +450,8 @@ struct FlexibleMorePanel: View {
                                         pressedFaces: model.settings.loadedFaces.count,
                                         chosen: r?.chosen, reachable: r?.reachable,
                                         error: model.recommendationError != nil,
-                                        topology: r?.topology ?? "", tempC: r?.tempC)
+                                        topology: r?.topology ?? "", tempC: r?.tempC,
+                                        blocker: model.autoBlocker(r))   // ★ U21 batch F (AUTO-CURVE): what it takes
     }
 }
 

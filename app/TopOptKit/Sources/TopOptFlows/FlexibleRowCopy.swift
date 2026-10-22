@@ -121,14 +121,16 @@ public enum FlexibleRowCopy {
         return fit("\(w) from \(g)")
     }
     /// The More tab's Auto line and whether it is a warning (pure: FlexibleRowCopyTests).
+    /// ★ U21 batch F (AUTO-CURVE, his Img10: "What does it take to meet my curve?"): out of reach, it says what it takes from core's
+    /// failure list (`blocker`: "Auto: Face 6 needs more weight or less depth"); nil keeps "can't meet your curve".
     public static func autoLine(noData: Bool, pressedFaces: Int, chosen: Bool?, reachable: Bool?, error: Bool,
-                                topology: String, tempC: Double?) -> (text: String, warning: Bool) {
+                                topology: String, tempC: Double?, blocker: AutoBlocker? = nil) -> (text: String, warning: Bool) {
         if noData { return (autoNoData, false) }
         if error { return (autoNoPick, true) }
         if pressedFaces == 0 { return (autoNoFace, false) }
         guard let chosen else { return (autoWaiting, false) }
         if !chosen { return (autoNoPick, true) }
-        if reachable == false { return (autoUnreachable, true) }
+        if reachable == false { return (blocker.map(autoWhatItTakes) ?? autoUnreachable, true) }
         return (auto(topology: topology, tempC: tempC), false)
     }
 

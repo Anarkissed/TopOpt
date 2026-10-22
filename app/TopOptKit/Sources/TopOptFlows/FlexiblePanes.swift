@@ -56,7 +56,12 @@ struct FlexibleAutoPane: View {
                     FlexCaption(text: String(format: "Across u %.0f–%.0f mm, v %.0f–%.0f mm of the face.",
                                              f.uRangeMM.lowerBound, f.uRangeMM.upperBound,
                                              f.vRangeMM.lowerBound, f.vRangeMM.upperBound))
-                    if let n = f.nearestDepthRangeMM {
+                    // ★ U21 batch F (DEPTH-LABEL): a pressed face's line is the card's and the chip's one number (core's buildable
+                    // depth); a press keeps core's nearest range
+                    if let x = model.reached(region: f.face) {
+                        FlexCaption(text: FlexibleRowCopy.coreBuilds(x.reachedMM, of: x.deepestMM), colour: DS.Color.accentCyan.color)
+                            .accessibilityIdentifier("flexible-auto-reached-\(f.face)")
+                    } else if let n = f.nearestDepthRangeMM {
                         FlexCaption(text: String(format: "Nearest achievable squish there: %.1f – %.1f mm.", n.lowerBound, n.upperBound),
                                     colour: DS.Color.accentCyan.color)
                     } else {

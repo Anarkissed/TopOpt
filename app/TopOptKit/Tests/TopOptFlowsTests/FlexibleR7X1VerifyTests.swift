@@ -360,8 +360,10 @@ final class FlexibleR7X1VerifyTests: XCTestCase {
             }.min() ?? 0
             XCTAssertGreaterThan(nearest, 25, "★ the prism's glass is far from every heat colour (ΔE \(nearest))")
             // ★ its number, in a box, at its deepest point
-            let tag = try XCTUnwrap(FlexibleBendPrism.tag(prism), "★ the prism carries its number")
-            XCTAssertEqual(tag.text, String(format: "%.1f mm", shell.reachedDepthMM), "★ the prism's deepest mm")
+            // ★ RE-PINNED (U21 batch F, his Img9 of 2026-10-21: "I set the squish to 7 in the modal and it shows 14 next to the
+            // model … Please ensure that these are consistent"): the number is TRUE mm — the shell's deepest ÷ the page's k
+            let tag = try XCTUnwrap(FlexibleBendPrism.tag(prism, k: sq.exaggeration, excluding: nil), "★ the prism carries its number")
+            XCTAssertEqual(tag.text, String(format: "%.1f mm", shell.reachedDepthMM / sq.exaggeration), "★ the prism's deepest mm, ÷ k")
             let deepest = zip(shell.base, shell.offset).max { simd_length($0.1 - $0.0) < simd_length($1.1 - $1.0) }
             XCTAssertEqual(simd_distance(tag.anchor, deepest?.1 ?? .zero), 0, accuracy: 1e-3, "★ …at its deepest point (the floor)")
             // ★ the ONE card has its row (it comes for it even with Heat hidden); "less than drawn" when the sim is short
