@@ -94,6 +94,54 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
+## ★ Round 7 · U21 checkpoint 2 — batches E, F, R, H and A together, installed (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). App only; core untouched; no #354/main file edited beyond
+batch A's approved hooks (H41–H46, H38').
+
+### What you will see in this install
+- **One lattice rule (E).** Tap a face, or part of one, with no lattice of its own: nothing gets selected or pressed, and the
+  pop-up says "No lattice under Face N · set a face-prism" with [Go to Lattice] (and [Face N rests] when the whole face can rest).
+  No more "Only 37 %" or a lattice strip behind a solid side wall.
+- **One depth number (F).** When core cannot reach your squish, the chip says "0.6 of 7.0 mm" and the card "Reaches 0.6 of 7.0 mm ·
+  4549 columns short". Your box keeps 7. The bend tag reads true millimetres (7, not 14) and stays clear of the chip. Auto says
+  what it takes ("Auto: Face 6 needs more weight or less depth").
+- **Every group gets its send (R).** With four groups the Export step shows two buttons and [More…] listing all of them. The
+  lattice walls sit back on the ghost (pull-back to 0.001 mm). A newer drawing always replaces a design still being worked out.
+- **Edge presses join cleanly (H).** Along an edge press's flat-prism plane the gyroid walls run on across; the shredded fringe of
+  your 13.png is gone.
+- **New TopOpt has a Flexible tab (A).** Filament (FDM) · Resin (SLA) · Flexible, with your 10 flexible filaments (varioShore TPU
+  first). Continue opens print settings, then the Flexible Lattice stage. A new model starts with no squish or rest faces.
+
+### How they were put together
+- E, F, R were built here (ac56f208, cdf226ab, a73fdadb). H and A were built on `claude/flexible-screens-u21-side2` and
+  cherry-picked with `-x` (bd50afba → 9d5cf10f, 19f821f9 → f8c88ee0). The only conflict was this handoff's top (both lanes wrote
+  it): both kept in full. FlexibleStageModel.swift merged on its own (H's `pressCuts:` stays before `skinOffFaces:`).
+- One integration fix (60732dc4, test only): FlexibleEdgeGroupsTests still pinned the old cap at three sends, which batch R's
+  ruling E(1) removed (R did not run that class). Both assertions now expect "Send Group 4 only" on your A1_0003 pad, each with
+  an in-test RED control (`controlSendsCapAtThree`, the old cap) that drops it.
+
+### Runs (`round7/batch_u21_integ2/u21_integ2_runs.txt`)
+- The union of the five batches' classes and pins (132 classes, incl. FlexibleSquishCopyTests and LatticeStaleTypeTests): 870
+  passed, 6 failed, 8 skipped (evidence/picture probes), 0 signal lines. Failures: AppModelTests 3MF ×3 and the Play ring (both
+  known), and FlexibleEdgeGroupsTests ×2 (the stale cap pins, fixed above; re-run 11/11 with FlexibleSquishCopyTests).
+- Goldens (FlexibleAngledGoldenTests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes (`stage_job_hashes_u21_integ2.txt`) are cmp-identical to x20b, integ1, u21r, u21a and u21h.
+- iOS: BUILD SUCCEEDED at 60732dc4. The app was not running; installed 08:34:59, NOT launched. Installed dylib == built (cmp;
+  sha256 6f833c64…); each batch's strings are in it ("set a face-prism", "columns short", "Lattice approximate where squish is
+  steepest", flx_wall_seam, "Flexible filament", FlexibleHomeCard).
+
+### Still open (from the five checkers; none blocks)
+- E: tapping a resting face with no lattice no longer selects its card; the [+ New] hint still says "Tap the face that starts it"
+  where no face can start one; a tap on Face 2's solid rim says "No lattice under Face 2" though its middle is latticed (your call).
+- F: the wider "0.6 of 7.0 mm" chip can tuck under the Settings panel's edge; two legend rows both start "Prism =".
+- R: the material-curve pane (FlexiblePanes.swift:190/:196) still reads the in-flight design, not the current one; [More…] has no
+  hosted tap test; X20b's design stuck in flight for 4 minutes is not traced.
+- H: speckle remains along the press column's inner side and at its ends; the gradient gate passes by a hair (p99 2.496 vs 2.5);
+  frame time with a seam is not measured — worth a look on the iPad.
+- A: check on the iPad that New TopOpt → Flexible → Continue → print settings lands on the Flexible Lattice stage (no hosted test
+  covers the jump); the filament field may cut long PEBA names.
+
 ## ★ Round 7 · U21 batch R — the reviewer's still-to-do items of 2026-10-21 (ruling E): [More…] for a fourth group, the lattice walls back on the ghost, a newer drawing always wins (2026-10-22)
 
 Branch `claude/flexible-screens` (PR #362), on top of batch F (`cdf226ab`). NOT pushed (your HOLD). App only; core untouched; no
