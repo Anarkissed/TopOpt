@@ -82,7 +82,9 @@ public enum FlexibleIndent {
     /// ★ A face's indent: core's squish fraction per column (liveS) on the column grid, padded by one column of no squish.
     @MainActor
     public static func face(model m: FlexibleStageModel, region r: Int) -> [Line] {
-        guard let k = m.key(r), let st = m.stacks[k], let g = m.geometry[k], let s = m.liveS[k],
+        // ★ MANUAL (M2, "the on-model indent rings follow the prediction"): in Manual each column's estimate ÷ the deepest (no
+        // estimate yet: no rings) — his drawing is no input there
+        guard let k = m.key(r), let st = m.stacks[k], let g = m.geometry[k], let s = m.isManual ? m.estimateFractions(region: r) : m.liveS[k],
               st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return [] }
         let p = st.pitchMM
         func world(_ iu: Int, _ iv: Int) -> SIMD3<Double> {
@@ -102,7 +104,11 @@ public enum FlexibleIndent {
     @MainActor
     public static func press(model m: FlexibleStageModel, id: UUID) -> [Line] {
         guard let p = m.press(id), let st = p.strip, let c = m.flatCut(id) else { return [] }
-        let s = FlexiblePressPush.samples(p, c)
+        // ★ MANUAL (M2): the field's push along the arrow at each sample, ÷ the deepest (no estimate yet: no rings)
+        let est = m.isManual ? m.estimatePushes(press: id) : nil
+        if m.isManual && est == nil { return [] }
+        var s = est?.samples ?? FlexiblePressPush.samples(p, c)
+        if let e = est { s.weight = e.values }
         let n = FlexiblePressPush.n + 1
         func at(_ i: Int) -> SIMD3<Double> { SIMD3(s.xyz[3 * i], s.xyz[3 * i + 1], s.xyz[3 * i + 2]) - c.direction * 0.5 }
         if st.kind != .corner {

@@ -456,6 +456,10 @@ public final class FlexibleStageModel: ObservableObject {
     var liveDesignTargetCache: [UUID: (gen: Int, target: FlexibleFEField.Target?)] = [:]
     private var designTask: Task<Void, Never>?
     private var autoTask: Task<Void, Never>?
+    /// ★ MANUAL (M2): how many design runs (faces, presses, stamp checks) and Auto picks were handed to core — the tests read
+    /// them (none while Manual is on). Counting only; nothing reads them to decide.
+    public internal(set) var coreDesignRequests = 0
+    public internal(set) var coreAutoRequests = 0
 
     public init(project: ProjectModel, materialsPath: String?, stampsPath: String?,
                 persist: @escaping () -> Void) {
@@ -1162,6 +1166,14 @@ public final class FlexibleStageModel: ObservableObject {
         designGeneration += 1
         let gen = designGeneration
         designTask?.cancel()
+        // ★ MANUAL (M2, his picks of 2026-10-22: "Auto's lattice-type pick and the 'can't meet your curve' checks disappear"): in
+        // Manual nothing is designed — no face, press or stamp design, no conflict is asked of core. What core said before is
+        // kept, unshown (every line that reads it is Auto's and hidden in Manual), so the job and the presses sent stay Auto's
+        guard !manualSkipsCore else {
+            if !checks.isEmpty { checks = [:] }
+            if designsInFlight { designsInFlight = false }
+            return
+        }
         // ★ ROUND 7, RULING 6: no face-prism — no design, no conflict, no stamp check is asked of core
         guard !heldWithoutFacePrism, let path = materialsPath, let mat = settings.materialID else {
             designs = [:]
@@ -1173,6 +1185,7 @@ public final class FlexibleStageModel: ObservableObject {
             return
         }
         if !designsInFlight { designsInFlight = true }
+        coreDesignRequests += 1   // ★ MANUAL (M2): counted (the tests)
         let faces = settings.loadedFaces.filter { stacks[FlexFaceKey(region: $0.faceRegionID, rotation: $0.rotationDeg)] != nil }
         let temp = designTempC, build = self.build, grids = stampGrids
         let checkStamps = settings.checkStamps
@@ -1317,6 +1330,11 @@ public final class FlexibleStageModel: ObservableObject {
         autoTask?.cancel()
         autoGeneration += 1
         let gen = autoGeneration
+        // ★ MANUAL (M2): no Auto pick is asked in Manual (his type is on [Model]); Auto's last pick is kept, unshown
+        guard !manualSkipsCore else {
+            if autoInFlight { autoInFlight = false }
+            return
+        }
         guard let path = materialsPath, let mat = material, !mat.testedTempsC.isEmpty else {
             recommendation = nil
             if autoInFlight { autoInFlight = false }
@@ -1339,6 +1357,7 @@ public final class FlexibleStageModel: ObservableObject {
             return
         }
         if !autoInFlight { autoInFlight = true }
+        coreAutoRequests += 1   // ★ MANUAL (M2): counted (the tests)
         // Auto weighs every tested temperature and both families; the user's overrides
         // are applied on top (R5), never fed back as if Auto chose them.
         let temps = mat.testedTempsC
@@ -1511,10 +1530,13 @@ public final class FlexibleStageModel: ObservableObject {
         var drawn: [FlexibleGeometryOnlyLattice.Face] = []
         var designed: [FlexFaceKey: FlexiblePinch.Segments] = [:], pressure: [FlexFaceKey: [Double]] = [:]
         var extent = 0.0, shallowest = Double.infinity
+        // ★ MANUAL (M2): nothing is designed in Manual — each face's DRAWN map stands in for its column preview (as a shape-only
+        // filament's) until his lattice's sim lands; the views then show the sim
+        let manualFaces = manualSkipsCore
         for (f, k) in zip(faces, allKeys) {
             guard let st = stacks[k] else { continue }
             let dk: [Double?]
-            if shapeOnly {
+            if shapeOnly || manualFaces {
                 guard let sv = liveS[k] else { continue }
                 dk = st.columns.indices.map { i in
                     i < sv.count && st.columns[i].latticeMM > 0 ? sv[i] * f.deepestMM : nil
@@ -1577,6 +1599,20 @@ public final class FlexibleStageModel: ObservableObject {
             return keys.isEmpty ? nil : FlexibleSim(id: sim.id, kind: sim.kind, title: sim.title, short: sim.short, keys: keys)
         }
         let stackOf = stacks.merging(pressStacks) { a, _ in a }, regions = self.regions   // ★ R7-E2: the presses' stacks too
+        // ★ MANUAL (M2): what the Manual field is assembled over and pressed with — every press's stack (its key owns its voxels: a
+        // group's own lattice reaches its presses) and a Stamp face's pressure on its stamp's footprint (his weight ÷ the footprint)
+        var manualPressStacks: [(key: Int, stack: FlexStackInfo)] = []
+        var manualPressure: [FlexFaceKey: [Double]] = [:]
+        if manualFaces {
+            for p in presses { if let r = pressRegistrations[p.id] { manualPressStacks.append((r.key, r.stack)) } }
+            for (f, k) in zip(faces, allKeys) where f.isStampShape {
+                guard let st = stacks[k], let foot = stampFootprint(f.faceRegionID), foot.count == st.columns.count else { continue }
+                let area = foot.reduce(0, +) * st.pitchMM * st.pitchMM
+                if area > 1e-9 { manualPressure[k] = foot.map { f.weightN / area * $0 } }
+            }
+        }
+        let manualPressSnap = manualPressStacks, manualPressureSnap = manualPressure
+        let manualCellMM = settings.manual?.part.cellMM ?? 0
         let cutsOf = Dictionary(order.map { ($0.region, regions.cuts(of: $0.region)) }, uniquingKeysWith: { a, _ in a })
         latticeGeneration += 1
         let generation = latticeGeneration
@@ -1629,6 +1665,17 @@ public final class FlexibleStageModel: ObservableObject {
                     let band = try FlexibleGeometryOnlyLattice.band(topology: build.topology, beadsPerWall: build.beadsPerWall,
                                                                     beadWidthMM: build.beadWidthMM, latticeDepthMM: depthForBand)
                     field = FlexibleGeometryOnlyLattice.field(mask: mask, faces: drawnFaces, band: band)
+                } else if manualFaces {
+                    // ★ MANUAL (M2): no design — core's mask, each voxel owned by the nearest pressed face's (or press's) stack by
+                    // core's rule (FlexibleGroupField.assemble); his densities are laid on below (FlexibleManualField)
+                    let mask = try await worker.withScene { try $0.latticeMask(build: build) }
+                    func face(_ region: Int, _ st: FlexStackInfo, _ cuts: [RegionCut]) -> FlexibleGroupField.Face {
+                        FlexibleGroupField.Face(region: region, stack: st, cuts: cuts, density: st.columns.map { $0.latticeMM > 0 ? 1 : 0 },
+                                                cellMM: st.columns.map { _ in manualCellMM })
+                    }
+                    let fs = builtKeys.compactMap { k in stackOf[k].map { face(k.region, $0, cutsOf[k.region] ?? []) } }
+                        + manualPressSnap.map { face($0.key, $0.stack, []) }
+                    field = FlexibleGroupField.assemble(mask: mask, faces: fs)
                 } else {
                     var fields: [FlexDensityField] = []
                     var mask: FlexDensityField?
@@ -1705,7 +1752,8 @@ public final class FlexibleStageModel: ObservableObject {
                         fs[k] = FlexibleFERequest.Face(key: k, stack: st, cuts: cutsOf[k.region] ?? [], depthsMM: faceDepths[k] ?? [],
                                                        heightsMM: sg?.heightMM ?? st.columns.map(\.latticeMM),
                                                        pinched: sg?.pinched ?? [],
-                                                       pressureMPa: pressureSnap[k] ?? [Double](repeating: even, count: st.columns.count))
+                                                       pressureMPa: pressureSnap[k] ?? manualPressureSnap[k]   // ★ MANUAL (M2): his stamp
+                                                           ?? [Double](repeating: even, count: st.columns.count))
                     }
                     fe = FlexibleFERequest.build(field: field, inputs: inputs, sims: sims, faces: fs, resting: feResting,
                                                  law: law, generation: generation)

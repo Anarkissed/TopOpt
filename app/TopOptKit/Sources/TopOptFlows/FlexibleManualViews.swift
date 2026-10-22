@@ -154,3 +154,19 @@ struct FlexibleManualGroupRow: View {
         }
     }
 }
+
+/// ★ MANUAL (M2, his picks of 2026-10-22: "depths and curves become the app's PREDICTION (read-only)"): a depth in Manual — ONE
+/// FlexRow line in the card's own look ("Squishes ≈ 3.2 mm at 10 lb"), its (i) saying it is the app's estimate; no box, no keypad,
+/// no scrub. Its frame reaches the page under `frameKey` (the hosted tests read it).
+struct FlexibleManualEstimateRow: View {
+    let text: String
+    let info: String
+    let id: String
+    let frameKey: String
+    var body: some View {
+        FlexRow(text, info: info, id: id)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: [frameKey: g.frame(in: .global)])
+            }.allowsHitTesting(false))
+    }
+}

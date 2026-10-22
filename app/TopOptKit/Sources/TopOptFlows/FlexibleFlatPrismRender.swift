@@ -535,7 +535,15 @@ struct FlexibleFlatPrismOverlay: View {
                 .background(mark("flatPrism-\(label)", CGRect(x: min(h.x, t.x), y: min(h.y, t.y), width: max(1, abs(h.x - t.x)), height: max(1, abs(h.y - t.y)))))
                 .background(mark("flatArrow-\(label)", CGRect(x: min(h.x, t.x), y: min(h.y, t.y), width: max(1, abs(h.x - t.x)), height: max(1, abs(h.y - t.y)))))
                 .allowsHitTesting(false)
-            if here.showChip {
+            if here.showChip, !model.depthIsInput {
+                // ★ MANUAL (M2): the edge's depth is the app's estimate — a read-only label where the chip sits (no drag, no keypad)
+                chip(FlexibleManualCopy.chipText(model.estimate(press: id)), active: false)
+                    .allowsHitTesting(false)
+                    .background(GeometryReader { g in Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["flatDepthLabel-\(label)": g.frame(in: .global)]) }.allowsHitTesting(false))
+                    .position(lay.chip)
+                    .accessibilityLabel("\(label) squish estimate")
+                    .accessibilityIdentifier("flexible-flat-depth-label")
+            } else if here.showChip {
                 // a TAP opens the keypad; a drag (past 4 pt) moves the plane along the arrow — the drag wins once it travels
                 Button {
                     FlexibleFlatPrismUI.lastPad = "flat-depth-\(id.uuidString)"

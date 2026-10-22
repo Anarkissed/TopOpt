@@ -283,6 +283,11 @@ struct FlexibleFaceRows: View {
             // stored value is kept (the box clamped every edit to 0.5 mm, silently)
             if FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: latticeMax) {
                 FlexibleDeepestNoLatticeRow(model: model, region: r)
+            } else if !model.depthIsInput {
+                // ★ MANUAL (M2, his picks of 2026-10-22: the depths become the app's PREDICTION, read only): one line, no box
+                FlexibleManualEstimateRow(text: model.estimateLine(region: r) ?? FlexibleManualCopy.estimateLater,
+                                          info: FlexibleManualCopy.EstimateInfo.face, id: "flexible-row-deepest-estimate",
+                                          frameKey: "manualEstimate-\(r)")
             } else {
                 FlexRow(FlexibleRowCopy.deepestRow, info: FlexibleRowCopy.Info.deepest, id: "flexible-row-deepest") {
                     FlexNumberBox(key: "deepest-\(r)", title: FlexibleRowCopy.deepestTitle,
@@ -310,7 +315,7 @@ struct FlexibleFaceRows: View {
                 }
             }   // ★ batch E review
             // ★ ROUND 5 (S3): the curve point showing its × on the part — its squish as a number box
-            if !f.isStampShape, let p = model.curvePoint, p.region == r {
+            if !f.isStampShape, model.curvesAreInput, let p = model.curvePoint, p.region == r {   // ★ MANUAL (M2): none in Manual
                 let c = p.axis == "y" ? f.curveY : f.curveX
                 if p.index >= 0, p.index < c.y.count {
                     FlexRow(FlexibleRowCopy.curvePointRow(axis: p.axis), info: FlexibleRowCopy.Info.curvePoint,

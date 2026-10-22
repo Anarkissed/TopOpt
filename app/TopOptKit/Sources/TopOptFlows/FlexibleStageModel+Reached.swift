@@ -25,6 +25,7 @@ extension FlexibleStageModel {
     /// core reaches his depth (within 0.05 mm) — then the chip and the tags keep their plain "7.0 mm".
     public func reached(region r: Int) -> FlexibleReached? {
         if Self.controlNoReached { return nil }
+        if isManual { return nil }   // ★ MANUAL (M2): no "Reaches 0.6 of 7.0 mm" — core's design is not shown in Manual
         guard !noFacePrismKnown, let f = settings.face(r), f.isLoaded, hasOwnLattice(r), let k = key(r), let d = designs[k], d.refusal == nil
         else { return nil }
         let short = shortColumns(region: r)
@@ -56,7 +57,9 @@ extension FlexibleStageModel {
     /// The depth a face's number shows wherever it is written on the model (its chip, its Prisms tag): "7.0 mm", or "0.6 of
     /// 7.0 mm" when core builds short.
     public func depthLabel(region r: Int, deepestMM: Double) -> String {
-        reached(region: r).map { FlexibleRowCopy.reachedOf($0.reachedMM, $0.deepestMM) } ?? String(format: "%.1f mm", deepestMM)
+        // ★ MANUAL (M2): the app's estimate from his lattice ("≈ 3.2 mm"), never his box nor core's buildable depth
+        if isManual { return FlexibleManualCopy.chipText(estimate(region: r)) }
+        return reached(region: r).map { FlexibleRowCopy.reachedOf($0.reachedMM, $0.deepestMM) } ?? String(format: "%.1f mm", deepestMM)
     }
 
     /// ★ AUTO-CURVE: what Auto's failure list says it takes, from core's own counts — the face or press with the most columns

@@ -89,6 +89,16 @@ struct FlexibleDepthChips: View {
                let h = Self.handle(model: model, k: k, pose: pose), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {
+              if !model.depthIsInput {
+                // ★ MANUAL (M2, his picks of 2026-10-22: the depths become the app's PREDICTION): a read-only label on the prism's
+                // floor — "≈ 3.2 mm" (or "No estimate yet"); no drag handle, no keypad
+                chip(f.deepestMM, reached: nil, arrow: arrowAngle(proj, h, at: p), text: model.depthLabel(region: r, deepestMM: f.deepestMM))
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleViewMarksKey.self, value: ["depthLabel-\(r)": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .allowsHitTesting(false)
+                    .position(p)
+              } else {
                 chip(f.deepestMM, reached: model.frozenExaggeration == nil ? model.reached(region: r) : nil, arrow: arrowAngle(proj, h, at: p))   // ★ U21 batch F: one number
                     // ★ ROUND 7 (S): what is drawn, by name (the hosted tests read it: no face's chip on an edges tab)
                     .background(GeometryReader { g in
@@ -109,6 +119,7 @@ struct FlexibleDepthChips: View {
                     .position(p)
                     .gesture(drag(region: r, handle: h, stack: st, proj: proj, startMM: f.deepestMM)
                         .updating($dragging) { _, state, _ in state = true })
+              }
             }
         }
         // a drag that ENDED without onEnded (cancelled) is finished here
@@ -127,7 +138,7 @@ struct FlexibleDepthChips: View {
     static func handle(model: FlexibleStageModel, k: Double, pose: FlexibleBendPose?) -> ClearanceHandle? {
         guard let r = FlexibleStageOverlays.workingRegion(model: model), let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
               let st = model.stacks[key], let g = model.geometry[key],
-              let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM,
+              let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: model.shownDepthMM(f),   // ★ M2
                                                 k: model.frozenExaggeration ?? k, footprint: model.prismFootprint(r))
         else { return nil }
         // (the red control: F's chip, read from the prism at rest)
@@ -153,9 +164,9 @@ struct FlexibleDepthChips: View {
     /// ★ U21 batch F (DEPTH-LABEL, his Img9: "If it can't go to a depth, ensure that the depth it reverts to is labelled correctly
     /// in both areas"): when core builds short, "0.6 of 7.0 mm" in the warning tint — the card's numbers (one source,
     /// FlexibleStageModel.reached); his box keeps 7.
-    private func chip(_ mm: Double, reached: FlexibleReached?, arrow: Angle) -> some View {
+    private func chip(_ mm: Double, reached: FlexibleReached?, arrow: Angle, text shown: String? = nil) -> some View {
         let active = model.frozenExaggeration != nil
-        let text = Self.chipText(mm, reached: reached)
+        let text = shown ?? Self.chipText(mm, reached: reached)   // ★ MANUAL (M2): `shown` — the estimate's label
         return HStack(spacing: 5) {
             Image(systemName: "arrow.down").font(.system(size: 12, weight: .bold)).rotationEffect(arrow)
             Text(text).font(.system(size: 13, weight: .semibold)).monospacedDigit()
@@ -182,7 +193,8 @@ struct FlexibleDepthChips: View {
     @MainActor
     static func frame(at p: CGPoint, model: FlexibleStageModel? = nil) -> CGRect {
         let text = model.flatMap { m in FlexibleStageOverlays.workingRegion(model: m).flatMap { r in
-            m.settings.face(r).map { chipText($0.deepestMM, reached: m.frozenExaggeration == nil ? m.reached(region: r) : nil) } } } ?? "00.0 mm"
+            m.settings.face(r).map { m.isManual ? m.depthLabel(region: r, deepestMM: $0.deepestMM)   // ★ MANUAL (M2)
+                : chipText($0.deepestMM, reached: m.frozenExaggeration == nil ? m.reached(region: r) : nil) } } } ?? "00.0 mm"
         let sz = size(text: text)
         return CGRect(x: p.x - sz.width / 2, y: p.y - sz.height / 2, width: sz.width, height: sz.height)
     }

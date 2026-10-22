@@ -130,6 +130,7 @@ extension FlexibleStageModel {
     }
 
     private func applyDraftAction(_ axis: FlexiblePressCurveBaselines.Axis, _ c: FlexCurve) {
+        guard curvesAreInput else { return }   // ★ MANUAL (M2): no Mirror, no Copy in Manual
         guard var d = curveDraft else { return }
         let m = FlexiblePressCurveBaselines.clamped(c)
         guard d.curves[axis] != m else { return }

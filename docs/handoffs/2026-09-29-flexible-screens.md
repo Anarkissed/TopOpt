@@ -99,6 +99,10 @@ Each item: what core does, where, the evidence, your numbers.
    Your pad: Manual seeded at gyroid 9 mm / 15.5 % / 1 bead (Auto's built lattice: 789 different densities, mean 15.2 %). Ask: a
    per include region (or per squeeze group) `manual` lattice — type, cell (or beads), density — that skips the design and is
    what the export prints; a wall that is not a whole bead refused with its nearest whole bead.
+   ★ M2 adds: in Manual the app asks core for NO design and no Auto pick at all; the depths, rings and curves on screen are the
+   app's own FE estimate on his lattice. When core takes a fixed lattice, it would be good to have core's own predicted squish for
+   it (a "check, don't design" call: his lattice + his weight + his stamp in, depth per column out), so the app's estimate can be
+   checked against core's.
 
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
@@ -118,6 +122,69 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · MANUAL, part M2 — predictions, and Auto removed in Manual (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed. Not installed (the installer does that). App only; core untouched; no
+#354/main file edited; no new hook. Your words of 02:30: "Remove any of the auto processes and make it as simple to understand as
+possible. The views become what the app assumes based on your values". Auto looks, builds and sends exactly what it did before.
+
+### What you will see in Manual (Squish page)
+- **A face's card**: "Deepest squish [box]" becomes one read-only line, "Squishes ≈ 2.8 mm at 5 lb" — the app's estimate from
+  your lattice, your weight and your stamp. Before the lattice is built it says "Squish estimate · Save & Exit to see it"; while
+  the sim runs, "Squish estimate · working it out…". The curve-point box is gone.
+- **The depth chip on the part** is a plain label, "≈ 2.8 mm" (no drag, no keypad). The faint depth prism is drawn to the estimate.
+- **An edge's card**: its depth is the same kind of read-only line ("Squishes ≈ 3.1 mm at 7 lb"); Shape, the stamp, Tilt and
+  Twist stay yours. The chip on its wedge is a label. Lines about core's design ("core is designing it", "Can't reach on 13
+  columns", "twisted 36% off") are not shown; a press that cannot be in the lattice at all (no stack, shared surface…) still says so.
+- **The curve window** ([2D]/[3D]) opens as "Face 3 · what your lattice does": the estimated dent drawn in the same charts (its two
+  cross-sections through the deepest point, scaled to the deepest), no points to drag, no Mirror/Copy, one line "What your lattice
+  does · deepest ≈ 2.8 mm", and one [Done] button. Nothing is written.
+- **The indent rings** on the part follow the estimate (none until there is one).
+- **The view line** now carries the number: "Bend · estimate ≈ 2.8 mm at 5 lb".
+- **Nothing is asked of core in Manual**: no face, press or stamp design, no Auto pick, no "can't meet your curve", no "Reaches
+  0.6 of 7.0 mm". The blockers that still matter stay with their one-tap fixes (no lattice under a pressed face; walls under 1 bead).
+
+### How the estimate is made
+The same sim the views use (the group's FE squish sim, solved on your lattice at its own stiffness, no core depth to scale it to).
+A face's number is its deepest column's squish along its push; an edge's, the same on its press stack. Twice the weight gives
+twice the squish; a firmer lattice gives less (your pad, Face 5: 15 % → 7.3 mm, 30 % → 1.3 mm, 30 % at twice the weight → 2.6 mm).
+
+### Decisions made here (yours to overturn)
+- Your old Auto designs are kept in memory (unshown) while Manual is on, so the job and the presses sent stay Auto's bytes; a
+  press's "designed" check is waived in Manual (nothing to wait for).
+- Without designs, Manual's lattice takes core's lattice MASK and lets each voxel belong to the nearest pressed face or press (core's
+  own rule, the app's copy of it — FlexibleGroupField.assemble), then lays your densities on it. M1 used core's designed field for
+  the owners; the lattice drawn is the same mask with the same densities.
+- A Stamp face is pushed only under its stamp (your weight ÷ the stamp's footprint); a Curves face evenly (the curves are not an
+  input in Manual).
+- The estimate is the full-weight number even when the picture is cut back so it never folds.
+- The window's curves are cross-sections through the deepest point (a "deepest anywhere" curve read flat on your Face 3).
+
+### Not done here
+- The main (Lattice) page's prisms and card still show the stored depth in Manual (the Squish page is done).
+- A shape-only filament (no data) has no mm estimate in Manual (its sim is in relative units); it says "Save & Exit to see it".
+
+### Tests (`FlexibleM2PredictTests`, 4, written first on stubs: 4/4 red, 23 failures — then green; your pad)
+No design request in Manual (RED: designs let through → a request is sent); Auto asks again and its job bytes are unchanged; the
+estimate follows the density and the weight (numbers above), the card line, the chip, the rings and the window's profiles; the
+depth is read only in Manual (RED: editable); the curve window is read only, no Mirror/Copy, nothing written (RED: editable).
+Hosted (`FlexibleM1ManualFramesProbe.testM2…`): no Deepest box on the face card or the edge card, the estimate lines drawn, no
+core-design line on the edge card, the window has [Done] and no [OK]/Mirror/Copy (RED: editable → the box is back).
+`FlexibleM1ManualTests`: its red control (core's design in Manual) now asks core again first (Manual asks nothing).
+
+### Runs (`round7/manual_m2/m2_runs.txt`)
+- The 72 classes that touch or pin the changed files: 414 passed, 1 failed, 23 skipped. The failure is the known batch I one
+  (`FlexibleSettingsPageHostedTests` 11" landscape "as opened", card 566-812 — same numbers as M1's report).
+- Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes: cmp-identical to batch I's install and to M1's.
+- Found by LOOKING at that run's frames, fixed after it (Manual-only code): the edge card still said "Can't reach on 13 columns ·
+  twisted 36% off", and the window's Y curve read flat. Re-run of M2's tests, the probe and the 6 edge-card classes: 44 passed,
+  0 failed, 1 skipped.
+
+### Renders (`round7/manual_m2/`, 13" portrait, your pad, Manual)
+`M2_01` Face 5's card · `M2_02` Edge 12's card (label on the wedge) · `M2_03` Face 3's curve window, read only · `M2_04` Bend on,
+"Bend · estimate ≈ 2.8 mm at 5 lb" (the bend is on the faces out of this camera, as M1's frame).
 
 ## ★ Round 7 · MANUAL, part M1 — the Manual | Auto toggle, your lattice values, the lattice and the views (2026-10-22) (read this first)
 

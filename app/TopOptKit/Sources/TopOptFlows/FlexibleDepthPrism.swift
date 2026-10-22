@@ -274,7 +274,7 @@ enum FlexibleDepthPrism {
             // ★ U21 BATCH E: no prism under a face with no lattice of its own (no bowl under a "can't squish" notice)
             guard model.hasOwnLattice(r) else { return [] }
             guard let f = model.settings.face(r), let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key],
-                  let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                  let v = volume(region: r, stack: st, centres: g.centres, depthMM: model.shownDepthMM(f), k: k,   // ★ MANUAL (M2)
                                  footprint: model.prismFootprint(r)) else { return [] }
             if r == sel, dragging { return [ClearanceRenderItem(volume: v, selected: true, tint: FlexibleStageStyle.facePrismTint)] }
             let bright = r == sel && all

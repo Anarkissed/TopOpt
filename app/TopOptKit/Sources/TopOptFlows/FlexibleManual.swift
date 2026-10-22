@@ -174,11 +174,13 @@ public enum FlexibleManualCopy {
 
     /// ★ "The views become what the app assumes based on your values, so cards should say that when a view is selected": the
     /// one line for the views on (Bend, Play, X-ray's bend prism, Heat — the first of them), nil in Auto or with none on.
-    public static func viewLine(views: FlexibleStageViews, manual: Bool, weight: String?) -> String? {
+    /// ★ MANUAL (M2): `mm` — the playing group's deepest estimate once its sim landed ("Bend · estimate ≈ 1.4 mm at 5 lb").
+    public static func viewLine(views: FlexibleStageViews, manual: Bool, weight: String?, mm: Double? = nil) -> String? {
         guard manual else { return nil }
         let at = weight.map { " at \($0)" } ?? ""
-        if views.contains(.bend) { return FlexibleRowCopy.fit("Bend · what your lattice does" + at) }
-        if views.contains(.play) { return FlexibleRowCopy.fit("Play · what your lattice does" + at) }
+        let what = mm.map { String(format: "estimate \u{2248} %.1f mm", $0) } ?? "what your lattice does"
+        if views.contains(.bend) { return FlexibleRowCopy.fit("Bend · " + what + at) }
+        if views.contains(.play) { return FlexibleRowCopy.fit("Play · " + what + at) }
         if views.contains(.xray) { return FlexibleRowCopy.fit("X-ray · bend estimated from your lattice") }
         if !views.contains(.heatOff) { return FlexibleRowCopy.fit("Heat · estimated from your lattice") }
         return nil
@@ -306,6 +308,7 @@ extension FlexibleStageModel {
         guard isManual else { return nil }
         let kg = playingGroup.flatMap { groupForce($0)?.upperBound }
         return FlexibleManualCopy.viewLine(views: views, manual: true,
-                                           weight: kg.map { FlexibleRowCopy.weightText($0, weightUnit) })
+                                           weight: kg.map { FlexibleRowCopy.weightText($0, weightUnit) },
+                                           mm: playingGroup.flatMap { estimateDeepest($0) })   // ★ MANUAL (M2)
     }
 }

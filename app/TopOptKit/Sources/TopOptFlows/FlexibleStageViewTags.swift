@@ -150,6 +150,7 @@ enum FlexibleStageViewTags {
         let working = FlexibleStageOverlays.workingRegion(model: m)
         let key = "\(k)|\(working ?? -1)|\(m.settings.hashValue)|\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)|\(m.rail)"
             + "|\(FlexibleStageOverlays.controlGateOnSelectionOnly)|\(pose?.key ?? "rest")|\(FlexibleBendPose.controlInsideStays)"
+            + m.estimateKey   // ★ MANUAL (M2): the floors follow the estimate ("" in Auto)
         // ★ U21 batch F (DEPTH-LABEL, his Img9: "labelled correctly in both areas"): a face core builds short reads "0.6 of 7.0 mm"
         // — the card's and the chip's one number (FlexibleStageModel.reached; core's designs land after the floors are cached)
         func labelled(_ fs: [Floor]) -> [Floor] {
@@ -163,7 +164,7 @@ enum FlexibleStageViewTags {
         for f in m.settings.loadedFaces where f.faceRegionID != working && open.map({ $0.contains(f.faceRegionID) }) ?? true {
             let r = f.faceRegionID
             guard let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
-                  let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                  let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: m.shownDepthMM(f), k: k,   // ★ M2
                                                     footprint: m.prismFootprint(r)),
                   let h = FlexibleDepthPrism.handle((FlexibleBendPose.controlInsideStays ? nil : pose).map { $0.pose(v) } ?? v)
             else { continue }   // ★ R: at the full bend (the red control: F's tags, at rest)

@@ -63,6 +63,10 @@ struct FlexibleCurveEditor: View {
     var keepOut: [CGRect] = []
     /// ★ BATCH V (m19): what the drawing is cut out of — the whole chrome (the pop-up, the top line… too); nil: `keepOut`.
     var clip: [CGRect]? = nil
+    /// ★ MANUAL (M2, his picks of 2026-10-22: in Manual the curves "should show as a visualization, not an input"): what the
+    /// lattice does along this curve (squish share, 1 = the deepest, evenly over t) drawn in the same chart — no points, no taps,
+    /// no drags; empty: the chart's guides only (no estimate yet). nil: the editor as before.
+    var readOnlyValues: [Double]? = nil
     @State private var dragIndex: Int?
     /// Finger − point at the drag's start: the point moves WITH the finger, never jumps to it.
     @State private var grab: CGSize = .zero
@@ -97,8 +101,20 @@ struct FlexibleCurveEditor: View {
         return (try? FlexibleCore.penCurveValues(x: curve.x, y: curve.y, t: t)) ?? []
     }
 
+    /// `v` (evenly over t = 0…1) at the editor's own samples.
+    static func resampled(_ v: [Double]) -> [Double] {
+        guard let first = v.first else { return [] }
+        guard v.count > 1 else { return [Double](repeating: first, count: sampleCount + 1) }
+        return (0...sampleCount).map { i in
+            let x = Double(i) / Double(sampleCount) * Double(v.count - 1)
+            let a = Swift.min(v.count - 2, Int(x)), f = x - Double(a)
+            return v[a] * (1 - f) + v[a + 1] * f
+        }
+    }
+
     var body: some View {
-        let ys = samples
+        let ys = readOnlyValues.map(Self.resampled) ?? samples
+        let editable = readOnlyValues == nil
         let line: [CGPoint] = ys.enumerated().compactMap { i, y in screen(drawn(Double(i) / Double(Self.sampleCount), y)) }
         ZStack {
             Canvas { ctx, size in
@@ -123,8 +139,8 @@ struct FlexibleCurveEditor: View {
                     var v = Path(); v.move(to: a); v.addLine(to: b)
                     ctx.stroke(v, with: .color(tint.opacity(0.35)), lineWidth: 1)
                 }
-                // control points
-                for k in curve.x.indices {
+                // control points (★ M2: none read only)
+                for k in editable ? Array(curve.x.indices) : [] {
                     guard let p = screen(drawn(curve.x[k], curve.y[k])) else { continue }
                     let r: CGFloat = dragIndex == k || selected == k ? 11 : 8
                     ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)),
@@ -149,6 +165,7 @@ struct FlexibleCurveEditor: View {
             .allowsHitTesting(false)
             // ★ A THIN BAND ALONG THE CURVE takes a tap (a point lands there); everywhere else
             // a drag still orbits. SpatialTapGesture: iOS 16 has no onTapGesture(coordinateSpace:).
+            if editable {   // ★ MANUAL (M2): read only — no band, no handles, no ×
             Color.white.opacity(0.001)
                 .contentShape(FlexibleCurveBand(runs: Self.runsOutside(line, keepOut: keepOut, margin: Self.bandWidth / 2),
                                                 width: Self.bandWidth))
@@ -182,6 +199,7 @@ struct FlexibleCurveEditor: View {
                 .buttonStyle(.plain)
                 .position(x: p.x + 30, y: p.y - 30)
                 .accessibilityIdentifier("flexible-curve-point-delete-\(k)")
+            }
             }
             if let r = refusal {
                 VStack {

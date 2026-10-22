@@ -207,6 +207,7 @@ extension FlexibleStageModel {
 
     /// ★ U2: one curve of the draft (clamped: never past the flat face). Nothing reaches the press until [OK].
     public func setDraftCurve(_ axis: FlexiblePressCurveBaselines.Axis, _ c: FlexCurve) {
+        guard curvesAreInput else { return }   // ★ MANUAL (M2): the window shows what his lattice does — no point moves
         guard var d = curveDraft else { return }
         let m = FlexiblePressCurveBaselines.clamped(c)
         d.curves[axis] = m
@@ -221,7 +222,7 @@ extension FlexibleStageModel {
     public func closeCurveModal(keep: Bool) {
         guard let d = curveDraft else { return }
         curveDraft = nil
-        guard keep, d.curves != d.before else { return }
+        guard keep, curvesAreInput, d.curves != d.before else { return }   // ★ MANUAL (M2): nothing written in Manual
         project.sealUndoStep()   // what came before the window is its own step
         if let r = d.face {   // ★ X20b: a face's X and Y curves, one edit
             edit({ s in
@@ -342,11 +343,18 @@ struct FlexiblePressCurveModalView: View {
 
     private var isFace: Bool { strip == nil }
     private var pair: (top: Axis, bottom: Axis)? { FlexibleCurveMirror.copyPair(face: isFace, strip: strip) }
+    /// ★ MANUAL (M2, his picks of 2026-10-22: in Manual the curves "should show as a visualization, not an input"): the window
+    /// opens read only — "what your lattice does": the predicted profile in the same charts, no points, no Mirror / Copy, one line,
+    /// [Done].
+    private var readOnly: Bool { !model.curvesAreInput }
+    /// The predicted profiles (read only; [:] — guides only — while there is no estimate yet).
+    private var predicted: [Axis: [Double]]? { readOnly ? (model.predictedProfiles(draft) ?? [:]) : nil }
+    private var name: String { draft.press.map { model.stripTitle($0) } ?? draft.face.map { model.displayName($0) } ?? "" }
 
     private func card(width: CGFloat, height: CGFloat?, old3D: CGFloat?) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
             HStack(spacing: DS.Space.s) {
-                Text(FlexiblePressCurveModal.title(draft.press.map { model.stripTitle($0) } ?? draft.face.map { model.displayName($0) } ?? ""))
+                Text(readOnly ? FlexibleManualCopy.curveTitle(name) : FlexiblePressCurveModal.title(name))
                     .font(.system(size: 16, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: DS.Space.s)
@@ -360,22 +368,46 @@ struct FlexiblePressCurveModalView: View {
                         ForEach(strip.map { FlexiblePressCurveModal.tables2D($0, names: draft.press.map { model.stripFaceNames($0) } ?? []) }
                                 ?? FlexiblePressCurveModal.faceTables2D()) { t in
                             FlexibleCurveTable2D(table: t, curves: draft.curves, resetToken: draft.resets,
-                                                 chartHeight: old3D == nil ? nil : 170) { a, c in model.setDraftCurve(a, c) }
+                                                 chartHeight: old3D == nil ? nil : 170, predicted: predicted) { a, c in model.setDraftCurve(a, c) }
                         }
                     }
-                    if let p = pair, !L.controlOldWindowSize { column2D(p) }
+                    if let p = pair, !L.controlOldWindowSize, !readOnly { column2D(p) }
                 } else {
                     FlexibleCurveTable3D(camera: camera, curves3D: strip.map { FlexiblePressCurveModal.curves3D($0, cut: draft.press.flatMap { model.flatCut($0) }) }
                                             ?? FlexiblePressCurveModal.faceCurves3D(), face: isFace,
                                          curves: draft.curves, height: old3D, resetToken: draft.resets,
-                                         showsLegend: pair == nil || L.controlOldWindowSize) { a, c in model.setDraftCurve(a, c) }
-                    if let p = pair, !L.controlOldWindowSize { column3D(p) }
+                                         showsLegend: pair == nil || L.controlOldWindowSize || readOnly,
+                                         predicted: predicted) { a, c in model.setDraftCurve(a, c) }
+                    if let p = pair, !L.controlOldWindowSize, !readOnly { column3D(p) }
                 }
             }
             .frame(maxHeight: height == nil ? nil : .infinity, alignment: .top)
-            Text(FlexiblePressCurveModal.hint).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
+            if readOnly {
+                // ★ MANUAL (M2): ONE line — what the charts are, and the deepest estimate
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "eye").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.accent.color)
+                    Text(FlexibleManualCopy.curveNote(model.predictedDeepest(draft))).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("flexible-curve-modal-estimate")
+            } else {
+                Text(FlexiblePressCurveModal.hint).font(.system(size: 12, weight: .medium)).foregroundStyle(DS.Color.textTertiary.color)
+            }
             HStack(spacing: DS.Space.m) {
                 Spacer()
+                if readOnly {
+                    Button { model.closeCurveModal(keep: false) } label: {
+                        Text(FlexibleManualCopy.done).font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(FlexibleStageStyle.onAccent).padding(.horizontal, 26).frame(minHeight: 44)
+                            .background(Capsule().fill(FlexibleStageStyle.accent))
+                    }
+                    .buttonStyle(.plain)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveDone": g.frame(in: .global)])
+                    }.allowsHitTesting(false))
+                    .accessibilityIdentifier("flexible-curve-modal-done")
+                } else {
                 Button { model.closeCurveModal(keep: false) } label: {
                     Text(FlexiblePressCurveModal.cancel).font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(DS.Color.textPrimary.color).padding(.horizontal, 18).frame(minHeight: 44)
@@ -396,6 +428,7 @@ struct FlexiblePressCurveModalView: View {
                     Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["curveOK": g.frame(in: .global)])
                 }.allowsHitTesting(false))
                 .accessibilityIdentifier("flexible-curve-modal-ok")
+                }
             }
         }
         .padding(DS.Space.l)
@@ -507,6 +540,8 @@ struct FlexibleCurveTable2D: View {
     var resetToken: Int = 0
     /// nil: the chart fills its share of the window (U21 B); a number: that height (the red control's old window).
     var chartHeight: CGFloat? = nil
+    /// ★ MANUAL (M2): read only — each curve's predicted profile (nil: his curves, editable).
+    var predicted: [FlexiblePressCurveBaselines.Axis: [Double]]? = nil
     let onChange: (FlexiblePressCurveBaselines.Axis, FlexCurve) -> Void
     @State private var selected: [FlexiblePressCurveBaselines.Axis: Int] = [:]
 
@@ -522,7 +557,8 @@ struct FlexibleCurveTable2D: View {
                                             curve: curves[a] ?? FlexiblePressCurveBaselines.ones, label: "",
                                             tint: FlexiblePressCurveModal.tint(a),
                                             selected: Binding(get: { selected[a] }, set: { selected[a] = $0 }),
-                                            onChange: { onChange(a, $0) }, onCommit: {})
+                                            onChange: { onChange(a, $0) }, onCommit: {},
+                                            readOnlyValues: predicted.map { $0[a] ?? [] })
                     }
                 }
                 .coordinateSpace(name: FlexibleStageSpace.name)
@@ -562,6 +598,8 @@ struct FlexibleCurveTable3D: View {
     var resetToken: Int = 0
     /// The legend under the table (a corner, which has no column).
     var showsLegend: Bool = true
+    /// ★ MANUAL (M2): read only — each curve's predicted profile (nil: his curves, editable).
+    var predicted: [FlexiblePressCurveBaselines.Axis: [Double]]? = nil
     let onChange: (FlexiblePressCurveBaselines.Axis, FlexCurve) -> Void
     @State private var selected: [String: Int] = [:]
     @State private var dragLast: CGPoint?
@@ -591,7 +629,8 @@ struct FlexibleCurveTable3D: View {
                                                 curve: curves[c.axis] ?? FlexiblePressCurveBaselines.ones, label: "",
                                                 tint: FlexiblePressCurveModal.tint(c.axis),
                                                 selected: Binding(get: { selected[c.id] }, set: { selected[c.id] = $0 }),
-                                                onChange: { onChange(c.axis, $0) }, onCommit: {})
+                                                onChange: { onChange(c.axis, $0) }, onCommit: {},
+                                                readOnlyValues: predicted.map { $0[c.axis] ?? [] })
                         }
                     }
                     .coordinateSpace(name: FlexibleStageSpace.name)

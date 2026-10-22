@@ -205,7 +205,7 @@ struct FlexibleEdgeGroupRows: View {
             // ★ R7-E2 (found by looking — his twisted Edge 16: "Twist stops at 7° · lattice ends" hid "Twisted · squish shape up to
             // 16% off"): a lattice stop is said about his last change; the press's own line (not in the job and why · how far off a
             // twist is · core's side label) stays under it — two facts, a line each
-            if let why = model.pressRefusals[p.id] {
+            if !model.isManual, let why = model.pressRefusals[p.id] {   // ★ MANUAL (M2): core's design words — none in Manual
                 FlexWarningLine(text: why, id: "flexible-edge-press-refused")
             }
             // ★ R7-E1b: a group selection like the faces have — the press moves to another edges group (its one force)
@@ -240,7 +240,7 @@ struct FlexibleEdgeGroupRows: View {
                     }
                 }
             }
-            if model.pressRefusals[p.id] == nil, let w = model.pressWarning(p.id) {
+            if model.pressRefusals[p.id] == nil, !model.manualHidesPressLine(p.id), let w = model.pressWarning(p.id) {   // ★ M2
                 // ★ R7-E2: not in the job (its reason, 1–3 fixes) › twisted more than 2 % off › core's side label
                 pressWarningRow(p, w)
             }
@@ -304,6 +304,13 @@ struct FlexibleEdgeGroupRows: View {
         let f = FlexibleFlatPrismUI.frame(model, p.id)
         let name: (Int) -> String = { FlexibleFlatPrismUI.memberName(model, st, $0) }
         let steep = f?.thetaIsTwist ?? false   // ★ R7-E1b: Tilt = up/down, Twist = left/right
+        if !model.depthIsInput {
+            // ★ MANUAL (M2): the edge's depth is the app's estimate along its arrow — read only; Tilt / Twist below stay his
+            FlexibleManualEstimateRow(text: model.estimateLine(press: p.id) ?? FlexibleManualCopy.estimateLater,
+                                      info: FlexibleManualCopy.EstimateInfo.edge, id: "flexible-row-deepest-estimate",
+                                      frameKey: "manualEstimate-\(st.label)")
+                .background(publish("flatRow-deepest-\(st.label)"))
+        } else {
         FlexRow(FlexibleRowCopy.flatDeepestRow, info: FlexibleRowCopy.Info.flatDepth, id: "flexible-row-deepest") {
             FlexNumberBox(key: "flat-depth-card-\(p.id.uuidString)", title: st.label + " \u{00B7} " + FlexibleRowCopy.flatDeepestRow,
                           spec: FlexNumberSpec(value: shown.depthMM, unit: "mm", step: 0.5,
@@ -313,6 +320,7 @@ struct FlexibleEdgeGroupRows: View {
             }
         }
         .background(publish("flatRow-deepest-\(st.label)"))
+        }
         // ★ R7-E3 (carry-over (c), E1b's open question 2): the row that READS "Tilt" always comes first, then "Twist" — on a steep
         // edge the θ row reads "Twist", so it goes second (FlexibleFlatPrismUI.tiltFirst)
         let thetaFirst = FlexibleFlatPrismUI.thetaRowFirst(corner: corner, steep: steep)

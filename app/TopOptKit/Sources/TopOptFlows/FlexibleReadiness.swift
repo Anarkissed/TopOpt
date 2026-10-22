@@ -579,6 +579,7 @@ extension FlexibleStageModel {
             } else if let e = designErrors[k] {
                 design = fresh ? .failed(text(e)) : .pending
             }
+            if manualSkipsCore { design = .ok }   // ★ MANUAL (M2): nothing is designed in Manual — nothing to wait for, no refusal
             return FlexibleReadiness.Face(region: f.faceRegionID, weightKg: f.weightKg, stacked: st != nil,
                                           stackError: stackErrors[k].map { text($0) }, design: design,
                                           drawn: liveS[k] != nil, areaMM2: st?.areaMM2 ?? 0,

@@ -135,6 +135,7 @@ extension FlexibleStageModel {
             }
         }
         key += "|\(pressConflicts.map { "\($0.faceA),\($0.faceB)" })"
+        key += "|\(manualSkipsCore)"   // ★ MANUAL (M2): the gate reads it
         if let m = pressSupportMemo, m.key == key { return m.value }
         var out: [UUID: FlexiblePressSupport.Verdict] = [:]
         let two = Set(FlexibleEdgeStrips.regionsInTwoEntries(s))
@@ -160,7 +161,8 @@ extension FlexibleStageModel {
                 }
             }
             let facts = FlexiblePressSupport.Facts(schema: core.0, bridge: core.1, api: core.2, stacked: stacked, twoEntries: twice,
-                                                   shared: shared[p.id], designed: designed, designRefusal: refusal, conflict: pinches[p.id],
+                                                   shared: shared[p.id], designed: designed || manualSkipsCore,   // ★ MANUAL (M2): nothing to wait for
+                                                   designRefusal: refusal, conflict: pinches[p.id],
                                                    backend: FlexibleBackend.sendsPresses)
             out[p.id] = FlexiblePressSupport.verdict(facts)
         }

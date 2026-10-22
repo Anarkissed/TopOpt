@@ -264,6 +264,7 @@ final class FlexibleM1ManualTests: XCTestCase {
 
         // RED CONTROL: core's design in Manual — the lattice is graded again, not his values
         FlexibleStageModel.controlManualLatticeOff = true
+        m.recomputeAll()   // ★ M2: Manual asks core for no design — the red control's core design is asked for again
         m.discardLattice()
         let red = try await FlexibleSquishFixture.build(m, "his pad · Manual · RED")
         XCTAssertFalse(rhoSet(red.inputs).isSubset(of: [0.2, 0.3]), "RED control (core's design) must not be his densities")
