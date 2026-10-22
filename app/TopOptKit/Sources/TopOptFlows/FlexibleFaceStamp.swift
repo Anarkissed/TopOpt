@@ -326,8 +326,8 @@ struct FlexibleFaceStampRows: View {
                         .accessibilityIdentifier("flexible-row-stamp-main-page")
                     let err = model.stampError(p.id)
                     if !err.isEmpty { FlexWarningLine(text: FlexibleRowCopy.fit(err), id: "flexible-row-stamp-error") }
-                    if let d = model.design(region), d.designStampOffFace {
-                        FlexWarningLine(text: FlexibleRowCopy.stampOffFace(d.designStampOffFaceN), id: "flexible-row-stamp-offface")
+                    if let n = model.stampOffFaceN(region: region) {   // ★ MANUAL (M2 check): core's design word — none in Manual
+                        FlexWarningLine(text: FlexibleRowCopy.stampOffFace(n), id: "flexible-row-stamp-offface")
                     }
                 }
                 if let e = importError { FlexWarningLine(text: FlexibleRowCopy.fit(e), id: "flexible-row-stamp-import-error") }

@@ -16,6 +16,7 @@ final class FlexibleM2PredictTests: XCTestCase {
         FlexibleStageModel.controlDesignsInManual = false
         FlexibleStageModel.controlManualDepthEditable = false
         FlexibleStageModel.controlManualCurvesEditable = false
+        FlexibleStageModel.controlStampOffFaceInManual = false
         super.tearDown()
     }
 
@@ -207,5 +208,22 @@ final class FlexibleM2PredictTests: XCTestCase {
         XCTAssertNotEqual(m.curveDraft?.curves, d.curves, "★ Auto edits as before")
         m.closeCurveModal(keep: false)
         XCTAssertEqual(m.settings.face(c)?.curveX, stored.curveX)
+    }
+
+    // MARK: 5 (reviewer check) — core's "N of the stamp lands off the face" is not shown in Manual (RED: shown)
+
+    func testTheStampOffFaceLineIsHiddenInManual() async throws {
+        let (_, m) = try await opened(FlexibleU21DeleteUndoTests.padDir, "his pad")
+        let r = try XCTUnwrap(m.settings.loadedFaces.first { f in
+            m.design(f.faceRegionID)?.designStampOffFace == true }?.faceRegionID, "premise: his pad has a stamp partly off its face")
+        let autoN = try XCTUnwrap(m.stampOffFaceN(region: r), "★ Auto: the line is there")
+        m.setManual(true)
+        XCTAssertNil(m.stampOffFaceN(region: r), "★ Manual: core's design word is not shown")
+        // RED CONTROL: shown in Manual
+        FlexibleStageModel.controlStampOffFaceInManual = true
+        XCTAssertNotNil(m.stampOffFaceN(region: r), "RED control (shown in Manual) must show the line")
+        FlexibleStageModel.controlStampOffFaceInManual = false
+        m.setManual(false)
+        XCTAssertEqual(m.stampOffFaceN(region: r), autoN, "★ Auto unchanged")
     }
 }

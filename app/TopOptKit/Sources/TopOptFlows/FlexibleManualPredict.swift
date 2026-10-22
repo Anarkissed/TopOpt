@@ -274,3 +274,13 @@ extension FlexibleStageModel {
         }
     }
 }
+
+extension FlexibleStageModel {
+    /// ★ MANUAL (M2 reviewer check): the face card's "3.0 N of the stamp lands off the face" is core's DESIGN word — none in
+    /// Manual (his orders: Auto's checks are not shown in Manual). nil: no line.
+    nonisolated(unsafe) static var controlStampOffFaceInManual = false
+    public func stampOffFaceN(region r: Int) -> Double? {
+        guard !isManual || Self.controlStampOffFaceInManual, let d = design(r), d.designStampOffFace else { return nil }
+        return d.designStampOffFaceN
+    }
+}
