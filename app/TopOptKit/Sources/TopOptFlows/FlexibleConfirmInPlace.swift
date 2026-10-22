@@ -5,8 +5,9 @@
 // gets the SAME confirm as a group").
 //
 // ★ THE RULE (one for every delete): the tapped control's place turns into [Keep] (or [Cancel]) — its CENTRE exactly where the
-// tapped control's centre was, so a second tap on the same spot only cancels; the question and the red button sit to its LEFT,
-// the red button's trailing edge at least `gap` (24 pt) left of Keep's leading edge, so confirming needs a move. A tap elsewhere
+// tapped control's centre was and (fix round 2) at least as wide as the control, so a second tap anywhere on the same spot only
+// cancels; the question and the red button sit to its LEFT, the red button's trailing edge at least `gap` (24 pt) left of Keep's
+// leading edge — so at least 24 pt clear of the control he tapped — and confirming needs a move. A tap elsewhere
 // (another face, a row, the part) or a tab change drops the ask (`dropInPlaceAsks`). Applied to: the face row's take-out (⊖),
 // an edge / corner press's trash, a group's trash (it asked in the panel's top line before), Reset all, the fix pop-up's
 // [Remove Face N] / a kept-out press's [Remove] (two taps with a move: his words beat the one-tap-fix rule for deletes) — and,
@@ -74,9 +75,25 @@ struct FlexibleConfirmInPlace: ViewModifier {
     @MainActor static var controlOldPlacement = false
     /// ★ RED CONTROL (hosted, U21 fix round 1): the red button always on the left — a first fix's [Remove] leaves its row.
     @MainActor static var controlRedAlwaysLeading = false
+    /// ★ RED CONTROL (hosted, U21 fix round 2): [Keep] always 64 pt wide — on a wide fix button ([Remove Face 5], 128–143 pt)
+    /// the red [Remove] then sits 9–16 pt over the button he tapped (the gap was measured from Keep, not from the button).
+    @MainActor static var controlGapFromKeepOnly = false
+
+    /// The tapped control's own width (measured while it shows).
+    @State private var controlWidth: CGFloat = 0
+
+    /// ★ U21 FIX ROUND 2 (the check: his Img13 "the OK button somewhere else so it requires a move to confirm"): [Keep] covers
+    /// the WHOLE tapped control — never narrower than it — so the red button's ≥ 24 pt gap is measured from the control's own
+    /// edge; a second tap anywhere on the button he tapped only keeps.
+    @MainActor var keepFrameWidth: CGFloat {
+        Self.controlGapFromKeepOnly ? FlexibleConfirmLayout.keepWidth : max(FlexibleConfirmLayout.keepWidth, controlWidth.rounded(.up))
+    }
 
     func body(content: Content) -> some View {
         content
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleConfirmControlWidthKey.self, value: g.size.width) })
+            .onPreferenceChange(FlexibleConfirmControlWidthKey.self) { controlWidth = $0 }
+            .transformPreference(FlexibleConfirmControlWidthKey.self) { $0 = 0 }   // (never an enclosing ask's)
             .opacity(asking ? 0 : 1)
             .allowsHitTesting(!asking)
             .overlay(alignment: Alignment(horizontal: .flexKeepCentre, vertical: .center)) {
@@ -99,9 +116,9 @@ struct FlexibleConfirmInPlace: ViewModifier {
         let keepButton = Button(action: cancel) {
             Text(keep).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).fixedSize()
-                .frame(width: FlexibleConfirmLayout.keepWidth - 8, height: 32)
+                .frame(width: keepFrameWidth - 8, height: 32)
                 .background(Capsule().fill(DS.Color.chipSolid.color))
-                .frame(width: FlexibleConfirmLayout.keepWidth, height: FlexibleTargets.side(32))
+                .frame(width: keepFrameWidth, height: FlexibleTargets.side(32))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -140,6 +157,11 @@ struct FlexibleConfirmInPlace: ViewModifier {
         GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }
             .allowsHitTesting(false)
     }
+}
+
+private struct FlexibleConfirmControlWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// The Lattice page's variant: [Cancel] takes the tapped control's place (centred on it); the question and [Delete] are drawn by

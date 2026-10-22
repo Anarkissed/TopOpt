@@ -86,6 +86,41 @@ confirmation button that is required? And if there is, is the "cancel" button wh
 somewhere else so it requires a move to confirm?) Then I hit undo and now it shows the bend on the model but it is not actually
 showing the face in the modal anymore? That's clearly a bug."
 
+### Fix round 2 (the second check: the red [Remove] still overlapped the wide button you tapped)
+- **What you will see now:** when you tap a wide fix button ([Remove Face 5], [Remove Edge 12]), [Keep] now covers the WHOLE
+  button, not a 64 pt chip in its middle, and the red [Remove] starts at least 24 pt past the button's own edge. A second tap
+  anywhere on the button you tapped only keeps; confirming always needs a move (your Img13: "the OK button somewhere else so it
+  requires a move to confirm"). The small icon controls (the face ⊖, the trashes) are unchanged: Keep was already wider than
+  them.
+- **What was wrong:** the 24 pt gap was measured from the 64 pt [Keep], not from the button you tapped, so on a 128–143 pt fix
+  button the red [Remove] sat 9–16 pt over that button's ends (pop-up [Remove Face 5] 54–194, red from 180; card [Remove Edge 12]
+  40–183, red from 167; warning row 40–168, red from 159; callout 162–296, red to 173).
+- **What changed:** `FlexibleConfirmInPlace` measures the tapped control's width and makes [Keep] at least that wide (its capsule
+  too), centred on it. Now (pad, 13" portrait): pop-up button 54–194 → Keep 54–194, red 218–293; card 40–183 → Keep 39–183, red
+  206–282; warning row 40–168 → Keep 39–168, red 191–267; callout (second fix) 162–296 → Keep 161–296, red 63–138.
+- **"Delete Flexible lattice" sheet:** the glass that shows before the ask is now centred on the page (it sat 50 pt above centre:
+  glass 319–955 in 1376; now 370–1006). The sheet moves down by half the hidden lines' height and stays there while it asks, so
+  the button does not move and [Cancel] still lands on it. A tap on the clear strip under the glass closes the sheet, like any
+  tap outside it.
+- **Wording corrected:** a first fix's red [Remove] STARTS inside its row and runs past the row's own (hugging) frame into the
+  card's free width; it ends at most 252 pt from the row's start, inside the narrowest panel's 308 pt (the mini's 336 less its
+  sides). The earlier text said "inside its row".
+- Tests (red controls asserted red inside): `FlexibleU2Tests.testU21FixRowsRemoveAskInPlace` now asserts, for all four rows, the
+  red button ≥ 24 pt clear of the tapped button's own frame, not intersecting it, [Keep] at least the button's width, and the
+  red's end within 308 pt of the row's start; RED `controlGapFromKeepOnly` (Keep 64 pt): the callout's red 98–173 and the
+  pop-up's 180–255 over their buttons. `testU21ConfirmKeepSitsOnTheTappedControl` asserts the same clearance for the ⊖, the
+  group trash, Reset all and Edge 12's trash (all clear). `testU21DeleteLatticeSheetCancelOnTheButton` asserts the glass centred
+  (± 2 pt); RED `controlOffCentre`: 50 pt above.
+- Runs (`round7/batch_u21_d/u21_d_fix2_runs.txt`): the changed tests 15/15 first; then the same 67 classes as fix round 1
+  (they include the pins of `FlexibleConfirmInPlace.swift` and `FlexibleStageChrome.swift`, and FlexibleSquishCopyTests):
+  **440 tests, 1 skipped, 1 failure = the known Play ring** (20 px). No signal. Goldens 38 identical / 0 DIFFERS
+  (deterministic), 32 + 1 PART-SKIP / 0 DIFFERS (unseeded). The 16 stage-job hashes cmp-identical to `stage_job_hashes_x20b.txt`
+  (whole file; `stage_job_hashes_u21d_fix2.txt`). Renders looked at: `look/U21_D6` (the warning row asking: a wide [Keep] on
+  the button, [Remove] past it), `U21_D8` (the sheet centred), `U21_D9` (asking; [Cancel] on the button).
+- **Still open:** the four fix rows are measured in a test layout with your pad's model behind them, not on the real Lattice
+  page, card and edges card with a live refusal or shared-surface warning (your projects show none), so the real-page placement
+  (what sits to the right, clipping) is proven only by the width check above.
+
 ### Fix round 1 (the check of this batch; read with the sections below, which are corrected to match)
 - **The blocker: two one-tap deletes were left.** On the Lattice page the blocker callout and the Lattice card's Core row applied
   [Remove Face N] (offered on every "Face N can't be squished here") and a kept-out press's [Remove Edge N] on one tap; on the
@@ -95,6 +130,7 @@ showing the face in the modal anymore? That's clearly a bug."
   The other fixes ([Face 5 rests], [Shallower]) still apply on one tap.
 - **A first fix's [Remove] no longer leaves its row:** when the Remove button is the row's first (the pop-up's only fix, a
   kept-out press's only fix, the warning row's only fix), the red [Remove] goes to the RIGHT of [Keep], the same ≥ 24 pt move.
+  (Fix round 2: it starts inside the row and runs past the row's hugging frame; [Keep] now covers the whole button.)
 - **Your l-bracket (22.png's state):** the take-out question named the section ("Take Face 6 · lattice out?"); its left end
   came to x 110 pt, exactly where the Group tab ends (110). It now names the face only, "Take Face 6 out?", starting at x 161
   pt inside the face card (`look/U21_D7`).
@@ -126,8 +162,9 @@ showing the face in the modal anymore? That's clearly a bug."
   [Remove] [Keep]"), a group's trash ("Delete Group 1? [Delete] [Keep]", now on the group's own line, not the panel's top line),
   Reset all ("Reset every setting here? [Reset] [Cancel]") and every [Remove Face N] / [Remove Edge 12] fix button, wherever it
   shows: the Squish page's pop-up, the edges card's warning row, and on the Lattice page the blocker callout and the Lattice
-  card's Core row (fix round 1). The fix button turns into [Keep], the red [Remove] appears beside it (to its left; to its right
-  when it is the row's first button, so it never leaves the row): two taps with a move, your words beating the one-tap-fix rule
+  card's Core row (fix round 1). The fix button turns into [Keep] (as wide as the button, fix round 2), the red [Remove] appears
+  at least 24 pt past the button's edge (to its left; to its right when it is the row's first button, so it never starts outside
+  the row): two taps with a move, your words beating the one-tap-fix rule
   for deletes. Tapping the part, another row or another tab drops the question. On your l-bracket the question reads "Take Face 6
   out?" (the face's own name: the section's " · lattice" is left off so the line stays inside the card).
 - **On the Lattice page** the Selections trash and the chip's trash turn into [Cancel] in place; [Delete] and the question go on
@@ -207,7 +244,8 @@ E(2). `FlexibleR7RHostedTests`' red control (F's 32 pt) kept: the confirm reads 
 ### Not done / open
 - F12's hold: an edit you make within that ~0.5–1 s (before the re-opened scene lands) joins the trash's step; an action that
   seals its own step (another delete, Undo) still seals at once.
-- (Fixed in fix round 1: a first fix's [Remove] now goes to the right of [Keep], inside its row.)
+- (Fixed in fix round 1: a first fix's [Remove] now goes to the right of [Keep], starting inside its row. Fix round 2: [Keep]
+  covers the whole tapped button, the red ≥ 24 pt past its edge.)
 - F12's hold re-announces the project's change every 150 ms (at most 5 s) and holds the model's save meanwhile; the clean way
   would be an undo-merge hook in ProjectModel (#354's file; not asked). On the reviewer's list.
 

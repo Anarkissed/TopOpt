@@ -254,7 +254,12 @@ final class FlexibleU2Tests: XCTestCase {
     struct Asked { let control: CGRect; let keep: CGRect?; let confirm: CGRect?
         var keepOnSpot: Bool { keep.map { abs($0.midX - control.midX) <= 1 && abs($0.midY - control.midY) <= 1 } ?? false }
         var clear: Bool { if let k = keep, let c = confirm { return c.maxX <= k.minX - FlexibleConfirmLayout.gap + 0.5 }; return false }
-        var line: String { "control \(control.integral) · keep \(keep.map { "\($0.integral)" } ?? "-") · red \(confirm.map { "\($0.integral)" } ?? "-") · on spot \(keepOnSpot) · ≥24 pt clear \(clear)" }
+        /// ★ U21 fix round 2 (the check): the red button ≥ 24 pt clear of the control he TAPPED (its own frame, not Keep's).
+        var clearOfControl: Bool {
+            guard let c = confirm else { return false }
+            return c.maxX <= control.minX - FlexibleConfirmLayout.gap + 0.5 || c.minX >= control.maxX + FlexibleConfirmLayout.gap - 0.5
+        }
+        var line: String { "control \(control.integral) · keep \(keep.map { "\($0.integral)" } ?? "-") · red \(confirm.map { "\($0.integral)" } ?? "-") · on spot \(keepOnSpot) · ≥24 pt clear \(clear) · ≥24 pt clear of the tapped control \(clearOfControl)" }
     }
 
     /// Click `controlKey`, measure the ask, then click the SAME spot again (a double tap): it only cancels.
@@ -306,6 +311,7 @@ final class FlexibleU2Tests: XCTestCase {
         for (name, a) in [("face ⊖", face), ("group trash", group), ("Reset all", reset), ("edge trash", press)] {
             XCTAssertTrue(a.keepOnSpot, "★ \(name): [Keep] centred on the tapped control ±1 pt (\(a.line))")
             XCTAssertTrue(a.clear, "★ \(name): the red button ≥ 24 pt left of [Keep] (\(a.line))")
+            XCTAssertTrue(a.clearOfControl, "★ \(name): the red button ≥ 24 pt clear of the tapped control (\(a.line))")
             if let k = a.keep { XCTAssertGreaterThanOrEqual(k.height, 44 - 0.5, "\(name): a 44 pt target") }
         }
         // the confirm itself: [Take out] removes Face 5
@@ -341,6 +347,7 @@ final class FlexibleU2Tests: XCTestCase {
             await m.waitForIdle()
             FlexibleStageModel.controlRemoveAtOnce = false
             FlexibleConfirmInPlace.controlRedAlwaysLeading = false
+            FlexibleConfirmInPlace.controlGapFromKeepOnly = false
             FlexibleStageModel.controlTakeOutFullName = false
             FlexibleStageSheet.controlBlankBlock = false
         }
@@ -400,11 +407,19 @@ final class FlexibleU2Tests: XCTestCase {
             let (a, row) = try run(c)
             let red = a.confirm ?? .zero
             let side = c.first ? (red.minX >= (a.keep?.maxX ?? 0) + FlexibleConfirmLayout.gap - 0.5) : a.clear
+            // (the row's own frame hugs its buttons: a first fix's red [Remove] starts inside it and runs past its trailing end
+            // into the card's free width — recorded, not claimed as "inside")
             let inside = red.minX >= row.minX - 0.5
-            lines.append("\(c.name): \(a.line) · row x \(Int(row.minX))…\(Int(row.maxX)) · red \(c.first ? "right" : "left") clear \(side) · inside \(inside)")
+            lines.append("\(c.name): \(a.line) · row x \(Int(row.minX))…\(Int(row.maxX)) · red \(c.first ? "right" : "left") clear \(side) · starts in the row \(inside) · red ends \(Int(red.maxX - row.minX)) pt from the row's start")
             XCTAssertTrue(a.keepOnSpot, "★ \(c.name): [Keep] on the tapped button (\(a.line))")
             XCTAssertTrue(side, "★ \(c.name): the red button ≥ 24 pt from [Keep] (\(a.line))")
-            XCTAssertTrue(inside, "★ \(c.name): the red button inside its row (red \(red.integral), row \(row.integral))")
+            XCTAssertTrue(a.clearOfControl, "★ \(c.name): the red button ≥ 24 pt clear of the button he tapped (\(a.line))")
+            XCTAssertFalse(red.intersects(a.control), "★ \(c.name): the red button off the tapped button (red \(red.integral), button \(a.control.integral))")
+            XCTAssertGreaterThanOrEqual((a.keep ?? .zero).width, a.control.width - 0.5, "★ \(c.name): [Keep] covers the whole button")
+            XCTAssertTrue(inside, "★ \(c.name): the red button starts inside its row (red \(red.integral), row \(row.integral))")
+            // (the narrowest panel these rows sit in: the mini's 336 pt less its 14 pt sides — the red's end must fit it)
+            let narrowest = FlexibleChromeLayout.panelWidth(CGSize(width: 744, height: 1133)) - 2 * DS.Space.ml
+            XCTAssertLessThanOrEqual(red.maxX - row.minX, narrowest, "★ \(c.name): the red button ends within the narrowest panel's \(Int(narrowest)) pt")
         }
         // the confirm itself (the warning row): [Remove] removes Edge 12
         let pc = try XCTUnwrap(h.frames.all["press-" + pf.id])
@@ -418,6 +433,15 @@ final class FlexibleU2Tests: XCTestCase {
         try await FlexibleHisProject.waitFor(60, "★ [Remove]: Edge 12 goes") { m.settings.press(e12.id) == nil }
         XCTAssertNil(m.settings.press(e12.id), "★ [Remove]: Edge 12 goes")
         pump(0.5)
+        // RED CONTROL 0 (fix round 2): [Keep] 64 pt wide, the gap measured from Keep — the red [Remove] over the wide button
+        FlexibleConfirmInPlace.controlGapFromKeepOnly = true
+        for i in [0, 2] {
+            let (ga, _) = try run(cases[i])
+            lines.append("RED gap from Keep only (\(cases[i].name)): \(ga.line)")
+            XCTAssertTrue((ga.confirm ?? .zero).intersects(ga.control), "RED CONTROL: the red [Remove] over the button he tapped (\(ga.line))")
+            XCTAssertFalse(ga.clearOfControl, "RED CONTROL: not 24 pt clear of the tapped button")
+        }
+        FlexibleConfirmInPlace.controlGapFromKeepOnly = false
         // RED CONTROL 1: a first fix's red button on the left leaves its row
         FlexibleConfirmInPlace.controlRedAlwaysLeading = true
         let (ra, rrow) = try run(cases[2])
@@ -482,11 +506,13 @@ final class FlexibleU2Tests: XCTestCase {
         var deleted = 0
         // (the sheet's own window: the page's full-screen size, as the app presents it)
         let h = host(FlexibleStageSheet(onDelete: { deleted += 1 }, onClose: {}).frame(width: Self.p13.width, height: Self.p13.height), size: Self.p13)
-        addTeardownBlock { @MainActor in FlexibleStageSheet.controlBlankBlock = false }
+        addTeardownBlock { @MainActor in FlexibleStageSheet.controlBlankBlock = false; FlexibleStageSheet.controlOffCentre = false }
         pump(1.2)
         let b = try XCTUnwrap(h.frames.all["latticeModeDelete"], "the button")
         let glass = try XCTUnwrap(h.frames.all["stageSheetGlass"], "the glass")
-        var lines = ["button \(b.integral) · glass \(glass.integral) (not asking)"]
+        var lines = ["button \(b.integral) · glass \(glass.integral) (not asking) · window height \(Int(Self.p13.height))"]
+        // ★ U21 fix round 2 (the check: the visible sheet sat above centre, glass 319-955 in 1376): the glass is centred
+        XCTAssertEqual(glass.midY, Self.p13.height / 2, accuracy: 2, "★ the glass shown before the ask is centred on the page (\(glass.integral))")
         XCTAssertLessThanOrEqual(glass.maxY - b.maxY, DS.Space.xl4 + 1, "★ the glass ends under the button (no blank block)")
         XCTAssertGreaterThanOrEqual(glass.maxY - b.maxY, DS.Space.xl4 - 1)
         try shot("U21_D8_13p_delete_sheet_before.png", h, settle: 0.2)
@@ -516,6 +542,14 @@ final class FlexibleU2Tests: XCTestCase {
         lines.append("RED blank block: glass bottom \(Int(rg.maxY - rb.maxY)) pt under the button")
         XCTAssertGreaterThan(rg.maxY - rb.maxY, DS.Space.xl4 + 40, "RED CONTROL: the blank block under the button")
         FlexibleStageSheet.controlBlankBlock = false
+        // RED CONTROL (fix round 2): no centring — the shortened glass above the page's centre
+        FlexibleStageSheet.controlOffCentre = true
+        let h3 = host(FlexibleStageSheet(onDelete: {}, onClose: {}).frame(width: Self.p13.width, height: Self.p13.height), size: Self.p13)
+        pump(1.2)
+        let og = try XCTUnwrap(h3.frames.all["stageSheetGlass"])
+        FlexibleStageSheet.controlOffCentre = false
+        lines.append("RED off centre: glass \(og.integral), its middle \(Int(Self.p13.height / 2 - og.midY)) pt above the page's")
+        XCTAssertLessThan(og.midY, Self.p13.height / 2 - 40, "RED CONTROL: the glass above centre")
         log = lines
         flush("u21_d_sheet_lines.txt")
     }

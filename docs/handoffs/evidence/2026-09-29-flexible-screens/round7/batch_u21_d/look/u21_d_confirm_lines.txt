@@ -1,5 +1,5 @@
-face ⊖: control (386.0, 748.0, 44.0, 44.0) · keep (376.0, 748.0, 64.0, 44.0) · red (274.0, 748.0, 78.0, 44.0) · on spot true · ≥24 pt clear true
-group trash: control (394.0, 565.0, 44.0, 44.0) · keep (384.0, 565.0, 64.0, 44.0) · red (295.0, 565.0, 65.0, 44.0) · on spot true · ≥24 pt clear true
-Reset all: control (369.0, 509.0, 71.0, 44.0) · keep (372.0, 509.0, 65.0, 44.0) · red (288.0, 509.0, 61.0, 44.0) · on spot true · ≥24 pt clear true
-edge trash: control (434.0, 564.0, 44.0, 44.0) · keep (424.0, 564.0, 64.0, 44.0) · red (325.0, 564.0, 75.0, 44.0) · on spot true · ≥24 pt clear true
-RED old placement (face ⊖): control (386.0, 1165.0, 44.0, 44.0) · keep (312.0, 1165.0, 64.0, 44.0) · red (226.0, 1165.0, 78.0, 44.0) · on spot false · ≥24 pt clear false
+face ⊖: control (386.0, 748.0, 44.0, 44.0) · keep (376.0, 748.0, 64.0, 44.0) · red (274.0, 748.0, 78.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true
+group trash: control (394.0, 565.0, 44.0, 44.0) · keep (384.0, 565.0, 64.0, 44.0) · red (295.0, 565.0, 65.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true
+Reset all: control (369.0, 509.0, 71.0, 44.0) · keep (369.0, 509.0, 72.0, 44.0) · red (285.0, 509.0, 61.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true
+edge trash: control (434.0, 564.0, 44.0, 44.0) · keep (424.0, 564.0, 64.0, 44.0) · red (325.0, 564.0, 75.0, 44.0) · on spot true · ≥24 pt clear true · ≥24 pt clear of the tapped control true
+RED old placement (face ⊖): control (386.0, 1165.0, 44.0, 44.0) · keep (312.0, 1165.0, 64.0, 44.0) · red (226.0, 1165.0, 78.0, 44.0) · on spot false · ≥24 pt clear false · ≥24 pt clear of the tapped control true

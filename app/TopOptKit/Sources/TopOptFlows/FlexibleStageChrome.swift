@@ -111,6 +111,7 @@ public struct FlexibleStageSheet: View {
     public let onClose: () -> Void
     @State private var confirming = false
     @State private var askTop: CGFloat = 0
+    @State private var sheetHeight: CGFloat = 0
 
     public init(onDelete: @escaping () -> Void, onClose: @escaping () -> Void) {
         self.onDelete = onDelete
@@ -245,6 +246,12 @@ public struct FlexibleStageSheet: View {
                     .frame(height: Self.glassHeight(confirming: confirming, askTop: askTop))
                     .background(FlexibleConfirmInPlace.publish("stageSheetGlass"))
             }
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleSheetHeightKey.self, value: g.size.height) })
+            .onPreferenceChange(FlexibleSheetHeightKey.self) { sheetHeight = $0 }
+            // ★ U21 FIX ROUND 2 (the check: "the visible sheet sits above centre"): the glass that shows before the ask is CENTRED
+            // on the page — the whole sheet moves down by half the hidden lines' height, and stays there while it asks (the
+            // button never moves, so [Cancel] still lands on it; the glass then grows downward to the red button)
+            .offset(y: Self.centringOffset(sheetHeight: sheetHeight, askTop: askTop))
         }
         .accessibilityIdentifier("flexible-stage-sheet")
     }
@@ -257,6 +264,19 @@ public struct FlexibleStageSheet: View {
         guard !confirming, !controlBlankBlock, askTop > 0 else { return nil }
         return askTop - DS.Space.l + DS.Space.xl4
     }
+    /// ★ RED CONTROL (hosted, U21 fix round 2): no centring — the shortened glass sits above the page's centre.
+    @MainActor static var controlOffCentre = false
+    /// Half the hidden lines' height (the sheet's laid-out height less the glass shown before the ask).
+    @MainActor static func centringOffset(sheetHeight: CGFloat, askTop: CGFloat) -> CGFloat {
+        guard !controlOffCentre, !controlBlankBlock, sheetHeight > 0,
+              let shown = glassHeight(confirming: false, askTop: askTop) else { return 0 }
+        return max(0, (sheetHeight - shown) / 2).rounded()
+    }
+}
+
+private struct FlexibleSheetHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct FlexibleSheetAskTopKey: PreferenceKey {
