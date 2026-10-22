@@ -75,7 +75,42 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
-## ★ Round 7 · U21 batch G — your notes of 2026-10-21, Img1 / Img2 / Img15: the Top and Bottom meet the side's dent, edges bend, no zig-zag (2026-10-21; fix round 1 2026-10-22) (read this first)
+## ★ Round 7 · U21 checkpoint 1 — batches D, G, C and B together, installed (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). App only; core untouched; no #354/main file edited.
+
+### What you will see in this install
+- **Deleting asks first, in place (D).** Every remove (a face, a group, an edge, a fix button) shows [Keep] right where you tapped
+  and the red button off to the side, so a double tap only keeps. Undo puts the panel back. The "Delete Flexible lattice" sheet is centred.
+- **Bend bends everything (G).** The Top and Bottom follow a side's dent; an edges group bends (the edge preview with no lattice),
+  and the stamp outline drops into the dent.
+- **The Lattice page's two handles (C).** Expand is now a "+", depth keeps its arrow, and they stay at least 24 pt apart.
+- **The curves window (B).** It fills 80 % of the screen, with Mirror (Left → Right / Right → Left) beside each chart and Copy
+  (X → Y / Y → X; Across / Along for an edge) between them.
+
+### How they were put together
+- Batches C and B were built on the side branch `claude/flexible-screens-u21-side` and cherry-picked here with `-x`
+  (31496aeb, 769f924c, 755b7c5b, 4321c453 → 74a1ede1, 4823fd74, 61f12fdf, ac251685). The only conflict was this handoff's top
+  (both lanes wrote it): both kept in full — CORE LIST, then G, D, B, C, X20b. No code conflict; no integration fix was needed.
+
+### Runs (`round7/batch_u21_integ1/u21_integ1_runs.txt`)
+- The union of the four batches' classes and pins (104 classes, incl. FlexibleSquishCopyTests and LatticeStaleTypeTests):
+  643 passed, 0 failed, 3 skipped (the evidence/picture probes), 0 signal lines. The known Play ring passed this time.
+- Goldens (FlexibleAngledGoldenTests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes (`stage_job_hashes_u21_integ1.txt`) are cmp-identical to x20b, u21d_fix2, u21g_fix1 and u21b.
+- iOS: BUILD SUCCEEDED at ac251685. The app WAS running, so it was terminated first; installed 02:54:32, NOT launched. The
+  installed dylib matches the build (cmp; sha256 8856b225…), and the batches' strings are in it ("Edge preview · no lattice",
+  "Left → Right", "Along → Across", "Mirror the …", FlexibleCurveMirror, FlexibleLegendLine, centringOffset).
+
+### Still open (from the four checkers; none blocks)
+- D: the delete sheet's downward shift is not limited to the window (short landscape iPads); the sheet's [Cancel] is not as wide
+  as its button; a short first fix could push a second Remove's red out of its row; the fix rows are unproven on the real page.
+- G: a sharp fold is left where an edge stamp's rim meets the prism floor; one open-list line about the glass contradicts fix 1.
+- C: near the screen's edge the "+" can flip to the other side of the floor, and then a drag runs the wrong way.
+- B: Right → Left stays lit after Left → Right on your Face 6 (a 3.5e-17 rounding difference); the 3D curves grew only ~27 %;
+  the 3D L / R tags sit by the second point, not the curve ends.
+
+## ★ Round 7 · U21 batch G — your notes of 2026-10-21, Img1 / Img2 / Img15: the Top and Bottom meet the side's dent, edges bend, no zig-zag (2026-10-21; fix round 1 2026-10-22) (in checkpoint 1 above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `f1928c96` (batch D's fix round 2). NOT pushed (your HOLD). App only; core
 untouched; no #354/main file edited, no new hook. Judged on your live projects of 10-21 (`round7/batch_u21/his_live_1021_pad`,
