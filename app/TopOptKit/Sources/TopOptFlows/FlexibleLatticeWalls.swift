@@ -268,8 +268,11 @@ public enum FlexibleLatticeWalls {
             let seams = l < spec.outlineSeams.count ? spec.outlineSeams[l] : []
             let wl = l < wire.count ? wire[l] : []
             for i in loop.indices {
-                if i < seams.count, seams[i] { continue }                 // a seam is never a wall
                 let a = loop[i], b = loop[(i + 1) % loop.count]
+                if i < seams.count, seams[i] {                            // a seam is never a wall: the lattice continues there
+                    if let ri = runOf(to3(a), to3(b)) { acc[ri].seamEdges += 1 }
+                    continue
+                }
                 guard simd_distance(a, b) > 1e-9, let ri = runOf(to3(a), to3(b)) else { continue }
                 // the wire edges on this edge's offset line (matched by LINE, never by index)
                 let d = simd_normalize(b - a)
@@ -285,7 +288,8 @@ public enum FlexibleLatticeWalls {
                     guard abs(dp - (controlWallsFromTheFaceOutline ? 0 : g)) < 1e-4, abs(dq2 - dp) < 1e-4 else { continue }
                     let tp = simd_dot(p - a, d), tq = simd_dot(q - a, d)
                     guard Swift.max(tp, tq) > -g - 1e-4, Swift.min(tp, tq) < len + g + 1e-4 else { continue }
-                    if indexKeys[ri] == nil { indexKeys[ri] = "side:w\(k)" }
+                    // (red control: the index among the edges that stand — as `halfSpaces` skips zero-length ones)
+                    if indexKeys[ri] == nil { indexKeys[ri] = "side:w\((0..<k).filter { simd_distance(wl[$0], wl[($0 + 1) % wl.count]) > 1e-9 }.count)" }
                     // inward (into the wire polygon) in-plane normal
                     let left = SIMD2(-dq.y, dq.x)
                     let mid = (p + q) / 2
@@ -306,7 +310,8 @@ public enum FlexibleLatticeWalls {
             let a = acc[ri]
             let key = controlIndexKeys ? (indexKeys[ri] ?? r.key) : r.key
             guard a.hasWire else {
-                walls.append(Wall(key: key, kind: r.kind, number: r.number, neighbour: r.neighbour, status: .gone, target: nil,
+                // every edge a seam: it runs into another lattice (greyed); else the expand ate it (gone)
+                walls.append(Wall(key: key, kind: r.kind, number: r.number, neighbour: r.neighbour, status: a.seamEdges > 0 ? .seam : .gone, target: nil,
                                   latticeAreaMM2: 0, touchedAreaMM2: 0, thinAreaMM2: 0, seamAreaMM2: 0, m: .zero, quads: [], frame: []))
                 continue
             }
@@ -340,6 +345,7 @@ public enum FlexibleLatticeWalls {
         var quads: [[SIMD3<Double>]] = []
         var frame: [[SIMD3<Double>]] = []
         var hasWire = false
+        var seamEdges = 0
         var m = SIMD3<Double>.zero
     }
 

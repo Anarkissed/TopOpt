@@ -78,6 +78,8 @@ Each item: what core does, where, the evidence, your numbers.
    today's chain glued Face 2 (raw u_x 0.0000 for Face 6's 0.4832); held by Group A (I1, sim only) Face 2 moves 18.42 for
    Face 6's 18.70 raw (ratio 0.99: the whole upright swings off the gripped plate; the lattice barely squashes). Core's anvil is
    always the far side (`core/src/flexible/faces.cpp:291-309`), so core's design and this sim now disagree on your bracket.
+   (I2: the app now stores the links — `lattice.flexible.links`, `FlexibleLatticeLink` {lattice key, wall key, target key};
+   never in a job. The sim reads them from I3.)
 
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
@@ -97,6 +99,61 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · U21 batch I, part I2 — the Attach tool, front end (2026-10-22) (read this first)
+
+Your answer of 2026-10-21 ~15:35: "set up an 'attachment point' option in the main lattice page … select any wall of the
+lattice and select any wall of the solid/non-latriced areas and link them together. Use the link icon … once clicked, it shows
+the lattice on its own, you select a wall, then it shows the model with the lattice as a ghost and you select the face it is
+meant to connect to. And you should be able to do this multiple times per lattice object." Your picks ~15:45: only the solid
+a wall touches is lit (the rest greyed); one-tap "Attach to the 4 walls around it" (nothing set until you tap); build straight
+away. NOT pushed, NOT installed (the installer does it, with I3). App only: no core file, no #354/main file, no new hook.
+
+### What you will see (Lattice page)
+- **Pick a lattice face** (Selections → Group B → Face 6, or tap it on the model). Its card has a new row:
+  **[🔗 Attach]** and, on the right, "Not attached" / "4 linked" / "Nothing solid touches it".
+- **When the lattice is inset** (a negative expand) a second row: **"🔗 Attach to the 4 walls around it"**. One tap links all
+  four sides (one Undo takes all four back). It never fires by itself. No inset (your pad) → no such row.
+- **[🔗 Attach] → step 1, the lattice on its own**: the part disappears, the walls are drawn on the model with their tags
+  (Side 1…4, and Floor when the lattice does not go through). Lit walls touch solid; greyed ones say why when tapped
+  ("Side 1 is open to the outside", "Side 1's solid is thinner than a bead", "Side 2 runs into another lattice").
+- **Tap a wall → step 2, the model with the lattice as a ghost**: the model is solid and every face is dimmed; only the
+  solid that wall touches is lit, tagged [wall] (the inner side of the 3 mm border on your l-bracket) or [solid under it]
+  (a floor). X-ray still works here if you want to see through.
+- **Tap [wall]** → "Linked Side 2 → wall", back to step 1 for the next wall, [Done] instead of [Cancel].
+- A stray tap never throws the steps away — only Cancel / Done / ✕. Play pauses while you attach and comes back after.
+- **Selections lists each link under its face**: "🔗 Side 2 → wall" with a trash that asks in place ([Keep] where you tapped,
+  [Remove] to its left). A link whose wall or solid is gone stays listed in grey with the reason ("· no solid there now",
+  "· side gone", "· runs through now", "· lattice off"); its trash is the fix. Nothing is ever removed by itself.
+- **On your l-bracket as saved**: Face 6 has 4 walls (Side 1 by Face 1, Side 2 by Face 7, Side 3 by Face 3, Side 4 by Face 0),
+  each touching the border at 100 %, no floor (30.5 mm on the wire goes through the 25 mm upright).
+- **What links do NOT do yet**: the squish sim does not read them until I3 ("Held by 4 linked walls" comes with it). They are
+  never in a job and never rebuild the lattice (CORE LIST item 10).
+
+### Decisions made here (yours to overturn)
+- One tap on the suggestion = one Undo step (every tap is one step); a link by hand = one step.
+- Step 1 on a part with several lattices: the lattice pass cannot draw one region alone without a rebuild, so ALL the lattice
+  is drawn as a ghost and the overlay lights the picked one's walls. Your l-bracket has one lattice: drawn as it is.
+- Links of a deleted group go quiet (listed nowhere) and come back with its Undo; a face moved to another group loses its
+  links exactly as it loses its depth/expand boxes. A face set Solid/Off keeps its links, greyed "· lattice off".
+- On the iPad mini in portrait the card with its Attach row has no clear spot beside the open list, so there [🔗] sits on the
+  card's title line (with the link count) and the one-tap suggestion row is not shown.
+- Step 2's ghost lattice is faint over the dimmed model (the pass's 0.12 ghost); the lit wall and its tag carry the step.
+- Correction to the spec's §4.5: at expand −0.3 Side 4 still touches (the foot is beyond it); Sides 1–3 read "thinner than a
+  bead". (#354's expand setter snaps −0.3 to 0, so that case is reachable only by test.)
+- With Face 0 AND Face 6 latticed, the edge they share is a seam (the lattice continues) — never a wall.
+
+### Evidence (round7/batch_i/i2/)
+- P0 (the red-first probe): `p0_walls_run1.txt`. Renders (13" portrait, his l-bracket): `I2_01` the card with Attach and the
+  suggestion, `I2_02` step 1, `I2_03` step 2 (Side 2, [wall] lit, the rest dimmed), `I2_04` Selections with the links and a
+  trash asking in place. Runs: `i2_runs.txt` — run 1 (87 classes): 579 passed, 3 failed (2 known: the refine line, the Play
+  ring; 1 mine: the mini-portrait card, fixed), 4 skipped; run 2 after the fixes (8 classes): 50 passed, 0 failed. Goldens
+  0 DIFFERS both modes (38; 32 + 1 PART-SKIP); the 16 stage-job hashes cmp-identical to I1's (`stage_job_hashes_i2.txt`).
+
+### APP side, for I3
+- `FlexibleStageSettings.links` (nil, never []), `FlexibleLatticeLink {id, lattice, wall, target}`; `FlexibleLatticeWalls`
+  (pure, memoised) gives each wall's lattice rectangles (`quads`) and outward normal `m` — what I3's `FlexHeldWall` needs.
+  `FlexibleMainStage.liveLinks(project, key:)` = the links the sim should read (stale and dormant excluded).
 
 ## ★ Round 7 · U21 batch I, part I1 — what holds the part in the squish sim (2026-10-22) (read this first)
 

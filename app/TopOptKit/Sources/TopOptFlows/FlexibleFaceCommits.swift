@@ -415,6 +415,12 @@ enum FlexibleFaceCommits {
             p.lattice.selectableDepthMM.removeValue(forKey: r.key)
             p.lattice.selectableExpandMM.removeValue(forKey: r.key)
         }
+        // ★ U21 batch I (I2): its lattices' links are NOT touched (they go dormant; an Undo brings them back) — red control only
+        if controlTrashPrunesLinks, var fs = p.lattice.flexible, let l = fs.links {
+            let kept = l.filter { !keys.contains($0.lattice) }
+            fs.links = kept.isEmpty ? nil : kept
+            p.lattice.flexible = fs
+        }
         if sealAfter { p.sealUndoStep() }
         return taken
     }
@@ -436,5 +442,59 @@ enum FlexibleFaceCommits {
         for (k, v) in d.expands { p.lattice.selectableExpandMM[k] = v }
         if d.hidden, !p.groupView.isHidden(d.group.id) { p.groupView.toggleHidden(d.group.id) }
         p.sealUndoStep()
+    }
+}
+
+// MARK: - ★ U21 batch I (I2): the Attach tool's writes — each ONE sealed undo step, written inside the tap
+
+extension FlexibleFaceCommits {
+    /// ★ RED CONTROL (I2 test 9 / hosted d): no seal BEFORE the write — the link folds into the edit before it.
+    static var controlUnsealedLinkWrite = false
+    /// ★ RED CONTROL (I2 test 10): the suggestion links on open (nothing should be set until he taps).
+    static var controlAutoApplySuggestion = false
+    /// ★ RED CONTROL (I2 test 12): the last link removed stores [] (the re-encode carries "links":[]).
+    static var controlLinksEmptyArray = false
+    /// ★ RED CONTROL (I2 test 14): the group trash removes its links in the same write (the toast's [Undo] cannot bring them back).
+    static var controlTrashPrunesLinks = false
+
+    private static func writeLinks(_ p: ProjectModel, _ change: (inout [FlexibleLatticeLink]) -> Void) -> Bool {
+        guard var s = p.lattice.flexible else { return false }
+        var links = s.links ?? []
+        let before = links
+        change(&links)
+        guard links != before else { return false }
+        if !controlUnsealedLinkWrite { p.sealUndoStep() }
+        s.links = links.isEmpty && !controlLinksEmptyArray ? nil : links   // ★ the last link removed stores nil, never []
+        p.lattice.flexible = s
+        p.sealUndoStep()
+        return true
+    }
+
+    /// One link made by hand: one step. A link that exists already is not added twice.
+    @discardableResult
+    static func addLink(lattice: String, wall: String, target: String, project p: ProjectModel) -> Bool {
+        writeLinks(p) { l in
+            guard !l.contains(where: { $0.lattice == lattice && $0.wall == wall && $0.target == target }) else { return }
+            l.append(FlexibleLatticeLink(lattice: lattice, wall: wall, target: target))
+        }
+    }
+
+    /// The trash, after its in-place confirm: one step.
+    @discardableResult
+    static func removeLink(id: UUID, project p: ProjectModel) -> Bool {
+        writeLinks(p) { l in l.removeAll { $0.id == id } }
+    }
+
+    /// ★ HIS ONE-TAP SUGGESTION: every missing side → wall link of `lattice` in ONE step (one tap = one Undo). Returns how many.
+    @discardableResult
+    static func addSuggested(lattice: String, sides: [String], project p: ProjectModel) -> Int {
+        var added = 0
+        _ = writeLinks(p) { l in
+            for w in sides where !l.contains(where: { $0.lattice == lattice && $0.wall == w && $0.target == "wall" }) {
+                l.append(FlexibleLatticeLink(lattice: lattice, wall: w, target: "wall"))
+                added += 1
+            }
+        }
+        return added
     }
 }

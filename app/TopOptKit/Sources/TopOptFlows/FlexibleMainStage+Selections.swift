@@ -23,6 +23,11 @@ extension FlexibleMainStage {
 
     /// H22: a tap on the part in the edit phase with no page up. Consumed: #354's tap routers never run on this stage.
     public func tapFace(_ project: ProjectModel, face: FaceID, point: SIMD3<Float>?, mesh: ViewerMesh) {
+        // ★ U21 batch I (I2): during Attach a tap on the part picks a wall / its solid — it never throws the steps away
+        if attach.active {
+            guard FlexibleAttach.controlStrayTapCancels else { attachTap(project, face: face, point: point); return }
+            endAttach()   // (the red control: today's — the tap runs the face pick and Attach is gone)
+        }
         chrome.foldAll()
         faceUI.closeTransient()
         let s = FlexibleFacePick.tap(FlexibleFacePick.validated(facePick, project: project), face: face, point: point,
@@ -39,6 +44,8 @@ extension FlexibleMainStage {
 
     /// H23: a tap on empty canvas — the chip closes, a pending pick is dropped, nothing is created.
     public func missTap() {
+        if attach.active, !FlexibleAttach.controlStrayTapCancels { attachMiss(); return }   // ★ I2: the step line again, nothing else
+        if attach.active { endAttach() }   // (the red control: today's — a stray tap ends it)
         chrome.foldAll()
         faceUI.closeTransient()
         let s = FlexibleFacePick.miss(facePick)
@@ -48,6 +55,7 @@ extension FlexibleMainStage {
     /// ★ ROUND 7, R7-D3: gravity setup starts (the tray's Gravity [Change]) — every card folds and the pick goes (its taps
     /// are #354's gravity picker until it is done; the join's group is remembered, as when leaving the stage).
     func gravitySetupStarts() {
+        endAttach()   // ★ I2
         chrome.foldAll()
         faceUI.closeTransient()
         if !facePick.scope.isNone { var s = facePick; s.scope = .none; facePick = s }
@@ -60,6 +68,7 @@ extension FlexibleMainStage {
             pickFace(refs[0], group: gid, project: project)
             return
         }
+        endAttach()   // ★ I2: another pick ends Attach
         faceUI.closeTransient()
         chrome.foldAll()
         if project.selection.activeGroupID != gid {
@@ -78,6 +87,7 @@ extension FlexibleMainStage {
     /// A face line of the list, or one of its boxes (that face, in its group).
     func pickFace(_ ref: LatticeSelectableRef, group gid: UUID, project: ProjectModel) {
         if case let .face(g, r) = facePick.scope, g == gid, r == ref { return }
+        endAttach()   // ★ I2: another pick ends Attach
         faceUI.closeTransient()
         chrome.foldAll()
         if project.selection.activeGroupID != gid {
@@ -98,6 +108,7 @@ extension FlexibleMainStage {
         let v = FlexibleFacePick.validated(facePick, project: project)
         if v != facePick { facePick = v }
         if facePick.scope.isNone { chrome.close(.faceChip) }
+        revalidateAttach(project)   // ★ I2: an Undo, a delete, Solid / Off — or a box edit under step 2
     }
 
     /// An outside write of the active group (anything but the router — a test, another stage's restore) is a GROUP pick, as

@@ -181,6 +181,8 @@ extension FlexibleMainStage {
             }
             feTintBox.set(per)
         }
+        // ★ U21 batch I (I2): Attach's step 2 — only the touching solid lit, every other face dimmed
+        if let t = attachTints(project, base: composed) { return t }
         // …and the page hands the one the RENDERER shows now (a re-upload never shows another group's)
         if let id = feShownField?.versionKey, let t = feTintBox.tints(id) { return t }
         return composed
@@ -262,6 +264,7 @@ extension FlexibleMainStage {
     /// the walls), or back out.
     public func cardTapped(mode: LatticeLegendMode) -> LatticeLegendMode {
         if FlexibleReadKind(mode: mode) != nil { return .groups }
+        if attach.active { return mode }   // ★ U21 batch I (I2): no drill-in during Attach
         guard let first = legendKinds.first else { return mode }
         clearReading()
         return first.mode
@@ -282,13 +285,17 @@ extension FlexibleMainStage {
     /// legend jumped 260 pt from under his finger) — only a pill he opens is placed first.
     public func legendTapped(_ k: FlexibleReadKind, mode: LatticeLegendMode) -> LatticeLegendMode {
         if FlexibleReadKind(mode: mode) == k { return .groups }
+        if attach.active { return mode }   // ★ I2: no drill-in during Attach
         clearReading()
         return k.mode
     }
 
     /// A legend went into (or out of) its reading: the squish holds still meanwhile, so the
     /// pinned reading stays on the surface it was read from (FlexibleSquishLoop.holdWhileReading).
-    public func noteDrill(_ on: Bool) { loop.holdWhileReading(on) }
+    public func noteDrill(_ on: Bool) {
+        loop.holdWhileReading(on)
+        if legendDrilled != on { legendDrilled = on; faceUI.objectWillChange.send() }   // ★ I2: the Attach row hides while drilled in
+    }
 
     /// The legend's one line. ★ BATCH C VERIFICATION: the dent's is "What you drew · mm" while
     /// the map shows his drawing (no lattice drawn, or a shape-only one — "no squish

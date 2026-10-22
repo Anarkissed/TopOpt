@@ -72,10 +72,17 @@ public struct FlexibleOnModelLayer: View {
             let chipPlaced: Placed? = frame.flatMap { f in chrome.allowsFaceChip && !scope.isNone ? place(scope, frame: f, origin: origin, viewport: v) : nil }
             ZStack(alignment: .topLeading) {
                 if let frame { edgeLights(scope, frame: frame, origin: origin, under: listUnder(origin: origin, viewport: v)) }
+                // ★ U21 batch I (I2): the Attach tool's walls on the model (under the chip, over the part)
+                if let frame, main.attachView {
+                    FlexibleAttachWallsOverlay(main: main, project: project, frame: frame, origin: origin, viewport: v,
+                                               under: listUnder(origin: origin, viewport: v),
+                                               keepOut: keepOuts(scope, frame: frame, origin: origin, viewport: v, listColumn: false, ownHandles: false)
+                                                + (chipPlaced.map { [$0.rect] } ?? []))
+                }
                 if let frame, let placed = chipPlaced {
                     leaders(placed.targets, chip: placed.rect, under: listUnder(origin: origin, viewport: v))
-                    handles(scope, frame: frame, origin: origin, viewport: v, under: listUnder(origin: origin, viewport: v))
-                    FlexibleFaceChip(main: main, project: project, ui: ui, scope: scope, cardsChanged: cardsChanged)
+                    if !main.attachView { handles(scope, frame: frame, origin: origin, viewport: v, under: listUnder(origin: origin, viewport: v)) }
+                    FlexibleFaceChip(main: main, project: project, ui: ui, scope: scope, cardsChanged: cardsChanged, attachCompact: placed.compact)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(width: placed.rect.width)
                         .background(GeometryReader { c in
@@ -90,7 +97,7 @@ public struct FlexibleOnModelLayer: View {
                             if !live { finishChipDrag(scope, viewport: v, tiers: placed.tiers) }
                         }
                 }
-                if let frame, main.prismsOn, chrome.allowsFaceChip || chrome.open == nil { prismNumbers(scope, frame: frame, origin: origin, viewport: v) }
+                if let frame, main.prismsOn, !main.attachView, chrome.allowsFaceChip || chrome.open == nil { prismNumbers(scope, frame: frame, origin: origin, viewport: v) }
                 if let info = ui.info {
                     let fromChip = info.key.hasPrefix("c-")
                     statsCard(info, origin: origin, viewport: v, chip: fromChip ? chipPlaced?.rect : nil,
@@ -225,10 +232,10 @@ public struct FlexibleOnModelLayer: View {
 
     // MARK: the chip's spot
 
-    private struct Placed { let rect: CGRect; let targets: [CGPoint]; let keepOut: [CGRect]; var tiers: [[CGRect]] = [] }
+    private struct Placed { let rect: CGRect; let targets: [CGPoint]; let keepOut: [CGRect]; var tiers: [[CGRect]] = []; var compact = false }
 
     private func place(_ scope: FlexibleFaceScope, frame: LatticeBandChipFrame, origin: CGPoint, viewport v: CGSize) -> Placed {
-        let kind = FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup)
+        let kind = FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup, main: main)
         var size = FlexibleFaceChipLayout.size(kind)
         if let k = scope.chipKey, chipMeasuredKey == k, chipMeasuredSize.height > size.height { size.height = chipMeasuredSize.height }
         let pts = targets(scope).compactMap { local(frame.project($0), origin) }
@@ -249,12 +256,42 @@ public struct FlexibleOnModelLayer: View {
         } else {
             // ★ the review of R7-D2 (13"/11" portrait: chip M sat on Face 3's own lattice; img2's front camera: on the pad's
             // front): the automatic spot also keeps off the lit faces' outline on screen — a drag may put it anywhere
-            let face = Self.outlineBounds(FlexibleFaceOutline.edges(faces: litFaces(scope), mesh: project.viewerMesh), frame: frame)
+            var face = Self.outlineBounds(FlexibleFaceOutline.edges(faces: litFaces(scope), mesh: project.viewerMesh), frame: frame)
                 .map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
+            // ★ I2: during Attach the walls' screen bounds are the soft keep-out (never over the chrome; a dragged spot is kept)
+            if main.attachView { face = attachWallBounds(frame: frame, origin: origin) ?? face }
             r = FlexibleFaceChipLayout.auto(size: size, anchor: anchor, viewport: v, tiers: tiers,
                                             soft: FlexibleFaceChipLayout.faceKeepOut(face, viewport: v))
         }
+        // ★ U21 batch I (I2): the card with its Attach row(s) has no clear spot in the tiers that never go stale (the list's
+        // column and its whole reach — the list "as drawn" lags a frame while a group opens under the pick: found on the mini in
+        // portrait, where the taller card sat on the grown list): the compact card — [🔗] on its title line, chip M's own height
+        let steady = tiers.count > 1 ? Array(tiers.dropLast()) : tiers
+        if case .memberAttach = kind, ui.spots[scope.chipKey ?? ""] == nil,
+           !steady.contains(where: { FlexibleFaceChipLayout.inside(r, v) && !FlexibleFaceChipLayout.hits(r, $0) }) {
+            var small = FlexibleFaceChipLayout.size(.member)
+            if let k = scope.chipKey, chipMeasuredKey == k, chipMeasuredSize.height > small.height, chipMeasuredSize.height < size.height { small.height = chipMeasuredSize.height }
+            let face = Self.outlineBounds(FlexibleFaceOutline.edges(faces: litFaces(scope), mesh: project.viewerMesh), frame: frame)
+                .map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
+            let r2 = FlexibleFaceChipLayout.auto(size: small, anchor: anchor, viewport: v, tiers: tiers,
+                                                 soft: FlexibleFaceChipLayout.faceKeepOut(face, viewport: v))
+            if main.faceUI.lastChipOrigin != r2.origin { main.faceUI.lastChipOrigin = r2.origin }
+            return Placed(rect: r2, targets: pts, keepOut: keep, tiers: tiers, compact: true)
+        }
+        if main.faceUI.lastChipOrigin != r.origin { main.faceUI.lastChipOrigin = r.origin }   // (★ I2: Attach pins it — never published)
         return Placed(rect: r, targets: pts, keepOut: keep, tiers: tiers)
+    }
+
+    /// ★ I2: the Attach lattice's walls on screen (local), or nil.
+    private func attachWallBounds(frame: LatticeBandChipFrame, origin: CGPoint) -> CGRect? {
+        guard let w = main.attachWalls(project, key: main.attach.lattice) else { return nil }
+        var r: CGRect?
+        for x in w.walls { for q in x.quads + x.frame { for c in q {
+            guard let p = frame.project(SIMD3<Float>(c)) else { continue }
+            let pr = CGRect(x: p.x - origin.x, y: p.y - origin.y, width: 0, height: 0)
+            r = r.map { $0.union(pr) } ?? pr
+        } } }
+        return r
     }
 
     private func noteChip(_ scope: FlexibleFaceScope, _ s: CGSize) {
@@ -296,7 +333,7 @@ public struct FlexibleOnModelLayer: View {
     private func finishChipDrag(_ scope: FlexibleFaceScope, viewport v: CGSize, tiers: [[CGRect]]) {
         defer { dragAnchor = nil }
         guard dragAnchor != nil, let key = scope.chipKey, let spot = ui.spots[key] else { return }
-        let size = FlexibleFaceChipLayout.size(FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup))
+        let size = FlexibleFaceChipLayout.size(FlexibleFaceChip.kind(scope, project: project, lastGroup: main.facePick.lastGroup, main: main))
         ui.spots[key] = FlexibleFaceChipLayout.released(CGRect(origin: spot, size: size), viewport: v, tiers: tiers).origin   // ★ R7-D3: the tiers
     }
 

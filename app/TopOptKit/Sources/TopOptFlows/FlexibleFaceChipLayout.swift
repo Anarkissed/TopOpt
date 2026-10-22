@@ -25,7 +25,15 @@ public enum FlexibleFaceChipLayout {
     public static let clearance: CGFloat = 8
 
     /// The chip's kinds (the plan's N / M / G / B / L) — their drawn heights, for placement before the first measure.
-    public enum Kind: Equatable, Sendable { case new(join: Bool), member, group, blocked, locked }
+    public enum Kind: Equatable, Sendable {
+        case new(join: Bool), member, group, blocked, locked
+        /// ★ U21 batch I (I2): chip M with its Attach row (1) and the one-tap suggestion (2).
+        case memberAttach(rows: Int)
+        /// ★ I2: the Attach step card — its chip lines (1–2) and whether the say line shows.
+        case attach(chipLines: Int, say: Bool)
+    }
+    /// ★ I2: one Attach row (44 pt + the stack's spacing).
+    public static let attachRow: CGFloat = 52
 
     public static func size(_ k: Kind) -> CGSize {
         switch k {
@@ -34,6 +42,11 @@ public enum FlexibleFaceChipLayout {
         // ★ the review of R7-D2: 132 as drawn (the grip's 12 was missing — the chip sat 12 pt lower than placed, onto the face's
         // outline and onto the (i)'s card); the layer also takes the chip's measured height when it grows (the role line, a confirm)
         case .member, .group, .blocked, .locked: return CGSize(width: width, height: 44 + 44 + 2 * padding + 8 + 12)
+        case let .memberAttach(rows): return CGSize(width: width, height: size(.member).height + attachRow * CGFloat(max(0, rows)))
+        case let .attach(lines, say):
+            // the grip, the header, the step line, the chips (1–2 lines), the say line, the buttons — 44 each, 8 apart
+            let rows = 3 + max(1, min(2, lines)) + (say ? 1 : 0)
+            return CGSize(width: width, height: 12 + CGFloat(rows) * 44 + CGFloat(rows) * 8 + 2 * padding)
         }
     }
 
@@ -248,6 +261,14 @@ public final class FlexibleFaceChipState: ObservableObject {
     @Published public var deleteAskInChip = false
     /// "Keep clear removes this lattice" waiting for [Keep clear] / [Cancel].
     @Published public var keepClearAsk: UUID?
+    /// ★ U21 batch I (I2): "Remove this link?" waiting for [Remove] / [Keep] (the link's id).
+    @Published public var linkRemoveAsk: UUID?
+    /// ★ I2: where the chip was last placed (Attach pins it there, so the step card does not jump) — never published.
+    var lastChipOrigin: CGPoint?
+    /// ★ I2: each wall tag's chosen spot (its candidate index), kept while it stays clear (no jitter in an orbit).
+    var attachTagPick: [String: Int] = [:]
+    /// ★ I2 (the red control `controlTagsPlacedOnce` only): each tag's first spot, never re-projected.
+    var attachTagFrozen: [String: CGPoint] = [:]
     /// The one message (with [Undo] after a delete).
     @Published public var toast: Toast?
     /// A handle being dragged (its key), and what the drag remembers.
@@ -279,11 +300,11 @@ public final class FlexibleFaceChipState: ObservableObject {
 
     public init() {}
 
-    func say(_ text: String, undo: Bool = false) {
+    func say(_ text: String, undo: Bool = false, seconds: Double? = nil) {
         toastSerial += 1
         let t = Toast(text: text, undo: undo, serial: toastSerial)
         toast = t
-        let s = toastSeconds
+        let s = seconds ?? toastSeconds
         DispatchQueue.main.asyncAfter(deadline: .now() + s) { [weak self] in
             if self?.toast == t { self?.toast = nil }
         }
@@ -296,5 +317,6 @@ public final class FlexibleFaceChipState: ObservableObject {
         if renaming != nil { renaming = nil }
         if deleteAsk != nil { deleteAsk = nil }
         if keepClearAsk != nil { keepClearAsk = nil }
+        if linkRemoveAsk != nil { linkRemoveAsk = nil }
     }
 }

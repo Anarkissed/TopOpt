@@ -242,6 +242,11 @@ public struct FlexibleSelectionsList: View {
         if refs.count >= 2 { allLine(g, refs: refs, selected: scope == .group(g.id), locked: locked) }
         ForEach(refs, id: \.key) { r in
             faceLine(g, r, selected: scope == .face(group: g.id, ref: r), locked: locked)
+            // ★ U21 batch I (I2): its links, live or stale (never dormant), each with a trash that asks in place
+            ForEach(main.listedLinks(project, key: r.key), id: \.link.id) { e in
+                FlexibleLinkRow(main: main, project: project, ui: ui, link: e.link, state: e.state, group: g.id, ref: r,
+                                cardsChanged: cardsChanged)
+            }
         }
     }
 

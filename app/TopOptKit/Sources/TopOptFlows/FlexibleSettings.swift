@@ -204,6 +204,12 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// Surface root, I2's form — FlexibleSectorMigration reads it through). OPTIONAL, omitted when nil: old projects decode
     /// and encode byte-identical. LABELS ONLY: never part of the lattice's key (`designInputs`).
     public var sectors: FlexibleSectorStore?
+    /// ★ ROUND 7 · U21 batch I (his answers of 2026-10-21 ~15:35 / ~15:45: "you can select any wall of the lattice and select any
+    /// wall of the solid/non-latriced areas and link them together … you should be able to do this multiple times per lattice
+    /// object"): which lattice walls are linked to the solid they touch (the Attach tool). DISPLAY SIM ONLY: never part of the
+    /// lattice's key (`designInputs`), never in a job (CORE LIST item 10). nil — never [] — when there are none, so a project
+    /// without links encodes byte-identical. OPTIONAL so old projects decode. No geometry is stored: the walls are re-derived.
+    public var links: [FlexibleLatticeLink]?
     // ★ ROUND 7 (his ruling 2026-10-18): R7-D2's lattice-only set is WITHDRAWN — a lattice face is always protected from
     // Topology, so no main-page group carries a lattice role without Protect. No build ever wrote the key (nil was never
     // encoded); a project.json that carried it would still open (the key is ignored) — FlexibleLatticeIsProtectedTests.
@@ -243,6 +249,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
         c.weightUnit = nil
         c.readsMainPageGroups = nil   // ★ U21 (batch A): how the open reads the main page, not an input of the lattice
+        c.links = Self.controlLinksInDesignInputs ? c.links : nil   // ★ U21 (batch I): a link tells the sim what holds the lattice — never the lattice's key
         // ★ R7-E2 (AP9): an edge or corner press (a flat prism) is built into the lattice now — core builds its stack, designs it,
         // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted
         // face press: no flat prism) still cannot change it, and a project without presses keys as before (nil either way).
@@ -254,6 +261,8 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
 
     /// ★ RED CONTROL only (FlexibleR7E2Tests — FlexibleStageModel.controlStripPresses): E1's rule, the presses out of the lattice's key.
     nonisolated(unsafe) static var controlStripPresses = false
+    /// ★ RED CONTROL only (FlexibleI2AttachTests): the links left in the lattice's key (a link would rebuild the lattice).
+    nonisolated(unsafe) static var controlLinksInDesignInputs = false
 
     /// The model-wide finish (nil or an unknown value ⇒ Covered).
     public var finishMode: FlexibleFinish { finish.flatMap(FlexibleFinish.init(rawValue:)) ?? .covered }
@@ -278,6 +287,19 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     /// ★ ROUND 5 (S6): is this face deleted from the Flexible setup (a main-page group still holds it)?
     public func isRemoved(_ region: Int) -> Bool { removedRegions?.contains(region) ?? false }
 
+}
+
+/// ★ ROUND 7 · U21 batch I: one link of a lattice wall to the solid it touches (the Attach tool). `lattice` is the face-prism's
+/// selectable key ("f:<group>:<face>"); `wall` a FlexibleLatticeWalls key ("side:f1", "side:f1.2", "side:e3", "hole:f9",
+/// "floor"); `target` "wall" | "under" | "skin:f7".
+public struct FlexibleLatticeLink: Codable, Equatable, Hashable, Sendable, Identifiable {
+    public var id: UUID
+    public var lattice: String
+    public var wall: String
+    public var target: String
+    public init(id: UUID = UUID(), lattice: String, wall: String, target: String) {
+        self.id = id; self.lattice = lattice; self.wall = wall; self.target = target
+    }
 }
 
 /// ★ ROUND 7 (M2): the Flexible-only sectors' numbers (FlexibleSectors) — `ids` maps a sector's stable ROLE key to its

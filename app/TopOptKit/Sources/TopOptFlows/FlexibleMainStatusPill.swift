@@ -166,7 +166,7 @@ public struct FlexibleMainViewToggles: View {
             .overlay(alignment: .topTrailing) {
                 if main.heatAllBadgeShown, let m = main.model { FlexibleHeatAllBadge(colours: FlexibleStageViews.glyphColours(model: m)) }
             }
-            .unavailable(!main.heatAvailable)   // ★ M1 VERIFY: no face-prism — nothing to heat; ★ R: …nor with no squeeze group
+            .unavailable(!main.heatAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism — nothing to heat; ★ R: …nor with no squeeze group
             .accessibilityIdentifier("flexible-main-view-heat")
     }
     private var stressButton: some View {
@@ -177,7 +177,7 @@ public struct FlexibleMainViewToggles: View {
                     ProgressView().controlSize(.small).tint(DS.Color.textPrimary.color).allowsHitTesting(false)
                 }
             }
-            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY
             .accessibilityIdentifier("flexible-main-view-stress")
     }
     // ★ C2: shows / hides the lattice — or, with nothing to show, opens Settings. ★ ROUND 7, X1: a plain show / hide, lit by
@@ -186,7 +186,7 @@ public struct FlexibleMainViewToggles: View {
         FlexibleViewButton(icon: "cube.transparent", label: "Lattice", on: main.latticeIconLit) {
             main.latticeButtonTapped(openSettings: openSettings)
         }
-            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism — no lattice can come (the Squish page cannot make one)
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism — no lattice can come (the Squish page cannot make one)
             .accessibilityIdentifier("flexible-main-view-lattice")
     }
     // ★ S1b (round 6 item 3 — his img3: "a view that turns on/off ALL squish prisms"): every pressed face's prism,
@@ -194,20 +194,25 @@ public struct FlexibleMainViewToggles: View {
     private var prismsButton: some View {
         FlexibleViewButton(icon: FlexibleStageViews.prismsIcon, label: "Prisms", on: main.prismsOn && main.viewsAvailable,
                            action: { main.togglePrisms() }, glyph: FlexibleStageViews.prismsGlyph(on: main.prismsOn && main.viewsAvailable))
-            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: no face-prism to draw
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: no face-prism to draw
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainView-prisms": g.frame(in: .global)]) }
+                .allowsHitTesting(false))   // (★ I2: the hosted tests click it)
             .accessibilityIdentifier("flexible-main-view-prisms")
     }
     // ★ R7-V: X-ray — the ghost and the walls inside it. ★ X1: off (the default), the solid part with the lattice where the
     // finish leaves it open (the printed view); Covered, the plain model
     private var xrayButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.xrayIcon, label: "X-ray", on: main.xrayOn) { main.toggleXray() }
+            .unavailable(main.attach.step == .pickWall)   // ★ U21 batch I (I2): live in step 2 (his to see through); step 1 has no body
+            .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainView-xray": g.frame(in: .global)]) }
+                .allowsHitTesting(false))
             .accessibilityIdentifier("flexible-main-view-xray")
     }
     // ★ R7-V: Play — the sim plays and its bar shows; off, no bar and the model at rest. A small ring while the sims run
     // or refine (the bar's note said so)
     private var playButton: some View {
         FlexibleViewButton(icon: FlexibleMainViewToggles.playIcon, label: "Play", on: main.playOn && main.viewsAvailable) { main.togglePlay() }
-            .unavailable(!main.viewsAvailable)   // ★ M1 VERIFY: nothing to play
+            .unavailable(!main.viewsAvailable || main.attach.active)   // ★ M1 VERIFY: nothing to play
             .overlay(alignment: .topTrailing) {
                 if Self.controlMiniSpinner {
                     if main.simsWorking {   // (the RED CONTROL only: the first build's faint grey speck)

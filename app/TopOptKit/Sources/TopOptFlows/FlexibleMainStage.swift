@@ -108,7 +108,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// body alpha and the tints follow the page a turn later (`frozen`) — that frame is under the full-screen page, and its
     /// closed surface still draws (flagged solid), so nothing vanishes. RED CONTROL `controlPrintedRulesApart` (X1's rules).
     func printedReady(_ m: FlexibleStageModel) -> Bool {
-        printedDrawn(m) && (controlPrintedRulesApart || overlay != nil)
+        printedDrawn(m) && (controlPrintedRulesApart || overlay != nil) && !attachView   // ★ I2: Attach never draws the printed view
     }
     var controlPrintedRulesApart = false
     /// Tests only: the overlay dropped (the state the one rule guards — no open surface to flag).
@@ -196,6 +196,20 @@ public final class FlexibleMainStage: ObservableObject {
     /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,
     /// observed only by the chip's layer and the list, so a drag never re-runs the workspace.
     public let faceUI = FlexibleFaceChipState()
+    /// ★ U21 batch I (I2 — his answer of 2026-10-21 ~15:35): the Attach tool, one value (FlexibleMainStage+Attach).
+    @Published public internal(set) var attach = FlexibleAttachState()
+    /// Play was on when Attach opened (paused at rest — the walls match the rest shape; put back when it ends).
+    var attachPlayWas = false
+    /// The project Attach was opened on (H23's miss carries none).
+    weak var attachProject: ProjectModel?
+    /// The chip's spot Attach pinned (so the step card does not jump), removed again when it ends.
+    var attachSpotSet: String?
+    /// The emission the walls are read from (memoised on what it is made from).
+    var attachRegionsMemo: (key: FlexibleIncludeMemoKey, regions: [LatticeRegionSpec])?
+    /// Step 2's dimmed tints, and what they were made from.
+    var attachTintsCache: (key: String, tints: [Float])?
+    /// A Flexible legend is drilled in (mirrored from FlexibleMainLegends): no Attach row then, and no drill-in during Attach.
+    var legendDrilled = false
     /// ★ R7-D2: the router is writing the active group (not an outside pick).
     var routerWritesSelection = false
     /// ★ R7-D2: #354's depth planes (the handles' geometry), and what they were built from.
@@ -591,10 +605,10 @@ public final class FlexibleMainStage: ObservableObject {
         guard let m = current(project, stage) else { return nil }
         let fresh = m.lattice != nil && !m.latticeIsStale
         // ★ ROUND 4 (D2): the picked squeeze's faces squish
-        var inputs = FlexibleLatticePreview.inputs(xray: xray, lattice: m.playLattice?.showing(playingSim), building: m.latticeBuilding,
-                                                   latticeShows: latticeOn && fresh && !pageUp,
+        var inputs = FlexibleLatticePreview.inputs(xray: xray || attachView, lattice: m.playLattice?.showing(playingSim), building: m.latticeBuilding,
+                                                   latticeShows: (latticeOn || attachView) && fresh && !pageUp,   // ★ I2: Attach shows it
                                                    loop: fresh && !pageUp ? loop : nil,
-                                                   printed: printedReady(m) && !pageUp)   // ★ X1: the printed view (★ verify: its one rule)
+                                                   printed: printedReady(m) && !pageUp && !attachView)   // ★ X1: the printed view (★ verify: its one rule; ★ I2: never during Attach)
         // ★ BATCH G: the squeeze groups' fields, their meshes and the sequence the loop plays
         if fe.active, fresh, !pageUp {
             inputs?.fe = fe.fields; inputs?.feMesh = fe.mesh; inputs?.feSequence = fe.sequence; inputs?.feToken = fe.token
@@ -603,8 +617,8 @@ public final class FlexibleMainStage: ObservableObject {
             // field on its own scale — the pass's texture carries the fraction of its top)
             if stress, feStressRoute, stressDrawable { inputs?.stressWalls = true }
         }
-        inputs?.ghostWalls = ghostWalls   // ★ BATCH M (M6): the dent view ghosts the walls under the solid planes
-        if heatOnWalls, !pageUp { inputs?.heatWalls = wallHeatTable }   // ★ X1 VERIFY: Heat on — the walls carry it
+        inputs?.ghostWalls = attachView ? attachGhosts(m) : ghostWalls   // ★ BATCH M (M6) — ★ I2: step 2's ghost (step 1: others ghosted)
+        if heatOnWalls, !pageUp, !attachView { inputs?.heatWalls = wallHeatTable }   // ★ X1 VERIFY: Heat on — the walls carry it
         return inputs
     }
 
@@ -623,6 +637,9 @@ public final class FlexibleMainStage: ObservableObject {
     }
     public func bodyAlpha(_ project: ProjectModel, on stage: WorkspaceStage) -> Float? {
         guard owns(project, stage) else { return nil }
+        // ★ U21 batch I (I2): step 1 shows the lattice ON ITS OWN (no body); step 2 the model (his X-ray stays his)
+        if attachView, attach.step == .pickWall { return 0 }
+        if attachView { return xray ? FlexibleStagePage.xrayBodyAlpha : 1 }
         if xray { return FlexibleStagePage.xrayBodyAlpha }
         // ★ X1, THE PRINTED VIEW: the body see-through — only its CLOSED surface (the tints' solid flag) draws, opaque, and the
         // pass writes it into the G-buffer with the walls (FlexibleLatticePass.encodeBody), so it is sorted
@@ -639,7 +656,7 @@ public final class FlexibleMainStage: ObservableObject {
     /// stage, under a page, or while a legend reads. Cached on its inputs (the workspace's body asks on every pass).
     /// RED CONTROL `controlSquishPrismsOnMain`: round 6's squish prisms (S1b).
     public func volumes(_ project: ProjectModel, on stage: WorkspaceStage, drilledIn: Bool) -> [ClearanceRenderItem] {
-        guard !drilledIn, !frozen, let m = current(project, stage) else { return [] }
+        guard !drilledIn, !frozen, !attachView, let m = current(project, stage) else { return [] }   // ★ I2: no prisms during Attach
         if controlSquishPrismsOnMain { return squishVolumes(project, m) }
         // ★ M1 VERIFY (the verify: "[Prisms] does nothing visible on the model" — before a pick it drew nothing, after one
         // exactly what the pick drew): [Prisms] = EVERY group's lattice face-prisms (his round-6 words for the view: "a view
@@ -1035,7 +1052,7 @@ public final class FlexibleMainStage: ObservableObject {
     }
 
     func apply(_ project: ProjectModel, owned: Bool, pageUp: Bool) {
-        if !owned || pageUp { chrome.foldAll() }   // ★ R7-D1: a stage change or the Squish page folds every card
+        if !owned || pageUp { chrome.foldAll(); endAttach() }   // ★ R7-D1: a stage change or the Squish page folds every card (★ I2: and ends Attach)
         // ★ R7-D2: leaving the stage drops the pick (its chip never waits to pop up on the way back); the join's group stays
         if !owned, !facePick.scope.isNone { var s = facePick; s.scope = .none; facePick = s; faceUI.closeTransient() }
         frozen = pageUp

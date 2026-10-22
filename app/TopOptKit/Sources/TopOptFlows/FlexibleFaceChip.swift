@@ -26,6 +26,9 @@ struct FlexibleFaceChip: View {
     @ObservedObject var ui: FlexibleFaceChipState
     let scope: FlexibleFaceScope
     let cardsChanged: () -> Void
+    /// ★ U21 batch I (I2): no clear spot for the card with its Attach row (the mini in portrait) — [🔗] sits on the title line
+    /// instead (one 44 pt icon with the link count), so the card keeps chip M's height.
+    var attachCompact = false
 
     static let protectTint = RGBA(hex: 0x2EE0C7)
     static let segmentWidth: CGFloat = 80
@@ -43,13 +46,25 @@ struct FlexibleFaceChip: View {
 
     /// The chip's kind (its placement height).
     @MainActor
-    static func kind(_ scope: FlexibleFaceScope, project p: ProjectModel, lastGroup: UUID?) -> FlexibleFaceChipLayout.Kind {
+    static func kind(_ scope: FlexibleFaceScope, project p: ProjectModel, lastGroup: UUID?,
+                     main: FlexibleMainStage? = nil, attachCompact: Bool = false) -> FlexibleFaceChipLayout.Kind {
         switch scope {
         case .pending: return .new(join: FlexibleFaceCommits.canJoin(lastGroup, p))
         case let .face(g, _), let .group(g):
             if FlexibleFaceCommits.isLocked(g, p) { return .locked }
             if FlexibleFaceCommits.blockedByKeepClear(g, p) { return .blocked }
             if case .group = scope { return .group }
+            // ★ U21 batch I (I2): the step card, or chip M with its Attach rows
+            if let m = main, case let .face(_, ref) = scope {
+                if m.attach.active, m.attach.lattice == ref.key, !FlexibleAttach.controlAttachUsesMemberSize {
+                    let n = m.attach.wall != nil ? 1 : (m.attachWalls(p, key: ref.key)?.walls.count ?? 1)
+                    return .attach(chipLines: n > 4 ? 2 : 1, say: m.attach.say != nil)
+                }
+                if !m.attach.active, !attachCompact {
+                    let rows = m.attachRow(p, group: g, ref: ref).rows
+                    if rows > 0 { return .memberAttach(rows: rows) }
+                }
+            }
             return .member
         case .none: return .member
         }
@@ -62,7 +77,10 @@ struct FlexibleFaceChip: View {
                 .accessibilityHidden(true)
             switch scope {
             case let .pending(faces): newFace(faces)
-            case let .face(g, ref): member(g, ref: ref)
+            case let .face(g, ref):
+                // ★ U21 batch I (I2): the card turns into the Attach step card in place (same spot)
+                if main.attach.active, main.attach.lattice == ref.key { FlexibleAttachStepCard(main: main, project: project) }
+                else { member(g, ref: ref) }
             case let .group(g): member(g, ref: nil)
             case .none: EmptyView()
             }
@@ -110,7 +128,7 @@ struct FlexibleFaceChip: View {
 
     @ViewBuilder private func member(_ gid: UUID, ref: LatticeSelectableRef?) -> some View {
         if let g = FlexibleFaceCommits.group(gid, project) {
-            if ui.roleOpen == gid { roleLine(g) } else { titleLine(g) }
+            if ui.roleOpen == gid { roleLine(g) } else { titleLine(g, ref: ref) }
             if ui.deleteAsk == gid, ui.deleteAskInChip {
                 // ★ U21: one line in the face line's place — the chip keeps its size, so [Cancel] stays where its trash was
                 FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) },
@@ -146,13 +164,14 @@ struct FlexibleFaceChip: View {
                 .accessibilityIdentifier("flexible-chip-protect-locked")
             } else if let ref {
                 faceLine(g, ref)
+                if !attachCompact { FlexibleAttachRows(main: main, project: project, group: g.id, ref: ref) }   // ★ U21 batch I (I2)
             } else {
                 allLine(g)
             }
         }
     }
 
-    private func titleLine(_ g: SelectionGroup) -> some View {
+    private func titleLine(_ g: SelectionGroup, ref: LatticeSelectableRef? = nil) -> some View {
         HStack(spacing: DS.Space.s) {
             RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 14, height: 14)
             if ui.renaming == g.id {
@@ -179,6 +198,7 @@ struct FlexibleFaceChip: View {
             }
             roleCapsule(g)
             Spacer(minLength: DS.Space.xs)
+            if attachCompact, let ref { FlexibleAttachIconButton(main: main, project: project, group: g.id, ref: ref) }   // ★ I2
             if !FlexibleFaceCommits.isLocked(g.id, project) {
                 Button { main.askDelete(g.id, inChip: true) } label: {
                     Image(systemName: "trash").font(.system(size: 15, weight: .medium))
