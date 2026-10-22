@@ -75,6 +75,11 @@ public struct FlexSquishRequestInfo: Sendable {
     public var coarsen: Int
     /// TESTS ONLY — the red controls (FlexibleBridge.hpp lists the bits). The app sends 0.
     public var control: Int
+    /// ★ U21 · I1 (his answer of 2026-10-21 ~15:35): 0 = today's hold chain; 1 = the app's (Rests → Topology's fixed faces,
+    /// sim only → the far side) — `anchorFaceIDs` / `anchorRegionIDs` are Topology's fixed faces / regions (FlexibleHold).
+    public var holdRule = 0
+    public var anchorFaceIDs: [Int] = []
+    public var anchorRegionIDs: [Int] = []
     public init(pressed: [FlexSquishPressInfo], restingIDs: [Int], rho: [Float], strainOp: [Float], skinFrac: [Float],
                 law: FlexSquishLawInfo, poisson: Double = 0.3, tolerance: Double = 1e-4, deadlineMS: Double = 20_000,
                 coarsen: Int = 0, control: Int = 0) {
@@ -127,6 +132,13 @@ public struct FlexSquishSolutionInfo: Sendable {
     /// 3 · node + component of every Dirichlet DOF.
     public let pinnedDOFs: [Int]
     public let restingMissing: [Int]
+    /// ★ U21 · I1: the hold's receipt — its rule, whether every anvil (a pressed stack's exit face) is held, the anchor ids the
+    /// scene lacks, the anchor faces / regions that pinned ≥ 1 node, and how many rests / anchors pinned ≥ 1 node.
+    public var holdRule = 0
+    public var exitsHeld = false
+    public var anchorsMissing: [Int] = []
+    public var anchorsHeld: [Int] = []
+    public var heldCount = 0
     /// Far ends of pressed stacks held along their normal beside the rests (their anvils).
     public var farAnvils: Int = 0
     /// ★ BATCH M: per FE element ((nx−1)(ny−1)(nz−1), x fastest), the modulus it was solved with
@@ -207,6 +219,9 @@ extension FlexibleScene {
         q.deadline_ms = r.deadlineMS
         q.coarsen = Int32(r.coarsen)
         q.control = Int32(r.control)
+        q.hold_rule = Int32(r.holdRule)   // ★ U21 · I1
+        q.anchor_face_ids = FlexConv.i(r.anchorFaceIDs)
+        q.anchor_region_ids = FlexConv.i(r.anchorRegionIDs)
         return q
     }
 }
@@ -259,6 +274,11 @@ extension FlexSquishConv {
         info.solidElements = Int(s.solid_elements)
         info.inflatedElements = Int(s.inflated_elements)
         info.volumeRatioMax = s.volume_ratio_max
+        info.holdRule = Int(s.hold_rule)   // ★ U21 · I1
+        info.exitsHeld = s.exits_held
+        info.anchorsMissing = Array(s.anchors_missing).map { Int($0) }
+        info.anchorsHeld = Array(s.anchors_held).map { Int($0) }
+        info.heldCount = Int(s.held_count)
         return info
     }
 }

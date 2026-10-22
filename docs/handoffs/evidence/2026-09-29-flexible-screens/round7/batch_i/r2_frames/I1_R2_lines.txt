@@ -1,0 +1,16 @@
+his pad: groups ["Group 1 faces regions [5, 3] presses 0", "Group 2 edges regions [] presses 2"] · rests [2000021, 2000020]
+TODAY Group 1: bc rest · k 1.037 (asked 2.266, clamped) · fold share 0.518 · s·gmax(part) 0.500 · max|u| 4.42 mm · line 'Held by 2 Rests'
+TODAY Group 2: bc rest · k 1.191 (asked 1.000) · fold share none · s·gmax(part) 0.956 · max|u| 6.68 mm · line 'Held by 2 Rests'
+balance group-1: |Σf| 15.17 of Σ|f| 59.65 N (25.4 %) · far anvils 0
+group-2 press 1: today bc rest · far anvils 0 · free modes 0 · held nodes 1666 · |Σf| 31.1 of 31.1 N · R2 free modes 0 · held nodes 1666 · fields identical true
+group-2 press 2: today bc rest · far anvils 0 · free modes 0 · held nodes 1666 · |Σf| 31.1 of 31.1 N · R2 free modes 0 · held nodes 1666 · fields identical true
+I1_R2_01_13p_group1_TODAY.png: camera az -2.3561945 el -0.7713401 d 429.21338
+I1_R2_01_13p_group1_TODAY.png: playing Group 1 · ×1.0 · held 1.0
+I1_R2_03_13p_group2_TODAY.png: camera az -2.3561945 el -0.7713401 d 429.21338
+I1_R2_03_13p_group2_TODAY.png: playing Group 2 · ×1.0 · held 1.0
+R2 Group 1: bc rest · k 0.727 (asked 3.432, clamped) · fold share 0.363 · s·gmax(part) 0.500 · max|u| 3.05 mm · line 'Held by 2 Rests'
+R2 Group 2: bc rest · k 1.191 (asked 1.000) · fold share none · s·gmax(part) 0.956 · max|u| 6.68 mm · line 'Held by 2 Rests'
+I1_R2_02_13p_group1_R2.png: camera az -2.3561945 el -0.7713401 d 429.21338
+I1_R2_02_13p_group1_R2.png: playing Group 1 · ×1.0 · held 1.0
+I1_R2_04_13p_group2_R2.png: camera az -2.3561945 el -0.7713401 d 429.21338
+I1_R2_04_13p_group2_R2.png: playing Group 2 · ×1.0 · held 1.0

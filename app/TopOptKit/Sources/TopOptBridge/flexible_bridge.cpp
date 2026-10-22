@@ -1175,6 +1175,22 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
   return o;
 }
 
+// ★ U21 · I1 (his answer of 2026-10-21 ~15:35): Topology's fixed faces / regions for the squish sim's hold (hold_rule 1), copied
+// beside the rests under the scene's lock; ids the scene does not have go to anchors_missing.
+static void squish_anchors(const Scene& s, const FlexSquishRequest& req, squishfe::Setup& setup) {
+  for (int32_t id : req.anchor_face_ids) {
+    const bool there = std::find(s.model.triangle_face.begin(), s.model.triangle_face.end(), id) != s.model.triangle_face.end();
+    if (there) setup.anchor_faces.push_back(id);
+    else setup.anchors_missing.push_back(id);
+  }
+  for (int32_t id : req.anchor_region_ids) {
+    const auto it = std::find_if(s.regions.begin(), s.regions.end(),
+                                 [id](const topopt::ResolvedFaceRegion& r) { return r.id == id; });
+    if (it == s.regions.end()) setup.anchors_missing.push_back(id);
+    else setup.anchor_regions.push_back(*it);
+  }
+}
+
 // ★ BATCH G: one squeeze group's squish as a 3D displacement field — see FlexibleBridge.hpp.
 // Under the scene's lock only what the solve needs is COPIED (the grid, each pressed face's region
 // and stack — built and cached here as the Settings page builds them —, the resting regions); the
@@ -1196,6 +1212,7 @@ FlexSquishSolution flexible_scene_squish_solve(int64_t scene, const FlexSquishRe
         if (it == s->regions.end()) setup.resting_missing.push_back(id);
         else setup.resting.push_back(*it);
       }
+      squish_anchors(*s, req, setup);   // ★ U21 · I1
     }
     setup.model = &s->model;
     return squishfe::solve(setup, req, *data_at(req.law.materials_path));
@@ -1222,6 +1239,7 @@ FlexSquishSolution flexible_scene_squish_step_begin(int64_t scene, const FlexSqu
         if (it == s->regions.end()) setup.resting_missing.push_back(id);
         else setup.resting.push_back(*it);
       }
+      squish_anchors(*s, req, setup);   // ★ U21 · I1
     }
     setup.model = &s->model;
     return squishfe::step_begin(setup, req, *data_at(req.law.materials_path), opt);

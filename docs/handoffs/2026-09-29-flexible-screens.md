@@ -74,6 +74,10 @@ Each item: what core does, where, the evidence, your numbers.
    input for them today: the Flexible block's keys (`core/src/flexible/job_block.cpp:76-78`) and a face's keys (`:208-211`)
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
+   Evidence so far (batch I1, your l-bracket as saved: no Rest, Group A = plate underside + bolt holes fixed on Topology):
+   today's chain glued Face 2 (raw u_x 0.0000 for Face 6's 0.4832); held by Group A (I1, sim only) Face 2 moves 18.42 for
+   Face 6's 18.70 raw (ratio 0.99: the whole upright swings off the gripped plate; the lattice barely squashes). Core's anvil is
+   always the far side (`core/src/flexible/faces.cpp:291-309`), so core's design and this sim now disagree on your bracket.
 
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
@@ -94,7 +98,78 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
-## ★ Round 7 · U21 checkpoint 2 — batches E, F, R, H and A together, installed (2026-10-22) (read this first)
+## ★ Round 7 · U21 batch I, part I1 — what holds the part in the squish sim (2026-10-22) (read this first)
+
+Your words (10-21 Img15/16): "It should absolutely be able to push the bottom face as long as there is not opposing push/rest!"
+Your answer (~15:35): "#1" — Rests hold it; without Rests, Topology's fixed faces hold it for the sim only; with neither, the far
+side, and the card says which. Your decision of 2026-10-22 ~02:50: a project WITH Rests stays exactly as today. NOT pushed, NOT
+installed (the installer does it). App only: no core file, no #354/main file, no new hook.
+
+### What you will see
+- **Every group card on the Squish page has one quiet line** under it saying what holds the part: "Held by 2 Rests",
+  "Held by Group A · fixed on Topology", "Held at Face 2 · nothing else holds it" or "Held by the presses against each other".
+- **Your l-bracket as saved** (no Rest): "Held by Group A · fixed on Topology". Face 2 now moves when you play it. The whole
+  upright swings off the plate, so Face 2 moves almost as much as Face 6 (0.99 of it). The lattice itself squashes little,
+  because nothing holds the upright's back. The 4 walls round the lattice only hold it once you attach them (the Attach tool,
+  I2/I3, not built yet).
+- **The colours are the lattice's squash and match the number; the part also bends, so a face can move further than the
+  number.** On your l-bracket the picture is cut to 0.655 of the calibrated size so nothing turns inside out.
+- **Your pad (it has Rests): unchanged.** The line reads "Held by 2 Rests".
+- Topology's fixed faces are read, never written: no Rest is added, and your setup's bytes and the job are unchanged.
+
+### The R2 frames (NOT shipped — for your yes/no this morning)
+`round7/batch_i/r2_frames/` (4 frames, same camera, Play ×1 at full load) + `CAPTION.md`. Under R2 (every Rest gripped, no far
+anvil) only your pad's Group 1 changes: the sim finds it stiffer, k asks 3.43 against 2.27, and after the band and the fold cut it
+moves 3.05 mm against 4.42 mm today. Group 2 (the edges) is byte-identical, because both its presses already end on the gripped
+Rests. Nothing tears in either frame. The odd part is the number: under R2, Group 1 would show less squish than you set.
+
+### What changed (code, all ours)
+- `FlexibleHold.swift` (new): the one place the hold is decided (`request`, `decide`, `landed`, `balanced`, `line`) and the
+  model's read of Topology's fixed groups (`topologyAnchors`, through the project's selection/force — the same read as
+  `loadCase()`).
+- Bridge (`FlexibleBridge.hpp`, `flexible_squish_fe.cpp/.hpp`, `flexible_bridge.cpp`): `hold_rule` (0 = today, the default),
+  `anchor_face_ids` / `anchor_region_ids`. Under rule 1 with no Rest, the anchors are held fast, the group's own pressed faces
+  never are, and bc reads "anchor". With Rests, or with no anchor, today's chain runs byte for byte. Receipt: `exits_held`,
+  `anchors_held`, `anchors_missing`, `held_count`. No new control bit.
+- `FlexibleFERequest` carries `hold`; `FlexibleStageModel` sets it in the build task. **Calibration (reviewer R3):** when the
+  hold leaves the exits free, k comes from a reference solve under today's chain and is applied to the real field. The fold cap
+  is measured on the real field. Per-press solves (edges groups) take one reference per press. A refine keeps the reference's
+  load factor. `FlexibleFEField` keeps the receipt and `referenceK`.
+- Squish card: `FlexibleHoldLine` under the miss line (`FlexibleSettingsRail.swift`); copy in `FlexibleRowCopy.Hold`.
+
+### Not done / open
+- **Perf gate: not met in debug, not measured in Release (reported to the reviewer).** The spec's budgets are Release numbers
+  (FlexibleSquishPerfProbe runs only with `FLEX_G_PERF=1` in Release; it was not run, to keep this lean). In the debug test
+  build your l-bracket's sim with its reference takes 3.48 s against the 3 s gate; today's single sim there is 2.60 s. Of that, the bridge solve is 0.44 s; the rest is the
+  field's bounds and the calibration in Swift. The reference's own bounds are skipped. What the test asserts: the reference
+  adds one bridge call, not a second sim. Your pad is not affected (it has Rests).
+- A Topology anchor edited on the Topology page reaches the sim at the next lattice build (the hold is read in the build task).
+  I3's `relinkSims` will re-solve without a rebuild.
+- Spec tests I1 3–6 and 10 are folded into the three tests below. The edge-press per-press reference is in the code but not
+  exercised on a project, because none of yours has an edges group without Rests.
+
+### Tests (`FlexibleI1HoldTests`, 3, your l-bracket and your pad of 10-21; red controls asserted red inside)
+- l-bracket: hold rule 1, anchors {5, 8, 9, 10, 11}, all resolved, all 5 pinned, free modes 0; Face 2 u_x 18.42 vs Face 6
+  18.70 raw (> 0.1×). **RED** `controlLegacyHold` → bc exit, Face 2 0.0000. kRef 1.705 == today's k 1.705. **RED**
+  `controlSingleSolveCalibration` → asks 2.659 (clamped at 2). No Rest written, setup bytes and job unchanged. **RED** batch A's
+  read-in writes 5 Rests; a Rest in the setup changes the job.
+- pad: request is today's chain; rule 1 handed your Bottom anchor beside the Rests → byte-identical u, pins and far anvils.
+  **RED** the R2 bits change a field.
+- pure: every line ≤ 44 with worst cases (**RED** 45 characters fail); Rests win over Topology; the receipt wins over the
+  decided line; the balance mirror is the bridge's 2 % (**RED** a 5 % mirror calls a 2.9 % squeeze a pinch).
+- `FlexibleI1R2FramesProbe` renders the frames (only with `FLEX_I1_DIR`).
+
+### Runs (`round7/batch_i/i1_runs.txt`)
+- `FlexibleI1HoldTests` 3/3 (run 1 failed only on the perf gate at 4.41 s; the reference's bounds are now skipped).
+- Pins, run once: `TopOptKitTests.FlexibleSquishFETests` (12, still green on the bridge default, rule 0) + 16 classes (the I1
+  tests, FE field / verify G / X20b / refine / solver / E3 / U21 R / U21 bend / new model / row copy / squish copy / settings):
+  **109 passed, 0 failed, 2 skipped** (FlexibleSquishPerfProbe, Release only).
+- Goldens 0 DIFFERS in both modes (38; 32 + 1 PART-SKIP). The 16 stage-job hashes are byte-identical (cmp) to
+  `round7/batch_u21_integ2`.
+- The R2 frames took 3 render passes, not 1. Frame 1 of the first pass had another camera, and the second was framed too close.
+  Only the last 4 frames are kept.
+
+## ★ Round 7 · U21 checkpoint 2 — batches E, F, R, H and A together, installed (2026-10-22)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). App only; core untouched; no #354/main file edited beyond
 batch A's approved hooks (H41–H46, H38').

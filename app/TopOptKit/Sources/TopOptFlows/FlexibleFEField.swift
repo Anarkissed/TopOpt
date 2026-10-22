@@ -77,6 +77,14 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// (× 1 for a design-depth field) still misses `FlexibleFE.pullbackTolMM` after `FlexibleFE.pullbackIterations` — said on
     /// screen in one line (FlexibleRowCopy.pullbackCapHit); nil: every wall back on the ghost.
     public private(set) var pullbackShortfall: Double?
+    /// ★ U21 · I1 (his answer of 2026-10-21 ~15:35): the hold's receipt — the rule the bridge ran, whether every anvil was held,
+    /// the Topology anchors that pinned (FlexibleHold.landed reads them for the card's line).
+    public private(set) var holdRule = 0
+    public private(set) var exitsHeld = false
+    public private(set) var anchorsHeld: [Int] = []
+    /// ★ U21 · I1 (the reviewer's R3, 2026-10-22 06:38): k was taken from a REFERENCE solve with the exits held (today's chain)
+    /// and applied to this field (its hold left the exits free) — nil: calibrated on itself.
+    public private(set) var referenceK: Double?
     /// The largest scale the PART's own map stays injective at.
     public var partSafeScale: Double { gmaxPart > 1e-12 ? FlexibleFE.safeGradient / gmaxPart : .infinity }
     /// Identity (fields are compared by it, never by their megabytes).
@@ -97,7 +105,9 @@ public struct FlexibleFEField: Sendable, Equatable {
     private static let serials = SerialCounter()
 
     /// The raw field of a solve (k = 1, not yet calibrated).
-    public init(solution s: FlexSquishSolutionInfo, simID: String, generation: Int) {
+    /// ★ U21 · I1: `bounds: false` — a REFERENCE field (only its column compressions are read): its gradient bounds are not
+    /// computed (two passes over every cell: ~0.9 s of a debug build on his l-bracket).
+    public init(solution s: FlexSquishSolutionInfo, simID: String, generation: Int, bounds: Bool = true) {
         self.simID = simID
         self.generation = generation
         nx = s.nx; ny = s.ny; nz = s.nz
@@ -116,8 +126,9 @@ public struct FlexibleFEField: Sendable, Equatable {
         solveMS = s.solveMS
         coarsen = s.coarsen
         uncalibrated = false
+        holdRule = s.holdRule; exitsHeld = s.exitsHeld; anchorsHeld = s.anchorsHeld   // ★ U21 · I1
         serial = Self.serials.next()
-        refreshBounds()
+        if bounds { refreshBounds() }
     }
 
     /// A field from its parts (tests, the probes).
@@ -375,9 +386,11 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// This field scaled so its deepest zone compresses core's squish there — k kept inside
     /// `band` (nil: unbounded — a shape-only lattice, whose law is in relative units) — and, with
     /// `foldCap`, cut so the part's own map stays injective at the page's ×1 (k · gmaxPart ≤ ½).
+    /// ★ U21 · I1 (R3): `reference` — a solve of the same sim with the exits held (today's chain); k is taken where core defines
+    /// it (the columns pressed against their anvil) on it and applied HERE; the fold cap is measured on this field.
     public func calibrated(to targets: [Target], band: ClosedRange<Double>? = FlexibleFE.calibrationBand,
-                           foldCap: Bool = true) -> FlexibleFEField {
-        let c = calibration(targets)
+                           foldCap: Bool = true, reference: FlexibleFEField? = nil) -> FlexibleFEField {
+        let c = (reference ?? self).calibration(targets)
         let banded = c.uncalibrated ? 1 : (band.map { Swift.min($0.upperBound, Swift.max($0.lowerBound, c.k)) } ?? c.k)
         var k = banded
         var share: Double?
@@ -388,6 +401,7 @@ public struct FlexibleFEField: Sendable, Equatable {
         var f = scaled(by: k, uncalibrated: c.uncalibrated, asked: c.k)
         f.clamped = !c.uncalibrated && abs(banded - c.k) > 1e-9 * Swift.max(1, abs(c.k))
         f.foldShare = share
+        if reference != nil { f.referenceK = banded }
         return f
     }
 
@@ -395,9 +409,25 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// the group's rests; linear, so the group's field is Σ kᵢ·uᵢ), each kᵢ set so press i's deepest compression along its arrow on
     /// core's press stack (`targets[i]`) is core's deepest design depth there (a few rounds, so a neighbour's push is counted). No
     /// band and no ½ cut; only a TRUE fold (a part cell turned inside out) scales every kᵢ down, and says so (`trueFoldCut`).
-    static func designDepth(parts: [FlexibleFEField], targets: [Target]) -> FlexibleFEField? {
+    /// ★ U21 · I1 (R3): `references` — per press, a solve with its exits held (nil: the part itself); each kᵢ is found on the
+    /// references and applied to the real parts.
+    static func designDepth(parts: [FlexibleFEField], targets: [Target], references: [FlexibleFEField?]? = nil) -> FlexibleFEField? {
         guard let first = parts.first, parts.count == targets.count,
               parts.allSatisfy({ $0.u.count == first.u.count }) else { return nil }
+        if let refs = references, refs.count == parts.count, refs.contains(where: { $0 != nil }) {
+            let src = zip(parts, refs).map { $1 ?? $0 }
+            guard src.allSatisfy({ $0.u.count == first.u.count }), let ref = designDepth(parts: src, targets: targets),
+                  let ks = ref.designK else { return nil }
+            return designDepth(parts: parts, targets: targets, fixedK: ks)
+        }
+        return designDepth(parts: parts, targets: targets, fixedK: nil)
+    }
+
+    /// ★ U21 · I1: the kᵢ a design-depth field was combined with (before a true fold's cut).
+    public private(set) var designK: [Double]?
+
+    private static func designDepth(parts: [FlexibleFEField], targets: [Target], fixedK: [Double]?) -> FlexibleFEField? {
+        guard let first = parts.first else { return nil }
         func deepest(_ f: FlexibleFEField, _ t: Target) -> Double {
             t.stack.columns.indices.map { f.columnCompression(stack: t.stack, col: $0, pinched: false) }.max() ?? 0
         }
@@ -416,7 +446,8 @@ public struct FlexibleFEField: Sendable, Equatable {
             }
             f.u = u
         }
-        for _ in 0..<6 {
+        if let fixedK { k = fixedK }
+        for _ in 0..<(fixedK == nil ? 6 : 0) {
             combine()
             var moved = false
             for i in k.indices where k[i] > 0 {
@@ -436,6 +467,8 @@ public struct FlexibleFEField: Sendable, Equatable {
         f.clamped = false
         f.foldShare = nil
         f.designDepth = true
+        f.designK = k
+        if fixedK != nil { f.referenceK = k.reduce(0, +) }
         f.scale = k.reduce(0, +)
         let keep = f.foldFreeScale(upTo: 1)
         if keep < 1 - 1e-6 {

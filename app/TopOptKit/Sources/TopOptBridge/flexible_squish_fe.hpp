@@ -40,6 +40,10 @@ struct Setup {
   std::vector<Press> pressed;              // parallel to the request's `pressed`
   std::vector<topopt::ResolvedFaceRegion> resting;
   std::vector<int32_t> resting_missing;
+  // ★ U21 · I1: Topology's fixed faces / regions (FlexSquishRequest.anchor_*), the ids the scene lacks
+  std::vector<int32_t> anchor_faces;
+  std::vector<topopt::ResolvedFaceRegion> anchor_regions;
+  std::vector<int32_t> anchors_missing;
 };
 
 FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req,

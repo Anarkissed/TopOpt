@@ -284,7 +284,9 @@ public enum FlexibleFERefine {
         // ★ THE CALIBRATION, RE-DECIDED on the stepped field: the load factor whose deepest zone
         // compresses core's depth (∝ λ^p from the last two increments), inside the band
         var asked = target
-        if !linear.uncalibrated, history.count >= 2, core > 0 {
+        // ★ U21 · I1 (R3): a field calibrated on a REFERENCE (its hold leaves the exits free) keeps the reference's load factor —
+        // the real hold's own compression is not where core defines k
+        if !linear.uncalibrated, linear.referenceK == nil, history.count >= 2, core > 0 {
             for _ in 0..<correctionSteps {
                 let a = history[history.count - 2], b = history[history.count - 1]
                 asked = nextLoadFactor(a, b, core: core)

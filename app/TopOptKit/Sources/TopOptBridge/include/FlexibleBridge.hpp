@@ -573,6 +573,15 @@ struct FlexSquishRequest {
                          // iterations . 16384 core's GenEO + Krylov recycling left as found
                          // . 32768 a pressed stack's far end NOT held when other faces rest —
                          // batch G's rule, the red control of the far anvil); else the app sends 0
+  // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, "#1": with no Rests the Topology page's fixed faces hold the part for the sim
+  // only, no Rests added; with neither the far side stays held — narrowed by his decision of 2026-10-22 ~02:50: a group WITH
+  // Rests keeps today's chain exactly, far anvil included). 0 = today's chain (the default: every existing caller and test);
+  // 1 = the app's hold: Rests present → today's chain unchanged; no Rests and `anchor_*` given → those faces / regions BONDED
+  // (x, y, z; every exposed cell face of their slab voxels — a bolt bore has no clear outward normal), bc_mode "anchor", the
+  // group's own pressed faces never held; no Rests and no anchor → today's far side (exit glue / free). No control bit.
+  int32_t hold_rule = 0;
+  std::vector<int32_t> anchor_face_ids;    // Topology's fixed B-rep / pseudo faces (model->triangle_face ids)
+  std::vector<int32_t> anchor_region_ids;  // Topology's fixed painted regions, resolved against the scene's regions
 };
 struct FlexSquishSolution {
   bool ok = false;
@@ -613,6 +622,15 @@ struct FlexSquishSolution {
   std::vector<int32_t> held_nodes;          // rest / exit: the held sole nodes
   std::vector<int32_t> pinned_dofs;         // 3 * node + component, every Dirichlet DOF
   std::vector<int32_t> resting_missing;     // resting ids the scene does not declare
+  // ★ U21 · I1: the hold's receipt — the rule it ran, whether every anvil (a pressed stack's exit face) is held (rest / exit:
+  // true as today; anchor: every anvil among the anchored faces; free / patch: false — the app's calibration then takes k from a
+  // reference solve with the exits held), the anchor ids the scene lacks, the anchor faces / regions (ids) that pinned >= 1
+  // node, and how many rests / anchors pinned >= 1 node
+  int32_t hold_rule = 0;
+  bool exits_held = false;
+  std::vector<int32_t> anchors_missing;
+  std::vector<int32_t> anchors_held;
+  int32_t held_count = 0;
   // ★ BATCH N: the STEPPED solve's receipt (a linear solve: one solve, load factor 1)
   int64_t session = 0;                      // step_begin: the session to step (0: none — see failure)
   double load_factor = 1.0;                 // x the design force this field is at

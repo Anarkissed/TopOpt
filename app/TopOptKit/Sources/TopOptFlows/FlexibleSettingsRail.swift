@@ -418,6 +418,8 @@ struct FlexibleGroupTabHeader: View {
                 FlexibleColourSwatches(model: model, group: group)
             }
             if let miss = row?.miss { FlexWarningLine(text: miss, id: "flexible-group-\(group.number)-miss") }
+            // ★ U21 · I1 (his answer of 2026-10-21 ~15:35: "The card always says what holds it"): one quiet line, read only
+            FlexibleHoldLine(model: model, group: group)
         }
         .background(GeometryReader { g in
             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["groupRow-\(group.number)": g.frame(in: .global)])
@@ -581,5 +583,22 @@ enum FlexibleNumberSpecs {
     /// A curve point's squish (mm), 0 … the face's deepest squish.
     static func curvePoint(mm: Double, deepestMM: Double) -> FlexNumberSpec {
         FlexNumberSpec(value: mm, unit: "mm", step: 0.1, range: 0...max(0.1, deepestMM), decimals: 1)
+    }
+}
+
+/// ★ U21 · I1: what holds the group's part in its sim — one quiet line (a statement, not a blocker), never cut.
+struct FlexibleHoldLine: View {
+    @ObservedObject var model: FlexibleStageModel
+    let group: FlexibleSqueezeGroup
+    var body: some View {
+        let k = model.holdKind(group)
+        HStack(spacing: DS.Space.xs) {
+            Image(systemName: "pin").font(.system(size: 13)).foregroundStyle(.secondary)
+            Text(FlexibleHold.line(k)).font(.system(size: 13)).foregroundStyle(.secondary)
+                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(FlexibleHold.spoken(k))
+        .accessibilityIdentifier("flexible-group-\(group.number)-hold")
     }
 }

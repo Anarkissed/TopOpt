@@ -380,3 +380,26 @@ public enum FlexibleRowCopy {
         public static let curvePoint = "How far the curve squishes at the selected point, in mm of this face's deepest squish. Drag the point on the part, or type it here."
     }
 }
+
+// MARK: ★ U21 · I1 — what holds the part in the squish sim (his answer of 2026-10-21 ~15:35: "the card always says what holds it")
+
+extension FlexibleRowCopy {
+    /// The one quiet line under a group's card on the Squish page (FlexibleHold.line), ≤ 44 characters with real names.
+    public enum Hold {
+        public static func rests(_ n: Int) -> String { n == 1 ? "Held by its Rest" : "Held by \(n) Rests" }
+        /// "Held by Group A · fixed on Topology" — a name over 16 characters is cut to 15 + "…".
+        public static func topology(group: String) -> String {
+            let name = group.count > 16 ? String(group.prefix(15)) + "…" : group
+            return "Held by \(name) · fixed on Topology"
+        }
+        public static let topologyMany = "Held by Topology's fixed faces"
+        /// "Held at Face 2 · nothing else holds it"; several faces (or none known yet): "Held at the far side · …".
+        public static func farSide(face: String?) -> String {
+            guard let face, face.count <= 12 else { return "Held at the far side · nothing else holds it" }
+            return "Held at \(face) · nothing else holds it"
+        }
+        public static let balanced = "Held by the presses against each other"
+        /// VoiceOver's tail when no link holds the group (I3 brings links; never after a links line).
+        public static let voiceOverTail = ", set links on the Lattice page"
+    }
+}

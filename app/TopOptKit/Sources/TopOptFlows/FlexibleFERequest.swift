@@ -58,10 +58,28 @@ public struct FlexibleFERequest: Sendable {
     public let resting: [Int]
     public let law: FlexSquishLawInfo
     public let sims: [Sim]
+    /// ★ U21 · I1 (his answer of 2026-10-21 ~15:35, narrowed 2026-10-22 ~02:50): what holds the part — today's chain whenever a
+    /// Rest exists, else Topology's fixed faces (sim only) → the far side (FlexibleHold.request). Every sim of the request shares
+    /// it, as it shares `resting`.
+    public var hold: FlexibleFEHold = .legacy
+
+    /// ★ U21 · I1, RED CONTROL only: every request sends today's chain (rule 0, no anchor) — his l-bracket's Face 2 glued.
+    nonisolated(unsafe) public static var controlLegacyHold = false
+    /// ★ U21 · I1, RED CONTROL only (R3): a field whose hold leaves the exits free calibrates on ITSELF (no reference solve).
+    nonisolated(unsafe) public static var controlSingleSolveCalibration = false
 
     /// ★ R7-E3: this request with `sims` in place of its own (the per-voxel arrays shared).
     public func with(sims: [Sim]) -> FlexibleFERequest {
-        FlexibleFERequest(generation: generation, rho: rho, skinFrac: skinFrac, resting: resting, law: law, sims: sims)
+        var r = FlexibleFERequest(generation: generation, rho: rho, skinFrac: skinFrac, resting: resting, law: law, sims: sims)
+        r.hold = hold
+        return r
+    }
+
+    /// ★ U21 · I1: this request with `hold` in place of its own (the reference solve: `.legacy`).
+    public func with(hold h: FlexibleFEHold) -> FlexibleFERequest {
+        var r = self
+        r.hold = h
+        return r
     }
 
     /// ★ R7-E3: the per-voxel arrays alone (no sim) — what an edges group's interim sim is solved on.
@@ -98,9 +116,20 @@ public struct FlexibleFERequest: Sendable {
 
     /// The bridge's request for `sim`.
     public func request(_ sim: Sim, control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> FlexSquishRequestInfo {
-        FlexSquishRequestInfo(pressed: sim.pressed, restingIDs: resting, rho: rho, strainOp: sim.strainOp, skinFrac: skinFrac,
-                              law: law, poisson: FlexibleFE.poisson, tolerance: FlexibleFE.tolerance, deadlineMS: deadlineMS,
-                              control: control)
+        var q = FlexSquishRequestInfo(pressed: sim.pressed, restingIDs: resting, rho: rho, strainOp: sim.strainOp, skinFrac: skinFrac,
+                                      law: law, poisson: FlexibleFE.poisson, tolerance: FlexibleFE.tolerance, deadlineMS: deadlineMS,
+                                      control: control)
+        let h = Self.controlLegacyHold ? FlexibleFEHold.legacy : hold   // ★ U21 · I1
+        q.holdRule = h.rule
+        q.anchorFaceIDs = h.anchorFaceIDs
+        q.anchorRegionIDs = h.anchorRegionIDs
+        return q
+    }
+
+    /// ★ U21 · I1 (R3): a field solved under a hold that leaves the exits free (the Topology anchors) is calibrated on a REFERENCE
+    /// — the same sim under today's chain (the exits held) — whose k is applied to it. Today's chain is its own reference.
+    static func needsReference(_ f: FlexibleFEField, _ r: FlexibleFERequest) -> Bool {
+        r.hold.rule == 1 && f.holdRule == 1 && f.bcMode == "anchor" && !f.exitsHeld && !controlSingleSolveCalibration
     }
 
     /// Build every group sim's request from the lattice just built.
@@ -161,25 +190,43 @@ public struct FlexibleFERequest: Sendable {
         // ★ X20b: an edges group core designed for — one solve per press, each scaled to core's design depth (linear: summed)
         if sim.perPress, sim.pressed.count == sim.targets.count, !controlOneScalar {
             var parts: [FlexibleFEField] = []
+            var refs: [FlexibleFEField?] = []
             for p in sim.pressed {
                 let one = Sim(id: sim.id, pressed: [p], strainOp: sim.strainOp, targets: [])
                 switch solveRaw(one, of: r, on: scene, control: control, deadlineMS: deadlineMS) {
-                case .success(let f): parts.append(f)
+                case .success(let f):
+                    parts.append(f)
+                    // ★ U21 · I1 (R3): one reference per press, only when its exits are not held
+                    if needsReference(f, r) {
+                        switch solveRaw(one, of: r.with(hold: .legacy), on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
+                        case .success(let g): refs.append(g)
+                        case .failure(let e): return .failure(e)
+                        }
+                    } else { refs.append(nil) }
                 case .failure(let e): return .failure(e)
                 }
             }
-            guard let f = FlexibleFEField.designDepth(parts: parts, targets: sim.targets) else {
+            guard let f = FlexibleFEField.designDepth(parts: parts, targets: sim.targets, references: refs) else {
                 return .failure(FlexibleSquishFailure(why: "The presses' sims did not share one grid."))
             }
             return .success(f)
         }
-        return solveRaw(sim, of: r, on: scene, control: control, deadlineMS: deadlineMS)
-            .map { $0.calibrated(to: sim.targets, band: r.law.shapeOnly ? nil : FlexibleFE.calibrationBand) }
+        let band = r.law.shapeOnly ? nil : Optional(FlexibleFE.calibrationBand)
+        switch solveRaw(sim, of: r, on: scene, control: control, deadlineMS: deadlineMS) {
+        case .failure(let e): return .failure(e)
+        case .success(let f):
+            // ★ U21 · I1 (R3): k from a reference solve with the exits held, applied to the real-hold field
+            guard needsReference(f, r), !sim.targets.isEmpty else { return .success(f.calibrated(to: sim.targets, band: band)) }
+            switch solveRaw(sim, of: r.with(hold: .legacy), on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
+            case .failure(let e): return .failure(e)
+            case .success(let ref): return .success(f.calibrated(to: sim.targets, band: band, reference: ref))
+            }
+        }
     }
 
     /// One solve, its raw field (k = 1).
     static func solveRaw(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
-                         control: Int, deadlineMS: Double) -> Result<FlexibleFEField, FlexibleSquishFailure> {
+                         control: Int, deadlineMS: Double, reference: Bool = false) -> Result<FlexibleFEField, FlexibleSquishFailure> {
         do {
             var s = try scene.squishSolve(r.request(sim, control: control, deadlineMS: deadlineMS))
             // ★ A squeeze whose rests SLIDE leaves near-rigid modes held by one pin each; on a
@@ -192,7 +239,7 @@ public struct FlexibleFERequest: Sendable {
                 if bonded.ok { s = bonded; retried = true }
             }
             guard s.ok else { return .failure(FlexibleSquishFailure(why: s.failure)) }
-            var raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation)
+            var raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation, bounds: !reference)
             raw.restsBonded = retried
             return .success(raw)
         } catch {

@@ -1593,6 +1593,9 @@ public final class FlexibleStageModel: ObservableObject {
                               tempC: designTempC ?? 0, shapeOnly: shapeOnly)
         }
         let feResting = settings.faces.filter { $0.role == "resting" }.map(\.faceRegionID)
+        // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, narrowed 2026-10-22 ~02:50): what holds the part — today's chain with a
+        // Rest, else Topology's fixed faces (read here, on the main actor; sim only, never written as Rests) → the far side
+        let feHold = FlexibleHold.request(resting: feResting, anchors: topologyAnchors)
         let feWeights = Dictionary(zip(allKeys, faces.map(\.weightN)), uniquingKeysWith: { a, _ in a })
         track(Task.detached(priority: .userInitiated) {
             do {
@@ -1686,6 +1689,7 @@ public final class FlexibleStageModel: ObservableObject {
                     }
                     fe = FlexibleFERequest.build(field: field, inputs: inputs, sims: sims, faces: fs, resting: feResting,
                                                  law: law, generation: generation)
+                    fe?.hold = feHold
                 }
                 let feBuilt = fe
                 // ★ C1: the presses core designed and this lattice carries — their sims calibrate to these depths

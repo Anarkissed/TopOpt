@@ -523,6 +523,8 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
   P.tolerance = req.tolerance;
   P.deadline_ms = req.deadline_ms;
   out.resting_missing = s.resting_missing;
+  out.anchors_missing = s.anchors_missing;   // ★ U21 · I1
+  out.hold_rule = req.hold_rule;
   P.law = make_law(req.law, data);
 
   // ── the FE grid (§1.1): core's grid, coarsened by the rule ──
@@ -798,6 +800,7 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
       }
       const bool bonded = (control & kRollerRest) ? false : ((control & kBondedRests) != 0 || anvil);
       hold(nodes, n, bonded);
+      if (!nodes.empty()) out.held_count += 1;   // ★ U21 · I1: the receipt only
     }
     // ★ THE FAR END IS THE ANVIL (batch G verification): a pressed stack's other end that neither
     // rests nor is pressed by this group is where core designs its columns to be squeezed against
@@ -820,6 +823,66 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
       }
     }
     if (!bcs.empty()) mode = "rest";
+    if (mode == "rest") {   // ★ U21 · I1: the receipt only — each anvil rests or is held by the far anvil
+      out.exits_held = true;
+      if (control & kNoFarAnvil)
+        for (int face : anvilFaces)
+          if (std::find(restingFaces.begin(), restingFaces.end(), face) == restingFaces.end()) out.exits_held = false;
+    }
+  }
+  // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, "#1"; narrowed 2026-10-22 ~02:50): NOTHING RESTS — the Topology page's fixed
+  // faces hold the part (sim only; never written as Rests), BONDED, whether or not the presses balance. Every exposed cell face
+  // of an anchor's slab voxels is pinned (no normal filter: a bolt bore's mean normal is ~0, so `sole` would hold nothing).
+  // A face this group presses is never held. Rule 0 (the default) never comes here: today's chain, byte for byte.
+  if (mode.empty() && req.hold_rule == 1 && s.resting.empty() && (!s.anchor_faces.empty() || !s.anchor_regions.empty())) {
+    auto pressedFace = [&](int f) { return std::find(pressedFaces.begin(), pressedFaces.end(), f) != pressedFaces.end(); };
+    auto grip = [&](const std::vector<int>& triangles, const std::vector<topopt::RegionCut>& cuts, std::vector<int>& nodes) {
+      std::vector<int> slab = member_voxels(fe.g, *s.model, triangles);
+      slab = topopt::cut_voxels(fe.g, slab, cuts);
+      for (int idx : slab) {
+        const int i = idx % fe.g.nx, j = (idx / fe.g.nx) % fe.g.ny, kk = idx / (fe.g.nx * fe.g.ny);
+        for (int d = 0; d < 6; ++d) {
+          if (fe.solid(i + kDir[d][0], j + kDir[d][1], kk + kDir[d][2])) continue;
+          for (int nd : face_nodes(fe, i, j, kk, d)) nodes.push_back(nd);
+        }
+      }
+    };
+    std::vector<int> anchored;
+    for (int face : s.anchor_faces) {
+      if (pressedFace(face)) continue;
+      std::vector<int> tris;
+      for (std::size_t t = 0; t < s.model->triangle_face.size(); ++t)
+        if (s.model->triangle_face[t] == face) tris.push_back(static_cast<int>(t));
+      std::vector<int> nodes;
+      grip(tris, {}, nodes);
+      hold(nodes, Vec3{0, 0, 1}, true);
+      if (!nodes.empty()) {
+        out.held_count += 1;
+        out.anchors_held.push_back(face);
+        anchored.push_back(face);
+      }
+    }
+    for (const auto& r : s.anchor_regions) {
+      std::vector<int> tris;
+      for (int t : r.member_triangles) {
+        const int f = (t >= 0 && static_cast<std::size_t>(t) < s.model->triangle_face.size()) ? s.model->triangle_face[t] : -1;
+        if (!pressedFace(f)) tris.push_back(t);
+      }
+      std::vector<int> nodes;
+      grip(tris, r.cuts, nodes);
+      hold(nodes, Vec3{0, 0, 1}, true);
+      if (!nodes.empty()) {
+        out.held_count += 1;
+        out.anchors_held.push_back(r.id);
+        for (int f : r.member_faces) anchored.push_back(f);
+      }
+    }
+    if (!bcs.empty()) {
+      mode = "anchor";
+      out.exits_held = true;
+      for (int face : anvilFaces)
+        if (std::find(anchored.begin(), anchored.end(), face) == anchored.end()) out.exits_held = false;
+    }
   }
   if (mode.empty() && !balanced) {
     // the linked other end of each pressed stack (core's anvil), not a face this group presses
@@ -832,7 +895,7 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
       sole(tris, {}, nodes, n);
       hold(nodes, n, true);
     }
-    if (!bcs.empty()) mode = "exit";
+    if (!bcs.empty()) { mode = "exit"; out.exits_held = true; }
   }
   if (mode.empty()) mode = "free";
   std::sort(out.held_nodes.begin(), out.held_nodes.end());
