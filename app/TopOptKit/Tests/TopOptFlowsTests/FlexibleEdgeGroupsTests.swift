@@ -570,7 +570,14 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         // (his rule "1-3 fix buttons": with four sent groups — his pad's three face groups and this one — the hold offers the
         // first three; the edges group's own send is offered once three or fewer groups are sent — FlexibleR7E2Tests E2-9)
         print("FLEX-I2-6 (R7-E2) sends \(G.sends(m).map(\.title)) · sent groups \(m.sentSqueezeGroups.map(\.number))")
-        XCTAssertEqual(G.sends(m).contains { $0.title == mine }, m.sentSqueezeGroups.count <= 3, "★ (R7-E2) the edges group's own send, within his three")
+        // ★ RE-PINNED (U21 checkpoint 2, for batch R — the reviewer's ruling E(1) of 2026-10-21: "one [More…] listing every group,
+        // one per row; no fourth fixed button"): was "offered only within his three"; now every sent group has its send (past
+        // three, the row shows two buttons + [More…]). RED CONTROL `controlSendsCapAtThree` (the old cap) still drops it.
+        XCTAssertTrue(G.sends(m).contains { $0.title == mine }, "★ (U21 R, E(1)) the edges group's own send, a fourth group included")
+        FlexibleCoreHold.controlSendsCapAtThree = true
+        let redHasMine = G.sends(m).contains { $0.title == mine }
+        FlexibleCoreHold.controlSendsCapAtThree = false
+        XCTAssertEqual(redHasMine, m.sentSqueezeGroups.count <= 3, "RED control (the cap at three): the fourth group's send is dropped")
         for send in G.sends(m) {
             let job = try m.runJobJSON(resting: Set(send.resting))
             let block = try FlexibleCore.parseJobBlock(job)
@@ -773,7 +780,13 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
         // the edges group's own send — within his three buttons ("1-3 fix buttons"): his pad's three face groups fill them
         let added = Set(after.keys).subtracting(sendsBefore)
         print("FLEX-I2-9 (R7-E2) sends before \(sendsBefore.sorted()) · after \(Set(after.keys).sorted()) · sent groups \(m.sentSqueezeGroups.count)")
-        XCTAssertEqual(added.count, sendsBefore.count < 3 ? 1 : 0, "★ the edges group's own send, when his three leave room: \(added)")
+        // ★ RE-PINNED (U21 checkpoint 2, for batch R — ruling E(1) of 2026-10-21: "one [More…] listing every group, one per row"):
+        // was "only when his three leave room"; now the edges group's own send is always added (RED CONTROL: the cap at three)
+        XCTAssertEqual(added.count, 1, "★ (U21 R, E(1)) the edges group's own send is added: \(added)")
+        FlexibleCoreHold.controlSendsCapAtThree = true
+        let redAdded = Set(G.sends(m).map(\.title)).subtracting(sendsBefore)
+        FlexibleCoreHold.controlSendsCapAtThree = false
+        XCTAssertEqual(redAdded.count, sendsBefore.count < 3 ? 1 : 0, "RED control (the cap at three): \(redAdded)")
         var same = 0
         for (send, ids) in before where after[send] != nil {
             for id in [0, 3, 4, 5] where ids[id] != nil {
