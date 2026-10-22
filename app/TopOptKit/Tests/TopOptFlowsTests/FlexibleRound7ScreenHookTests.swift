@@ -82,7 +82,9 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         Hook(id: "H38",
              pin: "                    showLatticeWizard = false   // Flexible (PR #362) H38: ",
              gate: "showLatticeWizard = false   //",
-             anchor: "                    project.lattice.flexible = FlexibleStageSettings()\n"),
+             // ★ RE-PINNED (round 7 · U21 batch A, his Img7 of 2026-10-21: "I don't think there should be any automatic squish/rest
+             // selections whatsoever. Please remove them from *new* models coming in."): the line before is H38' (`.newSetup()`)
+             anchor: "                    project.lattice.flexible = .newSetup()   // Flexible (PR #362) H38': a new setup reads nothing in from Topology (his Img7)\n"),
     ]
 
     /// Every rule the hooks must keep, on a copy of WorkspacePlaceholder's text. Empty = all pinned.

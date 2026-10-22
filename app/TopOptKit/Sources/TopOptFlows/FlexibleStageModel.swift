@@ -882,6 +882,9 @@ public final class FlexibleStageModel: ObservableObject {
     /// ★ D2 REVIEW: the adopt, then the squeeze groups kept whole — a face the main page rests
     /// holds no group, a face it presses again joins a group that EXISTS (a stale id made a
     /// "Group 2" nobody made), and a main-page hand sits in one group.
+    /// ★ RED CONTROL (U21 batch A): today's read-in on a new setup too.
+    nonisolated(unsafe) static var controlNewSetupReadsIn = false
+
     nonisolated static func adopt(_ loads: FlexibleMainPageLoads, into s: inout FlexibleStageSettings) -> [Int: Double] {
         // ★ ROUND 5 (S6): a face he DELETED stays deleted — the re-sync skips it (the main page's
         // group still holds it; that is his to change there)
@@ -890,7 +893,10 @@ public final class FlexibleStageModel: ObservableObject {
         // by FlexiblePressReviewTests.testAClashFaceKeepsItsLinkThroughTheReSync)
         let removed = Set(s.removedRegions ?? []).union(s.pressRegions.subtracting(s.faces.map(\.faceRegionID)))
         let full = loads
-        let loads = removed.isEmpty ? loads : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) })
+        // ★ U21 (batch A, his Img7): a new setup reads nothing in — only faces he set himself re-sync (FlexibleSettings)
+        let ownOnly = s.readsMainPageGroups == false && !controlNewSetupReadsIn
+        let loads = removed.isEmpty && !ownOnly ? loads
+            : FlexibleMainPageLoads(entries: loads.entries.filter { !removed.contains($0.key) && (!ownOnly || s.face($0.key) != nil) })
         let relinked = loads.adopt(into: &s)
         FlexiblePress.adoptWeights(full, into: &s)   // ★ AP1: linked presses re-sync from their group
         FlexibleSqueezeGroups.uniteHands(&s, loads: loads)

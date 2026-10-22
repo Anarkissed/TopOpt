@@ -207,6 +207,20 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
     // ★ ROUND 7 (his ruling 2026-10-18): R7-D2's lattice-only set is WITHDRAWN — a lattice face is always protected from
     // Topology, so no main-page group carries a lattice role without Protect. No build ever wrote the key (nil was never
     // encoded); a project.json that carried it would still open (the key is ignored) — FlexibleLatticeIsProtectedTests.
+    /// ★ ROUND 7 · U21 (batch A, his Img7 of 2026-10-21: "I don't think there should be any automatic squish/rest selections
+    /// whatsoever. Please remove them from *new* models coming in."): whether the scene's open reads the main page's Load /
+    /// Anchor groups in as pressed / resting faces. nil ⇒ saved before 10-21 (his pad, his bracket): the read-in stays, so
+    /// they keep what they have. false ⇒ a new setup (`newSetup`, both doors: New TopOpt's Flexible tab and the mode modal's
+    /// Flexible): nothing is read in; a face he presses himself still takes its Load group's weight and re-syncs it. OPTIONAL,
+    /// omitted when nil (old projects encode byte-identical); never part of the lattice's key (`designInputs`).
+    public var readsMainPageGroups: Bool?
+
+    /// ★ ROUND 7 · U21 (batch A): a brand-new Flexible setup — nothing read in from the Topology page (his Img7).
+    public static func newSetup(materialID: String? = nil) -> FlexibleStageSettings {
+        var s = FlexibleStageSettings(materialID: materialID)
+        s.readsMainPageGroups = false
+        return s
+    }
 
     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
                 feel: String = "springy", beadsPerWall: Int = 1,
@@ -228,6 +242,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
         c.groupNames = nil   // ★ ROUND 7 (S): a name is display only
         c.sectors = nil      // ★ ROUND 7 (M2): numbers are labels; the geometry reaches the lattice through the scene key
         c.weightUnit = nil
+        c.readsMainPageGroups = nil   // ★ U21 (batch A): how the open reads the main page, not an input of the lattice
         // ★ R7-E2 (AP9): an edge or corner press (a flat prism) is built into the lattice now — core builds its stack, designs it,
         // grades the lattice along its arrow — so its every edit re-keys the lattice. A press that is never sent (AP1's tilted
         // face press: no flat prism) still cannot change it, and a project without presses keys as before (nil either way).

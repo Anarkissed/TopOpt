@@ -1,0 +1,70 @@
+# U21 batch A runs (app/TopOptKit, --scratch-path /tmp/r7u21-side-build) — bd50afba + the working tree
+### red-first (the tests built before the hooks; FlexibleR7U21HookTests, FlexibleR7U21NewModelTests, FlexibleR7U21ImportSheetHostedTests)
+	 Executed 11 tests, with 1 test skipped and 3 failures (0 unexpected) in 7.616 (7.617) seconds
+	 Executed 11 tests, with 1 test skipped and 3 failures (0 unexpected) in 7.616 (7.618) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21HookTests.swift:104: error: -[TopOptFlowsTests.FlexibleR7U21HookTests testEveryHookIsPinnedOnceAtItsAnchorWithItsGate] : XCTAssertEqual failed: ("["H41: the hook appears 0 times (must be exactly once)", "H42: the hook appe
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21HookTests.swift:130: error: -[TopOptFlowsTests.FlexibleR7U21HookTests testTheSheetWithoutItsHooksIsTodays] : XCTAssertEqual failed: ("251") is not equal to ("250") - ★ today's 250 lines
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/u21-side/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7U21ImportSheetHostedTests.swift:105: error: -[TopOptFlowsTests.FlexibleR7U21ImportSheetHostedTests testFilamentAndResinWriteProcessAsToday] : XCTUnwrap failed: expected non-nil value of type "CGRect" - the picker's frame
+FLEX-U21A RED (a setup saved before 10-21, nil flag) faces ["5:resting", "8:resting", "9:resting", "10:resting", "11:resting", "2000002:loaded"]
+FLEX-U21A continue: undo steps 0, recents ["ABS · Just now"]
+FLEX-U21A menu: colorFabb varioShore TPU (foaming) · squish data | Bambu Lab TPU for AMS (hard, 68D) · no squish data | NinjaTek NinjaFlex 85A · no squish data | PEBA 85A (Siraya Rebound PEBA 85A; Xinbo PEBA 85A in Li 2026) · no squish data | PEBA 95A (Siraya Rebound PEBA 95A) · no squish data | Siraya Tech Flex TPU Air (fo
+FLEX-U21A new setup faces [] rail ["Model", "New"]
+FLEX-U21A pad faces ["5:loaded", "3:loaded", "2000021:resting", "2000020:resting"] bytes 6905 → 6905
+### runner.log
+start 04:17:04 bd50afba + working tree
+build exit 0 04:17:40
+golden det exit 0 04:17:57
+golden unseeded exit 0 04:18:13
+hashes exit 0 04:19:17
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_integ1/stage_job_hashes_u21_integ1.txt (whole file): identical
+hashes cmp vs round7/batch_u21_h/stage_job_hashes_u21h.txt (whole file): identical
+chunk_aa exit 1 04:19:52
+chunk_ab exit 0 04:21:45
+chunk_ac exit 0 04:24:19
+chunk_ad exit 0 04:28:08
+chunk_ae exit 0 04:28:14
+chunk_af exit 0 04:28:42
+chunk_ag exit 1 04:33:06
+chunk_ah exit 0 04:33:46
+ALLDONE 04:33:46
+### classes (37, chunks of 5)
+FlexibleR7U21HookTests FlexibleR7U21NewModelTests FlexibleR7U21ImportSheetHostedTests FlexibleRound7ScreenHookTests FlexibleBatchCHookTests FlexibleEdgeGroupsTests FlexibleLatticeSectionsTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4Tests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7SettingsTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound6Tests FlexibleSectorStoreTests FlexibleSqueezeGroupsReviewTests FlexibleSurfaceNavTests LatticeStaleTypeTests LatticeStructuralViewStateTests SmoothingPageRound2Tests FlexibleH39HotfixHookTests FlexibleRound7SelectionsHookTests FlexibleChromeLayoutTests FlexibleR7M1Tests FlexibleS1VerifyTests FlexibleSelectionsListTests FlexibleSettingsRound4Tests FlexibleRound6HostedTests AppModelTests PrintParamsTests UnreadableProjectTests FlexibleSquishCopyTests FlexibleU21DeleteUndoTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.717 (13.719) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.724 (13.726) seconds
+### chunks
+chunk_aa.log: Executed 19 tests, with 2 failures (0 unexpected) in 32.897 (32.900) seconds
+chunk_ab.log: Executed 43 tests, with 0 failures (0 unexpected) in 110.358 (110.364) seconds
+chunk_ac.log: Executed 44 tests, with 0 failures (0 unexpected) in 151.701 (151.707) seconds
+chunk_ad.log: Executed 38 tests, with 0 failures (0 unexpected) in 226.376 (226.383) seconds
+chunk_ae.log: Executed 42 tests, with 0 failures (0 unexpected) in 3.773 (3.778) seconds
+chunk_af.log: Executed 25 tests, with 0 failures (0 unexpected) in 25.468 (25.472) seconds
+chunk_ag.log: Executed 102 tests, with 1 test skipped and 8 failures (0 unexpected) in 262.000 (262.010) seconds
+chunk_ah.log: Executed 13 tests, with 0 failures (0 unexpected) in 37.587 (37.590) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleR7U21ImportSheetHostedTests.swift:124: error: -[TopOptFlowsTests.FlexibleR7U21ImportSheetHostedTests testFilamentAndResinWriteProcessAsToday] : XCTAssertEqual failed: ("[TopOptFlows.Process
+Tests/TopOptFlowsTests/FlexibleR7U21ImportSheetHostedTests.swift:125: error: -[TopOptFlowsTests.FlexibleR7U21ImportSheetHostedTests testFilamentAndResinWriteProcessAsToday] : XCTAssertFalse failed - ★ Filament after Fl
+Tests/TopOptFlowsTests/AppModelTests.swift:235: error: -[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:237: error: -[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy] : XCTUnwrap failed: expected non-nil value of type "UUID"
+Tests/TopOptFlowsTests/AppModelTests.swift:205: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertNil failed: "ImportRefusal(id: 6503147C-423E-47AC-9835-834
+Tests/TopOptFlowsTests/AppModelTests.swift:206: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertNotNil failed
+Tests/TopOptFlowsTests/AppModelTests.swift:208: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:209: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTUnwrap failed: expected non-nil value of type "ImportedFile"
+Tests/TopOptFlowsTests/AppModelTests.swift:267: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:268: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd] : XCTUnwrap failed: expected non-nil value of type "ImportedFile"
+  -> FlexibleR7U21ImportSheetHostedTests: the test's own click missed after the sheet grew by the dropdown's caption line (fixed: the caption dropped so the sheet never moves, and the frame re-read per click); AppModelTests 3MF x3: known
+### skipped
+Test Case '-[TopOptFlowsTests.UnreadableProjectTests testEveryProjectInTheStoreCopyDecodes]' skipped (0.001 seconds).
+signal lines: 0
+### re-run after the fix (FlexibleR7U21HookTests, FlexibleR7U21NewModelTests, FlexibleR7U21ImportSheetHostedTests incl. testRenders, FlexibleRound7ScreenHookTests)
+Executed 15 tests, with 0 failures (0 unexpected) in 30.837 (30.840) seconds
+FLEX-U21A-HOSTED today writes [TopOptFlows.ProcessKind.resin, TopOptFlows.ProcessKind.fdm, TopOptFlows.ProcessKind.resin, TopOptFlows.ProcessKind.fdm] · with [Flexible] [TopOptFlows.ProcessKind.resin, TopOptFlows.ProcessKind.fdm, TopOptFlows.ProcessKind.resin, TopOptFlows.ProcessKind.fdm, TopOptFlows.ProcessKind.fdm, TopOptFlows.ProcessKind.fdm] · frame (276.0, 601.5, 480.0, 43.0)
+FLEX-U21A-RENDER a_new_topopt_filament_13p.png process fdm material ABS
+FLEX-U21A-RENDER a_new_topopt_flexible_13p.png process fdm material ABS
+FLEX-U21A-RENDER a_new_topopt_resin_13p.png process resin material Resin_Standard
+FLEX-U21A RED (a setup saved before 10-21, nil flag) faces ["5:resting", "8:resting", "9:resting", "10:resting", "11:resting", "2000002:loaded"]
+FLEX-U21A new setup faces [] rail ["Model", "New"]
+FLEX-U21A continue: undo steps 0, recents ["ABS · Just now"]
+FLEX-U21A pad faces ["5:loaded", "3:loaded", "2000021:resting", "2000020:resting"] bytes 6905 → 6905
+FLEX-U21A menu: colorFabb varioShore TPU (foaming) · squish data | Bambu Lab TPU for AMS (hard, 68D) · no squish data | NinjaTek NinjaFlex 85A · no squish data | PEBA 85A (Siraya Rebound PEBA 85A; Xinbo PEBA 85A in Li 2026) · no squish data | PEBA 95A (Siraya Rebound PEBA 95A) · no squish data | Siraya Tech Flex TPU Air (foaming) · no squish data | Siraya Tech Rebound PEBA Air (foaming) · no squish data | Siraya Tech Roamr TPU Air HR 85A (foaming, high rebound) · no squish data | TPU 95A (Bambu 95A HF, Polymaker PolyFlex TPU95, eSUN, Elegoo ...) · no squish data | eSUN eTPU-LW (foamin

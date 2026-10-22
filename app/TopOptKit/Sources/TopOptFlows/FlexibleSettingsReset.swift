@@ -43,6 +43,7 @@ extension FlexibleStageModel {
         if Self.controlResetAdopts { return freshSettingsReadingTheMainPage() }
         var s = FlexibleStageSettings(materialID: defaultMaterialID)
         s.weightUnit = settings.weightUnit
+        s.readsMainPageGroups = settings.readsMainPageGroups   // ★ U21 (batch A): a new setup stays one after Reset all
         s.sectors = settings.sectors   // ★ ROUND 7 (M2): the numbers stay (never reused)
         if let mesh = project.viewerMesh {
             // ★ ROUND 7 (M2): the main page's groups read over the regions with no strip left (the Flexible sectors of `s`)

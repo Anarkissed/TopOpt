@@ -733,6 +733,7 @@ public struct WorkspacePlaceholder: View {
                 .onChange(of: showLatticeWizard) { open in
                     if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
                 }
+                .onAppear { if FlexibleNewProject.takeLatticeStage(for: project.id) { goToStage(.lattice) } }   // Flexible (PR #362) H45: New TopOpt's Flexible tab lands on the Flexible Lattice stage
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
                           selection: selection,
@@ -1391,7 +1392,7 @@ public struct WorkspacePlaceholder: View {
                     // depend on some later save to survive a relaunch.
                     model.persistCurrentProject()
                 }, onChooseFlexible: {
-                    project.lattice.flexible = FlexibleStageSettings()
+                    project.lattice.flexible = .newSetup()   // Flexible (PR #362) H38': a new setup reads nothing in from Topology (his Img7)
                     showLatticeWizard = false   // Flexible (PR #362) H38: choosing Flexible lands on the Lattice page; the Squish page never opens by itself (his answer)
                     model.persistCurrentProject()
                 })

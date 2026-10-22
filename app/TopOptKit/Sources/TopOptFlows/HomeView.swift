@@ -166,7 +166,7 @@ private struct RecentProjectCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                             .lineLimit(1)
-                        Text(project.meta)
+                        Text(FlexibleHomeCard.meta(project) ?? project.meta)   // Flexible (PR #362) H46: a Flexible project's card names its filament (FlexibleHomeCard.swift); else today's label
                             .dsStyle(DS.TypeScale.caption2)
                             .foregroundStyle(DS.Color.textTertiary.color)
                             .lineLimit(1)

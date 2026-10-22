@@ -320,6 +320,107 @@ a side wall and it shows that there IS lattice behind it? That's definitely a bu
   gives the notice.
 - A tap without a point (only tests use it) keeps the old route.
 
+## ★ Round 7 · U21 batch A — your notes of 2026-10-21, Img4/5 and Img7: a Flexible tab in New TopOpt, and nothing set automatically on a new model (2026-10-22) (side lane, after batch H below)
+
+Side branch `claude/flexible-screens-u21-side2` (to be cherry-picked onto `claude/flexible-screens`). NOT pushed (your HOLD).
+NOT installed (the integrator installs). App only; core untouched. Shared files: only the hooks the reviewer approved on
+2026-10-22 06:38 (H41–H44 in ImportSheet, H45 and the one-line H38' in WorkspacePlaceholder, H46 in HomeView). No CORE LIST item
+(item 8(b), no TPU in Topology's materials, already stands).
+
+Your notes:
+- Img4/5: "There should be a flexible tab next to "filament" and "resin" that has a drop down of the different flexible filaments
+  we have listed. This should then lead right to the Flexible Lattice stage."
+- Img7: "I don't think there should be any automatic squish/rest selections whatsoever. Please remove them from *new* models
+  coming in."
+
+### What you will see now
+- New TopOpt has three tabs: Filament (FDM) · Resin (SLA) · Flexible. Flexible shows "Flexible filament" with the 10 filaments in
+  the Model card's order, full names in the menu, colorFabb varioShore TPU (the one with squish data) picked.
+- Continue on Flexible: the print settings open first (as today), and behind them the workspace is already on the Flexible Lattice
+  stage. The Lattice mode question is not asked.
+- A new model's Squish page starts empty: no Rests and no squish. The rail shows [Model] [+ New].
+- A face you press yourself still takes its Topology load's weight (10 lb on your bracket's Face 6) and stays linked to it.
+- Your pad and your bracket keep what they have. Reset all on a new model stays empty.
+- The Home card of a Flexible project shows its filament ("colorFabb varioShore TPU · Just now"), not "ABS". Topology projects
+  read as before.
+- Filament and Resin behave exactly as before.
+- Evidence (13" portrait, the sheet as Home shows it): `round7/batch_u21_a/a_new_topopt_filament_13p.png`,
+  `a_new_topopt_flexible_13p.png`, `a_new_topopt_resin_13p.png`. The menu's button chrome is the Mac renderer's; today's Resin
+  dropdown shows the same.
+
+### What was wrong (one sentence each)
+- The Flexible tab was never built: the only way into Flexible was the Lattice stage's mode question.
+- Every open of a Flexible setup copied your Topology groups in. On your bracket that was Group A's 5 faces as Rests and
+  Group B's face as the squish.
+
+### What changed
+- `FlexibleImportDraft.swift` (new):
+  - the sheet's three segments; Filament and Resin assign `process` exactly as before;
+  - the filament menu;
+  - Continue on Flexible: today's Continue, then `lattice.flexible = .newSetup(materialID:)`, saved at once, and a one-shot ask to
+    open on the Lattice stage.
+- Under the hood a Flexible project is an FDM print with ABS for Topology (as your pad). The filament is in
+  `lattice.flexible.materialID`.
+- `FlexibleStageSettings.readsMainPageGroups`:
+  - nil means saved before today, and the read-in stays;
+  - false means a new setup (both doors: the new tab and the mode question's Flexible, H38'). The re-sync then only touches faces
+    you set yourself.
+  - Omitted from the file when nil, so your pad's bytes are unchanged. Not part of the lattice's key.
+- Reset all keeps the flag.
+- `FlexibleHomeCard.swift` (new): reads a project's saved `lattice.flexible.materialID` (read only, cached by id + file date).
+- Hooks (each with its `// Flexible (PR #362) H<n>:` comment):
+  - H41: the draft.
+  - H42: `flexDraft.available` ⇒ three segments, else today's five lines byte-identical.
+  - H43: `flexDraft.on` ⇒ the filament menu, else `materialDropdown`.
+  - H44: `flexDraft.on` ⇒ continueFlexible, else `continueToWorkspace()`.
+  - H45: `.onAppear` takes the one-shot for this project only and calls `goToStage(.lattice)`.
+  - H38': `FlexibleStageSettings()` → `.newSetup()`.
+  - H46: `Text(FlexibleHomeCard.meta(project) ?? project.meta)`.
+- Changed from the posted plan: the sheet had a caption line "Continue opens the Flexible Lattice stage". It was dropped because
+  it made the centred sheet taller, which moved the tabs under your finger. The filament field keeps today's height (one line;
+  the long PEBA names are cut in the field and shown in full in the menu).
+
+### Tests (tests first; the red-first run is in `u21a_runs.txt`)
+- `FlexibleR7U21HookTests`:
+  - each of H41–H46 and H38' is pinned once at its anchor, with its gate and its else branch;
+  - H42's five lines are byte-identical; the sheet with its hooks taken back out is today's 250 lines;
+  - RED: each gate removed from a copy fails; H42's else touched fails; today's code has 0 of the hooks.
+- `FlexibleR7U21NewModelTests` (your bracket and pad):
+  - the 3 segments, the Model card's 10 in its order, full names, varioShore preselected; Resin restores its material.
+    RED: `controlNoFlexibleTab` gives 2 segments.
+  - Continue on Flexible: materialID varioshore_tpu, readsMainPageGroups false, no mode, print settings open, ABS, landing taken
+    once and only by this project, saved at once, 0 undo steps. RED: today's Continue gives no setup and no landing.
+  - A new setup on your bracket: faces [], rail [Model] [+ New], still [] after a write-back, Reset keeps the flag.
+    RED: nil flag gives 6 faces (5:resting ×5 + 2000002:loaded); `controlNewSetupReadsIn` also gives 6.
+  - Face 2000002 pressed on a new setup: 4.536 kg linked to Group B, kept through the re-sync, no Rests added.
+  - Your pad: 6,905 bytes before and after the open, byte-identical, no new key.
+  - The flag's encode / decode: nil is never written; designInputs are equal.
+  - The Home card: varioShore on your bracket's copy, nil (today's "ABS · Just now") for a Topology copy, cached, re-read after a
+    save. RED: today's card reads "ABS · Just now".
+- `FlexibleR7U21ImportSheetHostedTests` (the sheet hosted and clicked):
+  - Resin, Filament, Resin, Filament write [resin, fdm, resin, fdm] on today's sheet and on the 3-segment sheet;
+  - Flexible then Filament write fdm, fdm and take the Flexible menu away; switching to Flexible does not move the sheet.
+  - RED: `controlSegmentsKeepFlexible` leaves the menu.
+- `FlexibleRound7ScreenHookTests`: H38's anchor is re-pinned to the H38' line (attributed to Img7).
+- There is no class named FlowFlowTests in this package. The import flow's classes `AppModelTests` and `PrintParamsTests` ran
+  unchanged.
+
+### Runs (`round7/batch_u21_a/u21a_runs.txt`)
+- 37 classes in chunks of 5: the batch's 3, the classes that touch or pin the changed files (ImportSheet / WorkspacePlaceholder /
+  HomeView readers on the Flexible side, adopt / freshSettings / designInputs users), AppModelTests, PrintParamsTests,
+  UnreadableProjectTests, FlexibleSquishCopyTests, LatticeStaleTypeTests, FlexibleU21DeleteUndoTests.
+  - 326 tests, 10 failures, 1 skipped, 0 signal lines.
+  - 8 of the failures are AppModelTests 3MF ×3 (known).
+  - 2 were this batch's hosted test missing its own click after the sheet grew (fixed above).
+- Re-run after the fix (the batch's 3 classes + FlexibleRound7ScreenHookTests, renders on): 15 tests, 0 failures.
+- Goldens (FlexibleAngledGoldenTests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes (`stage_job_hashes_u21a.txt`) are cmp-identical, whole file, to x20b's, checkpoint 1's and batch H's.
+
+### Left open
+- Reopening a Flexible project still opens on Topology (as planned; only a new one lands on Lattice).
+- The sheet's "Minimize plastic" row stays under Flexible (it is Topology's setting).
+- The FDM material is hidden under Flexible and stays ABS by default. Topology for a Flexible project runs as ABS (CORE LIST 8(b)).
+
 ## ★ Round 7 · U21 batch H — your notes of 2026-10-21, Img3: the edge press's lattice joins the face lattice cleanly (2026-10-22) (side lane, after checkpoint 1 below)
 
 Side branch `claude/flexible-screens-u21-side2` (to be cherry-picked onto `claude/flexible-screens`). NOT pushed (your HOLD).
