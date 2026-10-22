@@ -110,7 +110,38 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
-## ★ Round 7 · U21 batch I, part I3 — the linked walls hold the lattice in the sim (2026-10-22) (read this first)
+## ★ Round 7 · U21 batch I installed — the Attach tool, parts I1 + I2 + I3 together (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), at `0fbbd82a`. NOT pushed (your HOLD). App only; core untouched; no #354/main file
+edited; no new hook. Your 02:50 decision is what shipped: a group that HAS Rests and no link behaves exactly as before.
+
+### What you will see in this install
+- **Attach on the lattice card.** "Not attached" / "4 linked". On an inset lattice a one-tap "Attach to the 4 walls around it"
+  (never applied by itself). Attach: the lattice alone with its walls tagged → tap a wall → the model with the lattice as a ghost
+  and only the solid that wall touches lit → tap it. You can do this as many times as you like per lattice; each is one Undo.
+- **Selections** lists each link under its face, with a trash that asks in place.
+- **The Squish card says what holds each group**: "Held by 4 linked walls", "Held by 2 Rests", "Held by Group A · fixed on
+  Topology", or the far side. With your l-bracket's 4 border walls linked the frame stays put and the lattice squashes against
+  it (Face 2 bows out); without links the whole upright swings on the Topology hold.
+
+### Runs (`round7/batch_i/install/install_runs.txt`)
+- The union of the three parts' classes and pins (102 classes incl. FlexibleSquishCopyTests, + the kit's FlexibleSquishFETests):
+  676 passed, 1 failed (the known refine-line ×8), 6 skipped (picture/perf probes), no signal lines. Nothing needed fixing.
+- Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes are cmp-identical to I3's, I2's and checkpoint 2's (`stage_job_hashes_iinst.txt`).
+- iOS: BUILD SUCCEEDED at 0fbbd82a. The app was not running; installed 16:00:03, NOT launched. Installed dylib == built (cmp;
+  sha256 09dc4a99…); the new strings are in it ("Not attached", "Attach to the", "linked wall", "fixed on Topology", "Held by
+  Topology's fixed faces", "Curved lattice · Attach not yet").
+
+### Waiting for you (morning)
+- **The Rest-gripping change (R2), not shipped**: frames in `round7/batch_i/r2_frames/` (01/02 Group 1 today vs R2, 03/04
+  Group 2, CAPTION.md). Only Group 1 changes (4.42 → 3.05 mm at its deepest); the difference is hard to see from that camera.
+- **A link in a group that has Rests** takes the far side's place in that group's sim (none of your groups has that today). Yes/no.
+- Still open from the checkers: sim time 3.48 s in a debug build vs the 3 s target (Release not measured); a section lattice is
+  not held by its links yet; on the iPad mini in portrait the one-tap suggestion is not reachable; step 1 on a part with more than
+  one lattice ghosts all of them instead of showing the picked one alone.
+
+## ★ Round 7 · U21 batch I, part I3 — the linked walls hold the lattice in the sim (2026-10-22)
 
 Your answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up." Your picks ~15:45: "the
 linked walls HOLD that lattice. It squashes against them and they stay put … the top pushes in and the bottom bows out … The
