@@ -417,7 +417,9 @@ public final class FlexibleStageModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
     }
-    private var designGeneration = 0
+    private(set) var designGeneration = 0
+    /// ★ U21 FIX 1: `liveDesignTarget`'s answer per press for one design run (the legend and the edges sim ask on every refresh).
+    var liveDesignTargetCache: [UUID: (gen: Int, target: FlexibleFEField.Target?)] = [:]
     private var designTask: Task<Void, Never>?
     private var autoTask: Task<Void, Never>?
 

@@ -1,4 +1,4 @@
 A as saved (after his delete + undo, 25.png): region 2000008 · deepest 23.0 mm · latticeMax 25.00 mm · pinched columns 0 · k 1.00 · one drag stops at 25.00 mm · rests [] · removed [8, 9, 10, 11, 5]
-B Deepest 7 (his edit before the ⊖, 22.png): region 2000008 · deepest 7.0 mm · latticeMax 25.00 mm · pinched columns 0 · k 1.00 · one drag stops at 25.00 mm · rests [] · removed [8, 9, 10, 11, 5]
+B Deepest 7 (his edit before the ⊖, 22.png): region 2000008 · deepest 7.0 mm · latticeMax 25.00 mm · pinched columns 0 · k 2.00 · one drag stops at 12.50 mm · rests [] · removed [8, 9, 10, 11, 5]
 C after the ⊖ + Undo: region 2000008 · deepest 7.0 mm · latticeMax 25.00 mm · pinched columns 0 · k 2.00 · one drag stops at 12.50 mm · rests [] · removed [8, 9, 10, 11, 5]
 D his Topology faces read in again (removedRegions cleared): region 2000008 · deepest 7.0 mm · latticeMax 25.00 mm · pinched columns 0 · k 2.00 · one drag stops at 12.50 mm · rests [] · removed []

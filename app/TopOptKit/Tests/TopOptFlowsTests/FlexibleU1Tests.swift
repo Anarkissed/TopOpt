@@ -296,6 +296,22 @@ final class FlexibleU1Tests: XCTestCase {
         let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
         pump(3)
         let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        // ★ U21 FIX 1 (the checker: "re-take them at his framing so he can compare one-to-one"): his 11.png / 12.png cameras —
+        // the eye in the viewer's axes (the view cube's: 11.png shows Back, Left and Bottom; 12.png Back with the Top above),
+        // the page's own fit distance × zoom, the part right of the panel as he panned it
+        var fitDistance: Float = 0, fitTarget = SIMD3<Float>.zero
+        if let cm = cameraModel(h) { fitDistance = cm.camera.distance; fitTarget = cm.camera.target }
+        func lookAsHe(eye: SIMD3<Float>, pan: SIMD2<Float>, zoom: Float) {
+            guard let cm = cameraModel(h) else { return }
+            var c = cm.camera
+            let ae = OrbitCamera.azimuthElevation(forDirection: simd_normalize(eye), currentAzimuth: c.azimuth)
+            c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+            c.target = fitTarget
+            let rot = c.viewRotation().transpose
+            c.target -= rot * SIMD3<Float>(1, 0, 0) * pan.x + rot * SIMD3<Float>(0, 1, 0) * pan.y
+            c.distance = fitDistance * zoom
+            cm.adopt(c)
+        }
         func look(out o: SIMD3<Float>, side: SIMD3<Float>, down: Float, along: Float, pan: SIMD2<Float>, zoom: Float) {
             guard let cm = cameraModel(h) else { return }
             var c = cm.camera
@@ -307,8 +323,8 @@ final class FlexibleU1Tests: XCTestCase {
             c.distance *= zoom
             cm.adopt(c)
         }
-        // Img1: from below, Face 5 and the Bottom (and the Top's edge beyond it)
-        look(out: -SIMD3<Float>(st5.load), side: SIMD3<Float>(st5.xAxis), down: 0.9, along: 0.5, pan: SIMD2(-20, -10), zoom: 0.62)
+        // Img1 (his 11.png's camera): from below, Face 5 and the Bottom (and the Top's edge beyond it)
+        lookAsHe(eye: SIMD3(-0.8, -1.1, -0.8), pan: SIMD2(5, 20), zoom: 1.43)
         FlexibleOverlayMesh.controlCornerBlend = true
         m.views = m.views   // (a change the page refreshes on)
         try shot("U21G_01_13p_img1_group1_face5_bend_BEFORE.png", h, settle: 2.5)
@@ -327,13 +343,27 @@ final class FlexibleU1Tests: XCTestCase {
         let g2 = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .edges })
         m.rail = .group(g2.id)
         m.selectedPress = g2.presses.first
-        look(out: SIMD3<Float>(0, 1, 0), side: SIMD3<Float>(1, 0, 0), down: -1.1, along: 0.6, pan: SIMD2(-45, 15), zoom: 1.6)
+        lookAsHe(eye: SIMD3(-0.3, 0.5, -1), pan: SIMD2(-17, -4), zoom: 0.9)   // (his 12.png's camera)
         FlexibleSettingsSquish.controlEdgePreviewOff = true
+        FlexiblePressStampHandle.controlEdgeOutlineAtRest = true
         m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
         try shot("U21G_05_13p_img2_group2_bend_BEFORE.png", h, settle: 2.5)
         FlexibleSettingsSquish.controlEdgePreviewOff = false
+        // batch G as first committed: the edge dents, its stamp outline stays at rest (the checker's U21G_06)
+        m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
+        try shot("U21G_07_13p_img2_group2_bend_outline_at_rest_BEFORE_FIX1.png", h, settle: 2.5)
+        FlexiblePressStampHandle.controlEdgeOutlineAtRest = false
         m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
         try shot("U21G_06_13p_img2_group2_bend_AFTER.png", h, settle: 2.5)
+        // ★ U21 FIX 1: at his 12.png camera Edge 12's arrow points almost along the line of sight, so its outline's move barely
+        // shows; from the Left-Top-Back corner (the arrow ~55° to the view) before / after the outline follows the dent
+        lookAsHe(eye: SIMD3(-1, 0.6, -0.4), pan: SIMD2(52, 0), zoom: 0.8)
+        FlexiblePressStampHandle.controlEdgeOutlineAtRest = true
+        m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
+        try shot("U21G_08_13p_group2_bend_side_outline_at_rest_BEFORE_FIX1.png", h, settle: 2.5)
+        FlexiblePressStampHandle.controlEdgeOutlineAtRest = false
+        m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
+        try shot("U21G_09_13p_group2_bend_side_outline_on_the_dent_AFTER.png", h, settle: 2.5)
         log.append("pictures in \(out): note now '\(FlexibleSettingsSquish.note(model: m, fe: false) ?? "-")'")
         flush("U21G_lines_pictures.txt")
     }

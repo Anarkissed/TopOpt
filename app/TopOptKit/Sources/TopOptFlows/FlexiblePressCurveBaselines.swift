@@ -217,6 +217,8 @@ struct FlexiblePressCurveLayer: View {
     let projection: CameraProjection?
     let keepOut: [CGRect]
     var clip: [CGRect]? = nil
+    /// ★ U21 FIX 1: the full-bend pose while Bend shows (the indent on the bent edge).
+    var pose: FlexibleBendPose? = nil
 
     struct Drawn: Identifiable {
         let id: String
@@ -257,7 +259,8 @@ struct FlexiblePressCurveLayer: View {
             ZStack {
                 // ★ X20b: the working press's indent on the part, display only (Curves; a Stamp shows its own outline)
                 if !FlexibleIndent.controlCurvesOnPart, !p.settings.isStampShape {
-                    FlexibleIndentLayer(lines: FlexibleIndent.press(model: model, id: id), projection: projection, clip: clip ?? keepOut)
+                    FlexibleIndentLayer(lines: FlexibleIndent.press(model: model, id: id), projection: projection, clip: clip ?? keepOut,
+                                        pose: FlexiblePressStampHandle.controlEdgeOutlineAtRest ? nil : pose)
                 }
                 ForEach(Self.editorsOnPart(model: model, press: id, projection: projection)) { d in
                     FlexibleCurveEditor(projection: projection, baseline: d.baseline,

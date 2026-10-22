@@ -582,7 +582,8 @@ public struct FlexibleStagePage: View {
         if ghost != bendGhost { bendGhost = ghost }
         // ★ ROUND 7 (F): Bend on — what is drawn on the part follows the full bend
         let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration,
-                                 faces: sq.poseFaces, field: sq.field)   // ★ U21 (LBR-EDGES): on a pressed face, its own bend
+                                 faces: sq.poseFaces, field: sq.field,   // ★ U21 (LBR-EDGES): on a pressed face, its own bend
+                                 edges: sq.poseEdges)   // ★ U21 FIX 1: on an edge press, the edge preview's own push
         if pose?.key != bendPose?.key { bendPose = pose }
         // ★ X1: his X-ray — the current group's bend as a prism into the model, at full depth
         let prism = Self.xrayItems(model: model, overlay: overlay, dents: c.dents, k: c.exaggeration, views: model.views)
@@ -1123,8 +1124,10 @@ struct FlexibleStageOverlays: View {
             }
             if FlexibleFlatPrismUI.openEdgesGroup(model) != nil {
                 // ★ R7-E4: the working press's curves (Curves) or its stamp on the edge (Stamp) — under the flat prism's handles
-                FlexiblePressCurveLayer(model: model, projection: proj.projection, keepOut: keepOut, clip: clip)
-                FlexiblePressStampHandle(model: model, projection: proj.projection, keepOut: keepOut, clip: clip)
+                // ★ U21 FIX 1 (his Img2: "The bend view doesn't bend the edges/corners"): with Bend on, the press's indent and its
+                // stamp outline sit on the bent edge (they stayed at rest over the edge preview's dent)
+                FlexiblePressCurveLayer(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, pose: pose)
+                FlexiblePressStampHandle(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, pose: pose)
                 FlexibleFlatPrismOverlay(model: model, projection: proj.projection, keepOut: keepOut, clip: clip, padTarget: padTarget ?? .constant(nil))
             }
             // ★ ROUND 6 (item 3): the Prisms view's mm tags and the Groups view's number discs
@@ -1325,6 +1328,24 @@ struct FlexibleFaceResult: View {
 /// the long captions moved behind the (i) (FlexibleRowCopy); on the trailing edge, centred.
 /// ★ BATCH C: it takes a tap — "TAP TO READ" → "TAP THE PART TO READ" — and marks the reading
 /// on its ramp.
+/// ★ U21 FIX 1: the legend's line — 12 pt semibold, textPrimary, one line (scaled to 80 % before it is cut).
+struct FlexibleLegendLine: View {
+    let text: String
+    static let fontSize: CGFloat = 12
+    /// ★ RED CONTROL only: the line as U21 drew it — its .font and .foregroundStyle commented out (default type and colour).
+    nonisolated(unsafe) static var controlBareLegendLine = false
+
+    var body: some View {
+        if Self.controlBareLegendLine {
+            Text(text).lineLimit(1).minimumScaleFactor(0.8).accessibilityIdentifier("flexible-legend-line")
+        } else {
+            Text(text).font(.system(size: Self.fontSize, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("flexible-legend-line")
+        }
+    }
+}
+
 struct FlexibleLegend: View {
     @ObservedObject var model: FlexibleStageModel
     /// The generated lattice while it is drawn (X-ray): the map is then the one it was built from.
@@ -1376,9 +1397,9 @@ struct FlexibleLegend: View {
                     .font(.system(size: 10, weight: .bold)).tracking(0.7)
                     .foregroundStyle(DS.Color.accent.color)
                     .accessibilityIdentifier("flexible-legend-tab")
-                Text(pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine(tuned: model.playingPressSimTuned))   // ★ U21.font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .accessibilityIdentifier("flexible-legend-line")
+                // ★ U21: core's design or the interim sim; ★ U21 FIX 1: its type and colour in ONE place (FlexibleLegendLine) — U21's
+                // comment, pasted mid-line, had swallowed the line's .font and .foregroundStyle (17 pt body in a 216 pt legend)
+                FlexibleLegendLine(text: pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine(tuned: model.playingPressSimTuned))
                 // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main
                 // page's ONE smooth ramp (FlexibleMainLegendRow.ramp), never 24 flat blocks
                 FlexibleMainLegendRow.ramp(.dent).frame(width: 216, height: 10)

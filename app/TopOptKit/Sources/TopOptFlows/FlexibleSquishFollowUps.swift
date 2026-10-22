@@ -131,11 +131,13 @@ extension FlexibleStagePage {
     /// The full-bend pose of the page's overlay mesh bent by `dents` × `k` (the renderer's own), or nil.
     /// ★ U21 (LBR-EDGES): `faces` — the column preview's pressed faces (a point ON one takes that face's own bend: the squares'
     /// corners around it); `field` — the 3D sim shown (a point takes the field's own sample there). Both nil: the nearest vertex.
+    /// ★ U21 FIX 1: `edges` — the edge preview's pushes (a point takes their sum there: the outline on the same smooth dent).
     @MainActor static func bendPose(views: FlexibleStageViews, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double,
-                                    faces: [FlexibleBendPose.FaceBend] = [], field: FlexibleFEField? = nil) -> FlexibleBendPose? {
+                                    faces: [FlexibleBendPose.FaceBend] = [], field: FlexibleFEField? = nil,
+                                    edges: [FlexibleSettingsSquish.EdgePush] = []) -> FlexibleBendPose? {
         guard posesOverlays(views: views), let o = overlay, let d = dents, k > 0 else { return nil }
         return FlexibleBendPose.cached(positions: o.mesh.flat.positions, dents: d, k: k, signature: o.mesh.signature.contentHash,
-                                       faces: faces, field: field)
+                                       faces: faces, field: field, edges: edges)
     }
 }
 
@@ -160,6 +162,10 @@ struct FlexibleBendPose {
     let faces: [FaceBend]
     let field: FlexibleFEField?
     let k: Float
+    /// ★ U21 FIX 1: the edge preview's pushes — every point takes their sum (zero outside the flat prisms, as the renderer's vertices).
+    let edges: [FlexibleSettingsSquish.EdgePush]
+    /// ★ RED CONTROL only (U21 fix 1): the edge preview posed by the nearest vertex (fix 1's first try: a jagged outline).
+    nonisolated(unsafe) static var controlNearestVertexEdges = false
 
     /// One pressed face's bend for the pose: its squares' corner grid and its frame (core's from_uv(0, 0) back along the load).
     struct FaceBend {
@@ -194,7 +200,8 @@ struct FlexibleBendPose {
     /// ★ RED CONTROL only (LBR-EDGES): every point by the nearest overlay vertex (the zig-zag).
     nonisolated(unsafe) static var controlNearestVertexPose = false
 
-    init?(positions p: [Float], dents d: [Float], k: Double, key: String = "", faces: [FaceBend] = [], field: FlexibleFEField? = nil) {
+    init?(positions p: [Float], dents d: [Float], k: Double, key: String = "", faces: [FaceBend] = [], field: FlexibleFEField? = nil,
+          edges: [FlexibleSettingsSquish.EdgePush] = []) {
         let n = Swift.min(p.count, d.count) / 3
         guard n > 0, k > 0, k.isFinite else { return nil }
         var pos = [SIMD3<Float>](), mv = [SIMD3<Float>]()
@@ -211,7 +218,7 @@ struct FlexibleBendPose {
         for (i, q) in pos.enumerated() { b[Self.bucket(q, lo: lo, cell: cell), default: []].append(Int32(i)) }
         self.key = key; self.cell = cell; self.reach = cell; self.lo = lo
         self.buckets = b; self.positions = pos; self.moves = mv
-        self.faces = faces; self.field = field; self.k = Float(k)
+        self.faces = faces; self.field = field; self.k = Float(k); self.edges = edges
     }
 
     private static func bucket(_ q: SIMD3<Float>, lo: SIMD3<Float>, cell: Float) -> SIMD3<Int32> {
@@ -221,6 +228,12 @@ struct FlexibleBendPose {
 
     /// The bend at `p`: the nearest overlay vertex's displacement × k, within `reach` of the part's surface; else none.
     func displacement(at p: SIMD3<Float>) -> SIMD3<Float> {
+        if !edges.isEmpty, !Self.controlNearestVertexPose, !Self.controlNearestVertexEdges {
+            let pd = SIMD3<Double>(p)
+            var mv = SIMD3<Double>.zero
+            for e in edges { mv += e.move(pd) }
+            return SIMD3<Float>(mv) * k
+        }
         if !Self.controlNearestVertexPose, field == nil, !faces.isEmpty {
             let pd = SIMD3<Double>(p)
             var best: (mm: Double, gap: Double, load: SIMD3<Double>)?
@@ -278,12 +291,13 @@ struct FlexibleBendPose {
     @MainActor private static var itemsCache: (key: String, items: [ClearanceRenderItem], posed: [ClearanceRenderItem])?
 
     @MainActor static func cached(positions: [Float], dents: [Float], k: Double, signature: UInt64,
-                                  faces: [FaceBend] = [], field: FlexibleFEField? = nil) -> FlexibleBendPose? {
-        // ★ U21: which rule poses (the faces' own bend, the field, the nearest vertex) is part of the key
-        let source = field.map { "f\($0.simID)|\($0.serial)" } ?? "c\(faces.count)"
-        let key = Self.key(positions: positions, dents: dents, k: k, signature: signature) + "|\(source)|\(controlNearestVertexPose)"
+                                  faces: [FaceBend] = [], field: FlexibleFEField? = nil,
+                                  edges: [FlexibleSettingsSquish.EdgePush] = []) -> FlexibleBendPose? {
+        // ★ U21: which rule poses (the faces' own bend, the field, the edge pushes, the nearest vertex) is part of the key
+        let source = field.map { "f\($0.simID)|\($0.serial)" } ?? "c\(faces.count)|e\(edges.count)"
+        let key = Self.key(positions: positions, dents: dents, k: k, signature: signature) + "|\(source)|\(controlNearestVertexPose)|\(controlNearestVertexEdges)"
         if let c = poseCache, c.key == key { return c.pose }
-        let pose = FlexibleBendPose(positions: positions, dents: dents, k: k, key: key, faces: faces, field: field)
+        let pose = FlexibleBendPose(positions: positions, dents: dents, k: k, key: key, faces: faces, field: field, edges: edges)
         poseCache = (key, pose)
         return pose
     }

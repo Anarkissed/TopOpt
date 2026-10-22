@@ -37,6 +37,8 @@ public enum FlexibleSettingsSquish {
         /// faces (each point ON one takes that face's own bend).
         var field: FlexibleFEField? = nil
         var poseFaces: [FlexibleBendPose.FaceBend] = []
+        /// ★ U21 FIX 1: the edge preview's pushes (a point drawn on the part takes their sum there).
+        var poseEdges: [EdgePush] = []
     }
 
     /// The sim id of `g` when the current lattice has a landed field for it.
@@ -97,7 +99,9 @@ public enum FlexibleSettingsSquish {
         // ★ U21 (BEND-EDGES): an edges group with no sim to show (no lattice yet, its sim solving or failed) is never still — the
         // EDGE PREVIEW: each press's drawn push moves the part inside its flat prism along the arrow (the note says so)
         if edges, !controlEdgePreviewOff {
-            return Shown(dents: edgePreview(model: m, overlay: o, group: g), exaggeration: 1, fe: false, groupNumber: g.number)
+            let pushes = edgePushes(model: m, group: g)
+            return Shown(dents: edgePreview(overlay: o, pushes: pushes), exaggeration: 1, fe: false, groupNumber: g.number,
+                         poseEdges: pushes)   // ★ U21 FIX 1: the drawing on the part posed by the same pushes
         }
         return Shown(dents: columnDents(model: m, overlay: o, regions: Set(g.regions)), exaggeration: edges ? 1 : c.exaggeration,
                      fe: false, groupNumber: g.number,   // (an edges group: still, until its sim lands — the note says why)
@@ -112,14 +116,42 @@ public enum FlexibleSettingsSquish {
     /// samples Play pushes and the indent outlines: FlexiblePressPush), full at the surface, easing to 0 in the last millimetre
     /// above the prism's floor so it meets the still face. Nothing outside the prisms moves. Display only.
     static func edgePreview(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, group g: FlexibleSqueezeGroup) -> [Float] {
+        edgePreview(overlay: o, pushes: edgePushes(model: m, group: g))
+    }
+
+    /// The edge preview on `o` from its presses' pushes (every drawn part vertex moved by their sum).
+    static func edgePreview(overlay o: FlexibleOverlayMesh, pushes: [EdgePush]) -> [Float] {
         let pos = o.mesh.flat.positions
         var out = [Float](repeating: 0, count: pos.count)
-        for id in g.presses {
-            guard let p = m.press(id), p.strip != nil, let c = m.flatCut(id) else { continue }
+        guard !pushes.isEmpty else { return out }
+        for v in 0..<o.partFlatVertices {
+            let q = SIMD3<Double>(Double(pos[3 * v]), Double(pos[3 * v + 1]), Double(pos[3 * v + 2]))
+            var mv = SIMD3<Double>.zero
+            for e in pushes { mv += e.move(q) }
+            guard mv != .zero else { continue }
+            out[3 * v] += Float(mv.x); out[3 * v + 1] += Float(mv.y); out[3 * v + 2] += Float(mv.z)
+        }
+        return out
+    }
+
+    /// ★ U21 (BEND-EDGES): one press's drawn push inside its flat prism, as a function of the point — what the edge preview moves a
+    /// vertex by and (★ U21 FIX 1) what a point drawn on the part (the stamp's outline, the indent) is posed by, so the drawing sits on
+    /// the same smooth dent (the nearest vertex flipped between moved and still vertices along the prism's rim: a jagged outline).
+    struct EdgePush {
+        let cut: FlexibleFlatPrism.Cut
+        let depthMM: Double
+        let pts: [SIMD3<Double>]
+        let weights: [Double]
+        let reach: Double
+        let buckets: [SIMD3<Int32>: [Int]]
+
+        init?(_ p: FlexiblePress, _ c: FlexibleFlatPrism.Cut) {
             let s = FlexiblePressPush.samples(p, c)
-            guard s.count > 1, c.depthMM > 0 else { continue }
-            let depth = Swift.min(FlexibleFlatPrism.depth(of: p) ?? c.depthMM, c.depthMM)
-            let pts = (0..<s.count).map { SIMD3(s.xyz[3 * $0], s.xyz[3 * $0 + 1], s.xyz[3 * $0 + 2]) }
+            guard s.count > 1, c.depthMM > 0 else { return nil }
+            cut = c
+            depthMM = Swift.min(FlexibleFlatPrism.depth(of: p) ?? c.depthMM, c.depthMM)
+            pts = (0..<s.count).map { SIMD3(s.xyz[3 * $0], s.xyz[3 * $0 + 1], s.xyz[3 * $0 + 2]) }
+            weights = s.weight
             // the samples' own spacing: how far a point may lie from the footprint's nearest sample and still be on it
             var spacing = 0.0
             for i in stride(from: 0, to: pts.count, by: Swift.max(1, pts.count / 64)) {
@@ -127,35 +159,57 @@ public enum FlexibleSettingsSquish {
                 for j in pts.indices where j != i { let dd = simd_distance(pts[i], pts[j]); if dd > 1e-6 { best = Swift.min(best, dd) } }
                 if best.isFinite { spacing = Swift.max(spacing, best) }
             }
-            let reach = Swift.max(0.5, 1.5 * spacing)
-            let cell = reach
-            func key(_ q: SIMD3<Double>) -> SIMD3<Int32> { SIMD3<Int32>(Int32((q.x / cell).rounded(.down)), Int32((q.y / cell).rounded(.down)), Int32((q.z / cell).rounded(.down))) }
-            var buckets: [SIMD3<Int32>: [Int]] = [:]
-            for (i, q) in pts.enumerated() { buckets[key(q), default: []].append(i) }
-            for v in 0..<o.partFlatVertices {
-                let q = SIMD3<Double>(Double(pos[3 * v]), Double(pos[3 * v + 1]), Double(pos[3 * v + 2]))
-                let h = c.height(q)
-                guard h > -0.25, h < c.depthMM - 1e-6 else { continue }
-                // the drawn push at q: inverse-distance over the samples within reach (its nearest decides whether q is on it)
-                let k0 = key(q)
-                var wsum = 0.0, vsum = 0.0, nearest = Double.infinity
-                for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
-                    for i in buckets[k0 &+ SIMD3(Int32(dx), Int32(dy), Int32(dz))] ?? [] {
-                        let dd = simd_distance(pts[i], q)
-                        guard dd <= reach else { continue }
-                        nearest = Swift.min(nearest, dd)
-                        let w = 1 / Swift.max(dd, 1e-3)
-                        wsum += w; vsum += w * s.weight[i]
-                    }
-                } } }
-                guard wsum > 0, nearest <= reach else { continue }
-                let ease = Swift.min(1, Swift.max(0, (c.depthMM - h) / 1.0))
-                let mm = depth * (vsum / wsum) * ease
-                guard mm > 0 else { continue }
-                out[3 * v] += Float(c.direction.x * mm); out[3 * v + 1] += Float(c.direction.y * mm); out[3 * v + 2] += Float(c.direction.z * mm)
-            }
+            reach = Swift.max(0.5, 1.5 * spacing)
+            var b: [SIMD3<Int32>: [Int]] = [:]
+            for (i, q) in pts.enumerated() { b[Self.key(q, reach), default: []].append(i) }
+            buckets = b
         }
-        return out
+
+        private static func key(_ q: SIMD3<Double>, _ cell: Double) -> SIMD3<Int32> {
+            SIMD3<Int32>(Int32((q.x / cell).rounded(.down)), Int32((q.y / cell).rounded(.down)), Int32((q.z / cell).rounded(.down)))
+        }
+
+        /// The push at `q` (mm, along the arrow): inside the prism (between its apex and its floor) over its footprint, the press's
+        /// depth × the drawn push there (inverse distance over the samples within reach), easing to 0 in the last millimetre above
+        /// the floor; zero anywhere else.
+        func move(_ q: SIMD3<Double>) -> SIMD3<Double> {
+            let h = cut.height(q)
+            guard h > -0.25, h < cut.depthMM - 1e-6 else { return .zero }
+            let k0 = Self.key(q, reach)
+            var wsum = 0.0, vsum = 0.0
+            for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                for i in buckets[k0 &+ SIMD3(Int32(dx), Int32(dy), Int32(dz))] ?? [] {
+                    let dd = simd_distance(pts[i], q)
+                    guard dd <= reach else { continue }
+                    let w = 1 / Swift.max(dd, 1e-3)
+                    wsum += w; vsum += w * weights[i]
+                }
+            } } }
+            guard wsum > 0 else { return .zero }
+            let mm = depthMM * (vsum / wsum) * ease(h)
+            return mm > 0 ? cut.direction * mm : .zero
+        }
+
+        /// The 1 mm ease above the prism's floor at height `h` (1 above it, 0 on it).
+        func ease(_ h: Double) -> Double { Swift.min(1, Swift.max(0, (cut.depthMM - h) / 1.0)) }
+
+        /// ★ U21 FIX 1: the press's WHOLE push at `q` (the stamp's own weight, 1): inside the prism the press's depth × the ease, zero
+        /// outside. A stamp's push is 1 under it and 0 past it, so its outline lies exactly on that step — the drawn push there is
+        /// half of whichever samples are nearest (it jumped 0.2 ↔ 9.0 mm between neighbouring outline points). The outline is posed by
+        /// this instead: on the pocket's floor, where the stamp presses.
+        func whole(_ q: SIMD3<Double>) -> SIMD3<Double> {
+            let h = cut.height(q)
+            guard h > -0.25, h < cut.depthMM - 1e-6 else { return .zero }
+            return cut.direction * (depthMM * ease(h))
+        }
+    }
+
+    /// The pushes of `g`'s presses (each with a strip, a flat prism and a drawn push).
+    static func edgePushes(model m: FlexibleStageModel, group g: FlexibleSqueezeGroup) -> [EdgePush] {
+        g.presses.compactMap { id -> EdgePush? in
+            guard let p = m.press(id), p.strip != nil, let c = m.flatCut(id) else { return nil }
+            return EdgePush(p, c)
+        }
     }
 
     /// Each face's shown depths per column (the page's own rule), for `regions` only.

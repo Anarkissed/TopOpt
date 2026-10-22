@@ -217,7 +217,24 @@ struct FlexiblePressStampHandle: View {
     let projection: CameraProjection?
     let keepOut: [CGRect]
     var clip: [CGRect]? = nil
+    /// ★ U21 FIX 1 (the checker of batch G: "the thumb pad's dashed outline stays at rest while Edge 12 dents under it"): with Bend
+    /// on, the outline sits on the bent edge (`drawnOutline`). Its handle stays on the surface he grabs.
+    var pose: FlexibleBendPose? = nil
     @State private var dragging: FlexibleStampPlacement?
+
+    /// ★ RED CONTROL only: an edge press's outline (and indent) drawn at rest under Bend (batch G).
+    nonisolated(unsafe) static var controlEdgeOutlineAtRest = false
+
+    /// The outline as drawn, in the world: on the part, at the full bend while Bend shows (pure: the tests read it). On the edge
+    /// preview (`pose.edges`) the outline of `cut`'s stamp sits on the pocket's floor (`EdgePush.whole`); in the 3D sim, the field.
+    static func drawnOutline(_ st: FlexibleStrip, _ stamp: FlexibleStampPlacement, cut c: FlexibleFlatPrism.Cut, pose: FlexibleBendPose?) -> [SIMD3<Double>] {
+        let o = FlexiblePressStamp.outline(st, stamp, direction: c.direction)
+        guard let pose, !controlEdgeOutlineAtRest else { return o }
+        if !FlexibleBendPose.controlNearestVertexEdges, !FlexibleBendPose.controlNearestVertexPose, let e = pose.edges.first(where: { $0.cut == c }) {
+            return o.map { $0 + e.whole($0) * Double(pose.k) }
+        }
+        return o.map { pose.apply($0) }
+    }
 
     private func screen(_ w: SIMD3<Double>) -> CGPoint? { projection?.project(SIMD3<Float>(w)) }
 
@@ -230,7 +247,7 @@ struct FlexiblePressStampHandle: View {
                 Canvas { ctx, size in
                     FlexibleChromeClip.apply(&ctx, size: size, holes: clip ?? keepOut)
                     var path = Path()
-                    for (i, q) in FlexiblePressStamp.outline(st, stamp, direction: c.direction).compactMap(screen).enumerated() {
+                    for (i, q) in Self.drawnOutline(st, stamp, cut: c, pose: pose).compactMap(screen).enumerated() {
                         i == 0 ? path.move(to: q) : path.addLine(to: q)
                     }
                     ctx.stroke(path, with: .color(FlexibleStageStyle.onPart), style: StrokeStyle(lineWidth: 2, dash: stamp.rigid ? [] : [6, 4]))
@@ -239,7 +256,7 @@ struct FlexiblePressStampHandle: View {
                 // found by looking: on his Edge 16 the stamp's centre sat under the depth chip (the arrow's head, drawn over it) — the
                 // handle keeps the face stamp's 56 pt from the chip, with a leader to the centre (its drag is relative)
                 if st.kind == .edge, let w = FlexiblePressStamp.centre(st, stamp).flatMap({ FlexiblePressStamp.onPart($0 - c.direction * 0.01, st, direction: c.direction) }),
-                   let at = screen(w),
+                   let at = screen(w),   // (★ U21 fix 1: the handle stays on the surface — posed, an edge stamp's centre lands on the arrow's head, under the depth chip)
                    case let q = FlexibleFaceStampHandle.handlePoint(centre: at, chip: screen(FlexibleFlatPrismUI.arrow(st, c, lengthMM: 0).head)),
                    FlexibleDepthChipLayout.shows(q, dragging: dragging != nil, keepOut: keepOut, viewport: vp) {
                     if q != at {

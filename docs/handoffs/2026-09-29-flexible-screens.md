@@ -75,7 +75,7 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
-## ★ Round 7 · U21 batch G — your notes of 2026-10-21, Img1 / Img2 / Img15: the Top and Bottom meet the side's dent, edges bend, no zig-zag (2026-10-21) (read this first)
+## ★ Round 7 · U21 batch G — your notes of 2026-10-21, Img1 / Img2 / Img15: the Top and Bottom meet the side's dent, edges bend, no zig-zag (2026-10-21; fix round 1 2026-10-22) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on top of `f1928c96` (batch D's fix round 2). NOT pushed (your HOLD). App only; core
 untouched; no #354/main file edited, no new hook. Judged on your live projects of 10-21 (`round7/batch_u21/his_live_1021_pad`,
@@ -86,6 +86,65 @@ Your notes:
 - Img2: "The bend view doesn't bend the edges/corners"
 - Img15: "are you assuming the lattice and the walls are connected? … is it calculating how much the TPU can actually stretch at
   the edges without ripping? Is that what those sharp edges mean? I think there should be some kind of notification"
+
+### Fix round 1 (the check of batch G: one regression, four smaller findings)
+- **What you will see now:**
+  - The legend's top line ("Squish along the arrow · core's design", "Squish depth · what you drew", …) is back to its small
+    12 pt semibold type in the legend's text colour. Batch G had broken it on every page that shows the legend: a code comment
+    pasted mid-line switched off the line's font and colour, so it drew in the large default type.
+  - With Bend on, an **edge press's stamp outline now drops into the dent with the edge** (a Curves press's indent lines and the
+    prisms' faces follow the edge preview too). Before, on your pad's Edge 12, the dashed thumb-pad outline floated at rest while
+    the edge dented 9.5 mm under it (your Img2: "The bend view doesn't bend the edges/corners"). Where the outline lies inside the
+    flat prism it sits on the pocket's floor, 9.5 mm down; where it runs past the prism it stays on the face; between them it
+    follows the pocket's wall. Its slide handle stays on the surface you grab (posed, it would land under the "↓ 9.5 mm" chip).
+  - The pictures are re-taken at your 11.png and 12.png framing (the same view-cube faces, the whole pad, the part right of the
+    panel), so you can compare them one to one. The top line reads "Ready · nothing changed yet" in them, where yours reads
+    "Ready: Save & Exit builds the lattice": your screenshots were taken after an edit; the pictures open your saved file.
+- **What was wrong (one sentence each):**
+  - The legend: `// ★ U21` was pasted in front of `.font(…).foregroundStyle(…)` on the same line, so both were commented out;
+    the code still compiled because the next line carried on the chain, and the old test only searched the source for a string.
+  - The edge outline: the page handed the Bend pose to a face's stamp and indent but never to an edge press's stamp
+    (`FlexiblePressStampHandle`) or indent (`FlexiblePressCurveLayer`). **Found by looking** at the first try: posed by the nearest
+    drawn point (batch G's rule for edges groups) the outline went jagged on the bent edge, jumping 0.2 ↔ 9 mm between neighbouring
+    points. A stamp pushes fully under it and not at all past it, so its outline lies exactly on that step, and the nearest point
+    flips between the two sides.
+  - The Face 6 probe's row B was read before the model had settled k (it said k 1 at Deepest 7), which made the story contradict
+    its own rows; settled, the rows agree (see the corrected bullet below).
+  - `liveDesignTarget` (core's live design of a press, for the edges sim on an out-of-date lattice) ran FlexiblePinch.core on
+    every refresh that asked for it.
+- **What changed:** `FlexibleLegendLine` (FlexibleStagePage.swift) holds the line's type and colour in one place; the legend
+  uses it. `FlexiblePressStampHandle` and `FlexiblePressCurveLayer` take the page's pose. The edge preview's per-press push is now
+  a function of the point (`FlexibleSettingsSquish.EdgePush`, the same numbers: Edge 12 still 1,140 points up to 9.50 mm, Edge 9
+  1,234 up to 7.32 mm); `Shown.poseEdges` carries it to `FlexibleBendPose`, which poses every point by the pushes' sum on the edge
+  preview (zero outside the prisms, as the drawn part). A stamp's outline sits on the pocket's floor (`EdgePush.whole`: the press's
+  depth × the 1 mm ease above the prism's floor); in the 3D sim it takes the field as before. `liveDesignTarget` keeps one answer per press per design run (`designGeneration`, now readable, and the press's
+  stack; a press not designed yet is asked again). The probe settles row B. The handoff says which 2.19 / 2.59 measure is which.
+- **Tests (in `FlexibleU21BendTests`, file `FlexibleU21BendFix1Tests.swift`; each RED control asserted red inside):**
+  - `testTheLegendLineKeepsItsTypeAndColour`: the legend line rendered offscreen is pixel-identical to a 12 pt semibold
+    textPrimary reference, for 3 lines (e.g. 466×46 px both). RED `FlexibleLegendLine.controlBareLegendLine` (batch G's line):
+    479×48 px, pixels differ.
+  - `testNoTrailingCommentSwallowsAModifier`: none of the 337 Flexible source files has a modifier inside a comment at the end of
+    a code line. RED: batch G's committed line is caught.
+  - `testTheEdgeStampOutlineSitsOnTheEdgePreview` (your pad, Group 2, Bend on, no lattice): of Edge 12's 49 outline points, the 22
+    inside the prism move exactly 9.50 mm (the press's depth, the deepest dent under them; worst off it 0.000 mm); worst zig-zag
+    between neighbours 0.12 mm. RED `controlNearestVertexEdges` (the first try): zig-zag 7.37 mm. RED `controlEdgeOutlineAtRest`
+    (batch G): 0.00 mm, at rest.
+  - `testTheLiveDesignTargetIsWorkedOutOncePerDesignRun` (your pad): 20 refreshes, worked out 0 times; RED
+    `controlNoLiveDesignCache`: 20 times. After your edit (Edge 12 × 1.5) the new design is worked out again (476 of 476 columns
+    changed).
+  - `testProbeWhyFace6WentDeeperAfterTheDeleteAndUndo` re-run, settled: A k 1 / 25.00 mm; B, C, D k 2 / 12.50 mm.
+- **Runs (`round7/batch_u21_g/fix1/u21_g_fix1_runs.txt`):** `FlexibleU21BendTests` 16/16. 57 classes (batch G's 56 with
+  `FlexiblePressCurveTests` and `FlexiblePressStampTests` added for the press layers, `FlexibleU21BendTests` run on its own) in 6
+  chunks: **312 tests, 3 skipped, 1 failure = the known Play ring** (21 px); no signal. Goldens: 38 identical / 0 DIFFERS
+  (deterministic); 32 + 1 PART-SKIP / 0 DIFFERS (unseeded). The 16 stage-job hashes are cmp-identical (whole file) to
+  `stage_job_hashes_x20b.txt` and to batch G's `stage_job_hashes_u21g.txt` (`fix1/stage_job_hashes_u21g_fix1.txt`). The pictures
+  test, run alone after the last source change: passed.
+- **Evidence (looked at, 13" portrait, your pad):** `round7/batch_u21_g/look/` re-taken at your framing. `U21G_01`/`02` (your
+  11.png's camera): before, a dark straight skin stands out past Face 5's dent at the far end; after, the part's outline follows
+  the dent. `U21G_05`/`06` (your 12.png's camera): before, Edge 12 flat; after, its dent. At this camera Edge 12's arrow points
+  almost along the line of sight, so the outline's drop shows as a few pixels (`U21G_07`, batch G's outline at rest, against
+  `U21G_06`). So `U21G_08`/`09` look from the Left-Top-Back corner: before, the thumb-pad outline floats over the dent; after, it
+  drops into the pocket and follows its wall, smooth. The fix's lines are in `round7/batch_u21_g/fix1/`.
 
 ### What you will see now
 - **Bend, Group 1 (your Img1).** Where the Top and the Bottom meet Face 5 and Face 3, their edge now sits exactly on the side's
@@ -118,14 +177,17 @@ Your notes:
 - **Why you could bend Face 6 deeper after the delete + undo (Img15): pinned down, not fixed.** The deepest Face 6 allows did not
   change. It is 25.00 mm in every state: as saved, at Deepest 7, after ⊖ + Undo, and with your Topology faces read in again.
   There is no pinch and no rest on its columns. The only limit that moves is how far ONE drag goes: the lattice ÷ the drawing's
-  ×k, frozen while you drag. At 7 mm k is 2, so a drag stops at 12.50 mm. At 23 mm k is 1, so it stops at 25.00 mm. Each new
-  drag picks k again. The most likely story: before the delete you dragged once from 7 mm and stopped at 12.5 mm; after the
-  Undo, later drags picked k again and went on to 23 mm. Not proven: your earlier file is gone (the face's id was 2000002, now
-  2000008, and the sector list doesn't keep the old state).
+  ×k, frozen while you drag. **As measured (fix round 1 re-ran the probe with each state settled):** as saved (23 mm): k 1, a
+  drag stops at 25.00 mm. At Deepest 7: k 2, a drag stops at 12.50 mm. After ⊖ + Undo: still k 2, 12.50 mm. With your Topology
+  faces read in again: k 2, 12.50 mm. So the delete + undo changes nothing measurable; only the Deepest value moves k (the first
+  run read the Deepest-7 row before the model had settled k, which is why it showed k 1 there). Why you reached 23 mm after the
+  Undo is not proven: your earlier file is gone (the face's id was 2000002, now 2000008, and the sector list doesn't keep the old
+  state).
 
 ### What was wrong (one sentence each)
 - BEND-TOP: each fine sub-point of the Top/Bottom took a blend of its big triangle's corner dents, so it missed the dent between
-  the corners (Bottom vs Face 5: 2.19 mm drawn, 4.67 mm needed). And the per-point rule gave nothing at all along Face 5's FAR
+  the corners (Bottom vs Face 5: 2.19 mm drawn at the 224 points along the seam, 4.67 mm needed; the plan's "drawn 2.59" was the
+  probe's maximum over all 18,752 Bottom points, not only the seam). And the per-point rule gave nothing at all along Face 5's FAR
   edge. **The probe pinned the gate** (`testProbeTheFarEdgeGate`): Face 5 is 20.00 mm high at a 1.042 mm pitch, so 20 rows; the
   last row's centres sit off the face, so core gives that row no columns (0 of 96). Every Top point on that edge (148) hit "nil
   column at (iu, 19)".
@@ -205,21 +267,22 @@ Pictures: `FlexibleU1Tests.testU21BendPictures` (hosted, 13" portrait, runs only
   page and the display sim.
 
 ### Evidence (`round7/batch_u21_g/`)
-- `look/U21G_01`/`02`: your Img1 camera (Squish page, Group 1, Face 5, Bend on, from below), before / after. After: the Bottom's
-  edge rides Face 5's dent, and the thumb pad's outline stays on the bent edge.
+- `look/U21G_01`/`02`: your Img1 camera (Squish page, Group 1, Face 5, Bend on, from below), before / after (re-taken in fix round 1
+  at your 11.png framing). After: the Bottom's edge rides Face 5's dent, and the thumb pad's outline stays on the bent edge.
 - `look/U21G_03`/`04`: the same from above. Before: the Top's edge along Face 5 is straight and a dark gap shows where Face 3's
   side bends. After: the Top's edge curves with Face 5 and with Face 3.
-- `look/U21G_05`/`06`: Group 2, Bend on, no lattice (your 12.png). Before: Edge 12 flat. After: the thumb pad's dent along the
-  edge, inside its flat prism.
+- `look/U21G_05`/`06`: Group 2, Bend on, no lattice (your 12.png; re-taken in fix round 1 at its framing). Before: Edge 12 flat.
+  After: the thumb pad's dent along the edge, inside its flat prism. (`07`–`09`: fix round 1's outline, above.)
 - `lines/`: every test's numbers.
 
 ### Not done / open
-- An edges group's stamp outline and glass still use the nearest-vertex rule ("edges groups keep field / nearest", the plan). In
-  `U21G_06` the thumb pad's dashed outline over Edge 12 stays at rest while the edge under it dents.
+- ~~An edges group's stamp outline stays at rest~~ — fixed in fix round 1 (the outline and the indent are posed now). The glass
+  and the flat prism's own handles (traces, arrow, chip, knob) still use the nearest-vertex rule / rest, per the plan.
 - The edge preview is your drawing, not mechanics. It eases to 0 in the last 1 mm above the prism's floor so it meets the still
   face. On a stale lattice the sim keeps the OLD lattice's stiffness (open risk 4 of the plan); its depths are core's live design
   only once core designed every press.
-- The probe for Face 6 found no change in the cap. The single-drag stop (lattice ÷ k) is the likely reason; not changed.
+- The probe for Face 6 found no change in the cap and no change from the delete + undo (fix round 1's settled rows); only the
+  Deepest value moves the single-drag stop (k). Not changed.
 - The 7 / 8 squares-only jumps on your bracket are real steps of the squares (a latticed column next to one with no depth), not a
   drawing fault. The posed outline follows them.
 

@@ -177,11 +177,24 @@ extension FlexibleStageModel {
     }
 
     /// Core's design of press `id` as it is NOW (its current registration, the designs settled): its depths on the press stack.
+    /// ★ U21 FIX 1 (the checker: "a possible cost on each SwiftUI refresh on a stale lattice"): one answer per press per design run
+    /// (`designGeneration`, on the press's registered stack) — FlexiblePinch.core runs once, not on every refresh.
     func liveDesignTarget(_ id: UUID) -> FlexibleFEField.Target? {
-        guard !designsInFlight, let r = pressRegistrations[id], let d = pressDesign(id), d.refusal == nil,
-              d.columns.count == r.stack.columns.count else { return nil }
-        return FlexibleFEField.Target(stack: r.stack, depthsMM: FlexiblePinch.core(d, stack: r.stack).buildableDepthMM, pinched: [])
+        guard !designsInFlight else { return nil }
+        if !Self.controlNoLiveDesignCache, let c = liveDesignTargetCache[id], c.gen == designGeneration, let t = c.target,
+           pressRegistrations[id]?.stack == t.stack { return t }   // (a press not designed yet is asked again: cheap, and it may land)
+        Self.liveDesignTargetComputations += 1
+        var t: FlexibleFEField.Target?
+        if let r = pressRegistrations[id], let d = pressDesign(id), d.refusal == nil, d.columns.count == r.stack.columns.count {
+            t = FlexibleFEField.Target(stack: r.stack, depthsMM: FlexiblePinch.core(d, stack: r.stack).buildableDepthMM, pinched: [])
+        }
+        if t != nil { liveDesignTargetCache[id] = (designGeneration, t) } else { liveDesignTargetCache[id] = nil }
+        return t
     }
+    /// ★ RED CONTROL only: no cache (batch G — every call ran FlexiblePinch.core).
+    @MainActor static var controlNoLiveDesignCache = false
+    /// How many times `liveDesignTarget` worked its answer out (the cache's test reads it).
+    @MainActor static var liveDesignTargetComputations = 0
 
     /// The edges group's landed sim answers its presses as they are now (solved for the current wants, nothing in flight).
     func pressSimIsCurrent(_ id: String) -> Bool {

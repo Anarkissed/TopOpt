@@ -635,6 +635,8 @@ final class FlexibleU21BendTests: XCTestCase {
         }
         log.append(row("A as saved (after his delete + undo, 25.png)"))
         setDeepest(m, 2000008, 7)
+        await m.waitForIdle()   // ★ U21 FIX 1 (the checker): row B was read before the model settled its k
+        try await FlexibleSquishFixture.settle(m, "Deepest 7 settled")
         log.append(row("B Deepest 7 (his edit before the ⊖, 22.png)"))
         m.removeFace(2000008)
         FlexibleStagePage.history(undo: true, project: r.project, model: m)
