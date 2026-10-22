@@ -63,8 +63,18 @@ public struct FlexibleFERequest: Sendable {
     /// it, as it shares `resting`.
     public var hold: FlexibleFEHold = .legacy
 
+    /// ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"; his picks
+    /// ~15:45: "the linked walls HOLD that lattice"): per sim id, the live linked walls of the lattices that group presses into
+    /// (FlexibleStageModel.linkWalls). Display sim only — never in `designInputs`, never in a job (CORE LIST item 10). A link
+    /// added / removed re-solves the sims with new walls (FlexibleStageModel.relinkSims), never the lattice.
+    public var walls: [String: [FlexHeldWallInfo]] = [:]
+    /// ★ U21 · I3: the model's hold epoch these walls belong to (every field solved from this request carries it).
+    public var holdEpoch = 0
+
     /// ★ U21 · I1, RED CONTROL only: every request sends today's chain (rule 0, no anchor) — his l-bracket's Face 2 glued.
     nonisolated(unsafe) public static var controlLegacyHold = false
+    /// ★ U21 · I3, RED CONTROL only: the linked walls are not sent (the hold falls to Rests / Topology / the far side).
+    nonisolated(unsafe) public static var controlIgnoreLinks = false
     /// ★ U21 · I1, RED CONTROL only (R3): a field whose hold leaves the exits free calibrates on ITSELF (no reference solve).
     nonisolated(unsafe) public static var controlSingleSolveCalibration = false
 
@@ -72,6 +82,22 @@ public struct FlexibleFERequest: Sendable {
     public func with(sims: [Sim]) -> FlexibleFERequest {
         var r = FlexibleFERequest(generation: generation, rho: rho, skinFrac: skinFrac, resting: resting, law: law, sims: sims)
         r.hold = hold
+        r.walls = walls; r.holdEpoch = holdEpoch   // ★ U21 · I3
+        return r
+    }
+
+    /// ★ U21 · I3: this request with `walls` (per sim id) under hold epoch `epoch`.
+    public func with(walls w: [String: [FlexHeldWallInfo]], epoch: Int) -> FlexibleFERequest {
+        var r = self
+        r.walls = w
+        r.holdEpoch = epoch
+        return r
+    }
+
+    /// ★ U21 · I1 (R3) + I3: the REFERENCE a field whose hold leaves the exits free is calibrated on — today's chain, no linked wall.
+    var reference: FlexibleFERequest {
+        var r = with(hold: .legacy)
+        r.walls = [:]
         return r
     }
 
@@ -123,13 +149,17 @@ public struct FlexibleFERequest: Sendable {
         q.holdRule = h.rule
         q.anchorFaceIDs = h.anchorFaceIDs
         q.anchorRegionIDs = h.anchorRegionIDs
+        if !Self.controlIgnoreLinks { q.heldWalls = walls[sim.id] ?? [] }   // ★ U21 · I3
         return q
     }
 
     /// ★ U21 · I1 (R3): a field solved under a hold that leaves the exits free (the Topology anchors) is calibrated on a REFERENCE
     /// — the same sim under today's chain (the exits held) — whose k is applied to it. Today's chain is its own reference.
+    /// ★ U21 · I3: so is a field held by linked walls whose exits are free (the walls take the far anvil's place).
     static func needsReference(_ f: FlexibleFEField, _ r: FlexibleFERequest) -> Bool {
-        r.hold.rule == 1 && f.holdRule == 1 && f.bcMode == "anchor" && !f.exitsHeld && !controlSingleSolveCalibration
+        guard !controlSingleSolveCalibration, !f.exitsHeld else { return false }
+        if f.wallNodes.contains(where: { $0 > 0 }) { return true }
+        return r.hold.rule == 1 && f.holdRule == 1 && f.bcMode == "anchor"
     }
 
     /// Build every group sim's request from the lattice just built.
@@ -187,6 +217,16 @@ public struct FlexibleFERequest: Sendable {
     /// A failed solve is `.failure` with core's words.
     public static func solve(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
                              control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> Result<FlexibleFEField, FlexibleSquishFailure> {
+        // ★ U21 · I3: every field carries the hold epoch it was solved under (a late answer of another epoch is discarded)
+        solveCalibrated(sim, of: r, on: scene, control: control, deadlineMS: deadlineMS).map { f in
+            var f = f
+            f.holdEpoch = r.holdEpoch
+            return f
+        }
+    }
+
+    static func solveCalibrated(_ sim: Sim, of r: FlexibleFERequest, on scene: FlexibleScene,
+                                control: Int, deadlineMS: Double) -> Result<FlexibleFEField, FlexibleSquishFailure> {
         // ★ X20b: an edges group core designed for — one solve per press, each scaled to core's design depth (linear: summed)
         if sim.perPress, sim.pressed.count == sim.targets.count, !controlOneScalar {
             var parts: [FlexibleFEField] = []
@@ -198,7 +238,7 @@ public struct FlexibleFERequest: Sendable {
                     parts.append(f)
                     // ★ U21 · I1 (R3): one reference per press, only when its exits are not held
                     if needsReference(f, r) {
-                        switch solveRaw(one, of: r.with(hold: .legacy), on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
+                        switch solveRaw(one, of: r.reference, on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
                         case .success(let g): refs.append(g)
                         case .failure(let e): return .failure(e)
                         }
@@ -217,7 +257,7 @@ public struct FlexibleFERequest: Sendable {
         case .success(let f):
             // ★ U21 · I1 (R3): k from a reference solve with the exits held, applied to the real-hold field
             guard needsReference(f, r), !sim.targets.isEmpty else { return .success(f.calibrated(to: sim.targets, band: band)) }
-            switch solveRaw(sim, of: r.with(hold: .legacy), on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
+            switch solveRaw(sim, of: r.reference, on: scene, control: control, deadlineMS: deadlineMS, reference: true) {
             case .failure(let e): return .failure(e)
             case .success(let ref): return .success(f.calibrated(to: sim.targets, band: band, reference: ref))
             }
@@ -240,6 +280,7 @@ public struct FlexibleFERequest: Sendable {
             }
             guard s.ok else { return .failure(FlexibleSquishFailure(why: s.failure)) }
             var raw = FlexibleFEField(solution: s, simID: sim.id, generation: r.generation, bounds: !reference)
+            raw.holdEpoch = r.holdEpoch   // ★ U21 · I3
             raw.restsBonded = retried
             return .success(raw)
         } catch {

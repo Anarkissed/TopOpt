@@ -150,10 +150,19 @@ public enum FlexibleSettingsExit {
         modified ? FlexibleExitDecision.decide(r) : .exit
     }
 
+    /// ★ U21 · I3, RED CONTROL only: a link counts as a Squish-page change.
+    nonisolated(unsafe) static var controlLinksModifySettings = false
+
     /// Did anything change since the page opened (`opened` nil: the part is still opening — nothing yet)?
     public static func modified(_ now: FlexibleStageSettings, since opened: FlexibleStageSettings?) -> Bool {
         // ★ ROUND 7 (M2): the Flexible sectors' numbers are labels (registered by the open's own read too) — never his change
-        func bare(_ s: FlexibleStageSettings) -> FlexibleStageSettings { var c = s; c.sectors = nil; return c }
+        // ★ U21 · I3 (found by looking, I3_02): links are the Lattice page's and re-solve the sims only — never "Save & Exit
+        // builds the lattice" (RED: `controlLinksModifySettings`)
+        func bare(_ s: FlexibleStageSettings) -> FlexibleStageSettings {
+            var c = s; c.sectors = nil
+            if !controlLinksModifySettings { c.links = nil }
+            return c
+        }
         return opened.map { bare($0) != bare(now) } ?? false
     }
 

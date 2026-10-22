@@ -303,6 +303,19 @@ public final class FlexibleStageModel: ObservableObject {
     public internal(set) var squishGeneration: Int?
     /// What the sims need, built in the lattice's build task (released once the solver has it).
     var feRequest: FlexibleFERequest?
+    /// ★ U21 · I3 (his picks of 2026-10-21 ~15:45: "the linked walls HOLD that lattice"): the shown lattice's FE request, KEPT (the
+    /// solver releases its own copy) so a link added / removed re-solves the sims with new walls, never the lattice
+    /// (FlexibleStageModel+Squish.relinkSims; ~6.5 MB on his l-bracket).
+    var simRequest: FlexibleFERequest?
+    /// ★ U21 · I3: bumped by every relink; a field (or refine) of another epoch is discarded (the reviewer's E(5): "an answer
+    /// counts only for the job on screen").
+    public internal(set) var holdEpoch = 0
+    /// ★ U21 · I3: the linked walls per sim id the shown sims are solved (or solving) with.
+    public internal(set) var shownWalls: [String: [FlexHeldWallInfo]] = [:]
+    /// ★ U21 · I3: the emission the links' walls are read from (memoised; links themselves never re-key it).
+    var linkRegionsMemo: (key: FlexibleIncludeMemoKey, regions: [LatticeRegionSpec])?
+    /// ★ U21 · I3, RED CONTROL only: a link change (or its Undo) does not re-solve the sims.
+    var controlNoRelink = false
     /// The generation whose sims were handed to the solver.
     var squishScheduled: Int?
     /// ★ R7-E3: the current lattice's per-voxel arrays with no sim (FlexibleFERequest.base) — kept after the solver drops the request,

@@ -82,6 +82,11 @@ public struct FlexibleFEField: Sendable, Equatable {
     public private(set) var holdRule = 0
     public private(set) var exitsHeld = false
     public private(set) var anchorsHeld: [Int] = []
+    /// ★ U21 · I3: per linked wall sent, the nodes it held (0: it held nothing — left out of the card's count).
+    public private(set) var wallNodes: [Int] = []
+    /// ★ U21 · I3: the model's hold epoch the request was solved under (a link added / removed bumps it; an answer of another
+    /// epoch is discarded — FlexibleStageModel.squishLanded).
+    public internal(set) var holdEpoch = 0
     /// ★ U21 · I1 (the reviewer's R3, 2026-10-22 06:38): k was taken from a REFERENCE solve with the exits held (today's chain)
     /// and applied to this field (its hold left the exits free) — nil: calibrated on itself.
     public private(set) var referenceK: Double?
@@ -127,6 +132,7 @@ public struct FlexibleFEField: Sendable, Equatable {
         coarsen = s.coarsen
         uncalibrated = false
         holdRule = s.holdRule; exitsHeld = s.exitsHeld; anchorsHeld = s.anchorsHeld   // ★ U21 · I1
+        wallNodes = s.wallNodes   // ★ U21 · I3
         serial = Self.serials.next()
         if bounds { refreshBounds() }
     }

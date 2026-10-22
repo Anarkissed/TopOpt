@@ -7,7 +7,11 @@
 // it; with no Rests the Topology page's fixed faces hold it FOR THE SIM ONLY, no Rests added; with neither the far side stays
 // held and the card says so. NARROWED by his decision of 2026-10-22 ~02:50: a group whose project HAS Rests stays EXACTLY as
 // today (batch G's rules incl. the far anvil, byte for byte — the request carries rule 0 and no anchor); only without Rests does
-// the new chain run: Topology's fixed faces (sim only) → the far side. Links (the Attach tool) arrive in I2/I3.
+// the new chain run: Topology's fixed faces (sim only) → the far side.
+// ★ I3 (his picks of 2026-10-21 ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put … The
+// card always says what holds it ('Held by 4 linked walls')"): the LIVE links of the lattices a group presses into hold it,
+// wherever they exist — first in his order (links → Rests → Topology → the far side); with Rests the two hold together (the
+// walls take the far anvil's place). With no link nothing above changes, byte for byte. Display sim only (CORE LIST item 10).
 //
 // ★ THE RULE ON THE WIRE (flexible_squish_fe.cpp, hold_rule 1): no Rests and an anchor → the anchors BONDED (bc "anchor"), the
 // group's own pressed faces never held; no Rests and no anchor → today's far side (exit glue when the presses do not balance,
@@ -48,6 +52,8 @@ public enum FlexibleHold {
 
     /// What holds a group's part.
     public enum Kind: Equatable, Sendable {
+        /// ★ I3: `walls` linked walls hold it (and `rests` Rests beside them, 0: none).
+        case links(Int, rests: Int)
         /// The project's Rests (today's chain, unchanged).
         case rests(Int)
         /// Topology's fixed faces, by group name (sim only).
@@ -68,8 +74,10 @@ public enum FlexibleHold {
 
     /// The decided hold of one group, before its sim lands: `pressed` its pressed faces / regions, `forces` its presses' design
     /// forces (N, model frame), `farFaces` the names of its stacks' exit faces.
+    /// ★ I3: `links` — the live linked walls of the lattices the group presses into (they hold first, with the Rests if any).
     public static func decide(resting: [Int], anchors: [Anchor], pressed: Set<Int>, forces: [SIMD3<Double>],
-                              farFaces: [String]) -> Kind {
+                              farFaces: [String], links: Int = 0) -> Kind {
+        if links > 0 { return .links(links, rests: resting.count) }
         if !resting.isEmpty { return .rests(resting.count) }
         let holding = anchors.filter { a in a.ids.contains { !pressed.contains($0) } }
         if !holding.isEmpty { return .topology(holding.map(\.name)) }
@@ -77,7 +85,12 @@ public enum FlexibleHold {
     }
 
     /// The hold as the sim's receipt says it ran (bc mode, the anchors that pinned), the decided one where it agrees.
-    public static func landed(_ decided: Kind, bcMode: String, anchorsHeld: [Int], anchors: [Anchor], farFaces: [String]) -> Kind {
+    /// ★ I3: `wallsHeld` — the linked walls that pinned ≥ 1 node (a wall that held nothing is not counted).
+    public static func landed(_ decided: Kind, bcMode: String, anchorsHeld: [Int], anchors: [Anchor], farFaces: [String],
+                              wallsHeld: Int = 0, resting: Int = 0) -> Kind {
+        if wallsHeld > 0, bcMode == "wall" || bcMode == "rest" {
+            return .links(wallsHeld, rests: bcMode == "rest" ? Swift.max(1, resting) : 0)
+        }
         switch bcMode {
         case "rest":
             if case .rests = decided { return decided }
@@ -103,6 +116,7 @@ public enum FlexibleHold {
     /// The Squish card's one line (≤ 44 characters).
     public static func line(_ k: Kind) -> String {
         switch k {
+        case .links(let n, let rests): return FlexibleRowCopy.Hold.links(n, rests: rests)
         case .rests(let n): return FlexibleRowCopy.Hold.rests(n)
         case .topology(let names): return names.count == 1 ? FlexibleRowCopy.Hold.topology(group: names[0]) : FlexibleRowCopy.Hold.topologyMany
         case .farSide(let faces): return FlexibleRowCopy.Hold.farSide(face: faces.count == 1 ? faces[0] : nil)
@@ -110,8 +124,11 @@ public enum FlexibleHold {
         }
     }
 
-    /// The line read by VoiceOver: no link holds a group in I1, so its tail says where links are set.
-    public static func spoken(_ k: Kind) -> String { line(k) + FlexibleRowCopy.Hold.voiceOverTail }
+    /// The line read by VoiceOver: its tail says where links are set — only when no link holds the group.
+    public static func spoken(_ k: Kind) -> String {
+        if case .links = k { return line(k) }
+        return line(k) + FlexibleRowCopy.Hold.voiceOverTail
+    }
 
     static func uniq(_ v: [Int]) -> [Int] {
         var seen = Set<Int>(), out: [Int] = []
@@ -163,11 +180,78 @@ extension FlexibleStageModel {
     public func holdKind(_ g: FlexibleSqueezeGroup) -> FlexibleHold.Kind {
         let i = holdInputs(g)
         let anchors = topologyAnchors
-        let decided = FlexibleHold.decide(resting: holdResting, anchors: anchors, pressed: i.pressed, forces: i.forces, farFaces: i.far)
-        guard let f = shownSquishField(FlexibleSim.groupID(g.number)) else { return decided }
-        return FlexibleHold.landed(decided, bcMode: f.bcMode, anchorsHeld: f.anchorsHeld, anchors: anchors, farFaces: i.far)
+        let id = FlexibleSim.groupID(g.number)
+        // ★ I3: the walls the shown sims solve with (a lattice shown), else the live links now
+        let links = (lattice != nil ? shownWalls[id] : linkWalls()[id])?.count ?? 0
+        let decided = FlexibleHold.decide(resting: holdResting, anchors: anchors, pressed: i.pressed, forces: i.forces, farFaces: i.far,
+                                          links: links)
+        guard let f = shownSquishField(id) else { return decided }
+        return FlexibleHold.landed(decided, bcMode: f.bcMode, anchorsHeld: f.anchorsHeld, anchors: anchors, farFaces: i.far,
+                                   wallsHeld: f.wallNodes.filter { $0 > 0 }.count, resting: holdResting.count)
     }
 
     /// The Squish card's line for group `g`.
     public func holdLine(_ g: FlexibleSqueezeGroup) -> String { FlexibleHold.line(holdKind(g)) }
+}
+
+// MARK: - ★ I3: the live links each group's sim is held by (read-only; nothing is written)
+
+extension FlexibleStageModel {
+
+    /// ★ RED CONTROL only (I3 test): every live link holds every group, whatever lattice its presses push into.
+    nonisolated(unsafe) static var controlEveryLinkHoldsEveryGroup = false
+
+    /// The emission the links' walls are read from — memoised on what it reads, the links themselves left out (a link never
+    /// re-emits it).
+    func linkRegions() -> [LatticeRegionSpec] {
+        var lattice = project.lattice
+        lattice.flexible?.links = nil
+        let key = FlexibleIncludeMemoKey(lattice: lattice, selection: project.selection, force: project.force,
+                                         faceRegions: project.faceRegions,
+                                         mesh: project.viewerMesh.map { "\($0.signature.contentHash)|\($0.faceIDs.count)" } ?? "")
+        if let m = linkRegionsMemo, m.key == key { return m.regions }
+        let r = project.latticeJobRegions().regions
+        linkRegionsMemo = (key, r)
+        return r
+    }
+
+    /// Per squeeze group's sim id, the LIVE linked walls of the lattices its presses push into (a press pushes into the lattice
+    /// whose key names a face it covers — its face-prism —, or its painted region). Stale and dormant links never count.
+    public func linkWalls() -> [String: [FlexHeldWallInfo]] {
+        let links = project.lattice.flexible?.links ?? []
+        guard !links.isEmpty, let mesh = project.viewerMesh else { return [:] }
+        let regions = linkRegions()
+        var memo: [String: FlexibleLatticeWalls.Result?] = [:]
+        func walls(_ key: String) -> FlexibleLatticeWalls.Result? {
+            if let w = memo[key] { return w }
+            let w = FlexibleLatticeWalls.walls(project: project, key: key, regions: regions)
+            memo[key] = w
+            return w
+        }
+        let live = links.enumerated().filter { FlexibleAttach.linkState(project, $0.element, walls: walls) == .live }
+        guard !live.isEmpty else { return [:] }
+        let sectors = self.regions
+        var out: [String: [FlexHeldWallInfo]] = [:]
+        for g in squeezeGroups {
+            let pressed = holdInputs(g).pressed
+            let faces = Set(pressed.flatMap { sectors.faces(of: $0, mesh: mesh) })
+            var held: [FlexHeldWallInfo] = []
+            for (i, l) in live {
+                guard Self.controlEveryLinkHoldsEveryGroup || Self.pushesInto(l.lattice, faces: faces, regions: pressed),
+                      let w = walls(l.lattice)?.wall(l.wall), !w.quads.isEmpty else { continue }
+                held.append(FlexHeldWallInfo(m: w.m, quads: w.quads.flatMap { q in q.flatMap { [$0.x, $0.y, $0.z] } }, tag: i))
+            }
+            if !held.isEmpty { held.sort { $0.tag < $1.tag }; out[FlexibleSim.groupID(g.number)] = held }
+        }
+        return out
+    }
+
+    /// The lattice keyed `key` is the one a group pressing `faces` (B-rep) / `regions` (its region ids) pushes into.
+    static func pushesInto(_ key: String, faces: Set<Int>, regions: Set<Int>) -> Bool {
+        switch FlexibleAttach.ref(key) {
+        case let .face(_, f)?: return faces.contains(Int(f))
+        case let .region(_, r)?: return regions.contains(FlexibleRegions.sectorBase + Int(r))
+        default: return false
+        }
+    }
 }

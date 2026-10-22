@@ -44,10 +44,7 @@ extension FlexibleMainStage {
 
     /// A link as Selections lists it: live, stale (its reason), or dormant (its group is gone, or its face left the group).
     func linkState(_ p: ProjectModel, _ l: FlexibleLatticeLink) -> FlexibleAttach.LinkState {
-        guard let ref = FlexibleAttach.ref(l.lattice), let g = FlexibleAttach.group(of: ref),
-              let grp = p.selection.groups.first(where: { $0.id == g }), p.latticeSelectableRefs(grp).contains(ref) else { return .dormant }
-        let on = p.latticeSelectableRole(ref, in: g) == .include
-        return FlexibleAttach.state(l, groupExists: true, latticeOn: on, walls: on ? attachWalls(p, key: l.lattice) : nil)
+        FlexibleAttach.linkState(p, l) { attachWalls(p, key: $0) }   // ★ I3: the sim reads the same rule
     }
 
     /// The live links of lattice `key`.

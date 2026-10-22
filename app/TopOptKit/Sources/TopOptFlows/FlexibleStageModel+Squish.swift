@@ -13,8 +13,12 @@ import TopOptKit
 extension FlexibleStageModel {
 
     /// A new lattice (or none) landed: its own sims, none of the old one's.
-    func latticeLanded(_ request: FlexibleFERequest?) {
+    func latticeLanded(_ landed: FlexibleFERequest?) {
         squishSolver.cancel()
+        // ★ U21 · I3: the live linked walls as they are now, under the current hold epoch; the request is kept for a relink
+        let request = landed.map { $0.with(walls: linkWalls(), epoch: holdEpoch) }
+        shownWalls = request?.walls ?? [:]
+        simRequest = request
         feRequest = request
         if keepFERequest { keepLastFERequest(request) }
         squishScheduled = nil
@@ -39,11 +43,11 @@ extension FlexibleStageModel {
         var s = squish
         for sim in r.sims where s[sim.id] == nil { s[sim.id] = .pending }
         if s != squish { squish = s }   // one publish: "Simulating the squish…"
-        squishSolver.onResult = { [weak self] gen, id, state in self?.squishLanded(gen, id, state) }
+        squishSolver.onResult = { [weak self] gen, epoch, id, state in self?.squishLanded(gen, id, state, epoch: epoch) }
         // ★ BATCH N: once the quick sims landed, each group is solved again in steps (the shown first)
         squishSolver.linearField = { [weak self] id in self?.squish[id]?.field }
-        squishSolver.onRefineProgress = { [weak self] gen, id, done, total in self?.refineProgressed(gen, id, done, total) }
-        squishSolver.onRefine = { [weak self] gen, id, outcome in self?.refineLanded(gen, id, outcome) }
+        squishSolver.onRefineProgress = { [weak self] gen, epoch, id, done, total in self?.refineProgressed(gen, id, done, total, epoch: epoch) }
+        squishSolver.onRefine = { [weak self] gen, epoch, id, outcome in self?.refineLanded(gen, id, outcome, epoch: epoch) }
         let worker = squishWorker
         // (tracked: `waitForIdle` waits for the hand-over too, so no sim starts after it returned)
         track(Task { @MainActor [weak self] in
@@ -67,9 +71,11 @@ extension FlexibleStageModel {
         if !squishSolver.retry(id) { generateLattice() }
     }
 
-    /// One sim finished: kept only if it is for the lattice still shown.
-    func squishLanded(_ generation: Int, _ id: String, _ state: FlexibleSquishState) {
-        guard controlIgnoreSquishGeneration || (generation == lattice?.generation && generation == squishGeneration) else { return }
+    /// One sim finished: kept only if it is for the lattice still shown — ★ U21 · I3: and for the links shown (its hold epoch;
+    /// nil: the current one).
+    func squishLanded(_ generation: Int, _ id: String, _ state: FlexibleSquishState, epoch: Int? = nil) {
+        guard controlIgnoreSquishGeneration || (generation == lattice?.generation && generation == squishGeneration
+                                                && (Self.controlGenerationOnlyGuard || (epoch ?? holdEpoch) == holdEpoch)) else { return }
         squish[id] = state
         pressSimLanded(id)   // ★ R7-E3
     }
@@ -90,8 +96,8 @@ extension FlexibleStageModel {
 
     /// A refine claimed core or started an increment (`step`: the one being solved; a late report never
     /// overwrites a result).
-    func refineProgressed(_ generation: Int, _ id: String, _ step: Int, _ total: Int) {
-        guard generation == lattice?.generation, generation == squishGeneration else { return }
+    func refineProgressed(_ generation: Int, _ id: String, _ step: Int, _ total: Int, epoch: Int? = nil) {
+        guard generation == lattice?.generation, generation == squishGeneration, (epoch ?? holdEpoch) == holdEpoch else { return }
         switch refine[id] {
         case .ready?, .kept?: return
         default: break
@@ -101,8 +107,9 @@ extension FlexibleStageModel {
     }
 
     /// A refine ended: its field, or the quick one kept with why (a cancelled one leaves no trace).
-    func refineLanded(_ generation: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome) {
-        guard generation == lattice?.generation, generation == squishGeneration else { return }
+    func refineLanded(_ generation: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome, epoch: Int? = nil) {
+        guard generation == lattice?.generation, generation == squishGeneration,
+              Self.controlGenerationOnlyGuard || (epoch ?? holdEpoch) == holdEpoch else { return }
         switch outcome {
         case .refined(let f): refine[id] = .ready(f)
         case .kept(let why, let detail, _): refine[id] = .kept(why: why, detail: detail)
@@ -123,5 +130,47 @@ extension FlexibleStageModel {
     public var squishSims: [(sim: FlexibleSim, state: FlexibleSquishState?)] {
         (playLattice?.sims ?? []).filter { if case .group = $0.kind { return true }; return false }   // ★ R7-E3: and the edges groups'
             .map { ($0, squish[$0.id]) }
+    }
+}
+
+// MARK: - ★ U21 · I3: a link re-solves the sims, never the lattice
+
+extension FlexibleStageModel {
+
+    /// ★ RED CONTROL only: the landing guard compares the generation alone (a late answer of the links before is shown).
+    nonisolated(unsafe) static var controlGenerationOnlyGuard = false
+
+    /// The live linked walls moved since the shown sims were scheduled (a link added / removed, its Undo, an edit that made one
+    /// stale or live again): re-solve. Cheap when nothing moved (the walls are memoised); called on every project change.
+    public func relinkIfNeeded() {
+        guard !controlNoRelink else { return }
+        let want = linkWalls()
+        guard want != shownWalls else { return }
+        relinkSims(want)
+    }
+
+    /// His links of 2026-10-21 (~15:45: "the linked walls HOLD that lattice"): the shown lattice's sims solved again with `walls`
+    /// — a new hold epoch, the old fields and refines dropped, the lattice's key, generation and build untouched (links are not in
+    /// `designInputs`). A late answer of the old epoch is discarded where it lands.
+    func relinkSims(_ walls: [String: [FlexHeldWallInfo]]) {
+        holdEpoch += 1
+        shownWalls = walls
+        guard let r0 = simRequest, let l = lattice, r0.generation == l.generation else { return }   // the next build takes them
+        let r = r0.with(walls: walls, epoch: holdEpoch)
+        simRequest = r
+        if keepFERequest { keepLastFERequest(r) }
+        feBase = r.base
+        pressSimKeys = [:]
+        pressSimInFlight = []
+        guard squishScheduled == r.generation else {   // not handed to the solver yet: it starts with these walls
+            feRequest = r
+            return
+        }
+        squishSolver.cancel()
+        if !squish.isEmpty { squish = [:] }
+        if !refine.isEmpty { refine = [:] }
+        feRequest = r
+        squishScheduled = nil
+        startSquishSims(first: nil)
     }
 }

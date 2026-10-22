@@ -1100,6 +1100,7 @@ public final class FlexibleMainStage: ObservableObject {
     func projectChanged() {
         if !frozen, let p = model?.project { revalidatePick(p) }   // ★ R7-D2: a pick whose group an Undo removed reads as none
         guard !frozen, visible, let m = model, m.sceneState != .opening else { return }
+        m.relinkIfNeeded()   // ★ U21 · I3: a link added / removed (or its two-finger Undo) re-solves the sims, never the lattice
         if mainPageMoved(m) {
             noteLoads()
             m.openScene()

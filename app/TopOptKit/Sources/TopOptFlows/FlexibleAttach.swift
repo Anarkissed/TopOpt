@@ -255,6 +255,17 @@ public enum FlexibleAttach {
         return .live
     }
 
+    /// A link's state in `p` (`walls`: the lattice's walls now, by key) — the one rule Selections and the sim (I3) both read:
+    /// dormant when its key's group is gone or the face left it, stale with its reason, else live.
+    @MainActor
+    public static func linkState(_ p: ProjectModel, _ l: FlexibleLatticeLink,
+                                 walls: (String) -> FlexibleLatticeWalls.Result?) -> LinkState {
+        guard let ref = ref(l.lattice), let g = group(of: ref),
+              let grp = p.selection.groups.first(where: { $0.id == g }), p.latticeSelectableRefs(grp).contains(ref) else { return .dormant }
+        let on = p.latticeSelectableRole(ref, in: g) == .include
+        return state(l, groupExists: true, latticeOn: on, walls: on ? walls(l.lattice) : nil)
+    }
+
     /// A link's row: "Side 2 → wall", with its stale reason after it.
     public static func rowText(_ l: FlexibleLatticeLink, wallName: String, state: LinkState) -> String {
         let base = FlexibleSelectionsCopy.linkRow(wallName, FlexibleLatticeWalls.targetName(l.target))

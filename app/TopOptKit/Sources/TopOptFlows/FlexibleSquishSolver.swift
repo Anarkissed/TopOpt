@@ -58,8 +58,9 @@ public final class FlexibleSquishSolver {
     /// Another core solve is running: no sim starts (polled every `busyRetryS`).
     var busy: () -> Bool = { false }
     static let busyRetryS = 0.25
-    /// One per finished sim, on the main actor: (generation, sim id, state).
-    var onResult: (Int, String, FlexibleSquishState) -> Void = { _, _, _ in }
+    /// One per finished sim, on the main actor: (generation, hold epoch, sim id, state). ★ U21 · I3: the epoch of the request it
+    /// was solved from — a link change re-solves the same generation under a new epoch, and the old answer is discarded.
+    var onResult: (Int, Int, String, FlexibleSquishState) -> Void = { _, _, _, _ in }
     /// The queue ran dry (the Stress solve it held back may start).
     var onIdle: () -> Void = {}
     // ★ BATCH N: the refines
@@ -67,9 +68,10 @@ public final class FlexibleSquishSolver {
     var linearField: (String) -> FlexibleFEField? = { _ in nil }
     /// On the main actor: (generation, sim id, the increment being solved, total) — ★ verification: once
     /// when the refine CLAIMS core (step 1, so the line never blanks) and at each increment's start.
-    var onRefineProgress: (Int, String, Int, Int) -> Void = { _, _, _, _ in }
-    /// One per ended refine, on the main actor.
-    var onRefine: (Int, String, FlexibleFERefine.Outcome) -> Void = { _, _, _ in }
+    /// ★ U21 · I3: (generation, hold epoch, sim id, step, total).
+    var onRefineProgress: (Int, Int, String, Int, Int) -> Void = { _, _, _, _, _ in }
+    /// One per ended refine, on the main actor: (generation, hold epoch, sim id, outcome).
+    var onRefine: (Int, Int, String, FlexibleFERefine.Outcome) -> Void = { _, _, _, _ in }
 
     private let queue = DispatchQueue(label: "app.topopt.flexible.fe", qos: .utility)
     private var request: FlexibleFERequest?
@@ -256,7 +258,7 @@ public final class FlexibleSquishSolver {
                         cont.resume(returning: out)
                     }
                 }
-                self?.finished(r.generation, id, result)
+                self?.finished(r.generation, r.holdEpoch, id, result)
             }
         }
         if order.isEmpty, running.isEmpty { pumpRefine(r, scene) }
@@ -286,7 +288,7 @@ public final class FlexibleSquishSolver {
             refiningGeneration = r.generation
             refineCount += 1
             let token = refineToken
-            let gen = r.generation
+            let gen = r.generation, epoch = r.holdEpoch
             let bits = controlBits
             let incs = controlRefineIncrements ?? FlexibleFERefine.increments
             let past = controlRefinePastData ?? FlexibleFERefine.pastData
@@ -296,7 +298,7 @@ public final class FlexibleSquishSolver {
             let q = queue
             // ★ BATCH N VERIFICATION: the line from the moment the refine claims core (it blanked ~1.5 s
             // while the first increment ran) — in the same main-actor step as the claim
-            onRefineProgress(gen, id, 1, incs)
+            onRefineProgress(gen, epoch, id, 1, incs)
             Task { @MainActor [weak self] in
                 let outcome: FlexibleFERefine.Outcome = await withCheckedContinuation { cont in
                     q.async {
@@ -310,37 +312,38 @@ public final class FlexibleSquishSolver {
                                 if !noYield { Self.inFlight.yieldSim() }
                             },
                             progress: { step, total in
-                                Task { @MainActor [weak self] in self?.onRefineProgress(gen, id, step, total) }
+                                Task { @MainActor [weak self] in self?.onRefineProgress(gen, epoch, id, step, total) }
                             })
                         if Self.inFlight.leaveSim(yieldable: true) { Self.postIdle() }
                         cont.resume(returning: o)
                     }
                 }
-                self?.refineFinished(gen, id, outcome)
+                self?.refineFinished(gen, epoch, id, outcome)
             }
             return
         }
     }
 
-    private func refineFinished(_ generation: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome) {
+    private func refineFinished(_ generation: Int, _ epoch: Int, _ id: String, _ outcome: FlexibleFERefine.Outcome) {
         if refining == id { refining = nil; refiningGeneration = nil }
-        onRefine(generation, id, outcome)
-        if request?.generation == generation, order.isEmpty, running.isEmpty, refineOrder.isEmpty, failedIDs.isEmpty {
+        onRefine(generation, epoch, id, outcome)
+        if request?.generation == generation, request?.holdEpoch == epoch, order.isEmpty, running.isEmpty, refineOrder.isEmpty, failedIDs.isEmpty {
             request = nil
             scene = nil
         }
         pump()
     }
 
-    private func finished(_ generation: Int, _ id: String, _ result: Result<FlexibleFEField, FlexibleSquishFailure>) {
+    private func finished(_ generation: Int, _ epoch: Int, _ id: String, _ result: Result<FlexibleFEField, FlexibleSquishFailure>) {
         if let i = running.firstIndex(of: id) { running.remove(at: i) }
+        let current = request?.generation == generation && request?.holdEpoch == epoch   // ★ U21 · I3
         switch result {
-        case .success(let f): onResult(generation, id, .ready(f))
+        case .success(let f): onResult(generation, epoch, id, .ready(f))
         case .failure(let e):
-            if request?.generation == generation { failedIDs.insert(id) }
-            onResult(generation, id, .failed(e.why))
+            if current { failedIDs.insert(id) }
+            onResult(generation, epoch, id, .failed(e.why))
         }
-        if request?.generation == generation, order.isEmpty, running.isEmpty, failedIDs.isEmpty, refineOrder.isEmpty, refining == nil {
+        if current, order.isEmpty, running.isEmpty, failedIDs.isEmpty, refineOrder.isEmpty, refining == nil {
             // ★ the per-voxel arrays (~12 B per scene voxel + 4 per sim) are released after the last solve
             // (★ BATCH N: and the last refine)
             request = nil

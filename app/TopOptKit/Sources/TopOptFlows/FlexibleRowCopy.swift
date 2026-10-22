@@ -386,6 +386,13 @@ public enum FlexibleRowCopy {
 extension FlexibleRowCopy {
     /// The one quiet line under a group's card on the Squish page (FlexibleHold.line), ≤ 44 characters with real names.
     public enum Hold {
+        /// ★ I3 (his pick of 2026-10-21 ~15:45: "The card always says what holds it ('Held by 4 linked walls')"):
+        /// "Held by 4 linked walls", "Held by 1 linked wall", "… + 2 Rests", "… + its Rest".
+        public static func links(_ n: Int, rests: Int) -> String {
+            let walls = n == 1 ? "Held by 1 linked wall" : "Held by \(n) linked walls"
+            guard rests > 0 else { return walls }
+            return walls + (rests == 1 ? " + its Rest" : " + \(rests) Rests")
+        }
         public static func rests(_ n: Int) -> String { n == 1 ? "Held by its Rest" : "Held by \(n) Rests" }
         /// "Held by Group A · fixed on Topology" — a name over 16 characters is cut to 15 + "…".
         public static func topology(group: String) -> String {

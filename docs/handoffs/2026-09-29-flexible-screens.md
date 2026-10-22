@@ -69,17 +69,27 @@ Each item: what core does, where, the evidence, your numbers.
    same centre rule as item 1, `voxelize.cpp:361-389`) limits a twisted prism at Balanced (R7-E1 review). (c) Core designs
    every default edge press "too soft" on 52 of 52 columns (E2 finding 10): follows from item 5. (d) Core's design for a press
    ignores its drawn curve (item 2), so "how close core's profile is" can only measure the flat prism.
-10. **Attach links (placeholder until the Attach tool is built).** Your answer of 2026-10-21 ~15:45: a lattice's links to the
-   solid walls it touches tell the squish sim which walls HOLD it; they are "not sent to core yet (front-end first)". Core has no
-   input for them today: the Flexible block's keys (`core/src/flexible/job_block.cpp:76-78`) and a face's keys (`:208-211`)
-   carry no held walls. Ask, once Attach exists in the app: a
-   per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
-   Evidence so far (batch I1, your l-bracket as saved: no Rest, Group A = plate underside + bolt holes fixed on Topology):
-   today's chain glued Face 2 (raw u_x 0.0000 for Face 6's 0.4832); held by Group A (I1, sim only) Face 2 moves 18.42 for
-   Face 6's 18.70 raw (ratio 0.99: the whole upright swings off the gripped plate; the lattice barely squashes). Core's anvil is
-   always the far side (`core/src/flexible/faces.cpp:291-309`), so core's design and this sim now disagree on your bracket.
-   (I2: the app now stores the links — `lattice.flexible.links`, `FlexibleLatticeLink` {lattice key, wall key, target key};
-   never in a job. The sim reads them from I3.)
+10. **Lattice-to-solid links: which solid walls hold a lattice.** The app stores, per face-prism, links from a lattice wall to the
+   solid it touches, in `lattice.flexible.links` (`FlexibleLatticeLink`: lattice key, wall key, target key). A wall is a side,
+   keyed by the B-rep face across it, or the floor; the solid is the inner side of the expand border, the solid under the floor,
+   or a Covered/Skin model face's skin. Only the app's display sim reads them (`flexible_squish_fe.cpp`, `FlexHeldWall`: the solid
+   within one FE spacing beyond each linked wall is held, bonded). They are never in a job and never in the lattice's key.
+   Core has no such input: a face is only `loaded` or `resting` (`core/src/flexible/job_block.cpp:201-206`; the block's keys
+   `:76-78`, a face's keys `:208-211`), and a press stack's anvil is always its column's exit faces
+   (`core/src/flexible/faces.cpp:291-309`, `:569`; reported at `core/src/flexible/run.cpp:727-731`), i.e. the far side of the part.
+   Core will need: (a) links as Flexible job input (per include region: wall → the solid region or face that holds it), so the
+   press design squeezes against the linked walls and not the far side; (b) rules for a lattice region fused inside a solid
+   border (the expand border, the floor): the bond and overlap at the interface, a minimum border thickness, what a linked wall
+   must carry. Evidence, your l-bracket (Face 6 lattice 33.5 mm through the 25 mm wall, expand −3 mm, Group A = plate underside +
+   bolt holes fixed on Topology), raw u_x (mm, before the app's scale):
+   - no Rest, today's chain: Face 2 glued (0.0000 for Face 6's 0.4832); the deepest column squashes 0.48;
+   - held by Group A on Topology (I1, sim only): Face 2 18.42 for Face 6 18.70 (ratio 0.99: the whole upright swings off the
+     gripped plate); deepest column 0.286;
+   - with the 4 border walls linked (I3): Face 6 5.009 in, Face 2's window centre 4.767 OUT (ratio 0.952), its rim one FE spacing
+     inside the walls 0.37–0.44 (centre 11.7× the rim: a dish), the walls, the border and the plate exactly 0 (4 walls pinned 738 /
+     594 / 738 / 594 nodes at 3.125 mm); deepest column 0.248 (about half the glued case: the open 25 mm lattice clamped on its rim
+     mostly bends); kRef 1.705 (the same as today's k, R3), shown ×1 max |u| 8.63 mm.
+   Core's design still squeezes every column against Face 2, so on your bracket core's design and the sim disagree until (a).
 
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
@@ -99,6 +109,70 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · U21 batch I, part I3 — the linked walls hold the lattice in the sim (2026-10-22) (read this first)
+
+Your answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up." Your picks ~15:45: "the
+linked walls HOLD that lattice. It squashes against them and they stay put … the top pushes in and the bottom bows out … The
+card always says what holds it ('Held by 4 linked walls')." NOT pushed, NOT installed (the installer does I2 + I3 together).
+App only: no core file, no #354/main file, no new hook. Links are display-sim only (CORE LIST item 10).
+
+### What you will see
+- **Your l-bracket, the 4 walls linked** (the one-tap "Attach to the 4 walls around it"): the Squish card says
+  **"Held by 4 linked walls"**. Play: Face 6 pushes in and Face 2 bows OUT like a dish (its middle moves 4.8 mm raw for Face 6's
+  5.0; its rim next to the walls 0.4), the 3 mm border, the plate and everything beyond the walls stay exactly still.
+  Before the links (as saved) it reads "Held by Group A · fixed on Topology" and the whole upright swings (I1).
+- **The walls you link are held still; the part around them doesn't bend in the sim.** To see the lattice itself squash more,
+  hold its back too (a Rest on Face 2) or give it a skin: clamped only on its rim, the open 25 mm lattice mostly bends.
+- **Adding, removing or undoing a link re-runs the squish only** ("Simulating the squish…" for a few seconds) — the lattice is
+  not rebuilt. An answer for the links before is thrown away if it lands late.
+- **Your pad** (it has Rests): with no link, exactly as today. A link (e.g. Face 5's Floor → solid under it) holds beside the
+  Rests: "Held by 1 linked wall + 2 Rests", and only for the group that presses that lattice.
+
+### Decisions made here (yours to overturn)
+- Links hold wherever they exist, first in your order; with Rests the two hold together and **the linked walls take the far
+  anvil's place** (the far side is free to bow). With no link a Rest group is byte-for-byte today's (your 02:50 decision).
+- A group counts the links of the lattices its presses push into (the face-prism of a face it presses, or its painted region).
+- A wall that holds nothing in the sim (tried at one FE spacing, then two) is left out of the hold and of the card's count, and
+  logged ("held nodes 0"). At most one FE spacing of lattice next to each wall is held with it (the sim's grid is 3.125 mm on
+  your bracket, the border 3 mm).
+- k is taken from a reference solve with the exits held (R3) whenever the walls leave Face 2 free (one more ~0.3 s solve).
+
+### What changed (code, all ours)
+- Bridge: `FlexHeldWall` / `FlexSquishRequest.held_walls`, receipt `wall_nodes` / `wall_reach_mm`, bc mode "wall"
+  (`flexible_squish_fe.cpp` build(): pinned before the Rests; the far anvil skipped only when a wall holds).
+- `FlexHeldWallInfo` (TopOptKit), `FlexibleFERequest.walls` per sim id + `holdEpoch` + `reference`, `controlIgnoreLinks`.
+- `FlexibleStageModel`: `linkWalls()` (live links → walls per group, via the one link-state rule now shared with Selections,
+  `FlexibleAttach.linkState`), the request kept (`simRequest`), `relinkIfNeeded()` / `relinkSims()` (new hold epoch, sims
+  re-scheduled), landing guards on (generation, hold epoch) for sims and refines; called from the main page's project change and
+  from `historyRestored`.
+- `FlexibleHold`: `.links(n, rests:)` first; the line from the receipt counts walls that pinned ≥ 1 node; no VoiceOver
+  "set links" tail once links hold it. `FlexibleRowCopy.Hold.links`.
+
+### Tests (`FlexibleI3LinkSimTests`, 3, your l-bracket and your pad of 10-21; red controls asserted red inside)
+- the 4 walls: bc "wall", every wall pins, Face 6 +, Face 2's window + (bows out), centre ≥ 2× its rim (11.7×), plate and border
+  |u| ≤ 1e-6 (0), ratio Face 2 / Face 6 pinned to the measured 0.952 ±10 %; RED links ignored → Topology, centre/rim 1.39, the
+  border moves 29.7 mm raw;
+- a link re-solves without a rebuild (same generation, same key, new epoch), a late old answer dropped (RED: generation-only
+  guard shows it), links in designInputs re-key the lattice (RED), its toolbar Undo re-solves (RED: no relink on history keeps
+  the 4 walls);
+- your pad: the floor link holds beside the Rests only for group 1 (RED: every group), an air wall pins 0 nodes and is not
+  counted (RED: counted), no link = today's field byte for byte, the copy ≤ 44.
+
+### Runs (`round7/batch_i/i3/i3_runs.txt`)
+- Red-first (FlexibleI3LinkSimTests, before the pin): the bow and every red control as above; the ratio pin failed on purpose
+  (0.0) and was pinned to the measured 0.952.
+- Run 1 (frames + TopOptKitTests.FlexibleSquishFETests + 29 classes that touch or pin the changed files): 316 passed, 0 failed,
+  2 skipped (the perf probe, Release only). Run 2 after the fix found by looking (below): I3 tests + the 15 classes that read
+  the Squish page's ready line: 122 passed, 0 failed. Goldens 0 DIFFERS both modes, both runs (38; 32 + 1 PART-SKIP); the 16
+  stage-job hashes cmp-identical to I2's (`stage_job_hashes_i3.txt`).
+- **Found by looking** (run 1's frame): after a link, the Squish page said "Ready: Save & Exit builds the lattice" — a link counted
+  as a Squish change. Fixed: `FlexibleSettingsExit.modified` leaves links out (test 2, RED `controlLinksModifySettings`).
+- Frames (`I3_01` no link, `I3_02` 4 linked; 13" portrait, Play held at full load ×1, one side camera): without links the
+  upright visibly swings and shears off the gripped plate ("Held by Group A · fixed on Topology"); with them it stays square
+  ("Held by 4 linked walls"). Face 2's bow is on the far side, hidden from this camera; its numbers are in the test above
+  (shown ×1: Face 6 8.54 mm, Face 2 8.13 mm). Run 1's two frames (camera from above, nothing readable) were not kept: 4 renders
+  in all.
 
 ## ★ Round 7 · U21 batch I, part I2 — the Attach tool, front end (2026-10-22) (read this first)
 

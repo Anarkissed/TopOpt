@@ -555,6 +555,17 @@ struct FlexSquishLaw {
   double temp_c = 0.0;
   bool shape_only = false;               // calibrate-first: E = max(rho, 0.05)^2 (relative units)
 };
+// ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"; his picks
+// ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put"): one LIVE link's lattice wall, in model
+// mm — the display sim only (links never reach a job: CORE LIST item 10). The solid BEYOND it is held, bonded (x, y, z): every
+// solid FE element whose centre c lies 0 < (c - q0).m <= h_fe outward of a quad and inside it (dilated by h_fe / 2) has its 8
+// nodes pinned; a wall that pins nothing is tried again at 2 h_fe, then reported with 0 nodes (wall_nodes) — never silent.
+struct FlexHeldWall {
+  double m[3] = {0, 0, 0};       // outward unit normal (away from the lattice; the floor: +n, into the part)
+  std::vector<double> quads;     // the wall's lattice side as rectangles, 4 corners x 3 each (q0, q0+e1, q0+e1+e2, q0+e2)
+  int32_t tag = 0;               // the app's index of the link (for its receipt)
+};
+using FlexHeldWalls = std::vector<FlexHeldWall>;
 struct FlexSquishRequest {
   FlexSquishPresses pressed;
   std::vector<int32_t> resting_region_ids;
@@ -582,11 +593,16 @@ struct FlexSquishRequest {
   int32_t hold_rule = 0;
   std::vector<int32_t> anchor_face_ids;    // Topology's fixed B-rep / pseudo faces (model->triangle_face ids)
   std::vector<int32_t> anchor_region_ids;  // Topology's fixed painted regions, resolved against the scene's regions
+  // ★ U21 · I3: the live linked walls of the lattices this group presses into (empty: no link — every rule above unchanged, byte
+  // for byte). They hold WHEREVER they are given, under either rule: with Rests, the Rests keep today's grip and the linked walls
+  // take the place of the far anvil (the walls hold the lattice; bc_mode stays "rest"); with no Rest, the walls alone hold the
+  // part (bc_mode "wall": no Topology anchor, no exit glue).
+  FlexHeldWalls held_walls;
 };
 struct FlexSquishSolution {
   bool ok = false;
   std::string failure;
-  std::string bc_mode;                   // rest | exit | free | patch (control 2)
+  std::string bc_mode;                   // rest | exit | free | patch (control 2) | anchor (U21 · I1) | wall (U21 · I3)
   int32_t free_modes = 0;                // rigid modes the rests leave free (6: nothing rests), each
                                          // relieved (inertia relief) and pinned by one DOF
   int32_t far_anvils = 0;                // pressed stacks' far ends held along their normal beside
@@ -631,6 +647,10 @@ struct FlexSquishSolution {
   std::vector<int32_t> anchors_missing;
   std::vector<int32_t> anchors_held;
   int32_t held_count = 0;
+  // ★ U21 · I3: per held wall (parallel to the request's held_walls), the nodes it pinned (0: it held nothing — the app drops it
+  // from the hold and from the card's count), and the FE spacing the marking used for it (h_fe, or 2 h_fe on the retry)
+  std::vector<int32_t> wall_nodes;
+  std::vector<double> wall_reach_mm;
   // ★ BATCH N: the STEPPED solve's receipt (a linear solve: one solve, load factor 1)
   int64_t session = 0;                      // step_begin: the session to step (0: none — see failure)
   double load_factor = 1.0;                 // x the design force this field is at

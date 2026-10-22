@@ -80,6 +80,9 @@ public struct FlexSquishRequestInfo: Sendable {
     public var holdRule = 0
     public var anchorFaceIDs: [Int] = []
     public var anchorRegionIDs: [Int] = []
+    /// ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"): the live
+    /// linked walls of the lattices this group presses into — the solid beyond each is held, bonded (display sim only; never a job).
+    public var heldWalls: [FlexHeldWallInfo] = []
     public init(pressed: [FlexSquishPressInfo], restingIDs: [Int], rho: [Float], strainOp: [Float], skinFrac: [Float],
                 law: FlexSquishLawInfo, poisson: Double = 0.3, tolerance: Double = 1e-4, deadlineMS: Double = 20_000,
                 coarsen: Int = 0, control: Int = 0) {
@@ -139,6 +142,10 @@ public struct FlexSquishSolutionInfo: Sendable {
     public var anchorsMissing: [Int] = []
     public var anchorsHeld: [Int] = []
     public var heldCount = 0
+    /// ★ U21 · I3: per held wall (parallel to the request's `heldWalls`), the nodes it pinned (0: it held nothing — dropped from
+    /// the hold and the card's count) and the reach the marking used (one FE spacing, or two on the retry).
+    public var wallNodes: [Int] = []
+    public var wallReachMM: [Double] = []
     /// Far ends of pressed stacks held along their normal beside the rests (their anvils).
     public var farAnvils: Int = 0
     /// ★ BATCH M: per FE element ((nx−1)(ny−1)(nz−1), x fastest), the modulus it was solved with
@@ -222,6 +229,17 @@ extension FlexibleScene {
         q.hold_rule = Int32(r.holdRule)   // ★ U21 · I1
         q.anchor_face_ids = FlexConv.i(r.anchorFaceIDs)
         q.anchor_region_ids = FlexConv.i(r.anchorRegionIDs)
+        if !r.heldWalls.isEmpty {   // ★ U21 · I3
+            var walls = topoptbridge.FlexHeldWalls()
+            for w in r.heldWalls {
+                var x = topoptbridge.FlexHeldWall()
+                x.m = (w.m.x, w.m.y, w.m.z)
+                x.quads = FlexConv.d(w.quads)
+                x.tag = Int32(w.tag)
+                walls.push_back(x)
+            }
+            q.held_walls = walls
+        }
         return q
     }
 }
@@ -279,6 +297,8 @@ extension FlexSquishConv {
         info.anchorsMissing = Array(s.anchors_missing).map { Int($0) }
         info.anchorsHeld = Array(s.anchors_held).map { Int($0) }
         info.heldCount = Int(s.held_count)
+        info.wallNodes = Array(s.wall_nodes).map { Int($0) }   // ★ U21 · I3
+        info.wallReachMM = Array(s.wall_reach_mm)
         return info
     }
 }
@@ -324,4 +344,14 @@ enum FlexSquishConv {
         o.shape_only = l.shapeOnly
         return o
     }
+}
+
+/// ★ U21 · I3 (his picks of 2026-10-21 ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put"):
+/// one live link's lattice wall as the squish sim reads it — its outward normal (away from the lattice; the floor: into the part)
+/// and its lattice side as rectangles (FlexibleLatticeWalls.Wall.quads: 4 corners × 3 each, model mm). Display sim only.
+public struct FlexHeldWallInfo: Equatable, Hashable, Sendable {
+    public var m: SIMD3<Double>
+    public var quads: [Double]
+    public var tag: Int
+    public init(m: SIMD3<Double>, quads: [Double], tag: Int = 0) { self.m = m; self.quads = quads; self.tag = tag }
 }

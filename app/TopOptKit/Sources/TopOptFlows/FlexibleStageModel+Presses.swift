@@ -143,6 +143,7 @@ extension FlexibleStageModel {
     /// ★ AP1 REVIEW: after the page's undo / redo (FlexibleStagePage.history) — a press card open on a
     /// press the history took away closes.
     public func historyRestored() {
+        relinkIfNeeded()   // ★ U21 · I3: an Undo / Redo of a link re-solves the sims with the links it brought back
         if let id = selectedPress, settings.press(id) == nil { selectedPress = nil }
         // ★ U21 (UNDO-GHOST): an undone delete opens its tab again with its face selected (FlexibleSettingsOpenGroup)
         let before = historyBefore

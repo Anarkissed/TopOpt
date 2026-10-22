@@ -134,7 +134,7 @@ extension FlexibleStageModel {
             todo.append(FlexibleFERequest.pressSim(id: w.sim.id, presses: w.presses, voxels: base.rho.count, targets: w.targets))
         }
         guard !todo.isEmpty else { return }
-        squishSolver.onResult = { [weak self] gen, id, state in self?.squishLanded(gen, id, state) }
+        squishSolver.onResult = { [weak self] gen, epoch, id, state in self?.squishLanded(gen, id, state, epoch: epoch) }
         squishSolver.linearField = { [weak self] id in self?.squish[id]?.field }
         let worker = squishWorker
         track(Task { @MainActor [weak self] in

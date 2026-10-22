@@ -23,6 +23,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <map>
 #include <memory>
@@ -787,6 +788,77 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
           for (int cc = 0; cc < 3; ++cc) pin(fe.node(i + di, j + dj, k + dk), cc);
     mode = "patch";
   }
+  // ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"; his picks
+  // ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put"): each LIVE linked wall holds the
+  // SOLID beyond it, bonded — every solid element whose centre lies within one FE spacing outward of the wall's lattice side
+  // (inside a quad dilated by h / 2) has its 8 nodes pinned (the border and the shared nodes hold the lattice's edge; at
+  // coarsen 2 his 3 mm border is about one element). A wall that pins nothing is tried at 2 h, then reported with 0 nodes and
+  // left out of the hold (the app drops it from the card's count). No wall given: nothing here runs (every rule byte for byte).
+  std::size_t wallBcs = 0;
+  int wallsHolding = 0;
+  if (mode.empty() && !req.held_walls.empty()) {
+    const Vec3 go{fe.g.origin.x, fe.g.origin.y, fe.g.origin.z};
+    auto mark = [&](const FlexHeldWall& w, double reach, std::vector<int>& nodes) {
+      const Vec3 m{w.m[0], w.m[1], w.m[2]};
+      const double ml = norm(m);
+      if (!(ml > 0.0)) return;
+      const Vec3 mu = mul(m, 1.0 / ml);
+      for (std::size_t q = 0; q + 12 <= w.quads.size(); q += 12) {
+        const Vec3 q0{w.quads[q], w.quads[q + 1], w.quads[q + 2]};
+        const Vec3 q1{w.quads[q + 3], w.quads[q + 4], w.quads[q + 5]};
+        const Vec3 q3{w.quads[q + 9], w.quads[q + 10], w.quads[q + 11]};
+        const Vec3 e1 = sub(q1, q0), e2 = sub(q3, q0);
+        const double l1 = norm(e1), l2 = norm(e2);
+        if (!(l1 > 0.0) || !(l2 > 0.0)) continue;
+        const Vec3 a1 = mul(e1, 1.0 / l1), a2 = mul(e2, 1.0 / l2);
+        Vec3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
+        for (const Vec3& c : {q0, q1, add(q1, e2), q3})
+          for (const Vec3& e : {c, add(c, mul(mu, reach))}) {
+            lo = {std::min(lo.x, e.x), std::min(lo.y, e.y), std::min(lo.z, e.z)};
+            hi = {std::max(hi.x, e.x), std::max(hi.y, e.y), std::max(hi.z, e.z)};
+          }
+        auto lo_i = [&](double v, double o) { return std::max(0, static_cast<int>(std::floor((v - h - o) / h))); };
+        auto hi_i = [&](double v, double o, int n) { return std::min(n - 1, static_cast<int>(std::ceil((v + h - o) / h))); };
+        const int i0 = lo_i(lo.x, go.x), i1 = hi_i(hi.x, go.x, fe.g.nx);
+        const int j0 = lo_i(lo.y, go.y), j1 = hi_i(hi.y, go.y, fe.g.ny);
+        const int k0 = lo_i(lo.z, go.z), k1 = hi_i(hi.z, go.z, fe.g.nz);
+        for (int k = k0; k <= k1; ++k)
+          for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i) {
+              if (!fe.g.solid(i, j, k)) continue;
+              const Vec3 c{go.x + (i + 0.5) * h, go.y + (j + 0.5) * h, go.z + (k + 0.5) * h};
+              const Vec3 r = sub(c, q0);
+              const double d = dot(r, mu);
+              if (!(d > 0.0 && d <= reach)) continue;
+              const double a = dot(r, a1), b = dot(r, a2);
+              if (a < -0.5 * h || a > l1 + 0.5 * h || b < -0.5 * h || b > l2 + 0.5 * h) continue;
+              for (int dk = 0; dk < 2; ++dk)
+                for (int dj = 0; dj < 2; ++dj)
+                  for (int di = 0; di < 2; ++di) nodes.push_back(fe.node(i + di, j + dj, k + dk));
+            }
+      }
+    };
+    for (const FlexHeldWall& w : req.held_walls) {
+      std::vector<int> nodes;
+      double reach = h;
+      mark(w, reach, nodes);
+      if (nodes.empty()) {
+        reach = 2.0 * h;
+        mark(w, reach, nodes);
+      }
+      std::sort(nodes.begin(), nodes.end());
+      nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+      out.wall_nodes.push_back(static_cast<int32_t>(nodes.size()));
+      out.wall_reach_mm.push_back(reach);
+      if (nodes.empty()) {
+        std::fprintf(stderr, "flexible squish: linked wall %d held nodes 0 (left out of the hold)\n", w.tag);
+        continue;
+      }
+      hold(nodes, Vec3{0, 0, 1}, true);
+      ++wallsHolding;
+    }
+    wallBcs = bcs.size();
+  }
   if (mode.empty() && !s.resting.empty()) {
     std::vector<int> restingFaces;
     for (const auto& r : s.resting) {
@@ -809,7 +881,8 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
     // the frame that removes the part's motion the far face (Face 5) moved IN 4.25 mm — it read as
     // a two-sided pinch; and his Group 1's 10 kg thumb on Face 5 sheared the pad over its gripped
     // bottom (s·gmax 2.2 at ×1: the walls tore and Top B rose 7.8 mm). Control 32768: batch G's rule.
-    if (!(control & kNoFarAnvil)) {
+    // ★ U21 · I3: linked walls that hold take the far anvil's place (they hold the lattice; its far side is free to bow)
+    if (!(control & kNoFarAnvil) && wallsHolding == 0) {
       for (int face : anvilFaces) {
         if (std::find(restingFaces.begin(), restingFaces.end(), face) != restingFaces.end()) continue;
         std::vector<int> tris;
@@ -822,13 +895,18 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
         if (!nodes.empty()) out.far_anvils += 1;
       }
     }
-    if (!bcs.empty()) mode = "rest";
+    if (bcs.size() > wallBcs) mode = "rest";   // (wallBcs is 0 with no linked wall: today's test)
     if (mode == "rest") {   // ★ U21 · I1: the receipt only — each anvil rests or is held by the far anvil
       out.exits_held = true;
-      if (control & kNoFarAnvil)
+      if ((control & kNoFarAnvil) || wallsHolding > 0)
         for (int face : anvilFaces)
           if (std::find(restingFaces.begin(), restingFaces.end(), face) == restingFaces.end()) out.exits_held = false;
     }
+  }
+  // ★ U21 · I3: no Rest, linked walls hold — they alone hold the part (his order: links → Rests → Topology → the far side)
+  if (mode.empty() && wallsHolding > 0) {
+    mode = "wall";
+    out.exits_held = false;
   }
   // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, "#1"; narrowed 2026-10-22 ~02:50): NOTHING RESTS — the Topology page's fixed
   // faces hold the part (sim only; never written as Rests), BONDED, whether or not the presses balance. Every exposed cell face
