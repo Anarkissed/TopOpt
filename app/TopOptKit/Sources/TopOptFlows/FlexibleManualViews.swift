@@ -77,7 +77,7 @@ struct FlexibleManualLatticeRows: View {
                 FlexRow(FlexibleManualCopy.walls, info: FlexibleManualCopy.Info.walls, id: "flexible-manual-walls-\(keyTail)",
                         warning: FlexibleManualCopy.wallsWarning(beads) != nil) {
                     FlexNumberBox(key: "manual-walls-\(keyTail)", title: FlexibleManualCopy.walls,
-                                  spec: FlexNumberSpec(value: (beads * 10).rounded() / 10, unit: FlexibleManualCopy.wallsUnit, step: 1,
+                                  spec: FlexNumberSpec(value: (beads * 10).rounded() / 10, unit: FlexibleManualCopy.wallsUnitFor((beads * 10).rounded() / 10), step: 1,
                                                        range: 1...8, decimals: FlexibleNumberSpecs.wholeOrTenth(beads)),
                                   padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualWalls(v, group: group) }
                 }

@@ -153,6 +153,8 @@ public enum FlexibleManualCopy {
     public static let density = "Density"
     public static let walls = "Walls"
     public static let wallsUnit = "beads"
+    /// The Walls box's unit for the shown value: "bead" at exactly 1, else "beads".
+    public static func wallsUnitFor(_ shown: Double) -> String { shown == 1 ? "bead" : wallsUnit }
     public static let sameAsPart = "Lattice · same as the part"
     public static let ownLattice = "Lattice · its own"
     public static let setOwn = "Set its own"

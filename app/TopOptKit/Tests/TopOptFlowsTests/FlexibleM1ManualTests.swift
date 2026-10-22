@@ -270,6 +270,16 @@ final class FlexibleM1ManualTests: XCTestCase {
         FlexibleStageModel.controlManualLatticeOff = false
     }
 
+    // MARK: 8 — the Walls box reads "1 bead", never "1 beads" (reviewer check of M1, plain words)
+
+    func testTheWallsUnitIsSingularForOneBead() {
+        XCTAssertEqual(FlexibleManualCopy.wallsUnitFor(1), "bead")
+        XCTAssertEqual(FlexibleManualCopy.wallsUnitFor(1.0), "bead")
+        XCTAssertEqual(FlexibleManualCopy.wallsUnitFor(2), "beads")
+        XCTAssertEqual(FlexibleManualCopy.wallsUnitFor(1.4), "beads")
+        XCTAssertEqual(FlexibleManualCopy.wallsUnitFor(0.6), "beads")
+    }
+
     // MARK: 7 — the view line, in Manual only
 
     func testTheViewLineIsInManualOnly() async throws {
