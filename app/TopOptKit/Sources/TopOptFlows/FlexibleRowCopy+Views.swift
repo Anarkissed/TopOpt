@@ -12,6 +12,11 @@ extension FlexibleRowCopy {
     public static let latticeNotTunedForPress = "Lattice not tuned for this press yet"
     /// ★ X20b: an edges group's squish held back ONLY because deeper would turn a cell of the part inside out (≤ 44).
     public static func pressFoldCut(percent: Int) -> String { "Shown at \(percent)% of core's depth: deeper folds" }
+    /// ★ U21 batch R (the reviewer's ruling E(3): "cap hit ⇒ say so on screen; no silent drift"): the lattice walls' pull-back
+    /// reached its iteration cap somewhere on an edges group's field at × 1 — the walls there sit near, not on, the ghost (≤ 44).
+    public static let pullbackCapHit = "Lattice approximate where squish is steepest"
+    /// ★ U21 batch R (the reviewer's ruling E(1)): the Export step's last button past three sends — every group, one per row.
+    public static let moreSends = "More\u{2026}"
     /// ★ R7-E5: the legend's line over an edges group's heat (the interim sim's squish along each arrow).
     public static let pressHeatLine = "Squish along the arrow · interim sim"
     /// ★ U21 (BEND-EDGES): the legend follows the sim — calibrated to core's design of every press, or the interim sim.

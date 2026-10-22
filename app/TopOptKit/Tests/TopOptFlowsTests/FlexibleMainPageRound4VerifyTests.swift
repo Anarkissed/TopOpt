@@ -181,9 +181,12 @@ final class FlexibleMainPageRound4VerifyTests: XCTestCase {
         let his = FlexibleCoreHold.sends(groups: [g(1, 1, [1]), g(2, 2, [3, 5])], pinches: [(a: 3, b: 5)], name: name)
         XCTAssertEqual(his.map(\.title), ["Send Group 1 only", "Send Group 2 only, Face 5 resting"])
         XCTAssertEqual(his.map(\.resting), [[3, 5], [1, 5]])
-        // never more than three buttons
+        // never more than three buttons — ★ RE-PINNED (round 7 · U21 batch R, the reviewer's ruling E(1) of 2026-10-21, E2 Q2: "one
+        // [More…] listing every group, one per row; no fourth fixed button"): every group has a send; the Export step shows two
+        // buttons and [More…] (FlexibleCoreHold.slots), so still never more than three
         let four = FlexibleCoreHold.sends(groups: (1...4).map { g($0, $0, [$0]) }, pinches: [], name: name)
-        XCTAssertEqual(four.count, 3)
+        XCTAssertEqual(four.count, 4)
+        XCTAssertEqual(FlexibleCoreHold.slots(four).count, 3)
         // the order: a calibrate-first filament first (any send would be refused), then groups, then a pinch
         XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: true, groups: 2, pinches: 1), .shapeOnly)
         XCTAssertEqual(FlexibleCoreHold.kind(calibrateFirst: false, groups: 2, pinches: 1), .squeezeGroups)

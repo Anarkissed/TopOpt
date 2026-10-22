@@ -83,7 +83,7 @@ struct FlexibleShownValues {
         for f in settings.loadedFaces {
             if let p = m.pinchedColumns(f.faceRegionID) { pinched[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = p }
         }
-        var i = Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.designs, liveS: m.liveS,
+        var i = Inputs(loadedFaces: settings.loadedFaces, stacks: m.stacks, designs: m.currentDesigns, liveS: m.liveS,   // ★ U21 R: E(5)
                        checks: m.checks, checkStamps: settings.checkStamps, checkStampShown: m.checkStampShown,
                        showBuildable: m.showBuildable, editingDepth: m.frozenExaggeration != nil, stampFootprints: feet,
                        pinched: pinched, segments: m.segments)

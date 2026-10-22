@@ -345,6 +345,21 @@ public final class FlexibleStageModel: ObservableObject {
     nonisolated static func designInputKey(_ f: FlexibleFaceSettings) -> String {
         "\(f.weightKg)|\(f.map.hashValue)|\(f.activeStamp?.hashValue ?? 0)"
     }
+    /// ★ U21 batch R (the reviewer's ruling E(5) of 2026-10-21: "a newer drawn map ALWAYS supersedes an in-flight design; the stale
+    /// answer is discarded — an answer counts only for the job on screen"): core's designs that answer each pressed face AS IT IS
+    /// (its weight, map and stamp — `designedInputs`); a design for the face as it WAS is never shown over a newer drawing (X20b's
+    /// check: Face 5 Stamp → Curves kept the stamp's flat dent while the new design stayed in flight). Presses keep theirs.
+    /// RED CONTROL `controlStaleDesignShown`: every design, current or not (before).
+    var currentDesigns: [FlexFaceKey: FlexFaceDesignInfo] {
+        guard !Self.controlStaleDesignShown else { return designs }
+        var now: [FlexFaceKey: String] = [:]
+        for f in settings.loadedFaces { now[FlexFaceKey(region: f.faceRegionID, rotation: f.rotationDeg)] = Self.designInputKey(f) }
+        return designs.filter { k, _ in now[k].map { designedInputs[k] == $0 } ?? true }
+    }
+    /// ★ RED CONTROL only (U21 batch R): a design shown whatever it was designed for.
+    static var controlStaleDesignShown = false
+    /// ★ TESTS only (U21 batch R): the design run's answer waits before it lands (X20b's "in flight for more than 4 minutes").
+    nonisolated(unsafe) static var holdDesignLandingForTests = false
     /// Bumped by every action of HIS that can create a problem (press, rest, a weight, the
     /// trash, a filament): the fix pop-up opens only on a NEW blocking issue an action caused.
     @Published public internal(set) var actionSerial = 0
@@ -1237,6 +1252,7 @@ public final class FlexibleStageModel: ObservableObject {
                     if err == nil { err = "\(error)" }
                 }
             }
+            while Self.holdDesignLandingForTests { try? await Task.sleep(nanoseconds: 20_000_000) }   // (no hop unless a test holds it)
             if Task.isCancelled { return }
             let (o, fe, ss, ch, co, er, sg) = (out.merging(pressOut) { a, _ in a }, faceErrors.merging(pressErrs) { a, _ in a }, s, checks, conflicts, err, segs)
             let (se, mi, pc) = (segErrs, misses, pressConf)

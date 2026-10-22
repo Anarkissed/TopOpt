@@ -75,6 +75,103 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
+## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
+
+Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
+redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf226ab`.
+
+1. **An undo-merge hook in ProjectModel (F12's clean fix).** `app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift:154`
+   (`undoSettleInterval`, 400 ms) and `:390-396` (`sealUndoStep` → `commitUndoSnapshot`). Why: after a Lattice-page trash, the
+   Squish page re-files its face entries onto the re-opened scene's lattice sections (M2's carry) about 0.5–1 s later; that write
+   would land as its own undo step, so one toolbar Undo would only undo the hidden write. Today's accepted Flexible-side fix is
+   `sealAfterReopen` (`FlexibleConfirmInPlace.swift:334`): it keeps the trash's step open, re-announcing the change every 150 ms
+   (at most 5 s), until the re-open's write has landed in it. Ask: a ProjectModel call that folds a background write into the
+   step before it (for example `mergeIntoLastUndoStep { … }`), so the hold and its timer can go.
+2. **The keypad's "+" title (batch C, your Img6: "having expand be '+' and include it next to the input in the modal").**
+   `app/TopOptKit/Sources/TopOptFlows/NumberPad.swift:122-124` (`Config.title`, text only) and `:169-170`
+   (`Text(config.title.uppercased())`). Why: the Lattice page's expand handle and the Selections list's box both show the "+"
+   now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
+   `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
+   the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · U21 batch R — the reviewer's still-to-do items of 2026-10-21 (ruling E): [More…] for a fourth group, the lattice walls back on the ghost, a newer drawing always wins (2026-10-22)
+
+Branch `claude/flexible-screens` (PR #362), on top of batch F (`cdf226ab`). NOT pushed (your HOLD). App only; core untouched; no
+#354/main file edited (all nine source files are ours). No iOS build or install in this step (the integrator does it). Judged on
+your live pad of 10-21 (`round7/batch_u21/his_live_1021_pad`).
+
+### What you will see, in plain words
+- **A fourth group can be sent.** With three face groups and an edges group, the Export step (and the card's Core step) used to
+  offer only three [Send Group N only] buttons; the fourth group had none. Now, up to three sends, nothing changes. Past three it
+  shows two buttons and **[More…]**, a menu with every group's send, one per row. Never a fourth fixed button.
+- **The lattice walls stay on the ghost when Play shows core's full depth.** On your pad, Group 2 (Edge 12 + Edge 9) is shown at
+  ×1 with its steepest stretch at ‖∇u‖ 0.96. The walls' pull-back stopped after 8 rounds, which left 31 of 26,411 checked points
+  up to 0.046 mm off the ghost. It now keeps going until every point is within 0.001 mm (cap 64 rounds): 0 of 26,411 off, worst
+  0.0006 mm. If a field ever still misses at the cap, the line under the group selector says
+  "Lattice approximate where squish is steepest" (a true-fold cut's line comes first, as one line). On your pad: no line.
+- **A newer drawing always wins over a design still being worked out.** Switching Face 5 from Stamp to Curves used to keep the
+  stamp's old flat dent on screen until core's new design landed, and in X20b's check that design stayed "in flight" for more than
+  4 minutes. Now the Squish page shows only a design made for the face as it is (its weight, curve and stamp); until then it shows
+  your drawing. A late answer for an older drawing is dropped: an answer counts only for the job on screen.
+
+Which selector: the group selector beside the legend was already one menu with every group, one per row. The buttons that stopped
+at three were the Export step's sends, which is what the E2 question (three face groups plus an edges group) was about.
+
+### What was wrong (one line each)
+- E(1): `FlexibleCoreHold.sends` stopped after three groups (`if out.count == 3 { break }`), so a fourth group had no send.
+- E(3): the walls' pull-back ran a fixed 8 rounds, sized for fields kept under the ½ bound; X20b's full-depth fields go past it.
+- E(5): the Squish page showed `designs[k]` whatever drawing it was made for, so a stale design hid a newer drawing.
+
+### What changed (code)
+- `FlexibleCoreHold.sends` returns every group; `FlexibleCoreHold.slots` (≤ 3: the buttons; more: two + `.more(all)`);
+  `FlexibleExportRows.FixRow` draws [More…] as a menu (`flexible-export-fix-more`, rows `flexible-export-more-<id>`);
+  `FlexibleLatticeCard.coreSends` returns every send. RED CONTROL `FlexibleCoreHold.controlSendsCapAtThree`.
+- `FlexibleFE.pullbackIterations` 8 → 64 (a cap: GPU and the Swift twin stop as soon as the step is under 0.001 mm);
+  `FlexibleFEField.pullbackCheck` (forward each solved node, pull it back, measure the residual) and `pullbackShortfall`, set for a
+  design-depth field at ×1; `FlexibleStageModel.pressSimLine` puts it under the selector (`FlexibleRowCopy.pullbackCapHit`).
+- `FlexibleStageModel.currentDesigns` (designs whose `designedInputs` match the face now) feeds `FlexibleShownValues`. RED CONTROL
+  `controlStaleDesignShown`. A test-only hold (`holdDesignLandingForTests`, a plain flag read: the app never waits on it) keeps a design in flight. The generation guard that
+  drops an older run's answer was already there; the test now pins it.
+
+### The summed per-press solves (reviewer E(4))
+- X20b's one solve per press, summed, is the interim. The depths are core's numbers at each press; the shape away from the presses is
+  approximate (with no rests, a lone press is held at its exit face, not by the other press as one joint solve would hold it).
+
+### Not done here
+- E(6), the no-prism goldens (H39 Q2): left for the full-suite checkpoint before the push, as ruled. Each becomes a "nothing is
+  sent with no prism" golden plus a copy with a real face-prism on the production path, re-recorded with attribution.
+- No pictures: the change on the page is one menu button (its pop-up cannot be drawn offscreen) and a line that does not show on
+  your pad.
+
+### Tests (red controls asserted red inside each)
+- `FlexibleU21RTests` (4, new):
+  - `testMoreListsEveryGroupOnePerRow`: 4 sends, 3 slots (2 + [More…] with 4 rows). RED (the cap): 3 sends, Group 4 unsendable.
+  - `testPullbackMeetsToleranceOrSaysSo` (your pad, Group 2 at core's full depth): now 0/26,411 over tolerance, worst 0.0006 mm,
+    no line. RED (X20b's 8 rounds): 31/26,411 over, worst 0.046 mm.
+  - `testTheCapIsSaidInOneLine`: the line, the fold's first, ≤ 44 characters.
+  - `testANewerDrawnMapSupersedesAnInFlightDesign` (your pad, Face 5 Stamp → Curves with the design held in flight): the drawn map
+    shows (1,824 columns); RED (`controlStaleDesignShown`): the stamp's design. A second drawing while held, then released: the
+    answer kept is the one for the drawing on screen.
+- Re-pin, attributed to ruling E(1): `FlexibleMainPageRound4VerifyTests.testTheHoldRuleOffersWhatCoreCanRun` — four groups give 4
+  sends and 3 slots (was: 3 sends).
+
+### Runs (`round7/batch_u21_r/u21_r_runs.txt`)
+- Run 0, the batch's class: 4/4 passed; each red control red (numbers above).
+- Run 1, 44 classes once (the batch's class, every class that touches or pins the nine files, FlexibleSquishCopyTests,
+  LatticeStaleTypeTests): **318 passed, 2 failed, 0 skipped, no signal lines.** Both were this batch's:
+  - `FlexibleCornerPairTests.testTheExportStringsLiveOnceInTheSharedRows` (a source pin: `run.onFix?(f)` once): [More…] had its
+    own copy. Fixed in the code (one tap path, `FixRow.tap`); no re-pin.
+  - `FlexibleR7M1VerifyTests.testTwoFaceGroupsBesideAnEdgesGroupEachExportMakesOneGroupSaidFirst` ("said, not sent: idle"): the
+    test-only hold first hopped to the main actor before every design landing, which moved the landing's timing so the lattice was
+    not built yet when the test tapped. Proved by swapping files: HEAD + every other file of the batch passes, the hop alone fails.
+    The hold is now a plain flag read, with no hop unless a test holds it.
+- Run 2, the final tree: the batch's class + CornerPair + M1Verify + Round4Verify + SquishCopy + LatticeStaleType: **40 passed, 0
+  failed.**
+- Goldens (final tree): 38 identical / 0 DIFFERS (deterministic); 32 identical / 0 DIFFERS / 1 PART-SKIP (unseeded). Run 1 gave the same.
+- The 16 stage-job hashes (`stage_job_hashes_u21r.txt`): cmp-identical (whole file) to batch F's `stage_job_hashes_u21f.txt` and to
+  X20b's, in both runs. No job byte moved: the sends' list only grows past three groups (no golden project has four), the pull-back
+  and the shown dent are drawing only.
+
 ## ★ Round 7 · U21 batch F — your notes of 2026-10-21, Img8 / Img9 / Img10: one depth number, the chip clear, Auto says what it takes (2026-10-22)
 
 Branch `claude/flexible-screens` (PR #362), on top of batch E (`ac56f208`). NOT pushed (your HOLD). App only; core untouched; no

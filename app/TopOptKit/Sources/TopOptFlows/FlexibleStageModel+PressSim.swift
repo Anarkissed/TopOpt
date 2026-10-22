@@ -215,7 +215,15 @@ extension FlexibleStageModel {
         guard let simID, let w = pressSimWants.first(where: { $0.sim.id == simID }) else { return nil }
         guard w.tuned else { return FlexibleRowCopy.latticeNotTunedForPress }
         // ★ X20b: core's full design depth is shown — said only when a TRUE fold held it back
-        if let cut = squish[simID]?.field?.trueFoldCut { return FlexibleRowCopy.pressFoldCut(percent: Swift.max(1, Int((cut * 100).rounded(.down)))) }
+        // ★ U21 batch R (E(3)): or when the walls' pull-back hit its cap (no silent drift) — one line, the fold's first
+        let f = squish[simID]?.field
+        return Self.pressSimLine(trueFoldCut: f?.trueFoldCut, pullbackShortfall: f?.pullbackShortfall)
+    }
+
+    /// ★ U21 batch R: the one line under the selector for a sim calibrated to core's design (nil: nothing held back, nothing off).
+    nonisolated static func pressSimLine(trueFoldCut: Double?, pullbackShortfall: Double?) -> String? {
+        if let cut = trueFoldCut { return FlexibleRowCopy.pressFoldCut(percent: Swift.max(1, Int((cut * 100).rounded(.down)))) }
+        if pullbackShortfall != nil { return FlexibleRowCopy.pullbackCapHit }
         return nil
     }
 }

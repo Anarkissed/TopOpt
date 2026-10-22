@@ -73,6 +73,10 @@ public struct FlexibleFEField: Sendable, Equatable {
     /// ★ X20b: the share kept because a cell of the part would turn inside out past it (det(I + ∇u) < FlexibleFE.trueFoldDet);
     /// nil: core's full design depth is shown.
     public private(set) var trueFoldCut: Double?
+    /// ★ U21 batch R (the reviewer's ruling E(3)): the share of the part's sampled points whose pull-back at the scale the page shows
+    /// (× 1 for a design-depth field) still misses `FlexibleFE.pullbackTolMM` after `FlexibleFE.pullbackIterations` — said on
+    /// screen in one line (FlexibleRowCopy.pullbackCapHit); nil: every wall back on the ghost.
+    public private(set) var pullbackShortfall: Double?
     /// The largest scale the PART's own map stays injective at.
     public var partSafeScale: Double { gmaxPart > 1e-12 ? FlexibleFE.safeGradient / gmaxPart : .infinity }
     /// Identity (fields are compared by it, never by their megabytes).
@@ -191,6 +195,38 @@ public struct FlexibleFEField: Sendable, Equatable {
             }
         }
         return p
+    }
+
+    /// ★ U21 batch R: how the pull-back meets its tolerance at scale `s` over the PART (solved nodes, every `stride`-th each way so
+    /// at most ~40,000 points): each node's rest point p0 is pushed forward (x = p0 + s·u(p0)) and pulled back with `iterations`;
+    /// `unconverged` counts the points whose residual |p + s·u(p) − x| is still ≥ the tolerance, `maxResidualMM` the worst.
+    public struct PullbackCheck: Equatable, Sendable {
+        public let samples: Int
+        public let unconverged: Int
+        public let maxResidualMM: Float
+        public var share: Double { samples > 0 ? Double(unconverged) / Double(samples) : 0 }
+    }
+    public func pullbackCheck(scale s: Float, iterations: Int = FlexibleFE.pullbackIterations,
+                              tolMM: Float = FlexibleFE.pullbackTolMM) -> PullbackCheck {
+        guard s > 0, nx > 0, ny > 0, nz > 0 else { return PullbackCheck(samples: 0, unconverged: 0, maxResidualMM: 0) }
+        let solvedCount = solved.reduce(0) { $1 ? $0 + 1 : $0 }
+        let stride = Swift.max(1, Int(ceil(cbrt(Double(solvedCount) / 40_000))))
+        var n = 0, miss = 0
+        var worst: Float = 0
+        for c in Swift.stride(from: 0, to: nz, by: stride) {
+            for b in Swift.stride(from: 0, to: ny, by: stride) {
+                for a in Swift.stride(from: 0, to: nx, by: stride) where solved[node(a, b, c)] {
+                    let p0 = origin + SIMD3(Float(a), Float(b), Float(c)) * spacing
+                    let x = p0 + s * u[node(a, b, c)]
+                    let p = pullback(x, s, iterations: iterations, tolMM: tolMM)
+                    let r = simd_length(p + s * sample(p) - x)
+                    n += 1
+                    if r >= tolMM { miss += 1 }
+                    worst = Swift.max(worst, r)
+                }
+            }
+        }
+        return PullbackCheck(samples: n, unconverged: miss, maxResidualMM: worst)
     }
 
     /// The largest safe scale: s · gmax ≤ ½ (∞ when the field is flat).
@@ -409,6 +445,9 @@ public struct FlexibleFEField: Sendable, Equatable {
             f.trueFoldCut = keep
             f.refreshBounds()
         }
+        // ★ U21 batch R (E(3)): shown at × 1 — past the ½ bound the pull-back may not meet its tolerance by the cap: kept, and said
+        let check = f.pullbackCheck(scale: 1)
+        f.pullbackShortfall = check.unconverged > 0 ? check.share : nil
         return f
     }
 

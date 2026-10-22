@@ -32,7 +32,13 @@ public enum FlexibleFE {
     /// there (a TRUE fold: a cell turned inside out), said when it bites.
     public static let trueFoldDet = 0.1
     /// The inverse map's fixed-point iterations (GPU and Swift twin alike) and its early exit.
-    public static let pullbackIterations = 8
+    /// ★ U21 batch R (the reviewer's ruling E(3) of 2026-10-21: "pull-back iterations until residual < tolerance, with a cap; cap
+    /// hit ⇒ say so on screen; no silent drift"): the iterations run until the residual |p + s·u(p) − x| (= the step) is under
+    /// `pullbackTolMM`, up to this CAP — X20b's edges fields at core's full depth reach ‖∇u‖ ≈ 1 at × 1, past the ½ bound the
+    /// eight iterations were sized for. A field whose check still misses at the cap says so (FlexibleFEField.pullbackShortfall).
+    public static let pullbackIterations = 64
+    /// X20b's count (the red control's, and the check's "before").
+    public static let pullbackIterationsX20b = 8
     public static let pullbackTolMM: Float = 1e-3
     /// The calibration's deepest zone: columns within 90 % of the deepest core squish.
     public static let deepZone = 0.9

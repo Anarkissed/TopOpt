@@ -100,25 +100,12 @@ enum FlexibleExportRows {
 
         var body: some View {
             if let fixes = run.hold?.fixes, !fixes.isEmpty {
-                let buttons = ForEach(Array(fixes.prefix(3).enumerated()), id: \.offset) { i, f in
-                    let sent = run.sentFix == f
-                    Button { run.onFix?(f) } label: {
-                        Text(f.title)
-                            .font(.system(size: compact ? 14 : 15, weight: .semibold))
-                            .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.vertical, compact ? 0 : 12).padding(.horizontal, DS.Space.l)
-                            .frame(minWidth: compact ? 44 : 120, minHeight: compact ? 44 : nil)
-                            .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
-                            // ★ ROUND 7, the review of R7-D1: in the corner card a secondary send wears the hairline (it read as
-                            // text); the full-screen step (Topology, Surface) keeps its look
-                            .overlay { if compact { FlexibleCornerPairStyle.secondaryEdge(i == 0) } }
-                            .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color, lineWidth: 1.5).opacity(sent ? 1 : 0))
+                // ★ U21 batch R (the reviewer's ruling E(1)): up to three buttons; past that two and [More…] (every group, one per row)
+                let buttons = ForEach(Array(FlexibleCoreHold.slots(fixes).enumerated()), id: \.offset) { i, slot in
+                    switch slot {
+                    case .send(let f): sendButton(f, i)
+                    case .more(let all): more(all)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(run.isSending)
-                    .saidWhole(f.title, minScale: 0.8)
-                    .accessibilityIdentifier("flexible-export-fix-\(f.id)")
                 }
                 if compact {
                     VStack(alignment: .leading, spacing: DS.Space.s) { buttons }
@@ -126,6 +113,54 @@ enum FlexibleExportRows {
                     HStack(spacing: DS.Space.s) { buttons }
                 }
             }
+        }
+
+        /// A send tapped (a button or a [More…] row): the one way to the run.
+        private func tap(_ f: FlexibleCoreFix) { run.onFix?(f) }
+
+        /// One send (the first filled, the rest chips).
+        @ViewBuilder private func sendButton(_ f: FlexibleCoreFix, _ i: Int) -> some View {
+            let sent = run.sentFix == f
+            Button { tap(f) } label: {
+                Text(f.title)
+                    .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                    .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.vertical, compact ? 0 : 12).padding(.horizontal, DS.Space.l)
+                    .frame(minWidth: compact ? 44 : 120, minHeight: compact ? 44 : nil)
+                    .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
+                    // ★ ROUND 7, the review of R7-D1: in the corner card a secondary send wears the hairline (it read as
+                    // text); the full-screen step (Topology, Surface) keeps its look
+                    .overlay { if compact { FlexibleCornerPairStyle.secondaryEdge(i == 0) } }
+                    .overlay(Capsule().strokeBorder(DS.Color.textPrimary.color, lineWidth: 1.5).opacity(sent ? 1 : 0))
+            }
+            .buttonStyle(.plain)
+            .disabled(run.isSending)
+            .saidWhole(f.title, minScale: 0.8)
+            .accessibilityIdentifier("flexible-export-fix-\(f.id)")
+        }
+
+        /// ★ U21 batch R: [More…] — a menu with EVERY send, one per row (no fourth fixed button).
+        private func more(_ all: [FlexibleCoreFix]) -> some View {
+            Menu {
+                ForEach(all, id: \.self) { f in
+                    Button(f.title) { tap(f) }
+                        .accessibilityIdentifier("flexible-export-more-\(f.id)")
+                }
+            } label: {
+                Text(FlexibleRowCopy.moreSends)
+                    .font(.system(size: compact ? 14 : 15, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1)
+                    .padding(.vertical, compact ? 0 : 12).padding(.horizontal, DS.Space.l)
+                    .frame(minWidth: compact ? 44 : 120, minHeight: compact ? 44 : nil)
+                    .background(Capsule().fill(DS.Color.chipSolid.color))
+                    .overlay { if compact { FlexibleCornerPairStyle.secondaryEdge(false) } }
+            }
+            .menuIndicator(.hidden)
+            .disabled(run.isSending)
+            .saidWhole(FlexibleRowCopy.moreSends, minScale: 1)
+            .accessibilityIdentifier("flexible-export-fix-more")
         }
     }
 

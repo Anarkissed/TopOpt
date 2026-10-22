@@ -120,7 +120,7 @@ public enum FlexibleLatticeCard {
     /// The Core step's sends while core can't take the job as it stands (the hold's 1–3): what the card shows on Preview.
     @MainActor static func coreSends(state: FlexibleLatticeButton.State, status: FlexibleMainStatus, run: FlexibleCoreRun) -> [FlexibleCoreFix] {
         guard state == .preview || state == .refused || state == .ready || state == .sent else { return [] }
-        return Array((run.hold?.fixes ?? []).prefix(3))
+        return run.hold?.fixes ?? []   // ★ U21 batch R: every send (FixRow shows two and [More…] past three)
     }
 
     /// The exports wait until core returns a mesh (it returns none yet — FlexibleCoreRun.exportsWait).

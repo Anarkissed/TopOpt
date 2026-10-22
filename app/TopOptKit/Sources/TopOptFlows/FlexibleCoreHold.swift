@@ -105,7 +105,24 @@ public struct FlexibleCoreHold: Equatable, Sendable {
         }
     }
 
-    /// What core CAN run instead, 1–3 buttons: each group alone (one end of any pinch inside it
+    /// ★ RED CONTROL only (U21 batch R): the sends capped at three — a fourth group (three face groups and an edges group) unsendable.
+    nonisolated(unsafe) static var controlSendsCapAtThree = false
+
+    /// ★ U21 batch R (the reviewer's ruling E(1) of 2026-10-21, E2 Q2: "one [More…] listing every group, one per row; no fourth
+    /// fixed button"): what the Export step and the card show of the sends — up to `fixedButtons` as buttons; past that two buttons
+    /// and [More…], whose menu lists EVERY send, one per row.
+    public enum Slot: Equatable, Sendable {
+        case send(FlexibleCoreFix)
+        case more([FlexibleCoreFix])
+    }
+    /// His "1–3 fix buttons".
+    public static let fixedButtons = 3
+    public static func slots(_ fixes: [FlexibleCoreFix]) -> [Slot] {
+        guard fixes.count > fixedButtons else { return fixes.map { .send($0) } }
+        return fixes.prefix(fixedButtons - 1).map { .send($0) } + [.more(fixes)]
+    }
+
+    /// What core CAN run instead, 1–3 buttons (★ U21 batch R: any number — `slots` shows them): each group alone (one end of any pinch inside it
     /// resting), or — one group — each end of the pinch resting. Only a set that leaves no pinch
     /// and at least one pressed face is offered.
     /// ★ R7-E2: `pressMarker` — a press IN THE JOB by its first region (nil: not in it). A send that leaves a group out lists its
@@ -138,7 +155,9 @@ public struct FlexibleCoreHold: Equatable, Sendable {
                 let only = "Group \(g.number) only"
                 let scope = ends.isEmpty ? only : "\(only), \(names(ends)) resting"
                 out.append(.send(resting: rest, title: "Send \(scope)", scope: scope))
-                if out.count == 3 { break }
+                // ★ U21 batch R (the reviewer's ruling E(1), E2 Q2): every group can be sent — past three the buttons show two and
+                // [More…] (`slots`). RED CONTROL `controlSendsCapAtThree`: the cap at three (a fourth group had no button).
+                if Self.controlSendsCapAtThree, out.count == 3 { break }
             }
         } else if !pinches.isEmpty {
             for end in [{ (p: (a: Int, b: Int)) in p.b }, { (p: (a: Int, b: Int)) in p.a }] {
