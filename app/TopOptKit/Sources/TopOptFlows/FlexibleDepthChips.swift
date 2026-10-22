@@ -84,7 +84,8 @@ struct FlexibleDepthChips: View {
             if let r = FlexibleStageOverlays.workingRegion(model: model), let f = model.settings.face(r), f.isLoaded, let key = model.key(r),
                let st = model.stacks[key], let proj = projection,
                // ★ batch E review: no lattice under the face — nothing to drag into (the row says why)
-               !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
+               // ★ U21 batch E: and none with no lattice of its own (model.latticeMaxMM: 0)
+               !FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: model.latticeMaxMM(r) ?? FlexibleDepthPrism.latticeMax(st, pinched: model.pinchedColumns(r))),
                let h = Self.handle(model: model, k: k, pose: pose), let p = proj.project(h.anchor),
                FlexibleDepthChipLayout.shows(p, dragging: dragging || model.frozenExaggeration != nil,
                                              keepOut: keepOut, viewport: proj.viewportSize) {

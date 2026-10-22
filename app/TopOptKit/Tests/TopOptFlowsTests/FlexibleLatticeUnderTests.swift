@@ -73,8 +73,11 @@ final class FlexibleLatticeUnderTests: XCTestCase {
         XCTAssertEqual(m.latticedShare(b) ?? -1, 0, accuracy: 1e-9, "★ top B: none")
         let issue = try XCTUnwrap(m.readiness.issues.first { $0.kind == .noLatticeUnder }, "★ said at once")
         XCTAssertEqual(issue.region, b)
-        XCTAssertEqual(issue.oneLine, "Top B has no lattice under it, so it can't squish")
-        XCTAssertEqual(issue.fixes, [.latticeUnder(b), .rest(b)])
+        // ★ RE-PINNED (round 7 · U21 batch E, his notes of 2026-10-21, Img12/11: "if we are going to say 'you need to lattice
+        // this first' then it should do so for every face"): Top B has no face-prism of its own — the ONE no-lattice sentence
+        // with [Go to Lattice] [Top B rests]. Was: "Top B has no lattice under it, so it can't squish" [Lattice under it].
+        XCTAssertEqual(issue.oneLine, "No lattice under Top B \u{00B7} set a face-prism")
+        XCTAssertEqual(issue.fixes, [.goToLattice, .rest(b)])
         XCTAssertTrue(m.readiness.isReady, "never a blocker")
         // ★ the main page says it too (once a lattice is built), and its tap opens this fix
         await m.waitForIdle()
@@ -91,11 +94,14 @@ final class FlexibleLatticeUnderTests: XCTestCase {
         XCTAssertEqual(status.tone, .preview)
         XCTAssertEqual(status.tap, .send)
         XCTAssertEqual(m.readiness.oneLine, "Ready · No lattice under Top B", "the Settings line")
-        // the one tap: a main-page group of its own, protected + Lattice, as deep as the pad under it
-        XCTAssertEqual(m.latticeUnderPlan(b), .newGroup(face: nil, region: 104, name: "Top B", depthMM: 20))
+        // the main-page edit: a group of its own, protected + Lattice, as deep as the pad under it
+        // ★ RE-PINNED (U21 batch E): the page no longer offers it as a one-tap on a face with no face-prism of its own
+        // (latticeUnderPlan nil); the edit itself — his main-page step, the fixtures' replay — is applied directly.
+        XCTAssertNil(m.latticeUnderPlan(b), "★ U21 E: no one-tap [Lattice under it] on Top B")
         let groupsBefore = p.selection.groups.count
         let kindsBefore = p.selection.groups.map { "\($0.id):\(p.force.kind(for: $0.id))" }
-        FlexibleFixPopup.apply(.latticeUnder(b), to: m)
+        p.flexibleLatticeUnder(.newGroup(face: nil, region: 104, name: "Top B", depthMM: 20))
+        m.openScene()
         let g = try XCTUnwrap(p.selection.groups.first { $0.regionIDs.contains(104) })
         XCTAssertEqual(p.selection.groups.count, groupsBefore + 1)
         XCTAssertEqual(g.name, "Top B")
@@ -126,8 +132,21 @@ final class FlexibleLatticeUnderTests: XCTestCase {
             let offered = m.readiness.issues.filter { $0.kind == .noLatticeUnder }
                 .compactMap { i in i.region.flatMap { m.latticeUnderPlan($0) } }
             print("E-FLEX \(dir.lastPathComponent) offers \(offered)")
-            XCTAssertEqual(offered, FlexibleHisProject.latticeUnderTaps(dir), "★ \(dir.lastPathComponent): the fixture replays the page's offer")
-            XCTAssertFalse(offered.isEmpty, "control: his project needs a tap")
+            // ★ RE-PINNED (round 7 · U21 batch E, his notes of 2026-10-21, Img12/11): a face with no face-prism of its own is
+            // offered [Go to Lattice], never the one-tap (his 0004's Top B); a face inside a face-prism that core counts short
+            // keeps its one-tap (his round-5 Face 3 and Face 5 at 23 %). The fixture still replays his main-page edits.
+            // Was: offered == the fixture's taps on both.
+            let issues = m.readiness.issues.filter { $0.kind == .noLatticeUnder }
+            let own = issues.compactMap(\.region).filter { m.hasOwnLattice($0) }
+            print("E-FLEX \(dir.lastPathComponent) issues \(issues.map { "\($0.region ?? -1): \($0.fixes)" }) · own lattice \(own)")
+            if dir == FlexibleHisProject.round5Dir {
+                XCTAssertEqual(offered, FlexibleHisProject.latticeUnderTaps(dir), "★ round 5: Face 3 and Face 5 have their own lattice — the one-tap stays")
+            } else {
+                XCTAssertEqual(offered, [], "★ \(dir.lastPathComponent): no one-tap on Top B (no face-prism of its own)")
+            }
+            XCTAssertTrue(issues.filter { !own.contains($0.region ?? -1) }.allSatisfy { $0.fixes.first == .goToLattice },
+                          "★ [Go to Lattice] on every face with no lattice of its own")
+            XCTAssertFalse(FlexibleHisProject.latticeUnderTaps(dir).isEmpty, "control: his project needs a main-page edit")
             // with the taps: lattice under every column of every pressed face
             let tapped = try FlexibleHisProject.restore(dir)
             addTeardownBlock { tapped.cleanup() }

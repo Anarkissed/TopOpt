@@ -361,6 +361,12 @@ public final class FlexibleStageModel: ObservableObject {
     }
     /// ★ ROUND 7 (M2): the toast's ONE fix (a solid tap's [Go to Lattice]); cleared with the toast.
     @Published public var toastFix: FlexibleToastFix?
+    /// ★ U21 BATCH E (his Img11/12/14): the notice a tap on a face (or part of one) with no lattice of its own shows, in the
+    /// fix pop-up's place under the top line — the SAME sentence and fixes as a pressed face's ("No lattice under Face 5 · set
+    /// a face-prism" [Go to Lattice] [Face 5 rests]). It stays until dismissed or the next tap (never a 3.5 s toast).
+    @Published public var noLatticeTap: FlexibleIssue?
+    /// ★ U21 BATCH E: bumped by [Go to Lattice]; the page answers it with its leave for the Lattice page.
+    @Published public internal(set) var leaveForLatticeAsks = 0
     /// ★ ROUND 7 (M2): the Flexible-only sectors' numbers for this session (FlexibleSectorNumbers), seeded from the store.
     let sectorNumbers = FlexibleSectorNumbers()
     var sectorNumbersSeeded = false
@@ -737,9 +743,21 @@ public final class FlexibleStageModel: ObservableObject {
         // ★ ROUND 7 (M2, his img3 words: "when I tapped the top, it selected the model's top face, rather than one of the
         // lattice's top faces"): with a face-prism set, the tap picks the LATTICE section under it; on the solid part of a
         // face only partly latticed it selects nothing and says so, with one fix ([Go to Lattice]); the open tab stays
+        // ★ U21 BATCH E (his Img12/11: "if we are going to say 'you need to lattice this first' then it should do so for every
+        // face"; Img14): ONE rule — a tap on any face, or part of a face, with no lattice of its own (a root no face-prism
+        // meets, the solid part of a partial root, every face with no face-prism set) presses and selects nothing and shows
+        // the ONE notice (`noLatticeTap`); the open tab stays. RED CONTROL `FlexibleRegions.controlPressAnyRoot`: the two rules.
+        noLatticeTap = nil
         let regs = regions
         let region: Int
-        if facePrismsSet, let pt = point {
+        if !FlexibleRegions.controlPressAnyRoot, let pt = point, let mesh = project.viewerMesh {
+            guard let r = regs.pressable(at: pt, face: face, mesh: mesh) else {
+                noLatticeTap = noLatticeNotice(root: regs.ownRegion(at: pt, face: face, mesh: mesh))
+                return
+            }
+            region = r
+            if let line = regs.flexible?.notYet[r] { toast = line }
+        } else if facePrismsSet, let pt = point {
             guard let r = regs.pressable(at: pt, face: face, mesh: project.viewerMesh) else {
                 toast = FlexibleRowCopy.solidHere
                 toastFix = .goToLattice
@@ -786,6 +804,7 @@ public final class FlexibleStageModel: ObservableObject {
     public func select(_ region: Int) {
         if edgePick != nil { return }   // ★ ROUND 6 ITEM 2: pick mode selects no face
         dropInPlaceAsks()   // ★ U21: a tap elsewhere drops a delete's ask
+        noLatticeTap = nil   // ★ U21 batch E: the next tap drops the no-lattice notice
         curvePoint = nil
         selectedRegion = region
         followSelection()   // ★ ROUND 7 (S, 4f b): a row picked is his pick — its tab opens

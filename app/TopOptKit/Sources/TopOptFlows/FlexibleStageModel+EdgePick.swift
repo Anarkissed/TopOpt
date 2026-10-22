@@ -87,7 +87,7 @@ extension FlexibleStageModel {
                 }
                 // ★ ROUND 7 (M2, D6): with a face-prism set, a member with no lattice under it cannot take a strip
                 if facePrismsSet, !FlexibleLatticeSections.controlWholeFace, let set = regions.flexible,
-                   c.members.contains(where: { r in !FlexibleRegions.isFlexible(r) && !set.wholeRoots.contains(r) && set.notYet[r] == nil }) {
+                   c.members.contains(where: { r in !FlexibleRegions.isFlexible(r) && !set.latticed(r) }) {   // ★ U21 batch E: the one rule
                     greyed[c.number] = FlexibleRowCopy.noLatticeAt(FlexibleRowCopy.candidateLabel(c))
                     continue
                 }

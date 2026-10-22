@@ -269,12 +269,14 @@ public struct FlexibleStagePage: View {
                 }
                 // ★ THE POP-UP SHOWS THE ISSUE AS IT IS NOW (batch B review) — placed under the
                 // top line, clear of the gizmo (it covered its left 36 pt at 11" portrait)
-                if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {
+                // ★ U21 BATCH E: a tap on a face with no lattice of its own shows its notice in the same place (one sentence for
+                // every face, his Img11/12/14), until dismissed or the next tap
+                if let issue = Self.popUpIssue(shown: fixShown, model: model) {
                     let pop = FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),
                                                             below: model.toast == nil ? 0 : Self.toastRowHeight,
                                                             clear: [capsuleLocal() ?? Self.nominalCapsule],   // ★ R7-D1: below the capsule,
                                                             rightLimit: FlexibleStageViews.frame(viewport: geo.size).minX)   // left of the views
-                    FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil }
+                    FlexibleFixPopup(model: model, issue: issue, padTarget: $padTarget) { fixShown = nil; model.noLatticeTap = nil }
                         .frame(width: pop.width)
                         .background(GeometryReader { g in
                             Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["popup": g.frame(in: .global)])
@@ -314,6 +316,7 @@ public struct FlexibleStagePage: View {
             if let f = model.pendingFix { model.pendingFix = nil; present(f) }
         }
         .onChange(of: model.geometry.count) { _ in rebuildOverlay() }
+        .onChange(of: model.leaveForLatticeAsks) { _ in leaveForLattice() }   // ★ U21 batch E: [Go to Lattice]
         // ★ ROUND 5 (S9): a part still opening as the page appeared — "unchanged" is what it opens with:
         // ★ S VERIFICATION: the page's snapshot WITH the open's read of the main page's loads (an edit
         // he made while it opened stays a change)
@@ -993,6 +996,12 @@ public struct FlexibleStagePage: View {
         .padding(.leading, band.minX)
         .padding(.top, band.minY)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// ★ U21 BATCH E: what the fix pop-up shows — the issue it was opened on (as it is now), else a tap's no-lattice notice.
+    @MainActor static func popUpIssue(shown: FlexibleIssue?, model m: FlexibleStageModel) -> FlexibleIssue? {
+        if let shown, let live = FlexibleFixPrompt.live(shown, in: m.readiness) { return live }
+        return m.noLatticeTap
     }
 
     /// ★ ROUND 7 (M2): [Go to Lattice] — leave for the main Lattice page, where face-prisms are set: the page's Exit; his

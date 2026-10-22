@@ -57,6 +57,9 @@ public enum FlexibleFix: Hashable, Sendable {
     case latticeUnderAll([Int])
     /// ★ R7-E2 FIX: a fix of an edge or corner press kept out of the job ([Shallower] [Face 3 rests] [Remove Edge 16]).
     case pressFix(FlexiblePressFix)
+    /// ★ U21 BATCH E (his Img11/12/14): "[Go to Lattice]" — a face with no lattice of its own: leave for the Lattice page,
+    /// where face-prisms are set (saved, never the bake). It replaces [Lattice under it] on such a face.
+    case goToLattice
 
     /// The button's words (one line, ≤ 3 words where it can).
     public func title(_ name: (Int) -> String) -> String {
@@ -71,6 +74,7 @@ public enum FlexibleFix: Hashable, Sendable {
         case .latticeUnder: return "Lattice under it"
         case .latticeUnderAll(let rs): return FlexibleLatticeUnder.allTitle(rs.count)
         case .pressFix(let f): return f.title
+        case .goToLattice: return FlexibleRowCopy.goToLattice
         }
     }
 }
@@ -213,12 +217,15 @@ public struct FlexibleReadiness: Equatable, Sendable {
         /// ★ BATCH E: the share of its columns with lattice under them (core's count); nil before
         /// its stack.
         public var latticedShare: Double?
+        /// ★ U21 BATCH E: the face has lattice of its OWN by the app's face-prism geometry (FlexibleSectorSet.latticed) —
+        /// false: the one no-lattice sentence with [Go to Lattice] [<face> rests], whatever core's column count says.
+        public var ownLattice: Bool
         public init(region: Int, weightKg: Double, stacked: Bool, stackError: String? = nil,
                     design: DesignState = .pending, drawn: Bool = false, areaMM2: Double = 0,
-                    latticedShare: Double? = nil) {
+                    latticedShare: Double? = nil, ownLattice: Bool = true) {
             self.region = region; self.weightKg = weightKg; self.stacked = stacked
             self.stackError = stackError; self.design = design; self.drawn = drawn; self.areaMM2 = areaMM2
-            self.latticedShare = latticedShare
+            self.latticedShare = latticedShare; self.ownLattice = ownLattice
         }
     }
 
@@ -352,7 +359,10 @@ public struct FlexibleReadiness: Equatable, Sendable {
                 continue
             }
             // ★ BATCH E: no (or little) lattice under a pressed face — said, never blocking
-            if let share = f.latticedShare, share < FlexibleLatticeUnder.minShare {
+            // ★ U21 BATCH E (his Img11/12/14): a face with no lattice of its own says the ONE sentence a tap says
+            if !f.ownLattice {
+                out.append(FlexibleLatticeUnder.noPrismIssue(r, name: name(r), canRest: true, key: i.issueKey(r)))
+            } else if let share = f.latticedShare, share < FlexibleLatticeUnder.minShare {
                 out.append(FlexibleLatticeUnder.issue(r, share: share, name: name(r), canFix: i.canLatticeUnder(r), key: i.issueKey(r)))
             }
             // a calibrate-first filament designs nothing — its lattice needs only the drawing
@@ -572,7 +582,7 @@ extension FlexibleStageModel {
             return FlexibleReadiness.Face(region: f.faceRegionID, weightKg: f.weightKg, stacked: st != nil,
                                           stackError: stackErrors[k].map { text($0) }, design: design,
                                           drawn: liveS[k] != nil, areaMM2: st?.areaMM2 ?? 0,
-                                          latticedShare: latticedShare(f.faceRegionID))
+                                          latticedShare: latticedShare(f.faceRegionID), ownLattice: hasOwnLattice(f.faceRegionID))
         }
         let withData = catalogue.first { $0.noPrediction == nil }.map { (id: $0.id, name: $0.displayName) }
         let anyFilament = catalogue.first.map { (id: $0.id, name: $0.displayName) }

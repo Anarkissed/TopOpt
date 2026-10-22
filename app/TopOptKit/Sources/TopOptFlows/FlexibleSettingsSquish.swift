@@ -216,7 +216,9 @@ public enum FlexibleSettingsSquish {
     static func columnDepths(model m: FlexibleStageModel, regions: Set<Int>) -> [FlexFaceKey: [Double?]] {
         let shown = FlexibleShownValues(model: m, drawnLattice: nil)
         var depths: [FlexFaceKey: [Double?]] = [:]
-        for (k, vals) in shown.values where regions.contains(k.region) {
+        // ★ U21 BATCH E: a face with no lattice of its own has no column dent (0: no bowl under a "can't squish" notice; his
+        // Face 1's 28.5° squares drew the sawtooth strip of his Img14)
+        for (k, vals) in shown.values where regions.contains(k.region) && m.hasOwnLattice(k.region) {
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
         return depths

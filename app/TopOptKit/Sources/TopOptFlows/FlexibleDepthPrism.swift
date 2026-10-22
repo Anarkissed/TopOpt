@@ -271,6 +271,8 @@ enum FlexibleDepthPrism {
         let all = views.contains(.prisms) && !controlOnlyWhileDragging
         let regions = all ? model.settings.loadedFaces.map(\.faceRegionID) : sel.map { [$0] } ?? []
         return regions.flatMap { r -> [ClearanceRenderItem] in
+            // ★ U21 BATCH E: no prism under a face with no lattice of its own (no bowl under a "can't squish" notice)
+            guard model.hasOwnLattice(r) else { return [] }
             guard let f = model.settings.face(r), let key = model.key(r), let st = model.stacks[key], let g = model.geometry[key],
                   let v = volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
                                  footprint: model.prismFootprint(r)) else { return [] }

@@ -55,7 +55,8 @@ extension FlexibleMainStatusPill {
 extension FlexibleStagePage {
     /// ★ M1 VERIFY: the Squish page's top-line [Fix] — the first blocker, else the advisory (competing groups, a face with
     /// no lattice under it); with NO face-prism none: the line says what to do on the main page ("Set a face to Lattice in
-    /// Selections first"), and the per-face [Lattice under it] stays on each face's card.
+    /// Selections first"), and each face's card keeps its own fix — ★ U21 batch E: [Go to Lattice] (the one no-lattice rule;
+    /// a tap on any face says the same notice), never [Lattice under it].
     @MainActor static func noticeFix(_ r: FlexibleReadiness, model m: FlexibleStageModel) -> FlexibleIssue? {
         // ★ ROUND 7 (F, his answers: an empty setup is allowed after Reset all; the line suggests no face): no [Fix]
         if FlexibleSettingsExit.emptyLeaves(r, empty: m.isEmptySetup) { return nil }

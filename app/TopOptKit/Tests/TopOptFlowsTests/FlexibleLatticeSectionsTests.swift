@@ -48,9 +48,14 @@ final class FlexibleLatticeSectionsTests: XCTestCase {
         let before = m.selectedRegion
         m.tapFace(1, point: F.onTop(p, x: width(p) / 2))
         XCTAssertEqual(m.selectedRegion, before, "★ a tap on solid selects nothing")
-        XCTAssertEqual(m.toast, FlexibleRowCopy.solidHere, "★ its one line")
-        XCTAssertLessThanOrEqual(FlexibleRowCopy.solidHere.count, 44)
-        XCTAssertEqual(m.toastFix, .goToLattice, "★ its one fix: [Go to Lattice]")
+        // ★ RE-PINNED (round 7 · U21 batch E, his notes of 2026-10-21, Img12/11: "if we are going to say 'you need to lattice
+        // this first' then it should do so for every face"): the solid part of a partial face says the ONE no-lattice notice
+        // (in the fix pop-up's place, not a 3.5 s toast), with [Go to Lattice] only (it cannot rest: its sections press).
+        // Was: the toast "Solid here · only face-prisms get latticed" with toastFix .goToLattice.
+        let n = try XCTUnwrap(m.noLatticeTap, "★ its one notice")
+        XCTAssertEqual(n.oneLine, FlexibleRowCopy.noLatticeUnder(m.displayName(1)), "★ its one line")
+        XCTAssertLessThanOrEqual(n.oneLine.count, 44)
+        XCTAssertEqual(n.fixes, [.goToLattice], "★ its one fix: [Go to Lattice]")
 
         // ★ RED CONTROL: today's whole face
         FlexibleLatticeSections.controlWholeFace = true

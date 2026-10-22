@@ -110,12 +110,16 @@ final class FlexibleLatticeSectionsHostedTests: XCTestCase {
         m.tapFace(1, point: centre)   // the page's onPickPoint hands the tap here (FlexibleStagePage.stage)
         pump(0.8)
         XCTAssertEqual(m.selectedRegion, before, "★ a tap on solid selects nothing")
-        let line = h.frames.all.keys.first { $0.hasPrefix("toastLine:") }.map { String($0.dropFirst("toastLine:".count)) }
-        XCTAssertEqual(line, FlexibleRowCopy.solidHere, "★ its one line is on the page")
-        XCTAssertLessThanOrEqual(FlexibleRowCopy.solidHere.count, 44)
-        let pill = try XCTUnwrap(local(h, "toast"), "the line's pill")
-        XCTAssertLessThanOrEqual(pill.height, 44, "★ one line")
-        let fix = try XCTUnwrap(local(h, "toastFix"), "★ its ONE fix: [Go to Lattice]")
+        // ★ RE-PINNED (round 7 · U21 batch E, his notes of 2026-10-21, Img12/11: "if we are going to say 'you need to lattice
+        // this first' then it should do so for every face"): the ONE no-lattice notice in the fix pop-up's place, its ONE fix
+        // [Go to Lattice]. Was: the toast line "Solid here · only face-prisms get latticed" with the toast's [Go to Lattice].
+        let line = m.noLatticeTap?.oneLine
+        XCTAssertEqual(line, FlexibleRowCopy.noLatticeUnder(m.displayName(1)), "★ its one line")
+        XCTAssertLessThanOrEqual(line?.count ?? 99, 44)
+        let pill = try XCTUnwrap(local(h, "popup"), "★ the notice is on the page (the pop-up's place)")
+        XCTAssertNil(local(h, "toastFix"), "★ never the old toast's fix")
+        XCTAssertEqual(m.noLatticeTap?.fixes, [.goToLattice])
+        let fix = try XCTUnwrap(local(h, "fix-go-to-lattice"), "★ its ONE fix: [Go to Lattice]")
         XCTAssertGreaterThanOrEqual(fix.height, 28)
         snapshot(h, "R7M2_13p_solid_tap_line_and_fix.png")
         click(h, CGPoint(x: fix.midX, y: fix.midY))

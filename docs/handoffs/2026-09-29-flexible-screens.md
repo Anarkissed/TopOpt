@@ -75,6 +75,76 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
+## ★ Round 7 · U21 batch E — your notes of 2026-10-21, Img11 / Img12 / Img14: one lattice rule, one notice for every face (2026-10-22)
+
+Branch `claude/flexible-screens` (PR #362), on top of checkpoint 1 (`706d73c5`). NOT pushed (your HOLD). App only; core untouched;
+no #354/main file edited; no new hook. NOT installed (the integrator does it). CORE LIST item 8(a) (faces.cpp:312-325) is the core
+side of this batch; it was already on the list.
+
+Your notes: Img12/11 "if we are going to say 'you need to lattice this first' then it should do so for every face"; Img14 "I tapped
+a side wall and it shows that there IS lattice behind it? That's definitely a bug."
+
+### What you will see
+- A tap on any face, or part of a face, with no lattice of its own (a face no face-prism meets; the solid rim of a face only partly
+  latticed; every face when no face-prism is set) selects and presses nothing. One notice in the pop-up's place under the top line:
+  **"No lattice under Face 5 · set a face-prism"** with **[Go to Lattice]** (saves and leaves for the Lattice page, never the bake)
+  and **[Face 5 rests]** where the whole face can rest. It stays until you close it or tap again. "Solid here" and the 3.5 s toast
+  are gone.
+- A face already pressed with no face-prism of its own (an old save, a main-page load) says the same sentence in its pop-up, pill
+  and top line, never blocking. Its card shows "No lattice under it" + [Go to Lattice] instead of the Deepest box; no depth chip, no
+  prism, no column dent, no bend prism for it (the sawtooth strip of your Img14 was Face 1's 28.5°-off squares).
+- [Lattice under it] is no longer offered on such a face (on Face 1 it would have made a 50 mm protected lattice sideways into the
+  part). A face inside a face-prism that core counts short (your round-5 Face 3 / Face 5 at 23 %) keeps it.
+- Plan deviation: the plan's sentence "… · set a face-prism first" is 48 characters with "Face 5"; "first" is dropped to keep your
+  44 (the edge picker already says "· set a face-prism"). A long face name is shortened, the "set a face-prism" never.
+
+### What was wrong (one sentence each)
+- Two rules: the tap refused only the solid part of a partly latticed face ("Solid here"), while a face no face-prism meets was
+  selected and judged by core's column count.
+- Core's count credits a face with ANOTHER face-prism's lattice on its columns: your l-bracket Face 5 11.8 %, Face 1 36.5 % (Face 6's
+  lattice about 3 mm behind it), Face 7 93.8 % (no warning at all) — none has a face-prism of its own.
+- The Deepest box and the chip read core's deepest column (118.8 mm on Face 5, 93.8 mm on Face 1/7), so they disagreed with any notice.
+
+### What changed (code)
+- `FlexibleSectorSet.latticed(r)` (FlexibleSectors): a section (or strip / rest in one), a root wholly inside a face-prism, or a curved
+  face-prism's root (notYet keeps core's share). `FlexibleRegions.pressable` returns nil for every other root.
+- `FlexibleStageModel.tapFace`: no lattice of its own → `noLatticeTap` (the notice), nothing selected or pressed; `select` and the next
+  tap clear it. The page shows it with `FlexibleFixPopup` (`FlexibleStagePage.popUpIssue`); `FlexibleFix.goToLattice` →
+  `askLeaveForLattice()` → the page's `leaveForLattice()` (the old toast's own route).
+- `FlexibleLatticeUnder.noPrismIssue` (one sentence, `FlexibleRowCopy.noLatticeUnder`); readiness `Face.ownLattice`; `latticedShare`
+  → 0 and `latticeMaxMM` → 0 with no lattice of its own; `latticeUnderPlan` nil for such a face. Card row (FlexibleLatticeUnderViews),
+  FacePanel, DepthChips, DepthPrism, the column dent (FlexibleSettingsSquish.columnDepths) and FlexibleBendPrism read it. The edge
+  picker's "no lattice at" rule uses the same `latticed`.
+- Red controls: `FlexibleRegions.controlPressAnyRoot` (today's two rules), `FlexibleStageModel.controlCoreShare` (core's count).
+
+### Tests (`FlexibleU21OneLatticeRuleTests`, your l-bracket as saved + your pad A1_0003 with no face-prism; red asserted inside)
+- testEveryNoLatticeTapSaysTheSame: Face 5 / Face 1 / Face 7 / a point on Face 2's 3 mm rim → nothing selected or pressed, the same
+  sentence, [Go to Lattice] (+ [Face N rests]; the rim: none). RED: Face 5 selected, the rim's "Solid here" toast.
+- testTheLatticePartStillPresses (Face 6 · lattice selects, no notice) · testNoFacePrismStageSaysTheSame (RED: face 1 selected) ·
+  testAPressedFaceWithNoFacePrismSaysTheSameSentence (share 0, deepest 0, no prism; RED: "Only 12 % of Face 5", 118.8 mm, 2 prisms vs 1)
+  · testRestStillPossible · testNotYetKeepsCoresShare · testFace1DrawsNoSquares (RED: 1,216 squares; now none) · testCopyFits ≤ 44.
+- On the page (`FlexibleU2Tests.testU21NoLatticeNoticeOnThePage`): the notice in the pop-up's place for each tap, the old toast fix
+  absent, a click on [Go to Lattice] leaves the page (exitUnchanged).
+- Re-pins (attributed to Img12/11): FlexibleLatticeSectionsTests and …HostedTests (the notice for "Solid here"), FlexibleLatticeUnderTests
+  (Top B: the sentence, [Go to Lattice]; the fixtures' taps: none offered on 0004, round 5 unchanged), FlexibleLatticeUnderReviewTests
+  (the pop-up's fixes), FlexibleMainPageHookTests (the pop-up's source line). M1 / M1Verify / Ruling6 needed none.
+
+### Runs (`round7/batch_u21_e/u21_e_runs.txt`)
+- 59 classes (this batch's, the 56 that touch or pin the changed files, FlexibleSquishCopyTests, LatticeStaleTypeTests): 412 passed,
+  6 failed (the six re-pins above), 2 skipped (picture probes), no signal. After the re-pins: 30/31, then the round-5 fix 3/3.
+- Goldens: 38 identical / 0 DIFFERS (deterministic); 32 + 1 PART-SKIP / 0 DIFFERS (unseeded).
+- The 16 stage-job hashes (`stage_job_hashes_u21e.txt`) cmp-identical, whole file, to x20b's and checkpoint 1's. No job byte moved.
+- Pictures (`look/`, 13" portrait, your l-bracket): U21_E1 tap Face 5, U21_E2 tap Face 1, U21_E3 tap Face 2's rim (no [rests]),
+  U21_E4 Face 5 pressed (card: "No lattice under it" + [Go to Lattice]).
+
+### Open
+- On Face 2's rim the notice says "No lattice under Face 2" although Face 2's middle is latticed (its section presses); the words
+  could say "here" for a partial face — say if you want that.
+- The solid part of a partly latticed face still cannot rest (only whole faces get [rests]); plan risk 5.
+- The no-face-prism stage keeps M1's rule: the pressed faces' notice does not pop at once there (the top line says what to do); a tap
+  gives the notice.
+- A tap without a point (only tests use it) keeps the old route.
+
 ## ★ Round 7 · U21 checkpoint 1 — batches D, G, C and B together, installed (2026-10-22) (read this first)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). App only; core untouched; no #354/main file edited.

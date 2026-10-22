@@ -46,6 +46,19 @@ public enum FlexibleLatticeUnder {
                       pill: pill(name, share: share))
     }
 
+    /// ★ U21 BATCH E (NOLAT + LBR-COVER, his notes of 2026-10-21 — Img12/11: "if we are going to say 'you need to lattice
+    /// this first' then it should do so for every face"; Img14: "I tapped a side wall and it shows that there IS lattice
+    /// behind it? That's definitely a bug."): the ONE notice for a face, or part of a face, with no lattice of its own — a tap
+    /// on it (FlexibleStageModel.noLatticeTap, in the fix pop-up's place), a pressed face's pop-up, pill and top line. Fixes
+    /// [Go to Lattice] and, where the whole face can rest, [<face> rests] (rests need no lattice). Never blocking. It replaces
+    /// [Lattice under it] on such a face: on his Face 1 that made a 50 mm protected lattice sideways into the part.
+    static func noPrismIssue(_ region: Int, name: String, canRest: Bool, key: String? = nil) -> FlexibleIssue {
+        FlexibleIssue(id: "noLatticeUnder|\(key ?? "\(region)")", kind: .noLatticeUnder, region: region,
+                      oneLine: FlexibleRowCopy.noLatticeUnder(name), blocking: false,
+                      fixes: [.goToLattice] + (canRest ? [.rest(region)] : []),
+                      pill: pill(name, share: 0))
+    }
+
     /// What [Lattice under it] does for a Flexible region (the button exists only when there is one).
     public enum Plan: Equatable, Sendable {
         /// The Selections row's "Lattice" chip in the main-page group that holds it.
@@ -134,14 +147,59 @@ extension FlexibleStageModel {
     func latticedShare(_ region: Int) -> Double? {
         // ★ ROUND 7, RULING 6: no face-prism — no lattice under any face, by his rule; nothing was asked of core
         if heldWithoutFacePrism, settings.face(region)?.isLoaded == true { return 0 }
+        // ★ U21 BATCH E: no lattice of its OWN — 0, never core's count of another face-prism's lattice on its columns (his
+        // l-bracket: Face 5 11.8 %, Face 1 36.5 %, Face 7 93.8 %); a curved face-prism's root (notYet) keeps core's share
+        if !hasOwnLattice(region) { return 0 }
         guard let st = stacks[FlexFaceKey(region: region, rotation: settings.face(region)?.rotationDeg ?? 0)],
               !st.columns.isEmpty else { return nil }
         return Double(st.latticedColumns) / Double(st.columns.count)
     }
 
+    // MARK: ★ U21 BATCH E — the one lattice rule
+
+    /// ★ RED CONTROL only (U21 batch E): core's column count speaks for every face (today's): "Only 12 % of Face 5", its
+    /// Deepest box capped at core's 118.8 mm, its chip, prism and dent drawn.
+    nonisolated(unsafe) static var controlCoreShare = false
+
+    /// ★ U21 BATCH E: does `region` have lattice of its OWN — the app's face-prism geometry (FlexibleSectorSet.latticed: a
+    /// section, a root wholly inside a face-prism, a curved face-prism's root)? True under the old whole-part / whole-face
+    /// controls (their lattice is the whole part) and with no part loaded (nothing to say).
+    public func hasOwnLattice(_ region: Int) -> Bool {
+        if Self.controlCoreShare || Self.controlDesignsWithoutPrism || controlWholePartWithoutPrism
+            || FlexibleLatticeSections.controlWholeFace || FlexibleRegions.controlPressAnyRoot { return true }
+        guard project.viewerMesh != nil else { return true }
+        return sectorSet.latticed(region)
+    }
+
+    /// ★ U21 BATCH E: the deepest `region` may be squished — its deepest column's lattice (half where pinched); 0 with no
+    /// lattice of its own (the card says "No lattice under it", the chip, the prism and the dent read 0); nil before its stack.
+    public func latticeMaxMM(_ region: Int) -> Double? {
+        if !hasOwnLattice(region) { return 0 }
+        return stack(region).map { FlexibleDepthPrism.latticeMax($0, pinched: pinchedColumns(region)) }
+    }
+
+    /// ★ U21 BATCH E: the notice a tap on `root` (or on the solid part of it) shows — nothing is pressed or selected. [<face>
+    /// rests] only when the whole face can rest: never the solid part of a face partly inside a face-prism (its sections
+    /// press), never a face already resting.
+    func noLatticeNotice(root: Int) -> FlexibleIssue {
+        let partial = regions.flexible?.partialRoots[root] != nil
+        let rests = settings.face(root).map { !$0.isLoaded } ?? false
+        return FlexibleLatticeUnder.noPrismIssue(root, name: displayName(root), canRest: !partial && !rests, key: "tap|\(root)")
+    }
+
+    /// ★ U21 BATCH E: [Go to Lattice] — one request the page answers with its leave for the Lattice page (saved, never the
+    /// bake: FlexibleStagePage.leaveForLattice), the toast's own route (FlexibleToastFix.goToLattice).
+    public func askLeaveForLattice() {
+        noLatticeTap = nil
+        leaveForLatticeAsks += 1
+    }
+
     func latticeUnderPlan(_ region: Int) -> FlexibleLatticeUnder.Plan? {
         // ★ ROUND 7 (M2): a Flexible sector is a lattice section (or its strip / rest) — latticed by construction; no one-tap
         if FlexibleRegions.isFlexible(region) { return nil }
+        // ★ U21 BATCH E: a face with no lattice of its own gets [Go to Lattice], never the one-tap (on his side Face 1 it would
+        // lattice sideways 50 mm deep into the part, against his 10-18 default-depth rule)
+        if !hasOwnLattice(region) { return nil }
         let p = project
         let rid: RegionID? = FlexibleRegions.isSector(region) ? region - FlexibleRegions.sectorBase : nil
         let face: FaceID? = rid == nil ? FaceID(region) : nil

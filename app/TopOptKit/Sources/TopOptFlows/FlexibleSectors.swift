@@ -65,6 +65,17 @@ public struct FlexibleSectorSet: Equatable, Sendable {
     public var isEmpty: Bool { pieces.isEmpty }
     public func piece(_ wireID: Int) -> FlexibleSector? { pieces.first { $0.wireID == wireID } }
     public func piece(key: String) -> FlexibleSector? { pieces.first { $0.key == key } }
+
+    /// ★ U21 BATCH E (NOLAT + LBR-COVER, his notes of 2026-10-21, Img11/12: "if we are going to say 'you need to lattice this
+    /// first' then it should do so for every face"; Img14: "I tapped a side wall and it shows that there IS lattice behind
+    /// it? That's definitely a bug."): THE ONE LATTICE RULE — region `r` has lattice of its OWN when the app's face-prism
+    /// geometry says so: a lattice section (or a strip / rest inside one), a root wholly inside a face-prism (or a strip /
+    /// rest on it), or a root a curved face-prism meets (notYet: core's share still decides). Never core's column count,
+    /// which credits a face with another face-prism's lattice on its columns (faces.cpp:312-325, CORE LIST item 8a).
+    public func latticed(_ r: Int) -> Bool {
+        if let p = piece(r) { return p.sectionKey != nil || wholeRoots.contains(p.rootRegion) || notYet[p.rootRegion] != nil }
+        return wholeRoots.contains(r) || notYet[r] != nil
+    }
 }
 
 public enum FlexibleSectors {

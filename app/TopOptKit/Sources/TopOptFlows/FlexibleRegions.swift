@@ -114,14 +114,20 @@ public struct FlexibleRegions {
     }
 
     /// ★ ROUND 7 (M2, his img3 words): the region a tap on the Squish page PRESSES — the lattice section (or strip / rest)
-    /// holding the point; a whole face or Surface sector when it is wholly latticed (or not latticed at all: its card says
-    /// so); nil on the solid part of a face only partly inside a face-prism.
+    /// holding the point; a whole face or Surface sector when it is wholly latticed; nil on the solid part of a face only
+    /// partly inside a face-prism. ★ U21 BATCH E (his Img11/12/14): nil too on a root no face-prism meets (and on every face
+    /// when no face-prism is set) — ONE rule, FlexibleSectorSet.latticed; it had returned the root, so the card and core's
+    /// column count spoke for it ("Only 12 % of Face 5"). RED CONTROL `controlPressAnyRoot`: today's rule.
     public func pressable(at point: SIMD3<Double>?, face: Int, mesh: ViewerMesh?) -> Int? {
         if let point, let mesh, let id = flexibleAt(point, face: face, mesh: mesh) { return id }
         let root = ownRegion(at: point, face: face, mesh: mesh)
         if let f = flexible, f.partialRoots[root] != nil { return nil }
+        if !Self.controlPressAnyRoot, !FlexibleLatticeSections.controlWholeFace, flexible?.latticed(root) != true { return nil }   // (M2's whole-face control: no sections, every root whole)
         return root
     }
+    /// ★ U21 BATCH E, RED CONTROL only: the two rules as they were — a root no face-prism meets is pressable whole (its card
+    /// then read core's column count), the solid part of a partial root gives the 3.5 s "Solid here" toast.
+    nonisolated(unsafe) public static var controlPressAnyRoot = false
 
     /// ★ M2: the Flexible sector `id`'s section key (a section: its own; a strip or rest in one: it), or nil.
     public func section(of id: Int) -> String? { flexiblePiece(id)?.sectionKey }

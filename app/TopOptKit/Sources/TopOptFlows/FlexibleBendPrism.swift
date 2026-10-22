@@ -78,7 +78,7 @@ enum FlexibleBendPrism {
                 }
             }
         }
-        for r in g.regions where g.kind != .edges {
+        for r in g.regions where g.kind != .edges && m.hasOwnLattice(r) {   // ★ U21 batch E: none for a face with no lattice of its own
             guard let key = m.key(r), let start = o.flatStart[key], let st = m.stacks[key], start < n else { continue }
             ranges.append(start..<min(start + 6 * st.columns.count, n))
         }

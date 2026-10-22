@@ -274,7 +274,8 @@ struct FlexibleFaceRows: View {
             }
             if f.isStampShape { FlexibleFaceStampRows(model: model, region: r, padTarget: $padTarget) }
             // ★ ROUND 5 (S3): the number in its own box — tap for the keypad, drag up / down
-            let latticeMax = model.stack(r).map { FlexibleDepthPrism.latticeMax($0, pinched: model.pinchedColumns(r)) }
+            // ★ U21 BATCH E: 0 with no lattice of its own (the "No lattice under it" row, never core's 118.8 mm on his Face 5)
+            let latticeMax = model.latticeMaxMM(r)
             // ★ BATCH E REVIEW: no lattice under the face — the row says so and offers the fix; the
             // stored value is kept (the box clamped every edit to 0.5 mm, silently)
             if FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: latticeMax) {

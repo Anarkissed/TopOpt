@@ -6,6 +6,7 @@
 // under the face there is nothing to sink into: the row says so in ONE line, in the warning colour,
 // with the one-tap fix beside it (the pop-up's own [Lattice under it]); the 3D chip is not drawn
 // (FlexibleDepthChips) and the stored value is kept for when the lattice is there.
+// ★ U21 BATCH E: on a face with no lattice of its OWN (no face-prism meets it) the row's button is [Go to Lattice].
 
 import SwiftUI
 import TopOptKit
@@ -18,7 +19,18 @@ struct FlexibleDeepestNoLatticeRow: View {
     var body: some View {
         FlexRow(FlexibleLatticeUnder.deepestNoLattice, info: FlexibleRowCopy.Info.deepest,
                 id: "flexible-row-deepest", warning: true) {
-            if model.latticeUnderPlan(region) != nil {
+            // ★ U21 BATCH E (his Img11/12/14): a face with no lattice of its own — [Go to Lattice] (its [Lattice under it] is gone)
+            if !model.hasOwnLattice(region) {
+                Button { model.askLeaveForLattice() } label: {
+                    Text(FlexibleFix.goToLattice.title { _ in "" })
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(Capsule().fill(FlexibleStageStyle.facePrismToken.color.opacity(0.45)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("flexible-deepest-go-to-lattice")
+            } else if model.latticeUnderPlan(region) != nil {
                 Button { model.latticeUnder(region) } label: {
                     Text(FlexibleFix.latticeUnder(region).title { _ in "" })
                         .font(.system(size: 13, weight: .semibold))

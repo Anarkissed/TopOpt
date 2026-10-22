@@ -500,6 +500,47 @@ final class FlexibleU2Tests: XCTestCase {
         flush("u21_d_lbracket_take_out_lines.txt")
     }
 
+    /// ★ U21 BATCH E (his Img11/12/14): the one no-lattice notice ON THE PAGE, in the fix pop-up's place, on his l-bracket —
+    /// a tap on Face 5, on Face 1, on Face 2's solid rim, and Face 5 once pressed (its card: "No lattice under it" + [Go to
+    /// Lattice]). Pictures only with FLEX_U2_DIR (13" portrait).
+    func testU21NoLatticeNoticeOnThePage() async throws {
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.lbracketDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his l-bracket of 10-21")
+        var left = 0
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: FlexibleSquishLoop(), onExit: { left += 1 }), size: Self.p13)
+        pump(3)
+        var lines: [String] = []
+        let T = FlexibleU21OneLatticeRuleTests.self
+        for (face, p, pic) in [(5, T.face5, "U21_E1_13p_tap_face5_notice.png"), (1, T.face1, "U21_E2_13p_tap_face1_notice.png"),
+                               (2, T.face2Rim, "U21_E3_13p_tap_face2_rim_notice.png")] {
+            m.tapFace(face, point: p)
+            XCTAssertTrue(pumpUntil(3) { h.frames.all["popup"] != nil }, "★ Face \(face): the notice shows in the pop-up's place")
+            try shot(pic, h, settle: 0.4)
+            lines.append("tap Face \(face): popup \(h.frames.all["popup"].map { "\($0.integral)" } ?? "-") · '\(m.noLatticeTap?.oneLine ?? "-")' · fixes \(h.frames.all.keys.filter { $0.hasPrefix("fix-") }.sorted()) · toast \(m.toast ?? "-")")
+            XCTAssertNil(h.frames.all["toastFix"], "★ never the old toast's [Go to Lattice]")
+        }
+        // the [Go to Lattice] button on the page leaves (the page's Exit: saved, no bake)
+        let go = try XCTUnwrap(h.frames.all["fix-go-to-lattice"], "the [Go to Lattice] button")
+        click(h, CGPoint(x: go.midX, y: go.midY))
+        XCTAssertTrue(pumpUntil(3) { left == 1 }, "★ [Go to Lattice] leaves for the Lattice page")
+        lines.append("[Go to Lattice] clicked at \(go.integral): left \(left), exitUnchanged \(m.exitUnchanged)")
+        // Face 5 pressed (an old save's state): the card's row and the same sentence
+        XCTAssertTrue(m.press(5, kg: 4.5))
+        try await FlexibleSquishFixture.settle(m, "Face 5 pressed")
+        if let g = m.squeezeGroup(of: 5) { m.rail = .group(g.id) }
+        m.select(5); pump(1.5)
+        try shot("U21_E4_13p_face5_pressed_card.png", h, settle: 0.6)
+        lines.append("Face 5 pressed: own lattice \(m.hasOwnLattice(5)) · deepest \(m.latticeMaxMM(5) ?? -1) · issue '\(FlexibleLatticeUnder.first(m.readiness)?.oneLine ?? "-")'")
+        log = lines
+        flush("u21_e_notice_lines.txt")
+    }
+
     /// "Delete Flexible lattice" (the Lattice page's sheet): [Cancel] centred on the button; the glass ends under the button until
     /// it asks (the check: a blank block). RED: the blank block (the glass reaching the hidden lines).
     func testU21DeleteLatticeSheetCancelOnTheButton() throws {

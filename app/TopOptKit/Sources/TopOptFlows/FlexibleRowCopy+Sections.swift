@@ -8,6 +8,14 @@ extension FlexibleRowCopy {
     public static let solidHere = "Solid here · only face-prisms get latticed"
     /// The fix's button: the main Lattice page (where face-prisms are set).
     public static let goToLattice = "Go to Lattice"
+    /// ★ U21 BATCH E (his Img11/12: "if we are going to say 'you need to lattice this first' then it should do so for every
+    /// face"): the ONE sentence for any face, or part of a face, with no lattice of its own — a tap on it, a pressed face's
+    /// pop-up and pill, the no-face-prism stage. (The plan's "… · set a face-prism first" is 48 characters with "Face 5": the
+    /// "first" is dropped to keep his 44, the edge picker's own "· set a face-prism".)
+    public static func noLatticeUnder(_ name: String) -> String {
+        let head = "No lattice under ", tail = " \u{00B7} set a face-prism"
+        return head + fit(name, maxChars - head.count - tail.count) + tail   // the NAME is fitted, the what-to-do kept
+    }
     /// A face a curved / bolt / holed face-prism meets only partly (D4): kept whole, said.
     public static let curvedNotYet = "Curved lattice here · not yet"
     /// The Squish page's legend row while a face is cut into sections.

@@ -80,7 +80,10 @@ final class FlexibleMainPageHookTests: XCTestCase {
         // the issue AS IT IS NOW; the top line, the pop-up and the legend are placed by the
         // functions FlexibleLegendPlacementTests measure (not by 180 pt of padding)
         XCTAssertTrue(page.contains("prompt = FlexibleFixPrompt(actionSerial: model.actionSerial, popExisting: model.pendingFix == nil)"))
-        XCTAssertTrue(page.contains("if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {"))
+        // ★ RE-PINNED (round 7 · U21 batch E, his Img11/12/14): the pop-up shows the issue as it is now, else a tap's no-lattice
+        // notice (popUpIssue). Was: `if let shown = fixShown, let issue = FlexibleFixPrompt.live(shown, in: model.readiness) {`.
+        XCTAssertTrue(page.contains("if let issue = Self.popUpIssue(shown: fixShown, model: model) {"))
+        XCTAssertTrue(page.contains("if let shown, let live = FlexibleFixPrompt.live(shown, in: m.readiness) { return live }"))
         // ★ RE-PINNED (round 7, R7-D1): the band also clears the Squish page's capsule. Was: the Exit row alone.
         XCTAssertTrue(page.contains("FlexibleLegendPlacement.noticeBand(viewport: size, exitRow: exitRowLocal(),"))
         XCTAssertTrue(page.contains("FlexibleLegendPlacement.popUp(viewport: geo.size, notice: noticeBand(geo.size),"))

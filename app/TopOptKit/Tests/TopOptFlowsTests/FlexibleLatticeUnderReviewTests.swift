@@ -167,7 +167,9 @@ final class FlexibleLatticeUnderReviewTests: XCTestCase {
         var open = FlexibleFixPrompt(actionSerial: m.actionSerial, popExisting: true)
         let popped = open.next(m.readiness, actionSerial: m.actionSerial, settled: true)
         XCTAssertEqual(popped?.region, b, "★ it pops when the page opens")
-        XCTAssertEqual(popped?.fixes, [.latticeUnder(b), .rest(b)])
+        // ★ RE-PINNED (round 7 · U21 batch E, his notes of 2026-10-21, Img12/11): Top B has no face-prism of its own —
+        // [Go to Lattice] replaces [Lattice under it]. Was: [.latticeUnder(b), .rest(b)].
+        XCTAssertEqual(popped?.fixes, [.goToLattice, .rest(b)])
         // the deepest row: nothing to squish into, the value kept
         let maxB = m.stack(b).map { FlexibleDepthPrism.latticeMax($0, pinched: m.pinchedColumns(b)) }
         XCTAssertTrue(FlexibleLatticeUnder.nothingToSquish(latticeMaxMM: maxB), "★ the row says it (chip-max \(maxB ?? -1))")

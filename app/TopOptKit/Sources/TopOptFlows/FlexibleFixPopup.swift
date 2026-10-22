@@ -149,6 +149,7 @@ struct FlexibleFixPopup: View {
         case .latticeUnder(let r): return "lattice-under-\(r)"
         case .latticeUnderAll(let rs): return "lattice-under-all-\(rs.map(String.init).joined(separator: "-"))"
         case .pressFix(let f): return "press-fix-\(f.id)"
+        case .goToLattice: return "go-to-lattice"   // ★ U21 batch E
         }
     }
 
@@ -166,6 +167,7 @@ struct FlexibleFixPopup: View {
         case .latticeUnder(let r): model.latticeUnder(r)   // ★ batch E: the main page's own edit
         case .latticeUnderAll(let rs): model.latticeUnder(all: rs)   // ★ batch E review: one tap, one undo step
         case .pressFix(let f): Task { await model.applyPressFix(f) }   // ★ R7-E2 FIX: one undo step
+        case .goToLattice: model.askLeaveForLattice()   // ★ U21 batch E: the page leaves for the Lattice page (saved, no bake)
         }
         follow(fix, model: model)
     }

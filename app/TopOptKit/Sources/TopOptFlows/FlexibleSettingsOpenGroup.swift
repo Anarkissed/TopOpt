@@ -418,7 +418,8 @@ extension FlexibleStagePage {
         if controlPopOnNewTab { return true }
         // ★ ROUND 7, M1 VERIFY (the verify: with no face-prism the page opened on "Face 1 has no lattice under it" with
         // [Lattice under all 4] — three new groups and the whole pad latticed again): not at once; the top line says what to
-        // do on the main page, and each face's card keeps its own [Lattice under it]
+        // do on the main page, and each face's card keeps its own fix (★ U21 batch E: [Go to Lattice], the one no-lattice
+        // sentence a tap says too — FlexibleLatticeUnder.noPrismIssue)
         if issue.kind == .noLatticeUnder, m.noFacePrismKnown { return false }
         // ★ ROUND 7 (F): nothing pops over an EMPTY setup (his: allowed after Reset all), on any tab
         if issue.kind == .noPressedFace, m.isEmptySetup, !FlexibleSettingsExit.controlEmptyBlocks { return false }
