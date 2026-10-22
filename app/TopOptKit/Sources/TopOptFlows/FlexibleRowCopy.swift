@@ -309,6 +309,9 @@ public enum FlexibleRowCopy {
     public static let newGroupNone = "Press two faces first"
     /// ★ S2: above the Settings page's player while the group's 3D sim moves the part.
     public static let settingsSimNote = "3D sim · as last saved"
+    /// ★ U21 (BEND-EDGES, his note of 2026-10-21, Img2): an edges group's sim on the last built lattice with his presses as they are
+    /// now (the lattice itself is updated by Save & Exit). ≤ 44.
+    public static let settingsEdgesLastSaved = "Last saved lattice · Save & Exit updates it"
     /// ★ S VERIFICATION: …and while the COLUMN preview stands in for it (it changed character with
     /// no word): why, and what brings the 3D sim back.
     public static let settingsColumnEdited = "Column preview · Save & Exit for the 3D sim"

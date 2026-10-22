@@ -14,6 +14,14 @@ extension FlexibleRowCopy {
     public static func pressFoldCut(percent: Int) -> String { "Shown at \(percent)% of core's depth: deeper folds" }
     /// ★ R7-E5: the legend's line over an edges group's heat (the interim sim's squish along each arrow).
     public static let pressHeatLine = "Squish along the arrow · interim sim"
+    /// ★ U21 (BEND-EDGES): the legend follows the sim — calibrated to core's design of every press, or the interim sim.
+    public static let pressHeatTunedLine = "Squish along the arrow · core's design"
+    public static func pressHeatLine(tuned: Bool) -> String { tuned ? pressHeatTunedLine : pressHeatLine }
+    /// ★ U21 (BEND-EDGES): the edge preview's notes (an edges group with no sim to show: the drawn push in its flat prisms). ≤ 44.
+    public static let edgePreviewNoLattice = "Edge preview · no lattice built yet"
+    public static let edgePreviewRunning = "Edge preview · 3D sim running"
+    public static let edgePreviewFailed = "Edge preview · the 3D sim failed"
+    public static let edgePreviewEdited = "Edge preview · Save & Exit for the 3D sim"
     /// ★ R7-E3: the main page's group selector — its first entry, and the card's tab when it is the card's only row.
     public static let selectorAll = "All (one after another)"
     public static let selectorTab = "SQUEEZE GROUP"
@@ -35,6 +43,11 @@ extension FlexibleRowCopy {
         case settingsColumnNoLattice: return ["Columns · no lattice yet", "Column preview", "Columns"]
         case settingsColumnRunning: return ["Columns · 3D sim running", "Column preview", "Columns"]
         case settingsColumnFailed: return ["Columns · 3D sim failed", "Column preview", "Columns"]
+        case settingsEdgesLastSaved: return ["Last saved lattice", "Last saved"]
+        case edgePreviewNoLattice: return ["Edge preview · no lattice", "Edge preview"]
+        case edgePreviewRunning: return ["Edge preview · sim running", "Edge preview"]
+        case edgePreviewFailed: return ["Edge preview · sim failed", "Edge preview"]
+        case edgePreviewEdited: return ["Edge preview · Save & Exit", "Edge preview"]
         default: return []
         }
     }

@@ -486,15 +486,49 @@ public struct FlexibleOverlayMesh {
     /// ★ ROUND 7 (M2): `still(key, t)` — part triangle `t` (a drawn part triangle) does not ride `key`'s ramp: the SOLID
     /// rest of a face only partly latticed (his img3 words: "It must only be the lattice section"). nil: every part
     /// triangle rides it, as before.
+    /// ★ U21 (BEND-TOP, his note of 2026-10-21, Img1: "The bend view still does not bend the top and bottom layers"): `perVertex`
+    /// (the Squish page's column preview only; the main page keeps false) — every drawn part vertex takes its depth from the SAME
+    /// quad-corner means the pressed face's squares move by (`cornerGrid`, bilinear in u / v over the face grid, its far-edge row
+    /// included) times the ramp, so a skin's edge lands on the side's outer squares and fades to 0 across the lattice. Before:
+    /// each sub-vertex was the blend of its kept triangle's corner ramps (it missed the dent between corners), and `rampValue`
+    /// gave nothing at all on the face grid's far v edge (its last row has no column: his pad's Face 5 is 20 mm, 20 rows of
+    /// 1.04 mm, the last row's centres off the face), so the Top's edge along Face 5 stayed straight.
     public func displacements(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo],
                               partUVT: [FlexFaceKey: [Double]], joinRegions: Bool = true,
-                              still: ((FlexFaceKey, Int) -> Bool)? = nil) -> [Float] {
+                              still: ((FlexFaceKey, Int) -> Bool)? = nil, perVertex: Bool = false) -> [Float] {
         let n = mesh.flat.vertexCount
         var out = [Float](repeating: 0, count: n * 3)
         let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
+        let perVertex = perVertex && !Self.controlCornerBlend
         for (k, d) in depths {
             guard let st = stacks[k] else { continue }
             let l = st.load
+            if perVertex, let uvt = partUVT[k], st.pitchMM > 0 {
+                // the squares first (unchanged), then every part vertex from the squares' own corners
+                if let start = flatStart[k] {
+                    for (c, cs) in quadCorners(k, d, st, shared: shared) {
+                        for j in 0..<6 {
+                            let v = start + c * 6 + j, dd = cs[Self.quadOrder[j]] ?? 0
+                            guard v < n, dd > 0 else { continue }
+                            out[v * 3] += Float(l.x * dd); out[v * 3 + 1] += Float(l.y * dd); out[v * 3 + 2] += Float(l.z * dd)
+                        }
+                    }
+                }
+                let grid = cornerGrid(k, d, st, shared: shared)
+                for v in 0..<partFlatVertices {
+                    if let still, still(k, v / 3) { continue }
+                    let (src, wv) = sourceWeights(v)
+                    guard 3 * (3 * src + 2) + 2 < uvt.count else { continue }
+                    var u = 0.0, w = 0.0, t = 0.0
+                    for j in 0..<3 where wv[j] != 0 {
+                        let b = 3 * (3 * src + j)
+                        u += wv[j] * uvt[b]; w += wv[j] * uvt[b + 1]; t += wv[j] * uvt[b + 2]
+                    }
+                    guard let x = grid.dent(u: u, w: w, t: t), x != 0 else { continue }
+                    out[v * 3] += Float(l.x * x); out[v * 3 + 1] += Float(l.y * x); out[v * 3 + 2] += Float(l.z * x)
+                }
+                continue
+            }
             // the column quads: the full depth, each CORNER the mean of the columns that
             // share it, so neighbouring quads stay joined and the dented surface is closed
             if let start = flatStart[k] {
@@ -561,6 +595,109 @@ public struct FlexibleOverlayMesh {
         let span = c.exitT - c.entryT
         guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
         return (dd, max(0, min(1, (c.exitT - t) / span)))
+    }
+
+    // MARK: ★ U21 (BEND-TOP, LBR-EDGES) — the squares' own corners, anywhere over the face
+
+    /// ★ RED CONTROL only (BEND-TOP): today's rule on the Squish page — each sub-vertex the blend of its kept triangle's corner
+    /// ramps, those through `rampValue` (no `perVertex`).
+    nonisolated(unsafe) public static var controlCornerBlend = false
+    /// ★ RED CONTROL only (BEND-TOP's second control): the per-vertex rule with ONLY rampValue's far-edge gate put back — a
+    /// vertex whose nearest grid cell has no column takes no dent.
+    nonisolated(unsafe) public static var controlFarEdgeGate = false
+
+    /// Drawn part flat vertex `v`: its SOURCE triangle in the part and its barycentric weights there.
+    func sourceWeights(_ v: Int) -> (Int, SIMD3<Double>) {
+        if let s = subdivision, v / 3 < s.subOf.count, v < s.bary.count {
+            let i = s.subOf[v / 3], b = s.bary[v]
+            return (s.source[i], b.x * s.cornerWeights[3 * i] + b.y * s.cornerWeights[3 * i + 1] + b.z * s.cornerWeights[3 * i + 2])
+        }
+        guard v / 3 < keptTriangles.count, v < keptWeights.count else { return (-1, .zero) }
+        return (keptTriangles[v / 3], keptWeights[v])
+    }
+
+    /// One pressed face's dent as its squares carry it: every quad corner (cu, cv) of the column grid with the value the
+    /// renderer moves it by (`quadCorners` — the column means, across a split face's cut too).
+    public struct CornerGrid {
+        public let stack: FlexStackInfo
+        let values: [SIMD2<Int32>: Double]
+        /// The corners' extent (mm on the face grid): the first and last corner that has a value, along u and along w.
+        public var extent: (u: ClosedRange<Double>, w: ClosedRange<Double>)? {
+            guard let a = values.keys.map(\.x).min(), let b = values.keys.map(\.x).max(),
+                  let c = values.keys.map(\.y).min(), let d = values.keys.map(\.y).max() else { return nil }
+            let p = stack.pitchMM
+            return (Double(a) * p...Double(b) * p, Double(c) * p...Double(d) * p)
+        }
+
+        /// The bilinear blend of the four corners around (u, w) (mm on the face grid), over those that have a value (a missing
+        /// one — past the grid, or around no column — drops out and the others are renormalised): the face's bend there,
+        /// before the ramp. nil where none of the four has a value (more than a pitch off the squares).
+        public func bend(u: Double, w: Double) -> Double? {
+            let p = stack.pitchMM
+            guard p > 0 else { return nil }
+            let fu = u / p, fw = w / p
+            let cu = Int32(fu.rounded(.down)), cv = Int32(fw.rounded(.down))
+            let a = fu - Double(cu), b = fw - Double(cv)
+            var sum = 0.0, wsum = 0.0
+            for (du, dv, wt) in [(Int32(0), Int32(0), (1 - a) * (1 - b)), (1, 0, a * (1 - b)), (1, 1, a * b), (0, 1, (1 - a) * b)] {
+                guard let x = values[SIMD2(cu + du, cv + dv)] else { continue }
+                let ww = Swift.max(wt, 1e-12)
+                sum += ww * x; wsum += ww
+            }
+            return wsum > 0 ? sum / wsum : nil
+        }
+
+        /// The column whose entry / exit the ramp at (u, w) reads: the grid cell's own, else the nearest one (ring search).
+        func column(u: Double, w: Double) -> FlexColumn? {
+            let st = stack
+            guard st.nu > 0, st.nv > 0, st.pitchMM > 0 else { return nil }
+            let iu = Swift.min(st.nu - 1, Swift.max(0, Int((u / st.pitchMM).rounded(.down))))
+            let iv = Swift.min(st.nv - 1, Swift.max(0, Int((w / st.pitchMM).rounded(.down))))
+            for r in 0..<Swift.max(st.nu, st.nv) {
+                var best: (Int, Int)?
+                for dv in -r...r { for du in -r...r where abs(du) == r || abs(dv) == r {
+                    let c = st.column(iu + du, iv + dv)
+                    if c >= 0, best == nil || du * du + dv * dv < best!.1 { best = (c, du * du + dv * dv) }
+                } }
+                if let b = best { return st.columns[b.0] }
+            }
+            return nil
+        }
+
+        /// The dent (mm along the load) of a part point at (u, w, t): the face's bend there × the ramp (the face full, the far
+        /// end none). nil where the squares do not reach or the point is not within the stack along the load.
+        public func dent(u: Double, w: Double, t: Double) -> Double? {
+            let st = stack
+            if FlexibleOverlayMesh.controlFarEdgeGate {
+                let iu = Int((u / st.pitchMM).rounded(.down)), iv = Int((w / st.pitchMM).rounded(.down))
+                let iuC = Swift.min(Swift.max(iu, 0), st.nu - 1), ivC = Swift.min(Swift.max(iv, 0), st.nv - 1)
+                guard abs(iu - iuC) <= 1, abs(iv - ivC) <= 1, st.cell[ivC * st.nu + iuC] >= 0 else { return nil }
+            }
+            guard let b = bend(u: u, w: w), b > 0, let c = column(u: u, w: w) else { return nil }
+            let span = c.exitT - c.entryT
+            guard span > 1e-6, t >= c.entryT - 0.5 * st.pitchMM, t <= c.exitT + 0.5 * st.pitchMM else { return nil }
+            return b * Swift.max(0, Swift.min(1, (c.exitT - t) / span))
+        }
+    }
+
+    /// Face `k`'s squares' corners as a grid (`depths` per column, the page's own; `shared` across a split face's cut).
+    func cornerGrid(_ k: FlexFaceKey, _ d: [Double?], _ st: FlexStackInfo, shared: SharedCorners?) -> CornerGrid {
+        var values: [SIMD2<Int32>: Double] = [:]
+        for (c, cs) in quadCorners(k, d, st, shared: shared) {
+            let col = st.columns[c]
+            let at = [SIMD2<Int32>(Int32(col.iu), Int32(col.iv)), SIMD2(Int32(col.iu + 1), Int32(col.iv)),
+                      SIMD2(Int32(col.iu + 1), Int32(col.iv + 1)), SIMD2(Int32(col.iu), Int32(col.iv + 1))]
+            for i in 0..<4 { if let x = cs[i] { values[at[i]] = x } }
+        }
+        return CornerGrid(stack: st, values: values)
+    }
+
+    /// Every dented face's corner grid (the page's depths), for posing what is drawn ON a pressed face (LBR-EDGES).
+    public func cornerGrids(depths: [FlexFaceKey: [Double?]], stacks: [FlexFaceKey: FlexStackInfo], joinRegions: Bool = true) -> [FlexFaceKey: CornerGrid] {
+        let shared = joinRegions ? SharedCorners(self, depths: depths, stacks: stacks) : nil
+        var out: [FlexFaceKey: CornerGrid] = [:]
+        for (k, d) in depths { if let st = stacks[k] { out[k] = cornerGrid(k, d, st, shared: shared) } }
+        return out
     }
 
     /// ★ X20b (his answer of 2026-10-20 ~16:05: a face pressed by ANOTHER group lying over the squished lattice BENDS ALONG too —

@@ -33,21 +33,34 @@ public enum FlexibleSettingsSquish {
         public var fe: Bool
         /// The group that plays (its number, as shown).
         public var groupNumber: Int?
+        /// ★ U21 (LBR-EDGES): what poses the overlays at the full bend — the 3D field shown, or the column preview's pressed
+        /// faces (each point ON one takes that face's own bend).
+        var field: FlexibleFEField? = nil
+        var poseFaces: [FlexibleBendPose.FaceBend] = []
     }
 
     /// The sim id of `g` when the current lattice has a landed field for it.
     /// ★ BATCH N: its REFINED field once that landed (the squish solved in steps), else its quick one.
     static func field(model m: FlexibleStageModel, group g: FlexibleSqueezeGroup) -> FlexibleFEField? {
-        guard let l = m.lattice, !m.latticeIsStale, m.squishGeneration == l.generation,
-              let f = m.shownSquishField(FlexibleSim.groupID(g.number)), f.generation == l.generation else { return nil }
+        let id = FlexibleSim.groupID(g.number)
+        guard let l = m.lattice, m.squishGeneration == l.generation,
+              let f = m.shownSquishField(id), f.generation == l.generation else { return nil }
+        // ★ U21 (BEND-EDGES): out of date since Save & Exit — an edges group's sim on the LAST BUILT lattice still shows, once it
+        // answers his presses as they are now (a face group keeps the current-lattice rule: its column preview)
+        if m.latticeIsStale { return staleEdges(model: m, group: g) && m.pressSimIsCurrent(id) ? f : nil }
         return f
+    }
+
+    /// An edges group playing on the last built lattice (out of date, built on the scene open now).
+    static func staleEdges(model m: FlexibleStageModel, group g: FlexibleSqueezeGroup?) -> Bool {
+        g?.kind == .edges && m.edgesSimOnStaleLattice
     }
 
     /// The sims of a current lattice start when the Settings page asks for its group (the main page
     /// usually started them already; one call is cheap and never re-solves).
     static func startSims(model m: FlexibleStageModel, group g: FlexibleSqueezeGroup?) {
-        guard let g, m.lattice != nil, !m.latticeIsStale else { return }
-        m.startSquishSims(first: FlexibleSim.groupID(g.number))
+        guard let g, m.lattice != nil, !m.latticeIsStale || staleEdges(model: m, group: g) else { return }
+        m.startSquishSims(first: FlexibleSim.groupID(g.number))   // (out of date: only the edges groups' sims — startPressSims)
     }
 
     /// The overlay's edge for the 3D field (the sim's grid pitch), nil for the column preview.
@@ -79,22 +92,99 @@ public enum FlexibleSettingsSquish {
                 d = f.meshDisplacements(positions: o.mesh.flat.positions)
                 feCache = (key, d)
             }
-            return Shown(dents: d, exaggeration: k, fe: true, groupNumber: g.number)
+            return Shown(dents: d, exaggeration: k, fe: true, groupNumber: g.number, field: f)
+        }
+        // ★ U21 (BEND-EDGES): an edges group with no sim to show (no lattice yet, its sim solving or failed) is never still — the
+        // EDGE PREVIEW: each press's drawn push moves the part inside its flat prism along the arrow (the note says so)
+        if edges, !controlEdgePreviewOff {
+            return Shown(dents: edgePreview(model: m, overlay: o, group: g), exaggeration: 1, fe: false, groupNumber: g.number)
         }
         return Shown(dents: columnDents(model: m, overlay: o, regions: Set(g.regions)), exaggeration: edges ? 1 : c.exaggeration,
-                     fe: false, groupNumber: g.number)   // (an edges group: still, until its sim lands — the note says why)
+                     fe: false, groupNumber: g.number,   // (an edges group: still, until its sim lands — the note says why)
+                     poseFaces: poseFaces(model: m, overlay: o, regions: Set(g.regions)))
     }
 
-    /// The column preview of `regions` ONLY (each face's shown values, the page's own rule).
-    static func columnDents(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, regions: Set<Int>) -> [Float] {
+    /// ★ RED CONTROL only (BEND-EDGES): an edges group with no sim stands still (before U21).
+    public static var controlEdgePreviewOff = false
+
+    /// ★ U21 (BEND-EDGES): the edge preview of `g` on `o` — every drawn part vertex inside a press's flat prism (between its apex and
+    /// its floor along the arrow, over its footprint) moves along the arrow by the press's depth × the drawn push there (the
+    /// samples Play pushes and the indent outlines: FlexiblePressPush), full at the surface, easing to 0 in the last millimetre
+    /// above the prism's floor so it meets the still face. Nothing outside the prisms moves. Display only.
+    static func edgePreview(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, group g: FlexibleSqueezeGroup) -> [Float] {
+        let pos = o.mesh.flat.positions
+        var out = [Float](repeating: 0, count: pos.count)
+        for id in g.presses {
+            guard let p = m.press(id), p.strip != nil, let c = m.flatCut(id) else { continue }
+            let s = FlexiblePressPush.samples(p, c)
+            guard s.count > 1, c.depthMM > 0 else { continue }
+            let depth = Swift.min(FlexibleFlatPrism.depth(of: p) ?? c.depthMM, c.depthMM)
+            let pts = (0..<s.count).map { SIMD3(s.xyz[3 * $0], s.xyz[3 * $0 + 1], s.xyz[3 * $0 + 2]) }
+            // the samples' own spacing: how far a point may lie from the footprint's nearest sample and still be on it
+            var spacing = 0.0
+            for i in stride(from: 0, to: pts.count, by: Swift.max(1, pts.count / 64)) {
+                var best = Double.infinity
+                for j in pts.indices where j != i { let dd = simd_distance(pts[i], pts[j]); if dd > 1e-6 { best = Swift.min(best, dd) } }
+                if best.isFinite { spacing = Swift.max(spacing, best) }
+            }
+            let reach = Swift.max(0.5, 1.5 * spacing)
+            let cell = reach
+            func key(_ q: SIMD3<Double>) -> SIMD3<Int32> { SIMD3<Int32>(Int32((q.x / cell).rounded(.down)), Int32((q.y / cell).rounded(.down)), Int32((q.z / cell).rounded(.down))) }
+            var buckets: [SIMD3<Int32>: [Int]] = [:]
+            for (i, q) in pts.enumerated() { buckets[key(q), default: []].append(i) }
+            for v in 0..<o.partFlatVertices {
+                let q = SIMD3<Double>(Double(pos[3 * v]), Double(pos[3 * v + 1]), Double(pos[3 * v + 2]))
+                let h = c.height(q)
+                guard h > -0.25, h < c.depthMM - 1e-6 else { continue }
+                // the drawn push at q: inverse-distance over the samples within reach (its nearest decides whether q is on it)
+                let k0 = key(q)
+                var wsum = 0.0, vsum = 0.0, nearest = Double.infinity
+                for dz in -1...1 { for dy in -1...1 { for dx in -1...1 {
+                    for i in buckets[k0 &+ SIMD3(Int32(dx), Int32(dy), Int32(dz))] ?? [] {
+                        let dd = simd_distance(pts[i], q)
+                        guard dd <= reach else { continue }
+                        nearest = Swift.min(nearest, dd)
+                        let w = 1 / Swift.max(dd, 1e-3)
+                        wsum += w; vsum += w * s.weight[i]
+                    }
+                } } }
+                guard wsum > 0, nearest <= reach else { continue }
+                let ease = Swift.min(1, Swift.max(0, (c.depthMM - h) / 1.0))
+                let mm = depth * (vsum / wsum) * ease
+                guard mm > 0 else { continue }
+                out[3 * v] += Float(c.direction.x * mm); out[3 * v + 1] += Float(c.direction.y * mm); out[3 * v + 2] += Float(c.direction.z * mm)
+            }
+        }
+        return out
+    }
+
+    /// Each face's shown depths per column (the page's own rule), for `regions` only.
+    static func columnDepths(model m: FlexibleStageModel, regions: Set<Int>) -> [FlexFaceKey: [Double?]] {
         let shown = FlexibleShownValues(model: m, drawnLattice: nil)
         var depths: [FlexFaceKey: [Double?]] = [:]
         for (k, vals) in shown.values where regions.contains(k.region) {
             depths[k] = vals.map { if case .depth(let d) = $0 { return d } else { return nil } }
         }
+        return depths
+    }
+
+    /// ★ U21 (LBR-EDGES): the column preview's pressed faces as the bend pose reads them — each face's squares' corners (the
+    /// numbers `columnDents` moves them by) in its frame.
+    static func poseFaces(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, regions: Set<Int>) -> [FlexibleBendPose.FaceBend] {
+        let depths = columnDepths(model: m, regions: regions)
+        return o.cornerGrids(depths: depths, stacks: m.stacks).sorted { $0.key.region < $1.key.region }.compactMap { k, grid in
+            guard let g = m.geometry[k] else { return nil }
+            return FlexibleBendPose.FaceBend(grid: grid, origin: g.corner - grid.stack.load * grid.stack.entryT(nearU: 0, v: 0))
+        }
+    }
+
+    /// The column preview of `regions` ONLY (each face's shown values, the page's own rule).
+    static func columnDents(model m: FlexibleStageModel, overlay o: FlexibleOverlayMesh, regions: Set<Int>) -> [Float] {
+        let depths = columnDepths(model: m, regions: regions)
         var out = o.displacements(depths: depths, stacks: m.stacks, partUVT: m.geometry.mapValues(\.partUVT),
                                   still: FlexiblePageChannels.stillRule(regions: m.regions, mesh: m.project.viewerMesh, overlay: o,
-                                                                        keys: Array(depths.keys)))   // ★ ROUND 7 (M2)
+                                                                        keys: Array(depths.keys)),   // ★ ROUND 7 (M2)
+                                  perVertex: true)   // ★ U21 (BEND-TOP): every part vertex from the squares' own corners
         // ★ X20b (his answer of 2026-10-20 ~16:05): another group's face lying over the squished lattice bends along with it
         // (supersedes round 5's "another group's face stands still" for this case); RED CONTROL `controlOtherGroupStill`
         guard !controlOtherGroupStill else { return out }
@@ -175,10 +265,20 @@ public enum FlexibleSettingsSquish {
     /// failed. Nothing while he drags (the legend says "What you drew"), nor for a lattice that
     /// has no sim (shape only).
     public static func note(model m: FlexibleStageModel, fe: Bool) -> String? {
+        // ★ U21 (BEND-EDGES): an edges group's sim on the LAST BUILT lattice, his presses as they are now
+        if fe, let g = m.playingGroup, m.latticeIsStale, staleEdges(model: m, group: g) { return FlexibleRowCopy.settingsEdgesLastSaved }
         // ★ R7-E3: an edges group's squish is the interim sim — the chip says so while it plays
         if fe, let g = m.playingGroup, let line = m.notTunedLine(simID: FlexibleSim.groupID(g.number)) { return line }
         if fe { return FlexibleRowCopy.settingsSimNote }
         guard m.frozenExaggeration == nil, let g = m.playingGroup else { return nil }
+        // ★ U21 (BEND-EDGES): the edge preview stands in — and why
+        if g.kind == .edges, !controlEdgePreviewOff, !FlexibleStageModel.controlNoPressSims {
+            let id = FlexibleSim.groupID(g.number)
+            guard m.lattice != nil else { return FlexibleRowCopy.edgePreviewNoLattice }
+            if m.latticeIsStale && !staleEdges(model: m, group: g) { return FlexibleRowCopy.edgePreviewEdited }
+            if case .failed? = m.squish[id] { return FlexibleRowCopy.edgePreviewFailed }
+            return FlexibleRowCopy.edgePreviewRunning
+        }
         guard let l = m.lattice else { return FlexibleRowCopy.settingsColumnNoLattice }
         if m.latticeIsStale { return FlexibleRowCopy.settingsColumnEdited }
         switch m.squish[FlexibleSim.groupID(g.number)] {

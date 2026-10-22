@@ -141,9 +141,23 @@ final class FlexibleU1Tests: XCTestCase {
         log.append(String(format: "control: side %.2f mm · Top over the pocket %.2f mm (%d vertices)", red.side, red.top, red.topN))
         log.append(String(format: "fixed:   side %.2f mm · Top over the pocket %.2f mm (%d vertices)", now.side, now.top, now.topN))
         XCTAssertGreaterThan(red.side, 0.5, "premise: Face 3's stamp bends the side's top row")
-        XCTAssertLessThan(red.top, 0.1 * red.side, "RED CONTROL: the Top stays flat")
         XCTAssertGreaterThan(now.top, 0.6 * now.side, "the Top over the pocket follows the side's bend")
         XCTAssertEqual(now.side, red.side, accuracy: 0.02 * red.side, "the side's own bend is unchanged")
+        // ★ RE-PIN, U21 batch G (his note of 2026-10-21, Img1: "The bend view still does not bend the top and bottom layers"): U1's
+        // red control measured nothing (its Top points sat outside Face 3's t-window, so the uncut Top read 0 either way). The
+        // assertion is now the SEAM: where the Top and the Bottom meet Face 3's and Face 5's dent, the skin's edge lands on the
+        // side's outer squares (< 0.05 mm); RED `controlCornerBlend` (U1's rule: the sub-vertices blended from their kept
+        // triangle's corner ramps, through rampValue) leaves the gap.
+        let regions = Set(g.regions)
+        let seam = try FlexibleU21BendTests.seams(m, try XCTUnwrap(r.project.viewerMesh), regions: regions)
+        log.append("seams: " + seam.map { String(format: "%@ %.3f mm (%d)", $0.name, $0.gap, $0.count) }.joined(separator: " · "))
+        for s in seam where s.count > 0 { XCTAssertLessThan(s.gap, 0.05, "\(s.name): the skin meets the side's dent") }
+        XCTAssertTrue(seam.contains { $0.name == "Top vs Face 3" && $0.count > 20 }, "the Top's edge along Face 3 measured")
+        FlexibleOverlayMesh.controlCornerBlend = true
+        let redSeam = try FlexibleU21BendTests.seams(m, try XCTUnwrap(r.project.viewerMesh), regions: regions)
+        FlexibleOverlayMesh.controlCornerBlend = false
+        log.append("RED seams: " + redSeam.map { String(format: "%@ %.3f mm", $0.name, $0.gap) }.joined(separator: " · "))
+        XCTAssertGreaterThan(redSeam.map(\.gap).max() ?? 0, 1, "RED CONTROL: the seam gap")
         if Self.dir != nil { try bendPicture(r.project, m, group: g, face: key, stack: st) }
         flush("U1_lines_bend.txt")
     }
@@ -255,6 +269,73 @@ final class FlexibleU1Tests: XCTestCase {
         let c2 = cam()
         XCTAssertTrue(c0.indices.contains { abs(c0[$0] - c2[$0]) > 1e-3 }, "RED CONTROL: the camera turned by itself")
         flush("U1_lines_card_camera.txt")
+    }
+
+    // MARK: ★ U21 batch G — before / after pictures on his pad of 10-21 (13" portrait), only with FLEX_U21G_DIR=<dir>
+
+    /// His Img1 (11.png: the Squish page, Group 1, Face 5 selected, Bend on, seen from below) and Img2 (12.png: Group 2 with Bend
+    /// on), each before (the red controls: today's rule) and after.
+    func testU21BendPictures() async throws {
+        guard let out = ProcessInfo.processInfo.environment["FLEX_U21G_DIR"] else { throw XCTSkip("pictures only with FLEX_U21G_DIR") }
+        let r = try FlexibleHisProject.restore(FlexibleU21BendTests.padDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his pad of 10-21")
+        let saved = ProcessInfo.processInfo.environment["FLEX_U1_DIR"]
+        setenv("FLEX_U1_DIR", out, 1)
+        defer { if let saved { setenv("FLEX_U1_DIR", saved, 1) } else { unsetenv("FLEX_U1_DIR") } }
+        let g1 = try XCTUnwrap(m.squeezeGroup(of: 5)), k5 = try XCTUnwrap(m.loadedKeys.first { $0.region == 5 }), st5 = try XCTUnwrap(m.stacks[k5])
+        m.rail = .group(g1.id)
+        m.select(5)
+        var v = m.views; v.remove(.play); v.insert(.bend); m.views = v
+        let loop = FlexibleSquishLoop()
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
+        pump(3)
+        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        func look(out o: SIMD3<Float>, side: SIMD3<Float>, down: Float, along: Float, pan: SIMD2<Float>, zoom: Float) {
+            guard let cm = cameraModel(h) else { return }
+            var c = cm.camera
+            let eye = simd_normalize(settle.act(o) + settle.act(SIMD3<Float>(0, 0, -1)) * down + settle.act(side) * along)
+            let ae = OrbitCamera.azimuthElevation(forDirection: eye, currentAzimuth: c.azimuth)
+            c.setOrientation(azimuth: ae.azimuth, elevation: ae.elevation)
+            let rot = c.viewRotation().transpose
+            c.target -= rot * SIMD3<Float>(1, 0, 0) * pan.x + rot * SIMD3<Float>(0, 1, 0) * pan.y
+            c.distance *= zoom
+            cm.adopt(c)
+        }
+        // Img1: from below, Face 5 and the Bottom (and the Top's edge beyond it)
+        look(out: -SIMD3<Float>(st5.load), side: SIMD3<Float>(st5.xAxis), down: 0.9, along: 0.5, pan: SIMD2(-20, -10), zoom: 0.62)
+        FlexibleOverlayMesh.controlCornerBlend = true
+        m.views = m.views   // (a change the page refreshes on)
+        try shot("U21G_01_13p_img1_group1_face5_bend_BEFORE.png", h, settle: 2.5)
+        FlexibleOverlayMesh.controlCornerBlend = false
+        m.select(3); m.select(5)
+        try shot("U21G_02_13p_img1_group1_face5_bend_AFTER.png", h, settle: 2.5)
+        // the same from above: the Top's edge along Face 5
+        look(out: -SIMD3<Float>(st5.load), side: SIMD3<Float>(st5.xAxis), down: -1.6, along: 0.5, pan: SIMD2(-20, -10), zoom: 1)
+        FlexibleOverlayMesh.controlCornerBlend = true
+        m.select(3); m.select(5)
+        try shot("U21G_03_13p_img1_top_along_face5_BEFORE.png", h, settle: 2.5)
+        FlexibleOverlayMesh.controlCornerBlend = false
+        m.select(3); m.select(5)
+        try shot("U21G_04_13p_img1_top_along_face5_AFTER.png", h, settle: 2.5)
+        // Img2: Group 2 (Edge 12 + Edge 9), Bend on, no lattice yet (his 12.png: "Ready: Save & Exit builds the lattice")
+        let g2 = try XCTUnwrap(m.squeezeGroups.first { $0.kind == .edges })
+        m.rail = .group(g2.id)
+        m.selectedPress = g2.presses.first
+        look(out: SIMD3<Float>(0, 1, 0), side: SIMD3<Float>(1, 0, 0), down: -1.1, along: 0.6, pan: SIMD2(-45, 15), zoom: 1.6)
+        FlexibleSettingsSquish.controlEdgePreviewOff = true
+        m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
+        try shot("U21G_05_13p_img2_group2_bend_BEFORE.png", h, settle: 2.5)
+        FlexibleSettingsSquish.controlEdgePreviewOff = false
+        m.selectedPress = g2.presses.last; m.selectedPress = g2.presses.first
+        try shot("U21G_06_13p_img2_group2_bend_AFTER.png", h, settle: 2.5)
+        log.append("pictures in \(out): note now '\(FlexibleSettingsSquish.note(model: m, fe: false) ?? "-")'")
+        flush("U21G_lines_pictures.txt")
     }
 
     // MARK: pictures

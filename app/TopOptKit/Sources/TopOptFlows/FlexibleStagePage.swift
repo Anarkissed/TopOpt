@@ -581,7 +581,8 @@ public struct FlexibleStagePage: View {
             ? FlexibleBendGhost.item(overlay: overlay, dents: c.dents, k: c.exaggeration) : nil
         if ghost != bendGhost { bendGhost = ghost }
         // ★ ROUND 7 (F): Bend on — what is drawn on the part follows the full bend
-        let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration)
+        let pose = Self.bendPose(views: model.views, overlay: overlay, dents: c.dents, k: c.exaggeration,
+                                 faces: sq.poseFaces, field: sq.field)   // ★ U21 (LBR-EDGES): on a pressed face, its own bend
         if pose?.key != bendPose?.key { bendPose = pose }
         // ★ X1: his X-ray — the current group's bend as a prism into the model, at full depth
         let prism = Self.xrayItems(model: model, overlay: overlay, dents: c.dents, k: c.exaggeration, views: model.views)
@@ -1375,7 +1376,7 @@ struct FlexibleLegend: View {
                     .font(.system(size: 10, weight: .bold)).tracking(0.7)
                     .foregroundStyle(DS.Color.accent.color)
                     .accessibilityIdentifier("flexible-legend-tab")
-                Text(pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine).font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                Text(pressHeatTopMM == nil ? shown.legendLine : FlexibleRowCopy.pressHeatLine(tuned: model.playingPressSimTuned))   // ★ U21.font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .accessibilityIdentifier("flexible-legend-line")
                 // ★ BATCH M2 (V12; his round 5: "the graded dent colours should be in both views"): the main

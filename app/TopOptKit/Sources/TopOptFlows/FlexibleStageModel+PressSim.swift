@@ -53,11 +53,20 @@ extension FlexibleStageModel {
                                                    pushXYZ: s.xyz, pushWeight: s.weight)
             }
             // ★ C1: core's design for every press of the group in this lattice — the sim reads core's press stacks
-            let tuned = ps.compactMap { latticeTunedPresses[$0.id] }
-            let targets = tuned.count == ps.count ? tuned : []
+            // ★ U21 (BEND-EDGES): on a lattice out of date (edited since Save & Exit), core's LIVE design of each press as it is now —
+            // never the old build's design for a press edited since; with any press not designed yet: the interim sim and its chip
+            let targets: [FlexibleFEField.Target]
+            if latticeIsStale, !Self.controlStaleUsesOldTuned {
+                let live = ps.compactMap { liveDesignTarget($0.id) }
+                targets = live.count == ps.count ? live : []
+            } else {
+                let tuned = ps.compactMap { latticeTunedPresses[$0.id] }
+                targets = tuned.count == ps.count ? tuned : []
+            }
             var h = Hasher()
             h.combine(lattice?.generation)
             h.combine(targets.count)
+            for t in targets { h.combine(t.depthsMM) }   // ★ U21: a new live design solves again
             h.combine(openedKey)
             for (p, q) in zip(ps, pushes) {
                 h.combine(p.regions)
@@ -104,7 +113,10 @@ extension FlexibleStageModel {
     /// ★ Solve the edges groups' interim sims the current lattice lacks (or whose presses changed). Cheap on every refresh; only
     /// once the lattice's own sims were handed to the solver (so a new lattice's schedule never drops them).
     func startPressSims() {
-        guard let base = feBase, let l = lattice, base.generation == l.generation, !latticeIsStale,
+        // ★ U21 (BEND-EDGES): on a lattice edited since Save & Exit but built on the scene open now, the edges groups keep a sim on
+        // that LAST BUILT lattice with their presses as they are now — solved again once his drag ends (k frozen while he drags)
+        guard let base = feBase, let l = lattice, base.generation == l.generation,
+              !latticeIsStale || (edgesSimOnStaleLattice && frozenExaggeration == nil),
               squishScheduled == l.generation, feRequest == nil else { return }
         let wants = pressSimWants
         let wanted = Set(wants.map(\.sim.id))
@@ -145,6 +157,42 @@ extension FlexibleStageModel {
         if let w = pressSimWants.first(where: { $0.sim.id == id }), w.key != pressSimKeys[id] {
             DispatchQueue.main.async { [weak self] in self?.startPressSims() }
         }
+    }
+
+    // MARK: ★ U21 (BEND-EDGES, his note of 2026-10-21, Img2: "The bend view doesn't bend the edges/corners")
+    // WHY it was still: an edges group has no column preview; its Bend / Play / Heat came only from its sim on a CURRENT lattice, and
+    // since C1 any press edit puts the lattice out of date until Save & Exit — the sim was rejected (the probe: 6.275 mm → 0.000 mm
+    // after ONE stamp move on Edge 12).
+
+    /// ★ RED CONTROL only: today's rule — an edges group plays nothing on a lattice out of date.
+    @MainActor static var controlEdgesStillWhenStale = false
+    /// ★ RED CONTROL only: the old build's designs calibrate a press edited since.
+    @MainActor static var controlStaleUsesOldTuned = false
+
+    /// The lattice is out of date but was built on the scene open now, its sims' base is that lattice: an edges group may play on it.
+    var edgesSimOnStaleLattice: Bool {
+        guard !Self.controlEdgesStillWhenStale, latticeIsStale, let l = lattice, l.sceneKey == openedKey,
+              let b = feBase, b.generation == l.generation else { return false }
+        return true
+    }
+
+    /// Core's design of press `id` as it is NOW (its current registration, the designs settled): its depths on the press stack.
+    func liveDesignTarget(_ id: UUID) -> FlexibleFEField.Target? {
+        guard !designsInFlight, let r = pressRegistrations[id], let d = pressDesign(id), d.refusal == nil,
+              d.columns.count == r.stack.columns.count else { return nil }
+        return FlexibleFEField.Target(stack: r.stack, depthsMM: FlexiblePinch.core(d, stack: r.stack).buildableDepthMM, pinched: [])
+    }
+
+    /// The edges group's landed sim answers its presses as they are now (solved for the current wants, nothing in flight).
+    func pressSimIsCurrent(_ id: String) -> Bool {
+        guard let w = pressSimWants.first(where: { $0.sim.id == id }) else { return false }
+        return pressSimKeys[id] == w.key && !pressSimInFlight.contains(id)
+    }
+
+    /// The playing edges group's sim is calibrated to core's design (the legend says which).
+    public var playingPressSimTuned: Bool {
+        guard let g = playingGroup, g.kind == .edges else { return false }
+        return pressSimWants.first { $0.sim.id == FlexibleSim.groupID(g.number) }?.tuned ?? false
     }
 
     /// ★ THE CHIP (the reviewer's interim-sim conditions): "Lattice not tuned for this press yet" while an edges group's squish is the

@@ -75,7 +75,155 @@ Each item: what core does, where, the evidence, your numbers.
    carry no held walls. Ask, once Attach exists in the app: a
    per-lattice list of held wall faces in the Flexible block, read by the squish solve as fixed walls for that lattice only.
 
-## ★ Round 7 · U21 batch D — your notes of 2026-10-21, Img13: every delete asks first, in place; Undo puts the panel back; one Undo after a Lattice-page trash (2026-10-21) (read this first)
+## ★ Round 7 · U21 batch G — your notes of 2026-10-21, Img1 / Img2 / Img15: the Top and Bottom meet the side's dent, edges bend, no zig-zag (2026-10-21) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on top of `f1928c96` (batch D's fix round 2). NOT pushed (your HOLD). App only; core
+untouched; no #354/main file edited, no new hook. Judged on your live projects of 10-21 (`round7/batch_u21/his_live_1021_pad`,
+`his_live_1021_lbracket`). Nothing installed (the integrator builds and installs).
+
+Your notes:
+- Img1: "The bend view still does not bend the top and bottom layers"
+- Img2: "The bend view doesn't bend the edges/corners"
+- Img15: "are you assuming the lattice and the walls are connected? … is it calculating how much the TPU can actually stretch at
+  the edges without ripping? Is that what those sharp edges mean? I think there should be some kind of notification"
+
+### What you will see now
+- **Bend, Group 1 (your Img1).** Where the Top and the Bottom meet Face 5 and Face 3, their edge now sits exactly on the side's
+  dent and fades to nothing across the part. Before, a gap opened between them. On your pad the gaps were 4.67 mm (Top at Face 5),
+  2.48 mm (Bottom at Face 5), 5.85 mm (Top at Face 3) and 6.73 mm (Bottom at Face 3), shown ×3. They are now 0.000 mm at all
+  148–224 edge points of each. Along Face 5 the Top didn't move at all before; now it follows the side by 4.67 mm.
+  Your thumb pad reaches past Face 5's edge ("3.0 N of the stamp lands off the face"). The part of its outline past the edge
+  now stays with the bent edge. It used to drop back to rest, a 14 mm step on screen.
+- **Bend, Group 2 (your Img2).** An edges group no longer stands still:
+  - **No lattice built yet** (your 12.png): an **edge preview**. Each press's drawn push (its stamp or its curves, the shape
+    the indent outlines show) moves the part inside its flat prism along the arrow. It is full at the surface and eases to 0
+    just above the prism's floor, so it meets the face that doesn't move. Edge 12 moves up to 9.5 mm, Edge 9 up to 7.3 mm, and
+    nothing outside the two prisms moves. The line says "Edge preview · no lattice built yet".
+  - **After Save & Exit, then an edit** (any press edit puts the lattice out of date): the edges group keeps its 3D sim on the
+    LAST BUILT lattice, with your presses as they are now. It is solved again when your drag ends. Before, it dropped to 0.000
+    mm after one stamp move on Edge 12. Now it is 6.19 mm about 10 s after the edit (6.28 mm before it). The line says "Last
+    saved lattice · Save & Exit updates it". While the new solve runs, the edge preview shows ("Edge preview · 3D sim running").
+  - The sim is calibrated to **core's design of each press as it is now**, never the old build's design for a press you edited
+    since. Edge 12 at 1.5× its weight: all 476 of its columns took core's new design (deepest 5.62 → 5.95 mm). If a press has no
+    design yet, the uncalibrated interim sim plays, with its chip.
+  - The legend says which: "Squish along the arrow · core's design" when calibrated, "· interim sim" when not. Before, it always
+    said "interim sim".
+- **The sharp edges on your l-bracket (Img15) were a drawing mistake, not a warning.** Nothing computes stretching or tearing.
+  This view is the column preview, your drawing, with no mechanics. The jagged line was the 10 % indent outline on Face 6. Each
+  point took the bend of the nearest point of the model, and over the rim two layers lie together: the squashed squares (moved up
+  to 7.8 mm) and the solid border that stays put. So the line flipped between them. Now a point drawn ON a pressed face (indent
+  lines, curves, the stamp, glass, prism faces, chips) takes that face's own bend, from the same numbers the squares move by. In
+  the 3D sim it takes the sim's own value at that point. On your bracket the 10 % outline has 0 segments jumping more than 2 mm
+  (232 before; the 50 % line: 0, was 8). No tear notice: your 10-17 decision, and the squish limit is CORE LIST item 3.
+- **Why you could bend Face 6 deeper after the delete + undo (Img15): pinned down, not fixed.** The deepest Face 6 allows did not
+  change. It is 25.00 mm in every state: as saved, at Deepest 7, after ⊖ + Undo, and with your Topology faces read in again.
+  There is no pinch and no rest on its columns. The only limit that moves is how far ONE drag goes: the lattice ÷ the drawing's
+  ×k, frozen while you drag. At 7 mm k is 2, so a drag stops at 12.50 mm. At 23 mm k is 1, so it stops at 25.00 mm. Each new
+  drag picks k again. The most likely story: before the delete you dragged once from 7 mm and stopped at 12.5 mm; after the
+  Undo, later drags picked k again and went on to 23 mm. Not proven: your earlier file is gone (the face's id was 2000002, now
+  2000008, and the sector list doesn't keep the old state).
+
+### What was wrong (one sentence each)
+- BEND-TOP: each fine sub-point of the Top/Bottom took a blend of its big triangle's corner dents, so it missed the dent between
+  the corners (Bottom vs Face 5: 2.19 mm drawn, 4.67 mm needed). And the per-point rule gave nothing at all along Face 5's FAR
+  edge. **The probe pinned the gate** (`testProbeTheFarEdgeGate`): Face 5 is 20.00 mm high at a 1.042 mm pitch, so 20 rows; the
+  last row's centres sit off the face, so core gives that row no columns (0 of 96). Every Top point on that edge (148) hit "nil
+  column at (iu, 19)".
+- BEND-EDGES: an edges group has no column preview. Its Bend came only from its sim on a CURRENT lattice, and since C1 any press
+  edit makes the lattice out of date until Save & Exit.
+- LBR-EDGES: the pose copied the nearest model point, which flips between two coincident layers over the rim.
+
+### How (code)
+- `FlexibleOverlayMesh.displacements(perVertex:)`, used on the Squish page only (`FlexibleSettingsSquish.columnDents`; the main
+  page and the goldens unchanged). Every drawn part point takes `CornerGrid.dent(u, w, t)`: a bilinear blend of the squares' own
+  corner means (`quadCorners`, across a split face's cut too), corners with no value dropped and the rest renormalised, the far-edge
+  row included, times the ramp of the nearest column. The squares themselves are unchanged. Controls: `controlCornerBlend` (the
+  old rule) and `controlFarEdgeGate` (only rampValue's nil-column gate put back).
+- `FlexibleBendPose(faces:field:)`: `FaceBend.bend(at:)` for a point within a pitch (≥ 1 mm) of a pressed face's plane, over its
+  grid ± half a pitch. In the face's plane past the squares, it keeps the edge's value up to 40 mm (a stamp partly off the face).
+  In the 3D sim, `FlexibleFEField.sample`. Other points keep the nearest vertex. Built by `FlexibleSettingsSquish.poseFaces` and
+  passed through `Shown` to the page's `bendPose`. Control: `controlNearestVertexPose`.
+- `FlexibleStageModel+PressSim`:
+  - `edgesSimOnStaleLattice` holds when the lattice is out of date but was built on the scene open now
+    (`lattice.sceneKey == openedKey`) and `feBase` is that lattice.
+  - `startPressSims` runs then too, after your drag ends. `pressSimWants` takes its targets from `liveDesignTarget` (core's
+    current per-press design, settled) when the lattice is out of date, and the key hashes the targets' depths.
+  - `FlexibleSettingsSquish.field` accepts the edges group's sim once it answers the current presses (`pressSimIsCurrent`).
+    `startSims` lets an edges group through.
+  - `edgePreview` draws the preview when there is no sim to show.
+  - Controls: `controlEdgesStillWhenStale`, `controlStaleUsesOldTuned`, `controlEdgePreviewOff`.
+- Words: `FlexibleRowCopy.settingsEdgesLastSaved` (43 characters). In `FlexibleRowCopy+Views`: `pressHeatLine(tuned:)`
+  (`pressHeatTunedLine`), the four `edgePreview…` notes, and their short forms. The legend (FlexibleStagePage) reads
+  `model.playingPressSimTuned`.
+
+### Tests (each RED control asserted red inside its test)
+`FlexibleU21BendTests` (12, your live 10-21 copies):
+- `testProbeTheFarEdgeGate`: the probe line above (Top vs Face 5: nil column ×148; Bottom vs Face 3: nil column ×192; the other
+  two: a value).
+- `testTheSkinsMeetTheSideOnHisPad`: |skin − the side's outer squares at the same place| along the load < 0.05 mm on all four
+  edges, measured from the page's own dent buffer, interpolated along the edge. Now 0.000 / 0.000 / 0.000 / 0.000 mm. RED
+  `controlCornerBlend`: 4.665 / 2.480 / 5.848 / 6.725 mm (the probe's numbers). Second control: with only the far-edge gate put
+  back, the Top along Face 5 moves 0.000 mm and the gap is 4.665 mm.
+- `testNoCrackBetweenCoincidentEdges`: 536,408 points lie on another drawn triangle's edge, and every one moves with it. The worst
+  difference is 0.0000 mm, now and before. None of them sits inside an edge: there are no true T-junctions on this overlay.
+- `testTheIndentOutlineFollowsTheBendWithoutSpikes` (l-bracket, Face 6 at 23 mm, k 1). 10 % outline: 0 jumps > 2 mm. The control
+  that poses by the squares only (no part point to flip to) gives 7: these are the squares' own steps where a column meets one with
+  no depth, so the outline may follow them. RED `controlNearestVertexPose`: 232. 50 %: now 0, squares 8, RED 8. 90 %: 0 / 0 / 0.
+- `testPosedIndentSitsOnTheBentSquares`: 2,564 indent points over the squares. The worst |posed − the renderer's own triangle| is
+  0.237 mm; RED (nearest vertex): 4.560 mm.
+- `testOffTheFacePointsKeepTheNearestVertexRule`: 12,058 part points off Face 6 are posed exactly as before (Δ 0).
+- `testAStampPartlyOffTheFaceHasNoStep`: along the thumb pad's length the worst step between 0.5 mm samples is 0.26 mm; RED:
+  14.00 mm at v 23.
+- `testAnEdgesGroupBendsAfterAnEdit`:
+  - Lattice built and Group 2's sim landed: 6.275 mm, legend "core's design".
+  - Edge 12's stamp moved 3 mm: the lattice goes out of date. RED (`controlEdgesStillWhenStale` + `controlEdgePreviewOff`):
+    0.000 mm. With the gate alone the sim is rejected (fe false).
+  - Now, about 10 s later (9.9 s in the run): 6.191 mm, fe true, the note reads "Last saved lattice · Save & Exit updates it".
+- `testTheEditedPressIsNotCalibratedToTheOldBuild`: Edge 12 at 1.5× its weight: 476 of 476 columns' design changed. The sim's
+  target equals core's live design; RED `controlStaleUsesOldTuned`: the old build's. (A stamp move alone leaves core's design
+  unchanged, because core does not take an edge's stamp yet, CORE LIST item 2. So this test edits the weight.)
+- `testAnEdgesGroupBendsWithNoLattice`: Edge 12: 1,140 points move, up to 9.50 mm. Edge 9: 1,234 points, up to 7.32 mm. 0 points
+  move outside the prisms. The note reads "Edge preview · no lattice built yet", legend "interim sim". RED
+  `controlEdgePreviewOff`: 0.000 mm.
+- `testTheLegendSaysTunedOrInterim`: both lines; every new note ≤ 44 characters with a shorter form; the page reads the model.
+  RED: the old constant line is gone from the source.
+- `testProbeWhyFace6WentDeeperAfterTheDeleteAndUndo`: the four states above.
+Re-pin: `FlexibleU1Tests.testTheTopBendsWithTheSide`, attributed to your 10-21 Img1 note. U1's red control read 0.00 on 0 points
+(it measured nothing). The test now also checks the seam on your 10-20 pad: 0.000 mm on all four edges; RED `controlCornerBlend`:
+4.665 / 2.480 / 2.316 / 6.289 mm. U1's own lines in its section below are corrected.
+Pictures: `FlexibleU1Tests.testU21BendPictures` (hosted, 13" portrait, runs only with `FLEX_U21G_DIR`).
+
+### Runs (`round7/batch_u21_g/u21_g_runs.txt`)
+- The batch's 12 new tests first: 12/12 passed.
+- 56 classes (the classes that name the touched files' types — FlexibleOverlayMesh, FlexibleSettingsSquish, FlexibleBendPose,
+  the press-sim and note API, the page — plus the pose and X20b pins, FlexibleU1Tests, FlexibleSquishCopyTests,
+  LatticeStaleTypeTests), 6 chunks: **318 tests, 3 skipped, 1 failure = the known Play ring** (22 px). No signal. The skips: two
+  that were skipped before, and the new picture test (it runs only with its folder set).
+- Goldens: 38 identical, 0 DIFFERS (deterministic); 32 + 1 PART-SKIP, 0 DIFFERS (unseeded).
+- The 16 stage-job hashes are cmp-identical (whole file) to `stage_job_hashes_x20b.txt` and to batch D's
+  `stage_job_hashes_u21d_fix2.txt` (`stage_job_hashes_u21g.txt`). No job byte moved: everything here is drawing on the Squish
+  page and the display sim.
+
+### Evidence (`round7/batch_u21_g/`)
+- `look/U21G_01`/`02`: your Img1 camera (Squish page, Group 1, Face 5, Bend on, from below), before / after. After: the Bottom's
+  edge rides Face 5's dent, and the thumb pad's outline stays on the bent edge.
+- `look/U21G_03`/`04`: the same from above. Before: the Top's edge along Face 5 is straight and a dark gap shows where Face 3's
+  side bends. After: the Top's edge curves with Face 5 and with Face 3.
+- `look/U21G_05`/`06`: Group 2, Bend on, no lattice (your 12.png). Before: Edge 12 flat. After: the thumb pad's dent along the
+  edge, inside its flat prism.
+- `lines/`: every test's numbers.
+
+### Not done / open
+- An edges group's stamp outline and glass still use the nearest-vertex rule ("edges groups keep field / nearest", the plan). In
+  `U21G_06` the thumb pad's dashed outline over Edge 12 stays at rest while the edge under it dents.
+- The edge preview is your drawing, not mechanics. It eases to 0 in the last 1 mm above the prism's floor so it meets the still
+  face. On a stale lattice the sim keeps the OLD lattice's stiffness (open risk 4 of the plan); its depths are core's live design
+  only once core designed every press.
+- The probe for Face 6 found no change in the cap. The single-drag stop (lattice ÷ k) is the likely reason; not changed.
+- The 7 / 8 squares-only jumps on your bracket are real steps of the squares (a latticed column next to one with no depth), not a
+  drawing fault. The posed outline follows them.
+
+## ★ Round 7 · U21 batch D — your notes of 2026-10-21, Img13: every delete asks first, in place; Undo puts the panel back; one Undo after a Lattice-page trash (2026-10-21) (the step before U21 batch G above)
 
 Branch `claude/flexible-screens` (PR #362), on top of `eff5a922` (the CORE LIST above). NOT pushed (your HOLD). App only; core
 untouched; no #354/main file edited, no new hook. Judged on your live projects of 10-21 (`round7/batch_u21/his_live_1021_pad`,
@@ -489,7 +637,12 @@ Branch `claude/flexible-screens` (PR #362), on top of `f1362eb3` (R7-E5). NOT pu
 
 ### What you will see now, in plain words
 - **Bend (Squish page)**: when a side is pressed, the Top over its pocket now bends with it (your img_1020_7). On your pad Face 3's
-  stamp moves its top row 6.15 mm and the Top beside it now follows by 4.12 mm (it was 0).
+  stamp moves its top row 6.15 mm and the Top beside it now follows by 4.12 mm (it was 0). **[Corrected by U21 batch G, 2026-10-21:
+  this number did not show the Top bending with the side. It was the Top's largest move 0.5–12 mm in from Face 3, not at the edge
+  where the Top meets the side; the red control had no Top point in that strip at all (0 vertices, so its 0.00 measured nothing).
+  The Top's edge still did not land on the side's dent: on your 10-20 pad (U1's) a gap of 2.32 mm at Face 3 and 4.67 mm at Face 5
+  (Bottom 6.29 / 2.48 mm), on your 10-21 pad 5.85 / 4.67 mm (Bottom 6.73 / 2.48 mm), ×3 on screen; along Face 5 the Top did not
+  move at all. Batch G fixes that; see its section at the top.]**
 - **A stamp can no longer leave the model.** Drag it as far as you like: it stops while part of it still presses the face (partly
   off is fine). Your Four-fingertips stamp dragged far left stops with its centre 32 mm past Face 3's edge. A stamp you already
   lost comes back onto the face on your next drag. (An edge's stamp already stayed on the edge's length.)
@@ -509,7 +662,8 @@ Branch `claude/flexible-screens` (PR #362), on top of `f1362eb3` (R7-E5). NOT pu
 1. "the top wall doesn't bend with it" → the Squish page's overlay is now cut fine for the column preview too
    (`FlexibleSettingsSquish.pageEdge`: the stacks' pitch, ≥ 2 mm, at most 12 000 triangles; the 3D sim keeps its own grid): the Top
    is two triangles and took the ramp only at its corners (0 at the edge's ends and the far side). `testTheTopBendsWithTheSide`:
-   side 6.15 mm, Top over the pocket 4.12 mm; RED `controlColumnFlatNeighbours`: 0.00. Another GROUP's pressed map still stands
+   side 6.15 mm, Top over the pocket 4.12 mm; RED `controlColumnFlatNeighbours`: 0.00 (**corrected by U21 batch G: the red read
+   0.00 on 0 vertices, it measured nothing; the test now checks the seam instead**). Another GROUP's pressed map still stands
    still (round 5's rule; my first build dragged those too and five pins went red — reverted, see the question below).
    Found by the suite: a 60 000-triangle cap made the page slow enough that a hosted click missed (FlexibleLatticeSectionsHostedTests)
    → 12 000.

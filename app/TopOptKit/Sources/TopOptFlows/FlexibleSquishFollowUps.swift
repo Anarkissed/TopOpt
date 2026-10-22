@@ -129,9 +129,13 @@ extension FlexibleStagePage {
         !controlBendRestPose && views.contains(.bend) && !views.contains(.play)
     }
     /// The full-bend pose of the page's overlay mesh bent by `dents` × `k` (the renderer's own), or nil.
-    @MainActor static func bendPose(views: FlexibleStageViews, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double) -> FlexibleBendPose? {
+    /// ★ U21 (LBR-EDGES): `faces` — the column preview's pressed faces (a point ON one takes that face's own bend: the squares'
+    /// corners around it); `field` — the 3D sim shown (a point takes the field's own sample there). Both nil: the nearest vertex.
+    @MainActor static func bendPose(views: FlexibleStageViews, overlay: FlexibleOverlayMesh?, dents: [Float]?, k: Double,
+                                    faces: [FlexibleBendPose.FaceBend] = [], field: FlexibleFEField? = nil) -> FlexibleBendPose? {
         guard posesOverlays(views: views), let o = overlay, let d = dents, k > 0 else { return nil }
-        return FlexibleBendPose.cached(positions: o.mesh.flat.positions, dents: d, k: k, signature: o.mesh.signature.contentHash)
+        return FlexibleBendPose.cached(positions: o.mesh.flat.positions, dents: d, k: k, signature: o.mesh.signature.contentHash,
+                                       faces: faces, field: field)
     }
 }
 
@@ -146,8 +150,51 @@ struct FlexibleBendPose {
     private let buckets: [SIMD3<Int32>: [Int32]]
     private let positions: [SIMD3<Float>]
     private let moves: [SIMD3<Float>]
+    /// ★ U21 (LBR-EDGES, his Img15: "is it calculating how much the TPU can actually stretch at the edges without ripping? Is that
+    /// what those sharp edges mean?" — no: a drawing fault). The nearest vertex flipped between two layers that lie together over a
+    /// pressed face's rim — the squares (moved up to 7.8 mm) and the part's still solid rim (0) — so the 10 % indent outline on his
+    /// Face 6 zig-zagged (369 of 534 segments jumped > 2 mm). A point ON a pressed face (over its grid, half a pitch out, within a
+    /// pitch of its plane — the indent's padded ring, the curves, the glass, a prism's face) now takes that face's OWN bend: the
+    /// squares' corners around it (`FlexibleOverlayMesh.CornerGrid`, the numbers the renderer moves the squares by); in the 3D sim
+    /// the field's own sample there. Other points keep the nearest vertex.
+    let faces: [FaceBend]
+    let field: FlexibleFEField?
+    let k: Float
 
-    init?(positions p: [Float], dents d: [Float], k: Double, key: String = "") {
+    /// One pressed face's bend for the pose: its squares' corner grid and its frame (core's from_uv(0, 0) back along the load).
+    struct FaceBend {
+        let grid: FlexibleOverlayMesh.CornerGrid
+        let origin: SIMD3<Double>
+        /// The squares' corner extent (cached: the grid's).
+        let extent: (u: ClosedRange<Double>, w: ClosedRange<Double>)?
+        init(grid: FlexibleOverlayMesh.CornerGrid, origin: SIMD3<Double>) {
+            self.grid = grid; self.origin = origin; self.extent = grid.extent
+        }
+        /// The face's own bend at `p` (mm along its load, before × k) when `p` lies ON the face; nil off it. `gap`: how far
+        /// `p` sits off the face's plane.
+        func bend(at p: SIMD3<Double>) -> (mm: Double, gap: Double)? {
+            let st = grid.stack
+            let q = p - origin
+            let p2 = st.pitchMM / 2
+            let u0 = simd_dot(q, st.xAxis), w0 = simd_dot(q, st.yAxis), t = simd_dot(q, st.load)
+            // ★ a stamp partly off the face (his Img1: "3.0 N of the stamp lands off the face") is drawn on in the face's plane past
+            // its edge: that part keeps the edge's bend (within `offFaceMM`), so the outline never steps from the bent edge to rest
+            guard let e = extent else { return nil }
+            let u = Swift.min(Swift.max(u0, e.u.lowerBound - p2), e.u.upperBound + p2)
+            let w = Swift.min(Swift.max(w0, e.w.lowerBound - p2), e.w.upperBound + p2)
+            guard abs(u - u0) <= FaceBend.offFaceMM, abs(w - w0) <= FaceBend.offFaceMM, let c = grid.column(u: u, w: w) else { return nil }
+            let gap = abs(t - c.entryT)
+            guard gap <= Swift.max(st.pitchMM, 1), let b = grid.bend(u: u, w: w) else { return nil }
+            return (b, gap)
+        }
+        /// How far past a face's grid (in its plane) a point still takes the face's edge bend.
+        static let offFaceMM = 40.0
+    }
+
+    /// ★ RED CONTROL only (LBR-EDGES): every point by the nearest overlay vertex (the zig-zag).
+    nonisolated(unsafe) static var controlNearestVertexPose = false
+
+    init?(positions p: [Float], dents d: [Float], k: Double, key: String = "", faces: [FaceBend] = [], field: FlexibleFEField? = nil) {
         let n = Swift.min(p.count, d.count) / 3
         guard n > 0, k > 0, k.isFinite else { return nil }
         var pos = [SIMD3<Float>](), mv = [SIMD3<Float>]()
@@ -164,6 +211,7 @@ struct FlexibleBendPose {
         for (i, q) in pos.enumerated() { b[Self.bucket(q, lo: lo, cell: cell), default: []].append(Int32(i)) }
         self.key = key; self.cell = cell; self.reach = cell; self.lo = lo
         self.buckets = b; self.positions = pos; self.moves = mv
+        self.faces = faces; self.field = field; self.k = Float(k)
     }
 
     private static func bucket(_ q: SIMD3<Float>, lo: SIMD3<Float>, cell: Float) -> SIMD3<Int32> {
@@ -173,6 +221,23 @@ struct FlexibleBendPose {
 
     /// The bend at `p`: the nearest overlay vertex's displacement × k, within `reach` of the part's surface; else none.
     func displacement(at p: SIMD3<Float>) -> SIMD3<Float> {
+        if !Self.controlNearestVertexPose, field == nil, !faces.isEmpty {
+            let pd = SIMD3<Double>(p)
+            var best: (mm: Double, gap: Double, load: SIMD3<Double>)?
+            for f in faces {
+                guard let b = f.bend(at: pd), best == nil || b.gap < best!.gap else { continue }
+                best = (b.mm, b.gap, f.grid.stack.load)
+            }
+            if let b = best { return SIMD3<Float>(b.load * b.mm) * k }
+        }
+        let n = nearest(p)
+        guard n >= 0 else { return .zero }
+        if !Self.controlNearestVertexPose, let f = field { return f.sample(p) * k }
+        return moves[Int(n)]
+    }
+
+    /// The nearest overlay vertex within `reach` of `p`, or −1.
+    private func nearest(_ p: SIMD3<Float>) -> Int32 {
         let c = Self.bucket(p, lo: lo, cell: cell)
         var best: Int32 = -1
         var bestD = reach * reach
@@ -183,7 +248,7 @@ struct FlexibleBendPose {
                 if e <= bestD { bestD = e; best = i }
             }
         } } }
-        return best >= 0 ? moves[Int(best)] : .zero
+        return best
     }
     /// `p` at the full bend.
     func apply(_ p: SIMD3<Float>) -> SIMD3<Float> { p + displacement(at: p) }
@@ -212,10 +277,13 @@ struct FlexibleBendPose {
     @MainActor private static var poseCache: (key: String, pose: FlexibleBendPose?)?
     @MainActor private static var itemsCache: (key: String, items: [ClearanceRenderItem], posed: [ClearanceRenderItem])?
 
-    @MainActor static func cached(positions: [Float], dents: [Float], k: Double, signature: UInt64) -> FlexibleBendPose? {
-        let key = Self.key(positions: positions, dents: dents, k: k, signature: signature)
+    @MainActor static func cached(positions: [Float], dents: [Float], k: Double, signature: UInt64,
+                                  faces: [FaceBend] = [], field: FlexibleFEField? = nil) -> FlexibleBendPose? {
+        // ★ U21: which rule poses (the faces' own bend, the field, the nearest vertex) is part of the key
+        let source = field.map { "f\($0.simID)|\($0.serial)" } ?? "c\(faces.count)"
+        let key = Self.key(positions: positions, dents: dents, k: k, signature: signature) + "|\(source)|\(controlNearestVertexPose)"
         if let c = poseCache, c.key == key { return c.pose }
-        let pose = FlexibleBendPose(positions: positions, dents: dents, k: k, key: key)
+        let pose = FlexibleBendPose(positions: positions, dents: dents, k: k, key: key, faces: faces, field: field)
         poseCache = (key, pose)
         return pose
     }

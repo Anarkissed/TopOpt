@@ -1,0 +1,4 @@
+lattice current, Group 2's sim landed: max move 6.275 mm · fe true · note '3D sim · as last saved' · legend 'Squish along the arrow · core's design'
+RED (stale gate + no preview): max move 0.000 mm · fe false · note 'Column preview · Save & Exit for the 3D sim'
+CONTROL (stale gate only): max 9.500 mm (the edge preview) · fe false
+after the edit, 9.9 s: max move 6.191 mm · fe true · note 'Last saved lattice · Save & Exit updates it' · tuned true · legend 'Squish along the arrow · core's design' · sim ready(TopOpt · in flight false
