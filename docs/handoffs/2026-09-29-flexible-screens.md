@@ -123,7 +123,38 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
-## ★ Round 7 · MANUAL, part M2 — predictions, and Auto removed in Manual (2026-10-22) (read this first)
+## ★ Round 7 · MANUAL installed — parts M1 + M2 together (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), at `49f42b6a`. NOT pushed (your HOLD). App only; core untouched; no #354/main file
+edited; no new hook. Auto is unchanged: it looks, builds and sends exactly what it did before.
+
+### What you will see in this install
+- **The toggle**: open a model's Flexible stage → the Squish page. On the settings card's top line, beside [Reset all], are
+  two chips **[Manual | Auto]**. Auto is picked by default, so nothing changes until you tap Manual.
+- **Manual, the Model card**: a section "Lattice · you set it" with four lines: Lattice [Gyroid | Honeycomb], Cell size,
+  Density %, Walls (beads). Density and walls follow each other. It starts from what Auto last built. If the walls aren't a
+  whole bead, one line says so and gives a one-tap fix.
+- **Manual, each group card**: "Lattice · same as the part" [Set its own]. Only a group's own density is drawn for now; its
+  own type and walls are saved and shown but drawn as the part's (see the open items under M1).
+- **What is an estimate in Manual**: every depth. The face card shows "Squishes ≈ 2.8 mm at 5 lb", the chips on the model show
+  "≈ 2.8 mm", and the edge card's depth is the same kind of line. The curve window opens read only ("Face 3 · what your
+  lattice does") with a single [Done]. The views say so on their top line (e.g. "Bend · estimate ≈ 2.8 mm at 5 lb"). Before
+  the first Save & Exit it says "Squish estimate · Save & Exit to see it".
+- **Still yours in Manual**: which faces and edges are pressed, the weight, what presses on it (stamp), and an edge's Tilt/Twist.
+- Auto's lattice pick and its "can't reach your curve" style warnings are hidden in Manual.
+- Not done yet: the main (Lattice) page still shows the stored depth (and its stamp caption) in Manual; only the Squish page is.
+
+### Runs (`round7/manual_install/install_runs.txt`)
+- The union of M1's and M2's classes and pins (72 classes incl. FlexibleSquishCopyTests): 414 passed, 1 failed, 24 skipped
+  (picture probes). The failure is the known batch I one (FlexibleSettingsPageHostedTests 11" landscape "as opened", card
+  566-812). FlexibleM1ManualTests 8/8, FlexibleM2PredictTests 5/5, the hosted Manual probe on your pad passed. Nothing to fix.
+- Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes are cmp-identical to batch I's install, M1's and M2's (`stage_job_hashes_minst.txt`).
+- iOS: BUILD SUCCEEDED at 49f42b6a. The app was running and was terminated; installed 19:53:01, NOT launched. Installed
+  dylib == built (cmp; sha256 05ea341b…); the new strings are in it ("Lattice · you set it", "Lattice · same as the part",
+  "Set its own", "Squish estimate · Save & Exit to see it", "what your lattice does", "not a whole bead").
+
+## ★ Round 7 · MANUAL, part M2 — predictions, and Auto removed in Manual (2026-10-22)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed. Not installed (the installer does that). App only; core untouched; no
 #354/main file edited; no new hook. Your words of 02:30: "Remove any of the auto processes and make it as simple to understand as
