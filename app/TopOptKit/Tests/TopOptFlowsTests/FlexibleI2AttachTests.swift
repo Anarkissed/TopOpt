@@ -29,7 +29,19 @@ final class FlexibleI2AttachTests: XCTestCase {
         FlexibleFaceCommits.controlLinksEmptyArray = false
         FlexibleFaceCommits.controlTrashPrunesLinks = false
         FlexibleStageSettings.controlLinksInDesignInputs = false
+        FlexibleAttach.controlOverlayGhostOnlyWhenStale = false
         super.tearDown()
+    }
+
+    // MARK: 16 — step 2 shows "the model with the lattice as a ghost" even with a built lattice (the checker's fix:
+    // the pass's 0.12 ghost was invisible over the opaque model in I2_03)
+
+    func testStepTwoOverlayDrawsTheGhostWithABuiltLattice() {
+        XCTAssertTrue(FlexibleAttach.overlayDrawsGhost(fresh: true), "★ a built lattice: the overlay still draws its walls as a ghost")
+        XCTAssertTrue(FlexibleAttach.overlayDrawsGhost(fresh: false), "no lattice built: the overlay's ghost")
+        // ★ RED CONTROL: I2's first rule — the overlay's ghost only with no (or a stale) lattice
+        FlexibleAttach.controlOverlayGhostOnlyWhenStale = true
+        XCTAssertFalse(FlexibleAttach.overlayDrawsGhost(fresh: true), "★ RED: nothing drawn over the opaque model")
     }
 
     func bracket() throws -> FlexibleHisProject.Restored {

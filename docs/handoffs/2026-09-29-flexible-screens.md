@@ -138,7 +138,8 @@ away. NOT pushed, NOT installed (the installer does it, with I3). App only: no c
   links exactly as it loses its depth/expand boxes. A face set Solid/Off keeps its links, greyed "· lattice off".
 - On the iPad mini in portrait the card with its Attach row has no clear spot beside the open list, so there [🔗] sits on the
   card's title line (with the link count) and the one-tap suggestion row is not shown.
-- Step 2's ghost lattice is faint over the dimmed model (the pass's 0.12 ghost); the lit wall and its tag carry the step.
+- Step 2's ghost lattice: the pass's 0.12 ghost did not show over the dimmed model, so the checker made the overlay draw the
+  lattice's walls as a ghost (faint fill, dashed edges) even with a built lattice (I2_03b; FlexibleI2AttachTests test 16).
 - Correction to the spec's §4.5: at expand −0.3 Side 4 still touches (the foot is beyond it); Sides 1–3 read "thinner than a
   bead". (#354's expand setter snaps −0.3 to 0, so that case is reachable only by test.)
 - With Face 0 AND Face 6 latticed, the edge they share is a seam (the lattice continues) — never a wall.

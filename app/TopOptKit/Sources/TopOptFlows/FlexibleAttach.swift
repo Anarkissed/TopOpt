@@ -78,6 +78,12 @@ public enum FlexibleAttach {
     nonisolated(unsafe) static var controlTagsPlacedOnce = false
     /// ★ RED CONTROL (hosted h): Kind `.attach` measured as `.member` (the step card's buttons clipped / on the chrome).
     nonisolated(unsafe) static var controlAttachUsesMemberSize = false
+    /// ★ RED CONTROL (I2 test 16): I2's first rule — step 2's overlay ghost only with no (or a stale) lattice.
+    nonisolated(unsafe) static var controlOverlayGhostOnlyWhenStale = false
+    /// Step 2 draws the lattice's walls at the ghost alpha on top of the model. His words: "it shows the model with the
+    /// lattice as a ghost". The pass's own ghost (0.12, depth .always) was not visible over the opaque body (I2_03), so the
+    /// overlay draws it whether or not a lattice is built.
+    static func overlayDrawsGhost(fresh: Bool) -> Bool { controlOverlayGhostOnlyWhenStale ? !fresh : true }
     /// ★ RED CONTROL (I2 test 13): stale links pruned when listed.
     nonisolated(unsafe) static var controlPruneStale = false
 

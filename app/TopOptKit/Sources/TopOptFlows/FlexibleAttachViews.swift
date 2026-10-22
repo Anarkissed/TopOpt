@@ -227,8 +227,14 @@ struct FlexibleAttachWallsOverlay: View {
                 }
                 let accent = DS.Color.accent.color
                 if let w = picked {
-                    // step 2: the lattice as a ghost when none is drawn yet, the picked wall bright, its lit solid on top
-                    if !fresh { for x in all { for q in x.quads { if let p = path(q) { ctx.fill(p, with: .color(Color.white.opacity(0.12))) } } } }
+                    // step 2: the lattice as a ghost (drawn here even with a built lattice: the pass's ghost does not show over
+                    // the opaque model), the picked wall bright, its lit solid on top
+                    if FlexibleAttach.overlayDrawsGhost(fresh: fresh) {
+                        for x in all { for q in x.quads { if let p = path(q) {
+                            ctx.fill(p, with: .color(Color.white.opacity(0.12)))
+                            ctx.stroke(p, with: .color(Color.white.opacity(0.5)), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        } } }
+                    }
                     for q in w.quads {
                         guard let p = path(q) else { continue }
                         ctx.fill(p, with: .color(accent.opacity(0.30)))
