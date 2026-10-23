@@ -59,7 +59,8 @@ struct FlexibleManualLatticeRows: View {
         var r = ["type", "walls", "density", "cell", "cellsAcross", "grade"]
         if gradeOn { r += ["gradeBy", "from", "to", "along", "style"] }
         r.append("facts")
-        if group == nil { r.append("temperature") }
+        // ★ ONE NOZZLE ROW (his words of 2026-10-23 ~03:05): the temperature is More's "Nozzle °C", as in Auto (RED CONTROL: P1's row)
+        if group == nil, FlexibleStageModel.controlTwoTemperatureRows { r.append("temperature") }
         return r
     }
 
@@ -136,9 +137,9 @@ struct FlexibleManualLatticeRows: View {
                     }
                 }
                 FlexibleManualFacts(model: model, group: group)
-                if group == nil, let m = model.material, m.noPrediction == nil, !m.testedTempsC.isEmpty {
+                if rows.contains("temperature"), let m = model.material, m.noPrediction == nil, !m.testedTempsC.isEmpty {
                     let t = model.manualTempC.map { String(Int($0)) } ?? ""
-                    FlexRow(C.temperature, info: C.Info.temperature, id: "flexible-manual-temp") {
+                    FlexRow("Temperature", info: C.Info.temperature, id: "flexible-manual-temp") {
                         chips("temp", m.testedTempsC.map { (String(Int($0)), "\(Int($0)) °C") }, t) { v in
                             if let d = Double(v) { model.setManualTemp(d) }
                         }

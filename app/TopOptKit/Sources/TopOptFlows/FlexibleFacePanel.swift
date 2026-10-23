@@ -421,32 +421,16 @@ struct FlexibleFaceRows: View {
 
 struct FlexibleMorePanel: View {
     @ObservedObject var model: FlexibleStageModel
+    /// ★ NOZZLE GRADE: the keypad slot of the grade's From / To boxes.
+    @Binding var padTarget: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             let calibrateFirst = model.material?.noPrediction != nil
-            // ★ round 7 polish (MANUAL): in Manual the Model card's Temperature is the one setting — More's Nozzle row is Auto's
-            if !model.isManual, let m = model.material, m.noPrediction == nil {
-                // a temperature core has a note on (not in order, estimated…) is said by the
-                // row's colour; the (i) carries the note itself
-                let note = model.settings.nozzleTempC.map { model.temperatureNote($0) } ?? ""
-                // (MANUAL P1's in-Manual variant of this row is gone: the Model card's Temperature is Manual's one setting)
-                FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp",
-                        warning: !note.isEmpty) {
-                    FlexChips(options: FlexibleRowCopy.temperatureOptions(m.testedTempsC),
-                              selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp",
-                              equalWidths: false) { v in
-                        model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) }
-                    }
-                    .fixedSize()
-                } extra: {
-                    if let t = model.settings.nozzleTempC, !note.isEmpty {
-                        FlexInfoText("\(Int(t)) °C: \(note)", warning: true)
-                    }
-                }
-            } else if !model.isManual {
-                FlexRow(FlexibleRowCopy.temperatureNoData, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp")
-            }
+            // ★ ONE NOZZLE ROW (his words of 2026-10-23 ~03:05: "what's the difference between "temperature" and "nozzle" shouldn't
+            // they be the same???" then "Temperature needs a grade option"): "Nozzle °C" in Auto AND Manual (Manual: no Auto chip),
+            // then its grade up the build height
+            FlexibleNozzleRows(model: model, padTarget: $padTarget)
             // ★ MANUAL (M1): Auto's lattice pick and Auto's line are gone in Manual (his type is on [Model])
             if !calibrateFirst, !model.isManual {
                 FlexRow(FlexibleRowCopy.topology, info: FlexibleRowCopy.Info.topology, id: "flexible-row-topology") {

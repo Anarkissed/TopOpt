@@ -129,6 +129,18 @@ Each item: what core does, where, the evidence, your numbers.
    face from that depth. Core's design has no per-face depth of its own lattice to hand over (`lattice_mm` is the whole column's,
    item 8(a)); the app measures it from core's voxel owners.
 
+14. **Per-layer nozzle temperature in the job / export (round 7 · NOZZLE GRADE).** Your words of 2026-10-23 ~03:05: "Temperature
+   needs a grade **option**". Core's Flexible block takes ONE `nozzle_temp_c` (`core/src/flexible/job_block.cpp:76-78`), and
+   `curve_set` refuses any untested temperature, "squish is never interpolated between temperatures (R10)"
+   (`core/src/flexible/squish.cpp:140-149`). The app now stores a grade up the build height (`lattice.flexible.nozzleGrade`:
+   From °C at the bed, To °C at the top, Default smooth or Stepped bands). Only the app's display sim reads it: a temperature per
+   scene voxel (`FlexSquishRequest.temp_c`); the law interpolates σ in °C between the tested sets (190 / 220 / 240) and
+   extrapolates past them, marked. It is never in a job: the 16 stage-job hashes are identical. Core would need: (a) a per-layer
+   (per-height) temperature in the Flexible job and its designs, i.e. a ruling on R10 (interpolate between tested temperatures,
+   or allow tested temperatures only, in bands); (b) the heights carried in the export or G-code, so the slicer gets them. Today
+   the card gives those heights for you to type into the slicer. Data note: varioShore's curves are not in order with
+   temperature. 220 °C is the softest; 240 °C is a little firmer (gyroid ρ 0.2 at ε 0.1: 190 0.219, 220 0.077, 240 0.084 MPa).
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
@@ -147,6 +159,59 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · ONE "Nozzle °C" row, and a temperature GRADE up the part (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (the app was open; ready on your OK). App only:
+core untouched, no #354/main file edited, no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/nozzle_grade/`.
+
+Your words of ~03:05: "temperature also needs a grade... also, what's the difference between "temperature" and "nozzle"
+shouldn't they be the same???" then "Temperature needs a grade **option**". They were the same thing: the nozzle temperature
+(varioShore foams more when hotter, so it prints softer). Showing two rows was a bug.
+
+What you get, in plain words:
+- **One row, "Nozzle °C", under More, in Auto and in Manual.** It is the same place and look in both modes. Auto keeps its Auto
+  chip; Manual shows only the tested temperatures (NG_01, NG_02). The Model card's "Temperature" row is gone, and so is the second
+  stored value: a pick in Manual is the same setting Auto shows.
+- **Grade [Off | On] under it.** When on, it adds three rows:
+  - From °C · bottom (the first layer);
+  - To °C · top (the last layer);
+  - Style: Default (changes a little every layer) or Stepped (bands).
+  It runs up the BUILD HEIGHT, because a nozzle only changes temperature between layers. Switched on, From starts at the row's
+  temperature and To at the next tested temperature above it.
+- **The squish estimate and the views use each layer's temperature.** Your pad in Manual, 190 → 220 °C: the deepest estimate goes
+  from 1.69 mm (190 °C everywhere) to 3.37 mm. Per layer, the lattice's stiffness against the 190 °C solve is 0.94 at 2 mm,
+  0.72 at 9 mm and 0.42 at 19 mm (hotter layers squish more). Between 190, 220 and 240 °C it is interpolated; past them it is
+  extrapolated and the card says "Estimate past tested data (190–240 °C)".
+- **A line with the heights for your slicer** (44 characters a line, two lines at most):
+  - Stepped: "190 °C to 10 mm · 220 °C";
+  - Default: "190 °C at the bed → 240 °C at 20 mm" / "+5 °C every 2 mm up the part".
+- **Auto:** the grade drives Auto's display sim the same way (no rebuild: the sims re-solve). Core's job still carries one
+  temperature, so the card adds "Shown in the sim only · core's job: one °C". Auto's job bytes are unchanged. CORE LIST item 14.
+
+Decisions made here (yours to overturn):
+- Stepped makes one band per ~25 °C, 2 to 4 bands of equal height: 190 → 220 gives 2, 190 → 240 gives 3 (190 / 215 / 240).
+- Heights are measured from the part's lowest point along the build direction (its mesh).
+- From / To can be set from 180 to 260 °C.
+- varioShore is not in order with temperature: 240 °C is a little FIRMER than 220 °C. A 220 → 240 grade barely changes anything.
+- Core never interpolates between temperatures (R10). This interpolation is the display sim's own, said here and in the (i).
+- The grade row is titled "Grade", the same word as the lattice's Grade above it on the Model card in Manual (NG_01). It sits
+  right under "Nozzle °C".
+- Found while testing: quick re-solves (Stepped on/off) could leave the sims "working…" for ever. An older hand-over could
+  schedule last, and every answer it got was discarded. Fixed: a hand-over checks its own epoch (`startSquishSims`).
+
+Tests (`FlexibleNozzleGradeTests`, 4, red controls asserted red inside each):
+- one row in both modes (RED: today's two rows and two values);
+- Stepped makes bands, plus the slicer line (RED: Stepped ignored);
+- Manual: graded estimate layer by layer (RED: grade not in the sim, the estimate stays 1.69 mm);
+- Auto: the grade in the sim, job bytes unchanged (RED: the grade written as the nozzle setting changes the job).
+
+Run once (17 classes): 114 executed, 3 failed. Two were source pins of "More's Nozzle row is Auto's only", which your words
+supersede; they are re-pinned and pass on re-run (12/0). The third is the known 11" landscape hosted test. Goldens: det 38 /
+unseeded 32 + 1 PART-SKIP, 0 DIFFERS. The 16 stage-job hashes are identical to auto_floor's (`nozzle_grade/ng_runs.txt`).
+Renders (13" portrait, your pad):
+- NG_01: Manual, the one row with the grade Stepped;
+- NG_02: Auto, with the Auto chip, Default.
 
 ## ★ Round 7 · Auto at the floor says so and grades by your shape; Manual grades along your curve OR stamp (2026-10-23) (read this first)
 

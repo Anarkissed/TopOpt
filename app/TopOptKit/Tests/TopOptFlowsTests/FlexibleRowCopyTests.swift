@@ -128,7 +128,10 @@ final class FlexibleRowCopyTests: XCTestCase {
         XCTAssertTrue(panel.contains("FlexibleRowCopy.autoLine("))
         XCTAssertTrue(panel.contains("warning: auto.warning"))
         XCTAssertFalse(panel.contains(".frame(width: 2"), "no chip row squeezed into a fixed frame")
-        XCTAssertTrue(panel.contains("warning: !note.isEmpty"), "a temperature core has a note on is coloured")
+        // ★ RE-PINNED (his words of 2026-10-23 ~03:05: "shouldn't they be the same???"): the ONE Nozzle row lives in FlexibleNozzleGrade
+        let nozzle = (try? String(contentsOf: root.appendingPathComponent("FlexibleNozzleGrade.swift"), encoding: .utf8)) ?? ""
+        XCTAssertTrue(panel.contains("FlexibleNozzleRows(model: model, padTarget: $padTarget)"), "More draws the one Nozzle row")
+        XCTAssertTrue(nozzle.contains("warning: !note.isEmpty"), "a temperature core has a note on is coloured")
     }
 
     #if canImport(AppKit)

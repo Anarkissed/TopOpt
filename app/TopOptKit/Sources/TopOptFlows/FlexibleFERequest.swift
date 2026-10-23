@@ -74,6 +74,21 @@ public struct FlexibleFERequest: Sendable {
     public var walls: [String: [FlexHeldWallInfo]] = [:]
     /// ★ U21 · I3: the model's hold epoch these walls belong to (every field solved from this request carries it).
     public var holdEpoch = 0
+    /// ★ ROUND 7 · NOZZLE GRADE (his words of 2026-10-23 ~03:05: "Temperature needs a grade option"): per scene voxel, the nozzle
+    /// °C its layer prints at (FlexibleNozzleGradeMath.field); empty: no grade, every voxel at the law's one temperature. Display
+    /// sim only — never in `designInputs`, never in a job (CORE LIST: per-layer nozzle temperature in the job/export). A grade edit
+    /// re-solves the sims with new temperatures (FlexibleStageModel.regradeSims), never the lattice.
+    public var tempC: [Float] = []
+    /// ★ NOZZLE GRADE: what `tempC` was made from (FlexibleStageModel.nozzleGradeKey; "" with no grade).
+    public var tempKey = ""
+
+    /// ★ NOZZLE GRADE: this request with `t` as its per-voxel temperatures (made from `key`).
+    public func with(tempC t: [Float], key: String) -> FlexibleFERequest {
+        var r = self
+        r.tempC = t.count == rho.count ? t : []
+        r.tempKey = r.tempC.isEmpty ? "" : key
+        return r
+    }
 
     /// ★ U21 · I1, RED CONTROL only: every request sends today's chain (rule 0, no anchor) — his l-bracket's Face 2 glued.
     nonisolated(unsafe) public static var controlLegacyHold = false
@@ -88,6 +103,7 @@ public struct FlexibleFERequest: Sendable {
         r.hold = hold
         r.walls = walls; r.holdEpoch = holdEpoch   // ★ U21 · I3
         r.simTopology = simTopology   // ★ MANUAL P1
+        r.tempC = tempC; r.tempKey = tempKey   // ★ NOZZLE GRADE
         return r
     }
 
@@ -168,6 +184,7 @@ public struct FlexibleFERequest: Sendable {
         q.anchorFaceIDs = h.anchorFaceIDs
         q.anchorRegionIDs = h.anchorRegionIDs
         if !Self.controlIgnoreLinks { q.heldWalls = walls[sim.id] ?? [] }   // ★ U21 · I3
+        q.tempC = tempC   // ★ NOZZLE GRADE
         return q
     }
 

@@ -86,6 +86,9 @@ public struct FlexSquishRequestInfo: Sendable {
     /// ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"): the live
     /// linked walls of the lattices this group presses into — the solid beyond each is held, bonded (display sim only; never a job).
     public var heldWalls: [FlexHeldWallInfo] = []
+    /// ★ ROUND 7 · NOZZLE GRADE (his words of 2026-10-23 ~03:05: "Temperature needs a grade option"): per scene voxel, the nozzle
+    /// °C its layer prints at; empty (no grade): every voxel at `law.tempC`, exactly as before. Display sim only, never a job.
+    public var tempC: [Float] = []
     public init(pressed: [FlexSquishPressInfo], restingIDs: [Int], rho: [Float], strainOp: [Float], skinFrac: [Float],
                 law: FlexSquishLawInfo, poisson: Double = 0.3, tolerance: Double = 1e-4, deadlineMS: Double = 20_000,
                 coarsen: Int = 0, control: Int = 0) {
@@ -223,6 +226,7 @@ extension FlexibleScene {
         q.rho = FlexSquishConv.f(r.rho)
         q.strain_op = FlexSquishConv.f(r.strainOp)
         q.skin_frac = FlexSquishConv.f(r.skinFrac)
+        if !r.tempC.isEmpty { q.temp_c = FlexSquishConv.f(r.tempC) }   // ★ ROUND 7 · NOZZLE GRADE
         q.law = FlexSquishConv.law(r.law)
         q.poisson = r.poisson
         q.tolerance = r.tolerance

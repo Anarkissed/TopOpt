@@ -129,7 +129,8 @@ final class FlexibleManualP1Tests: XCTestCase {
             XCTAssertFalse(s.hasSuffix("…"), "never cut: \(s)")
         }
         XCTAssertEqual(FlexibleManualLatticeRows.rows(group: nil, gradeOn: true),
-                       ["type", "walls", "density", "cell", "cellsAcross", "grade", "gradeBy", "from", "to", "along", "style", "facts", "temperature"])
+                       ["type", "walls", "density", "cell", "cellsAcross", "grade", "gradeBy", "from", "to", "along", "style", "facts"],
+                       "★ RE-PINNED (his words of 2026-10-23 ~03:05: \"shouldn't they be the same???\"): the temperature is More's one Nozzle °C row")
         XCTAssertEqual(FlexibleManualLatticeRows.rows(group: 2, gradeOn: false),
                        ["type", "walls", "density", "cell", "cellsAcross", "grade", "facts"], "★ a group: the same set (no temperature)")
     }
@@ -151,14 +152,15 @@ final class FlexibleManualP1Tests: XCTestCase {
         let temps = m.material?.testedTempsC ?? []
         let hot = try XCTUnwrap(temps.max(), "premise: tested temperatures")
         m.setManualTemp(hot)
-        let auto = m.settings.nozzleTempC
         // round-trip
         let back = try JSONDecoder().decode(FlexibleStageSettings.self, from: try JSONEncoder().encode(m.settings))
         XCTAssertEqual(back.manual, m.settings.manual, "★ round-trips")
         let own = try XCTUnwrap(back.manual?.lattice(group: g.id))
         XCTAssertEqual(own.topology, "honeycomb"); XCTAssertEqual(own.beads, 2); XCTAssertEqual(own.density, 0.25, accuracy: 1e-12)
         XCTAssertEqual(back.manual?.part.topology, "gyroid", "★ the part keeps its own type")
-        XCTAssertEqual(back.manual?.tempC, hot); XCTAssertEqual(back.nozzleTempC, auto, "★ Auto's temperature untouched")
+        // ★ RE-PINNED (his words of 2026-10-23 ~03:05: "what's the difference between "temperature" and "nozzle" shouldn't they be
+        // the same???"): ONE nozzle setting — Manual writes it, no second copy
+        XCTAssertNil(back.manual?.tempC); XCTAssertEqual(back.nozzleTempC, hot, "★ one nozzle setting")
         let cardCell = try XCTUnwrap(m.manualCellMM(group: g.id))
         XCTAssertEqual(cardCell, 2 * 2 * bw / 0.25, accuracy: 1e-9, "★ the card: honeycomb d = 2t/ρ at 2 beads")
 

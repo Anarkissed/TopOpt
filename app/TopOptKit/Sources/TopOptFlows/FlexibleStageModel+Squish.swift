@@ -16,7 +16,8 @@ extension FlexibleStageModel {
     func latticeLanded(_ landed: FlexibleFERequest?) {
         squishSolver.cancel()
         // ★ U21 · I3: the live linked walls as they are now, under the current hold epoch; the request is kept for a relink
-        let request = landed.map { $0.with(walls: linkWalls(), epoch: holdEpoch) }
+        // ★ NOZZLE GRADE: and each layer's nozzle temperature as the grade says now (empty: none)
+        let request = landed.map { $0.with(walls: linkWalls(), epoch: holdEpoch).with(tempC: nozzleTempField(), key: nozzleGradeKey) }
         shownWalls = request?.walls ?? [:]
         simRequest = request
         feRequest = request
@@ -52,7 +53,11 @@ extension FlexibleStageModel {
         // (tracked: `waitForIdle` waits for the hand-over too, so no sim starts after it returned)
         track(Task { @MainActor [weak self] in
             let scene = await worker.sceneRef()
-            guard let self, self.feRequest?.generation == r.generation, self.lattice?.generation == r.generation else { return }
+            // ★ NOZZLE GRADE: and the request's own epoch — quick re-solves (Stepped on/off, a scrubbed From / To) each queue a
+            // hand-over; they need not resume in order, and an older one scheduled last had every answer discarded (stale epoch):
+            // the sims stayed "working" for ever (found by FlexibleNozzleGradeTests on his pad)
+            guard let self, self.feRequest?.generation == r.generation, self.lattice?.generation == r.generation,
+                  self.feRequest?.holdEpoch == r.holdEpoch else { return }
             guard let scene else {
                 for sim in r.sims { self.squishLanded(r.generation, sim.id, .failed("The part is still opening.")) }
                 return
@@ -143,10 +148,11 @@ extension FlexibleStageModel {
     /// The live linked walls moved since the shown sims were scheduled (a link added / removed, its Undo, an edit that made one
     /// stale or live again): re-solve. Cheap when nothing moved (the walls are memoised); called on every project change.
     public func relinkIfNeeded() {
-        guard !controlNoRelink else { return }
-        let want = linkWalls()
-        guard want != shownWalls else { return }
-        relinkSims(want)
+        if !controlNoRelink {
+            let want = linkWalls()
+            if want != shownWalls { relinkSims(want) }
+        }
+        regradeIfNeeded()   // ★ NOZZLE GRADE: a grade edit (or its Undo) re-solves the sims the same way
     }
 
     /// His links of 2026-10-21 (~15:45: "the linked walls HOLD that lattice"): the shown lattice's sims solved again with `walls`
@@ -156,7 +162,12 @@ extension FlexibleStageModel {
         holdEpoch += 1
         shownWalls = walls
         guard let r0 = simRequest, let l = lattice, r0.generation == l.generation else { return }   // the next build takes them
-        let r = r0.with(walls: walls, epoch: holdEpoch)
+        restartSims(r0.with(walls: walls, epoch: holdEpoch))
+    }
+
+    /// ★ U21 · I3 + NOZZLE GRADE: the shown lattice's sims solved again from `r` (its generation's) — the old fields and refines
+    /// dropped, the lattice untouched.
+    func restartSims(_ r: FlexibleFERequest) {
         simRequest = r
         if keepFERequest { keepLastFERequest(r) }
         feBase = r.base

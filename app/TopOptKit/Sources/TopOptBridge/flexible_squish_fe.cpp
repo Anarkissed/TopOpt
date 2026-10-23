@@ -118,17 +118,24 @@ struct Law {
   // (σ_b − σ_a)/(ρ_b − ρ_a)): continuous and C¹ at the row (no kink), monotone in ρ (n > 0; rows that do not rise take the
   // textbook n = 2). false (Auto): the clamp, exactly as before.
   bool extrapolate = false;
-  double stress(double eps, double rho) const {
-    const double lo = set.density_min(), hi = set.density_max();
-    if (!extrapolate || set.rows.size() < 2 || (rho >= lo && rho <= hi)) {
-      const fx::StressResult s = fx::stress_at(set, eps, std::min(std::max(rho, lo), hi));
+  // ★ ROUND 7 · NOZZLE GRADE (his words of 2026-10-23 ~03:05: "Temperature needs a grade option"): every tested temperature's
+  // curve set (sorted by °C), loaded only when the request carries a per-voxel temperature (`temp_c`). A voxel's σ is the LINEAR
+  // interpolation in °C between the two tested sets around it (past the tested ends: the end interval's line, floored at 5 % of
+  // the nearer set — "estimate past tested data", marked by the app). Core never interpolates between temperatures (R10): this is
+  // the display sim's own estimate, said in the handoff. Empty (no grade): every voxel at `set`, exactly as before.
+  std::vector<double> grade_t;
+  std::vector<fx::CurveSet> grade_sets;
+  double stress_in(const fx::CurveSet& cs, double eps, double rho) const {
+    const double lo = cs.density_min(), hi = cs.density_max();
+    if (!extrapolate || cs.rows.size() < 2 || (rho >= lo && rho <= hi)) {
+      const fx::StressResult s = fx::stress_at(cs, eps, std::min(std::max(rho, lo), hi));
       return s.ok ? s.stress_mpa : -1.0;
     }
     const bool below = rho < lo;
-    const std::size_t n = set.rows.size();
-    const double ra = below ? set.rows[0].core_density : set.rows[n - 2].core_density;
-    const double rb = below ? set.rows[1].core_density : set.rows[n - 1].core_density;
-    const fx::StressResult sa = fx::stress_at(set, eps, ra), sb = fx::stress_at(set, eps, rb);
+    const std::size_t n = cs.rows.size();
+    const double ra = below ? cs.rows[0].core_density : cs.rows[n - 2].core_density;
+    const double rb = below ? cs.rows[1].core_density : cs.rows[n - 1].core_density;
+    const fx::StressResult sa = fx::stress_at(cs, eps, ra), sb = fx::stress_at(cs, eps, rb);
     if (!sa.ok || !sb.ok) return -1.0;
     const double re = below ? ra : rb, se = below ? sa.stress_mpa : sb.stress_mpa;
     if (!(se > 0.0)) return -1.0;
@@ -136,8 +143,23 @@ struct Law {
     if (!(k > 0.0) || !std::isfinite(k)) k = 2.0;
     return se * std::pow(std::max(rho, 1e-6) / re, k);
   }
+  double stress(double eps, double rho) const { return stress_in(set, eps, rho); }
+  // σ at the voxel's own nozzle temperature `t` (NaN: the law's one temperature — `stress`, byte for byte).
+  double stress_t(double eps, double rho, double t) const {
+    if (grade_sets.size() < 2 || !std::isfinite(t)) return stress(eps, rho);
+    std::size_t i = 0;
+    while (i + 2 < grade_t.size() && t > grade_t[i + 1]) ++i;
+    const double ta = grade_t[i], tb = grade_t[i + 1];
+    const double sa = stress_in(grade_sets[i], eps, rho), sb = stress_in(grade_sets[i + 1], eps, rho);
+    if (!(sa > 0.0) || !(sb > 0.0)) return stress(eps, rho);
+    if (t == ta) return sa;
+    if (t == tb) return sb;
+    const double f = (t - ta) / std::max(tb - ta, 1e-9);
+    const double v = sa + f * (sb - sa);
+    return std::max(v, 0.05 * (f < 0.5 ? sa : sb));
+  }
 
-  double lattice(double rho, double strain, int control) const {
+  double lattice(double rho, double strain, int control, double t = std::numeric_limits<double>::quiet_NaN()) const {
     if (relative) {
       const double r = std::max(rho, 0.05);
       return r * r;
@@ -147,14 +169,15 @@ struct Law {
     const double eps = strain > 0.0 ? std::min(std::max(strain, kEpsMin), lim) : kEpsRef;
     // control 256: the table's NOMINAL strain axis (no skin correction) — the wrong law
     const double at = (control & kNominalStrain) ? std::min(eps * kNominalToCore, lim) : eps;
-    const double s = stress(at, r);
+    const double s = stress_t(at, r, t);
     return s > 0.0 ? s / eps : 0.0;
   }
 
-  double voxel(double rho, double strain, double skin, int control) const {
+  double voxel(double rho, double strain, double skin, int control,
+               double t = std::numeric_limits<double>::quiet_NaN()) const {
     if (rho < 0.0 || (control & kLatticeSolid)) return es;
     const double f = std::min(1.0, std::max(0.0, skin));
-    const double e = f * es + (1.0 - f) * lattice(rho, strain, control);
+    const double e = f * es + (1.0 - f) * lattice(rho, strain, control, t);
     return std::max(e, 1e-4 * es);
   }
 
@@ -176,7 +199,7 @@ struct Law {
     const double lim = set.strain_limit();
     return std::min(0.95, std::max(lim + 0.05, 1.0 - densification * r));
   }
-  double lattice_at(double rho, double strain) const {
+  double lattice_at(double rho, double strain, double t = std::numeric_limits<double>::quiet_NaN()) const {
     if (relative) {
       const double r = std::max(rho, 0.05);
       return r * r;
@@ -185,13 +208,13 @@ struct Law {
     const double lim = set.strain_limit();
     const double e = std::max(strain, kEpsMin);
     if (e <= lim) {
-      const double s = stress(e, r);
+      const double s = stress_t(e, r, t);
       return s > 0.0 ? s / e : 0.0;
     }
-    const double sl = stress(lim, r);
+    const double sl = stress_t(lim, r, t);
     if (!(sl > 0.0)) return 0.0;
     if (past == 0) return sl / lim;
-    const double s2 = stress(lim - 0.01, r);
+    const double s2 = stress_t(lim - 0.01, r, t);
     const double et = s2 >= 0.0 ? (sl - s2) / 0.01 : sl / lim;
     const double ed = densification_strain(r);
     if (e >= ed - 1e-3) return es;
@@ -199,15 +222,16 @@ struct Law {
     const double sigma = sl * std::pow((ed - lim) / (ed - e), m);
     return std::min(sigma / e, es);
   }
-  double voxel_at(double rho, double strain, double skin, int control) const {
+  double voxel_at(double rho, double strain, double skin, int control,
+                  double t = std::numeric_limits<double>::quiet_NaN()) const {
     if (rho < 0.0 || (control & kLatticeSolid)) return es;
     const double f = std::min(1.0, std::max(0.0, skin));
-    const double e = f * es + (1.0 - f) * lattice_at(rho, strain);
+    const double e = f * es + (1.0 - f) * lattice_at(rho, strain, t);
     return std::max(e, 1e-4 * es);
   }
 };
 
-Law make_law(const FlexSquishLaw& in, const fx::FlexibleData& data) {
+Law make_law(const FlexSquishLaw& in, const fx::FlexibleData& data, bool graded = false) {
   Law L;
   L.relative = in.shape_only;
   L.extrapolate = in.extrapolate;   // ★ R7 MANUAL P1
@@ -218,6 +242,24 @@ Law make_law(const FlexSquishLaw& in, const fx::FlexibleData& data) {
     } else {
       L.set = r.set;
     }
+  }
+  // ★ ROUND 7 · NOZZLE GRADE: every tested temperature's set (a refused one is skipped; fewer than 2: no grade)
+  if (graded && !L.relative) {
+    for (double t : fx::tested_temperatures(data, in.material_id)) {
+      const fx::CurveSetResult r = fx::curve_set(data, in.material_id, t, in.topology);
+      if (r.refusal.refused()) continue;
+      L.grade_t.push_back(t);
+      L.grade_sets.push_back(r.set);
+    }
+    std::vector<std::size_t> o(L.grade_t.size());
+    for (std::size_t i = 0; i < o.size(); ++i) o[i] = i;
+    std::sort(o.begin(), o.end(), [&](std::size_t a, std::size_t b) { return L.grade_t[a] < L.grade_t[b]; });
+    std::vector<double> ts;
+    std::vector<fx::CurveSet> ss;
+    for (std::size_t i : o) { ts.push_back(L.grade_t[i]); ss.push_back(L.grade_sets[i]); }
+    L.grade_t = ts;
+    L.grade_sets = ss;
+    if (L.grade_sets.size() < 2) { L.grade_t.clear(); L.grade_sets.clear(); }
   }
   if (L.relative) {
     L.es = 1.0;
@@ -541,6 +583,9 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
            FlexSquishSolution& out) {
   const topopt::VoxelGrid& sg = s.grid;
   const std::size_t nvox = sg.voxel_count();
+  if (!req.temp_c.empty() && req.temp_c.size() != nvox)   // ★ ROUND 7 · NOZZLE GRADE
+    throw std::invalid_argument("squish sim: the per-voxel temperatures have " + std::to_string(req.temp_c.size()) +
+                                " entries for a grid of " + std::to_string(nvox) + " voxels");
   if (req.rho.size() != nvox || req.strain_op.size() != nvox || req.skin_frac.size() != nvox)
     throw std::invalid_argument("squish sim: the per-voxel arrays have " + std::to_string(req.rho.size()) + " / " +
                                 std::to_string(req.strain_op.size()) + " / " + std::to_string(req.skin_frac.size()) +
@@ -555,7 +600,7 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
   out.resting_missing = s.resting_missing;
   out.anchors_missing = s.anchors_missing;   // ★ U21 · I1
   out.hold_rule = req.hold_rule;
-  P.law = make_law(req.law, data);
+  P.law = make_law(req.law, data, !req.temp_c.empty());   // ★ ROUND 7 · NOZZLE GRADE: every tested set when graded
 
   // ── the FE grid (§1.1): core's grid, coarsened by the rule ──
   FE& fe = P.fe;
@@ -1365,6 +1410,7 @@ constexpr double kInflatedVolume = 1.3;
 struct Session {
   Problem P;
   std::vector<float> rho, skin;  // per scene voxel: the law's inputs
+  std::vector<float> temp;       // ★ ROUND 7 · NOZZLE GRADE: per scene voxel °C (empty: the law's one temperature)
   FlexSquishSolution base;        // the setup's receipts (every step's out starts from them)
   std::vector<double> u;          // the last RAW field (the next step's warm start)
   double lambda = 0.0;
@@ -1421,7 +1467,8 @@ FlexSquishSolution solve(const Setup& s, const FlexSquishRequest& req, const fx:
   std::size_t esolid = 0;
   for (std::size_t v = 0; v < nvox; ++v) {
     if (s.grid.tags[v] == topopt::VoxelTag::Empty) continue;
-    Es[v] = P.law.voxel(req.rho[v], req.strain_op[v], req.skin_frac[v], control);
+    Es[v] = req.temp_c.empty() ? P.law.voxel(req.rho[v], req.strain_op[v], req.skin_frac[v], control)
+                               : P.law.voxel(req.rho[v], req.strain_op[v], req.skin_frac[v], control, req.temp_c[v]);
     esum += Es[v];
     ++esolid;
   }
@@ -1491,6 +1538,7 @@ FlexSquishSolution step_begin(const Setup& s, const FlexSquishRequest& req, cons
   S->P.law.densification = opt.densification_coeff;
   S->rho.assign(req.rho.begin(), req.rho.end());
   S->skin.assign(req.skin_frac.begin(), req.skin_frac.end());
+  S->temp.assign(req.temp_c.begin(), req.temp_c.end());   // ★ ROUND 7 · NOZZLE GRADE
   out.setup_ms = topopt::steady_clock_ms() - t0;
   out.max_iterations = (req.control & kLongSolve) ? kMaxIterationsCap
                        : (req.control & kFixedCap) ? kMinIterations
@@ -1549,7 +1597,8 @@ FlexSquishSolution step(int64_t id, double load_factor, int max_iterations, doub
     double sum = 0.0;
     for (int q = P.elem_off[e]; q < P.elem_off[e + 1]; ++q) {
       const std::size_t v = static_cast<std::size_t>(P.elem_vox[static_cast<std::size_t>(q)]);
-      sum += P.law.voxel_at(S->rho[v], strain, S->skin[v], P.control);
+      sum += S->temp.empty() ? P.law.voxel_at(S->rho[v], strain, S->skin[v], P.control)
+                             : P.law.voxel_at(S->rho[v], strain, S->skin[v], P.control, S->temp[v]);
     }
     return sum * inv_c3;
   };

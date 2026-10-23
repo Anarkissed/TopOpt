@@ -217,10 +217,12 @@ final class FlexibleAutoFloorShapeTests: XCTestCase {
             XCTAssertLessThanOrEqual(FlexibleManualCopy.dataLine(min: 0.16, max: 0.45, past: true, topology: t).count, FlexibleRowCopy.maxChars)
             XCTAssertTrue(FlexibleManualCopy.dataLine(min: 0.16, max: 0.45, past: true, topology: t).hasPrefix("Estimate past tested data"))
         }
-        // More's Nozzle row is not drawn in Manual (source pin: the row sits inside `if !model.isManual`)
+        // ★ RE-PINNED (his words of 2026-10-23 ~03:05: "what's the difference between "temperature" and "nozzle" shouldn't they be the
+        // same???"): More's ONE Nozzle °C row is drawn in Auto AND Manual (FlexibleNozzleGradeTests pins it; RED there: two rows)
         let src = try String(contentsOf: FlexibleHisProject.repoRoot.appendingPathComponent("app/TopOptKit/Sources/TopOptFlows/FlexibleFacePanel.swift"),
                              encoding: .utf8)
-        XCTAssertTrue(src.contains("if !model.isManual, let m = model.material, m.noPrediction == nil {"), "★ the Nozzle row is Auto's only")
+        XCTAssertTrue(src.contains("FlexibleNozzleRows(model: model, padTarget: $padTarget)"), "★ the one Nozzle row, both modes")
+        XCTAssertEqual(FlexibleStageModel.nozzleRows(manual: true, hasData: true, gradeOn: false), ["nozzle", "grade"])
 
         let (_, m) = try await opened("his l-bracket")
         try await hisSetup(m)

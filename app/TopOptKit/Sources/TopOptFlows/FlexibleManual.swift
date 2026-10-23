@@ -297,7 +297,6 @@ public enum FlexibleManualCopy {
     public static let alongOptions: [(id: String, label: String)] = [("depth", "Depth"), ("across", "Across"), ("shape", "Shape")]
     public static let style = "Style"
     public static let styleOptions: [(id: String, label: String)] = [("default", "Default"), ("stepped", "Stepped")]
-    public static let temperature = "Temperature"
     public static let sameAsPart = "Lattice · same as the part"
     public static let ownLattice = "Lattice · its own"
     public static let setOwn = "Set its own"
@@ -525,7 +524,9 @@ extension FlexibleStageModel {
         let temp = designTempC
         actionSerial += 1
         edit { s in
-            if let seed { s.manual = FlexibleManualSettings(on: true, part: seed, tempC: temp) } else { s.manual?.on = on }
+            if let seed { s.manual = FlexibleManualSettings(on: true, part: seed, tempC: s.nozzleTempC == nil ? temp : nil) } else { s.manual?.on = on }
+            // ★ ONE NOZZLE SETTING: while it says Auto, Manual holds Auto's pick (nothing jumps when core's answers are dropped)
+            if on, s.nozzleTempC == nil, s.manual?.tempC == nil { s.manual?.tempC = temp }
         }
     }
 
@@ -594,13 +595,20 @@ extension FlexibleStageModel {
     }
     public func setManualStepped(_ on: Bool, group: Int?) { editManual(group: group) { var o = $0; o.stepped = on; return o } }
 
-    /// ★ P1: the part-wide temperature in Manual (Auto's own setting untouched).
+    /// ★ The nozzle temperature in Manual — ONE setting with Auto's (his words of 2026-10-23 ~03:05: "what's the difference between
+    /// "temperature" and "nozzle" shouldn't they be the same???"): written as THE nozzle setting; Manual's old copy dropped. RED
+    /// CONTROL `controlTwoTemperatureRows`: P1's own copy (Auto's setting untouched — two values).
     public func setManualTemp(_ t: Double) {
         guard let m = manualSettings else { return }
         actionSerial += 1
-        edit { s in s.manual = m.resolvedKeeping(on: true); s.manual?.tempC = t }
+        if Self.controlTwoTemperatureRows {
+            edit { s in s.manual = m.resolvedKeeping(on: true); s.manual?.tempC = t }
+            return
+        }
+        edit { s in s.manual = m.resolvedKeeping(on: true); s.manual?.tempC = nil; s.nozzleTempC = t }
     }
-    /// The temperature Manual's estimate uses: his, else Auto's.
+    /// The temperature Manual's estimate uses: the nozzle setting; while it says Auto, Auto's pick (frozen as `manual.tempC` when
+    /// Manual is switched on, so nothing jumps).
     public var manualTempC: Double? { manualSettings?.tempC ?? designTempC }
 
     /// The walls on a row, in beads (whole — P1). RED CONTROL `controlM1Tie`: M1's tie (the held cell × ρ / unit).

@@ -360,7 +360,7 @@ struct FlexibleModelTab: View {
             if model.isManual { FlexibleManualPartSection(model: model, padTarget: $padTarget) }
             Divider().overlay(DS.Color.strokeSubtle.color).padding(.vertical, DS.Space.xs)
             FlexSectionTitle(text: FlexibleRowCopy.moreTitle)
-            FlexibleMorePanel(model: model)
+            FlexibleMorePanel(model: model, padTarget: $padTarget)
         }
     }
 }

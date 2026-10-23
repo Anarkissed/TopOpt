@@ -573,6 +573,11 @@ struct FlexSquishRequest {
   FlexFloats rho;        // per SCENE voxel (x fastest): < 0 not lattice; else the printed core rho
   FlexFloats strain_op;  // per scene voxel: its column's strain under THIS group; 0 = none
   FlexFloats skin_frac;  // per scene voxel: the share inside the skin, 0..1
+  // ★ ROUND 7 · NOZZLE GRADE (his words of 2026-10-23 ~03:05: "Temperature needs a grade option"): per scene voxel, the nozzle
+  // temperature its layer is printed at (°C). Empty (no grade): every voxel at law.temp_c, exactly as before. Given, the law
+  // loads every tested temperature's curves and interpolates in °C between them (past the tested ends: the end line, marked by
+  // the app) — the display sim's own estimate; core never interpolates between temperatures (R10). Never in a job.
+  FlexFloats temp_c;
   FlexSquishLaw law;
   double poisson = 0.3, tolerance = 1e-4, deadline_ms = 20000;
   int32_t coarsen = 0;   // 0 = the rule (flexible_squish_coarsen)
