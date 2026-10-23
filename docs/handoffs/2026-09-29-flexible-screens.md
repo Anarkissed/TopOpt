@@ -182,6 +182,13 @@ Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installe
 install). Core untouched, no #354/main file edited, no new hook. Evidence:
 `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/t2_drawing/` (`t2_runs.txt` holds every raw number below).
 
+**This round's iOS line (installer, 2026-10-23 08:06): INSTALLED.** BUILD SUCCEEDED at `a40f0194` (T1 + T2 together: the
+Play-all picker, the bridge exit-crash fix, the honeycomb square ends, the Stepped band edges). The app was not running;
+installed 08:06:15, NOT launched. Installed TopOpt.debug.dylib == built (cmp; sha256 27aac44e…, 98,674,912 bytes). Run once:
+35 Flows classes + 5 Kit classes + 3MF, 242 executed / 3 skipped (opt-in) / 5 failed, all known (the 11" landscape test, still
+unresolved; APP LIST items 3-5); no signal line. Goldens det 38 / unseeded 32 + 1 PART-SKIP, 0 DIFFERS; the 16 stage-job hashes
+identical to nozzle_grade's (`t2_drawing/install_runs_t12.txt`). The T1/T2 "not installed" lines below are now superseded.
+
 1. **Honeycomb slivers where the lattice is cut — FIXED, Auto and Manual.**
    - Why: the lattice was cut at each point, by the region's edge and by the part's surface. A wall crossing the cut at an
      angle ended in a knife edge. A wall running beside the cut was shaved thin.
