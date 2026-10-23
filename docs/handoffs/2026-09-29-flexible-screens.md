@@ -192,7 +192,7 @@ Install check (P1 + P2 together, at `432b46ec`): the 25 classes P1 and P2 touch 
 (38; 32 + 1 PART-SKIP); the 16 stage-job hashes cmp-identical to the follow-up's (Auto byte-identical).
 - iOS: BUILD SUCCEEDED at 432b46ec. The app WAS running (started 23:40 on the 22nd; you may be using it), so it was NOT
   terminated and NOT installed. The build is ready (TopOpt.debug.dylib sha256 b8cbb580…, the new strings present); say the
-  word and it goes on. Evidence: `round7/manual_install/install_runs.txt`. NOT pushed.
+  word and it goes on. Evidence: `round7/manual_install/install_runs_p12.txt`. NOT pushed.
 - Reviewer notes for the next round: the card's "cells across" still uses the whole column's depth (68.7 mm on Group 1) while
   the drawing grades over each face's own depth (33.9 mm); the "Lattice · density" legend reads Auto's ladder, not Manual's
   drawn cell (P2_01 says 10 % ≈ 13.5 mm, 13.9 mm is drawn); in Manual the Model card shows Temperature and More's Nozzle row,
@@ -326,7 +326,7 @@ edited; no new hook. Auto is unchanged: it looks, builds and sends exactly what 
 - Auto's lattice pick and its "can't reach your curve" style warnings are hidden in Manual.
 - Not done yet: the main (Lattice) page still shows the stored depth (and its stamp caption) in Manual; only the Squish page is.
 
-### Runs (`round7/manual_install/install_runs.txt`)
+### Runs (`round7/manual_install/install_runs_p12.txt`)
 - The union of M1's and M2's classes and pins (72 classes incl. FlexibleSquishCopyTests): 414 passed, 1 failed, 24 skipped
   (picture probes). The failure is the known batch I one (FlexibleSettingsPageHostedTests 11" landscape "as opened", card
   566-812). FlexibleM1ManualTests 8/8, FlexibleM2PredictTests 5/5, the hosted Manual probe on your pad passed. Nothing to fix.
