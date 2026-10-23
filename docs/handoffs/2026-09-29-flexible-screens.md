@@ -123,9 +123,9 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
-## ★ Round 7 · Links + Rests both hold, Manual on the Lattice page, a group's own lattice = what is drawn (2026-10-22) (read this first)
+## ★ Round 7 · Links + Rests both hold, Manual on the Lattice page, a group's own lattice = what is drawn (2026-10-22) — INSTALLED (read this first)
 
-Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). Not installed. App only; core untouched; no #354/main file
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). Installed on the simulator 21:03, not launched. App only; core untouched; no #354/main file
 edited; no new hook. Auto looks, builds and sends what it did before (goldens and the 16 stage-job hashes identical).
 
 ### What changed, in plain words
@@ -162,10 +162,23 @@ edited; no new hook. Auto looks, builds and sends what it did before (goldens an
   2156 held nodes gone); `FlexibleManualFollowUpTests` A (red controls: the stored depth on the main page; core's design lines in
   Manual; "working" with no sim) and B (red control: the group's type line shown).
 
+### Install (`round7/manual_followup/install_runs.txt`)
+- The batch's 16 classes once more at cdb64af5: 69 passed, 1 failed, 8 skipped (picture probes). The failure is the known batch I
+  one (FlexibleSettingsPageHostedTests 11" landscape "as opened", card 566-812). The new links test and both Manual tests passed.
+  Goldens 0 DIFFERS both modes (38; 32 + 1 PART-SKIP); the 16 stage-job hashes cmp-identical to the follow-up's and the Manual
+  install's. Nothing to fix.
+- iOS: BUILD SUCCEEDED at cdb64af5. The app was not running; installed 21:03:06, NOT launched. Installed dylib == built (cmp;
+  sha256 31624e35…); the new strings ("Type and cell follow the part", "Save & Exit to see it") present.
+
 ### Renders (`round7/manual_followup/`, 13" portrait, your pad)
 `MF_01` the main Lattice page in Manual, heat on: "Squish · mm 0 – 2.8 mm" (the card's estimate) · `MF_02` Group 1's own
 lattice in Manual: "Type and cell follow the part", Density 30 %, Walls 1.9 beads · `MF_03` the Squish page with the Face 5 floor
 link on your rest group, Play ×1 at 5 lb: "Held by 1 linked wall + 2 Rests" (Auto).
+- Reviewer's note: MF_03 was taken in Auto with the strip reading "3D sim · as last saved", so it most likely shows the saved
+  field, not the new link-plus-far-side solve (and on your pad as saved, item 1 changes nothing you can see). The proof for
+  item 1 is the test (`FlexibleI3LinkSimTests` 4), not this picture.
+- Reviewer's note on item 3: an older save keeps its group type and cell only until that group's density or walls are next
+  edited; that edit writes the part's type and cell into the group. Harmless for the drawing (only density is drawn).
 
 ## ★ Round 7 · MANUAL installed — parts M1 + M2 together (2026-10-22) (read this first)
 
