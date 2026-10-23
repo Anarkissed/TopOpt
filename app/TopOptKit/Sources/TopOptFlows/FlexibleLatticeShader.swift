@@ -203,9 +203,9 @@ enum FlexibleLatticeShader {
     }
 
     // ── FlexibleLatticeField.wall; `rhoRaw` is the sampled ρ, `Lcur` the local cell ─────
-    static float flx_wall(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p, thread float& Lcur) {
-        float t = U.shape.y;
-        if (U.shape.x < 0.5f) {
+    // ★ MANUAL P1: the gyroid of wall `t` (flx_wall's gyroid branch, t a parameter) and the honeycomb of cell d, wall t.
+    static float flx_gyroid_wall(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p, thread float& Lcur, float t) {
+        {
             bool rhoIn = rhoRaw > 0.05f && rhoRaw < 0.9f;
             float rho = min(max(rhoRaw, 0.05f), 0.9f);
             float Lraw = 3.0915f * t / rho;
@@ -236,18 +236,23 @@ enum FlexibleLatticeShader {
             float k = (1.0f - w) * ka + w * kb;
             return abs(g) / max(length(grad), 0.05f * k) - 0.5f * t;
         }
+    }
+    static float flx_honey_wall(constant FlxUniforms& U, float3 p, float d, float t) {
         float3 b = normalize(U.buildDir.xyz);
         float3 ref = abs(b.x) < 0.9f ? float3(1, 0, 0) : float3(0, 1, 0);
         float3 e1 = normalize(cross(b, ref)), e2 = cross(b, e1);
         float2 v = float2(dot(p, e1), dot(p, e2));
-        float d = U.shape2.x;
-        Lcur = d;
         float2 r = float2(d, 1.7320508f * d), h = r * 0.5f;
         float2 A = float2(flx_fmod(v.x, r.x), flx_fmod(v.y, r.y)) - h;
         float2 B = float2(flx_fmod(v.x - h.x, r.x), flx_fmod(v.y - h.y, r.y)) - h;
         float2 q = length_squared(A) < length_squared(B) ? A : B;
         float n = max(abs(q.x), max(abs(0.5f * q.x + 0.8660254f * q.y), abs(-0.5f * q.x + 0.8660254f * q.y)));
         return abs(0.5f * d - n) - 0.5f * t;
+    }
+    static float flx_wall(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p, thread float& Lcur) {
+        if (U.shape.x < 0.5f) return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, U.shape.y);
+        Lcur = U.shape2.x;
+        return flx_honey_wall(U, p, U.shape2.x, U.shape.y);
     }
 
     // ── ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great") ─────────────────────────
@@ -258,8 +263,7 @@ enum FlexibleLatticeShader {
     // ∇ρ), meeting at σ = smoothstep(trilinear share) — ½ on the plane's true position — with the whole gradient. Any
     // other cell: flx_wall, exactly as before. The step cap follows the finer side in play.
     static float flx_ladder_sheet(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p,
-                                  thread float3& grad, thread float& k, thread float& Lcur) {
-        float t = U.shape.y;
+                                  thread float3& grad, thread float& k, thread float& Lcur, float t) {
         bool rhoIn = rhoRaw > 0.05f && rhoRaw < 0.9f;
         float rho = min(max(rhoRaw, 0.05f), 0.9f);
         float Lraw = 3.0915f * t / rho;
@@ -301,9 +305,8 @@ enum FlexibleLatticeShader {
         return c0v * (1 - fz) + c1v * fz;
     }
 
-    static float flx_wall_seam(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
-                               thread float& Lcur) {
-        if (U.rmN.w < 0.5f || U.shape.x > 0.5f) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+    static float flx_seam_gyroid(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur, float t) {
         float4 O = U.rmO, N = U.rmN;
         float3 u = (p - O.xyz) / O.w;
         int nx = int(N.x), ny = int(N.y), nz = int(N.z);
@@ -327,31 +330,93 @@ enum FlexibleLatticeShader {
             outC[q] = pressSide ? c[q].z : c[q].x;
             phC[q] = c[q].w;
         }
-        if (!seam) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+        if (!seam) return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, t);
         float3 gIn, gOut, gPh;
         float rIn = flx_tri8(inC, fx, fy, fz, u, N, O.w, gIn);
         float rOut = flx_tri8(outC, fx, fy, fz, u, N, O.w, gOut);
         float ph = clamp(flx_tri8(phC, fx, fy, fz, u, N, O.w, gPh), 0.0f, 1.0f);
         float sigma = ph * ph * (3.0f - 2.0f * ph);
         float3 dSigma = (ph > 0.0f && ph < 1.0f ? 6.0f * ph * (1.0f - ph) : 0.0f) * gPh;
-        float t = U.shape.y;
         float3 grA, grB;
         float kA, kB, LA, LB;
         float G, k;
         float3 grad;
         if (sigma <= 0.0f) {
-            G = flx_ladder_sheet(U, rOut, gOut, p, grad, k, Lcur);
+            G = flx_ladder_sheet(U, rOut, gOut, p, grad, k, Lcur, t);
         } else if (sigma >= 1.0f) {
-            G = flx_ladder_sheet(U, rIn, gIn, p, grad, k, Lcur);
+            G = flx_ladder_sheet(U, rIn, gIn, p, grad, k, Lcur, t);
         } else {
-            float a = flx_ladder_sheet(U, rOut, gOut, p, grA, kA, LA);
-            float b = flx_ladder_sheet(U, rIn, gIn, p, grB, kB, LB);
+            float a = flx_ladder_sheet(U, rOut, gOut, p, grA, kA, LA, t);
+            float b = flx_ladder_sheet(U, rIn, gIn, p, grB, kB, LB, t);
             G = (1.0f - sigma) * a + sigma * b;
             grad = (1.0f - sigma) * grA + sigma * grB + (b - a) * dSigma;
             k = (1.0f - sigma) * kA + sigma * kB;
             Lcur = min(LA, LB);
         }
         return abs(G) / max(length(grad), 0.05f * k) - 0.5f * t;
+    }
+
+    // ── ★ ROUND 7 · MANUAL P1 — A TYPE AND WALLS PER GROUP (FlexibleLatticeField.manualWall, the twin) ─────────────────
+    // When buildDir.w = 1 the (ρ, mask) volume is TWICE as deep: slices nz … 2nz−1 hold (t mm, type share) per voxel. t and the
+    // share are trilinear (8 integer reads, as ρ's); share < ½: a gyroid of wall t (the press seam where a cell holds one), else a
+    // honeycomb of wall t, d = 2t/ρ on the ladder's rungs (dMin = 2·tMin/0.9 = shape.z·2/3.0915), neighbours blended.
+    static float2 flx_manual_tk(constant FlxUniforms& U, texture3d<float> T, float3 p) {
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        k0 += nz; k1 += nz;
+        float2 c00 = flx_at(T, i0, j0, k0) * (1 - fx) + flx_at(T, i1, j0, k0) * fx;
+        float2 c10 = flx_at(T, i0, j1, k0) * (1 - fx) + flx_at(T, i1, j1, k0) * fx;
+        float2 c01 = flx_at(T, i0, j0, k1) * (1 - fx) + flx_at(T, i1, j0, k1) * fx;
+        float2 c11 = flx_at(T, i0, j1, k1) * (1 - fx) + flx_at(T, i1, j1, k1) * fx;
+        float2 c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+    static float flx_wall_manual(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur) {
+        float2 tk = flx_manual_tk(U, T, p);
+        float t = max(tk.x, 1e-3f);
+        bool uniform = length(gradRho) < \(FlexibleLatticeField.uniformGradient)f;   // one density: the EXACT cell
+        if (tk.y < 0.5f) {
+            if (U.rmN.w > 0.5f) return flx_seam_gyroid(U, T, p, rhoRaw, gradRho, Lcur, t);
+            if (uniform) {
+                float rho = min(max(rhoRaw, 0.05f), 0.9f);
+                float L = min(max(3.0915f * t / rho, U.shape.z), U.shape.w), k = 2 * M_PI_F / L;
+                float3 gr;
+                float g = flx_gyroid(p, k, gr);
+                Lcur = L;
+                return abs(g) / max(length(gr), 0.05f * k) - 0.5f * t;
+            }
+            return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, t);
+        }
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float dMin = U.shape.z * 2.0f / 3.0915f, dMax = U.shape.w * 2.0f / 3.0915f;
+        float d = min(max(2.0f * t / rho, dMin), dMax);
+        if (uniform) { Lcur = d; return flx_honey_wall(U, p, d, t); }
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(d / dMin));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float La = dMin * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = dMin * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        Lcur = w < 1.0f ? La : Lb;
+        if (w <= 0.0f) return flx_honey_wall(U, p, La, t);
+        if (w >= 1.0f) return flx_honey_wall(U, p, Lb, t);
+        return (1.0f - w) * flx_honey_wall(U, p, La, t) + w * flx_honey_wall(U, p, Lb, t);
+    }
+
+    static float flx_wall_seam(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                               thread float& Lcur) {
+        if (U.buildDir.w > 0.5f) return flx_wall_manual(U, T, p, rhoRaw, gradRho, Lcur);
+        if (U.rmN.w < 0.5f || U.shape.x > 0.5f) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+        return flx_seam_gyroid(U, T, p, rhoRaw, gradRho, Lcur, U.shape.y);
     }
 
     // ── ★ ROUND 7, X1 — THE PRINTED SOLID (FlexibleLatticeField.printedSolid, the twin) ──────

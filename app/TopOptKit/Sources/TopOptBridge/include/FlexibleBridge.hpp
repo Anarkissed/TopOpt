@@ -554,6 +554,7 @@ struct FlexSquishLaw {
   std::string materials_path, material_id, topology;  // gyroid | honeycomb
   double temp_c = 0.0;
   bool shape_only = false;               // calibrate-first: E = max(rho, 0.05)^2 (relative units)
+  bool extrapolate = false;              // ★ R7 MANUAL P1: rho past the tested rows extended (power law, C1 at the end row)
 };
 // ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"; his picks
 // ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put"): one LIVE link's lattice wall, in model

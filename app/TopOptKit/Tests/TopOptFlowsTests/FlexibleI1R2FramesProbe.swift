@@ -180,8 +180,8 @@ final class FlexibleI1R2FramesProbe: XCTestCase {
         m.setManualDensity(0.30, group: g.id)
         pump(1.5)
         let own = try XCTUnwrap(m.manualLattice(group: g.id))
-        log.append(String(format: "MF_02 %@ own: %@ · cell %.2f mm · density %.3f · walls %.3f beads · rows %@", m.groupName(g), own.topology, own.cellMM,
-                          own.density, m.manualWalls(group: g.id) ?? -1, "\(FlexibleManualLatticeRows.rows(group: g.id))"))
+        log.append(String(format: "MF_02 %@ own: %@ · cell %.2f mm · density %.3f · walls %.3f beads · rows %@", m.groupName(g), own.topology, m.manualCellMM(group: g.id) ?? -1,
+                          own.density, m.manualWalls(group: g.id) ?? -1, "\(FlexibleManualLatticeRows.rows(group: g.id, gradeOn: own.grade.on))"))
         try shot("MF_02_13p_pad_MANUAL_group_own_density.png", h, settle: 1.5)
         flush("MF_lines.txt")
     }

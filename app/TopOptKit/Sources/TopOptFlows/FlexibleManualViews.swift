@@ -43,8 +43,10 @@ struct FlexibleManualViewLine: View {
     }
 }
 
-/// His four lines: Lattice [Gyroid | Honeycomb], Cell size, Density %, Walls (beads) — the part's (`group` nil); a group's own:
-/// Density % and Walls (beads) under "Type and cell follow the part"; then the bead warning with its one-tap fix when the walls are not a whole number of beads.
+/// ★ P1 (his notes of 2026-10-23: "Each lattice should have the same set of settings as the entire model"): the SAME rows for the
+/// part (`group` nil) and a group's own — Type; Walls (whole beads); Density ⇄ Cell size ⇄ Cells across (linked: edit one, the
+/// others follow at his walls); Grade [Off | On] and, when on, Grade by, From, To, Along, Style; the facts line; on [Model] only,
+/// Temperature. One FlexRow line each in the redesign's look (FlexChips, FlexNumberBox), ≤ 44 characters.
 struct FlexibleManualLatticeRows: View {
     @ObservedObject var model: FlexibleStageModel
     let group: Int?
@@ -52,65 +54,94 @@ struct FlexibleManualLatticeRows: View {
 
     private var keyTail: String { group.map { "g\($0)" } ?? "part" }
 
-    /// ★ GROUP OVERRIDE = WHAT IS DRAWN: the rows shown, in order — the part's four; a group's Density and Walls and the one quiet
-    /// line that its type and cell are the part's (the shader draws one type and one cell per part).
-    static func rows(group: Int?) -> [String] {
-        guard group != nil, !FlexibleStageModel.groupShowsTypeAndCell else { return ["type", "cell", "density", "walls"] }
-        return ["follows", "density", "walls"]
+    /// The rows shown, in order (the hosted tests and the P1 tests read it).
+    static func rows(group: Int?, gradeOn: Bool) -> [String] {
+        var r = ["type", "walls", "density", "cell", "cellsAcross", "grade"]
+        if gradeOn { r += ["gradeBy", "from", "to", "along", "style"] }
+        r.append("facts")
+        if group == nil { r.append("temperature") }
+        return r
+    }
+
+    private func box(_ key: String, _ title: String, _ spec: FlexNumberSpec, _ set: @escaping (Double) -> Void) -> some View {
+        FlexNumberBox(key: "manual-\(key)-\(keyTail)", title: title, spec: spec, padTarget: $padTarget,
+                      onNote: { model.toast = $0 }) { set($0) }
+    }
+    private func chips(_ id: String, _ o: [(id: String, label: String)], _ sel: String, _ set: @escaping (String) -> Void) -> some View {
+        FlexChips(options: o, selection: sel, id: "flexible-manual-\(id)-\(keyTail)", equalWidths: false) { set($0) }.fixedSize()
     }
 
     var body: some View {
         if let l = model.manualLattice(group: group) {
-            let beads = model.manualWalls(group: group) ?? 0
-            let rows = Self.rows(group: group)
+            let bw = model.project.printParams.strutLineWidthMM
+            let cell = FlexibleManualMath.cellMM(l, beadWidthMM: bw)
+            let lo = FlexibleManualMath.cellMM(density: FlexibleManualMath.densityRange.upperBound, beads: l.beads, topology: l.topology, beadWidthMM: bw)
+            let hi = FlexibleManualMath.cellMM(density: FlexibleManualMath.densityRange.lowerBound, beads: l.beads, topology: l.topology, beadWidthMM: bw)
+            let rows = Self.rows(group: group, gradeOn: l.grade.on)
+            let C = FlexibleManualCopy.self
             VStack(alignment: .leading, spacing: DS.Space.xs) {
-                if rows.contains("follows") {
-                    Text(FlexibleManualCopy.followsPart)
-                        .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityIdentifier("flexible-manual-follows-\(keyTail)")
+                FlexRow(C.lattice, info: C.Info.lattice, id: "flexible-manual-type-\(keyTail)") {
+                    chips("type", C.typeOptions, l.topology) { model.setManualType($0, group: group) }
                 }
-                if rows.contains("type") {
-                    FlexRow(FlexibleManualCopy.lattice, info: FlexibleManualCopy.Info.lattice, id: "flexible-manual-type-\(keyTail)") {
-                        FlexChips(options: FlexibleManualCopy.typeOptions, selection: l.topology, id: "flexible-manual-type-\(keyTail)",
-                                  equalWidths: false) { v in model.setManualType(v, group: group) }
-                            .fixedSize()
+                FlexRow(C.walls, info: C.Info.walls, id: "flexible-manual-walls-\(keyTail)") {
+                    chips("walls", C.wallsOptions, String(l.beads)) { model.setManualBeads(Int($0) ?? 1, group: group) }
+                }
+                FlexRow(C.density, info: C.Info.density, id: "flexible-manual-density-\(keyTail)") {
+                    box("density", C.density, FlexNumberSpec(value: (l.density * 1000).rounded() / 10, unit: "%", step: 1,
+                                                             range: (FlexibleManualMath.densityRange.lowerBound * 100)...(FlexibleManualMath.densityRange.upperBound * 100),
+                                                             decimals: FlexibleNumberSpecs.wholeOrTenth(l.density * 100))) {
+                        model.setManualDensity($0 / 100, group: group)
                     }
                 }
-                if rows.contains("cell") {
-                    FlexRow(FlexibleManualCopy.cell, info: FlexibleManualCopy.Info.cell, id: "flexible-manual-cell-\(keyTail)") {
-                        FlexNumberBox(key: "manual-cell-\(keyTail)", title: FlexibleManualCopy.cell,
-                                      spec: FlexNumberSpec(value: l.cellMM, unit: "mm", step: 0.5, range: FlexibleManualMath.cellRange,
-                                                           decimals: FlexibleNumberSpecs.wholeOrTenth(l.cellMM)),
-                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualCell(v, group: group) }
+                FlexRow(C.cell, info: C.Info.cell, id: "flexible-manual-cell-\(keyTail)") {
+                    box("cell", C.cell, FlexNumberSpec(value: (cell * 10).rounded() / 10, unit: "mm", step: 0.5, range: lo...hi, decimals: 1)) {
+                        model.setManualCell($0, group: group)
                     }
                 }
-                FlexRow(FlexibleManualCopy.density, info: FlexibleManualCopy.Info.density, id: "flexible-manual-density-\(keyTail)") {
-                    FlexNumberBox(key: "manual-density-\(keyTail)", title: FlexibleManualCopy.density,
-                                  spec: FlexNumberSpec(value: (l.density * 100).rounded(), unit: "%", step: 1,
-                                                       range: (FlexibleManualMath.densityRange.lowerBound * 100)...(FlexibleManualMath.densityRange.upperBound * 100),
-                                                       decimals: 0),
-                                  padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualDensity(v / 100, group: group) }
-                }
-                FlexRow(FlexibleManualCopy.walls, info: FlexibleManualCopy.Info.walls, id: "flexible-manual-walls-\(keyTail)",
-                        warning: FlexibleManualCopy.wallsWarning(beads) != nil) {
-                    FlexNumberBox(key: "manual-walls-\(keyTail)", title: FlexibleManualCopy.walls,
-                                  spec: FlexNumberSpec(value: (beads * 10).rounded() / 10, unit: FlexibleManualCopy.wallsUnitFor((beads * 10).rounded() / 10), step: 1,
-                                                       range: 1...8, decimals: FlexibleNumberSpecs.wholeOrTenth(beads)),
-                                  padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualWalls(v, group: group) }
-                }
-                if let w = FlexibleManualCopy.wallsWarning(beads) {
-                    FlexRow(w, info: FlexibleManualCopy.Info.walls, id: "flexible-manual-walls-warning-\(keyTail)", warning: true) {
-                        Button { model.fixManualWalls(group: group) } label: {
-                            Text(FlexibleManualCopy.fixTitle(beads))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                                .padding(.horizontal, 12).padding(.vertical, 4)
-                                .background(Capsule().fill(DS.Color.warning.color.opacity(0.35)))
-                                .frame(minHeight: FlexibleTargets.least).contentShape(Rectangle())
+                if let n = model.manualCellsAcross(group: group), let d = model.manualDepthMM(group: group) {
+                    FlexRow(C.cellsAcross, info: C.Info.cellsAcross, id: "flexible-manual-cells-\(keyTail)", warning: n < 2) {
+                        box("cells", C.cellsAcross, FlexNumberSpec(value: (n * 10).rounded() / 10, unit: "", step: 0.5,
+                                                                  range: Swift.max(0.1, d / hi)...Swift.max(0.2, d / lo), decimals: 1)) {
+                            model.setManualCellsAcross($0, group: group)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("flexible-manual-walls-fix-\(keyTail)")
+                    }
+                } else {
+                    FlexRow(C.cellsAcross + " · no prism yet", info: C.Info.cellsAcross, id: "flexible-manual-cells-\(keyTail)")
+                }
+                FlexRow(C.grade, info: C.Info.grade, id: "flexible-manual-grade-\(keyTail)") {
+                    chips("grade", C.gradeOptions, l.grade.on ? "on" : "off") { model.setManualGrade(on: $0 == "on", group: group) }
+                }
+                if rows.contains("gradeBy") {
+                    let byCell = l.grade.by == "cell"
+                    FlexRow(C.gradeBy, info: C.Info.grade, id: "flexible-manual-grade-by-\(keyTail)") {
+                        chips("grade-by", C.gradeByOptions, l.grade.by) { model.setManualGradeBy($0, group: group) }
+                    }
+                    ForEach([false, true], id: \.self) { end in
+                        let v = FlexibleManualMath.gradeValue(l, end: end, beadWidthMM: bw)
+                        FlexRow(end ? C.to : C.from, info: C.Info.grade, id: "flexible-manual-grade-\(end ? "to" : "from")-\(keyTail)") {
+                            box(end ? "to" : "from", end ? C.to : C.from,
+                                byCell ? FlexNumberSpec(value: (v * 10).rounded() / 10, unit: "mm", step: 0.5, range: lo...hi, decimals: 1)
+                                       : FlexNumberSpec(value: (v * 1000).rounded() / 10, unit: "%", step: 1,
+                                                        range: (FlexibleManualMath.densityRange.lowerBound * 100)...(FlexibleManualMath.densityRange.upperBound * 100),
+                                                        decimals: FlexibleNumberSpecs.wholeOrTenth(v * 100))) {
+                                model.setManualGradeValue(end: end, byCell ? $0 : $0 / 100, group: group)
+                            }
+                        }
+                    }
+                    FlexRow(C.along, info: C.Info.along, id: "flexible-manual-along-\(keyTail)") {
+                        chips("along", C.alongOptions, l.grade.along) { model.setManualGradeAlong($0, group: group) }
+                    }
+                    FlexRow(C.style, info: C.Info.style, id: "flexible-manual-style-\(keyTail)") {
+                        chips("style", C.styleOptions, l.stepped ? "stepped" : "default") { model.setManualStepped($0 == "stepped", group: group) }
+                    }
+                }
+                FlexibleManualFacts(model: model, group: group)
+                if group == nil, let m = model.material, m.noPrediction == nil, !m.testedTempsC.isEmpty {
+                    let t = model.manualTempC.map { String(Int($0)) } ?? ""
+                    FlexRow(C.temperature, info: C.Info.temperature, id: "flexible-manual-temp") {
+                        chips("temp", m.testedTempsC.map { (String(Int($0)), "\(Int($0)) °C") }, t) { v in
+                            if let d = Double(v) { model.setManualTemp(d) }
+                        }
                     }
                 }
             }
@@ -118,7 +149,30 @@ struct FlexibleManualLatticeRows: View {
     }
 }
 
-/// [Model] in Manual: the part's four lines under a section title.
+/// ★ P1, THE FACTS LINE: what his values make, read only — quiet lines, a flag in the warning colour (never blocking).
+struct FlexibleManualFacts: View {
+    @ObservedObject var model: FlexibleStageModel
+    let group: Int?
+    var body: some View {
+        let facts = model.manualFacts(group: group)
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(facts.enumerated()), id: \.offset) { _, f in
+                HStack(spacing: DS.Space.xs) {
+                    Text(f.text)
+                        .font(.system(size: 12, weight: f.warning ? .semibold : .regular))
+                        .foregroundStyle(f.warning ? DS.Color.warning.color : DS.Color.textTertiary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("flexible-manual-facts-\(group.map { "g\($0)" } ?? "part")")
+    }
+}
+
+/// [Model] in Manual: the part's rows under a section title.
 struct FlexibleManualPartSection: View {
     @ObservedObject var model: FlexibleStageModel
     @Binding var padTarget: String?
@@ -136,7 +190,7 @@ struct FlexibleManualPartSection: View {
 }
 
 /// A group's card in Manual: ONE quiet line "Lattice · same as the part" [Set its own] — or "Lattice · its own" [Use the part's]
-/// with its own four lines.
+/// with its own rows — the same set as the part's.
 struct FlexibleManualGroupRow: View {
     @ObservedObject var model: FlexibleStageModel
     let group: FlexibleSqueezeGroup
@@ -166,6 +220,7 @@ struct FlexibleManualGroupRow: View {
                     .accessibilityIdentifier("flexible-manual-group-\(group.number)-\(own ? "use-parts" : "set-own")")
                 }
                 if own { FlexibleManualLatticeRows(model: model, group: group.id, padTarget: $padTarget) }
+                else { FlexibleManualFacts(model: model, group: group.id) }   // ★ P1: its cells, its estimate, the data's span
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("flexible-manual-group-\(group.number)")

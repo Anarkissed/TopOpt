@@ -417,16 +417,22 @@ struct FlexibleMorePanel: View {
                 // a temperature core has a note on (not in order, estimated…) is said by the
                 // row's colour; the (i) carries the note itself
                 let note = model.settings.nozzleTempC.map { model.temperatureNote($0) } ?? ""
+                // ★ MANUAL P1 (his decisions of 2026-10-23: "part-wide Temperature … no Auto in Manual"): in Manual the row is
+                // Manual's own temperature (the tested ones, no Auto); Auto's setting — and the job — untouched
+                let manual = model.isManual
                 FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp",
-                        warning: !note.isEmpty) {
-                    FlexChips(options: FlexibleRowCopy.temperatureOptions(m.testedTempsC),
-                              selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp",
+                        warning: !manual && !note.isEmpty) {
+                    FlexChips(options: manual ? Array(FlexibleRowCopy.temperatureOptions(m.testedTempsC).dropFirst())
+                                              : FlexibleRowCopy.temperatureOptions(m.testedTempsC),
+                              selection: manual ? (model.manualTempC.map { String(Int($0)) } ?? "")
+                                                : (model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto"), id: "flexible-temp",
                               equalWidths: false) { v in
-                        model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) }
+                        if manual { if let d = Double(v) { model.setManualTemp(d) } }
+                        else { model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) } }
                     }
                     .fixedSize()
                 } extra: {
-                    if let t = model.settings.nozzleTempC, !note.isEmpty {
+                    if !manual, let t = model.settings.nozzleTempC, !note.isEmpty {
                         FlexInfoText("\(Int(t)) °C: \(note)", warning: true)
                     }
                 }

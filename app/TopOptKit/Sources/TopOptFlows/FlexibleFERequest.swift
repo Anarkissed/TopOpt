@@ -62,6 +62,10 @@ public struct FlexibleFERequest: Sendable {
     /// Rest exists, else Topology's fixed faces (sim only) → the far side (FlexibleHold.request). Every sim of the request shares
     /// it, as it shares `resting`.
     public var hold: FlexibleFEHold = .legacy
+    /// ★ ROUND 7 · MANUAL P1 (his decision of 2026-10-23: a lattice TYPE per group): per sim id, the law's type — the group's own
+    /// lattice type (the other groups' lattice in that sim reads the same type's curves: approximate, said in the handoff). Empty in
+    /// Auto (the request's one law).
+    public var simTopology: [String: String] = [:]
 
     /// ★ U21 · I3 (his answer of 2026-10-21 ~15:35: "I expect the 4 walls around the lattice to hold the lattice up"; his picks
     /// ~15:45: "the linked walls HOLD that lattice"): per sim id, the live linked walls of the lattices that group presses into
@@ -83,6 +87,7 @@ public struct FlexibleFERequest: Sendable {
         var r = FlexibleFERequest(generation: generation, rho: rho, skinFrac: skinFrac, resting: resting, law: law, sims: sims)
         r.hold = hold
         r.walls = walls; r.holdEpoch = holdEpoch   // ★ U21 · I3
+        r.simTopology = simTopology   // ★ MANUAL P1
         return r
     }
 
@@ -153,8 +158,10 @@ public struct FlexibleFERequest: Sendable {
 
     /// The bridge's request for `sim`.
     public func request(_ sim: Sim, control: Int = 0, deadlineMS: Double = FlexibleFE.deadlineMS) -> FlexSquishRequestInfo {
+        var simLaw = law
+        if let t = simTopology[sim.id] { simLaw.topology = t }   // ★ MANUAL P1: the group's own type
         var q = FlexSquishRequestInfo(pressed: sim.pressed, restingIDs: resting, rho: rho, strainOp: sim.strainOp, skinFrac: skinFrac,
-                                      law: law, poisson: FlexibleFE.poisson, tolerance: FlexibleFE.tolerance, deadlineMS: deadlineMS,
+                                      law: simLaw, poisson: FlexibleFE.poisson, tolerance: FlexibleFE.tolerance, deadlineMS: deadlineMS,
                                       control: control)
         let h = Self.controlLegacyHold ? FlexibleFEHold.legacy : hold   // ★ U21 · I1
         q.holdRule = h.rule

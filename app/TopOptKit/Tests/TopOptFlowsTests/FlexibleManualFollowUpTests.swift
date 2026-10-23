@@ -21,7 +21,6 @@ final class FlexibleManualFollowUpTests: XCTestCase {
         FlexibleMainStage.controlCalibratedHeatInManual = false
         FlexibleFaceResult.controlDesignCaptionsInManual = false
         FlexibleStageModel.controlNoEntryIsWorking = false
-        FlexibleStageModel.controlGroupOwnTypeAndCell = false
         super.tearDown()
     }
 
@@ -129,66 +128,8 @@ final class FlexibleManualFollowUpTests: XCTestCase {
 
     // MARK: B — a group's own lattice = what is drawn: Density % and Walls (beads), type and cell the part's
 
-    func testAGroupsOwnLatticeIsDensityAndWallsUnderThePartsTypeAndCell() async throws {
-        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.padDir, asSaved: true)
-        addTeardownBlock { r.cleanup() }
-        let m = try await FlexibleHisProject.openedModel(r.project, test: self)
-        try await FlexibleSquishFixture.settle(m, "his pad")
-        m.setManual(true)
-        let g = try XCTUnwrap(m.squeezeGroups.first)
-        let bw = m.manualBeadWidthMM
-        m.setGroupOwnLattice(g.id, own: true)
-        let part = try XCTUnwrap(m.manualLattice(group: nil))
+    // ★ RETIRED by P1 (his decision of 2026-10-23: a lattice TYPE per group YES — a group has the part's full set): the follow-up's
+    // "a group's own lattice is density and walls under the part's type and cell" is replaced by FlexibleManualP1Tests'
+    // testAGroupsOwnTypeWallsAndDensityRoundTripAndTheCardIsWhatIsDrawn.
 
-        // the card: Density and Walls under one quiet line
-        XCTAssertEqual(FlexibleManualLatticeRows.rows(group: nil), ["type", "cell", "density", "walls"], "the part's four lines")
-        XCTAssertEqual(FlexibleManualLatticeRows.rows(group: g.id), ["follows", "density", "walls"], "★ a group: Density and Walls only")
-        XCTAssertEqual(FlexibleManualCopy.followsPart, "Type and cell follow the part")
-        XCTAssertLessThanOrEqual(FlexibleManualCopy.followsPart.count, 44)
-
-        // its walls are worked out with the PART's type and cell, and follow the part's cell
-        m.setManualDensity(0.30, group: g.id)
-        var own = try XCTUnwrap(m.manualLattice(group: g.id))
-        XCTAssertEqual(own.topology, part.topology)
-        XCTAssertEqual(own.cellMM, part.cellMM)
-        XCTAssertEqual(own.density, 0.30, accuracy: 1e-12)
-        let unit = FlexibleManualMath.unitCellMM(part.topology, beadWidthMM: bw)
-        XCTAssertEqual(m.manualWalls(group: g.id) ?? 0, part.cellMM * 0.30 / unit, accuracy: 1e-9, "★ walls from the part's cell")
-        m.setManualCell(part.cellMM + 2, group: nil)
-        XCTAssertEqual(m.manualWalls(group: g.id) ?? 0, (part.cellMM + 2) * 0.30 / unit, accuracy: 1e-9, "★ the part's cell moves them")
-        m.setManualWalls(2, group: g.id)
-        own = try XCTUnwrap(m.manualLattice(group: g.id))
-        XCTAssertEqual(m.manualWalls(group: g.id) ?? 0, 2, accuracy: 1e-6, "★ his walls give the group's density at the part's cell")
-        // a group type / cell edit does nothing (no row for it)
-        let before = m.settings.manual
-        m.setManualType(part.topology == "gyroid" ? "honeycomb" : "gyroid", group: g.id)
-        m.setManualCell(20, group: g.id)
-        XCTAssertEqual(m.settings.manual, before, "★ a group has no type or cell of its own")
-
-        // an older save with a group type and cell: decoded, kept, never drawn nor shown
-        let other = part.topology == "gyroid" ? "honeycomb" : "gyroid"
-        let json = """
-        {"on":true,"part":{"topology":"\(part.topology)","cellMM":\(part.cellMM + 2),"density":\(part.density)},
-         "groups":{"\(g.id)":{"topology":"\(other)","cellMM":20,"density":0.3}}}
-        """
-        let old = try JSONDecoder().decode(FlexibleManualSettings.self, from: Data(json.utf8))
-        m.edit { s in s.manual = old }
-        XCTAssertEqual(m.settings.manual?.groups?[String(g.id)]?.topology, other, "the save's group type is kept")
-        own = try XCTUnwrap(m.manualLattice(group: g.id))
-        XCTAssertEqual(own.topology, part.topology, "★ shown: the part's type")
-        XCTAssertEqual(own.cellMM, part.cellMM + 2, "★ shown: the part's cell")
-        XCTAssertEqual(own.density, 0.3, accuracy: 1e-12)
-        // drawn: the group's density only (its type and cell change nothing in the field)
-        let f = FlexDensityField(nx: 2, ny: 1, nz: 1, spacing: 1, origin: .zero, density: [0.2, 0.2], owner: [7, 8])
-        var same = old
-        same.groups?[String(g.id)] = FlexibleManualLattice(topology: part.topology, cellMM: part.cellMM + 2, density: 0.3)
-        XCTAssertEqual(FlexibleManualField.field(f, manual: old, ownerGroups: [7: g.id]).density,
-                       FlexibleManualField.field(f, manual: same, ownerGroups: [7: g.id]).density, "★ the drawn field ignores them")
-
-        // RED CONTROL: the group's own type and cell shown (M1's card) — the card and the screen disagree
-        FlexibleStageModel.controlGroupOwnTypeAndCell = true
-        XCTAssertTrue(FlexibleManualLatticeRows.rows(group: g.id).contains("type"), "RED control must show the group's type line")
-        XCTAssertEqual(m.manualLattice(group: g.id)?.topology, other, "RED control: the group's saved type shown")
-        FlexibleStageModel.controlGroupOwnTypeAndCell = false
-    }
 }

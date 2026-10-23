@@ -1612,7 +1612,7 @@ public final class FlexibleStageModel: ObservableObject {
             }
         }
         let manualPressSnap = manualPressStacks, manualPressureSnap = manualPressure
-        let manualCellMM = settings.manual?.part.cellMM ?? 0
+        let manualCellMM = manualSettings.map { FlexibleManualMath.cellMM($0.part, beadWidthMM: manualBeadWidthMM) } ?? 0
         let cutsOf = Dictionary(order.map { ($0.region, regions.cuts(of: $0.region)) }, uniquingKeysWith: { a, _ in a })
         latticeGeneration += 1
         let generation = latticeGeneration
@@ -1638,12 +1638,21 @@ public final class FlexibleStageModel: ObservableObject {
         let combine = controlCombine
         // ★ MANUAL (M1, his orders of 2026-10-22 ~02:30): in Manual the lattice is HIS — every lattice voxel at his density (the
         // owning group's own, else the part's), his type, his walls; core's mask and owners kept. nil in Auto (nothing changes)
-        let manualSnap = settings.isManual && !Self.controlManualLatticeOff ? settings.manual : nil
+        let manualSnap = settings.isManual && !Self.controlManualLatticeOff ? manualSettings : nil
         let manualOwners = manualSnap == nil ? [:] : manualOwnerGroups()
+        // ★ MANUAL P1: each owner's stack for his grade, and each group's own lattice type for its sim's law
+        let manualStacks = manualSnap == nil ? [:] : manualGradeOwners()
+        let manualOnePerPart = Self.controlOneLatticePerPart
+        var manualSimTypes: [String: String] = [:]
+        if let ms = manualSnap { for g in squeezeGroups { manualSimTypes[FlexibleSim.groupID(g.number)] = ms.lattice(group: g.id).topology } }
+        let manualSimTypesSnap = manualSimTypes
         // ★ BATCH G: the squish sims' law, rests and (shape only) weights — every group a sim
         let feLaw: FlexSquishLawInfo? = materialsPath.map {
+            // ★ MANUAL P1: his temperature (no Auto in Manual), and the law EXTENDED past the tested densities (his decision of
+            // 2026-10-23: "estimate past tested data", marked on the card); Auto's law exactly as before
             FlexSquishLawInfo(materialsPath: $0, materialID: settings.materialID ?? "", topology: manualSnap?.part.topology ?? build.topology,
-                              tempC: designTempC ?? 0, shapeOnly: shapeOnly)
+                              tempC: manualSnap == nil ? (designTempC ?? 0) : (manualTempC ?? 0), shapeOnly: shapeOnly,
+                              extrapolate: manualSnap != nil)
         }
         let feResting = settings.faces.filter { $0.role == "resting" }.map(\.faceRegionID)
         // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, narrowed 2026-10-22 ~02:50): what holds the part — today's chain with a
@@ -1732,13 +1741,22 @@ public final class FlexibleStageModel: ObservableObject {
                         }
                     }
                 }
-                if let ms = manualSnap { field = FlexibleManualField.field(field, manual: ms, ownerGroups: manualOwners) }
+                // ★ MANUAL P1: every lattice voxel at its group's own density (graded as he set it), walls and type — the numbers
+                // on its card. RED CONTROL `controlOneLatticePerPart`: M1's one type and one wall for the part
+                var manualGrids: FlexibleManualField.Built?
+                if let ms = manualSnap {
+                    let b = FlexibleManualField.build(field, manual: ms, ownerGroups: manualOwners, owners: manualStacks,
+                                                      beadWidthMM: build.beadWidthMM)
+                    field = b.field
+                    if !manualOnePerPart { manualGrids = b }
+                }
                 let inputs = try FlexibleLatticeBuilder.inputs(
                     field: field, part: part, topology: manualSnap?.part.topology ?? build.topology, beadsPerWall: build.beadsPerWall,
                     beadWidthMM: build.beadWidthMM,
                     wallMM: manualSnap.map { FlexibleManualMath.wallMM($0.part, beadWidthMM: build.beadWidthMM) },
                     buildDir: buildDir,
                     pressCuts: shapeOnly ? [:] : pressCutsSnap,   // ★ R7-U21 H (EDGE-LOOK): the presses' seams
+                    manualWall: manualGrids?.wallMM, manualType: manualGrids?.type,   // ★ MANUAL P1: his walls and types
                     skinOffFaces: [], finish: finish)
                 // ★ BATCH G: what the squish sims need, made HERE — the combined field is not kept
                 // (D-R4-19); the solver releases it after the last sim
@@ -1759,7 +1777,7 @@ public final class FlexibleStageModel: ObservableObject {
                                                  law: law, generation: generation)
                     fe?.hold = feHold
                     // ★ MANUAL (M1): the views are the app's estimate from HIS lattice — no core design to scale them to
-                    if manualSnap != nil { fe = fe?.manualEstimate }
+                    if manualSnap != nil { fe = fe?.manualEstimate; fe?.simTopology = manualSimTypesSnap }
                 }
                 let feBuilt = fe
                 // ★ C1: the presses core designed and this lattice carries — their sims calibrate to these depths

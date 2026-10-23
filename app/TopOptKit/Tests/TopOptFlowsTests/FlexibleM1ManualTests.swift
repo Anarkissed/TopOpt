@@ -76,11 +76,11 @@ final class FlexibleM1ManualTests: XCTestCase {
         var s = FlexibleStageSettings(materialID: "varioshore_tpu")
         let dec = JSONDecoder()
         XCTAssertNil(try dec.decode(FlexibleStageSettings.self, from: try JSONEncoder().encode(s)).manual)
-        s.manual = FlexibleManualSettings(on: true, part: FlexibleManualLattice(topology: "honeycomb", cellMM: 7.5, density: 0.24),
-                                          groups: ["2": FlexibleManualLattice(topology: "gyroid", cellMM: 9, density: 0.155)])
+        s.manual = FlexibleManualSettings(on: true, part: FlexibleManualLattice(topology: "honeycomb", beads: 2, density: 0.24),
+                                          groups: ["2": FlexibleManualLattice(topology: "gyroid", beads: 3, density: 0.155)])
         let back = try dec.decode(FlexibleStageSettings.self, from: try JSONEncoder().encode(s))
         XCTAssertEqual(back, s, "★ Manual round-trips")
-        XCTAssertEqual(back.manual?.lattice(group: 2).cellMM, 9)
+        XCTAssertEqual(back.manual?.lattice(group: 2).beads, 3)
         XCTAssertEqual(back.manual?.lattice(group: 1), back.manual?.part, "a group without its own uses the part's")
         // through the project's lattice settings (what project.json holds)
         let pm = try FlexibleHisProject.padProject(s)
@@ -90,90 +90,12 @@ final class FlexibleM1ManualTests: XCTestCase {
         s.manual?.on = false
         let off = try dec.decode(FlexibleStageSettings.self, from: try JSONEncoder().encode(s))
         XCTAssertFalse(off.isManual)
-        XCTAssertEqual(off.manual?.part.cellMM, 7.5)
+        XCTAssertEqual(off.manual?.part.beads, 2)
         XCTAssertNil(off.designInputs.manual, "★ off: not in the lattice's key")
     }
 
-    // MARK: 3 — walls ↔ density, both ways (core's relation)
-
-    func testWallsAndDensityBothWays() async throws {
-        let bw = 0.45
-        let u = FlexibleManualMath.unitCellMM("gyroid", beadWidthMM: bw)
-        XCTAssertEqual(u, 3.0915 * bw, accuracy: 1e-9, "★ core's relation through the bridge (gyroid)")
-        XCTAssertEqual(FlexibleManualMath.unitCellMM("honeycomb", beadWidthMM: bw), 2 * bw, accuracy: 1e-9, "(honeycomb)")
-        let l = FlexibleManualLattice(topology: "gyroid", cellMM: 7, density: u / 7)
-        XCTAssertEqual(FlexibleManualMath.walls(l, beadWidthMM: bw), 1, accuracy: 1e-9)
-        XCTAssertEqual(try FlexibleCore.cellSizeMM(topology: "gyroid", density: l.density, beadsPerWall: 1, beadWidthMM: bw), 7, accuracy: 1e-9)
-        // walls → density
-        let w2 = FlexibleManualMath.withWalls(l, 2, beadWidthMM: bw)
-        XCTAssertEqual(w2.cellMM, 7, "the cell kept")
-        XCTAssertEqual(w2.density, 2 * l.density, accuracy: 1e-9, "★ 2 beads: the density doubles")
-        XCTAssertEqual(try FlexibleCore.cellSizeMM(topology: "gyroid", density: w2.density, beadsPerWall: 2, beadWidthMM: bw), 7, accuracy: 1e-9,
-                       "★ core agrees: 2 beads at that density is the same 7 mm cell")
-        // density → walls
-        let d3 = FlexibleManualMath.withDensity(l, 0.3)
-        XCTAssertEqual(FlexibleManualMath.walls(d3, beadWidthMM: bw), 7 * 0.3 / u, accuracy: 1e-9, "★ density moves the walls")
-        // cell → walls
-        XCTAssertEqual(FlexibleManualMath.walls(FlexibleManualMath.withCell(l, 14), beadWidthMM: bw), 2, accuracy: 1e-9, "★ cell moves the walls")
-        // type keeps cell + walls
-        let h = FlexibleManualMath.withType(l, "honeycomb", beadWidthMM: bw)
-        XCTAssertEqual(h.cellMM, 7)
-        XCTAssertEqual(FlexibleManualMath.walls(h, beadWidthMM: bw), 1, accuracy: 1e-9, "★ the type keeps the walls")
-        XCTAssertEqual(h.density, 2 * bw / 7, accuracy: 1e-9)
-
-        // through the model, on his pad (his bead width)
-        let (r, m) = try await opened(FlexibleU21DeleteUndoTests.padDir, "his pad")
-        m.setManual(true)
-        let pbw = r.project.printParams.strutLineWidthMM
-        XCTAssertEqual(m.manualWalls(group: nil) ?? 0, 1, accuracy: 1e-9, "★ a fresh Manual is 1 bead (Auto's walls)")
-        let cell = try XCTUnwrap(m.manualLattice(group: nil)).cellMM
-        m.setManualWalls(2, group: nil)
-        XCTAssertEqual(m.manualLattice(group: nil)?.density ?? 0, 2 * FlexibleManualMath.unitCellMM(m.manualLattice(group: nil)!.topology, beadWidthMM: pbw) / cell,
-                       accuracy: 1e-9, "★ walls edited → density follows")
-        m.setManualDensity(0.25, group: nil)
-        XCTAssertEqual(m.manualWalls(group: nil) ?? 0, cell * 0.25 / FlexibleManualMath.unitCellMM(m.manualLattice(group: nil)!.topology, beadWidthMM: pbw),
-                       accuracy: 1e-9, "★ density edited → walls follow")
-        XCTAssertEqual(m.manualLattice(group: nil)?.cellMM, cell)
-    }
-
-    // MARK: 4 — the bead warning and its one-tap fix
-
-    func testBeadWarningAndOneTapFix() async throws {
-        let bw = 0.45, u = 3.0915 * bw
-        let l14 = FlexibleManualLattice(topology: "gyroid", cellMM: 7, density: 1.4 * u / 7)
-        XCTAssertEqual(FlexibleManualCopy.wallsWarning(FlexibleManualMath.walls(l14, beadWidthMM: bw)), "Walls 1.4 beads · not a whole bead")
-        XCTAssertEqual(FlexibleManualCopy.fixTitle(1.4), "Make it 1 bead")
-        let f14 = FlexibleManualMath.fixed(l14, beadWidthMM: bw)
-        XCTAssertEqual(FlexibleManualMath.walls(f14, beadWidthMM: bw), 1, accuracy: 1e-9, "★ the fix: the nearest whole bead")
-        XCTAssertEqual(f14.cellMM, 7, "the cell kept")
-        let l06 = FlexibleManualLattice(topology: "gyroid", cellMM: 7, density: 0.6 * u / 7)
-        XCTAssertEqual(FlexibleManualCopy.wallsWarning(0.6), "Walls under 1 bead · too thin to print")
-        XCTAssertEqual(FlexibleManualMath.walls(FlexibleManualMath.fixed(l06, beadWidthMM: bw), beadWidthMM: bw), 1, accuracy: 1e-9)
-        XCTAssertEqual(FlexibleManualCopy.fixTitle(1.7), "Make it 2 beads")
-        // past what the field draws: the density at its bound, the cell moved to keep the whole bead
-        let tight = FlexibleManualLattice(topology: "gyroid", cellMM: 2.5, density: 0.9)
-        let ft = FlexibleManualMath.fixed(tight, beadWidthMM: bw)
-        XCTAssertEqual(ft.density, 0.9, accuracy: 1e-12)
-        XCTAssertEqual(FlexibleManualMath.walls(ft, beadWidthMM: bw), 2, accuracy: 1e-9)
-        XCTAssertNil(FlexibleManualCopy.wallsWarning(1.0))
-        XCTAssertNil(FlexibleManualCopy.wallsWarning(2.02))
-        for s in [FlexibleManualCopy.wallsWarning(7.4)!, FlexibleManualCopy.wallsWarning(0.2)!, FlexibleManualCopy.sameAsPart,
-                  FlexibleManualCopy.ownLattice, FlexibleManualCopy.title] {
-            XCTAssertLessThanOrEqual(s.count, FlexibleRowCopy.maxChars, "one line: \(s)")
-            XCTAssertFalse(s.hasSuffix("…"), "never cut: \(s)")
-        }
-
-        // through the model, on his pad
-        let (_, m) = try await opened(FlexibleU21DeleteUndoTests.padDir, "his pad")
-        m.setManual(true)
-        m.setManualWalls(1.4, group: nil)
-        let w = try XCTUnwrap(m.manualWalls(group: nil))
-        XCTAssertEqual(w, 1.4, accuracy: 1e-9)
-        XCTAssertNotNil(FlexibleManualCopy.wallsWarning(w), "★ the warning is up at once")
-        m.fixManualWalls(group: nil)
-        XCTAssertEqual(m.manualWalls(group: nil) ?? 0, 1, accuracy: 1e-9, "★ one tap: whole beads")
-        XCTAssertNil(FlexibleManualCopy.wallsWarning(m.manualWalls(group: nil) ?? 0), "★ the warning is gone")
-    }
+    // MARK: 3, 4 — RETIRED by P1 (his decisions of 2026-10-23: walls are WHOLE beads, the density is free and the cell follows; no
+    // fractional-bead warning, no one-tap fix). The new relation, both ways, is FlexibleManualP1Tests.
 
     // MARK: 5 — a group's own lattice, and its removal
 
@@ -195,7 +117,7 @@ final class FlexibleM1ManualTests: XCTestCase {
         XCTAssertNil(m.settings.manual?.groups, "★ [Use the part's] drops it (nil, never [:])")
         XCTAssertEqual(m.manualLattice(group: g.id), part)
         // a group renumbered carries its own lattice; a group gone drops it
-        let x = FlexibleManualLattice(topology: "gyroid", cellMM: 9, density: 0.2)
+        let x = FlexibleManualLattice(topology: "gyroid", density: 0.2)
         XCTAssertEqual(FlexibleManualSettings.remap(["2": x, "3": part], rank: [2: 1]), ["1": x])
         XCTAssertNil(FlexibleManualSettings.remap(["3": x], rank: [2: 1]))
     }
@@ -223,9 +145,9 @@ final class FlexibleM1ManualTests: XCTestCase {
         let seed = try XCTUnwrap(m.manualLattice(group: nil))
         XCTAssertEqual(seed.topology, m.designTopology, "★ starts from Auto's type")
         XCTAssertEqual(m.manualWalls(group: nil) ?? 0, 1, accuracy: 1e-9, "★ Auto's 1-bead walls")
-        XCTAssertEqual(seed.density, mean, accuracy: 0.05, "★ near Auto's mean density (the cell on 0.5 mm)")
+        XCTAssertEqual(seed.density, mean, accuracy: 1e-6, "★ Auto's mean density at 1 bead (P1: the cell follows)")
         print(String(format: "FLEX-M1 his pad seed: %@ cell %.2f mm density %.4f (Auto's mean %.4f over %d voxels, %d densities)",
-                     seed.topology, seed.cellMM, seed.density, mean, n, autoRhos.count))
+                     seed.topology, m.manualCellMM(group: nil) ?? -1, seed.density, mean, n, autoRhos.count))
 
         m.setManualDensity(0.30, group: nil)
         let g = m.squeezeGroups[0]
@@ -241,7 +163,8 @@ final class FlexibleM1ManualTests: XCTestCase {
         let bw = m.build.beadWidthMM
         XCTAssertEqual(Double(built.inputs.wallMM), FlexibleManualMath.wallMM(part, beadWidthMM: bw), accuracy: 1e-5, "★ his walls")
         if built.inputs.topology == .gyroid {
-            XCTAssertEqual(Double(3.0915 * built.inputs.wallMM / 0.3), part.cellMM, accuracy: 1e-3, "★ the drawn cell is his cell")
+            XCTAssertEqual(Double(3.0915 * built.inputs.wallMM / 0.3), FlexibleManualMath.cellMM(part, beadWidthMM: bw), accuracy: 1e-3,
+                           "★ the drawn cell is his cell")
         }
         // the combined field: Group 1's voxels at its own 0.2, every other lattice voxel at the part's 0.3
         let field = try XCTUnwrap(m.lastCombinedField)

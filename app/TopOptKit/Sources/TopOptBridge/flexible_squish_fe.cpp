@@ -111,19 +111,44 @@ struct Law {
   bool relative = false;  // shape only (or the curve set refused): E_s = 1, E_lat = max(ρ, .05)²
   fx::CurveSet set;
   double es = 1.0;
+  // ★ ROUND 7 · MANUAL P1 (his decision of 2026-10-23 ~00:35: out-of-data densities in Manual are EXTRAPOLATED, MARKED "estimate
+  // past tested data" on the card): a density below the softest tested row (or above the firmest) was clamped to it — every
+  // 5–14 % lattice squished like 14.3 %. With `extrapolate`, σ(ε; ρ) past an end row ρ_e follows the Gibson–Ashby power law
+  // σ = σ(ε; ρ_e)·(ρ/ρ_e)^n, n fitted so the SLOPE matches the end interval's linear interpolation at ρ_e (n = s·ρ_e/σ_e, s =
+  // (σ_b − σ_a)/(ρ_b − ρ_a)): continuous and C¹ at the row (no kink), monotone in ρ (n > 0; rows that do not rise take the
+  // textbook n = 2). false (Auto): the clamp, exactly as before.
+  bool extrapolate = false;
+  double stress(double eps, double rho) const {
+    const double lo = set.density_min(), hi = set.density_max();
+    if (!extrapolate || set.rows.size() < 2 || (rho >= lo && rho <= hi)) {
+      const fx::StressResult s = fx::stress_at(set, eps, std::min(std::max(rho, lo), hi));
+      return s.ok ? s.stress_mpa : -1.0;
+    }
+    const bool below = rho < lo;
+    const std::size_t n = set.rows.size();
+    const double ra = below ? set.rows[0].core_density : set.rows[n - 2].core_density;
+    const double rb = below ? set.rows[1].core_density : set.rows[n - 1].core_density;
+    const fx::StressResult sa = fx::stress_at(set, eps, ra), sb = fx::stress_at(set, eps, rb);
+    if (!sa.ok || !sb.ok) return -1.0;
+    const double re = below ? ra : rb, se = below ? sa.stress_mpa : sb.stress_mpa;
+    if (!(se > 0.0)) return -1.0;
+    double k = (sb.stress_mpa - sa.stress_mpa) / std::max(rb - ra, 1e-12) * re / se;
+    if (!(k > 0.0) || !std::isfinite(k)) k = 2.0;
+    return se * std::pow(std::max(rho, 1e-6) / re, k);
+  }
 
   double lattice(double rho, double strain, int control) const {
     if (relative) {
       const double r = std::max(rho, 0.05);
       return r * r;
     }
-    const double r = std::min(std::max(rho, set.density_min()), set.density_max());
+    const double r = extrapolate ? rho : std::min(std::max(rho, set.density_min()), set.density_max());
     const double lim = set.strain_limit();
     const double eps = strain > 0.0 ? std::min(std::max(strain, kEpsMin), lim) : kEpsRef;
     // control 256: the table's NOMINAL strain axis (no skin correction) — the wrong law
     const double at = (control & kNominalStrain) ? std::min(eps * kNominalToCore, lim) : eps;
-    const fx::StressResult s = fx::stress_at(set, at, r);
-    return s.ok && s.stress_mpa > 0.0 ? s.stress_mpa / eps : 0.0;
+    const double s = stress(at, r);
+    return s > 0.0 ? s / eps : 0.0;
   }
 
   double voxel(double rho, double strain, double skin, int control) const {
@@ -156,22 +181,22 @@ struct Law {
       const double r = std::max(rho, 0.05);
       return r * r;
     }
-    const double r = std::min(std::max(rho, set.density_min()), set.density_max());
+    const double r = extrapolate ? std::max(rho, 1e-3) : std::min(std::max(rho, set.density_min()), set.density_max());
     const double lim = set.strain_limit();
     const double e = std::max(strain, kEpsMin);
     if (e <= lim) {
-      const fx::StressResult s = fx::stress_at(set, e, r);
-      return s.ok && s.stress_mpa > 0.0 ? s.stress_mpa / e : 0.0;
+      const double s = stress(e, r);
+      return s > 0.0 ? s / e : 0.0;
     }
-    const fx::StressResult sl = fx::stress_at(set, lim, r);
-    if (!sl.ok || !(sl.stress_mpa > 0.0)) return 0.0;
-    if (past == 0) return sl.stress_mpa / lim;
-    const fx::StressResult s2 = fx::stress_at(set, lim - 0.01, r);
-    const double et = s2.ok ? (sl.stress_mpa - s2.stress_mpa) / 0.01 : sl.stress_mpa / lim;
+    const double sl = stress(lim, r);
+    if (!(sl > 0.0)) return 0.0;
+    if (past == 0) return sl / lim;
+    const double s2 = stress(lim - 0.01, r);
+    const double et = s2 >= 0.0 ? (sl - s2) / 0.01 : sl / lim;
     const double ed = densification_strain(r);
     if (e >= ed - 1e-3) return es;
-    const double m = std::max(0.1, et * (ed - lim) / sl.stress_mpa);
-    const double sigma = sl.stress_mpa * std::pow((ed - lim) / (ed - e), m);
+    const double m = std::max(0.1, et * (ed - lim) / sl);
+    const double sigma = sl * std::pow((ed - lim) / (ed - e), m);
     return std::min(sigma / e, es);
   }
   double voxel_at(double rho, double strain, double skin, int control) const {
@@ -185,6 +210,7 @@ struct Law {
 Law make_law(const FlexSquishLaw& in, const fx::FlexibleData& data) {
   Law L;
   L.relative = in.shape_only;
+  L.extrapolate = in.extrapolate;   // ★ R7 MANUAL P1
   if (!L.relative) {
     const fx::CurveSetResult r = fx::curve_set(data, in.material_id, in.temp_c, in.topology);
     if (r.refusal.refused()) {

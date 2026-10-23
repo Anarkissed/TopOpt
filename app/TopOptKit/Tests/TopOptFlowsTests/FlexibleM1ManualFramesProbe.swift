@@ -63,7 +63,7 @@ final class FlexibleM1ManualFramesProbe: XCTestCase {
         XCTAssertTrue(m.isManual, "★ a tap on [Manual] turns Manual on")
         let part = try XCTUnwrap(m.manualLattice(group: nil))
         log.append(String(format: "(2) Manual: part %@ · cell %.2f mm · density %.4f · walls %.3f beads (seeded from Auto's lattice)",
-                          part.topology, part.cellMM, part.density, m.manualWalls(group: nil) ?? -1))
+                          part.topology, m.manualCellMM(group: nil) ?? -1, part.density, m.manualWalls(group: nil) ?? -1))
         try shot("M1_02_13p_pad_squish_card_MANUAL.png", h, settle: 1.5)
 
         // (3) a group with its own lattice: [Set its own], 2-bead walls
@@ -71,10 +71,10 @@ final class FlexibleM1ManualFramesProbe: XCTestCase {
         if let r0 = g.regions.first { m.select(r0) }
         pump(1)
         m.setGroupOwnLattice(g.id, own: true)
-        m.setManualWalls(2, group: g.id)
+        m.setManualBeads(2, group: g.id)
         pump(1.5)
         let own = try XCTUnwrap(m.manualLattice(group: g.id))
-        log.append(String(format: "(3) %@ own: %@ · cell %.2f mm · density %.4f · walls %.3f beads", m.groupName(g), own.topology, own.cellMM,
+        log.append(String(format: "(3) %@ own: %@ · cell %.2f mm · density %.4f · walls %.3f beads", m.groupName(g), own.topology, m.manualCellMM(group: g.id) ?? -1,
                           own.density, m.manualWalls(group: g.id) ?? -1))
         try shot("M1_03_13p_pad_group_own_lattice.png", h, settle: 1.5)
 

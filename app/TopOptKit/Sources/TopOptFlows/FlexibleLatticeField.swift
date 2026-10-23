@@ -128,6 +128,11 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     /// no press seam — the field is exactly the ladder as before. Same grid as `rho`.
     public var rhoAcross: FlexGrid? = nil
     public var pressSide: FlexGrid? = nil
+    /// ★ ROUND 7 · MANUAL P1 (his decisions of 2026-10-23: a lattice TYPE and WALLS per group, "a clean seam where types meet"): per
+    /// voxel the wall t (mm, whole beads × the bead width) and the type share (0 gyroid, 1 honeycomb), on ρ's grid. nil (Auto, and
+    /// Manual's red control): one type and one t for the part — the field exactly as before.
+    public var manualWall: FlexGrid? = nil
+    public var manualType: FlexGrid? = nil
 }
 
 public enum FlexibleLatticeField {
@@ -200,8 +205,8 @@ public enum FlexibleLatticeField {
     /// (gB − gA)·∇w, the blend weight's own gradient through ρ, without which the walls inside
     /// a blend are drawn off t (`blendGradient: false` is only a test's red control).
     public static func gyroidSheet(_ p: SIMD3<Float>, rhoRaw: Float, gradRho: SIMD3<Float>, _ f: FlexibleLatticeInputs,
-                                   blendGradient: Bool = true) -> (G: Float, grad: SIMD3<Float>, k: Float, w: Float) {
-        let t = f.wallMM
+                                   blendGradient: Bool = true, t tIn: Float? = nil) -> (G: Float, grad: SIMD3<Float>, k: Float, w: Float) {
+        let t = tIn ?? f.wallMM
         let rhoIn = rhoRaw > 0.05 && rhoRaw < 0.9
         let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
         let Lraw = 3.0915 * t / rho
@@ -234,7 +239,7 @@ public enum FlexibleLatticeField {
     /// sheets meet at the plane's TRUE position — σ = smoothstep of the trilinear side share, ½ on the plane, not the voxel
     /// staircase — with the whole gradient (incl. (G_press − G_face)·∇σ), so walls run on across the seam instead of
     /// ending in slivers. nil: no seam in this cell (the ladder exactly as before). The MSL's `flx_wall_seam` is the twin.
-    public static func seamSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (G: Float, grad: SIMD3<Float>, k: Float)? {
+    public static func seamSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, t: Float? = nil) -> (G: Float, grad: SIMD3<Float>, k: Float)? {
         guard !controlLadderAcrossCliffs, let ac = f.rhoAcross, let sd = f.pressSide else { return nil }
         let g = f.rho
         let u = (p - g.c0) / g.spacing
@@ -261,10 +266,10 @@ public enum FlexibleLatticeField {
         let x = Swift.min(Swift.max(phi.value, 0), 1)
         let sigma = x * x * (3 - 2 * x)
         let dSigma = (x > 0 && x < 1 ? 6 * x * (1 - x) : 0) * phi.grad
-        if sigma <= 0 { let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f); return (a.G, a.grad, a.k) }
-        if sigma >= 1 { let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f); return (b.G, b.grad, b.k) }
-        let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f)
-        let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f)
+        if sigma <= 0 { let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f, t: t); return (a.G, a.grad, a.k) }
+        if sigma >= 1 { let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f, t: t); return (b.G, b.grad, b.k) }
+        let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f, t: t)
+        let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f, t: t)
         return ((1 - sigma) * a.G + sigma * b.G, (1 - sigma) * a.grad + sigma * b.grad + (b.G - a.G) * dSigma,
                 (1 - sigma) * a.k + sigma * b.k)
     }
@@ -296,6 +301,7 @@ public enum FlexibleLatticeField {
     }
 
     public static func wall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        if let mw = f.manualWall, let mt = f.manualType { return manualWall(p, f, mw, mt) }
         let t = f.wallMM
         switch f.topology {
         case .gyroid:
@@ -315,6 +321,54 @@ public enum FlexibleLatticeField {
             let n = Swift.max(abs(q.x), Swift.max(abs(0.5 * q.x + 0.8660254 * q.y), abs(-0.5 * q.x + 0.8660254 * q.y)))
             return abs(0.5 * d - n) - 0.5 * t
         }
+    }
+
+    /// One honeycomb of cell `d` (across flats) and wall `t` at p (the `.honeycomb` case's arithmetic).
+    static func honeycombWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, d: Float, t: Float) -> Float {
+        let b = simd_normalize(f.buildDir)
+        let ref: SIMD3<Float> = abs(b.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+        let e1 = simd_normalize(simd_cross(b, ref)), e2 = simd_cross(b, e1)
+        let v = SIMD2<Float>(simd_dot(p, e1), simd_dot(p, e2))
+        let r = SIMD2<Float>(d, 1.7320508 * d), h = r * 0.5
+        let A = SIMD2<Float>(fmod(v.x, r.x), fmod(v.y, r.y)) - h
+        let B = SIMD2<Float>(fmod(v.x - h.x, r.x), fmod(v.y - h.y, r.y)) - h
+        let q = simd_length_squared(A) < simd_length_squared(B) ? A : B
+        let n = Swift.max(abs(q.x), Swift.max(abs(0.5 * q.x + 0.8660254 * q.y), abs(-0.5 * q.x + 0.8660254 * q.y)))
+        return abs(0.5 * d - n) - 0.5 * t
+    }
+
+    /// ★ ROUND 7 · MANUAL P1 — A TYPE AND WALLS PER GROUP (the MSL's `flx_wall_manual`, the twin). t = the wall grid's trilinear (his
+    /// whole beads; constant inside a group). The type grid's trilinear share decides the side: < ½ a gyroid of wall t on the ladder
+    /// (the press seam's where a cell holds one), ≥ ½ a honeycomb of wall t whose cell follows ρ, d = 2t/ρ, on the SAME ladder of rungs
+    /// 19 % apart (dMin = 2·tMin/0.9), neighbouring rungs blended — one exact honeycomb wherever ρ is one value (a group without a
+    /// grade). Where the types meet the switch is at the share's ½: each lattice runs to that seam, the clean seam he asked for.
+    /// |∇ρ| (mm⁻¹) under which a cell holds ONE density (its eight corners equal: exactly 0 on both copies).
+    public static let uniformGradient: Float = 1e-5
+    static func manualWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, _ mw: FlexGrid, _ mt: FlexGrid) -> Float {
+        let t = Swift.max(mw.sample(p), 1e-3)
+        let r0 = sampleWithGradient(f.rho, p)
+        // ★ ONE DENSITY HERE (∇ρ = 0: a group without a grade): the EXACT cell — one true gyroid / honeycomb at his cell, never a
+        // ladder rung — so what is drawn is the cell on his card. A grade (∇ρ ≠ 0) draws on the ladder (within one rung, 19 %).
+        let uniform = simd_length(r0.grad) < uniformGradient
+        if mt.sample(p) < 0.5 {
+            if let s = seamSheet(p, f, t: t) { return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t }
+            if uniform {
+                let rho = Swift.min(Swift.max(r0.value, 0.05), 0.9)
+                let L = Swift.min(Swift.max(3.0915 * t / rho, f.lMinMM), f.lMaxMM), k = 2 * Float.pi / L
+                let g = gyroid(p, k: k)
+                return abs(g.g) / Swift.max(simd_length(g.grad), 0.05 * k) - 0.5 * t
+            }
+            let s = gyroidSheet(p, rhoRaw: r0.value, gradRho: r0.grad, f, t: t)
+            return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t
+        }
+        let rho = Swift.min(Swift.max(r0.value, 0.05), 0.9)
+        let dMin = f.lMinMM * 2 / 3.0915, dMax = f.lMaxMM * 2 / 3.0915
+        let d = Swift.min(Swift.max(2 * t / rho, dMin), dMax)
+        if uniform { return honeycombWall(p, f, d: d, t: t) }
+        let r = rungs(L: d, lMin: dMin)
+        if r.w <= 0 { return honeycombWall(p, f, d: r.La, t: t) }
+        if r.w >= 1 { return honeycombWall(p, f, d: r.Lb, t: t) }
+        return (1 - r.w) * honeycombWall(p, f, d: r.La, t: t) + r.w * honeycombWall(p, f, d: r.Lb, t: t)
     }
 
     public static func dRegion(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
@@ -466,6 +520,8 @@ public enum FlexibleLatticeBuilder {
     public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
                               beadsPerWall: Int, beadWidthMM: Double, wallMM: Double? = nil, buildDir: SIMD3<Double>,
                               pressCuts: [Int: FlexibleFlatPrism.Cut] = [:],
+                              manualWall: [Float]? = nil,
+                              manualType: [Float]? = nil,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
                               finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
@@ -497,6 +553,9 @@ public enum FlexibleLatticeBuilder {
         // ★ R7-U21 H (EDGE-LOOK): the owner follows ρ through the fills, so a filled voxel carrying a press's ρ is that
         // press's voxel to the seam (FlexibleGroupField.pressSeam); read by nothing else
         var own = field.owner.count == n ? field.owner : [Int](repeating: -1, count: n)
+        // ★ MANUAL P1: his per-voxel walls and type follow ρ through every fill (nil: Auto — nothing here runs)
+        let hasManual = manualWall?.count == n && manualType?.count == n
+        var mw = hasManual ? manualWall! : [], mt = hasManual ? manualType! : []
         while head < queue.count {
             let v = queue[head]; head += 1
             let i = v % nx, j = (v / nx) % ny, k = v / (nx * ny)
@@ -504,7 +563,7 @@ public enum FlexibleLatticeBuilder {
                 let a = i + di, b = j + dj, c = k + dk
                 guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
                 let w = (c * ny + b) * nx + a
-                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; queue.append(w) }
+                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; if hasManual { mw[w] = mw[v]; mt[w] = mt[v] }; queue.append(w) }
             }
         }
         // ★ ROUND 7 — THE MASK REACHES THE SURFACE (his report of 2026-10-18: "the top isn't being bent or removed when I
@@ -578,7 +637,8 @@ public enum FlexibleLatticeBuilder {
             let inside = coreEncloses(asked, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
             for (n, c) in cand.enumerated() where !inside[n] {
                 if cornerRule, c.solid.contains(where: { inside[at[$0]!] }) { continue }   // a solid, non-lattice neighbour
-                mask[c.v] = 1; rho[c.v] = rho[c.from]; own[c.v] = own[c.from]; added.insert(c.v)   // decided on core's mask alone
+                mask[c.v] = 1; rho[c.v] = rho[c.from]; own[c.v] = own[c.from]; added.insert(c.v)
+                if hasManual { mw[c.v] = mw[c.from]; mt[c.v] = mt[c.from] }   // decided on core's mask alone
             }
         }
         let sp = Float(field.spacing)
@@ -618,17 +678,29 @@ public enum FlexibleLatticeBuilder {
                                values: sdf.values)
         // ★ MANUAL (M1): `wallMM` — his walls (beads × the bead width, a fraction allowed: his type + cell + density decide it), so
         // the gyroid's L = 3.0915·t/ρ and the honeycomb's d = 2t/ρ̄ come out at HIS cell; nil: whole beads, as before
-        let t = Float(wallMM ?? Double(beadsPerWall) * beadWidthMM)
+        var t = Float(wallMM ?? Double(beadsPerWall) * beadWidthMM)
+        var tMax = t
+        if hasManual {
+            // ★ MANUAL P1: the ladder spans every wall in play (its rungs start at the thinnest wall's densest cell)
+            var lo = Float.infinity, hi: Float = 0
+            for v in 0..<n where mask[v] >= 0.5 && mw[v] > 0 { lo = Swift.min(lo, mw[v]); hi = Swift.max(hi, mw[v]) }
+            if lo.isFinite { t = lo; tMax = hi }
+        }
         let meanRho = Float(assignedSum / Double(assignedN))
         let topo: FlexibleLatticeInputs.Topology = topology == "honeycomb" ? .honeycomb : .gyroid
-        return FlexibleLatticeInputs(
+        var out = FlexibleLatticeInputs(
             topology: topo, wallMM: t,
-            lMinMM: 3.0915 * t / 0.9, lMaxMM: 3.0915 * t / 0.05,
+            lMinMM: 3.0915 * t / 0.9, lMaxMM: 3.0915 * tMax / 0.05,
             honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
             buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
             rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
             boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added, seamFilled: seamFilled,
             rhoAcross: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.across) },
             pressSide: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.side) })
+        if hasManual {
+            out.manualWall = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mw)
+            out.manualType = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mt)
+        }
+        return out
     }
 }

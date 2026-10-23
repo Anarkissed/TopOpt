@@ -50,9 +50,12 @@ public struct FlexSquishLawInfo: Equatable, Sendable {
     public var topology: String
     public var tempC: Double
     public var shapeOnly: Bool
-    public init(materialsPath: String, materialID: String, topology: String, tempC: Double, shapeOnly: Bool) {
+    /// ★ ROUND 7 · MANUAL P1: a density outside the tested rows is EXTENDED by a power law fitted to the end row (C¹ there,
+    /// monotone) instead of clamped to it (flexible_squish_fe.cpp, Law::stress). false: the clamp (Auto, exactly as before).
+    public var extrapolate: Bool
+    public init(materialsPath: String, materialID: String, topology: String, tempC: Double, shapeOnly: Bool, extrapolate: Bool = false) {
         self.materialsPath = materialsPath; self.materialID = materialID; self.topology = topology
-        self.tempC = tempC; self.shapeOnly = shapeOnly
+        self.tempC = tempC; self.shapeOnly = shapeOnly; self.extrapolate = extrapolate
     }
 }
 
@@ -342,6 +345,7 @@ enum FlexSquishConv {
         o.topology = std.string(l.topology)
         o.temp_c = l.tempC
         o.shape_only = l.shapeOnly
+        o.extrapolate = l.extrapolate
         return o
     }
 }

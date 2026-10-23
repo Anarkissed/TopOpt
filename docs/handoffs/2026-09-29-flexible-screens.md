@@ -104,6 +104,21 @@ Each item: what core does, where, the evidence, your numbers.
    it (a "check, don't design" call: his lattice + his weight + his stamp in, depth per column out), so the app's estimate can be
    checked against core's.
 
+12. **A per-region MANUAL lattice for core (round 7 · MANUAL P1, his decisions of 2026-10-23).** Item 11's ask, now with the full
+   set the app lets him set for the whole part AND per squeeze group: `type` (gyroid | honeycomb — a type per region, with a clean
+   seam where two meet), `beads_per_wall` 1–3 (core's block takes only 1 or 2: `core/src/flexible/job_block.cpp:105-107`), a
+   free `density` (5–90 %) with the cell following (cell = beads · unit / ρ; or `cell_mm` / `cells_across` the region's depth,
+   the density then following), and a `grade` {by density | by cell, from → to, along: through the depth | across the face |
+   the face's drawn curve; style default (smooth) | stepped (one flat band per cell through the depth)}. Today none of it reaches
+   core (the job stays Auto's bytes); the app draws and sims it alone. Also needed by Manual: (a) CURVE ROWS outside the tested
+   14.3–36.2 % (varioShore gyroid 190 °C): below 14.3 % the app now EXTENDS the data by a power law fitted to the softest
+   interval (C¹ at the row; its exponent on that data is ≈ 7.1, far steeper than Gibson–Ashby's textbook 2 — so a 10 % lattice
+   reads 0.029 MPa against 0.366 MPa at 14.3 %, ε 0.1); every such estimate is marked "Estimate past tested data" on the card
+   (`flexible_squish_fe.cpp`, `Law::stress`); (b) rows for WALLS OTHER THAN 1 BEAD — every tested row is a 1-bead specimen, so
+   a 2- or 3-bead lattice is estimated from its density alone (Gibson–Ashby: stiffness follows ρ, not the wall count), unproven.
+   (c) the app's sim reads ONE law type per group's sim (that group's own type); another group's lattice of the other type inside
+   the same sim uses the wrong curves (approximate, said here).
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
@@ -122,6 +137,56 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+
+## ★ Round 7 · MANUAL P1 — the full lattice set for the part and every group; whole-bead walls; the estimate past the data (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on `122191ff`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no
+#354/main file edited; no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/manual_p1/`.
+
+Your notes of 2026-10-23 (~00:00): "any time I try to change the density, it gives me a warning … Each lattice should have the
+same set of settings as the entire model … If we are saying this is going to be a manual implementation of the lattice, then we
+should GIVE them a manual implementation of the lattice, not a whole section for 3 options!" Your decisions (~00:35): walls in
+whole beads, the density free and the cell follows; a lattice type per group; past the tested data: extend it, and say so.
+
+What you get, in plain words:
+- **The same rows for the whole part (Model card) and for each group's "Set its own":** Type [Gyroid | Honeycomb]; Walls [1 bead |
+  2 beads | 3 beads]; Density %, Cell size mm, Cells across (change any one and the other two follow at your walls); Grade [Off |
+  On] and, when on: Grade by [Density | Cell], From, To, Along [Depth | Across | Curve], Style [Default | Stepped]; then a short
+  facts block. The Model card also has Temperature [190 | 220 | 240 °C]; More's Nozzle row shows no Auto in Manual.
+- **Any density, no warning.** 20 % at 1 bead is a 7.0 mm gyroid cell; 2 beads at the same 20 % is a 13.9 mm cell (your pad and
+  your l-bracket). Walls can only be whole beads, so the "Walls 1.4 beads" warning and its fix button are gone.
+- **Cells across** is that lattice's own face-prism depth ÷ the cell (your pad: the part's lattice 27.6 mm deep, Group 1's 68.7 mm).
+  Under 2 cells is flagged in the facts block (your 10-17 rule), never blocked; so is a cell outside 2–60 mm.
+- **A group's own lattice is what is drawn.** Each lattice voxel now carries its own walls and type (a clean seam where gyroid
+  meets honeycomb); a lattice with one density is drawn at exactly the cell on its card (your pad, Group 1 honeycomb 2 beads 25 %:
+  card 7.2 mm, drawn wall minus card wall 0.0 mm). A graded lattice is drawn on the 19 % ladder of cells, as Auto's.
+- **Past the tested data the estimate goes on, marked.** Below 14.3 % the squish estimate used to treat every lattice as 14.3 %.
+  It now extends the data's own trend (a power law joined smoothly to the softest row) and the card says "Estimate past tested data
+  (14–36 %)"; inside, it says "Data covers 14–36 %". One thing to know: on varioShore gyroid 190 °C that trend is steep (exponent
+  ≈ 7.1; the textbook is 2), so a 10 % lattice reads about 12× softer than 14.3 % (0.029 vs 0.366 MPa at 10 % squash). Your call
+  if you would rather the gentler textbook slope (it would put a kink at 14.3 %).
+- **The estimate uses your Manual temperature** (it starts at Auto's); Auto's own temperature and the job stay as they were.
+- **Old Manual saves** open at the same cell they showed, at 1 bead.
+
+Not built / defaults taken (tell me if you want otherwise):
+- From = your Density above (the grade starts at the lattice's own value); To starts at 1.5× it. Stepped = one flat band per cell
+  through the depth (2–8 bands). Along Curve on an edge press reads as Depth (an edge has no drawn curve on its columns).
+- A group's sim reads its own type's curves; another group's lattice of the other type inside that sim reads the same curves
+  (approximate; CORE LIST 12(c)). 2- and 3-bead walls use the 1-bead rows by density (CORE LIST 12(b)).
+- The Squish page's X-ray shows the bend prisms, not the lattice walls (render 3); the walls are drawn on the Lattice page.
+
+Tests (red controls asserted red inside each): `FlexibleManualP1Tests` (7) — a free density keeps whole beads and moves the cell on
+both projects (RED: M1's tie gives fractional beads); the linked trio both ways, part and group, both projects; a group's own
+honeycomb / 2 beads / 25 % round-trips and the drawn wall is the card's (RED: one lattice per part draws the part's gyroid);
+the estimate monotone below and above the data, no kink (slopes 16.7 / 18.1 at 14.3 %), the card's marked line (RED: the clamp is
+flat below 14.3 %), 240 °C another curve set; the grade (smooth, stepped, by cell); old saves map; the GPU draws the per-group walls
+and types as the Swift field (max 0.00097 mm over 400 points; RED: grids dropped 16.9 mm). M1's walls/bead-warning tests and the
+follow-up's "type and cell follow the part" test are retired (your decisions replace them).
+Run once (18 classes): 91 passed, 2 failed, 2 skipped — FlexibleSettingsRound4Tests (a source-text pin; the call's arguments
+reordered, re-run 14/14) and FlexibleSettingsPageHostedTests 11" landscape "as opened" (the known one, same numbers). Goldens 0
+DIFFERS both modes (38; 32 + 1 PART-SKIP); the 16 stage-job hashes cmp-identical to the follow-up's (Auto byte-identical).
+Renders (13" portrait, your pad): P1_01 the Model card in Manual; P1_02 Group 1 with its own honeycomb + grade on; P1_03 the same
+with X-ray.
 
 ## ★ Round 7 · Links + Rests both hold, Manual on the Lattice page, a group's own lattice = what is drawn (2026-10-22) — INSTALLED (read this first)
 
