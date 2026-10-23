@@ -143,6 +143,21 @@ Each item: what core does, where, the evidence, your numbers.
    the card gives those heights for you to type into the slicer. Data note: varioShore's curves are not in order with
    temperature. 220 °C is the softest; 240 °C is a little firmer (gyroid ρ 0.2 at ε 0.1: 190 0.219, 220 0.077, 240 0.084 MPa).
 
+15. **STEP import: drop repeated-corner triangles and re-mesh a face that comes out open (round 8, the reviewer's ruling of
+   2026-10-23 18:56 (2)).** `core/src/io/step.cpp:146` meshes the whole shape once (`BRepMesh_IncrementalMesh`, 0.1 mm absolute,
+   0.5 rad), welds on a 1e-6 mm grid and runs `check_watertight` with NO clean-up between. Two defects follow on your four
+   squish-rig parts that Fusion's Validate passes: (a) POLE SLIVERS: a fillet-corner face (sphere octant, 3-sided B-spline
+   patch) carries a degenerated edge; BRepMesh gives the pole two nodes at one 3D point, and a triangle on both welds to
+   (a, a, b): zero area, one self-edge and one 4-use edge. Carriage Arms 8, Pressing Plate Mount 4, Top Motor Mount 10,
+   2040 Extrusion Stand 2. The mesh path's `weld_and_clean` drops exactly these; the STEP path keeps them. (b) ONE BROKEN FACE:
+   2040 Extrusion Stand face 16 (a plane, 0.01-0.05 mm wire edges) comes back at 0.1 mm with a 4-edge hole and overlapping
+   triangles (771.9 mm² of triangles on a 725.2 mm² face; mesh volume +0.79 % off the B-rep at 0.1 mm, +0.06 % at 0.05 mm),
+   and BRepMesh reports no error. The round-8 report's numbers for it: **34 mm² vs 2.4 mm²** (0.1 mm vs 0.05 mm). Ask: drop
+   repeated-corner triangles in step.cpp as `weld_and_clean` does, plus a per-face triangulation check (re-mesh a face finer
+   when it comes out open). Until then the app repairs its OWN import (H47, `StepMeshRepair.swift`) and paint is off on a
+   repaired part (H48), because core's run re-tessellates the STEP itself and its triangle numbers differ; both lift when
+   core does this.
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
@@ -175,6 +190,35 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    main checkout links it to `.vcpkg/installed/arm64-osx-dynamic/lib`), so `Package.swift:95-101` links no 3MF and the
    import refuses "3MF import requires lib3mf". Provisioning, not code: vendoring lib3mf-lib and rebuilding the core
    slice with it (build_core.sh) would make them run. Not done here (vendor/ and core are not ours).
+
+## ★ Round 8 · STEP import repair WIRED IN (H47) + paint off on a repaired STEP (H48) (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on `9b11b6dc` (phase 1: `StepMeshRepair.swift`, own files). NOT pushed (your
+HOLD). NOT installed. Core untouched. The reviewer's ruling of 2026-10-23 18:56, approved by you: the one sanctioned exception
+outside the Flexible stage, H47 + the paint gate and nothing else in the import path.
+
+**What you see.** Your four refused rig parts (Carriage Arms, Pressing Plate Mount, Top Motor Mount, 2040 Extrusion Stand)
+import, fillets and every CAD face as today (same face count, every face id). Base and both pillow-block stands, and every
+other part, import byte-identical to before. On those four only, the Paint chip is greyed with one line under it:
+"Paint off · this STEP was repaired on import" (core's run re-meshes the STEP itself, so painted triangle numbers would not
+match it). Every other part paints as today. It lifts when core drops the slivers (CORE LIST item 15).
+
+- **H47** `TopOptKit.swift` `importMesh(path:linearDeflectionMM:)`, +4 −1, exactly as approved: `return convert(raw)` →
+  the mesh, the gate (`.step/.stp` AND not watertight), the repair. Accepted only closed + consistently wound + positive volume
+  + same face count + every face id; else the original refusal.
+- **H48** `WorkspacePlaceholder.swift`, the Paint chip's row in `settingsChipRow` (`case .paint:`), one line:
+  `paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path)…` (`FlexibleRepairedStepPaint.swift`, new).
+  "Repaired" is recorded by `StepMeshRepair.repaired` per file (path + size + modification date), so no shared type changed.
+- Tests: `StepMeshRepairTests.testHookedImportMeshAcceptsTheFour` replaces the old refusal pin; new
+  `FlexibleStepRepairHookTests` (H47 + H48 pinned once at their anchors with their gates, gate-removed copies red; a repaired
+  part's paint off, an unrepaired part's on; AppModel's import accepts Carriage Arms with paint off, Base with paint on).
+
+Run once (`evidence/2026-09-29-flexible-screens/round8_step_h47/r8_runs.txt`):
+- StepMeshRepairTests 8/8 + FlexibleStepRepairHookTests 3/3; hook pins (7 classes) 9/9; PaintTests + PaintModeUITests 6/6;
+  TopOptKitTests import 8/8; AppModelTests import 12 executed, 9 pass, 3 fail = the known 3MF ×3 (no macOS lib3mf in this
+  worktree, T1 item 5), nothing else;
+- goldens det 38 identical / 0 DIFFERS; unseeded 32 / 0 DIFFERS / 1 PART-SKIP;
+- the 16 stage-job hashes cmp-identical (whole file) to `t3_reveal/stage_job_hashes_t3.txt`: Flexible unaffected.
 
 ## ★ Round 7 · T3 — the Settings panel's scroll RECODED: the selected card is whole as the page opens (2026-10-23) (read this first)
 

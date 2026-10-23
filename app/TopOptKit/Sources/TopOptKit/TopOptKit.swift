@@ -2375,7 +2375,10 @@ public enum TopOptKit {
         var err = topoptbridge.BridgeError()
         let raw = topoptbridge.import_part(std.string(path), linearDeflectionMM, &err)
         try throwIfFailed(err)
-        return convert(raw)
+        let mesh = convert(raw)
+        // Flexible (PR #362) H47 — gate: only a .step/.stp import that is NOT watertight (StepMeshRepair.swift).
+        guard StepMeshRepair.needsRepair(path: path, mesh: mesh) else { return mesh }
+        return StepMeshRepair.repaired(mesh, path: path, linearDeflectionMM: linearDeflectionMM)
     }
 
     /// Inspect a part file without throwing on a mesh-quality refusal: the

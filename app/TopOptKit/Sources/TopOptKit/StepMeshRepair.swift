@@ -87,10 +87,50 @@ public enum StepMeshRepair {
 
     // MARK: - the repair
 
-    /// The repaired mesh, or `mesh` itself when nothing could be accepted.
+    /// The repaired mesh, or `mesh` itself when nothing could be accepted. Records whether
+    /// the repair CHANGED this file (see `wasRepaired`), so paint can be turned off on it.
     public static func repaired(_ mesh: ImportedMesh, path: String,
                                 linearDeflectionMM: Double = 0) -> ImportedMesh {
-        repairedWithReport(mesh, path: path, linearDeflectionMM: linearDeflectionMM).mesh
+        let (out, report) = repairedWithReport(mesh, path: path,
+                                               linearDeflectionMM: linearDeflectionMM)
+        repairedFiles.record(path, changed: report.pass == .poleSlivers
+                                         || report.pass == .retessellated)
+        return out
+    }
+
+    // MARK: - which files the repair changed (paint gate, ruling 2026-10-23 18:56 (3))
+
+    /// True when the hooked import of the file at `path`, AS IT IS ON DISK NOW (same size and
+    /// modification date), came back repaired. Its triangles then no longer match the mesh
+    /// core's run tessellates for itself, so a triangle-indexed paint sidecar would index the
+    /// wrong triangles: paint stays off on it until core drops the slivers. False for every
+    /// file the gate never opened on (STL/3MF, an already-watertight STEP) and for a refusal.
+    public static func wasRepaired(path: String) -> Bool { repairedFiles.contains(path) }
+
+    static let repairedFiles = RepairedFiles()
+
+    /// The paths (with size + modification date, so an edited file starts clean) whose
+    /// import the repair changed in this process. Every mesh the app shows comes through
+    /// the hooked `TopOptKit.importMesh`, so the entry exists whenever the mesh does.
+    final class RepairedFiles: @unchecked Sendable {
+        private let lock = NSLock()
+        private var keys: Set<String> = []
+        static func key(_ path: String) -> String? {
+            guard let a = try? FileManager.default.attributesOfItem(atPath: path) else { return nil }
+            let size = (a[.size] as? NSNumber)?.int64Value ?? -1
+            let date = (a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+            return "\(path)|\(size)|\(date)"
+        }
+        func record(_ path: String, changed: Bool) {
+            guard let k = Self.key(path) else { return }
+            lock.lock(); defer { lock.unlock() }
+            if changed { keys.insert(k) } else { keys.remove(k) }
+        }
+        func contains(_ path: String) -> Bool {
+            guard let k = Self.key(path) else { return false }
+            lock.lock(); defer { lock.unlock() }
+            return keys.contains(k)
+        }
     }
 
     /// The import as the hooked `TopOptKit.importMesh` will return it: today's import,

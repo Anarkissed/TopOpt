@@ -241,14 +241,26 @@ final class StepMeshRepairTests: XCTestCase {
         }
     }
 
-    // MARK: - the hook's pin
+    // MARK: - the hook (H47, ruling 2026-10-23 18:56 (1))
 
-    /// PIN for the importMesh hook (TopOptKit.swift, `importMesh(path:linearDeflectionMM:)`).
-    /// Before the hook, TopOptKit.importMesh still refuses all four. The hook commit flips
-    /// this test: each must then equal `StepMeshRepair.importMesh` and be watertight.
-    func testPinBeforeTheHookImportMeshStillRefusesTheFour() throws {
+    /// The hooked TopOptKit.importMesh now ACCEPTS all four: watertight, closed and
+    /// consistently wound, positive volume, the B-rep's face count with every face id the
+    /// stock import carried, and exactly the mesh the repair gives on today's import.
+    /// (Replaces testPinBeforeTheHookImportMeshStillRefusesTheFour.) The pin of the hook's
+    /// text is FlexibleStepRepairHookTests.
+    func testHookedImportMeshAcceptsTheFour() throws {
         for p in Self.refused {
-            XCTAssertFalse(try TopOptKit.importMesh(path: Self.fixture(p.file)).watertight, p.file)
+            let path = Self.fixture(p.file)
+            let stock = try Self.stock(path)
+            XCTAssertFalse(stock.watertight, "today's bridge import is still open: \(p.file)")
+            let m = try TopOptKit.importMesh(path: path)
+            XCTAssertTrue(m.watertight, p.file)
+            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.file)
+            XCTAssertGreaterThan(StepMeshRepair.signedVolume(m), 0, p.file)
+            XCTAssertEqual(m.faceCount, p.faces, p.file)
+            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.file)")
+            let expected = StepMeshRepair.repaired(stock, path: path)
+            XCTAssertEqual(Self.differences(expected, m), [], p.file)
         }
     }
 

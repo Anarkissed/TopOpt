@@ -5989,7 +5989,7 @@ public struct WorkspacePlaceholder: View {
             }
         case .paint:
             VStack(alignment: .trailing, spacing: DS.Space.s) {
-                paintChip.background(chipWidthReader(id))
+                paintChip.flexibleRepairedStepPaintGate(path: project.importedFile?.path).background(chipWidthReader(id))   // Flexible (PR #362) H48 — paint off on a repaired STEP (ruling 2026-10-23 18:56)
                 if paintActive {
                     paintDrawer
                         .transition(.move(edge: .top).combined(with: .opacity))
