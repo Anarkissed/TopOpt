@@ -133,6 +133,14 @@ public struct FlexibleLatticeInputs: Equatable, Sendable {
     /// Manual's red control): one type and one t for the part — the field exactly as before.
     public var manualWall: FlexGrid? = nil
     public var manualType: FlexGrid? = nil
+    /// ★ ROUND 7 · MANUAL P2 (the drawing matches the settings): per voxel the PIECE code (4 · piece + 2 · graded + type,
+    /// FlexibleManualField.Built.code), the neighbouring OTHER piece's ρ carried onto this voxel and that piece's code (= this
+    /// voxel's ρ and code away from a seam). Where two pieces meet — two types, two walls, two Stepped bands, two groups — each
+    /// side draws its own lattice from its own same-side values and the two join at the seam's true position
+    /// (`manualPieceWall`). nil: P1's field (its red control).
+    public var manualPiece: FlexGrid? = nil
+    public var manualAcross: FlexGrid? = nil
+    public var manualOther: FlexGrid? = nil
 }
 
 public enum FlexibleLatticeField {
@@ -301,7 +309,12 @@ public enum FlexibleLatticeField {
     }
 
     public static func wall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
-        if let mw = f.manualWall, let mt = f.manualType { return manualWall(p, f, mw, mt) }
+        if let mw = f.manualWall, let mt = f.manualType {
+            if !controlP1Manual, let pc = f.manualPiece, let ac = f.manualAcross, let ot = f.manualOther {
+                return manualPieceWall(p, f, mw, pc, ac, ot).d
+            }
+            return manualWall(p, f, mw, mt)
+        }
         let t = f.wallMM
         switch f.topology {
         case .gyroid:
@@ -369,6 +382,136 @@ public enum FlexibleLatticeField {
         if r.w <= 0 { return honeycombWall(p, f, d: r.La, t: t) }
         if r.w >= 1 { return honeycombWall(p, f, d: r.Lb, t: t) }
         return (1 - r.w) * honeycombWall(p, f, d: r.La, t: t) + r.w * honeycombWall(p, f, d: r.Lb, t: t)
+    }
+
+    // MARK: ★ ROUND 7 · MANUAL P2 — THE DRAWING MATCHES THE SETTINGS (the MSL's `flx_wall_pieces`, the twin)
+
+    /// ★ RED CONTROL only (FlexibleManualP2Tests): P1's manual field (one trilinear type share, ρ ladder-blended across every
+    /// group edge and Stepped band) — the piece grids ignored.
+    nonisolated(unsafe) public static var controlP1Manual = false
+
+    /// A piece code's type (0 gyroid, 1 honeycomb) and whether its lattice is graded smoothly (drawn on the ladder).
+    @inline(__always) static func pieceBits(_ c: Float) -> (type: Int, graded: Bool) {
+        let i = Int(c + 0.5)
+        return (i & 1, (i >> 1) & 1 == 1)
+    }
+
+    /// One piece's wall at p from ITS values: a gyroid / honeycomb of wall t; one density (graded false) at the EXACT cell (his
+    /// card's), a Default grade on the ladder (rungs 19 % apart, neighbours blended). Also its sheet (gyroid) and the cell drawn.
+    static func pieceSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho rhoRaw: Float, grad: SIMD3<Float>, t: Float,
+                           graded: Bool) -> (G: Float, grad: SIMD3<Float>, k: Float) {
+        if !graded {
+            let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+            let L = Swift.min(Swift.max(3.0915 * t / rho, f.lMinMM), f.lMaxMM), k = 2 * Float.pi / L
+            let g = gyroid(p, k: k)
+            return (g.g, g.grad, k)
+        }
+        let s = gyroidSheet(p, rhoRaw: rhoRaw, gradRho: grad, f, t: t)
+        return (s.G, s.grad, s.k)
+    }
+    static func pieceHoney(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho rhoRaw: Float, t: Float, graded: Bool) -> (d: Float, cell: Float) {
+        let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+        let dMin = f.lMinMM * 2 / 3.0915, dMax = f.lMaxMM * 2 / 3.0915
+        let d = Swift.min(Swift.max(2 * t / rho, dMin), dMax)
+        if !graded { return (honeycombWall(p, f, d: d, t: t), d) }
+        let r = rungs(L: d, lMin: dMin)
+        if r.w <= 0 { return (honeycombWall(p, f, d: r.La, t: t), r.La) }
+        if r.w >= 1 { return (honeycombWall(p, f, d: r.Lb, t: t), r.Lb) }
+        return ((1 - r.w) * honeycombWall(p, f, d: r.La, t: t) + r.w * honeycombWall(p, f, d: r.Lb, t: t), (1 - r.w) * r.La + r.w * r.Lb)
+    }
+    static func pieceDistance(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho: Float, grad: SIMD3<Float>, t: Float,
+                              code: Float) -> (d: Float, cell: Float) {
+        let b = pieceBits(code)
+        if b.type == 1 { return pieceHoney(p, f, rho: rho, t: t, graded: b.graded) }
+        let s = pieceSheet(p, f, rho: rho, grad: grad, t: t, graded: b.graded)
+        return (abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t, 2 * Float.pi / s.k)
+    }
+
+    /// What the manual field draws at p: the wall distance, the cell (mm: the gyroid's 2π/k̄, the honeycomb's d), the type and
+    /// wall of the piece drawn there, and whether p lies in a SEAM cell (two pieces among its eight corners).
+    public struct ManualPoint: Equatable { public let d: Float; public let cell: Float; public let type: Int; public let t: Float; public let seam: Bool }
+
+    /// ★ P2 — EVERY PIECE DRAWS ITS OWN LATTICE; PIECES JOIN CLEANLY. In a cell whose eight corners are one piece: that piece's
+    /// lattice (its type, its whole-bead wall t, its exact cell — or the ladder under a Default grade). In a SEAM cell (batch H's
+    /// idea, generalised from a press plane to any piece edge): per piece P present, φ_P = the trilinear of "this corner is P"
+    /// and P's SAME-SIDE ρ (its own corners, and at the others the ρ of P carried across — `manualAcross` — so it is
+    /// continuous from cell to cell); A = the piece with the largest φ at p, B the next. Two GYROIDS: each side's sheet, blended
+    /// by σ = smoothstep(φ_A / (φ_A + φ_B)) — ½ on the seam's true position — with the whole gradient and t blended, so the
+    /// walls run on across it (H's fix). Any other pair (a honeycomb on either side): A's own wall, joined to B's by a SEAM WALL
+    /// on φ_A = φ_B, the thinner side's t thick — every wall of either side ends ON it, never in a sliver.
+    public static func manualPieceWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, _ mw: FlexGrid, _ pc: FlexGrid, _ ac: FlexGrid,
+                                       _ ot: FlexGrid) -> ManualPoint {
+        let g = f.rho
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let vs = [(i0, j0, k0), (i1, j0, k0), (i0, j1, k0), (i1, j1, k0), (i0, j0, k1), (i1, j0, k1), (i0, j1, k1), (i1, j1, k1)]
+            .map { ($0.2 * ny + $0.1) * nx + $0.0 }
+        var code = [Float](repeating: 0, count: 8)
+        var seam = false
+        for q in 0..<8 { code[q] = pc.values[vs[q]]; if code[q] != code[0] { seam = true } }
+        if !seam {
+            let t = Swift.max(mw.values[vs[0]], 1e-3)
+            let r = sampleWithGradient(g, p)
+            let a = pieceDistance(p, f, rho: r.value, grad: r.grad, t: t, code: code[0])
+            return ManualPoint(d: a.d, cell: a.cell, type: pieceBits(code[0]).type, t: t, seam: false)
+        }
+        // the pieces present (first appearance, corner order) and their shares at p
+        var best = -1, second = -1
+        var phiBest: (value: Float, grad: SIMD3<Float>) = (-1, .zero), phiSecond: (value: Float, grad: SIMD3<Float>) = (-1, .zero)
+        for q in 0..<8 {
+            if (0..<q).contains(where: { code[$0] == code[q] }) { continue }
+            let ind = code.map { $0 == code[q] ? Float(1) : 0 }
+            let phi = trilinear(ind, fx, fy, fz, u, nx, ny, nz, g.spacing)
+            if phi.value > phiBest.value { second = best; phiSecond = phiBest; best = q; phiBest = phi }
+            else if phi.value > phiSecond.value { second = q; phiSecond = phi }
+        }
+        func side(_ q: Int) -> (rho: Float, grad: SIMD3<Float>, t: Float) {
+            let P = code[q]
+            var c = [Float](repeating: 0, count: 8)
+            var t: Float = 0
+            for r in 0..<8 {
+                let v = vs[r]
+                if code[r] == P { c[r] = g.values[v]; if t == 0 { t = mw.values[v] } }
+                else { c[r] = ot.values[v] == P ? ac.values[v] : g.values[v] }
+            }
+            let s = trilinear(c, fx, fy, fz, u, nx, ny, nz, g.spacing)
+            return (s.value, s.grad, Swift.max(t, 1e-3))
+        }
+        let A = side(best), B = side(second)
+        let cA = code[best], cB = code[second]
+        let bA = pieceBits(cA), bB = pieceBits(cB)
+        if bA.type == 0 && bB.type == 0 {
+            let sA = pieceSheet(p, f, rho: A.rho, grad: A.grad, t: A.t, graded: bA.graded)
+            let sB = pieceSheet(p, f, rho: B.rho, grad: B.grad, t: B.t, graded: bB.graded)
+            let S = phiBest.value + phiSecond.value
+            let x = Swift.min(Swift.max(phiBest.value / S, 0), 1)
+            let dx = (phiBest.grad * S - phiBest.value * (phiBest.grad + phiSecond.grad)) / (S * S)
+            let sigma = x * x * (3 - 2 * x)
+            let dSigma = 6 * x * (1 - x) * dx
+            let G = sigma * sA.G + (1 - sigma) * sB.G
+            let grad = sigma * sA.grad + (1 - sigma) * sB.grad + (sA.G - sB.G) * dSigma
+            let k = sigma * sA.k + (1 - sigma) * sB.k
+            let t = sigma * A.t + (1 - sigma) * B.t
+            return ManualPoint(d: abs(G) / Swift.max(simd_length(grad), 0.05 * k) - 0.5 * t, cell: 2 * Float.pi / k, type: 0, t: A.t, seam: true)
+        }
+        let a = pieceDistance(p, f, rho: A.rho, grad: A.grad, t: A.t, code: cA)
+        let delta = phiBest.value - phiSecond.value
+        let gd = simd_length(phiBest.grad - phiSecond.grad)
+        let sheet = abs(delta) / Swift.max(gd, 0.1 / g.spacing) - 0.5 * Swift.min(A.t, B.t)
+        return ManualPoint(d: Swift.min(a.d, sheet), cell: a.cell, type: bA.type, t: A.t, seam: true)
+    }
+
+    /// ★ P2: what the manual field draws at p (nil: not a P2 manual field) — the tests' reporter of type, wall and cell.
+    public static func manualPoint(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> ManualPoint? {
+        guard let mw = f.manualWall, let pc = f.manualPiece, let ac = f.manualAcross, let ot = f.manualOther else { return nil }
+        return manualPieceWall(p, f, mw, pc, ac, ot)
     }
 
     public static func dRegion(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
@@ -505,6 +648,37 @@ public enum FlexibleLatticeBuilder {
         }
     }
 
+    /// ★ MANUAL P2: per voxel, the OTHER piece most of its 26 neighbours belong to (ties: the lower code) and that piece's ρ
+    /// carried here (the mean over those neighbours) — so a seam cell reads each side's ρ continuously from cell to cell. A voxel
+    /// with no other piece around: its own code and ρ.
+    static func manualAcross(rho: [Float], code: [Float], nx: Int, ny: Int, nz: Int) -> (across: [Float], other: [Float]) {
+        var across = rho, other = code
+        for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+            let v = (k * ny + j) * nx + i
+            let c = code[v]
+            var differs = false
+            for dk in -1...1 where !differs { for dj in -1...1 where !differs { for di in -1...1 {
+                let a = i + di, b = j + dj, e = k + dk
+                guard a >= 0, b >= 0, e >= 0, a < nx, b < ny, e < nz else { continue }
+                if code[(e * ny + b) * nx + a] != c { differs = true; break }
+            } } }
+            guard differs else { continue }
+            var tally: [Float: (n: Int, sum: Float)] = [:]
+            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
+                let a = i + di, b = j + dj, e = k + dk
+                guard a >= 0, b >= 0, e >= 0, a < nx, b < ny, e < nz else { continue }
+                let w = (e * ny + b) * nx + a
+                guard code[w] != c else { continue }
+                let o = tally[code[w]] ?? (0, 0)
+                tally[code[w]] = (o.n + 1, o.sum + rho[w])
+            } } }
+            guard let pick = tally.max(by: { $0.value.n != $1.value.n ? $0.value.n < $1.value.n : $0.key > $1.key }) else { continue }
+            other[v] = pick.key
+            across[v] = pick.value.sum / Float(pick.value.n)
+        } } }
+        return (across, other)
+    }
+
     /// Prepare the grids from core's density field and the part (off the main thread).
     /// `skinOffFaces` are the B-rep/pseudo face ids whose skin is off (M15);
     /// each entry's `cuts` narrow a split sector to its own half-spaces (the face is cut
@@ -522,6 +696,7 @@ public enum FlexibleLatticeBuilder {
                               pressCuts: [Int: FlexibleFlatPrism.Cut] = [:],
                               manualWall: [Float]? = nil,
                               manualType: [Float]? = nil,
+                              manualPiece: [Float]? = nil,
                               skinOffFaces: [(face: Int, cuts: [RegionCut])],
                               finish: FlexibleFinish = .covered,
                               skinMM: Float = FlexibleLatticeField.defaultSkinMM,
@@ -556,6 +731,9 @@ public enum FlexibleLatticeBuilder {
         // ★ MANUAL P1: his per-voxel walls and type follow ρ through every fill (nil: Auto — nothing here runs)
         let hasManual = manualWall?.count == n && manualType?.count == n
         var mw = hasManual ? manualWall! : [], mt = hasManual ? manualType! : []
+        // ★ MANUAL P2: the piece codes follow ρ too
+        let hasPiece = hasManual && manualPiece?.count == n
+        var pcs = hasPiece ? manualPiece! : []
         while head < queue.count {
             let v = queue[head]; head += 1
             let i = v % nx, j = (v / nx) % ny, k = v / (nx * ny)
@@ -563,7 +741,7 @@ public enum FlexibleLatticeBuilder {
                 let a = i + di, b = j + dj, c = k + dk
                 guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
                 let w = (c * ny + b) * nx + a
-                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; if hasManual { mw[w] = mw[v]; mt[w] = mt[v] }; queue.append(w) }
+                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; if hasManual { mw[w] = mw[v]; mt[w] = mt[v]; if hasPiece { pcs[w] = pcs[v] } }; queue.append(w) }
             }
         }
         // ★ ROUND 7 — THE MASK REACHES THE SURFACE (his report of 2026-10-18: "the top isn't being bent or removed when I
@@ -638,7 +816,7 @@ public enum FlexibleLatticeBuilder {
             for (n, c) in cand.enumerated() where !inside[n] {
                 if cornerRule, c.solid.contains(where: { inside[at[$0]!] }) { continue }   // a solid, non-lattice neighbour
                 mask[c.v] = 1; rho[c.v] = rho[c.from]; own[c.v] = own[c.from]; added.insert(c.v)
-                if hasManual { mw[c.v] = mw[c.from]; mt[c.v] = mt[c.from] }   // decided on core's mask alone
+                if hasManual { mw[c.v] = mw[c.from]; mt[c.v] = mt[c.from]; if hasPiece { pcs[c.v] = pcs[c.from] } }   // decided on core's mask alone
             }
         }
         let sp = Float(field.spacing)
@@ -700,6 +878,12 @@ public enum FlexibleLatticeBuilder {
         if hasManual {
             out.manualWall = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mw)
             out.manualType = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mt)
+        }
+        if hasPiece {
+            let x = manualAcross(rho: rho, code: pcs, nx: nx, ny: ny, nz: nz)
+            out.manualPiece = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: pcs)
+            out.manualAcross = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: x.across)
+            out.manualOther = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: x.other)
         }
         return out
     }

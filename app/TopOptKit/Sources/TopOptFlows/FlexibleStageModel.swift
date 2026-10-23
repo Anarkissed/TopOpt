@@ -1757,6 +1757,7 @@ public final class FlexibleStageModel: ObservableObject {
                     buildDir: buildDir,
                     pressCuts: shapeOnly ? [:] : pressCutsSnap,   // ★ R7-U21 H (EDGE-LOOK): the presses' seams
                     manualWall: manualGrids?.wallMM, manualType: manualGrids?.type,   // ★ MANUAL P1: his walls and types
+                    manualPiece: manualGrids?.code,   // ★ MANUAL P2: the pieces, joined cleanly where they meet
                     skinOffFaces: [], finish: finish)
                 // ★ BATCH G: what the squish sims need, made HERE — the combined field is not kept
                 // (D-R4-19); the solver releases it after the last sim

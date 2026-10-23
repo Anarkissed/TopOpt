@@ -119,6 +119,16 @@ Each item: what core does, where, the evidence, your numbers.
    (c) the app's sim reads ONE law type per group's sim (that group's own type); another group's lattice of the other type inside
    the same sim uses the wrong curves (approximate, said here).
 
+13. **How two manual regions meet, and a grade per face (round 7 · MANUAL P2).** For item 12's per-region lattice, core's
+   lattice writer would also need the JOIN rule the app now draws (`FlexibleLatticeField.manualPieceWall`, MSL `flx_wall_pieces`):
+   wherever two "pieces" meet (two types, two wall counts, two groups, two Stepped bands) each side keeps its own lattice; two
+   gyroids blend their sheets over the seam (no slivers, batch H's rule); a honeycomb beside anything gets a SEAM WALL (the thinner
+   side's wall thick) that every wall of both sides ends on. Your pad: the honeycomb | gyroid seam draws 0 thin fragments in 703
+   runs (P1's switch: 733 of 1,208). Also: a grade "through the depth" runs from each pressed face to the end of ITS OWN lattice
+   on that column (a pinched face owns half the column: your pad's Group 1, 33.9 mm of 68.7 mm), and Stepped's band count is per
+   face from that depth. Core's design has no per-face depth of its own lattice to hand over (`lattice_mm` is the whole column's,
+   item 8(a)); the app measures it from core's voxel owners.
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
@@ -138,7 +148,46 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
-## ★ Round 7 · MANUAL P1 — the full lattice set for the part and every group; whole-bead walls; the estimate past the data (2026-10-23) (read this first)
+## ★ Round 7 · MANUAL P2 — the drawing matches the settings (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on `55631daa`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no
+#354/main file edited; no new hook. Auto draws, builds and sends exactly what it did (goldens and the 16 stage-job hashes
+identical). Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/manual_p2/`.
+
+What you get, in plain words:
+- **Each lattice is drawn as its card says, voxel by voxel:** its type, its walls (beads × 0.45 mm), its cell from its density
+  at those walls. Your pad, Group 1 on its own honeycomb 2 beads 25 % inside the part's gyroid 1 bead: honeycomb there, the
+  card's 7.2 mm cell, walls measured 0.90 mm across (5th percentile), straight up the build direction.
+- **The grade is drawn.** Group 1 graded 10 → 30 % through the depth: cells 10.4 / 8.0 / 6.2 / 5.2 mm from the pressed face to the
+  end of its lattice (P2_01). The squish sim reads the same density per voxel (0.109–0.300, identical to what is drawn).
+- **Stepped is hard steps.** The same grade Stepped draws exactly two cells, 13.9 and 4.6 mm; 94.6 % of the lattice is exactly
+  one band's cell, the rest is the thin seam between them (P2_02). Default draws a smooth run (208 different cells).
+- **Clean seams.** Where two lattices meet (two types, two wall counts, two groups, two bands) each keeps its own lattice. Two
+  gyroids flow into each other; a honeycomb beside anything gets one thin seam wall that every wall ends on (P2_03). Thin
+  slivers along the seam, per mm: type seam 0.000 (P1 0.445), wall seam 0.010 (P1 0.492), Stepped bands 0.086 (P1 1.049).
+- **A fix found on the way:** on your pinched Group 1 (Face 5 and Face 3 meet in the middle), "through the depth" ran over the
+  whole column, so your 10 → 30 % only reached 20 % at the middle. It now runs from each face to the end of its own lattice.
+
+Not built / defaults taken (tell me if you want otherwise):
+- Stepped's number of bands is one per cell through each face's OWN depth (2–8): on Group 1 that is 2 bands for 10 → 30 %
+  (33.9 mm, big 14 mm cells at the face). The card's "cells across" still counts the whole column (68.7 mm).
+- The Stepped band seams are clean against P1 but still carry about twice the slivers of the lattice away from them (0.086 vs
+  0.037 per mm), because 13.9 → 4.6 mm is a 3× jump in one voxel. A seam wall there too is an option.
+- The press-plane seam (batch H, edges) is not used inside Manual's own pieces: a press in another group is its own piece and
+  meets the face through the same seam rule.
+
+Tests (red controls asserted red inside each): `FlexibleManualP2Tests` (4) — the group's own honeycomb 2 beads drawn there
+(RED: the part's 1-bead gyroid, walls 0.445 mm, not prismatic) and the type seam clean (RED: P1's switch); the grade shrinks the
+cells with depth, more walls per mm at the floor (×1.23 vs the uniform lattice's ×1.00), the sim's density = the drawn one,
+Stepped = exactly the bands' cells and hard (RED: grade off — 13.91 mm everywhere; Default — on a band 1.4 %); the wall seam
+clean (RED: P1); the GPU draws the pieces as the Swift field (max 0.00097 mm over 700 points, 300 in seam cells; RED: pieces
+dropped, 19.7 mm). Red-first: the grade test failed first (6 assertions — the pinch bug above); fixed, then passed.
+Run once (18 classes): 159 passed, 0 failed, 2 skipped (picture probes). Goldens 0 DIFFERS both modes (38; 32 + 1 PART-SKIP);
+the 16 stage-job hashes cmp-identical to the follow-up's (Auto byte-identical).
+Renders (13" portrait, your pad, main Lattice page, X-ray, close up on Group 1): P2_01 graded Default, P2_02 Stepped, P2_03
+honeycomb 2 beads beside the part's gyroid (the type seam).
+
+## ★ Round 7 · MANUAL P1 — the full lattice set for the part and every group; whole-bead walls; the estimate past the data (2026-10-23)
 
 Branch `claude/flexible-screens` (PR #362), on `122191ff`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no
 #354/main file edited; no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/manual_p1/`.

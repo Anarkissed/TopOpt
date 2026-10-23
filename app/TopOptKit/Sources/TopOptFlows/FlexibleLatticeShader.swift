@@ -412,8 +412,133 @@ enum FlexibleLatticeShader {
         return (1.0f - w) * flx_honey_wall(U, p, La, t) + w * flx_honey_wall(U, p, Lb, t);
     }
 
+    // ── ★ ROUND 7 · MANUAL P2 — THE DRAWING MATCHES THE SETTINGS (FlexibleLatticeField.manualPieceWall, the twin) ─────────
+    // When buildDir.w = 2 the (ρ, mask) volume is THREE times as deep: slices nz … 2nz−1 hold (t mm, piece code) and 2nz … 3nz−1
+    // (ρ of the other piece carried here, its code). Code = 4·piece + 2·graded + type. A cell of one piece: its lattice (exact
+    // cell, or the ladder under a Default grade). A SEAM cell: per piece its share φ and same-side ρ; two gyroids blend their
+    // sheets by σ = smoothstep(φA / (φA + φB)) with the whole gradient; any other pair: A's wall ∪ a seam wall on φA = φB.
+    static float flx_piece_sheet(constant FlxUniforms& U, float3 p, float rhoRaw, float3 gradRho, float t, bool graded,
+                                 thread float3& grad, thread float& k, thread float& Lcur) {
+        if (!graded) {
+            float rho = min(max(rhoRaw, 0.05f), 0.9f);
+            float L = min(max(3.0915f * t / rho, U.shape.z), U.shape.w);
+            k = 2 * M_PI_F / L;
+            Lcur = L;
+            return flx_gyroid(p, k, grad);
+        }
+        return flx_ladder_sheet(U, rhoRaw, gradRho, p, grad, k, Lcur, t);
+    }
+    static float flx_piece_honey(constant FlxUniforms& U, float3 p, float rhoRaw, float t, bool graded, thread float& Lcur) {
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float dMin = U.shape.z * 2.0f / 3.0915f, dMax = U.shape.w * 2.0f / 3.0915f;
+        float d = min(max(2.0f * t / rho, dMin), dMax);
+        if (!graded) { Lcur = d; return flx_honey_wall(U, p, d, t); }
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(d / dMin));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float La = dMin * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = dMin * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        Lcur = w < 1.0f ? La : Lb;
+        if (w <= 0.0f) return flx_honey_wall(U, p, La, t);
+        if (w >= 1.0f) return flx_honey_wall(U, p, Lb, t);
+        return (1.0f - w) * flx_honey_wall(U, p, La, t) + w * flx_honey_wall(U, p, Lb, t);
+    }
+    static float flx_piece_distance(constant FlxUniforms& U, float3 p, float rho, float3 gradRho, float t, float code,
+                                    thread float& Lcur) {
+        int ci = int(code + 0.5f);
+        bool graded = ((ci >> 1) & 1) == 1;
+        if ((ci & 1) == 1) return flx_piece_honey(U, p, rho, t, graded, Lcur);
+        float3 gr;
+        float k;
+        float G = flx_piece_sheet(U, p, rho, gradRho, t, graded, gr, k, Lcur);
+        return abs(G) / max(length(gr), 0.05f * k) - 0.5f * t;
+    }
+    static float flx_wall_pieces(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur) {
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        uint3 ix[8] = { uint3(i0, j0, k0), uint3(i1, j0, k0), uint3(i0, j1, k0), uint3(i1, j1, k0),
+                        uint3(i0, j0, k1), uint3(i1, j0, k1), uint3(i0, j1, k1), uint3(i1, j1, k1) };
+        uint3 h1 = uint3(0, 0, uint(nz)), h2 = uint3(0, 0, uint(2 * nz));
+        float cd[8], tt[8];
+        bool seam = false;
+        for (int q = 0; q < 8; q++) {
+            float2 v = T.read(ix[q] + h1).rg;
+            tt[q] = v.x; cd[q] = v.y;
+            if (cd[q] != cd[0]) seam = true;
+        }
+        if (!seam) return flx_piece_distance(U, p, rhoRaw, gradRho, max(tt[0], 1e-3f), cd[0], Lcur);
+        float rr[8], aa[8], oo[8];
+        for (int q = 0; q < 8; q++) {
+            rr[q] = T.read(ix[q]).x;
+            float2 w = T.read(ix[q] + h2).rg;
+            aa[q] = w.x; oo[q] = w.y;
+        }
+        int best = -1, second = -1;
+        float pb = -1.0f, ps = -1.0f;
+        float3 gb = float3(0.0f), gs = float3(0.0f);
+        for (int q = 0; q < 8; q++) {
+            bool dup = false;
+            for (int r = 0; r < q; r++) { if (cd[r] == cd[q]) dup = true; }
+            if (dup) continue;
+            float ind[8];
+            for (int r = 0; r < 8; r++) ind[r] = cd[r] == cd[q] ? 1.0f : 0.0f;
+            float3 gph;
+            float ph = flx_tri8(ind, fx, fy, fz, u, N, O.w, gph);
+            if (ph > pb) { second = best; ps = pb; gs = gb; best = q; pb = ph; gb = gph; }
+            else if (ph > ps) { second = q; ps = ph; gs = gph; }
+        }
+        float rA, rB, tA = 0.0f, tB = 0.0f;
+        float3 gA, gB;
+        {
+            float c[8], d[8];
+            float PA = cd[best], PB = cd[second];
+            for (int r = 0; r < 8; r++) {
+                if (cd[r] == PA) { c[r] = rr[r]; if (tA == 0.0f) tA = tt[r]; } else { c[r] = oo[r] == PA ? aa[r] : rr[r]; }
+                if (cd[r] == PB) { d[r] = rr[r]; if (tB == 0.0f) tB = tt[r]; } else { d[r] = oo[r] == PB ? aa[r] : rr[r]; }
+            }
+            rA = flx_tri8(c, fx, fy, fz, u, N, O.w, gA);
+            rB = flx_tri8(d, fx, fy, fz, u, N, O.w, gB);
+            tA = max(tA, 1e-3f); tB = max(tB, 1e-3f);
+        }
+        float cA = cd[best], cB = cd[second];
+        int iA = int(cA + 0.5f), iB = int(cB + 0.5f);
+        if ((iA & 1) == 0 && (iB & 1) == 0) {
+            float3 grA, grB;
+            float kA, kB, LA, LB;
+            float GA = flx_piece_sheet(U, p, rA, gA, tA, ((iA >> 1) & 1) == 1, grA, kA, LA);
+            float GB = flx_piece_sheet(U, p, rB, gB, tB, ((iB >> 1) & 1) == 1, grB, kB, LB);
+            float S = pb + ps;
+            float x = clamp(pb / S, 0.0f, 1.0f);
+            float3 dx = (gb * S - pb * (gb + gs)) / (S * S);
+            float sigma = x * x * (3.0f - 2.0f * x);
+            float3 dSigma = 6.0f * x * (1.0f - x) * dx;
+            float G = sigma * GA + (1.0f - sigma) * GB;
+            float3 grad = sigma * grA + (1.0f - sigma) * grB + (GA - GB) * dSigma;
+            float k = sigma * kA + (1.0f - sigma) * kB;
+            float t = sigma * tA + (1.0f - sigma) * tB;
+            Lcur = min(LA, LB);
+            return abs(G) / max(length(grad), 0.05f * k) - 0.5f * t;
+        }
+        float a = flx_piece_distance(U, p, rA, gA, tA, cA, Lcur);
+        float delta = pb - ps;
+        float gd = length(gb - gs);
+        float sheet = abs(delta) / max(gd, 0.1f / O.w) - 0.5f * min(tA, tB);
+        return min(a, sheet);
+    }
+
     static float flx_wall_seam(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
                                thread float& Lcur) {
+        if (U.buildDir.w > 1.5f) return flx_wall_pieces(U, T, p, rhoRaw, gradRho, Lcur);   // ★ MANUAL P2
         if (U.buildDir.w > 0.5f) return flx_wall_manual(U, T, p, rhoRaw, gradRho, Lcur);
         if (U.rmN.w < 0.5f || U.shape.x > 0.5f) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
         return flx_seam_gyroid(U, T, p, rhoRaw, gradRho, Lcur, U.shape.y);

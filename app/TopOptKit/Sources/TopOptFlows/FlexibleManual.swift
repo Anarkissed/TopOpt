@@ -244,6 +244,13 @@ public enum FlexibleManualMath {
         }
         return clampDensity(l.density + (l.grade.toDensity - l.density) * x)
     }
+    /// ★ P2: which of Stepped's flat bands `s` falls in (0 … steps−1); 0 with the grade off or Default (one smooth piece).
+    public static func band(_ l: FlexibleManualLattice, at s: Double, steps: Int) -> Int {
+        guard l.grade.on, l.stepped else { return 0 }
+        let x = min(max(s.isFinite ? s : 0, 0), 1)
+        let n = Double(Swift.max(steps, 2))
+        return Int(min((x * n).rounded(.down), n - 1))
+    }
     /// Every density the lattice holds (its own; with a grade on, From … To).
     public static func densitySpan(_ l: FlexibleManualLattice) -> ClosedRange<Double> {
         guard l.grade.on else { return l.density...l.density }
@@ -350,6 +357,11 @@ public enum FlexibleManualField {
         public let wallMM: [Float]
         /// Per voxel: 0 gyroid, 1 honeycomb.
         public let type: [Float]
+        /// ★ P2: per voxel the PIECE code, 4 · piece + 2 · graded + type — one piece per lattice he set (the part's, each group's
+        /// own), per Stepped band, and (Default grade only) per owner stack, so every place two pieces meet is a SEAM the field
+        /// joins cleanly (FlexibleLatticeField.manualPieceWall). `graded` 1: a Default grade (drawn on the ladder), 0: one density
+        /// in the piece (drawn at its exact cell).
+        public let code: [Float]
     }
 
     /// `ownerGroups`: a voxel owner (a face or press region, as core names it) → its stored group number.
@@ -357,9 +369,27 @@ public enum FlexibleManualField {
                              owners: [Int: Owner] = [:], beadWidthMM bw: Double) -> Built {
         var d = f.density
         var wall = [Float](repeating: 0, count: d.count), type = [Float](repeating: 0, count: d.count)
+        var code = [Float](repeating: 0, count: d.count)
+        struct PieceKey: Hashable { let lattice: Int; let owner: Int; let band: Int }
+        var pieces: [PieceKey: Int] = [:]
         struct Geo { let centre: SIMD2<Double>; let rMax: Double; let steps: Int; let depth: Double }
         var geo: [Int: Geo] = [:]
         func lattice(_ o: Int) -> FlexibleManualLattice { m.lattice(group: ownerGroups[o]) }
+        // ★ P2: each owner's OWN depth per column — the deepest of its voxels on that column. A pinched face owns only its half
+        // of the column (his pad's Group 1: Face 5 and Face 3 meet in the middle), so "through the depth" runs from its face to
+        // the end of ITS lattice, never to the far face's (P1 divided by the whole column: his 10 → 30 % reached only 20 %)
+        var hits = [Int: (col: Int, depth: Double)]()
+        var ownDepth: [Int: [Int: Double]] = [:]
+        func centre(_ v: Int) -> SIMD3<Double> {
+            let i = v % f.nx, j = (v / f.nx) % f.ny, k = v / (f.nx * f.ny)
+            return f.origin + SIMD3<Double>(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * f.spacing
+        }
+        for v in d.indices where d[v] >= 0 {
+            let o = v < f.owner.count ? f.owner[v] : -1
+            guard lattice(o).grade.on, let ow = owners[o], let hit = FlexibleStackMembership.hit(centre(v), ow.stack, cuts: ow.cuts) else { continue }
+            hits[v] = hit
+            ownDepth[o, default: [:]][hit.col] = Swift.max(ownDepth[o]?[hit.col] ?? 0, hit.depth)
+        }
         func geometry(_ o: Int, _ ow: Owner, _ l: FlexibleManualLattice) -> Geo {
             if let g = geo[o] { return g }
             let cols = ow.stack.columns.filter { $0.latticeMM > 0 }
@@ -367,7 +397,9 @@ public enum FlexibleManualField {
             for col in cols { c += SIMD2(col.uMM, col.vMM) }
             c /= Double(Swift.max(cols.count, 1))
             let r = cols.map { simd_length(SIMD2($0.uMM, $0.vMM) - c) }.max() ?? 0
-            let depth = cols.isEmpty ? 0 : cols.map(\.latticeMM).reduce(0, +) / Double(cols.count)
+            let own = (ownDepth[o] ?? [:]).values.filter { $0 > 0 }
+            let depth = !own.isEmpty ? own.reduce(0, +) / Double(own.count)
+                : (cols.isEmpty ? 0 : cols.map(\.latticeMM).reduce(0, +) / Double(cols.count))
             let g = Geo(centre: c, rMax: r, steps: FlexibleManualMath.steps(l, depthMM: depth, beadWidthMM: bw), depth: depth)
             geo[o] = g
             return g
@@ -376,28 +408,38 @@ public enum FlexibleManualField {
             let o = v < f.owner.count ? f.owner[v] : -1
             let l = lattice(o)
             var rho = l.density
+            var band = 0
             if l.grade.on, let ow = owners[o] {
-                let i = v % f.nx, j = (v / f.nx) % f.ny, k = v / (f.nx * f.ny)
-                let p = f.origin + SIMD3<Double>(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * f.spacing
                 let g = geometry(o, ow, l)
                 var s = 0.0
-                if let hit = FlexibleStackMembership.hit(p, ow.stack, cuts: ow.cuts) {
+                if let hit = hits[v] {
                     let col = ow.stack.columns[hit.col]
                     let along = l.grade.along == "curve" && ow.curve == nil ? "depth" : l.grade.along
                     switch along {
                     case "across": s = g.rMax > 1e-9 ? simd_length(SIMD2(col.uMM, col.vMM) - g.centre) / g.rMax : 0
                     case "curve": s = hit.col < (ow.curve?.count ?? 0) ? ow.curve![hit.col] : 0
-                    default: s = hit.depth / Swift.max(col.latticeMM > 0 ? col.latticeMM : col.exitT - col.entryT, 1e-9)
+                    default:
+                        let own = ownDepth[o]?[hit.col] ?? 0
+                        s = hit.depth / Swift.max(own > 0 ? own : (col.latticeMM > 0 ? col.latticeMM : col.exitT - col.entryT), 1e-9)
                     }
                 }
                 rho = FlexibleManualMath.density(l, at: s, steps: g.steps, beadWidthMM: bw)
+                band = FlexibleManualMath.band(l, at: s, steps: g.steps)
             }
             d[v] = Float(rho)
             wall[v] = Float(FlexibleManualMath.wallMM(l, beadWidthMM: bw))
             type[v] = l.topology == "honeycomb" ? 1 : 0
+            // ★ P2: the piece — his lattice (the part's 0, a group's own its stored number), its Stepped band, and the owner only
+            // under a Default grade (a smooth grade is laid per owner stack, so two owners may meet at a cliff)
+            let graded = l.grade.on && !l.stepped
+            let gid = ownerGroups[o].flatMap { m.hasOwn(group: $0) ? $0 : nil } ?? 0
+            let key = PieceKey(lattice: gid, owner: graded ? o : Int.min, band: band)
+            let idx: Int
+            if let i = pieces[key] { idx = i } else { idx = pieces.count; pieces[key] = idx }
+            code[v] = Float(4 * idx + (graded ? 2 : 0) + Int(type[v]))
         }
         return Built(field: FlexDensityField(nx: f.nx, ny: f.ny, nz: f.nz, spacing: f.spacing, origin: f.origin, density: d, owner: f.owner),
-                     wallMM: wall, type: type)
+                     wallMM: wall, type: type, code: code)
     }
 
     /// The densities only (FlexibleM1ManualTests' M1 entry point, kept).
