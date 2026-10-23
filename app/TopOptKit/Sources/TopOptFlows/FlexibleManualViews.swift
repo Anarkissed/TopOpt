@@ -43,8 +43,8 @@ struct FlexibleManualViewLine: View {
     }
 }
 
-/// His four lines: Lattice [Gyroid | Honeycomb], Cell size, Density %, Walls (beads) — the part's (`group` nil) or a group's own;
-/// then the bead warning with its one-tap fix when the walls are not a whole number of beads.
+/// His four lines: Lattice [Gyroid | Honeycomb], Cell size, Density %, Walls (beads) — the part's (`group` nil); a group's own:
+/// Density % and Walls (beads) under "Type and cell follow the part"; then the bead warning with its one-tap fix when the walls are not a whole number of beads.
 struct FlexibleManualLatticeRows: View {
     @ObservedObject var model: FlexibleStageModel
     let group: Int?
@@ -52,20 +52,38 @@ struct FlexibleManualLatticeRows: View {
 
     private var keyTail: String { group.map { "g\($0)" } ?? "part" }
 
+    /// ★ GROUP OVERRIDE = WHAT IS DRAWN: the rows shown, in order — the part's four; a group's Density and Walls and the one quiet
+    /// line that its type and cell are the part's (the shader draws one type and one cell per part).
+    static func rows(group: Int?) -> [String] {
+        guard group != nil, !FlexibleStageModel.groupShowsTypeAndCell else { return ["type", "cell", "density", "walls"] }
+        return ["follows", "density", "walls"]
+    }
+
     var body: some View {
         if let l = model.manualLattice(group: group) {
             let beads = model.manualWalls(group: group) ?? 0
+            let rows = Self.rows(group: group)
             VStack(alignment: .leading, spacing: DS.Space.xs) {
-                FlexRow(FlexibleManualCopy.lattice, info: FlexibleManualCopy.Info.lattice, id: "flexible-manual-type-\(keyTail)") {
-                    FlexChips(options: FlexibleManualCopy.typeOptions, selection: l.topology, id: "flexible-manual-type-\(keyTail)",
-                              equalWidths: false) { v in model.setManualType(v, group: group) }
-                        .fixedSize()
+                if rows.contains("follows") {
+                    Text(FlexibleManualCopy.followsPart)
+                        .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .accessibilityIdentifier("flexible-manual-follows-\(keyTail)")
                 }
-                FlexRow(FlexibleManualCopy.cell, info: FlexibleManualCopy.Info.cell, id: "flexible-manual-cell-\(keyTail)") {
-                    FlexNumberBox(key: "manual-cell-\(keyTail)", title: FlexibleManualCopy.cell,
-                                  spec: FlexNumberSpec(value: l.cellMM, unit: "mm", step: 0.5, range: FlexibleManualMath.cellRange,
-                                                       decimals: FlexibleNumberSpecs.wholeOrTenth(l.cellMM)),
-                                  padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualCell(v, group: group) }
+                if rows.contains("type") {
+                    FlexRow(FlexibleManualCopy.lattice, info: FlexibleManualCopy.Info.lattice, id: "flexible-manual-type-\(keyTail)") {
+                        FlexChips(options: FlexibleManualCopy.typeOptions, selection: l.topology, id: "flexible-manual-type-\(keyTail)",
+                                  equalWidths: false) { v in model.setManualType(v, group: group) }
+                            .fixedSize()
+                    }
+                }
+                if rows.contains("cell") {
+                    FlexRow(FlexibleManualCopy.cell, info: FlexibleManualCopy.Info.cell, id: "flexible-manual-cell-\(keyTail)") {
+                        FlexNumberBox(key: "manual-cell-\(keyTail)", title: FlexibleManualCopy.cell,
+                                      spec: FlexNumberSpec(value: l.cellMM, unit: "mm", step: 0.5, range: FlexibleManualMath.cellRange,
+                                                           decimals: FlexibleNumberSpecs.wholeOrTenth(l.cellMM)),
+                                      padTarget: $padTarget, onNote: { model.toast = $0 }) { v in model.setManualCell(v, group: group) }
+                    }
                 }
                 FlexRow(FlexibleManualCopy.density, info: FlexibleManualCopy.Info.density, id: "flexible-manual-density-\(keyTail)") {
                     FlexNumberBox(key: "manual-density-\(keyTail)", title: FlexibleManualCopy.density,

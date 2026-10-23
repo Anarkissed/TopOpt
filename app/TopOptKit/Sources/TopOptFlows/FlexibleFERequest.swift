@@ -166,7 +166,8 @@ public struct FlexibleFERequest: Sendable {
 
     /// ★ U21 · I1 (R3): a field solved under a hold that leaves the exits free (the Topology anchors) is calibrated on a REFERENCE
     /// — the same sim under today's chain (the exits held) — whose k is applied to it. Today's chain is its own reference.
-    /// ★ U21 · I3: so is a field held by linked walls whose exits are free (the walls take the far anvil's place).
+    /// ★ U21 · I3: so is a field held by linked walls whose exits are free (no Rest: the walls alone hold it; with Rests the far
+    /// anvil stays — "links and Rests both hold" — so its exits are held and it is its own reference).
     static func needsReference(_ f: FlexibleFEField, _ r: FlexibleFERequest) -> Bool {
         guard !controlSingleSolveCalibration, !f.exitsHeld else { return false }
         if f.wallNodes.contains(where: { $0 > 0 }) { return true }

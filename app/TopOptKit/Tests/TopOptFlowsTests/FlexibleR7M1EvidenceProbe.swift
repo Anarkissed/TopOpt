@@ -205,6 +205,39 @@ final class FlexibleR7M1EvidenceProbe: XCTestCase {
         print("FLEX-R7M1-EVIDENCE main\n  " + lines.joined(separator: "\n  "))
     }
 
+    /// ★ ROUND 7 · MANUAL follow-up (render MF_01): HIS pad of 10-21 in Manual on the MAIN Lattice page, heat on — the heat, its
+    /// legend and the readings are the Squish page's estimate (FlexibleManualFollowUpTests A). Opt-in like the rest of this probe.
+    func testManualMainPageOnHisPad() async throws {
+        guard Self.dir != nil, ProcessInfo.processInfo.environment["FLEX_MF"] != nil else { throw XCTSkip("opt-in: FLEX_R7M1_EVIDENCE_DIR + FLEX_MF") }
+        var lines: [String] = []
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.padDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let p = r.project
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: p, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.squishSolver.controlNoRefine = true
+        m.openScene()
+        try await FlexibleSquishFixture.settle(m, "his pad")
+        m.setManual(true)
+        s.didExitSettings()
+        s.apply(p, owned: true, pageUp: false)
+        if m.lattice == nil, !m.latticeBuilding { m.generateLattice() }
+        try await FlexibleHisProject.waitFor(300, "the Manual lattice") { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+        try await FlexibleSquishFixture.solve(m, "his pad · Manual")
+        s.heat = true
+        for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }
+        for g in m.squeezeGroups {
+            let est = m.estimateDeepest(g).map { String(format: "%.2f mm", $0) } ?? "-"
+            lines.append("\(m.groupName(g)): estimate deepest \(est) · faces \(g.regions.map { "\(m.name($0)) \(m.estimateLine(region: $0) ?? "-")" })")
+        }
+        try shot(s, p, "MF_01_13p_pad_MANUAL_main_lattice_page_heat.png", cam: Self.img1, size: Self.p13, lines: &lines)
+        lines.append("legend top \(String(format: "%.2f", s.dentMaxMM)) mm · legend title '\(s.legendTitle(.dent))'")
+        print("FLEX-MF main\n  " + lines.joined(separator: "\n  "))
+        if let d = Self.dir { try? (lines.joined(separator: "\n") + "\n").write(to: d.appendingPathComponent("MF_01_lines.txt"), atomically: true, encoding: .utf8) }
+    }
+
     /// The Export step: no face-prism (the stated reason, nothing sent), and an edges group beside a face group (said first).
     func testTheExportStep() async throws {
         guard Self.dir != nil else { throw XCTSkip("opt-in: FLEX_R7M1_EVIDENCE_DIR") }

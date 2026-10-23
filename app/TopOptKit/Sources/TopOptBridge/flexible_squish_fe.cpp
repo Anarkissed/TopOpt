@@ -89,6 +89,9 @@ enum Control : int {
   // first one, where a damped solve's small change counted as converged.
   kStartDamped = 65536,
   kDampedConverges = 131072,
+  // ★ ROUND 7 · LINKS AND RESTS BOTH HOLD (his answer of 2026-10-22 ~16:10, tests only): I3's first rule, the RED control —
+  // linked walls that hold take the far anvil's place in a group with Rests (the anvil dropped, the exits reported free).
+  kLinksReplaceFarAnvil = 262144,
 };
 
 std::mutex g_squish_fe_mu;
@@ -881,8 +884,12 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
     // the frame that removes the part's motion the far face (Face 5) moved IN 4.25 mm — it read as
     // a two-sided pinch; and his Group 1's 10 kg thumb on Face 5 sheared the pad over its gripped
     // bottom (s·gmax 2.2 at ×1: the walls tore and Top B rose 7.8 mm). Control 32768: batch G's rule.
-    // ★ U21 · I3: linked walls that hold take the far anvil's place (they hold the lattice; its far side is free to bow)
-    if (!(control & kNoFarAnvil) && wallsHolding == 0) {
+    // ★ ROUND 7 · LINKS AND RESTS BOTH HOLD (his answer of 2026-10-22 ~16:10: "All hold. Links and far side wall that is set to
+    // rest. If the user has set both up, they intended both to be implemented. So both should act on the model."): the linked
+    // walls never drop this group's far anvil — the walls and every hold of today's chain act together. With no link nothing
+    // here changes, byte for byte. Control 262144: I3's first rule (the walls took the far anvil's place).
+    const bool linksDropAnvil = (control & kLinksReplaceFarAnvil) && wallsHolding > 0;
+    if (!(control & kNoFarAnvil) && !linksDropAnvil) {
       for (int face : anvilFaces) {
         if (std::find(restingFaces.begin(), restingFaces.end(), face) != restingFaces.end()) continue;
         std::vector<int> tris;
@@ -898,7 +905,7 @@ bool build(const Setup& s, const FlexSquishRequest& req, const fx::FlexibleData&
     if (bcs.size() > wallBcs) mode = "rest";   // (wallBcs is 0 with no linked wall: today's test)
     if (mode == "rest") {   // ★ U21 · I1: the receipt only — each anvil rests or is held by the far anvil
       out.exits_held = true;
-      if ((control & kNoFarAnvil) || wallsHolding > 0)
+      if ((control & kNoFarAnvil) || linksDropAnvil)
         for (int face : anvilFaces)
           if (std::find(restingFaces.begin(), restingFaces.end(), face) == restingFaces.end()) out.exits_held = false;
     }

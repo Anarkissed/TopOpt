@@ -278,7 +278,8 @@ final class FlexibleI3LinkSimTests: XCTestCase {
         XCTAssertGreaterThan(s.wallNodes[0], 0, "★ the floor link pins the solid under it")
         XCTAssertEqual(s.wallNodes[1], 0, "★ the wall in the air pins nothing — reported, never silent")
         XCTAssertEqual(s.wallReachMM[1], 2 * s.spacing, accuracy: 1e-9, "it was tried again at 2 h")
-        XCTAssertEqual(s.farAnvils, 0, "★ the linked wall takes the far anvil's place")
+        // ★ RE-PINNED (his answer of 2026-10-22 ~16:10, "All hold"): the link never drops the group's far anvil (here none today)
+        XCTAssertEqual(s.farAnvils, today.farAnvils, "★ links and Rests both hold: today's far anvils kept")
         XCTAssertNotEqual(s.u, today.u, "the link changes the field")
         let wallsHeld = s.wallNodes.filter { $0 > 0 }.count
         let k = FlexibleHold.landed(.rests(m.holdResting.count), bcMode: s.bcMode, anchorsHeld: [], anchors: [], farFaces: [],
@@ -304,5 +305,93 @@ final class FlexibleI3LinkSimTests: XCTestCase {
         XCTAssertEqual(FlexibleHold.line(.links(4, rests: 1)), "Held by 4 linked walls + its Rest")
         XCTAssertEqual(FlexibleHold.line(.links(4, rests: 5)), "Held by 4 linked walls + 5 Rests")
         XCTAssertFalse(fits("Held by 1234567 linked walls + 1234567 Rests."), "★ RED CONTROL: 45 characters fail the checker")
+    }
+
+    // MARK: 4 — ★ LINKS AND RESTS BOTH HOLD (his answer of 2026-10-22 ~16:10, verbatim: "All hold. Links and far side wall that is
+    // set to rest. If the user has set both up, they intended both to be implemented. So both should act on the model.")
+
+    /// The bridge's RED control bit: I3's first rule — linked walls take a rest group's far anvil's place (FlexibleBridge.hpp).
+    static let controlLinksReplaceFarAnvil = 262144
+
+    func testOnHisPadALinkInARestGroupKeepsTheFarWallHeldBesideTheRests() async throws {
+        let (r, m) = try await opened(FlexibleU21DeleteUndoTests.padDir, "his pad of 10-21")
+        let p = r.project
+        _ = try await FlexibleSquishFixture.build(m, "his pad")
+        try await FlexibleSquishFixture.solve(m, "his pad")
+        let req0 = try XCTUnwrap(m.lastFERequest)
+        XCTAssertFalse(req0.resting.isEmpty, "premise: his pad has Rests (\(req0.resting))")
+        // his link: Face 5's lattice floor → the solid under it (test 3's), on the group that presses Face 5
+        let key5 = LatticeSelectableRef.face(group: FlexibleI2AttachTests.groupC, face: 5).key
+        XCTAssertTrue(FlexibleFaceCommits.addLink(lattice: key5, wall: "floor", target: "under", project: p))
+        let walls = m.linkWalls()
+        let sim = try XCTUnwrap(req0.sims.first { walls[$0.id] != nil }, "a rest group with the link (\(walls.keys.sorted()))")
+        let ref = await m.squishWorker.sceneRef()
+        let scene = try XCTUnwrap(ref)
+        // the far wall: an exit face of the group's stacks that nothing presses and nothing rests on — held today by batch G's far
+        // anvil. FOUND BY THE FIRST RUN: on his pad as saved every exit of group 1 rests (with both Rests, and with either alone:
+        // far anvils 0, exits held) — the far wall IS a Rest, held whether or not a link exists, so nothing there can drop. The
+        // case his answer is about appears when the group presses ONE of its faces: Face 5 alone (his link's lattice first), his
+        // Rests set — its far side (the face across the stack) is then the far wall the anvil holds (batch G's Group 2 case).
+        let part = try XCTUnwrap(p.viewerMesh)
+        let byFive = sim.pressed.sorted { a, b in
+            let fa = m.regions.faces(of: a.face, mesh: part).contains(5), fb = m.regions.faces(of: b.face, mesh: part).contains(5)
+            return fa && !fb
+        }
+        var pick: (pressed: [FlexSquishPressInfo], rests: [Int], today: FlexSquishSolutionInfo)?
+        var tried: [String] = []
+        search: for pressed in [sim.pressed] + byFive.map({ [$0] }) {
+            for rests in [req0.resting] + req0.resting.map({ x in req0.resting.filter { $0 != x } }) where !rests.isEmpty {
+                var q = req0.with(walls: [:], epoch: 0).request(sim)
+                q.pressed = pressed
+                q.restingIDs = rests
+                let t = try scene.squishSolve(q)
+                tried.append("pressed \(pressed.map(\.face)) rests \(rests): bc \(t.bcMode) · far anvils \(t.farAnvils) · exits held \(t.exitsHeld)")
+                if t.bcMode == "rest", t.farAnvils > 0 { pick = (pressed, rests, t); break search }
+            }
+        }
+        print("FLEX-LR \(sim.id) today: " + tried.joined(separator: " | "))
+        let (pressed, rests, today) = try XCTUnwrap(pick, "premise: a rest group of his pad with a far wall (\(tried))")
+        XCTAssertTrue(today.exitsHeld, "premise: today every exit is held (a Rest or the far anvil)")
+
+        func solve(walls w: [FlexHeldWallInfo], control: Int = 0) throws -> FlexSquishSolutionInfo {
+            var q = req0.with(walls: w.isEmpty ? [:] : [sim.id: w], epoch: 1).request(sim, control: control)
+            q.pressed = pressed
+            q.restingIDs = rests
+            return try scene.squishSolve(q)
+        }
+        let link = try XCTUnwrap(walls[sim.id])
+        let s = try solve(walls: link)
+        let todayPins = Set(today.pinnedDOFs), pins = Set(s.pinnedDOFs)
+        print(String(format: "FLEX-LR %@ pressed \(pressed.map(\.face)) rests %@ + 1 link: bc %@ · wall nodes %@ · far anvils %d (today %d) · exits held %@ · pinned %d (today %d, kept %d) · max|u| %.4f (today %.4f)",
+                     sim.id, "\(rests)", s.bcMode, "\(s.wallNodes)", s.farAnvils, today.farAnvils, "\(s.exitsHeld)", pins.count,
+                     todayPins.count, todayPins.intersection(pins).count, s.u.map(abs).max() ?? 0, today.u.map(abs).max() ?? 0))
+        XCTAssertEqual(s.bcMode, "rest", "★ the Rests hold")
+        XCTAssertTrue(s.wallNodes.allSatisfy { $0 > 0 }, "★ the linked wall holds (\(s.wallNodes))")
+        XCTAssertEqual(s.farAnvils, today.farAnvils, "★ the far wall stays held beside the link (both act)")
+        XCTAssertTrue(s.exitsHeld, "★ every exit still held")
+        // (held nodes, not pinned DOFs: FOUND BY THE SECOND RUN — today's chain leaves a rigid mode its rests and anvil do not stop,
+        // and the bridge pins ONE more DOF for it; with the bonded link no mode is left, so that anchor pin is not needed)
+        let todayHeld = Set(today.heldNodes), held = Set(s.heldNodes)
+        print("FLEX-LR held nodes: \(held.count) (today \(todayHeld.count), kept \(todayHeld.intersection(held).count)) · free modes \(s.freeModes) (today \(today.freeModes))")
+        XCTAssertTrue(todayHeld.isSubset(of: held), "★ every hold of today's chain still acts (\(todayHeld.subtracting(held).count) dropped)")
+        XCTAssertGreaterThan(held.count, todayHeld.count, "★ and the link adds its own")
+        // the line counts the wall beside the Rests
+        let k = FlexibleHold.landed(.rests(rests.count), bcMode: s.bcMode, anchorsHeld: [], anchors: [], farFaces: [],
+                                    wallsHeld: s.wallNodes.filter { $0 > 0 }.count, resting: rests.count)
+        XCTAssertEqual(FlexibleHold.line(k), FlexibleRowCopy.Hold.links(1, rests: rests.count))
+
+        // ★ RED CONTROL: I3's first rule — the link takes the far anvil's place: the far wall is dropped
+        let red = try solve(walls: link, control: Self.controlLinksReplaceFarAnvil)
+        print("FLEX-LR RED (links replace the far anvil): far anvils \(red.farAnvils) · exits held \(red.exitsHeld) · today's held nodes kept \(Set(red.heldNodes).intersection(todayHeld).count)/\(todayHeld.count)")
+        XCTAssertEqual(red.farAnvils, 0, "★ RED CONTROL: the far anvil dropped")
+        XCTAssertFalse(red.exitsHeld, "★ RED CONTROL: the far wall reported free")
+        XCTAssertFalse(todayHeld.isSubset(of: Set(red.heldNodes)), "★ RED CONTROL: today's far-wall holds are gone")
+
+        // no link: byte for byte today (the control bit changes nothing without a wall)
+        let none = try solve(walls: [])
+        XCTAssertEqual(none.u, today.u, "★ a rest group with no link: today's field, byte for byte")
+        XCTAssertEqual(none.pinnedDOFs, today.pinnedDOFs)
+        let noneRed = try solve(walls: [], control: Self.controlLinksReplaceFarAnvil)
+        XCTAssertEqual(noneRed.u, today.u, "no link: the control bit is inert")
     }
 }

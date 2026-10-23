@@ -123,6 +123,50 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
+## ★ Round 7 · Links + Rests both hold, Manual on the Lattice page, a group's own lattice = what is drawn (2026-10-22) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). Not installed. App only; core untouched; no #354/main file
+edited; no new hook. Auto looks, builds and sends what it did before (goldens and the 16 stage-job hashes identical).
+
+### What changed, in plain words
+1. **Links and Rests both hold.** Your answer of ~16:10: "All hold. Links and far side wall that is set to rest. If the user has
+   set both up, they intended both to be implemented. So both should act on the model." Before, a link in a group with Rests
+   switched off the hold on the group's far side. Now the linked walls, the Rests and the far side all hold together. A group with
+   Rests and no link is exactly as before; a group with links and no Rests is exactly as before. How a Rest grips (R2) is NOT
+   changed: that still waits for your pictures.
+   - On your pad as saved, every far side of Group 1 is already a Rest, so a link there changes nothing you can see. The test
+     makes the case your answer is about: Face 5 pressed alone with your Rests (the far side is then Face 3, held by the far
+     anvil) plus the Face 5 floor link. Before: the far side was let go (exits free). Now: it stays held beside the link.
+2. **Manual on the main Lattice page.** In Manual the main page's heat, its legend's top and TAP TO READ now use the same
+   numbers as the Squish page's estimate (your pad, Face 5: 2.8 mm on both; before, the main page read 2.1 mm). The squish
+   prism and its number (only drawn under a test switch on the main page) follow the estimate too. Core's design lines on a
+   face (range, tier, "N of the design stamp lands off this face") are hidden in Manual. A group with no sim coming now says
+   "Squish estimate · Save & Exit to see it" instead of "working it out…" for ever.
+3. **A group's own lattice is what is drawn.** The screen draws one lattice type and one cell size for the whole part, so a
+   group's "Set its own" now shows only Density % and Walls (beads), under one quiet line "Type and cell follow the part". The
+   walls are worked out with the part's type and cell. An older save that has a group type or cell still opens; those values
+   are kept but not used.
+
+### Decisions made here (yours to overturn)
+- Main page column heat with no sim landed yet (Manual): not changed (it shows nothing until the sim lands, as before).
+- A group's own type/cell taps are ignored (there is no row for them); the stored group lattice takes the part's type and cell
+  the next time its density or walls change.
+
+### Runs (`round7/manual_followup/mf_runs.txt`)
+- 16 classes that touch or pin the changed files: 68 passed, 2 failed, 8 skipped (the probes). Failure 1: the new links test's
+  first version (your pad has no far side that is not a Rest); reworked and re-run twice, now passes. Failure 2: the known
+  batch I one (FlexibleSettingsPageHostedTests 11" landscape "as opened", card 566-812).
+- Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+- The 16 stage-job hashes: cmp-identical to the Manual install's (`stage_job_hashes_mf.txt`).
+- New tests: `FlexibleI3LinkSimTests` 4 (red control: the old rule drops the far anvil — far anvils 0, exits free, 490 of today's
+  2156 held nodes gone); `FlexibleManualFollowUpTests` A (red controls: the stored depth on the main page; core's design lines in
+  Manual; "working" with no sim) and B (red control: the group's type line shown).
+
+### Renders (`round7/manual_followup/`, 13" portrait, your pad)
+`MF_01` the main Lattice page in Manual, heat on: "Squish · mm 0 – 2.8 mm" (the card's estimate) · `MF_02` Group 1's own
+lattice in Manual: "Type and cell follow the part", Density 30 %, Walls 1.9 beads · `MF_03` the Squish page with the Face 5 floor
+link on your rest group, Play ×1 at 5 lb: "Held by 1 linked wall + 2 Rests" (Auto).
+
 ## ★ Round 7 · MANUAL installed — parts M1 + M2 together (2026-10-22) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), at `49f42b6a`. NOT pushed (your HOLD). App only; core untouched; no #354/main file

@@ -99,9 +99,27 @@ extension FlexibleStageModel {
     private func waiting(_ g: FlexibleSqueezeGroup) -> FlexibleManualEstimate {
         guard let l = lattice, squishGeneration == l.generation,
               !latticeIsStale || FlexibleSettingsSquish.staleEdges(model: self, group: g) else { return .later }
-        switch squish[FlexibleSim.groupID(g.number)] {
-        case .pending?, nil: return .working
+        let id = FlexibleSim.groupID(g.number)
+        switch squish[id] {
+        case .pending?: return .working
+        case nil:
+            // ★ NEVER "working it out…" FOR EVER (round 7 · MANUAL follow-up): no sim entry is working only while this lattice's sims
+            // are still to be handed to the solver (the main page starts them) and one of them is this group's; else no sim is
+            // coming for it — "Save & Exit to see it". RED CONTROL `controlNoEntryIsWorking`: M2's rule (nil read as working).
+            if Self.controlNoEntryIsWorking { return .working }
+            return (squishScheduled != l.generation || feRequest != nil) && willSolve(g, l) ? .working : .later
         default: return .later
+        }
+    }
+    /// ★ RED CONTROL only (FlexibleManualFollowUpTests): a group with no sim entry reads "working it out…" (M2's rule).
+    nonisolated(unsafe) static var controlNoEntryIsWorking = false
+    /// A sim of `l` is this group's: one of the lattice's own, or an edges group's interim sim (FlexibleStageModel+PressSim).
+    private func willSolve(_ g: FlexibleSqueezeGroup, _ l: FlexibleGeneratedLattice) -> Bool {
+        let id = FlexibleSim.groupID(g.number)
+        if l.sims.contains(where: { $0.id == id }) { return true }
+        guard g.kind == .edges, !Self.controlNoPressSims else { return false }
+        return g.presses.contains { pid in
+            settings.press(pid).map { $0.strip != nil && !$0.regions.isEmpty && $0.settings.weightN > 0 } ?? false
         }
     }
 

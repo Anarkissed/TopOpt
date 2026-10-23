@@ -159,6 +159,9 @@ public enum FlexibleManualCopy {
     public static let ownLattice = "Lattice · its own"
     public static let setOwn = "Set its own"
     public static let useParts = "Use the part's"
+    /// ★ GROUP OVERRIDE = WHAT IS DRAWN (round 7 · MANUAL follow-up): a group's own lattice is its density and walls only — the
+    /// screen draws one lattice type and one cell for the whole part, so the group's card says so in one quiet line.
+    public static let followsPart = "Type and cell follow the part"
 
     /// The bead warning (nil: whole beads, ≥ 1).
     public static func wallsWarning(_ beads: Double) -> String? {
@@ -244,16 +247,27 @@ extension FlexibleStageModel {
         return FlexibleManualMath.oneBead(topology: top, density: rho, beadWidthMM: manualBeadWidthMM)
     }
 
+    /// ★ RED CONTROL only (FlexibleManualFollowUpTests): a group's own TYPE and CELL shown and used (M1's rule — saved, never drawn).
+    nonisolated(unsafe) static var controlGroupOwnTypeAndCell = false
+
     /// The lattice shown on a Manual row: the group's own (or the part's), nil in Auto.
+    /// ★ GROUP OVERRIDE = WHAT IS DRAWN: the shader draws ONE lattice type and ONE cell for the whole part, so a group's own lattice
+    /// is the part's type and cell at the group's own density — its walls (beads) are worked out with the PART's type and cell. A
+    /// group type or cell in an older save is decoded and kept, never drawn nor shown.
     public func manualLattice(group groupID: Int?) -> FlexibleManualLattice? {
         guard let m = settings.manual, m.on else { return nil }
-        return m.lattice(group: groupID)
+        let l = m.lattice(group: groupID)
+        guard groupID != nil, !Self.controlGroupOwnTypeAndCell else { return l }
+        return FlexibleManualLattice(topology: m.part.topology, cellMM: m.part.cellMM, density: l.density)
     }
+
+    /// A group's card in Manual shows only Density and Walls (the type and the cell are the part's).
+    nonisolated public static var groupShowsTypeAndCell: Bool { controlGroupOwnTypeAndCell }
 
     /// Change the part's lattice (`group` nil) or a group's own.
     public func editManual(group groupID: Int?, _ change: (FlexibleManualLattice) -> FlexibleManualLattice) {
         guard let m = settings.manual, m.on else { return }
-        let next = change(m.lattice(group: groupID))
+        let next = change(manualLattice(group: groupID) ?? m.lattice(group: groupID))
         actionSerial += 1
         edit { s in
             if let g = groupID, s.manual?.hasOwn(group: g) == true { s.manual?.groups?[String(g)] = next }
@@ -261,10 +275,14 @@ extension FlexibleStageModel {
         }
     }
     public func setManualType(_ t: String, group: Int?) {
+        guard group == nil || Self.groupShowsTypeAndCell else { return }   // ★ a group's type is the part's
         let bw = manualBeadWidthMM
         editManual(group: group) { FlexibleManualMath.withType($0, t, beadWidthMM: bw) }
     }
-    public func setManualCell(_ mm: Double, group: Int?) { editManual(group: group) { FlexibleManualMath.withCell($0, mm) } }
+    public func setManualCell(_ mm: Double, group: Int?) {
+        guard group == nil || Self.groupShowsTypeAndCell else { return }   // ★ a group's cell is the part's
+        editManual(group: group) { FlexibleManualMath.withCell($0, mm) }
+    }
     public func setManualDensity(_ rho: Double, group: Int?) { editManual(group: group) { FlexibleManualMath.withDensity($0, rho) } }
     public func setManualWalls(_ beads: Double, group: Int?) {
         let bw = manualBeadWidthMM

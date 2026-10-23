@@ -1,0 +1,3 @@
+Group 1: bc rest · walls held [1078] · exits held true · max|u| 4.64 mm · line 'Held by 1 linked wall + 2 Rests' · rests [2000021, 2000020]
+MF_03: playing Group 1 · ×1.0 · held 1.0
+MF_02 Group 1 own: gyroid · cell 9.00 mm · density 0.300 · walls 1.941 beads · rows ["follows", "density", "walls"]

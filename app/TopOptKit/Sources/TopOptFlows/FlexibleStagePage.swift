@@ -1302,11 +1302,30 @@ struct FlexTierBadge: View {
 }
 
 /// The per-face numbers: range with tier and band, and the clamped columns in plain words.
+/// ★ ROUND 7 · MANUAL follow-up: every line here is core's DESIGN (its range, tier, clamps, "N of the design stamp lands off
+/// this face") — none of it in Manual; the face's one line there is the app's estimate (FlexibleManualPredict), as on its card.
 struct FlexibleFaceResult: View {
     let design: FlexFaceDesignInfo
     @ObservedObject var model: FlexibleStageModel
+    var region: Int? = nil
+
+    /// ★ RED CONTROL only (FlexibleManualFollowUpTests): core's design lines shown in Manual.
+    nonisolated(unsafe) static var controlDesignCaptionsInManual = false
+    /// Core's design lines are shown (Auto), or the estimate's one line (Manual).
+    static func showsDesign(model: FlexibleStageModel) -> Bool { !model.isManual || controlDesignCaptionsInManual }
+    /// The caption "N of the design stamp lands off this face." (nil: none — or Manual).
+    static func stampOffCaption(_ d: FlexFaceDesignInfo, model: FlexibleStageModel) -> String? {
+        guard showsDesign(model: model), d.designStampOffFace else { return nil }
+        return String(format: "%.1f N of the design stamp lands off this face.", d.designStampOffFaceN)
+    }
 
     var body: some View {
+        if Self.showsDesign(model: model) { designBody } else {
+            FlexCaption(text: region.flatMap { model.estimateLine(region: $0) } ?? FlexibleManualCopy.estimateLater)
+        }
+    }
+
+    private var designBody: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 FlexSectionTitle(text: model.showBuildable ? "Can be built" : "You drew")
@@ -1335,10 +1354,7 @@ struct FlexibleFaceResult: View {
             if design.designStampRigidAveraged {
                 FlexCaption(text: "A rigid design stamp is read as its stated weight spread over the area it covers — its real pressure depends on the lattice being designed.")
             }
-            if design.designStampOffFace {
-                FlexCaption(text: String(format: "%.1f N of the design stamp lands off this face.", design.designStampOffFaceN),
-                            colour: DS.Color.warning.color)
-            }
+            if let t = Self.stampOffCaption(design, model: model) { FlexCaption(text: t, colour: DS.Color.warning.color) }
         }
     }
 

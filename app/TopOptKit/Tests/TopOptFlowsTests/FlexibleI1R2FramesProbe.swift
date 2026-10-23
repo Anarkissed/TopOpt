@@ -127,6 +127,65 @@ final class FlexibleI1R2FramesProbe: XCTestCase {
         flush("I1_R2_lines_v2.txt")
     }
 
+    // ★ ROUND 7 · MANUAL follow-up (renders MF_02, MF_03, with FLEX_I1_DIR + FLEX_MF): his pad's Squish page — a group card with
+    // its own density in Manual ("Type and cell follow the part"); and a link added to his rest group, Play ×1 at full load (links
+    // and Rests both hold — his answer of 2026-10-22 ~16:10, "All hold").
+    func testManualFollowUpFramesOnHisPad() throws {
+        guard Self.dir != nil, ProcessInfo.processInfo.environment["FLEX_MF"] != nil else { throw XCTSkip("frames only with FLEX_I1_DIR + FLEX_MF") }
+        let r = try FlexibleHisProject.restore(FlexibleU21DeleteUndoTests.padDir, asSaved: true)
+        addTeardownBlock { r.cleanup() }
+        let s = FlexibleMainStage()
+        s.reduceMotion = { true }
+        let m = s.model(for: r.project, materialsPath: FlexibleHisProject.materialsPath, stampsPath: FlexibleHisProject.stampsPath, persist: {})
+        addTeardownBlock { @MainActor in await m.waitForIdle() }
+        m.squishSolver.controlNoRefine = true
+        m.openScene()
+        XCTAssertTrue(pumpUntil(180) { m.sceneState == .ready && m.loadedKeys.allSatisfy { m.stacks[$0] != nil } }, "scene")
+        let strips = m.presses.filter { $0.strip != nil }
+        pumpUntil(240) { strips.allSatisfy { m.pressKey($0.id) != nil } }
+        pumpUntil(60) { !m.readiness.designing }
+        // his link: Face 5's lattice floor → the solid under it (FlexibleI3LinkSimTests 3/4), in Auto (his rest group)
+        let key5 = LatticeSelectableRef.face(group: FlexibleI2AttachTests.groupC, face: 5).key
+        XCTAssertTrue(FlexibleFaceCommits.addLink(lattice: key5, wall: "floor", target: "under", project: r.project))
+        s.didExitSettings()
+        s.apply(r.project, owned: true, pageUp: false)
+        XCTAssertTrue(pumpUntil(400) { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }, "lattice")
+        let groups = m.squeezeGroups
+        let g = try XCTUnwrap(groups.first { $0.kind == .faces })
+        let id = FlexibleSim.groupID(g.number)
+        for x in groups { m.startSquishSims(first: FlexibleSim.groupID(x.number)) }
+        XCTAssertTrue(pumpUntil(600) { m.squish[id] != nil && m.squish[id] != .pending }, "the sim")
+        if let f = m.squish[id]?.field {
+            log.append(String(format: "%@: bc %@ · walls held %@ · exits held %@ · max|u| %.2f mm · line '%@' · rests %@",
+                              m.groupName(g), f.bcMode, "\(f.wallNodes)", "\(f.exitsHeld)", f.maxDisplacement, m.holdLine(g), "\(m.holdResting)"))
+        }
+        let loop = FlexibleSquishLoop()
+        m.views = [.play]
+        let h = host(FlexibleStagePage(project: r.project, model: m, loop: loop, onExit: {}), size: Self.p13)
+        pump(3)
+        m.rail = .group(g.id)
+        if let r0 = g.regions.first { m.select(r0) }
+        pump(1.5)
+        loop.exaggeration = 1
+        loop.hold(1)
+        pump(0.5)
+        log.append("MF_03: playing \(m.playingGroup.map { m.groupName($0) } ?? "-") · ×\(loop.exaggeration) · held \(loop.held)")
+        try shot("MF_03_13p_pad_link_plus_rests_play_full.png", h, settle: 2.5)
+
+        // a group card with its own density, in Manual
+        m.views = [.heatOff]
+        m.setManual(true)
+        m.rail = .group(g.id)
+        m.setGroupOwnLattice(g.id, own: true)
+        m.setManualDensity(0.30, group: g.id)
+        pump(1.5)
+        let own = try XCTUnwrap(m.manualLattice(group: g.id))
+        log.append(String(format: "MF_02 %@ own: %@ · cell %.2f mm · density %.3f · walls %.3f beads · rows %@", m.groupName(g), own.topology, own.cellMM,
+                          own.density, m.manualWalls(group: g.id) ?? -1, "\(FlexibleManualLatticeRows.rows(group: g.id))"))
+        try shot("MF_02_13p_pad_MANUAL_group_own_density.png", h, settle: 1.5)
+        flush("MF_lines.txt")
+    }
+
     // ★ v2: HIS l-bracket, the 4 border walls linked vs not (FlexibleI3FramesProbe's scene), seen from the side, a little below
     // and behind, so Face 2's (the plate's underside) bow reads in silhouette; the panel collapsed; Play ×1 at full load; the same camera for both
     func testLBracketLinksFromBehind() throws {

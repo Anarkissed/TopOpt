@@ -754,7 +754,7 @@ public final class FlexibleMainStage: ObservableObject {
         // session, and never a Pending group's (FlexibleMainPickSession.prismGroup)
         let active = prismGroup(project)
         let key = "\(k)|\(m.views.rawValue)|\(active.map { "\($0.id)\($0.faces)\($0.regionIDs)" } ?? "-")|\(m.settings.hashValue)|"
-            + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)"
+            + "\(m.stacks.count)|\(m.geometry.count)|\(m.stampGrids.count)|\(m.estimateKey)|\(Self.controlStoredDepthInManual)"   // ★ MANUAL: the estimate moves the depth
         if let c = volumesCache, c.key == key { return c.items }
         let loaded = m.settings.loadedFaces.map(\.faceRegionID)
         // the active group's pressed faces: its faces (a region's members too) and its cut sectors; a face it LOADS is
@@ -780,7 +780,7 @@ public final class FlexibleMainStage: ObservableObject {
         let regions = prisms ? loaded : loaded.filter { picked.contains($0) }
         let items: [ClearanceRenderItem] = regions.compactMap { r in
             guard let f = m.settings.face(r), let key = m.key(r), let st = m.stacks[key], let g = m.geometry[key],
-                  let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: f.deepestMM, k: k,
+                  let v = FlexibleDepthPrism.volume(region: r, stack: st, centres: g.centres, depthMM: mainDepthMM(m, f), k: k,
                                                     footprint: m.prismFootprint(r)) else { return nil }
             let bright = prisms && picked.contains(r)
             return ClearanceRenderItem(volume: v, selected: bright, tint: FlexibleStageStyle.facePrismTint,
@@ -790,6 +790,19 @@ public final class FlexibleMainStage: ObservableObject {
         volumesCache = (key, items)
         return items
     }
+    /// ★ ROUND 7 · MANUAL follow-up: the main page's squish depth of a pressed face — his Deepest squish in Auto; in Manual the
+    /// app's estimate, the Squish page's own number (FlexibleManualPredict.shownDepthMM), never the stored depth core designed.
+    /// RED CONTROL `controlStoredDepthInManual`: the stored depth in Manual (M2's main page).
+    func mainDepthMM(_ m: FlexibleStageModel, _ f: FlexibleFaceSettings) -> Double {
+        Self.controlStoredDepthInManual ? f.deepestMM : m.shownDepthMM(f)
+    }
+    /// …and its tag: "≈ 2.8 mm" (or "Estimating…" / "No estimate yet") in Manual, "%.1f mm" in Auto.
+    func mainDepthText(_ m: FlexibleStageModel, _ f: FlexibleFaceSettings) -> String {
+        guard m.isManual, !Self.controlStoredDepthInManual else { return String(format: "%.1f mm", f.deepestMM) }
+        return FlexibleManualCopy.chipText(m.estimate(region: f.faceRegionID))
+    }
+    nonisolated(unsafe) static var controlStoredDepthInManual = false
+
     /// ★ S1b (round 6 item 3, the main page): the ONE k the main page's prisms, their mm tags and the legend's Prisms
     /// row use — the dent's exaggeration, or 1 while nothing is dented (the prism at its true depth).
     public var prismK: Double { channels.map { FlexibleStageVolumes.prismK($0.exaggeration) } ?? 1 }
@@ -846,7 +859,7 @@ public final class FlexibleMainStage: ObservableObject {
             // the face turns away when the view ray meets its OUTWARD normal (the handle's normal points in)
             let away = viewDirection.flatMap { $0(h.planeOrigin) }.map { simd_dot($0, -h.planeNormal) > FlexibleStageViewTags.awayDot } ?? false
             return FlexibleStageViewTags.MainCandidate(region: r, columns: columns, bright: item.selected,
-                                                       text: String(format: "%.1f mm", f.deepestMM), along: along,
+                                                       text: mainDepthText(m, f), along: along,
                                                        axisCount: axisCount, face: face, away: away)
         }
         return FlexibleStageViewTags.placeMain(cands, keepOut: keepOut, viewport: viewport)

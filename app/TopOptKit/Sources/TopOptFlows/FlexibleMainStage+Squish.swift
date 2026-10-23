@@ -190,7 +190,7 @@ extension FlexibleMainStage {
     /// Cached per (overlay, field).
     func feMapValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [Float]? {
         guard let o = overlay, let perColumn = feColumnValues(f, m) else { return nil }
-        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
+        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)|\(m.isManual && !Self.controlCalibratedHeatInManual)"
         if let c = feValueCache[f.versionKey], c.key == key { return c.values }
         let out = o.mapCornerValues(perColumn, stacks: m.stacks)
         feValueCache[f.versionKey] = (key, out)
@@ -199,15 +199,23 @@ extension FlexibleMainStage {
 
     /// ★ X1 VERIFY: the compression per COLUMN of the field's group's faces (the numbers `feMapValues` blends at the map's
     /// corners) — the walls' heat on the FE route. Cached per (overlay, field).
+    /// RED CONTROL only: the calibrated route's numbers in Manual (M2's main page).
+    nonisolated(unsafe) static var controlCalibratedHeatInManual = false
     func feColumnValues(_ f: FlexibleFEField, _ m: FlexibleStageModel) -> [FlexFaceKey: [Double?]]? {
         guard let o = overlay else { return nil }
-        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)"
+        let key = "\(overlaySerial)|\(f.serial)|\(f.scale)|\(m.isManual && !Self.controlCalibratedHeatInManual)"
         if let c = feColumnCache[f.versionKey], c.key == key { return c.values }
         let keys = Set(m.playLattice?.sims.first { $0.id == f.simID }?.keys ?? [])
         let ratio = 1 / Swift.max(1e-6, f.foldShare ?? 1)
         var perColumn: [FlexFaceKey: [Double?]] = [:]
         for k in o.flatStart.keys where keys.contains(k) {
             guard let st = m.stacks[k] else { continue }
+            // ★ ROUND 7 · MANUAL follow-up: in Manual the main page's heat, its legend's top and TAP TO READ are the Squish page's
+            // estimate, column for column (FlexibleManualPredict.estimateColumns — the same numbers as the card and the chip)
+            if m.isManual, !Self.controlCalibratedHeatInManual {
+                perColumn[k] = m.estimateColumns(f, st, key: "r\(k.region)").map { Optional($0) }
+                continue
+            }
             let pinched = m.pinchedColumns(k.region) ?? []
             perColumn[k] = st.columns.indices.map { c in
                 Swift.max(0, f.columnCompression(stack: st, col: c, pinched: c < pinched.count && pinched[c]) * ratio)

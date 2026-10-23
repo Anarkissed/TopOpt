@@ -304,7 +304,7 @@ struct FlexibleFaceRows: View {
                 } extra: {
                     if let d = model.design(r) {
                         if let why = d.refusal { FlexInfoText(model.text(why.reason), warning: true) }
-                        else { FlexibleFaceResult(design: d, model: model) }
+                        else { FlexibleFaceResult(design: d, model: model, region: r) }
                     }
                     if let st = model.stack(r) {
                         FlexInfoText(FlexibleLatticeUnder.stackInfo(uMM: st.uExtentMM, vMM: st.vExtentMM, columns: st.columns.count,

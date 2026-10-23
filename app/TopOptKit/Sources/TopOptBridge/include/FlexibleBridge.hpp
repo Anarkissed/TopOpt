@@ -583,7 +583,9 @@ struct FlexSquishRequest {
                          // iteration budget lifted (a reference solve) . 8192 the old fixed 600
                          // iterations . 16384 core's GenEO + Krylov recycling left as found
                          // . 32768 a pressed stack's far end NOT held when other faces rest —
-                         // batch G's rule, the red control of the far anvil); else the app sends 0
+                         // batch G's rule, the red control of the far anvil) . 262144 linked walls drop
+                         // a rest group's far anvil — I3's first rule, the red control of "links and
+                         // Rests both hold" (his answer of 2026-10-22 ~16:10); else the app sends 0
   // ★ U21 · I1 (his answer of 2026-10-21 ~15:35, "#1": with no Rests the Topology page's fixed faces hold the part for the sim
   // only, no Rests added; with neither the far side stays held — narrowed by his decision of 2026-10-22 ~02:50: a group WITH
   // Rests keeps today's chain exactly, far anvil included). 0 = today's chain (the default: every existing caller and test);
@@ -594,9 +596,10 @@ struct FlexSquishRequest {
   std::vector<int32_t> anchor_face_ids;    // Topology's fixed B-rep / pseudo faces (model->triangle_face ids)
   std::vector<int32_t> anchor_region_ids;  // Topology's fixed painted regions, resolved against the scene's regions
   // ★ U21 · I3: the live linked walls of the lattices this group presses into (empty: no link — every rule above unchanged, byte
-  // for byte). They hold WHEREVER they are given, under either rule: with Rests, the Rests keep today's grip and the linked walls
-  // take the place of the far anvil (the walls hold the lattice; bc_mode stays "rest"); with no Rest, the walls alone hold the
-  // part (bc_mode "wall": no Topology anchor, no exit glue).
+  // for byte). They hold WHEREVER they are given, under either rule: with Rests, the Rests keep today's grip, today's far anvil
+  // stays and the linked walls hold beside them — all act (his answer of 2026-10-22 ~16:10: "All hold. Links and far side wall
+  // that is set to rest"; bc_mode stays "rest"); with no Rest, the walls alone hold the part (bc_mode "wall": no Topology
+  // anchor, no exit glue).
   FlexHeldWalls held_walls;
 };
 struct FlexSquishSolution {

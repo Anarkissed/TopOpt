@@ -10,8 +10,9 @@
 // the new chain run: Topology's fixed faces (sim only) → the far side.
 // ★ I3 (his picks of 2026-10-21 ~15:45: "the linked walls HOLD that lattice. It squashes against them and they stay put … The
 // card always says what holds it ('Held by 4 linked walls')"): the LIVE links of the lattices a group presses into hold it,
-// wherever they exist — first in his order (links → Rests → Topology → the far side); with Rests the two hold together (the
-// walls take the far anvil's place). With no link nothing above changes, byte for byte. Display sim only (CORE LIST item 10).
+// wherever they exist — first in his order (links → Rests → Topology → the far side); with Rests the two hold together, the
+// Rests' far anvil included (his answer of 2026-10-22 ~16:10: "All hold. Links and far side wall that is set to rest … both
+// should act on the model"). With no link nothing above changes, byte for byte. Display sim only (CORE LIST item 10).
 //
 // ★ THE RULE ON THE WIRE (flexible_squish_fe.cpp, hold_rule 1): no Rests and an anchor → the anchors BONDED (bc "anchor"), the
 // group's own pressed faces never held; no Rests and no anchor → today's far side (exit glue when the presses do not balance,
