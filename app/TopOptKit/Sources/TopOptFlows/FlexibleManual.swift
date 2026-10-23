@@ -395,7 +395,8 @@ public enum FlexibleManualField {
         public let wallMM: [Float]
         /// Per voxel: 0 gyroid, 1 honeycomb.
         public let type: [Float]
-        /// ★ P2: per voxel the PIECE code, 4 · piece + 2 · graded + type — one piece per lattice he set (the part's, each group's
+        /// ★ P2: per voxel the PIECE code, 8 · piece + 4 · stepped (T2: one Stepped band) + 2 · graded + type — one piece per
+        /// lattice he set (the part's, each group's
         /// own), per Stepped band, and (Default grade only) per owner stack, so every place two pieces meet is a SEAM the field
         /// joins cleanly (FlexibleLatticeField.manualPieceWall). `graded` 1: a Default grade (drawn on the ladder), 0: one density
         /// in the piece (drawn at its exact cell).
@@ -483,7 +484,9 @@ public enum FlexibleManualField {
             let key = PieceKey(lattice: gid, owner: graded ? o : Int.min, band: band)
             let idx: Int
             if let i = pieces[key] { idx = i } else { idx = pieces.count; pieces[key] = idx }
-            code[v] = Float(4 * idx + (graded ? 2 : 0) + Int(type[v]))
+            // ★ T2: a Stepped band says so — where two bands meet the field draws a seam wall (a band edge reads as a clean line)
+            let stepped = l.grade.on && l.stepped
+            code[v] = Float(8 * idx + (stepped ? 4 : 0) + (graded ? 2 : 0) + Int(type[v]))
         }
         var depths: [Int: OwnDepth] = [:]
         for (o, cols) in ownDepth {

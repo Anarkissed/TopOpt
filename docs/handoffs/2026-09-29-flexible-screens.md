@@ -176,7 +176,55 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    import refuses "3MF import requires lib3mf". Provisioning, not code: vendoring lib3mf-lib and rebuilding the core
    slice with it (build_core.sh) would make them run. Not done here (vendor/ and core are not ours).
 
-## ★ Round 7 · T1 — the known failing tests, looked into (2026-10-23) (read this first)
+## ★ Round 7 · T2 — two drawing leftovers from the Manual P2 checks (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (drawing only; ready with the next
+install). Core untouched, no #354/main file edited, no new hook. Evidence:
+`docs/handoffs/evidence/2026-09-29-flexible-screens/round7/t2_drawing/` (`t2_runs.txt` holds every raw number below).
+
+1. **Honeycomb slivers where the lattice is cut — FIXED, Auto and Manual.**
+   - Why: the lattice was cut at each point, by the region's edge and by the part's surface. A wall crossing the cut at an
+     angle ended in a knife edge. A wall running beside the cut was shaved thin.
+   - Auto showed the same slivers on your pad's honeycomb, so the fix covers both modes. It changes the drawing only; your
+     goldens and hashes are identical.
+   - Now a honeycomb wall is drawn only where its whole thickness fits. Every cut wall ends square and whole, never past the
+     old cut. Where walls meet, one whole wall keeps the junction.
+   - Code: `FlexibleLatticeField.squareClip`, and its GPU twin `flx_square_clip`.
+   - Numbers (thin pieces = under half a wall thick, near the cut):
+     - Manual honeycomb (2 beads): 87 of 1500 (5.8 %) before, 0 of 1500 after.
+     - Auto honeycomb: 39 of 1500 (2.6 %) before, 0 of 1500 after.
+     - Lattice away from the cut: 0 of 1500 in both modes.
+   - Gyroid is cut as before. I also tried squaring the gyroid. It lowered the march's depth match 5× (66 → 348 px) and
+     changed your pad's open top (FlexibleTopLayerTests), so I took it out.
+2. **Stepped band edges — FIXED.** Two causes:
+   - (a) the bands were joined by blending two gyroids whose cells are 3× apart;
+   - (b) where a band edge meets the group's own edge (three pieces in one voxel), the third piece's density leaked in and
+     bent the gyroid.
+   Now any edge with a Stepped band on either side gets the clean seam wall the type seams use. A piece of one density
+   always reads its own density.
+   - Fragments per mm at the band edges: 0.1275 before, 0.0000 after (the lattice away reads 0.0154).
+   - The Stepped group's own edge: 0.0838 before, 0.0000 after.
+   - P2's whole Stepped count: 0.0855 before, 0.0006 after.
+   - Piece codes gained a Stepped bit (8·piece + 4·stepped + 2·graded + type). P2's GPU fixture codes were renumbered to
+     match; it tests the same thing.
+3. **GPU = Swift** within 0.00097 mm at 300 cut points and 300 band-edge points (limit 0.005); the red control misses by
+   12.3 mm (Manual) and 1.31 mm (Auto).
+
+Run once (18 classes):
+- 99 test cases: 97 passed, 2 skipped (opt-in), 0 failed;
+- goldens: det 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP;
+- the 16 stage-job hashes are cmp-identical to nozzle_grade's and t1's.
+
+Renders (13" portrait, your pad, X-ray):
+- `T2_01`: the honeycomb close-up, with the same camera as `manual_p2/P2_03` (P2_03 is the "before"). The right block's
+  lower-right walls now end square; nothing hangs.
+- `T2_02`: a Stepped close-up. The band edge is one clean line between the 13.9 mm and the 4.6 mm cells.
+
+Not changed:
+- a Manual honeycomb that is graded, or sits in a seam cell (still cut as before);
+- the gyroid's cut.
+
+## ★ Round 7 · T1 — the known failing tests, looked into (2026-10-23)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (tests and the bridge only; one line of
 the player changed — ready with the next install). Core untouched, no #354/main file edited, no new hook. Evidence:

@@ -414,9 +414,9 @@ enum FlexibleLatticeShader {
 
     // ── ★ ROUND 7 · MANUAL P2 — THE DRAWING MATCHES THE SETTINGS (FlexibleLatticeField.manualPieceWall, the twin) ─────────
     // When buildDir.w = 2 the (ρ, mask) volume is THREE times as deep: slices nz … 2nz−1 hold (t mm, piece code) and 2nz … 3nz−1
-    // (ρ of the other piece carried here, its code). Code = 4·piece + 2·graded + type. A cell of one piece: its lattice (exact
+    // (ρ of the other piece carried here, its code). Code = 8·piece + 4·stepped band (T2) + 2·graded + type. A cell of one piece: its lattice (exact
     // cell, or the ladder under a Default grade). A SEAM cell: per piece its share φ and same-side ρ; two gyroids blend their
-    // sheets by σ = smoothstep(φA / (φA + φB)) with the whole gradient; any other pair: A's wall ∪ a seam wall on φA = φB.
+    // sheets by σ = smoothstep(φA / (φA + φB)) with the whole gradient; any other pair (T2: a Stepped band on either side too): A's wall ∪ a seam wall on φA = φB.
     static float flx_piece_sheet(constant FlxUniforms& U, float3 p, float rhoRaw, float3 gradRho, float t, bool graded,
                                  thread float3& grad, thread float& k, thread float& Lcur) {
         if (!graded) {
@@ -502,9 +502,16 @@ enum FlexibleLatticeShader {
         {
             float c[8], d[8];
             float PA = cd[best], PB = cd[second];
+            // ★ T2: a piece of one density reads it where a corner carries a third piece's ρ (FlexibleLatticeField.manualPieceWall)
+            float sA = 0.0f, nA = 0.0f, sB = 0.0f, nB = 0.0f;
             for (int r = 0; r < 8; r++) {
-                if (cd[r] == PA) { c[r] = rr[r]; if (tA == 0.0f) tA = tt[r]; } else { c[r] = oo[r] == PA ? aa[r] : rr[r]; }
-                if (cd[r] == PB) { d[r] = rr[r]; if (tB == 0.0f) tB = tt[r]; } else { d[r] = oo[r] == PB ? aa[r] : rr[r]; }
+                if (cd[r] == PA) { sA += rr[r]; nA += 1.0f; }
+                if (cd[r] == PB) { sB += rr[r]; nB += 1.0f; }
+            }
+            bool oneA = ((int(PA + 0.5f) >> 1) & 1) == 0, oneB = ((int(PB + 0.5f) >> 1) & 1) == 0;
+            for (int r = 0; r < 8; r++) {
+                if (cd[r] == PA) { c[r] = rr[r]; if (tA == 0.0f) tA = tt[r]; } else { c[r] = oo[r] == PA ? aa[r] : (oneA ? sA / nA : rr[r]); }
+                if (cd[r] == PB) { d[r] = rr[r]; if (tB == 0.0f) tB = tt[r]; } else { d[r] = oo[r] == PB ? aa[r] : (oneB ? sB / nB : rr[r]); }
             }
             rA = flx_tri8(c, fx, fy, fz, u, N, O.w, gA);
             rB = flx_tri8(d, fx, fy, fz, u, N, O.w, gB);
@@ -512,7 +519,8 @@ enum FlexibleLatticeShader {
         }
         float cA = cd[best], cB = cd[second];
         int iA = int(cA + 0.5f), iB = int(cB + 0.5f);
-        if ((iA & 1) == 0 && (iB & 1) == 0) {
+        bool bandEdge = ((iA >> 2) & 1) == 1 || ((iB >> 2) & 1) == 1;   // ★ T2: a Stepped band either side → the seam wall below
+        if ((iA & 1) == 0 && (iB & 1) == 0 && !bandEdge) {
             float3 grA, grB;
             float kA, kB, LA, LB;
             float GA = flx_piece_sheet(U, p, rA, gA, tA, ((iA >> 1) & 1) == 1, grA, kA, LA);
@@ -555,6 +563,76 @@ enum FlexibleLatticeShader {
         return max(dPart, min(max(dRegion, -dSkin), -dRegion));
     }
 
+    // ── ★ ROUND 7 · T2 — THE CLIPS END A HONEYCOMB WALL SQUARE (FlexibleLatticeField.squareClip, the twin) ─────────────
+    // A uniform honeycomb's wall cross-section is kept only where BOTH its faces (p − n·w and p − n·(w + t), per wall family
+    // through p) are inside the region and the part: every cut wall ends square and whole, never past the old clip (the value ≥
+    // the plain clip's — the march's bounds hold); at a junction any whole wall keeps it. Only on or beside a wall (w < ½ t,
+    // fading out at ½ t) and where a clip can reach (the SDF within 1.5 t; the mask below 1 at a corner of the cube p ± 1.5 t).
+    static float flx_dregion_at(constant FlxUniforms& U, texture3d<float> T, float3 q) {
+        return (0.5f - flx_sample2(T, U.rmO, U.rmN, q).y) * 2 * U.rmO.w;
+    }
+    static float flx_dpart_at(constant FlxUniforms& U, texture3d<float> dsT, float3 q) {
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, q);
+        return flx_part_distance(ds.x, U.dsO, U.dsN, q);
+    }
+    // the uniform honeycomb drawn at p (FlexibleLatticeField.uniformHoneycomb): Auto's; a Manual piece of one density off its seams
+    static bool flx_uniform_honey(constant FlxUniforms& U, texture3d<float> T, float3 p, float Lcur, thread float& d, thread float& t) {
+        if (U.buildDir.w < 0.5f) { d = U.shape2.x; t = U.shape.y; return U.shape.x > 0.5f; }
+        if (U.buildDir.w < 1.5f) return false;
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1)), uy = min(max(u.y, 0.0f), float(ny - 1)), uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2)), k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        uint3 h1 = uint3(0, 0, uint(nz));
+        float2 c0 = T.read(uint3(i0, j0, k0) + h1).rg;
+        uint3 ix[7] = { uint3(i1, j0, k0), uint3(i0, j1, k0), uint3(i1, j1, k0), uint3(i0, j0, k1), uint3(i1, j0, k1),
+                        uint3(i0, j1, k1), uint3(i1, j1, k1) };
+        for (int q = 0; q < 7; q++) { if (T.read(ix[q] + h1).g != c0.y) return false; }
+        int ci = int(c0.y + 0.5f);
+        if ((ci & 1) != 1 || ((ci >> 1) & 1) == 1) return false;
+        d = Lcur; t = max(c0.x, 1e-3f);
+        return true;
+    }
+    // returns max(dRegion, dPart), squared to a uniform honeycomb's walls (a gyroid: the plain clips)
+    static float flx_square_clip(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT, float3 p, float w, float Lcur,
+                                 float dRegion, float dPart) {
+        float base = max(dRegion, dPart);
+        float hd = 0.0f, t = 0.0f;
+        if (!flx_uniform_honey(U, rmT, p, Lcur, hd, t)) return base;
+        if (w >= 0.5f * t) return base;
+        float R = 1.5f * t;
+        bool near = dPart > -R - 0.01f;
+        for (int c = 0; c < 8 && !near; c++) {
+            float3 q = p + float3((c & 1) == 0 ? -R : R, (c & 2) == 0 ? -R : R, (c & 4) == 0 ? -R : R);
+            if (flx_sample2(rmT, U.rmO, U.rmN, q).y < 0.99999f) near = true;
+        }
+        if (!near) return base;
+        float3 b = normalize(U.buildDir.xyz);
+        float3 rf = abs(b.x) < 0.9f ? float3(1, 0, 0) : float3(0, 1, 0);
+        float3 e1 = normalize(cross(b, rf)), e2 = cross(b, e1);
+        float2 v = float2(dot(p, e1), dot(p, e2));
+        float2 r = float2(hd, 1.7320508f * hd), h = r * 0.5f;
+        float2 A = float2(flx_fmod(v.x, r.x), flx_fmod(v.y, r.y)) - h;
+        float2 B = float2(flx_fmod(v.x - h.x, r.x), flx_fmod(v.y - h.y, r.y)) - h;
+        float2 q = length_squared(A) < length_squared(B) ? A : B;
+        float2 ax[3] = { float2(1.0f, 0.0f), float2(0.5f, 0.8660254f), float2(-0.5f, 0.8660254f) };
+        float sq = 1e30f;
+        for (int i = 0; i < 3; i++) {
+            float dq = dot(q, ax[i]), ni = abs(dq);
+            float wi = abs(0.5f * hd - ni) - 0.5f * t;
+            if (wi > max(w, 0.0f) + 1e-6f) continue;
+            float2 g = (((ni > 0.5f * hd) == (dq >= 0.0f)) ? 1.0f : -1.0f) * ax[i];
+            float3 n = g.x * e1 + g.y * e2;
+            float3 fa = p - n * wi, fb = p - n * (wi + t);
+            sq = min(sq, max(max(flx_dregion_at(U, rmT, fa), flx_dregion_at(U, rmT, fb)), max(flx_dpart_at(U, dsT, fa), flx_dpart_at(U, dsT, fb))));
+        }
+        if (sq > 1e29f) return base;
+        float s = w <= 0.0f ? 1.0f : 1.0f - w / (0.5f * t);
+        return base + s * max(sq - base, 0.0f);
+    }
+
     // ── FlexibleLatticeField.lattice: F = max(wall, dRegion, dPart, dSkin) ──────────────
     // `S` (X1): the printed solid at p (FlexibleLatticeField.terms).
     static float flx_terms(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
@@ -567,7 +645,7 @@ enum FlexibleLatticeShader {
         float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
         float dSkin = U.shape2.y - ds.y;
         S = flx_printed_solid(dRegion, dPart, dSkin);
-        return max(max(wall, dRegion), max(dPart, dSkin));
+        return max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin);   // ★ T2: the clips end a wall square
     }
 
     static float flx_field(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
@@ -603,11 +681,11 @@ enum FlexibleLatticeShader {
             float lb = min(max(dRegion, max(dPart, dSkin)), S);
             if (lb > far) { Lcur = 1e30f; return lb; }
             float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
-            return min(max(max(wall, dRegion), max(dPart, dSkin)), S);
+            return min(max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin), S);   // ★ T2
         }
         if (dRegion > far) { Lcur = 1e30f; return max(dRegion, max(dPart, dSkin)); }
         float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
-        return max(max(wall, dRegion), max(dPart, dSkin));
+        return max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin);   // ★ T2
     }
 
     // ── THE SQUISH, INVERTED (02 §6) ─────────────────────────────────────────────────────

@@ -394,8 +394,9 @@ final class FlexibleManualP2Tests: XCTestCase {
             let p = g.c0 + SIMD3<Float>(Float(i), Float(j), Float(k)) * g.spacing
             if p.x < 12 { w[v] = 0.45; t[v] = 0; rho[v] = 0.2; code[v] = 0 }                       // gyroid 1 bead, one density
             else if p.y >= 22 { w[v] = 0.9; t[v] = 1; rho[v] = 0.25; code[v] = 17 }                 // honeycomb 2 beads
-            else if p.x < 26 { w[v] = 0.9; t[v] = 0; code[v] = 6 }                                  // gyroid 2 beads, graded (the ramp)
-            else { w[v] = 0.45; t[v] = 0; rho[v] = p.z < 10 ? 0.15 : 0.3; code[v] = p.z < 10 ? 8 : 12 }   // two Stepped bands
+            // (codes in T2's encoding, 8 · piece + 4 · stepped + 2 · graded + type: the bands carry the Stepped bit)
+            else if p.x < 26 { w[v] = 0.9; t[v] = 0; code[v] = 26 }                                 // gyroid 2 beads, graded (the ramp)
+            else { w[v] = 0.45; t[v] = 0; rho[v] = p.z < 10 ? 0.15 : 0.3; code[v] = p.z < 10 ? 36 : 44 }  // two Stepped bands
         } } }
         let x = FlexibleLatticeBuilder.manualAcross(rho: rho, code: code, nx: g.nx, ny: g.ny, nz: g.nz)
         func grid(_ a: [Float]) -> FlexGrid { FlexGrid(nx: g.nx, ny: g.ny, nz: g.nz, c0: g.c0, spacing: g.spacing, values: a) }
