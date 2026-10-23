@@ -1,72 +1,11 @@
-MANUAL install run (M1 + M2 + the reviewer checks together) at 49f42b6a, 2026-10-22, scratch-path /tmp/r7x20b-build
-Classes (72 TopOptFlowsTests classes: the union of M1's 54 and M2's 72 touched/pinning classes, incl. FlexibleSquishCopyTests):
-FlexibleC1Tests FlexibleCurveEditTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFlatPrismEvidenceProbe FlexibleFlatPrismHostedTests FlexibleH39HotfixHookTests FlexibleI2AttachTests FlexibleI3LinkSimTests FlexibleLatticeEvidenceProbe FlexibleLatticeFieldTests FlexibleLatticeIsProtectedTests FlexibleM1ManualFramesProbe FlexibleM1ManualTests FlexibleM2PredictTests FlexibleMainPageLoadsTests FlexibleOverlayClipTests FlexiblePressCurveTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewHostedTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3EvidenceProbe FlexibleR7EveningAnswersTests FlexibleR7M1VerifyTests FlexibleR7M2EvidenceProbe FlexibleR7REvidenceProbe FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsTests FlexibleR7U21BCurveHostedTests FlexibleR7U21BCurveTests FlexibleR7U21NewModelTests FlexibleReadinessTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound6EvidenceProbe FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7D1ReviewEvidenceProbe FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests FlexibleS1bMainTagsTests FlexibleSectorStoreTests FlexibleSettingsMigrationTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleTopLayerHostedTests FlexibleTopLayerTests FlexibleU1Tests FlexibleU21BendTests FlexibleU21OneDepthNumberTests FlexibleU21OneLatticeRuleTests FlexibleU2Tests FlexibleX20bHostedTests FlexibleX20bTests
-
-runner.log:
-start 19:09:24 49f42b6a + working tree
-build exit 0 19:10:25
-chunk_aa exit 0 19:10:59
-chunk_ab exit 0 19:12:47
-chunk_ac exit 0 19:13:31
-chunk_ad exit 0 19:14:53
-chunk_ae exit 0 19:15:09
-chunk_af exit 0 19:20:19
-chunk_ag exit 0 19:21:47
-chunk_ah exit 0 19:22:24
-chunk_ai exit 0 19:24:30
-chunk_aj exit 0 19:27:13
-chunk_ak exit 0 19:32:40
-chunk_al exit 0 19:32:59
-chunk_am exit 0 19:35:47
-chunk_an exit 1 19:38:39
-chunk_ao exit 0 19:40:31
-chunk_ap exit 0 19:41:49
-chunk_aq exit 0 19:45:29
-chunk_ar exit 0 19:50:29
-golden det exit 0 19:50:47
-golden unseeded exit 0 19:51:03
-hashes exit 0 19:52:07
-hashes cmp vs round7/batch_i/install/stage_job_hashes_iinst.txt (whole file): identical
-hashes cmp vs round7/manual_m2/stage_job_hashes_m2.txt (whole file): identical
-hashes cmp vs round7/manual_m1/stage_job_hashes_m1.txt (whole file): identical
-ALLDONE 19:52:07
-
-Per chunk (passed failed skipped):
-chunk_aa.log 22 0 1
-chunk_ab.log 16 0 2
-chunk_ac.log 25 0 1
-chunk_ad.log 19 0 1
-chunk_ae.log 32 0 0
-chunk_af.log 26 0 0
-chunk_ag.log 19 0 2
-chunk_ah.log 13 0 3
-chunk_ai.log 17 0 1
-chunk_aj.log 26 0 0
-chunk_ak.log 39 0 3
-chunk_al.log 16 0 8
-chunk_am.log 17 0 1
-chunk_an.log 31 1 0
-chunk_ao.log 19 0 0
-chunk_ap.log 15 0 0
-chunk_aq.log 37 0 1
-chunk_ar.log 25 0 0
-TOTAL 414 passed, 1 failed, 24 skipped. The failure: FlexibleSettingsPageHostedTests.testTheSelectedFacesRowsAreOnThePanelOnHisProject 11l 'as opened' (card 566-812 vs scroll 202-796) — the known batch I one (FlexibleHoldLine), same numbers as M1 and M2. No signal lines. Skips = picture probes without their FLEX_*_DIR, as before.
-Manual on his pad: FlexibleM1ManualTests 8/8, FlexibleM2PredictTests 5/5, hosted probe testM2ReadOnlyDepthsAndFramesOnHisPad passed.
-Goldens: deterministic 38 identical / 0 DIFFERS / 0 PART-SKIP; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP
-
-iOS: xcodebuild Debug, destination 147E56A1, derivedData flexA1: BUILD SUCCEEDED at 49f42b6a.
-the app WAS running (pid 84955): terminated, exit 0 19:52:54
-install exit 0 19:53:01
-cmp identical
-05ea341b05fe71998e0c0c597dde163ff0c0a98769b9d4fd6adec7b5e57fd3eb  /Users/nadim/Library/Developer/Xcode/DerivedData/flexA1/Build/Products/Debug-iphonesimulator/TopOpt.app/TopOpt.debug.dylib
-05ea341b05fe71998e0c0c597dde163ff0c0a98769b9d4fd6adec7b5e57fd3eb  /Users/nadim/Library/Developer/CoreSimulator/Devices/147E56A1-C8CA-4B9D-BE6C-CF230589A83A/data/Containers/Bundle/Application/9646675E-F2A0-49E0-A55E-A73A934BB8C4/TopOpt.app/TopOpt.debug.dylib
-1 Lattice · you set it
-1 Lattice · same as the part
-1 Set its own
-1 Squish estimate · Save & Exit to see it
-1 what your lattice does
-1 not a whole bead
-2 too thin to print
-1 X-ray · bend estimated from your lattice
-1 Heat · estimated from your lattice
-not running (not launched)
+Installer run at 432b46ec (P1+P2), 25 classes once, chunks of 5 (passed/failed/skipped):
+chunk_aa: FlexibleManualP2Tests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleM2PredictTests -> 23/0/0
+chunk_ab: FlexibleLatticePassTests FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleR7U21EdgeLookTests FlexibleTopLayerTests -> 27/0/1
+chunk_ac: FlexibleR7E1FollowUpTests FlexibleU1Tests FlexibleSettingsRound4Tests FlexibleSquishCoarsenTests FlexibleFEFieldTests -> 36/0/1
+chunk_ad: FlexibleI1HoldTests FlexibleI3LinkSimTests FlexibleSquishCopyTests FlexibleSettingsPageHostedTests FlexibleFEPassTests -> 15/1/0
+chunk_ae: FlexibleInPassCompositeTests FlexibleBatchBReviewTests FlexibleH39HotfixHookTests FlexibleR7EveningAnswersTests FlexibleReadinessTests -> 39/0/0
+Total 140 passed, 1 failed (FlexibleSettingsPageHostedTests 11l 'as opened', known), 2 skipped.
+Goldens: deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: 16, cmp-identical (whole file) to round7/manual_followup/stage_job_hashes_mf.txt.
+xcodebuild Debug (flexA1, iPad Pro 13 Flexible-A1): BUILD SUCCEEDED at 432b46ec; built TopOpt.debug.dylib sha256 b8cbb580d3c67fb048b07f313319fd137e29fb2084d38ee65797344d05ca1c6c (98163344 bytes); strings 'Estimate past tested data', 'Data covers', 'Cells across' present.
+pgrep -f TopOpt.app/TopOpt: pid 28604 (started Thu Oct 22 23:40:42) - the app WAS running; NOT terminated, NOT installed.

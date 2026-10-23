@@ -187,6 +187,17 @@ the 16 stage-job hashes cmp-identical to the follow-up's (Auto byte-identical).
 Renders (13" portrait, your pad, main Lattice page, X-ray, close up on Group 1): P2_01 graded Default, P2_02 Stepped, P2_03
 honeycomb 2 beads beside the part's gyroid (the type seam).
 
+Install check (P1 + P2 together, at `432b46ec`): the 25 classes P1 and P2 touch or pin, plus FlexibleSquishCopyTests, run once:
+140 passed, 1 failed (FlexibleSettingsPageHostedTests 11l "as opened", the known one), 2 skipped; goldens 0 DIFFERS both modes
+(38; 32 + 1 PART-SKIP); the 16 stage-job hashes cmp-identical to the follow-up's (Auto byte-identical).
+- iOS: BUILD SUCCEEDED at 432b46ec. The app WAS running (started 23:40 on the 22nd; you may be using it), so it was NOT
+  terminated and NOT installed. The build is ready (TopOpt.debug.dylib sha256 b8cbb580…, the new strings present); say the
+  word and it goes on. Evidence: `round7/manual_install/install_runs.txt`. NOT pushed.
+- Reviewer notes for the next round: the card's "cells across" still uses the whole column's depth (68.7 mm on Group 1) while
+  the drawing grades over each face's own depth (33.9 mm); the "Lattice · density" legend reads Auto's ladder, not Manual's
+  drawn cell (P2_01 says 10 % ≈ 13.5 mm, 13.9 mm is drawn); in Manual the Model card shows Temperature and More's Nozzle row,
+  both editing the same setting; honeycomb wall slivers hang at the face-prism clip on the pad's lower right.
+
 ## ★ Round 7 · MANUAL P1 — the full lattice set for the part and every group; whole-bead walls; the estimate past the data (2026-10-23)
 
 Branch `claude/flexible-screens` (PR #362), on `122191ff`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no
