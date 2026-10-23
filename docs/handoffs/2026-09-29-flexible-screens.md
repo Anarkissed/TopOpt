@@ -158,6 +158,11 @@ Branch `claude/flexible-screens` (PR #362), on `177dc162`. NOT pushed (your HOLD
 now"; the app was closed first, with your OK). Built at `432b46ec`, TopOpt.debug.dylib sha256 b8cbb580…, installed == built, not
 launched.
 
+**This round's iOS line (installer, 2026-10-23 03:36):** BUILD SUCCEEDED at `2b6849fb`, TopOpt.debug.dylib sha256 530774ab…
+(98,301,008 bytes). The app WAS running (started 03:03 today; you may be using it), so it was NOT closed and NOT installed; the
+build is ready to install on your OK. Run once: 19 classes 129 passed / 0 failed / 1 skipped; goldens det 38 / unseeded 32 + 1
+PART-SKIP, 0 DIFFERS; 16 stage-job hashes identical to P2's (`auto_floor/install_runs_af.txt`).
+
 Your question of ~02:45: "the grading follows the curve OR stamp, not just the curves, right?" Before this round, no: Manual's
 "Along Curve" read only your drawn curves. Now it reads whichever Shape the face is set to (Curves or Stamp), and so does Auto's new
 fallback.
