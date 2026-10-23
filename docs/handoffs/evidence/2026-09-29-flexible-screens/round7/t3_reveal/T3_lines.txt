@@ -1,0 +1,2 @@
+T3_01_11l_as_opened.png: selected Face 5 · card 550–796 in the panel's scroll 202–796 (594 pt) ✓
+T3_02_13p_as_opened.png: selected Face 5 · card 1092–1338 in the panel's scroll 728–1338 (610 pt) ✓

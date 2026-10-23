@@ -158,6 +158,7 @@ struct FlexibleFaceList: View {
             .background(GeometryReader { g in
                 Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["faceCard": g.frame(in: .global)])
             }.allowsHitTesting(false))
+            .flexibleRevealTarget()   // ★ ROUND 7 · T3: what the panel's scroll keeps in view
             .id(Self.cardID(region))
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isSelected)

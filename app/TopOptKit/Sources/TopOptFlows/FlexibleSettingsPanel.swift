@@ -30,11 +30,6 @@ struct FlexibleSettingsPanel: View {
     static let width: CGFloat = 480
     /// The open tab's width beside the rail — round 4's 372 pt, so every one-line row still fits.
     static let contentWidth: CGFloat = width - 2 * DS.Space.ml - FlexibleSettingsRailView.width - DS.Space.s
-    /// The selected card's height and the scroll's own, as laid out: when either changes (the
-    /// stamp's rows, a design's warning line; the fix pop-up taking the top of the page) the card
-    /// is brought back into view — a reveal made before them left it cut off.
-    @State private var cardHeight: CGFloat = 0
-    @State private var scrollHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -42,32 +37,27 @@ struct FlexibleSettingsPanel: View {
             header
             if !minimized {
                 // ★ ROUND 5 (S8): the folder rail on the left, the open tab beside it
-                ScrollViewReader { proxy in
-                    FlexibleHugHeight {
-                        HStack(alignment: .top, spacing: DS.Space.s) {
+                FlexibleHugHeight {
+                    HStack(alignment: .top, spacing: DS.Space.s) {
                         FlexibleSettingsRailView(model: model)
-                        ScrollView(.vertical, showsIndicators: true) {
+                        // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
+                        // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
+                        // card growing (Stamp's rows, a warning line), the panel shrinking under the
+                        // pop-up — and as the page opens. ★ ROUND 7 · T3 RECODE: an explicit scroll
+                        // position settled against the scroll's measured height (FlexibleRevealScroll);
+                        // the ScrollViewReader ask never moved on 11" landscape "as opened".
+                        FlexibleRevealScroll(revealKey: revealKey, enabled: revealEnabled,
+                                             legacyID: model.selectedRegion.map { AnyHashable(FlexibleFaceList.cardID($0)) }) {
                             VStack(alignment: .leading, spacing: DS.Space.m) {
                                 FlexibleRailContent(model: model, padTarget: $padTarget)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .background(GeometryReader { g in
-                            Color.clear
-                                .onAppear { scrollHeight = g.size.height }
-                                .onChange(of: g.size.height) { scrollHeight = $0 }
-                                // what the scroll SHOWS (the hosted test checks the card lies in it)
-                                .preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
+                            // what the scroll SHOWS (the hosted test checks the card lies in it)
+                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["panelScroll": g.frame(in: .global)])
                         }.allowsHitTesting(false))
-                        .onPreferenceChange(FlexibleKeepOutKey.self) { v in cardHeight = v["faceCard"]?.height ?? 0 }
-                        }
                     }
-                    // ★ THE SELECTED FACE'S CARD SCROLLS INTO VIEW (verification of D1): on a list
-                    // tap, a tap on the part, the fix pop-up's select, a switch back to Face, the
-                    // card growing (Stamp's rows, a warning line), the panel shrinking under the
-                    // pop-up — and as the page opens
-                    .onChange(of: revealKey) { _ in reveal(proxy) }
-                    .onAppear { reveal(proxy) }
                 }
             }
         }
@@ -80,27 +70,20 @@ struct FlexibleSettingsPanel: View {
         .dsShadow(DS.Shadow.panel)
     }
 
-    /// What moves or resizes the selected face's card.
+    /// What moves the selected face's card (its height and the scroll's own are watched by
+    /// FlexibleRevealScroll itself).
     private var revealKey: String {
         let r = model.selectedRegion
         let f = r.flatMap { model.settings.face($0) }
         // ★ D2 REVIEW: a move to another squeeze group moves the card under that group's header
         let group = r.flatMap { model.squeezeGroup(of: $0)?.id } ?? 0
         return "\(r ?? -1)|\(model.tab.rawValue)|\(model.rail)|\(f?.role ?? "-")|\(f?.isStampShape ?? false)|\(minimized)|g\(group)"
-            + "|\(Int(cardHeight / 4))|\(Int(scrollHeight / 4))"
     }
 
-    /// Scroll the card fully into view: `.bottom` moves the list only as far as the card's last
-    /// row needs (a card already on the panel stays put; the rows above it stay in sight).
-    /// Asked IN the change (SwiftUI applies it on the layout that follows), and again whenever the
-    /// card or the scroll changes height (`revealKey`: the stamp's rows, a design's warning, the
-    /// fix pop-up taking the top of the page). ★ Not deferred: a scroll dispatched for later ran
-    /// seconds late in the hosted test — after the next tap — and left the card below the fold.
-    private func reveal(_ proxy: ScrollViewProxy) {
-        guard !minimized, model.tab == .face, let r = model.selectedRegion else { return }
-        proxy.scrollTo(FlexibleFaceList.cardID(r), anchor: Self.revealAnchor)
-    }
-    static let revealAnchor = UnitPoint.bottom
+    /// The card is revealed on the Face tab with a face selected (`.bottom`-first: the list moves
+    /// only as far as the card's last row needs; a card already on the panel stays put; a card
+    /// taller than the scroll shows its top).
+    private var revealEnabled: Bool { !minimized && model.tab == .face && model.selectedRegion != nil }
 
     /// ★ HOW TALL THE PANEL MAY GROW (verification of D1): up to the page's top chrome over its
     /// column — the Exit row, the top line (and its toast), the fix pop-up while it is up — never

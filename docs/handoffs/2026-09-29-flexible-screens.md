@@ -176,6 +176,41 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    import refuses "3MF import requires lib3mf". Provisioning, not code: vendoring lib3mf-lib and rebuilding the core
    slice with it (build_core.sh) would make them run. Not done here (vendor/ and core are not ours).
 
+## ★ Round 7 · T3 — the Settings panel's scroll RECODED: the selected card is whole as the page opens (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (ready with the next install). Core
+untouched, no #354/main file edited, no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/t3_reveal/`
+(`t3_runs.txt`: every raw number below).
+
+T1's item 4 (11" landscape "as opened", card 566–812 below the scroll's 202–796) had five failed patches, so per your
+2–3 rule the reveal was recoded, not patched again.
+
+1. **What changed.** The panel's scroll no longer asks a ScrollViewReader to "scroll the card to its bottom". It now
+   holds an explicit scroll position (`FlexibleRevealScroll`, new file). The card reports where it sits in the list; the
+   scroll reports what it shows. A reveal stays "asked" until the card is wholly on screen, and it is checked again every
+   time either side reports, so the second pass (the scroll 16 pt shorter) settles it whenever it comes.
+   - It moves only as far as needed: a card already on the panel does not move; a card taller than the scroll shows its top.
+   - Once the card is on screen the ask is done, so your own scrolling is never pulled back.
+   - It is asked again on a new selection, tab, group, Pressed/Rests, Shape, and when the card or the scroll changes height.
+   - iPadOS 18+ / macOS 15+ (your iPad and the Mac test host) use it; older systems keep the old ask.
+2. **Numbers, his project 0004:** 11" landscape as opened: card **550–796** in the scroll 202–796 (was 566–812, off).
+   All 20 steps (4 sizes × as opened, Top A, Top A · Stamp, face 5, face 4) are on the panel. The test is unchanged.
+3. **New `FlexibleRevealScrollTests` (4 tests).** A rig shaped like the page: the scroll hugs 610 pt, then gets 594 pt on
+   the next pass, at the 11" landscape, 11" portrait and 13" portrait scroll heights. It checks:
+   - the card is whole as opened, after a selection above the fold, and after one below it;
+   - a selection already in view leaves the scroll where it was;
+   - a card that grows from 246 to 330 pt is brought back whole;
+   - a 700 pt card shows its top;
+   - the offset maths.
+   Honest note: on this rig the OLD ask also worked, so the rig is no red control. The red is the hosted page test.
+4. **Renders** (`T3_01` 11" landscape, `T3_02` 13" portrait, as opened with Face 5 selected): the card's last row (Deepest
+   squish) and its blue border sit inside the panel on both.
+
+Run once (24 classes, the panel's and the hosted ones that pin FlexibleSettingsPanel / FlexibleStagePage):
+- 126 executed, 1 skipped (opt-in), **0 failed**;
+- goldens det 38 identical / 0 DIFFERS; unseeded 32 / 0 DIFFERS / 1 PART-SKIP;
+- the 16 stage-job hashes cmp-identical to `t2_drawing/stage_job_hashes_t12i.txt`.
+
 ## ★ Round 7 · T2 — two drawing leftovers from the Manual P2 checks (2026-10-23) (read this first)
 
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (drawing only; ready with the next
@@ -252,7 +287,7 @@ Your words of ~03:45: "Can you take time to figure out the test error issue and 
    window drew in your MAIN monitor's colour space (Samsung U28D590). There the app's blue (0A84FF) is outside the screen's
    range and reads back with red 45 off, past the 40 the test allows. With the Mac's own (P3) screen it reads right, hence
    "intermittent". The test window now draws in sRGB, the colours' own space: 401 px. Threshold unchanged.
-4. **11" landscape "as opened" — NOT FIXED (unresolved, ours).** What happens: on the page's first pass the panel's scroll
+4. **11" landscape "as opened" — NOT FIXED here; FIXED by T3's recode (above, 2026-10-23).** What happens: on the page's first pass the panel's scroll
    gets 610 pt, the whole tab, so there is nothing to scroll. On the next pass the top chrome takes 16 pt and the scroll is
    594 pt. The card's last 16 pt are then below the fold (566–812 in 202–796), and the scroll never moves (offset 0).
    It only moves when the content changes (your next tap). I tried, probed and reverted five ways:
