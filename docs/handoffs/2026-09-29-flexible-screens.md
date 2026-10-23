@@ -197,6 +197,10 @@ Branch `claude/flexible-screens` (PR #362), on `9b11b6dc` (phase 1: `StepMeshRep
 HOLD). NOT installed. Core untouched. The reviewer's ruling of 2026-10-23 18:56, approved by you: the one sanctioned exception
 outside the Flexible stage, H47 + the paint gate and nothing else in the import path.
 
+**This round's iOS line (installer, 2026-10-23 15:16): BUILT, NOT INSTALLED.** BUILD SUCCEEDED at `a8e6a85b` (H47 + H48)
+(DerivedData flexA1). The app WAS running in the simulator (PID 11379), so nothing was terminated and nothing installed; the
+simulator still has the earlier build. Close the app and ask for an install, or on the physical iPad press Run in Xcode again.
+
 **What you see.** Your four refused rig parts (Carriage Arms, Pressing Plate Mount, Top Motor Mount, 2040 Extrusion Stand)
 import, fillets and every CAD face as today (same face count, every face id). Base and both pillow-block stands, and every
 other part, import byte-identical to before. On those four only, the Paint chip is greyed with one line under it:
