@@ -119,7 +119,7 @@ public enum FlexibleNozzleGradeMath {
 }
 
 extension FlexibleRowCopy {
-    public static let nozzleGrade = "Grade"
+    public static let nozzleGrade = "Temp grade"
     public static let nozzleGradeFrom = "From °C · bottom"
     public static let nozzleGradeTo = "To °C · top"
     public static let nozzleGradeStyle = "Style"
