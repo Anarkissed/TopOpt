@@ -94,7 +94,7 @@ enum Control : int {
   kLinksReplaceFarAnvil = 262144,
 };
 
-std::mutex g_squish_fe_mu;
+std::mutex& g_squish_fe_mu = *new std::mutex;   // ★ ROUND 7 · T1: never destroyed (a solve may run while exit() finalizes)
 
 Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -1422,8 +1422,9 @@ struct Session {
   double omega = 1.0;
   double prev_change = std::numeric_limits<double>::infinity();
 };
-std::mutex g_sessions_mu;
-std::map<int64_t, std::unique_ptr<Session>> g_sessions;
+// ★ ROUND 7 · T1: never destroyed — a session in use while exit() runs __cxa_finalize keeps its memory
+std::mutex& g_sessions_mu = *new std::mutex;
+std::map<int64_t, std::unique_ptr<Session>>& g_sessions = *new std::map<int64_t, std::unique_ptr<Session>>;
 int64_t g_next_session = 1;
 
 Session* session_at(int64_t id) {

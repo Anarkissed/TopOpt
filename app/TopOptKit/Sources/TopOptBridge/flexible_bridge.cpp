@@ -48,8 +48,13 @@ void fail(BridgeError& err, const std::exception& e) {
 }
 
 // ── the data, loaded once per path ──────────────────────────────────────────
-std::mutex g_data_mu;
-std::map<std::string, std::shared_ptr<const fx::FlexibleData>> g_data;
+// ★ ROUND 7 · T1 (the exit signal 11 / 6): the process-wide caches here and in flexible_squish_fe.cpp are NEVER
+// destroyed (heap objects, deliberately leaked). A scheduled design task can still be inside a call (set_for →
+// data_at) while exit() runs __cxa_finalize; a namespace-scope std::map / std::mutex was destroyed under it
+// (xctest crash reports of 2026-10-18: SIGSEGV in curve_set, SIGABRT freeing FlexibleData). FlexibleBridgeExitTests.
+std::mutex& g_data_mu = *new std::mutex;
+std::map<std::string, std::shared_ptr<const fx::FlexibleData>>& g_data =
+    *new std::map<std::string, std::shared_ptr<const fx::FlexibleData>>;
 
 std::shared_ptr<const fx::FlexibleData> data_at(const std::string& path) {
   std::lock_guard<std::mutex> lock(g_data_mu);
@@ -150,8 +155,8 @@ std::atomic<int32_t> g_next_press{kSyntheticPressMax};
 // ★ R7-E1 REVIEW: TESTS ONLY — the press columns' run from the first sample (flexible_control_run_from_first_sample).
 std::atomic<bool> g_control_run_first_sample{false};
 
-std::mutex g_scene_mu;
-std::map<int64_t, std::shared_ptr<Scene>> g_scenes;
+std::mutex& g_scene_mu = *new std::mutex;                                                   // ★ T1: never destroyed
+std::map<int64_t, std::shared_ptr<Scene>>& g_scenes = *new std::map<int64_t, std::shared_ptr<Scene>>;
 int64_t g_next_scene = 1;
 
 std::shared_ptr<Scene> scene_at(int64_t id) {

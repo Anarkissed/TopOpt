@@ -420,6 +420,10 @@ struct FlexibleSquishPlayer: View {
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         }
+        // ★ ROUND 7 · T1 (the refine-line test ×8): the label AS DRAWN — the same as the group row's menu
+        // (FlexibleSqueezeGroupRows). Unstyled, the system menu put its own bezel and arrow round the label (about 47 pt
+        // more, macOS 27), so beside a live "Play all" the line was squeezed: 'Refining Group 2… 8/8' drawn 110 of 147 pt
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("Which squeeze plays")
         .accessibilityIdentifier("flexible-squish-picker")

@@ -49,7 +49,9 @@ Each item: what core does, where, the evidence, your numbers.
    `FlexibleCore.strainUnder` → `topoptbridge::flexible_strain_under` (`app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp:534`)
    while `exit()` runs `__cxa_finalize` on the static data cache (`flexible_bridge.cpp:51-61`, `g_data`). Test noise only
    (xctest exits after every test passed), not the iPad app. The cache is in OUR bridge, not core: the fix (never destroy the
-   cache, or join the design tasks before exit) waits with the rest.
+   cache, or join the design tasks before exit) waits with the rest. **FIXED 2026-10-23 (T1, your ask of ~03:45):** the
+   bridge's caches are never destroyed now (`FlexibleBridgeExitTests`: 16 child processes exit 0; before, 2 of 8 died on
+   signal 11). Nothing is asked of core here any more.
 7. **"No include region = the whole part" as a Flexible job flag.** `core/src/flexible/job_block.cpp:399`
    (`if (members.has_include_regions() && !members.in_include_region(...)) continue;`): with no include region every solid
    voxel is lattice. The app gates it (ruling 6, `FlexibleCoreDoor`: no face-prism, nothing is asked of core; M1
@@ -159,6 +161,71 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    now, but the keypad a box opens is #354's and can only show a text title ("EXPAND"; ours passes "Expand" at
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
+3. **LatticeSlotOriginTests ×4 (T1, 2026-10-23): #354's app still refuses an off-plane slot origin that core now takes.**
+   `app/TopOptKit/Sources/TopOptFlows/LatticeSettings.swift:660` (`LatticeSteppedCellWire.slotOrigins` → `.offPlane`) and
+   its test `LatticeSlotOriginTests.swift:135-139` follow the ruling of 2026-10-05. Core dropped that check on the reviewer's
+   correction of 2026-10-08 (`core/src/cli/job.cpp:1587-1596`, commit 25c6a551: "any point of the region's slot lattice is
+   a valid phase"), so core accepts all six cases and the app withholds three. Ask: #354 drops the off-plane withhold (or
+   re-pins its test to the 10-08 ruling). Not touched here.
+4. **LatticeSimSolveTriggerTests ×1 (T1): the test reads 900 characters of a function that grew.** `LatticeStressTintTests.swift:182`
+   takes `prefix(900)` of `startStressSolveIfNeeded()` (`WorkspacePlaceholder.swift:3897`); #354's `DIAG solve` NSLog lines
+   (already at the merge base c0b3f60b, unchanged by us) push `latticeSim.run(ctx)` past character 900. The code is right;
+   the test's window is too short. Ask: #354 widens it (e.g. to the function's closing brace).
+5. **AppModelTests 3MF ×3 (T1): this worktree has no macOS lib3mf.** `app/TopOptKit/vendor/lib3mf-lib` is absent here (the
+   main checkout links it to `.vcpkg/installed/arm64-osx-dynamic/lib`), so `Package.swift:95-101` links no 3MF and the
+   import refuses "3MF import requires lib3mf". Provisioning, not code: vendoring lib3mf-lib and rebuilding the core
+   slice with it (build_core.sh) would make them run. Not done here (vendor/ and core are not ours).
+
+## ★ Round 7 · T1 — the known failing tests, looked into (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (tests and the bridge only; one line of
+the player changed — ready with the next install). Core untouched, no #354/main file edited, no new hook. Evidence:
+`docs/handoffs/evidence/2026-09-29-flexible-screens/round7/t1_tests/` (`t1_runs.txt`: every raw number below).
+
+Your words of ~03:45: "Can you take time to figure out the test error issue and fix it". Each was reproduced first.
+
+1. **The exit signal 11 / 6 — FIXED (ours).** Two crash reports (xctest, 10-18) show the main thread in `exit()` destroying
+   the bridge's material cache while a design task was still reading it (`flexible_bridge.cpp:54-64`). The bridge's caches
+   (data, scenes, squish sessions, their locks) are now never destroyed. New test `FlexibleBridgeExitTests`: it starts
+   child test processes with four bridge threads running as they exit. Before the fix: 2 of 8 died on signal 11. After:
+   16 of 16 exit 0.
+2. **The refine line ×8 — FIXED (ours).** The player's group picker was drawn by the Mac's default menu style, which puts
+   its own frame and arrow round the label (about 47 pt extra). Beside a live "Play all" at 11" portrait the line got 118
+   of its 151 pt. The picker now draws its label as is, the same as the group row's menu (T1_02). The lines get ~165 pt
+   and are whole. The test is unchanged and passes.
+3. **The Play ring — FIXED (the test's measurement, ours).** The ring is drawn: 410 accent pixels in the picture. The test
+   window drew in your MAIN monitor's colour space (Samsung U28D590). There the app's blue (0A84FF) is outside the screen's
+   range and reads back with red 45 off, past the 40 the test allows. With the Mac's own (P3) screen it reads right, hence
+   "intermittent". The test window now draws in sRGB, the colours' own space: 401 px. Threshold unchanged.
+4. **11" landscape "as opened" — NOT FIXED (unresolved, ours).** What happens: on the page's first pass the panel's scroll
+   gets 610 pt, the whole tab, so there is nothing to scroll. On the next pass the top chrome takes 16 pt and the scroll is
+   594 pt. The card's last 16 pt are then below the fold (566–812 in 202–796), and the scroll never moves (offset 0).
+   It only moves when the content changes (your next tap). I tried, probed and reverted five ways:
+   - a key on the card's top;
+   - a second ask on the next main-queue turn;
+   - the same ask 0.15 s and 0.8 s later;
+   - the capsule's nominal place in the first cap;
+   - a run-loop timer.
+   None moved the scroll on the Mac host. Per your 2–3 rule, I stopped. Your call:
+   - (a) recode the panel's scroll (e.g. an explicit scroll position);
+   - (b) let the panel reach 16 pt lower on 11" landscape;
+   - (c) check on the iPad first. This is the Mac's scroll view; the iPad's may already be fine.
+5. **Not ours, written up in the APP LIST (items 3–5):**
+   - LatticeSlotOriginTests ×4: #354's app vs core's 10-08 correction;
+   - LatticeSimSolveTriggerTests ×1: #354's test reads too few characters;
+   - AppModelTests 3MF ×3: this worktree has no macOS lib3mf.
+   CORE LIST item 6 is marked fixed.
+
+Run once (13 TopOptFlows classes + 3MF + 5 TopOptKit classes):
+- 105 executed, 1 skipped (the exit test's child, by design), 5 test cases failed: the 11" landscape one (4 above) and
+  the three not-ours classes;
+- no signal line;
+- goldens det 38 identical / 0 DIFFERS, unseeded 32 / 0 DIFFERS / 1 PART-SKIP;
+- the 16 stage-job hashes cmp-identical to nozzle_grade's.
+
+Renders:
+- T1_01: 13" portrait, Settings with Play on (the a1 fixture; this page shows no picker);
+- T1_02: the player with two groups at 294 pt, picker and line whole.
 
 ## ★ Round 7 · ONE "Nozzle °C" row, and a temperature GRADE up the part (2026-10-23) (read this first)
 

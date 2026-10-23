@@ -59,6 +59,11 @@ final class FlexibleRound7ViewsHostedTests: XCTestCase {
         let w = R7VHostWindow(contentRect: CGRect(x: -20000, y: -20000, width: size.width, height: size.height),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         w.appearance = NSAppearance(named: .darkAqua)
+        // ★ ROUND 7 · T1 (the "known Play ring", 18–25 px of 120): the window drew in the MAIN DISPLAY's colour space. On his
+        // Samsung U28D590 the design system's sRGB accent 0x0A84FF is out of gamut and reads back (55, 132, 255) — red 45 off,
+        // past the 40 the pixel tests allow — so the ring (drawn, 424 px) was not counted; the orange dot survived. On a P3
+        // display it round-trips, hence "intermittent". The pages are drawn in sRGB, the space the DS colours are given in.
+        w.colorSpace = .sRGB
         w.contentView = hv
         w.setFrameOrigin(NSPoint(x: -20000, y: -20000))
         w.orderFrontRegardless()
