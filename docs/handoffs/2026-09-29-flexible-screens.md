@@ -182,6 +182,11 @@ Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installe
 untouched, no #354/main file edited, no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/t3_reveal/`
 (`t3_runs.txt`: every raw number below).
 
+**This round's iOS line (installer, 2026-10-23 09:10): INSTALLED.** BUILD SUCCEEDED at `b0b09031` (T3's recode of the panel's
+scroll). The app was not running; installed 09:10:03, NOT launched. Installed TopOpt.debug.dylib == built (cmp; sha256
+c4b8d94a…, 98,786,384 bytes). No extra test run at install (T3's run below is at the same app code). The "NOT installed"
+above is superseded. Look at the 11" landscape "as opened" screen on the iPad: this was checked on the Mac test host only.
+
 T1's item 4 (11" landscape "as opened", card 566–812 below the scroll's 202–796) had five failed patches, so per your
 2–3 rule the reveal was recoded, not patched again.
 
