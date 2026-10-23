@@ -165,6 +165,12 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
 Branch `claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed (the app was open; ready on your OK). App only:
 core untouched, no #354/main file edited, no new hook. Evidence: `docs/handoffs/evidence/2026-09-29-flexible-screens/round7/nozzle_grade/`.
 
+**This round's iOS line (installer, 2026-10-23 04:37):** BUILD SUCCEEDED at `91591c7f` (this batch plus the Auto floor + shape
+grading batch), TopOpt.debug.dylib sha256 d0e4d4c2… (98,665,056 bytes). The app WAS running (started 03:03 today; you may be using
+it), so it was NOT closed and NOT installed; the build is ready to install on your OK. Run once: 15 classes + 3 law classes, 116
+executed / 1 failed (the known 11" landscape test); goldens det 38 / unseeded 32 + 1 PART-SKIP, 0 DIFFERS; stage-job hashes
+identical to auto_floor's (`nozzle_grade/install_runs_ng.txt`).
+
 Your words of ~03:05: "temperature also needs a grade... also, what's the difference between "temperature" and "nozzle"
 shouldn't they be the same???" then "Temperature needs a grade **option**". They were the same thing: the nozzle temperature
 (varioShore foams more when hotter, so it prints softer). Showing two rows was a bug.
