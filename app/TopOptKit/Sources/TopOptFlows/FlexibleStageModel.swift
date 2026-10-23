@@ -240,6 +240,9 @@ public final class FlexibleStageModel: ObservableObject {
     @Published public private(set) var stacks: [FlexFaceKey: FlexStackInfo] = [:]
     @Published public private(set) var geometry: [FlexFaceKey: FlexFaceGeometry] = [:]
     @Published public private(set) var liveS: [FlexFaceKey: [Double]] = [:]
+    /// ★ MANUAL (round 7 polish): the depth the drawn lattice grades and counts cells over, per voxel owner (its own deepest voxel
+    /// per column, averaged — FlexibleManualField.Built.ownerDepth); the rows' Cells across read it once a lattice is built.
+    @Published public internal(set) var manualDrawnDepths: [Int: FlexibleManualField.OwnDepth] = [:]
     @Published public private(set) var designs: [FlexFaceKey: FlexFaceDesignInfo] = [:]
     @Published public private(set) var conflicts: [FlexConflictInfo] = []
     /// ★ ROUND 4 (D2): the TWO-SEGMENT designs of the faces a pinch presses (FlexiblePinch) —
@@ -1612,6 +1615,20 @@ public final class FlexibleStageModel: ObservableObject {
             }
         }
         let manualPressSnap = manualPressStacks, manualPressureSnap = manualPressure
+        // ★ AUTO AT THE FLOOR (his decisions of 2026-10-23 ~00:35 + his words of ~02:45: "the grading follows the curve OR stamp"):
+        // a face core designs at the softest tested lattice on ≥ 95 % of its pressed columns is DRAWN graded by its active shape
+        // (his curves, or his stamp) inside the tested densities — marked on its card; core's job untouched. RED CONTROL
+        // `controlNoShapeFallback`: core's flat field
+        var floorShapes: [FlexibleAutoShapeField.Face] = []
+        let floorBand: ClosedRange<Double>? = shapeOnly || manualFaces || Self.controlNoShapeFallback ? nil : autoDataRange()
+        if floorBand != nil {
+            for (f, k) in zip(faces, allKeys) where squish[k] != nil {
+                guard autoFloor(region: f.faceRegionID) != nil, let st = stacks[k], let s = shapeValues(region: f.faceRegionID),
+                      s.count == st.columns.count else { continue }
+                floorShapes.append(.init(region: f.faceRegionID, stack: st, s: s))
+            }
+        }
+        let floorShapesSnap = floorShapes
         let manualCellMM = manualSettings.map { FlexibleManualMath.cellMM($0.part, beadWidthMM: manualBeadWidthMM) } ?? 0
         let cutsOf = Dictionary(order.map { ($0.region, regions.cuts(of: $0.region)) }, uniquingKeysWith: { a, _ in a })
         latticeGeneration += 1
@@ -1741,6 +1758,10 @@ public final class FlexibleStageModel: ObservableObject {
                         }
                     }
                 }
+                // ★ AUTO AT THE FLOOR: a floor face's voxels graded by its shape (the views read this drawn field)
+                if let band = floorBand, !floorShapesSnap.isEmpty {
+                    field = FlexibleAutoShapeField.apply(field, faces: floorShapesSnap, band: band)
+                }
                 // ★ MANUAL P1: every lattice voxel at its group's own density (graded as he set it), walls and type — the numbers
                 // on its card. RED CONTROL `controlOneLatticePerPart`: M1's one type and one wall for the part
                 var manualGrids: FlexibleManualField.Built?
@@ -1800,10 +1821,12 @@ public final class FlexibleStageModel: ObservableObject {
                                                  shapeOnlyLabel: label, sceneKey: builtOn,
                                                  sims: sims, simNotes: notes, sharedVoxels: shared, pinchedWith: pinchedWith)
                 let combined = field
+                let drawnDepths = manualGrids?.ownerDepth ?? [:]   // ★ MANUAL (C): the drawing's own depth per owner
                 let keep = await MainActor.run { self.keepCombinedField }
                 let kept = keep ? combined : nil
                 await MainActor.run {
                     self.lattice = g; self.lastCombinedField = kept; self.latticeBuilding = false
+                    self.manualDrawnDepths = drawnDepths
                     self.latticeTunedPresses = Self.controlNoTune || manualSnap != nil ? [:] : tunedSnap   // ★ C1 (★ MANUAL: none)
                     self.latticeLanded(feBuilt)   // ★ BATCH G: a new lattice — its own squish sims
                 }

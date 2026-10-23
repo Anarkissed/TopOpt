@@ -240,6 +240,10 @@ struct FlexibleFaceRows: View {
         // ★ MANUAL (M1): "can't reach your curve" is Auto's check on core's design — gone in Manual
         if !model.isManual {
             if f.isLoaded, let w = Self.warning(model: model, region: r) { FlexWarningLine(text: w) }
+            // ★ AUTO AT THE FLOOR: the truth line, the reachable range and — while the drawn lattice follows his shape — its mark
+            if f.isLoaded {
+                ForEach(Self.floorLines(model: model, region: r), id: \.self) { FlexInfoText($0) }
+            }
         }
         if f.isLoaded {
             let e = model.mainPageLoads.entry(r)
@@ -335,6 +339,14 @@ struct FlexibleFaceRows: View {
     @MainActor
     static func curvedLine(model: FlexibleStageModel, region r: Int) -> String? { model.regions.flexible?.notYet[r] }
 
+    /// ★ AUTO AT THE FLOOR: the card's lines — "Every column at the softest tested lattice (14 %)", "Auto reaches 0.05–0.64 mm at
+    /// 10 lb", and "Lattice shaped by your stamp · not from data" while the drawn lattice follows his shape. Empty otherwise.
+    @MainActor
+    static func floorLines(model: FlexibleStageModel, region r: Int) -> [String] {
+        guard let floor = model.autoFloor(region: r) else { return [] }
+        return floor.lines + [model.autoShapeLine(region: r)].compactMap { $0 }
+    }
+
     /// The selected face's one warning line (FlexibleRowCopy.faceWarning), or nil.
     /// ★ D2 REVIEW: a PINCHED face counts the columns its two HALVES cannot reach (the lattice is
     /// built from them) — core's whole-column design said 832 on his face 3, the halves miss 412.
@@ -413,30 +425,26 @@ struct FlexibleMorePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             let calibrateFirst = model.material?.noPrediction != nil
-            if let m = model.material, m.noPrediction == nil {
+            // ★ round 7 polish (MANUAL): in Manual the Model card's Temperature is the one setting — More's Nozzle row is Auto's
+            if !model.isManual, let m = model.material, m.noPrediction == nil {
                 // a temperature core has a note on (not in order, estimated…) is said by the
                 // row's colour; the (i) carries the note itself
                 let note = model.settings.nozzleTempC.map { model.temperatureNote($0) } ?? ""
-                // ★ MANUAL P1 (his decisions of 2026-10-23: "part-wide Temperature … no Auto in Manual"): in Manual the row is
-                // Manual's own temperature (the tested ones, no Auto); Auto's setting — and the job — untouched
-                let manual = model.isManual
+                // (MANUAL P1's in-Manual variant of this row is gone: the Model card's Temperature is Manual's one setting)
                 FlexRow(FlexibleRowCopy.temperature, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp",
-                        warning: !manual && !note.isEmpty) {
-                    FlexChips(options: manual ? Array(FlexibleRowCopy.temperatureOptions(m.testedTempsC).dropFirst())
-                                              : FlexibleRowCopy.temperatureOptions(m.testedTempsC),
-                              selection: manual ? (model.manualTempC.map { String(Int($0)) } ?? "")
-                                                : (model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto"), id: "flexible-temp",
+                        warning: !note.isEmpty) {
+                    FlexChips(options: FlexibleRowCopy.temperatureOptions(m.testedTempsC),
+                              selection: model.settings.nozzleTempC.map { String(Int($0)) } ?? "auto", id: "flexible-temp",
                               equalWidths: false) { v in
-                        if manual { if let d = Double(v) { model.setManualTemp(d) } }
-                        else { model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) } }
+                        model.edit { $0.nozzleTempC = v == "auto" ? nil : Double(v) }
                     }
                     .fixedSize()
                 } extra: {
-                    if !manual, let t = model.settings.nozzleTempC, !note.isEmpty {
+                    if let t = model.settings.nozzleTempC, !note.isEmpty {
                         FlexInfoText("\(Int(t)) °C: \(note)", warning: true)
                     }
                 }
-            } else {
+            } else if !model.isManual {
                 FlexRow(FlexibleRowCopy.temperatureNoData, info: FlexibleRowCopy.Info.temperature, id: "flexible-row-temp")
             }
             // ★ MANUAL (M1): Auto's lattice pick and Auto's line are gone in Manual (his type is on [Model])
@@ -454,6 +462,9 @@ struct FlexibleMorePanel: View {
                 FlexDisclosureRow(auto.text, id: "flexible-row-auto", warning: auto.warning) {
                     FlexibleAutoPane(model: model)
                 }
+                // ★ AUTO TRUTH LINE (his decisions of 2026-10-23 ~00:35: "SAY IT"): every column at the softest tested lattice,
+                // and the depths Auto can reach at his weight
+                ForEach(model.autoFloorLines(), id: \.self) { FlexInfoText($0) }
             }
             // ★ MANUAL (M1): "Physics · 1-bead walls" is Auto's rule — in Manual the walls are his (the Walls line on [Model])
             if !model.isManual {

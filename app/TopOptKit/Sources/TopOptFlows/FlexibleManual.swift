@@ -26,11 +26,21 @@ public struct FlexibleManualGrade: Codable, Equatable, Hashable, Sendable {
     public var by: String
     /// The density at the grade's END; its start ("From") is the lattice's own density.
     public var toDensity: Double
-    /// "depth" (from the pressed face through the lattice) | "across" (from the face's middle to its rim) | "curve" (from where his
-    /// curve is flat to where it is deepest)
+    /// "depth" (from the pressed face through the lattice) | "across" (from the face's middle to its rim) | "shape" (from where
+    /// the face's ACTIVE shape — his curves, or his stamp — presses least to where it presses most). ★ His words of 2026-10-23
+    /// ~02:45: "the grading follows the curve OR stamp, not just the curves, right?" — an old save's "curve" reads as "shape".
     public var along: String
     public init(on: Bool = false, by: String = "density", toDensity: Double, along: String = "depth") {
-        self.on = on; self.by = by; self.toDensity = toDensity; self.along = along
+        self.on = on; self.by = by; self.toDensity = toDensity; self.along = along == "curve" ? "shape" : along
+    }
+    enum CodingKeys: String, CodingKey { case on, by, toDensity, along }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        on = try c.decode(Bool.self, forKey: .on)
+        by = try c.decode(String.self, forKey: .by)
+        toDensity = try c.decode(Double.self, forKey: .toDensity)
+        let a = try c.decode(String.self, forKey: .along)
+        along = a == "curve" ? "shape" : a
     }
 }
 
@@ -284,7 +294,7 @@ public enum FlexibleManualCopy {
     public static let from = "From"
     public static let to = "To"
     public static let along = "Along"
-    public static let alongOptions: [(id: String, label: String)] = [("depth", "Depth"), ("across", "Across"), ("curve", "Curve")]
+    public static let alongOptions: [(id: String, label: String)] = [("depth", "Depth"), ("across", "Across"), ("shape", "Shape")]
     public static let style = "Style"
     public static let styleOptions: [(id: String, label: String)] = [("default", "Default"), ("stepped", "Stepped")]
     public static let temperature = "Temperature"
@@ -301,10 +311,39 @@ public enum FlexibleManualCopy {
     }
     public static let underTwoCells = "Under 2 cells across the depth"
     public static let cellOutsideDrawn = "Cell past what the preview draws (2–60 mm)"
-    /// "Data covers 14–36 %" / "Estimate past tested data (14–36 %)".
-    public static func dataLine(min lo: Double, max hi: Double, past: Bool) -> String {
+    /// "Data covers 14–36 % (gyroid)" / "Estimate past tested data (gyroid 14–36%)" (≤ 44: the type named — the span is that
+    /// type's rows). No type: "Data covers 14–36 %" / "Estimate past tested data (14–36 %)".
+    public static func dataLine(min lo: Double, max hi: Double, past: Bool, topology: String? = nil) -> String {
         let span = String(format: "%.0f–%.0f %%", lo * 100, hi * 100)
-        return past ? "Estimate past tested data (\(span))" : "Data covers \(span)"
+        guard let t = topology else { return past ? "Estimate past tested data (\(span))" : "Data covers \(span)" }
+        let tight = String(format: "%.0f–%.0f%%", lo * 100, hi * 100)
+        return past ? FlexibleRowCopy.fit("Estimate past tested data (\(t) \(tight))") : "Data covers \(span) (\(t))"
+    }
+
+    /// ★ MANUAL (round 7 polish): a tap's unit on his drawn piece — "density · gyroid · 1 bead · 9.3 mm cell".
+    public static func tapUnit(type: Int, beads: Int, cellMM: Double) -> String {
+        String(format: "density · %@ · %d %@ · %.1f mm cell", type == 1 ? "honeycomb" : "gyroid", beads, beads == 1 ? "bead" : "beads", cellMM)
+    }
+
+    /// ★ MANUAL (round 7 polish): the lattice legend's ends from the DRAWN pieces — the lightest and the densest voxel, each with
+    /// its own type and exact cell (its wall × the type's unit ÷ ρ): "10% · gyroid 13.9 mm". nil: not a manual field.
+    public static func legendEnds(_ f: FlexibleLatticeInputs) -> (lo: String, hi: String)? {
+        guard let mw = f.manualWall, let mt = f.manualType else { return nil }
+        let g = f.rho, m = f.mask
+        guard mw.values.count == g.values.count, mt.values.count == g.values.count, m.values.count == g.values.count else { return nil }
+        var lo = -1, hi = -1
+        for n in g.values.indices where m.values[n] >= 0.5 && mw.values[n] > 0 {
+            if lo < 0 || g.values[n] < g.values[lo] { lo = n }
+            if hi < 0 || g.values[n] > g.values[hi] { hi = n }
+        }
+        guard lo >= 0, hi >= 0 else { return nil }
+        func end(_ n: Int) -> String {
+            let top = mt.values[n] >= 0.5 ? "honeycomb" : "gyroid"
+            let rho = Double(g.values[n])
+            let cell = FlexibleManualMath.unitCellMM(top, beadWidthMM: Double(mw.values[n])) / Swift.max(rho, 1e-6)
+            return String(format: "%.0f%% · %@ %.1f mm", rho * 100, top, cell)
+        }
+        return (end(lo), end(hi))
     }
 
     /// ★ "The views become what the app assumes based on your values, so cards should say that when a view is selected": the
@@ -329,7 +368,7 @@ public enum FlexibleManualCopy {
         public static let cell = "The size of one repeat of the lattice. Set it and the density follows at your walls."
         public static let cellsAcross = "How many cells fit through this lattice's depth (its face-prisms). Set it and the cell size and density follow. Under 2 is too few to squish evenly."
         public static let grade = "Off: one density everywhere. On: the lattice changes from your value above (From) to To — by density (the cell follows) or by cell size (the density follows)."
-        public static let along = "Depth: from the pressed face through the lattice. Across: from the face's middle to its rim. Curve: from where your curve is flat to where it is deepest."
+        public static let along = "Depth: from the pressed face through the lattice. Across: from the face's middle to its rim. Shape: by the face's shape — your curves, or your stamp — from where it presses least to where it presses most."
         public static let style = "Default changes smoothly. Stepped changes in flat bands, one per cell through the depth."
         public static let temperature = "The nozzle temperature the squish estimate uses (its tested curves). Manual has no Auto."
         public static let facts = "What your values make: cells through the depth (at least 2), the wall in mm, and the densities the tested data covers — past them the estimate is extended from the data's own trend."
@@ -340,8 +379,8 @@ public enum FlexibleManualCopy {
 /// ★ MANUAL: the lattice field from his values — every lattice voxel of core's field takes the density, walls and type of the group
 /// that owns it (its own lattice, else the part's), with his grade laid along its stack; the mask and the owners are core's. Pure.
 public enum FlexibleManualField {
-    /// What a voxel owner's stack gives the grade: its stack (and cuts), and his drawn curve per column (0 flat … 1 deepest; nil:
-    /// none — a press — then Curve reads as Depth).
+    /// What a voxel owner's stack gives the grade: its stack (and cuts), and its ACTIVE SHAPE per column (0 no press … 1 the
+    /// deepest — his curves, his stamp, or a press's own push or stamp; nil: none yet, then Shape reads as Depth).
     public struct Owner: Sendable {
         public let stack: FlexStackInfo
         public let cuts: [RegionCut]
@@ -362,6 +401,13 @@ public enum FlexibleManualField {
         /// joins cleanly (FlexibleLatticeField.manualPieceWall). `graded` 1: a Default grade (drawn on the ladder), 0: one density
         /// in the piece (drawn at its exact cell).
         public let code: [Float]
+        /// ★ Round 7 polish: per owner, the depth its lattice is drawn over (its own deepest voxel per column, averaged) and the
+        /// columns it holds — what the rows' Cells across read, so the row and the drawing count cells over ONE depth.
+        public var ownerDepth: [Int: OwnDepth] = [:]
+    }
+    public struct OwnDepth: Equatable, Sendable {
+        public let depth: Double
+        public let columns: Int
     }
 
     /// `ownerGroups`: a voxel owner (a face or press region, as core names it) → its stored group number.
@@ -386,8 +432,9 @@ public enum FlexibleManualField {
         }
         for v in d.indices where d[v] >= 0 {
             let o = v < f.owner.count ? f.owner[v] : -1
-            guard lattice(o).grade.on, let ow = owners[o], let hit = FlexibleStackMembership.hit(centre(v), ow.stack, cuts: ow.cuts) else { continue }
-            hits[v] = hit
+            // ★ round 7 polish: every owner's own depth (the rows' Cells across read it), the hits kept for a grade only
+            guard let ow = owners[o], let hit = FlexibleStackMembership.hit(centre(v), ow.stack, cuts: ow.cuts) else { continue }
+            if lattice(o).grade.on { hits[v] = hit }
             ownDepth[o, default: [:]][hit.col] = Swift.max(ownDepth[o]?[hit.col] ?? 0, hit.depth)
         }
         func geometry(_ o: Int, _ ow: Owner, _ l: FlexibleManualLattice) -> Geo {
@@ -414,10 +461,11 @@ public enum FlexibleManualField {
                 var s = 0.0
                 if let hit = hits[v] {
                     let col = ow.stack.columns[hit.col]
-                    let along = l.grade.along == "curve" && ow.curve == nil ? "depth" : l.grade.along
+                    let shape = l.grade.along == "shape" || l.grade.along == "curve"
+                    let along = shape && ow.curve == nil ? "depth" : (shape ? "shape" : l.grade.along)
                     switch along {
                     case "across": s = g.rMax > 1e-9 ? simd_length(SIMD2(col.uMM, col.vMM) - g.centre) / g.rMax : 0
-                    case "curve": s = hit.col < (ow.curve?.count ?? 0) ? ow.curve![hit.col] : 0
+                    case "shape": s = hit.col < (ow.curve?.count ?? 0) ? ow.curve![hit.col] : 0
                     default:
                         let own = ownDepth[o]?[hit.col] ?? 0
                         s = hit.depth / Swift.max(own > 0 ? own : (col.latticeMM > 0 ? col.latticeMM : col.exitT - col.entryT), 1e-9)
@@ -438,8 +486,15 @@ public enum FlexibleManualField {
             if let i = pieces[key] { idx = i } else { idx = pieces.count; pieces[key] = idx }
             code[v] = Float(4 * idx + (graded ? 2 : 0) + Int(type[v]))
         }
-        return Built(field: FlexDensityField(nx: f.nx, ny: f.ny, nz: f.nz, spacing: f.spacing, origin: f.origin, density: d, owner: f.owner),
-                     wallMM: wall, type: type, code: code)
+        var depths: [Int: OwnDepth] = [:]
+        for (o, cols) in ownDepth {
+            let own = cols.values.filter { $0 > 0 }
+            if !own.isEmpty { depths[o] = OwnDepth(depth: own.reduce(0, +) / Double(own.count), columns: own.count) }
+        }
+        var built = Built(field: FlexDensityField(nx: f.nx, ny: f.ny, nz: f.nz, spacing: f.spacing, origin: f.origin, density: d, owner: f.owner),
+                          wallMM: wall, type: type, code: code)
+        built.ownerDepth = depths
+        return built
     }
 
     /// The densities only (FlexibleM1ManualTests' M1 entry point, kept).
@@ -526,7 +581,8 @@ extension FlexibleStageModel {
     public func setManualGrade(on: Bool, group: Int?) {
         editManual(group: group) { l in
             var o = l; o.grade.on = on
-            if on, abs(o.grade.toDensity - o.density) < 1e-9 { o.grade.toDensity = FlexibleManualMath.clampDensity(o.density * 1.5) }
+            // ★ round 7 polish: To starts at 1.5 × From whenever it is not above From (an older save kept a To below it)
+            if on, o.grade.toDensity <= o.density + 1e-9 { o.grade.toDensity = FlexibleManualMath.clampDensity(o.density * 1.5) }
             return o
         }
     }
@@ -563,6 +619,19 @@ extension FlexibleStageModel {
     /// faces and presses; the part's: every pressed face and press of the groups without their own (all of them if none). nil: no
     /// stack yet.
     public func manualDepthMM(group: Int?) -> Double? {
+        // ★ round 7 polish: once his lattice is drawn, the DRAWING's own depth — each owner's own deepest voxel per column (his
+        // pinched Group 1: each face's half, not the whole column's 68.7 mm), weighted by its columns
+        if lattice != nil, !manualDrawnDepths.isEmpty {
+            let og = manualOwnerGroups(), m = settings.manual
+            let shared = Set(squeezeGroups.map(\.id).filter { !(m?.hasOwn(group: $0) ?? false) })
+            var sum = 0.0, n = 0
+            for (o, e) in manualDrawnDepths {
+                guard let g = og[o] else { continue }
+                let mine = group.map { $0 == g } ?? (shared.isEmpty || shared.contains(g))
+                if mine { sum += e.depth * Double(e.columns); n += e.columns }
+            }
+            if n > 0 { return sum / Double(n) }
+        }
         let gs = squeezeGroups
         let mine: [FlexibleSqueezeGroup]
         if let g = group { mine = gs.filter { $0.id == g } } else {
@@ -621,7 +690,7 @@ extension FlexibleStageModel {
         }
         if let r = manualDataRange(topology: l.topology) {
             let past = manualPastData(group: group)
-            out.append((FlexibleManualCopy.dataLine(min: r.lowerBound, max: r.upperBound, past: past), past))
+            out.append((FlexibleManualCopy.dataLine(min: r.lowerBound, max: r.upperBound, past: past, topology: l.topology), past))
         }
         return out
     }
@@ -650,17 +719,22 @@ extension FlexibleStageModel {
         }
         return out
     }
-    /// ★ P1: each voxel owner's stack for the grade (a face: its stack, cuts and drawn curve; a press: its stack).
+    /// ★ P1: each voxel owner's stack for the grade (a face: its stack, cuts and active shape; a press: its stack and its shape).
     func manualGradeOwners() -> [Int: FlexibleManualField.Owner] {
         var out: [Int: FlexibleManualField.Owner] = [:]
         for f in settings.loadedFaces {
             guard let k = key(f.faceRegionID), let st = stacks[k] else { continue }
-            out[f.faceRegionID] = .init(stack: st, cuts: regions.cuts(of: f.faceRegionID), curve: liveS[k])
+            // ★ his words of 2026-10-23 ~02:45: "the grading follows the curve OR stamp" — the face's ACTIVE shape. RED CONTROL
+            // `controlGradeAlongCurvesOnly`: the drawn curves only (a stamp ignored)
+            let shape = Self.controlGradeAlongCurvesOnly ? liveS[k] : shapeValues(region: f.faceRegionID)
+            out[f.faceRegionID] = .init(stack: st, cuts: regions.cuts(of: f.faceRegionID), curve: shape)
         }
         for p in presses {
             guard let r = pressRegistrations[p.id] else { continue }
-            out[r.key] = .init(stack: r.stack)
-            if let first = p.regions.first, out[first] == nil { out[first] = .init(stack: r.stack) }
+            // an edge or a corner: its own drawn push or stamp (before: none — Shape fell back to Depth)
+            let shape = Self.controlGradeAlongCurvesOnly ? nil : pressShapeValues(p.id)
+            out[r.key] = .init(stack: r.stack, curve: shape)
+            if let first = p.regions.first, out[first] == nil { out[first] = .init(stack: r.stack, curve: shape) }
         }
         return out
     }

@@ -148,6 +148,73 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    `FlexibleSelectionsList.swift:276` and `:312`). It does not block using the Flexible screen. Ask: an optional symbol beside
    the title in `NumberPad.Config` (e.g. `titleSymbol: "plus"`), which our two call sites would pass.
 
+## ★ Round 7 · Auto at the floor says so and grades by your shape; Manual grades along your curve OR stamp (2026-10-23) (read this first)
+
+Branch `claude/flexible-screens` (PR #362), on `177dc162`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no
+#354/main file edited; no new hook. Core's job is byte-for-byte what it was (the 16 stage-job hashes identical). Evidence:
+`docs/handoffs/evidence/2026-09-29-flexible-screens/round7/auto_floor/`.
+
+**Install line (the Manual install, recorded here):** P1 + P2 INSTALLED 2026-10-23 02:34:59 with your OK (you said "Yes, install
+now"; the app was closed first, with your OK). Built at `432b46ec`, TopOpt.debug.dylib sha256 b8cbb580…, installed == built, not
+launched.
+
+Your question of ~02:45: "the grading follows the curve OR stamp, not just the curves, right?" Before this round, no: Manual's
+"Along Curve" read only your drawn curves. Now it reads whichever Shape the face is set to (Curves or Stamp), and so does Auto's new
+fallback.
+
+What you get, in plain words:
+- **Auto says when every column is at the floor.** Your l-bracket at 10 lb / 7 mm, Face 6 on Stamp · Elbow 60 × 75 mm turned 90°:
+  core puts all 4560 columns at the softest tested lattice. The face card and the Auto row now say "Every column at the softest
+  tested lattice (14 %)" and "Auto reaches 0.51–1.80 mm at 10 lb" (core's own nearest depths; the stamp packs your 10 lb into a
+  smaller area). On your curves the same face reads "Nearly every column at softest tested (14 %)" (4549 of 4560) and "Auto reaches
+  0.00–0.64 mm at 10 lb". The rule is 95 % or more of the pressed columns.
+- **Auto at the floor grades the drawn lattice by your shape, and says so.** On Stamp: 14.4 % (big cells) under the stamp's
+  deepest press, 36.2 % (small cells) where nothing presses. On Curves: 15.2 % at the curve's soft centre, 33.2 % at its firm edge.
+  It uses the no-data filament's mapping, kept inside the tested densities, cells following density at 1-bead walls. The card
+  adds "Lattice shaped by your stamp · not from data" (or "… your curve …"). The views (Bend, Play, Heat, X-ray, the legend, a tap)
+  all use this drawn field, so what you see stays consistent; the squish depths still come from core's design. Faces core can
+  design keep core's field exactly (20 lb / 0.5 mm: byte-identical).
+- **Manual: "Along" is now Depth | Across | Shape.** Shape reads the face's active shape: your curves, or your stamp's footprint
+  (the same grid the press uses, 0 where nothing presses up to 1 at its deepest press). An edge or corner reads its own drawn push
+  or stamp; before, it fell back to Depth. Your bracket, 10 → 30 % along Shape: 29.9 % under the stamp, 10.0 % everywhere outside
+  it (spread 0.2 %). An old save's "Curve" opens as "Shape".
+- **Manual polish:**
+  - More's Nozzle row is hidden in Manual; the Model card's Temperature is the only setting (AF_03).
+  - Once the lattice is built, "Cells across" and its under-2 flag use the depth the drawing grades over (your bracket: 24.2 mm,
+    not the 25.0 mm column mean; on your pinched Group 1 each face's half instead of 68.7 mm).
+  - In Manual the "Lattice · density" legend and a tap read the drawn piece: type and exact cell ("10% · gyroid 13.9 mm …
+    30% · gyroid 4.6 mm"; a tap says "density · gyroid · 1 bead · 9.3 mm cell").
+  - A grade's To starts at 1.5 × From whenever the stored To is not above From (older saves).
+  - The data line names the type: "Data covers 14–36 % (gyroid)", or "Estimate past tested data (gyroid 14–36%)".
+
+Not built / defaults taken (tell me if you want otherwise):
+- The first line is your exact wording, 49 characters (over the 44 rule). It fits one line on the 13" card (AF_01).
+- The range's low end is core's shallowest column. On Curves that is 0.00 mm at the curve's edge, where almost nothing presses.
+- A pinched face's floor check reads core's whole-column design, not its two halves.
+- Presses (edges, corners) in Auto keep core's field; only faces get the fallback.
+- None of the three renders shows the lattice walls (the Squish page draws the prism and the stamp outline, not the walls), so
+  the grading evidence is the test numbers above, not pictures.
+
+Tests (red controls asserted red inside each): `FlexibleAutoFloorShapeTests` (4):
+- the truth line (RED: no line, the Auto row says only what it takes);
+- the stamp and curve fallback (RED: core's flat 14.3 % everywhere; POSITIVE: 20 lb / 0.5 mm byte-identical; the job bytes
+  unchanged);
+- Manual along Shape follows the stamp (RED: today's curve grade puts the whole face at 30 %, the stamp ignored);
+- the polish.
+The test file could not compile before the new calls existed, so "red first" here means the red controls, which bring back
+today's behaviour inside each test. Two expectations were corrected on the first run. The stamp's reach is 1.80 mm, not 0.64
+(0.64 mm is the curves case, now pinned there). The curve control's red is "outside the stamp at 30 %" rather than a spread.
+Run once (18 classes): 126 passed, 1 failed, 1 skipped. The failure was FlexibleRowCopyTests' Nozzle-row source pin, left over
+from P1; fixed by the Auto-only row, re-run 4/4.
+Goldens: the first run showed `fields_his_0004_r5.txt` 3 lines DIFFERS, only in its "app field" section; core's designs and fields
+were identical. Your r5 is at the floor, so its drawn field is now graded. With the fallback off it is identical to the old golden.
+After re-recording those 3 lines: det 0 DIFFERS (38), unseeded 0 DIFFERS (32 + 1 PART-SKIP). The 16 stage-job hashes are
+cmp-identical to P2's.
+Renders (13" portrait):
+- AF_01: your l-bracket in Auto, Face 6 card with the three lines;
+- AF_02: the same in Manual, Model card, Along = Shape, 10 → 30 %;
+- AF_03: your pad's Model card in Manual (one Temperature row).
+
 ## ★ Round 7 · MANUAL P2 — the drawing matches the settings (2026-10-23) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on `55631daa`. NOT pushed (your HOLD). NOT installed. App only; core untouched; no

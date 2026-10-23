@@ -389,6 +389,11 @@ extension FlexibleMainStage {
         if let c = latticeEndsCache, c.generation == g.generation { return (c.lo, c.hi, c.span) }
         latticeSpanScans += 1
         let s = FlexibleProbe.latticeSpan(g.inputs)
+        // ★ MANUAL (round 7 polish): the ends read his DRAWN pieces — each end's own type and exact cell
+        if model?.isManual == true, let e = FlexibleManualCopy.legendEnds(g.inputs) {
+            latticeEndsCache = (g.generation, s, e.lo, e.hi)
+            return (e.lo, e.hi, s)
+        }
         func end(_ rho: Double) -> String {
             let c = FlexibleProbe.drawnCell(rho: rho, g.inputs)
             return String(format: "%.0f%% · %@%.1f mm", rho * 100, c.blended ? "≈" : "", c.mm)
@@ -527,6 +532,14 @@ extension FlexibleMainStage {
         }
         let span = latticeEnds()?.span ?? FlexibleProbe.latticeSpan(g.inputs)
         let w = span.upperBound - span.lowerBound
+        // ★ MANUAL (round 7 polish): a tap reads the DRAWN piece there — its type, its whole-bead walls, its exact cell
+        if let m = model, m.isManual, let mp = FlexibleLatticeField.manualPoint(r.rest, g.inputs) {
+            let beads = Int((Double(mp.t) / Swift.max(m.manualBeadWidthMM, 1e-6)).rounded())
+            reading = FlexibleReading(kind: .lattice, value: "\(Int((r.rho * 100).rounded()))%",
+                                      unit: FlexibleManualCopy.tapUnit(type: mp.type, beads: beads, cellMM: Double(mp.cell)),
+                                      fraction: w > 1e-6 ? min(1, max(0, (r.rho - span.lowerBound) / w)) : 0, anchor: p)
+            return true
+        }
         reading = FlexibleReading(kind: .lattice, value: "\(Int((r.rho * 100).rounded()))%",
                                   unit: String(format: "density · %@%.1f mm cell", r.cellBlended ? "≈" : "", r.cellMM),
                                   fraction: w > 1e-6 ? min(1, max(0, (r.rho - span.lowerBound) / w)) : 0, anchor: p)

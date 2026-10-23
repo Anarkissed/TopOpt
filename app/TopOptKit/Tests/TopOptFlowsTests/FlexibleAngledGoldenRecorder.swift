@@ -678,6 +678,11 @@ enum FlexibleAngledGoldens {
         let wholePart = !m.facePrismsSet
         if wholePart { m.controlWholePartWithoutPrism = true }
         defer { if wholePart { m.controlWholePartWithoutPrism = false } }
+        // ★ AUTO AT THE FLOOR (round 7): his r5 is at the floor, so the app field is drawn by its shape; the env check
+        // FLEX_AP_NO_SHAPE_FALLBACK=1 restores core's flat field (the pre-fallback golden) to show that is the only change
+        let noFallback = ProcessInfo.processInfo.environment["FLEX_AP_NO_SHAPE_FALLBACK"] == "1"
+        if noFallback { FlexibleStageModel.controlNoShapeFallback = true }
+        defer { if noFallback { FlexibleStageModel.controlNoShapeFallback = false } }
         m.generateLattice()
         try await FlexibleHisProject.waitFor(180, "\(label): the lattice") { (m.lattice != nil && !m.latticeIsStale) || m.latticeError != nil }
         await m.waitForIdle()
