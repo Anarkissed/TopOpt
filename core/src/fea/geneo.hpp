@@ -70,8 +70,10 @@ namespace fea_detail {
 //   size and the GenEO eigenvalue cut, exactly phase 2's `core=8, ov=1,
 //   block_m=20, cut=0.05`.
 // kGeneoCoarseDenseCap — dense-Cholesky the coarse operator when N_t is at or
-//   under this; a capped Jacobi-CG inner solve above it (production extents,
-//   phase 2 §P3). kGeneoCoarseInnerIters caps that inner solve.
+//   under this. A basis WIDER than this is REFUSED (2026-10-23, Carriage Arms:
+//   N_t = 15,734 made the capped inner solve a dense-gemv crawl), so the
+//   capped Jacobi-CG inner solve (coarse_inner_cg, kGeneoCoarseInnerIters) is
+//   no longer reached by production; the solve stays plain Jacobi-CG.
 // kGeneoTriggerIters — the STAGNATION TRIGGER: a fallback solve pays the basis
 //   build only after burning this many plain Jacobi-CG iterations unconverged.
 //   Derivation: the measured healthy-regime Jacobi fallback ceiling is ~327
@@ -286,7 +288,8 @@ double geneo_probe_apply_seconds();    // in-CG deflation applies
 //           1 = REUSED the held basis + coarse operator unchanged (same system)
 //           2 = REFRESHED the coarse operator against this system's operator
 //           3 = REBUILT the basis (first build, DOF-set change, or degradation)
-//           4 = build REFUSED by the memory cap (solve stayed plain, exact)
+//           4 = build REFUSED by the memory cap or by N_t over the dense
+//               coarse cap (solve stayed plain, exact)
 //           5 = DECLINED by the engagement gate: a basis WAS held, and this
 //               solve converged inside `threshold` plain iterations, so paying
 //               the refresh + deflation would have cost more than finishing

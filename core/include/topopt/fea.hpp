@@ -500,6 +500,7 @@ struct CgInfo {
   //                       system; 3 = basis (RE)BUILT — first build via the
   //                       stagnation trigger, or a scheduled degradation /
   //                       DOF-set rebuild; 4 = build REFUSED by the memory cap
+  //                       or by N_t over the dense coarse cap
   //                       (solve stayed plain Jacobi-CG — exact, just slower);
   //                       5 = DECLINED by the ENGAGEMENT GATE (handoff
   //                       2026-08-02-geneo-disarm): a basis WAS held and this
