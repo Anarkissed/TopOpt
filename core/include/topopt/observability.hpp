@@ -1368,6 +1368,14 @@ struct RunInfo {
   // `cells_with_no_strut: <every cell>` would say the generator laid nothing where the
   // truth is that nobody counted. They are omitted instead, and this says why.
   bool stepped_plan_laid_measured = false;
+  // ── ★ THE LAW GRADED NOTHING AND THE RUN CARRIED ON (ruling, 2026-10-11) ────
+  // On a PLAN job whose every cell carries its own relative density, the law's inability
+  // to grade is REPORTED rather than fatal: the plan is the design, so core needs the
+  // law's grade for neither the geometry nor the certificate. The note carries the law's
+  // own fallback counts, so "core overrode its own law here" is never silent. False on
+  // every job where the law did grade, and on every job that sent no plan.
+  bool stepped_law_ungradeable_reported = false;
+  std::string stepped_law_ungradeable_note;
   // Elements the generator emitted that no plan cell shares. 0 is the expected value;
   // a non-zero count means geometry was written outside every cell of the plan.
   long long stepped_plan_laid_unattributed = 0;

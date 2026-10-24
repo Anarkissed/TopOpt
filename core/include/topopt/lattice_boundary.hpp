@@ -389,6 +389,14 @@ class LatticeBoundary {
 // `lattice_certification_mask` is now this function with a single-cell provider, so the
 // printed / keep-out / exclude / include precedence has ONE definition and the plan path
 // cannot drift from the graded one.
+// ── ★ THE OUTLINE WALK'S COST, AS A COUNT (2026-10-24) ───────────────────────
+// How many RING STEPS the outline distance queries have taken since the last reset. The
+// ring count is what the old bound left unbounded: it grew with the query's distance from
+// the outline in index cells, which on a 177-region part is most of the part. A test
+// seam, not a receipt -- a count can be asserted where a stopwatch cannot. Thread-local.
+long long lattice_outline_ring_steps();
+void lattice_outline_reset_ring_steps();
+
 std::vector<char> lattice_certification_mask_per_cell(
     const LatticeBoundary& boundary, const VoxelGrid& grid,
     const std::vector<double>& density, double iso,

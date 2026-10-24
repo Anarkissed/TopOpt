@@ -4308,6 +4308,10 @@ struct LatticeVariantOutcome {
   // ★ whether the ledger tap ran at all (lattice.emit_plan_laid): without it the laid
   // counts are not measured and must not be reported as zeros.
   bool plan_laid_measured = false;
+  // ★ the law graded nothing and the run carried on anyway, because the plan is the
+  // design and carries its own density (ruling of 2026-10-11). Reported, never silent.
+  bool law_ungradeable_reported = false;
+  std::string law_ungradeable_note;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -6408,6 +6412,59 @@ LatticeVariantOutcome lattice_one_variant(
     // carries the predicate, the per-reason counts and the two measured widths,
     // because the whole remedy is the relation between them.
     if (gf.region_ungradeable) {
+      // ── ★ ON A PLAN JOB THIS IS A REPORT, NOT A REFUSAL (ruling, 2026-10-11) ──
+      // The law could grade nothing. On a job that sent no plan that is the end of it:
+      // there is no lattice to emit and the refusal below stands, unchanged.
+      //
+      // On a PLAN job it is not core's decision to make. The plan IS the design: it says
+      // which cells, and with ruling C it says at what density, so core needs the law's
+      // grade for neither the geometry nor the certificate. Measured on 102117B9's
+      // Default Grade plan -- 12,112 cells over 177 regions, every one carrying a rho --
+      // the plan validated and then this line refused the job over 66,710 candidate
+      // voxels the LAW could not grade. That is core's own law gating a design it was
+      // not asked to produce.
+      //
+      // So: reported, and the run carries on. The plan's posture certifies as usual and
+      // can still refuse on its own grounds (the octet band, the strut-strength margin,
+      // the void rule) -- this removes one gate, not the certificate.
+      //
+      // ★ THE CONDITION IS THE PLAN'S OWN DENSITY, not the mere presence of a plan. Every
+      // planned cell must carry a rho; D5 has already proved each of those prints at its
+      // own size. A cell with no rho would have to be sized from the law's field, and the
+      // law has nothing here -- K3's refusal covers exactly that case and is unchanged.
+      bool plan_rho_everywhere = !job.lattice.stepped_cells.empty();
+      std::size_t cells_without_rho = 0;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        if (!(c.rho > 0.0)) ++cells_without_rho;
+      if (cells_without_rho > 0) plan_rho_everywhere = false;
+      if (plan_rho_everywhere) {
+        R.law_ungradeable_reported = true;
+        R.law_ungradeable_note =
+            "the grading law could lattice NONE of this variant's " +
+            std::to_string(gf.region_voxels) +
+            " candidate voxels, and the run carried on because the PLAN is the design: " +
+            std::to_string(job.lattice.stepped_cells.size()) +
+            " cell(s), every one carrying its own relative density, so core needs the "
+            "law's grade for neither the geometry nor the certificate. The law's own "
+            "fallbacks over the voxels it rejected: member_too_thin_for_cell=" +
+            std::to_string(gf.fallback_member_too_thin) +
+            ", strut_unprintable_at_every_cell=" +
+            std::to_string(gf.fallback_strut_unprintable) +
+            ", irrecoverable_by_any_cell_size=" +
+            std::to_string(gf.fallback_irrecoverable_by_cell) +
+            ". The plan's posture still certifies, and can still refuse.";
+        std::fprintf(stderr, "[stepped] law ungradeable, REPORTED not refused: %s\n",
+                     R.law_ungradeable_note.c_str());
+        // ★ AND THE WINDOW NEEDS A CELL. `cell` below feeds the boundary's voxel-base
+        // window (2 x cell) and the certification mask's own cell. The law may leave it
+        // at 0 when it graded nothing, so it falls back to the PLAN's coarsest cell --
+        // the plan's own number, never one core invents.
+        double plan_coarsest = 0.0;
+        for (const SteppedCell& c : job.lattice.stepped_cells)
+          if (c.size_mm > plan_coarsest) plan_coarsest = c.size_mm;
+        if (!(gf.cell_size_mm > 0.0) && plan_coarsest > 0.0)
+          gf.cell_size_mm = plan_coarsest;
+      } else {
       R.ungradeable = true;
       R.ungradeable_reason =
           "the grading law could lattice NONE of this variant's " +
@@ -6433,6 +6490,7 @@ LatticeVariantOutcome lattice_one_variant(
           " mm) — run the pre-flight forecast for the evaluated remedies.";
       R.gf = gf;
       return R;
+      }
     }
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
@@ -11312,6 +11370,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_plan_by_region = R.plan_by_region;
       gi.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
       gi.stepped_plan_laid_measured = R.plan_laid_measured;
+      gi.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      gi.stepped_law_ungradeable_note = R.law_ungradeable_note;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;
@@ -13530,6 +13590,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_cell_ri.stepped_plan_by_region = R.plan_by_region;
       lat_agg.g_cell_ri.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
       lat_agg.g_cell_ri.stepped_plan_laid_measured = R.plan_laid_measured;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_note = R.law_ungradeable_note;
       lat_agg.g_cell_ri.lattice_outline_beam_mm = R.outline_beam_mm;
       lat_agg.g_cell_ri.lattice_outline_bleed_mm = R.outline_bleed_mm;
       lat_agg.g_cell_ri.lattice_outline_inward_mm = R.outline_inward_mm;
@@ -13849,6 +13911,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           lat_agg.g_cell_ri.stepped_plan_laid_unattributed;
       run_info.stepped_plan_laid_measured =
           lat_agg.g_cell_ri.stepped_plan_laid_measured;
+      run_info.stepped_law_ungradeable_reported =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_reported;
+      run_info.stepped_law_ungradeable_note =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_note;
       run_info.lattice_outline_beam_mm = lat_agg.g_cell_ri.lattice_outline_beam_mm;
       run_info.lattice_outline_bleed_mm = lat_agg.g_cell_ri.lattice_outline_bleed_mm;
       run_info.lattice_outline_inward_mm = lat_agg.g_cell_ri.lattice_outline_inward_mm;

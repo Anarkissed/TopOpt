@@ -101,6 +101,14 @@ int include_declared_id(const ClearanceGeometry& g, std::size_t i) {
 // which is what correctness needs). A query walks Chebyshev rings outward from its own
 // cell and stops as soon as the best distance found is within `ring * cell` -- every
 // unscanned cell is at least that far away -- so the answer is EXACT, not approximate.
+// ── ★ A TEST SEAM FOR THE WALK'S COST (2026-10-24) ────────────────────────────
+// How many RING STEPS the outline distance queries have taken since the last reset. The
+// ring count is the quantity the old bound left unbounded -- it grew with |qi|, the
+// query's distance from this outline in index cells -- so it is the thing to cap. A count
+// can be asserted where a stopwatch cannot. Thread-local, so a parallel caller cannot
+// make another's figure meaningless.
+static thread_local long long g_outline_ring_steps = 0;
+
 struct LatticeOutlineIndex {
   std::vector<double> ax, ay, bx, by;   // edge endpoints, flattened over every loop
   double lo_a = 0.0, lo_b = 0.0, cell = 1.0;
@@ -113,17 +121,65 @@ struct LatticeOutlineIndex {
     const int qi = static_cast<int>(std::floor((a - lo_a) / cell));
     const int qj = static_cast<int>(std::floor((b - lo_b) / cell));
     double best = std::numeric_limits<double>::infinity();
-    const int span = std::max(na, nb) +
-                     std::max(std::abs(qi), std::abs(qj)) + 1;
-    for (int ring = 0; ring <= span; ++ring) {
-      // Everything outside this ring is at least `ring * cell` away, so once the best
-      // beats that bound no further ring can improve it.
-      if (best <= static_cast<double>(ring) * cell) break;
-      for (int dj = -ring; dj <= ring; ++dj)
-        for (int di = -ring; di <= ring; ++di) {
-          if (std::max(std::abs(di), std::abs(dj)) != ring) continue;  // the ring only
-          const int i = qi + di, j = qj + dj;
-          if (i < 0 || j < 0 || i >= na || j >= nb) continue;
+    // ── ★ THE EMPTY PREFIX IS SKIPPED, AND THE TAIL IS BOUNDED ─────────────────
+    // This walk cost eleven hours on 102117B9 before it was bounded. `best` starts at
+    // infinity, so nothing can break the loop until the first EDGE is found -- and for a
+    // query far outside this outline's own box the walk scanned ring after ring of empty
+    // cells first. The old bound was `max(na, nb) + max(|qi|, |qj|) + 1`, and |qi| is a
+    // count of CELLS from the outline, so on a part whose other regions are hundreds of
+    // millimetres away it ran into the thousands: O(span^2) empty visits per query, per
+    // region, times 177 regions, times every refinement step of every strut's clip.
+    //
+    // Every occupied cell lies in [0, na) x [0, nb). So the first ring that can hold one
+    // is the CHEBYSHEV DISTANCE from the query cell to that index box, and every grid
+    // cell is covered by the time the ring reaches that plus max(na, nb). Both bounds are
+    // exact: the rings skipped and the rings dropped are provably empty, so the answer is
+    // bit-identical to the unbounded walk -- which `test_outline_index` checks on near
+    // AND far samples rather than asserting.
+    const int gap_i = std::max(0, std::max(-qi, qi - (na - 1)));
+    const int gap_j = std::max(0, std::max(-qj, qj - (nb - 1)));
+    const int ring0 = std::max(gap_i, gap_j);
+    const int ring1 = ring0 + std::max(na, nb);
+    for (int ring = ring0; ring <= ring1; ++ring) {
+      // ★ THE COUNTER IS ON THE RING, because the ring count is the quantity that was
+      // unbounded. Two earlier placements measured the wrong thing and I am recording
+      // why rather than leaving a third guess: counting cells INSIDE the grid saw only
+      // the useful work (unbounded and bounded both read "4"), and counting cells the
+      // walk looks at still missed it, because rows outside the grid are skipped before
+      // any cell is examined. The rings are what |qi| multiplies.
+      ++g_outline_ring_steps;
+      // ── ★ THE BOUND WAS OFF BY ONE, AND IT RETURNED WRONG DISTANCES ──────────
+      // At the TOP of iteration `ring` the rings scanned so far are 0 .. ring-1, so an
+      // unscanned cell is at Chebyshev cell-distance >= ring, and the closest point of
+      // such a cell to a query inside its OWN cell is at least (ring - 1) * cell away --
+      // not ring * cell. The old test broke a ring too early and returned the first edge
+      // it had found instead of the nearest one.
+      //
+      // Found by the exactness check this commit adds, not by reading: on a 5.33 mm index
+      // cell it reported 3.359843 mm where the unindexed scan says 2.613614, and 5.000
+      // (the depth term winning) where the scan says 2.002241 -- 122 of 7,990 sampled
+      // points, up to 4.79 mm out. This is a defect in 91abe169 as shipped, not in
+      // today's bounds: the distance came back too LARGE, so the clip kept strut pieces
+      // it should have cut. Conservative in the "the part never shrinks" direction, and
+      // wrong.
+      if (ring > 0 && best <= static_cast<double>(ring - 1) * cell) break;
+      // ★ AND THE RING IS WALKED AS A PERIMETER. The old form swept the whole
+      // (2*ring+1)^2 block and skipped the interior, which is O(ring^2) iterations to
+      // visit 8*ring cells. Same cells, same order within each row, so the visited SET
+      // and the answer are unchanged.
+      const int i0 = qi - ring, i1 = qi + ring;
+      for (int dj = -ring; dj <= ring; ++dj) {
+        const int j = qj + dj;
+        if (j < 0 || j >= nb) continue;
+        const bool edge_row = (dj == -ring || dj == ring);
+        // An edge row is the whole span; any other row is just its two end columns.
+        // Written as an explicit list rather than a swept index, because a hang fix is
+        // the wrong place to be clever with a loop variable.
+        int cols[2] = {i0, i1};
+        const int ncols = (i0 == i1) ? 1 : 2;
+        for (int c = 0; c < (edge_row ? (i1 - i0 + 1) : ncols); ++c) {
+          const int i = edge_row ? (i0 + c) : cols[c];
+          if (i < 0 || i >= na) continue;
           for (int e : bucket[static_cast<std::size_t>(j) * na + i]) {
             const double ex = bx[e] - ax[e], ey = by[e] - ay[e];
             const double len2 = ex * ex + ey * ey;
@@ -136,6 +192,7 @@ struct LatticeOutlineIndex {
             best = std::min(best, std::sqrt(dx * dx + dy * dy));
           }
         }
+      }
     }
     return best;
   }
@@ -683,6 +740,9 @@ std::vector<LatticeClipSpan> LatticeBoundary::clip_segment(
       },
       kClipTolMm, uncertified_dropped);
 }
+
+long long lattice_outline_ring_steps() { return g_outline_ring_steps; }
+void lattice_outline_reset_ring_steps() { g_outline_ring_steps = 0; }
 
 std::vector<char> lattice_certification_mask_per_cell(
     const LatticeBoundary& boundary, const VoxelGrid& grid,
