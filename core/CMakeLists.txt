@@ -1553,6 +1553,17 @@ if(OpenCASCADE_FOUND)
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME step_import COMMAND test_step)
 
+  # C2 B0 item 15 (2026-10-24): the STEP import drops repeated-corner triangles and
+  # re-meshes a face that comes out open. The test builds a filleted box with OCCT itself.
+  add_executable(test_step_clean tests/unit/test_step_clean.cpp)
+  target_include_directories(test_step_clean SYSTEM PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+  target_link_libraries(test_step_clean PRIVATE topopt
+    TKFillet TKPrim TKDESTEP TKXSBase TKDE TKTopAlgo TKBRep TKMath TKernel)
+  target_compile_definitions(test_step_clean PRIVATE
+    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step"
+    STEP_CLEAN_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME step_clean COMMAND test_step_clean)
+
   # Pseudo-faces vs B-rep ground truth (handoff 134): export the demo L-bracket
   # STEP to STL, re-import through the MESH path, and require the manufactured
   # partition to match the B-rep it came from. Needs OCCT for the ground truth.
