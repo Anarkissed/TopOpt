@@ -2771,7 +2771,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       MfHierarchy& HS = use2 ? H2 : H;
       bool ok = false;
       bool seeded_fallback = false;
-      double r0 = 1.0;
+      double r0 = 1.0;     // start, on the system the retry solves (HS)
+      double r0x = 1.0;    // start, on the EXACT system m
+      double resx = -1.0;  // end, on the EXACT system m (-1 = not evaluated)
       int it = 0;
       double res = 0.0;
       if (HS.m != nullptr) {
@@ -2801,13 +2803,31 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         Vec x0;
         if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
                                              static_cast<Eigen::Index>(m.ng));
-        // Starting relative residual (1 when cold), so a non-converged attempt
-        // can be judged PRODUCTIVE (>= 10x reduction) for the latch below.
+        // Starting relative residuals (1 when cold). The retry's own (r0, on
+        // HS) is reported; seeding the fallback and the latch's PRODUCTIVE test
+        // (>= 10x reduction) are judged on the EXACT system `m` (the islands
+        // back at their true modulus), because that is the system the Jacobi-CG
+        // fallback solves: an iterate of the island-DROPPED system can sit far
+        // below HS's start yet far above the exact one's (the dropped specks
+        // carry the near-rigid motion's forces). Uncounted applies, so no
+        // matvec count moves; HS is m itself when nothing was dropped.
+        UncountedFineApply Ax(m);
+        const Vec bx = Eigen::Map<const Vec>(m.rg.data(),
+                                             static_cast<Eigen::Index>(m.ng));
+        const double bxn = bx.norm();
+        Vec ax;
         if (warm && rgv.norm() > 0.0) {
           UncountedFineApply A(*HS.m);
-          Vec ax;
           A(x0, ax);
           r0 = (rgv - ax).norm() / rgv.norm();
+        }
+        if (warm && bxn > 0.0) {
+          if (use2) {
+            Ax(x0, ax);
+            r0x = (bx - ax).norm() / bxn;
+          } else {
+            r0x = r0;
+          }
         }
         Vec xg;
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kSafeMaxCycles),
@@ -2826,28 +2846,34 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
             g_mg_last_dropped = scan.drop;
             g_mg_last_dropped_floor = scan.floor_e;
           }
-        } else if (xg.size() == m.ng && xg.allFinite() && res < r0) {
+        } else if (xg.size() == m.ng && xg.allFinite() && bxn > 0.0) {
           // Did not reach tolerance: hand the iterate to the exact Jacobi-CG
           // fallback as its starting guess. PCG never raises the energy-norm
           // error of its start, so this is at least as good as the guess the
           // fallback would otherwise use (measured on the Carriage Arms: rel
           // res ~1e-2 after 300 l1 cycles, which Jacobi-CG needs ~8,000
-          // iterations to reach from zero). Only an iterate whose residual is
-          // below the start's is handed over (on a near-singular system the
-          // 2-norm residual can rise while the energy error falls; the demo
-          // L-bracket showed rel res 10-140 after 300 l1 cycles), so the
-          // fallback never starts further from its own stopping test. The
-          // fallback's stopping test is
-          // still ||r|| <= tol*||b|| on the EXACT system (the islands, if any
-          // were dropped above, are back), so its answer is unchanged in kind.
-          for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
-          seeded_fallback = true;
+          // iterations to reach from zero). Only an iterate whose EXACT-system
+          // residual is below the exact start's is handed over (on a
+          // near-singular system the 2-norm residual can rise while the energy
+          // error falls; the demo L-bracket showed rel res 10-140 after 300 l1
+          // cycles; and an island-dropped iterate is judged on the system the
+          // fallback solves, not on the one it came from), so the fallback
+          // never starts further from its own stopping test, which is still
+          // ||r|| <= tol*||b|| on the EXACT system: its answer is unchanged in
+          // kind.
+          Ax(xg, ax);
+          resx = (bx - ax).norm() / bxn;
+          if (resx < r0x) {
+            for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
+            seeded_fallback = true;
+          }
         }
       }
-      // Latch: an attempt that carried, or that cut the residual >= 10x and
-      // seeded the fallback with it, is productive; kMgLatchThreshold
-      // consecutive unproductive attempts latch the safe path off for the run.
-      const bool productive = ok || (seeded_fallback && res <= 0.1 * r0);
+      // Latch: an attempt that carried, or that cut the EXACT-system residual
+      // >= 10x and seeded the fallback with it, is productive;
+      // kMgLatchThreshold consecutive unproductive attempts latch the safe
+      // path off for the run.
+      const bool productive = ok || (seeded_fallback && resx <= 0.1 * r0x);
       if (ok) ++g_mg_safe_carries;
       if (productive) {
         g_mg_safe_consecutive_failures = 0;
@@ -2864,8 +2890,20 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         rep.cycles = it;
         rep.res = res;
         rep.r0 = r0;
+        rep.res_exact = resx;
+        rep.r0_exact = r0x;
         rep.consecutive_failures = g_mg_safe_consecutive_failures;
       }
+      // The seeding decision, stated on the system it was judged on.
+      char exact_note[128] = "";
+      if (resx >= 0.0 && seeded_fallback)
+        std::snprintf(exact_note, sizeof exact_note,
+                      " ; Jacobi-CG fallback starts from the l1 iterate (exact rel "
+                      "res %.3e < start %.3e)", resx, r0x);
+      else if (resx >= 0.0)
+        std::snprintf(exact_note, sizeof exact_note,
+                      " ; l1 iterate NOT handed over (exact rel res %.3e >= start "
+                      "%.3e)", resx, r0x);
       std::fprintf(stderr,
                    "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
                    "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
@@ -2883,7 +2921,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                    use2 ? scan.droppable_voxels : 0LL, scan.elements,
                    scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
                    g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
-                   seeded_fallback ? " ; Jacobi-CG fallback starts from the l1 iterate" : "");
+                   exact_note);
       diag.t_mg_ms = fea_detail::mf_steady_ms() - t_mg0;
     }
 

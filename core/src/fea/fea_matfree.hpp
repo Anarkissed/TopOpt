@@ -585,7 +585,8 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
 //                    the system it solved (the island-dropped one when
 //                    `dropped`); an attempt that breaks down before its first
 //                    update reports res == its starting residual.
-//   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback.
+//   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback
+//                    (only when res_exact < r0_exact).
 //   productive       counted as productive by the safe-path latch.
 //   consecutive_failures  the safe-path latch counter AFTER this attempt.
 struct MgSafeAttemptReport {
@@ -596,6 +597,11 @@ struct MgSafeAttemptReport {
   bool productive = false;
   int cycles = 0;
   double res = 0.0, r0 = 0.0;
+  // The same iterate / start on the EXACT system (the one the Jacobi-CG
+  // fallback solves; differs from res / r0 when islands were dropped). Seeding
+  // and `productive` are judged on these. res_exact = -1 when not evaluated
+  // (the attempt converged, or its iterate was unusable).
+  double res_exact = -1.0, r0_exact = -1.0;
   int consecutive_failures = 0;
 };
 const MgSafeAttemptReport& mg_last_safe_attempt();

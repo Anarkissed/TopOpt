@@ -445,6 +445,59 @@ int main() {
   }
 
   // ---------------------------------------------------------------------------
+  // A (exact-system seeding): the Jacobi-CG fallback solves the EXACT system,
+  // so a safe attempt's iterate may seed it only if it is better than the start
+  // ON THAT SYSTEM. An island-DROPPED retry stopped short (cycle cap 10, via
+  // max_iterations; the capped fallback then throws, which is expected here)
+  // has its own residual below its start, yet on the exact system — the specks
+  // back at 0.5 E0 — the same iterate is far WORSE than the start. It must not
+  // seed (nor count as productive). RED before the fix: the test compared the
+  // dropped system's residuals and seeded. POSITIVE CONTROL: with no drop, an
+  // improving capped iterate still seeds.
+  // ---------------------------------------------------------------------------
+  {
+    SpeckField F = make_speck_field(true);
+    const double tol = 1e-8;
+    const int cap = 10;
+    auto capped_solve = [&](bool permit_drop) {
+      topopt::fea_matfree_reset_mg_stagnation_latch();
+      CgInfo ci;
+      bool threw = false;
+      try {
+        if (permit_drop) {
+          topopt::FeaIslandDropPermit permit;
+          topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap, &ci);
+        } else {
+          topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap, &ci);
+        }
+      } catch (const topopt::SolverNonConvergence&) {
+        threw = true;
+      }
+      const topopt::fea_detail::MgSafeAttemptReport R =
+          topopt::fea_detail::mg_last_safe_attempt();
+      std::printf("      capped (%d) %s: cycles=%d res=%.3e r0=%.3e | exact res=%.3e "
+                  "r0=%.3e | seeded=%d productive=%d (fallback threw=%d)\n",
+                  cap, permit_drop ? "drop" : "no drop", R.cycles, R.res, R.r0,
+                  R.res_exact, R.r0_exact, R.seeded_fallback ? 1 : 0,
+                  R.productive ? 1 : 0, threw ? 1 : 0);
+      return R;
+    };
+    const auto D = capped_solve(true);
+    check(D.seq == 1 && D.dropped && !D.converged && D.cycles == cap && D.res < D.r0,
+          "A setup: the island-dropped retry stops at its cap with its OWN residual "
+          "below its start");
+    check(D.res_exact > D.r0_exact && D.r0_exact == 1.0,
+          "A setup: on the EXACT system that iterate is WORSE than the (cold) start");
+    check(!D.seeded_fallback && !D.productive,
+          "A: an iterate worse on the exact system never seeds the fallback and is "
+          "not productive");
+    const auto N = capped_solve(false);
+    check(!N.dropped && !N.converged && N.res_exact >= 0.0 &&
+              N.res_exact < N.r0_exact && N.seeded_fallback,
+          "A POSITIVE CONTROL: an iterate better on the exact system still seeds");
+  }
+
+  // ---------------------------------------------------------------------------
   // G: a SECOND, separate, anchored and loaded body survives the drop — even a
   // tiny one (6 voxels, under the 27-voxel size cap). This is the reviewer's
   // case of a split part (the second Carriage Arm carries its own anchors and
