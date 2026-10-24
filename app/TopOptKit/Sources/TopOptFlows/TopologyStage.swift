@@ -142,9 +142,9 @@ public enum TopologyStageMenu {
 
 extension WorkspaceStage {
     /// Whether the stage draws its forward column of stage BUTTONS. Topology does not: its capsule's ● menu and ✂ carry
-    /// `forward` ([.lattice, .surface]) instead (S3 amended — "no Surface button"). The lattice and surface stages keep theirs
-    /// until B4 / B5.
-    public var drawsForwardButtons: Bool { self != .topology }
+    /// `forward` ([.lattice, .surface]) instead (S3 amended — "no Surface button"). B4: nor does the lattice stage (its capsule's
+    /// ● menu and ✂ reach Topology and Edit faces). The surface stage keeps its own until B5.
+    public var drawsForwardButtons: Bool { self == .surface }
 }
 
 // MARK: - the Setup chip's rows (A1)

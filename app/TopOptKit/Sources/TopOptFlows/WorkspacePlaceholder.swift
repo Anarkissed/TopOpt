@@ -625,7 +625,9 @@ public struct WorkspacePlaceholder: View {
     /// deliberately not a default, so a project made before the modes existed reopens
     /// the choice rather than inheriting one nobody made.
     private var latticeStageModeNeeded: Bool {
-        (stage == .lattice || showLatticePage) && project.lattice.stageMode == nil
+        // ★ B4 (L1 amended): the selector on first entry — one type per project
+        LatticeTypeSelector.isShown(onLatticeStage: stage == .lattice || showLatticePage,
+                                    typeInUse: project.lattice.stageMode)
     }
 
     /// ★★★ THROW AWAY EVERYTHING DONE UNDER THIS MODE AND ASK AGAIN (maintainer,
@@ -642,16 +644,17 @@ public struct WorkspacePlaceholder: View {
     /// not in `LatticeSettings`, so resetting the settings alone would leave a part still
     /// marked for lattice with nothing configured — a state no page has words for.
     private func deleteLatticeForMode() {
-        project.lattice = LatticeSettings()
+        // ★ B4: the same reset is "Change lattice type…" → "Continue and lose all work" (ProjectModel.clearLatticeWork),
+        // ONE undo step; its Undo shows over the selector that the reset brings up
+        clearedLattice = project.clearLatticeWork()
         showLatticeModeSheet = false
         showLatticePage = false
         showStrutPreview = false
         strutScene = nil
         latticeSettingsSavedThisSession = false
         refreshLatticeFaceCards()
-        // ★ SEALED AS ONE UNDO STEP — the reset touches several fields and a half-undone
-        // lattice is a state nothing downstream has words for.
-        project.sealUndoStep()
+        // ★ SEALED AS ONE UNDO STEP (inside clearLatticeWork) — the reset touches several fields and a
+        // half-undone lattice is a state nothing downstream has words for.
         model.persistCurrentProject()
     }
 
@@ -674,6 +677,14 @@ public struct WorkspacePlaceholder: View {
 
     /// Whether the mode's limitations sheet is up. Opened by tapping the mode title.
     @State private var showLatticeModeSheet = false
+    /// ★ B4: "Change lattice type…" is asking (ChangeLatticeTypeCard).
+    @State private var showChangeLatticeType = false
+    /// ★ B4: the capsule's Regions leaves the Cells page through its own Save (bumped, never read).
+    @State private var cellsCloseToken = 0
+    /// ★ B4 (APP LIST 6): the LATTICE run's re-run card is asking.
+    @State private var pendingLatticeRerun: ResultsReplacementPrompt?
+    /// ★ B4: what "Continue and lose all work" (or the mode sheet's delete) took, for its one-step Undo.
+    @State private var clearedLattice: ClearedLattice?
 
     /// ★ IS A LATTICE HANDLE UNDER THE FINGER RIGHT NOW? Depth, expand and the
     /// clearance/design-box knobs all move a region, so all three defer the bake. One
@@ -733,6 +744,8 @@ public struct WorkspacePlaceholder: View {
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
                     if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }
+                    // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
+                    if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
                 }
             MetalMeshView(mesh: stageMesh,
                           camera: cameraModel,
@@ -1377,13 +1390,26 @@ public struct WorkspacePlaceholder: View {
             // object and a default would pick one silently. See `LatticeStageMode`.
             if latticeStageModeNeeded {
                 LatticeStageModeModal { mode in
-                    project.lattice.stageMode = mode
+                    // ★ B4 (reviewer 08:45): the pick goes through the ONE "type" place, which clears any other type
+                    project.lattice.chooseLatticeType(mode)
                     // Written straight away: the choice is permanent, so it must not
                     // depend on some later save to survive a relaunch.
                     model.persistCurrentProject()
                 }
                 .transition(.opacity)
                 .zIndex(50)
+                // ★ B4: the reset's one-step Undo, over the selector it brought up
+                if let c = clearedLattice, project.canUndoClearLattice(c) {
+                    VStack {
+                        Spacer()
+                        CornerPairStyle.small(c.undoLabel, id: "lattice-clear-undo") {
+                            project.undoClearLattice(c); clearedLattice = nil; model.persistCurrentProject()
+                        }
+                        .padding(.bottom, DS.Space.xl6)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .zIndex(51)
+                }
             }
             // ★★ THE LIMITATIONS, ON DEMAND — and the only way to unmake the choice
             // (maintainer, 2026-08-21). Above everything except the modal itself: it
@@ -1396,6 +1422,12 @@ public struct WorkspacePlaceholder: View {
                     onClose: { showLatticeModeSheet = false })
                 .transition(.opacity)
                 .zIndex(49)
+            }
+            // ★ B4: "Change lattice type…" asks in place — a duplicate, lose all work, or Cancel
+            if showChangeLatticeType, let mode = project.lattice.stageMode {
+                ChangeLatticeTypeCard(type: mode.title, regions: latticeRegionTabNames.count) { chooseLatticeTypeChange($0) }
+                    .transition(.opacity)
+                    .zIndex(49)
             }
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
@@ -1424,8 +1456,11 @@ public struct WorkspacePlaceholder: View {
                 .wallMarking { goToWallMarking() }
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
+                // ★ B4: the Cells page — this page's rows, over the live part, under the capsule
+                .cellsPage(regions: latticeRegionTabNames, closeToken: cellsCloseToken)
                 .transition(.opacity)
             }
+            if showLatticeWizard, stage == .lattice, viewerMesh != nil { latticeCapsuleOverlay }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
             // when its Regions & faces row opens it — the SAME `selectionsPanel`
             // view over the SAME `project.selection` the TO page uses. Never a
@@ -1633,7 +1668,8 @@ public struct WorkspacePlaceholder: View {
         VStack {
             HStack {
                 Spacer()
-                OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
+                // ★ B4: the Cells page draws over the live part, so the gizmo follows the part's camera
+                OrientationGizmoView(camera: cameraModel,
                                      size: gizmoSize)
                     .latticeBandChipKeepOut()
             }
@@ -1681,11 +1717,26 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        // ★ B4 (APP LIST 6): the LATTICE run's own re-run card — its first button starts this request
+        // (startLatticeRequest), never Topology's Optimize run
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
-            rerunOffersCopy = false; pendingReplacement = prompt
+            pendingLatticeRerun = prompt
             return
         }
         run.start(request)
+    }
+
+    /// The lattice request, started (the re-run card's "Re-run the lattice here").
+    private func startLatticeRequest() {
+        guard canLatticeThis, let request = model.makeLatticeRunRequest() else {
+            model.toast = "Import a part and set a lattice region first."
+            return
+        }
+        run.start(request)
+    }
+
+    private var latticeRerunBinding: Binding<Bool> {
+        Binding(get: { pendingLatticeRerun != nil }, set: { if !$0 { pendingLatticeRerun = nil } })
     }
 
     private func startRun() {
@@ -2802,10 +2853,9 @@ public struct WorkspacePlaceholder: View {
             // It still fills the span he asked for: `maxWidth: .infinity` takes
             // everything between Redo and the trailing inset kept for Settings + the
             // orientation cube.
-            if stage == .lattice, let mode = project.lattice.stageMode {
-                LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }
-                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
-            }
+            // ★ B4: the type is named by the capsule (● Structural ⌄); its About row opens the mode sheet that
+            // this chip opened, so the chip is gone from the row.
+
         }
         // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
         // The way back sits under it (`StageNavPlacement`) and the lattice MODE takes
@@ -3041,8 +3091,7 @@ public struct WorkspacePlaceholder: View {
         // BAR 4: a new run is the ONE remaining thing that retires finished
         // variants, and it says so before it does.
         // ★ B3: THE RE-RUN CARD (RerunCard's words; TopologyRerunChoice): Re-run here / Save as new
-        // project (an Optimize re-run only) / Cancel. (Re-run here still calls startRun() for the
-        // Lattice run too — APP LIST 6, B4's.)
+        // project (an Optimize re-run only) / Cancel. B4: the Lattice run has its own card, below.
         .alert(RerunCard.title, isPresented: replacementPromptBinding) {
             Button(TopologyRerunChoice.rerunHere.label, role: .destructive) {
                 pendingReplacement = nil
@@ -3052,6 +3101,18 @@ public struct WorkspacePlaceholder: View {
             Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
         } message: {
             Text(pendingReplacement?.message ?? "")
+        }
+        // ★ B4 (APP LIST 6): THE LATTICE RUN'S RE-RUN CARD — "Re-running clears this lattice's results":
+        // Re-run the lattice here (the LATTICE request) / Save as new project (the copy opens on Lattice) / Cancel.
+        .alert(LatticeRerunChoice.title, isPresented: latticeRerunBinding) {
+            Button(LatticeRerunChoice.rerunHere.label, role: .destructive) {
+                pendingLatticeRerun = nil
+                startLatticeRequest()
+            }
+            Button(LatticeRerunChoice.saveAsNew.label) { pendingLatticeRerun = nil; saveAsNewProjectForLattice() }
+            Button(LatticeRerunChoice.cancel.label, role: .cancel) { pendingLatticeRerun = nil }
+        } message: {
+            Text(pendingLatticeRerun?.message ?? "")
         }
         // ★ "After running certification, only these spacings are available. Pick one
         // (you can always change this in the settings)." — maintainer, 2026-09-03.
@@ -3717,7 +3778,7 @@ public struct WorkspacePlaceholder: View {
                 + "This job must certify under the load case the variant was optimized under."
             return
         }
-        viewOriginal = false
+        // ★ B4 (T2): a re-lattice NO LONGER opens Results — the run lands as a dot and a message
         let inputs = RelatticeRun.Inputs(
             config: config, modelPath: file.path, jobJSON: job.json,
             designBin: art.designBin, projectName: project.name,
@@ -5520,6 +5581,10 @@ public struct WorkspacePlaceholder: View {
             // ● Topology ⌄ | Setup | Results | Smooth | ✂. The ● menu carries `forward`.
             // (Over the Results page it is mounted above ResultsScreen instead — see the body.)
             if !topologyResultsPageUp { topologyCapsuleOverlay }
+        } else if stage == .lattice {
+            // ★ B4: the Lattice stage's capsule — ● <Type> ⌄ | Regions | Cells | ✂ (its ● menu: ‹ Topology,
+            // the one type, Change lattice type…, Edit faces…, About)
+            latticeCapsuleOverlay
         } else if let back = stage.back {
             stageNavButton(to: back, icon: "chevron.left")
                 .latticeBandChipKeepOut()
@@ -5844,7 +5909,9 @@ public struct WorkspacePlaceholder: View {
     /// top-left under the project name there is exactly ONE button in this corner
     /// on either page.
     @ViewBuilder private var latticeSettingsButtonOverlay: some View {
-        if stage == .lattice {
+        // ★ B4: NO SETTINGS BUTTON — the capsule's Cells is that page now (one way in). Kept, never drawn, so the
+        // overlay's placement rules stay where the reviewer reads them.
+        if stage == .lattice, Self.latticeSettingsButtonDrawn {
             Button { showLatticeWizard = true } label: {
                 HStack(spacing: DS.Space.s) {
                     Image(systemName: "slider.horizontal.3")
@@ -9602,7 +9669,9 @@ public struct WorkspacePlaceholder: View {
             // when the panel is open, where "under the modal" is what reads.
             if selectionsCollapsed { latticePreviewNotice }
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
-            if stage == .topology, !showLatticePage { topologySelectionsList } else {
+            if stage == .topology, !showLatticePage { topologySelectionsList }
+            // ★ B4: the Lattice stage's Regions page — the same list: groups and lattice regions, eye, trash + Undo
+            else if stage == .lattice, !showLatticePage { latticeSelectionsList } else {
             selectionsLibraryCard
             }
             if !selectionsCollapsed { latticePreviewNotice }
@@ -10438,7 +10507,9 @@ public struct WorkspacePlaceholder: View {
                                        config: .init(title: row.label,
                                                      unit: row.unit,
                                                      allowsDecimal: true,
-                                                     allowsNegative: row.kind == .expand),
+                                                     allowsNegative: row.kind == .expand,
+                                                     // ★ APP LIST 2 (B4): the Expand keypad shows the "+" its box shows
+                                                     titleSymbol: row.kind == .expand ? NumberPad.Config.expandSymbol : nil),
                                        // …and its own seed: the depth reads
                                        // "10.0 mm", the density reads "27%".
                                        seed: Self.latticeRowSeed(row)) { v in
@@ -11775,6 +11846,11 @@ public struct WorkspacePlaceholder: View {
                 // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
                 // parameters and the chip column, as rows) and the Optimize split button.
                 topologyCornerPair
+            } else if stage == .lattice {
+                // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)
+                ComputeLocationControl(compute: compute)
+                printParamsButton
+                latticeSplit
             } else {
             ComputeLocationControl(compute: compute)
             printParamsButton
@@ -12383,6 +12459,207 @@ extension WorkspacePlaceholder {
         } else {
             model.toast = RerunCard.copyFailedToast
         }
+    }
+}
+
+// MARK: - B4: the Lattice stage (LatticeStage.swift) — one type, the capsule, Regions / Cells, the split, the re-run card
+//
+// A re-layout of existing function: LatticeStageTests pins the stage's lattice job and the variant's re-lattice job.
+extension WorkspacePlaceholder {
+
+    /// The Settings button's slot (top right) is the capsule's Cells now; the overlay draws nothing on the lattice stage.
+    static let latticeSettingsButtonDrawn = false
+
+    /// The groups that lattice something (an include in them): the Cells page's tabs, the change-type card's count.
+    var latticeRegionTabNames: [String] {
+        selection.groups.filter { g in
+            project.latticeSelectableRefs(g).contains { project.latticeSelectableRole($0, in: g.id) == .include }
+        }.map(\.name)
+    }
+
+    /// ● <Type> ⌄ | Regions | Cells | ✂ — and what the lattice builds on. Over the Cells page too (mounted above it).
+    @ViewBuilder var latticeCapsuleOverlay: some View {
+        let mode = project.lattice.stageMode
+        let rows = LatticeStageMenu.rows(typeInUse: mode, anchors: force.anchorCount(in: selection.groups),
+                                         loads: force.loadCount(in: selection.groups)).map { r in
+            StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
+                              action: LatticeStageMenu.capsuleAction(r.target))
+        }
+        let page: StageCapsule.Page = LatticeStagePage.current(cellsUp: showLatticeWizard) == .cells ? .secondary : .primary
+        HStack(spacing: DS.Space.s) {
+            StageCapsule(project: project, title: LatticeStageMenu.title(typeInUse: mode),
+                         accent: mode.map { LatticeStageModeStyle.accent($0) } ?? DS.Color.textSecondary.color,
+                         primaryTitle: LatticeStagePage.regions.title, secondaryTitle: LatticeStagePage.cells.title,
+                         idPrefix: "lattice",
+                         page: page,
+                         go: { dest in leaveLatticeCells(); goToStage(dest) },
+                         primary: { leaveLatticeCells() },
+                         secondary: { showLatticeWizard = true },
+                         about: { showLatticeModeSheet = true },
+                         greyed: mode == nil ? [.primary, .secondary] : [],
+                         menuRows: rows,
+                         editFaces: { leaveLatticeCells(); openEditFaces() },
+                         changeType: { showChangeLatticeType = true })
+            Text(LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction))
+                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                .accessibilityIdentifier("lattice-built-on")
+        }
+        .latticeBandChipKeepOut()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.leading, StageCapsuleLayout.capsuleLeft)
+        .padding(.top, StageCapsuleLayout.capsuleTop)
+    }
+
+    /// Leave the Cells page through its own Save (the page commits; today's onExit bakes and persists).
+    private func leaveLatticeCells() {
+        if showLatticeWizard { cellsCloseToken += 1 }
+    }
+
+    /// "Change lattice type…": the three ways.
+    func chooseLatticeTypeChange(_ c: ChangeLatticeTypeChoice) {
+        showChangeLatticeType = false
+        switch c {
+        case .duplicate:
+            leaveLatticeCells()
+            model.persistCurrentProject()
+            if model.duplicateAndChooseLatticeType(id: project.id) == nil { model.toast = RerunCard.copyFailedToast }
+        case .loseAll:
+            showLatticeWizard = false   // the page's copy of the settings is not written back over the reset
+            deleteLatticeForMode()
+        case .cancel:
+            break
+        }
+    }
+
+    /// The lattice re-run card's Save as new project: the copy opens on the Lattice stage; he presses Lattice there.
+    func saveAsNewProjectForLattice() {
+        if model.saveAsNewProjectForLattice(id: project.id) == nil { model.toast = RerunCard.copyFailedToast }
+    }
+
+    /// The lattice split: Lattice (today's button), and ⌃ for its steps — Preview, Core, Export.
+    var latticeSplit: some View {
+        let hasResults = acceptedVariantCount > 0
+        return HStack(spacing: 2) {
+            latticeThisButton
+            Menu {
+                Section("Preview") {
+                    Button(showStrutPreview ? "Hide the preview" : "Show the preview") {
+                        if showStrutPreview { showStrutPreview = false } else { armLatticePreview() }
+                    }
+                    .accessibilityIdentifier("lattice-split-preview")
+                }
+                Section("Core") {
+                    Button(hasResults ? "Re-run in core\u{2026}" : "Run in core") { requestLatticeRun() }
+                        .disabled(!canLatticeThis)
+                        .accessibilityIdentifier("lattice-split-core")
+                    Button("Optimize with this lattice") { requestRun() }
+                        .disabled(!canOptimize)
+                        .accessibilityIdentifier("lattice-split-optimize")
+                }
+                Section("Export") {
+                    // today's STL / 3MF export is on Results; this opens it (his tap — never by itself)
+                    Button("Export\u{2026}") { viewOriginal = false }
+                        .disabled(!hasResults)
+                        .accessibilityIdentifier("lattice-split-export")
+                }
+            } label: {
+                Image(systemName: "chevron.up").font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 44, height: 52)
+                    .background(Capsule().fill(DS.Surface.bar.color)
+                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+                    .contentShape(Capsule())
+            }
+            .menuIndicator(.hidden)
+            .accessibilityLabel("Lattice steps")
+            .accessibilityIdentifier("lattice-split-more")
+        }
+        .background(CornerPairStyle.publish("latticeSplit"))
+    }
+
+    // MARK: the Regions page (B1 list)
+
+    /// Groups and lattice regions in ONE list: the eye (view only), the trash (asked in place, "from every stage", one
+    /// Undo — ProjectModel.trashGroup), the open group's rows (today's: role chips, depth and expand boxes); then the Grade
+    /// pair (today's density band).
+    var latticeSelectionsList: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            SelectionsList(project: project, collapsed: $selectionsCollapsed, picked: selection.activeGroupID,
+                           deleteAsk: topoDeleteAsk,
+                           isLocked: { !project.groupView.canEdit($0) },
+                           readsLattice: { _ in true },
+                           pick: { id in
+                               topoDeleteAsk = nil
+                               if selection.activeGroupID == id { leaveGroupEditing() } else { selection.setActive(id) }
+                           },
+                           askDelete: { topoDeleteAsk = $0 },
+                           confirmDelete: { confirmTopologyTrash() },
+                           cancelDelete: { topoDeleteAsk = nil },
+                           noteFrame: { chromeGeometry.noteSelections($0) },
+                           idPrefix: "lattice",
+                           rows: { g in AnyView(groupRow(g, inList: true)) },
+                           summary: { g in
+                               let s = SelectionsSummary.summary(project: project, group: g)
+                               return s == "\u{2014}" ? topologyGroupSummary(g) : s
+                           },
+                           isHidden: { project.groupView.isHidden($0) },
+                           toggleEye: { toggleTopologyEye($0) },
+                           ask: TopologySelectionsCopy.deleteAsk)
+            if !selectionsCollapsed {
+                HStack(spacing: DS.Space.s) {
+                    Text("Grade").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
+                    regionsGradeBox("regions-grade-from", title: "Grade from", value: project.lattice.maxRelativeDensity) { v in
+                        project.lattice.maxRelativeDensity = Swift.max(Swift.min(v, 1), project.lattice.minRelativeDensity + 0.02)
+                    }
+                    Text("\u{2192}").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+                    regionsGradeBox("regions-grade-to", title: "Grade to", value: project.lattice.minRelativeDensity) { v in
+                        project.lattice.minRelativeDensity = Swift.min(Swift.max(v, 0), project.lattice.maxRelativeDensity - 0.02)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, DS.Space.m)
+                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
+                .accessibilityIdentifier("lattice-regions-grade")
+                HStack(spacing: DS.Space.s) {
+                    if let t = topoTrashed, project.canUndoTrash(t) {
+                        HStack(spacing: DS.Space.s) {
+                            Text(TopologySelectionsCopy.deletedToast(t.name)).dsStyle(DS.TypeScale.footnote)
+                                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                            CornerPairStyle.small(TopologySelectionsCopy.undo, id: "lattice-trash-undo") {
+                                project.undoTrash(t); topoTrashed = nil
+                            }
+                        }
+                        .padding(.leading, DS.Space.m)
+                        .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
+                    }
+                    // the Regions surface (union / split) — today's header toggle, kept until Edit faces (B5)
+                    CornerPairStyle.small("Regions", id: "lattice-regions") { regionsOpen.toggle() }
+                }
+            }
+        }
+    }
+
+    /// A Grade box: types on the keypad; closing it is the commit (one bake), as the region rows' pads do.
+    private func regionsGradeBox(_ key: String, title: String, value: Double,
+                                 write: @escaping (Double) -> Void) -> some View {
+        Text("\(Int((value * 100).rounded())) %")
+            .font(.system(size: 12, weight: .bold)).monospacedDigit()
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 4).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Color.fillSelected.color))
+            .frame(minHeight: 44).contentShape(Rectangle())
+            .onTapGesture { depthPadKey = key }
+            .numberPad(Binding(get: { depthPadKey == key },
+                               set: { if !$0 {
+                                   depthPadKey = nil
+                                   if showStrutPreview, project.lattice.enabled { buildStrutScene() }
+                               } }),
+                       config: .init(title: title, unit: "%", allowsDecimal: false),
+                       seed: (value * 100).rounded()) { v in
+                guard let v else { return }
+                write(v / 100)
+            }
+            .accessibilityIdentifier(key)
     }
 }
 

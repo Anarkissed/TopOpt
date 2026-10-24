@@ -24,6 +24,9 @@
 // Smooth stay grey until a run), an accent `noticeDot` on the secondary segment (a run landed: Results never opens by itself),
 // the menu's rows as a parameter (`menuRows`, Topology's ● menu) with two more actions (`.lattice`, `.editFaces`), and the greyed
 // ✂ set apart after the last page (`editFaces`, S3 amended).
+//
+// B4 (Lattice, 2026-10-24) — ONE MORE ADDITION, defaulted: the `.changeType` action and its `changeType` closure (the lattice
+// ● menu's "Change lattice type…", which asks in place).
 
 import SwiftUI
 import TopOptDesign
@@ -41,7 +44,7 @@ public enum StageCapsuleLayout {
 
 public struct StageCapsule: View {
     public enum Page: Equatable, Sendable { case primary, secondary, tertiary }
-    public enum Action: Equatable, Sendable { case topology, surface, about, none, lattice, editFaces }
+    public enum Action: Equatable, Sendable { case topology, surface, about, none, lattice, editFaces, changeType }
     /// One row of the ● <Stage> menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -80,18 +83,21 @@ public struct StageCapsule: View {
     let noticeDot: Bool
     let menuRows: [Item]?
     let editFaces: (() -> Void)?
+    /// B4: the lattice stage's "Change lattice type…" row (asks in place). nil ⇒ no such row acts.
+    let changeType: (() -> Void)?
 
     public init(project: ProjectModel, title: String, accent: Color, primaryTitle: String, secondaryTitle: String,
                 idPrefix: String = "stage", page: Page, go: @escaping (WorkspaceStage) -> Void, primary: @escaping () -> Void = {},
                 secondary: @escaping () -> Void, about: @escaping () -> Void, modified: Bool = false, fixDot: Bool = false,
                 fold: (() -> Void)? = nil, tertiaryTitle: String? = nil, tertiary: @escaping () -> Void = {},
-                greyed: Set<Page> = [], noticeDot: Bool = false, menuRows: [Item]? = nil, editFaces: (() -> Void)? = nil) {
+                greyed: Set<Page> = [], noticeDot: Bool = false, menuRows: [Item]? = nil, editFaces: (() -> Void)? = nil,
+                changeType: (() -> Void)? = nil) {
         self.project = project; self.title = title; self.accent = accent
         self.primaryTitle = primaryTitle; self.secondaryTitle = secondaryTitle; self.idPrefix = idPrefix
         self.page = page; self.go = go; self.primary = primary; self.secondary = secondary; self.about = about
         self.modified = modified; self.fixDot = fixDot; self.fold = fold
         self.tertiaryTitle = tertiaryTitle; self.tertiary = tertiary; self.greyed = greyed; self.noticeDot = noticeDot
-        self.menuRows = menuRows; self.editFaces = editFaces
+        self.menuRows = menuRows; self.editFaces = editFaces; self.changeType = changeType
     }
 
     // MARK: the rules, as values
@@ -114,7 +120,7 @@ public struct StageCapsule: View {
 
     /// A menu row: a stage change or the sheet folds every card first.
     @MainActor static func perform(_ a: Action, fold: (() -> Void)?, go: (WorkspaceStage) -> Void, about: () -> Void,
-                                   editFaces: (() -> Void)? = nil) {
+                                   editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil) {
         guard a != .none else { return }
         fold?()
         switch a {
@@ -124,6 +130,7 @@ public struct StageCapsule: View {
         case .none: break
         case .lattice: go(.lattice)
         case .editFaces: if let editFaces { editFaces() } else { go(.surface) }
+        case .changeType: changeType?()
         }
     }
 
@@ -178,7 +185,7 @@ public struct StageCapsule: View {
             ForEach(items, id: \.id) { item in
                 if item.id == "\(idPrefix)-menu-about" { Divider() }
                 Button {
-                    Self.perform(item.action, fold: pageFold, go: go, about: about, editFaces: editFaces)
+                    Self.perform(item.action, fold: pageFold, go: go, about: about, editFaces: editFaces, changeType: changeType)
                 } label: {
                     if item.checked {
                         Label(item.title, systemImage: "checkmark")

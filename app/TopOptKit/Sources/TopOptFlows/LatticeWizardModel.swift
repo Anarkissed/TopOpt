@@ -164,6 +164,11 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// from. One number the whole page reads — the strut radius is derived, never
     /// stored twice.
     public var relativeDensity: Double
+    /// ★ B4: the Cells page's Grade "to" (the band's low end, `minRelativeDensity`); "from" is `relativeDensity` (the high
+    /// end the wizard always wrote). Read from the settings and written back unchanged unless he types one.
+    public var minRelativeDensity: Double = 0
+    /// ★ B4: the Cells page's Along (display only — `LatticeSettings.gradeAlong`).
+    public var gradeAlong: LatticeGradeAlong? = nil
 
     // ── the selections (Stage B) ────────────────────────────────────────────
     public var densityMode: LatticeDensityMode
@@ -372,6 +377,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
                   simulateStresses: s.simulateStresses,
                   retainSubfloor: s.retainSubfloorInUnloadedRegions)
         self.cellTransition = s.cellTransition
+        self.minRelativeDensity = s.minRelativeDensity
+        self.gradeAlong = s.gradeAlong
         self.singleCellMembers = s.singleCellMembers
         self.shapeFitGradeStrength = s.shapeFitGradeStrength
         // ★ the rule holds on load too: a saved single-cell project opens with Skin
@@ -402,6 +409,8 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.topologyID = topologyID
         out.cellMM = cellMM
         out.maxRelativeDensity = relativeDensity
+        out.minRelativeDensity = minRelativeDensity   // ★ B4: as read, unless the Cells page's Grade "to" moved it
+        out.gradeAlong = gradeAlong
         out.densityMode = densityMode
         out.cellSizeMode = cellSizeMode
         // ★ §9(a) — and the window goes back with them, so a range typed in the

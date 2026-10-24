@@ -121,25 +121,54 @@ public struct LatticeSetupWizard: View {
         return v
     }
 
+    // MARK: ★ B4 — THE CELLS PAGE (the redesign's Lattice stage, 2026-10-24)
+    //
+    // The settings this page asks (One cell / In the part: Type, Thickness, Cell size, Density, Finish, the grade rows,
+    // Organic) ARE the Cells page's rows: re-homed, not copied. In the `.cellsPage` presentation the page draws only its
+    // panel — no sample cube, no cinematics, no full-screen background — over the live part, under the stage's capsule
+    // (● <Type> ⌄ | Regions | Cells | ✂), with a tab per region on top and the rows the design adds at the end
+    // (Grade from → to, Along, Strength / Ties / Overhangs: LatticeCellsRow). The commit is today's: Save (here) or the
+    // capsule's Regions (`closeToken`) runs `saveAndClose`, so a setting has ONE way in and ONE way to the job.
+
+    struct CellsPageContext: Equatable {
+        var regions: [String]
+        var closeToken: Int
+    }
+    private var cellsPage: CellsPageContext? = nil
+    @State private var cellsTab = 0
+
+    /// Present this page as the lattice stage's Cells page.
+    public func cellsPage(regions: [String], closeToken: Int) -> LatticeSetupWizard {
+        var v = self
+        v.cellsPage = CellsPageContext(regions: regions, closeToken: closeToken)
+        return v
+    }
+
     public var body: some View {
         GeometryReader { geo in
             ZStack {
+                if cellsPage == nil {
                 DS.Color.background.color.ignoresSafeArea()
                 stageView
+                }
                 // ★ ONE MODAL (maintainer, 2026-08-14): *"Combine the two modals
                 // together. Place the one on the right at the very bottom of the
                 // one on the left."* The floating wizard card is gone; its view
                 // switch is the last row inside this panel.
                 selectionsModal
                     .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
+                if cellsPage == nil {
                 disclaimer
                 saveAndExit
                 refreshSample
+                }
             }
         }
         // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
         // camera was doing before.
         .onAppear { rebuild(force: true); frameSample() }
+        // ★ B4: the capsule's Regions leaves the Cells page through today's Save
+        .onChange(of: cellsPage?.closeToken) { _ in saveAndClose() }
         .background(GeometryReader { g in
             Color.clear.onAppear { canvasHeight = g.size.height }
                 .onChange(of: g.size.height) { canvasHeight = $0 }
@@ -393,6 +422,7 @@ public struct LatticeSetupWizard: View {
     /// is the fix he actually asked for.
     private var selectionsModal: some View {
         VStack(alignment: .leading, spacing: DS.Space.m) {
+            if let c = cellsPage { cellsHeader(c) }
             // ★ ABOVE THE TYPE, ON EVERY VIEW (maintainer, 2026-08-17: "a dark
             // glass on/off check with a 'Simulate Stresses' at the top of the
             // 'Lattice Settings' modal (above the 'type')"). It is not one
@@ -467,6 +497,8 @@ public struct LatticeSetupWizard: View {
                (project.lattice.stageMode ?? .structural) == .structural {
                 subfloorRetentionSwitch
             }
+            // ★ B4: the rows the Cells page adds (Grade, Along, and the type's own rows)
+            if cellsPage != nil, model.stage == .lattice { cellsAddedRows }
             }
             .background(GeometryReader { g in
                 Color.clear.preference(key: WizardPanelRowsHeightKey.self, value: g.size.height)
@@ -2548,8 +2580,134 @@ public struct LatticeSetupWizard: View {
     }
 
     private func saveAndClose() {
-        if settingsChangedSinceOpen { project.lattice = model.applied(to: project.lattice) }
+        // ★ B4: Along's display pick is not a bake input, so it is saved on its own test
+        if settingsChangedSinceOpen || model.gradeAlong != project.lattice.gradeAlong {
+            project.lattice = model.applied(to: project.lattice)
+        }
         onExit()
+    }
+
+    // MARK: ★ B4 — the Cells page's header and added rows
+
+    /// "Cells" · Save / Done, and a tab per region (the rows apply to every region today, and say so).
+    @ViewBuilder private func cellsHeader(_ c: CellsPageContext) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack {
+                Text(LatticeStagePage.cells.title).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                Button { saveAndClose() } label: {
+                    Text(settingsChangedSinceOpen || model.gradeAlong != project.lattice.gradeAlong ? "Save" : "Done")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, DS.Space.m).frame(height: 32)
+                        .background(Capsule().fill(DS.Color.accent.color))
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("lattice-cells-save")
+            }
+            if !c.regions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Space.xs) {
+                        ForEach(Array(c.regions.enumerated()), id: \.offset) { i, name in
+                            Button { cellsTab = i } label: {
+                                Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                    .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
+                                    .background(Capsule().fill((cellsTab == i ? DS.Color.accent.opacity(0.85)
+                                                                 : DS.Color.background.opacity(0.35)).color))
+                                    .foregroundStyle(DS.Color.textPrimary.color)
+                                    .frame(minHeight: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("lattice-cells-tab-\(i)")
+                        }
+                    }
+                }
+                shortNote(LatticeCellsRow.tabsNote)
+            }
+        }
+    }
+
+    /// Grade from → to (today's density band: `maxRelativeDensity` → `minRelativeDensity`), Along (three; only "By stress"
+    /// is built), then Strength (Structural) or Ties and Overhangs (Aesthetic) — each line says what backs it.
+    @ViewBuilder private var cellsAddedRows: some View {
+        let mode = project.lattice.stageMode
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            ForEach(LatticeCellsRow.rows(mode), id: \.rawValue) { row in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(row.title).font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                    switch row {
+                    case .grade:
+                        HStack(spacing: DS.Space.s) {
+                            cellsPercentBox("cells-grade-from", title: "Grade from", value: model.relativeDensity) { v in
+                                model.relativeDensity = Swift.min(1, Swift.max(v, Swift.max(0.05, model.minRelativeDensity + 0.02)))
+                                rebuild()
+                            }
+                            Text("\u{2192}").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+                            cellsPercentBox("cells-grade-to", title: "Grade to", value: model.minRelativeDensity) { v in
+                                model.minRelativeDensity = Swift.max(0, Swift.min(v, model.relativeDensity - 0.02))
+                                rebuild()
+                            }
+                            Text("density").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                        }
+                    case .along:
+                        let lit = LatticeGradeAlong.lit(stored: model.gradeAlong, densityMode: model.densityMode)
+                        HStack(spacing: DS.Space.xs) {
+                            ForEach(LatticeGradeAlong.allCases, id: \.rawValue) { a in
+                                let off = a == .load && !model.simulateStresses
+                                Button {
+                                    guard model.chooseAlong(a) else { return }
+                                    rebuild()
+                                } label: {
+                                    Text(a.title(mode)).font(.system(size: 11, weight: .semibold))
+                                        .lineLimit(1).minimumScaleFactor(0.8)
+                                        .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                                        .frame(maxWidth: .infinity)
+                                        .background(RoundedRectangle(cornerRadius: DS.Radius.pill)
+                                            .fill((lit == a ? DS.Color.accent.opacity(0.85)
+                                                   : DS.Color.background.opacity(0.35)).color))
+                                        .foregroundStyle((off ? DS.Color.textTertiary : DS.Color.textPrimary).color)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(off)
+                                .accessibilityIdentifier("lattice-cells-along-\(a.rawValue)")
+                            }
+                        }
+                        if let note = LatticeGradeAlong.note(lit: lit, densityMode: model.densityMode, mode: mode) {
+                            shortNote(note, warning: true)
+                        }
+                    case .strength:
+                        shortNote(LatticeCellsRow.strengthLine)
+                    case .ties:
+                        shortNote(model.cellTransition == .organicGrade ? LatticeCellsRow.tiesOrganic
+                                                                        : LatticeCellsRow.tiesNotOrganic)
+                    case .overhangs:
+                        shortNote(LatticeCellsRow.overhangsLine)
+                    }
+                }
+                .accessibilityIdentifier("lattice-cells-row-\(row.rawValue)")
+            }
+        }
+    }
+
+    /// A percent box that types (his rule: every number takes the keypad).
+    private func cellsPercentBox(_ key: String, title: String, value: Double,
+                                 write: @escaping (Double) -> Void) -> some View {
+        Text("\(Int((value * 100).rounded())) %")
+            .font(.system(size: 12, weight: .bold)).monospacedDigit()
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Color.fillSelected.color))
+            .frame(minHeight: 44).contentShape(Rectangle())
+            .onTapGesture { numberPadField = key }
+            .numberPad(Binding(get: { numberPadField == key }, set: { if !$0 { numberPadField = nil } }),
+                       config: .init(title: title, unit: "%", allowsDecimal: false),
+                       seed: (value * 100).rounded()) { v in
+                guard let v else { return }
+                write(v / 100)
+            }
+            .accessibilityIdentifier(key)
     }
 
     // MARK: the moves
@@ -2566,6 +2724,7 @@ public struct LatticeSetupWizard: View {
             sampleIsStale = true
             return
         }
+        guard cellsPage == nil else { return }   // ★ B4: the Cells page draws no sample cube
         sampleIsStale = false
         let t0 = CFAbsoluteTimeGetCurrent()
         mesh = model.stageMesh(progress: tileProgress,

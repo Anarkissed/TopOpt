@@ -181,7 +181,8 @@ final class TopologyStageTests: XCTestCase {
 
     func testTopologyHasNoSurfaceButtonAndTheMenuReachesEditFaces() throws {
         XCTAssertFalse(WorkspaceStage.topology.drawsForwardButtons, "Topology draws no stage buttons")
-        XCTAssertTrue(WorkspaceStage.lattice.drawsForwardButtons, "the lattice stage keeps its own until B4")
+        XCTAssertFalse(WorkspaceStage.lattice.drawsForwardButtons, "B4: the lattice stage's capsule carries them")
+        XCTAssertTrue(WorkspaceStage.surface.drawsForwardButtons, "the surface stage keeps its own until B5")
         let gate = LatticeEntryButtonGate.compute(gravitySet: true, anchors: 1, loads: 1)
         let rows = TopologyStageMenu.rows(typeInUse: nil, latticeGate: gate)
         XCTAssertEqual(rows.map(\.title), ["Topology", "Lattice\u{2026}", "Edit faces\u{2026}"])

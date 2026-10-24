@@ -1575,6 +1575,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         var s = self
         s.selectableWallCoreDead = [:]
         s.organicForecast = nil
+        s.gradeAlong = nil   // ★ B4: Along's UI-only pick never re-keys the bake
         return s
     }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
@@ -1590,6 +1591,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// is what makes the modal appear; it is deliberately NOT defaulted, because a
     /// default would silently pick which claim the receipt makes.
     public var stageMode: LatticeStageMode?
+    /// ★ B4 (the Cells page's Along, decided 2026-10-24): which way he wants the grade to run. A DISPLAY choice: only
+    /// "By stress" has a backing (`densityMode == .sim`, set through the wizard's own setter); "Through the depth" and
+    /// "Across the face" are saved and SHOWN, and no job key reads this (LatticeStageTests pins the job). nil ⇒ unpicked.
+    public var gradeAlong: LatticeGradeAlong? = nil
 
     /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own
     /// name string. ORTHOGONAL to `cellSizeMode`: that says how the cell is CHOSEN,
@@ -2369,6 +2374,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
         case stageMode                  // Structural / Aesthetic — chosen once (nil ⇒ unasked)
+        case gradeAlong                 // B4: the Cells page's Along (display only; nil ⇒ unpicked)
         case algorithm                  // core's LatticeAlgorithm name ("" ⇒ not stated)
         case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
@@ -2438,6 +2444,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // ★ ABSENT ⇒ NOT YET ASKED. A pre-mode snapshot must reopen the modal rather
         // than inherit a mode nobody chose — the choice decides what the receipt claims.
         stageMode = try c.decodeIfPresent(LatticeStageMode.self, forKey: .stageMode)
+        // ★ B4: an unknown raw value decodes as unpicked, never a failed project (a dropped project is silent)
+        gradeAlong = (try? c.decodeIfPresent(LatticeGradeAlong.self, forKey: .gradeAlong)) ?? nil
         // Absent in every project saved before the selector existed, and "" is exactly
         // what those projects mean: not stated, so core takes doubled.
         algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
@@ -2616,6 +2624,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
             try c.encode(organicPickedSeparationMM, forKey: .organicPickedSeparationMM)
         }
         try c.encodeIfPresent(stageMode, forKey: .stageMode)
+        try c.encodeIfPresent(gradeAlong, forKey: .gradeAlong)
         // Written only when stated, so an untouched project's file is byte-identical
         // to one saved before the selector existed (bar U1).
         if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }
