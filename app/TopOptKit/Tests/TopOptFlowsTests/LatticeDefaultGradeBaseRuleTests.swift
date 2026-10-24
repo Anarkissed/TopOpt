@@ -164,11 +164,12 @@ final class LatticeDefaultGradeBaseRuleTests: XCTestCase {
 /// ★★ (b)'S "DO NO HARM" GUARD — the reviewer's ruling, 2026-10-11 04:31, approved by the maintainer: "Take a (b) candidate
 /// only if its uncovered share is no larger than n0's. Otherwise keep n0. Ties keep n0. (b) exists to restore coverage,
 /// so it must never cost coverage." 3418E167 Default Grade r1 was the case: (b)'s 3.50 left 75.0 % uncovered where n₀'s
-/// 4.67 left 62.5 %, because the preview's wall-thickness slab fits a 4.67 grid better. A 14 mm prism whose slab
-/// ends at 9.34 mm is that case in miniature: 4.67 lays two whole layers (9.33 mm), 3.50 only two (7 mm).
+/// 4.67 left 62.5 %, because the preview's wall-thickness slab fits a 4.67 grid better. That slab is withdrawn
+/// (his 2026-10-11: the lattice always fills the whole prism), so the case in miniature is now a 9.34 mm PRISM:
+/// 4.67 lays two whole layers (9.33 mm), 3.50 only two (7 mm).
 final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
 
-    private func slab(prismDepth: Double, slabEnd: Double?) -> (LatticeVoxelGrid, LatticeVoxelGrid, LatticeRegionSpec) {
+    private func slab(prismDepth: Double) -> (LatticeVoxelGrid, LatticeVoxelGrid, LatticeRegionSpec) {
         let n = 44, origin = SIMD3<Float>(-2, -2, -2)
         var vals = [Float](repeating: 0, count: n * n * n)
         for k in 0..<n { for j in 0..<n { for i in 0..<n {
@@ -178,7 +179,6 @@ final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
         var r = LatticeRegionSpec(role: .include, kind: .face)
         r.origin = SIMD3(20, 0, 20); r.normal = SIMD3(0, 1, 0); r.halfUMM = 19; r.halfWMM = 19; r.depthMM = prismDepth
         r.outlineLoops = [[SIMD2(-18, -18), SIMD2(18, -18), SIMD2(18, 18), SIMD2(-18, 18)]]
-        if let e = slabEnd { r.thicknessMap = .constant(startMM: 0, endMM: e) }
         let sp = SIMD3<Float>(repeating: 1)
         return (LatticeVoxelGrid(nx: n, ny: n, nz: n, origin: origin, spacing: sp, values: vals),
                 LatticeVoxelGrid(nx: n, ny: n, nz: n, origin: origin, spacing: sp, values: [Float](repeating: 0.3, count: vals.count)), r)
@@ -193,10 +193,10 @@ final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
         return (f?.steppedCells.first?.planBaseCellMM ?? 0, st)
     }
 
-    /// ★ RED without the guard: (b)'s 3.50 costs coverage under a 9.34 mm slab, so the bake keeps n₀'s 4.67.
+    /// ★ RED without the guard: (b)'s 3.50 costs coverage in a 9.34 mm prism, so the bake keeps n₀'s 4.67.
     func testTheGuardKeepsN0WhereBCostsCoverage() {
-        let (occ, dem, r) = slab(prismDepth: 14, slabEnd: 9.34)
-        let b = 3.5, n0 = 14.0 / 3
+        let (occ, dem, r) = slab(prismDepth: 9.34)
+        let b = 3.5, n0 = 9.34 / 2
         var stB = LatticePreviewOccupancy.OctreeBakeStats(), st0 = LatticePreviewOccupancy.OctreeBakeStats()
         let fB = LatticePreviewOccupancy.octreeCellFieldOnce(occupancy: occ, demand: dem, regions: [r], cellMM: [b],
             lineWidthMM: 0.45, realFloorMM: 2.25, shapeFitBandMM: 0, shapeFit: false, densityLo: 0.1, densityHi: 0.3,
@@ -206,7 +206,7 @@ final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
             densityGamma: 1, latticeID: "octet", dyadicSteps: true, stats: &st0)
         let uB = LatticePreviewOccupancy.uncoveredShare(region: 0, regions: [r], cells: fB?.steppedCells ?? [], occupancy: occ)
         let u0 = LatticePreviewOccupancy.uncoveredShare(region: 0, regions: [r], cells: f0?.steppedCells ?? [], occupancy: occ)
-        print(String(format: "GUARD slab 9.34: (b) 3.50 uncovered %.1f%%, n0 4.67 uncovered %.1f%%", 100 * uB, 100 * u0))
+        print(String(format: "GUARD prism 9.34: (b) 3.50 uncovered %.1f%%, n0 4.67 uncovered %.1f%%", 100 * uB, 100 * u0))
         XCTAssertGreaterThan(uB, u0, "positive control: (b) costs coverage here")
         let g = bake(occ, dem, r, cell: b, before: n0)
         XCTAssertEqual(g.base, n0, accuracy: 1e-9, "★ the guard keeps n0")
@@ -216,7 +216,7 @@ final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
 
     /// Ties keep n₀: the whole 14 mm prism holds three 4.67 and four 3.50 alike.
     func testATieKeepsN0() {
-        let (occ, dem, r) = slab(prismDepth: 14, slabEnd: nil)
+        let (occ, dem, r) = slab(prismDepth: 14)
         let g = bake(occ, dem, r, cell: 3.5, before: 14.0 / 3)
         print(String(format: "GUARD whole prism: kept %@ guarded %@ ⇒ base %.4f", "\(g.st.baseRuleKept)", "\(g.st.baseRuleGuarded)", g.base))
         XCTAssertEqual(g.base, 14.0 / 3, accuracy: 1e-9, "★ a tie keeps n0")
@@ -225,7 +225,7 @@ final class LatticeDefaultGradeBaseRuleGuardTests: XCTestCase {
     /// Where (b) restores coverage the guard lets it: a 12.6 mm slab in a 12.6 mm prism fits two 6.30 layers and one
     /// 9.45 cell plus a 3.15 strip of nothing (9.45's halves stop at 4.73, which cannot fill 3.15).
     func testTheGuardTakesBWhereItRestoresCoverage() {
-        let (occ, dem, r) = slab(prismDepth: 12.6, slabEnd: nil)
+        let (occ, dem, r) = slab(prismDepth: 12.6)
         let g = bake(occ, dem, r, cell: 6.3, before: 9.45)
         print(String(format: "GUARD 12.6 prism: kept %@ guarded %@ ⇒ base %.4f", "\(g.st.baseRuleKept)", "\(g.st.baseRuleGuarded)", g.base))
         XCTAssertEqual(g.base, 6.3, accuracy: 1e-9, "★ (b) is taken where it covers more")

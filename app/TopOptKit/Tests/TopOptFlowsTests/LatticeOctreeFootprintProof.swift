@@ -110,17 +110,12 @@ final class LatticeOctreeFootprintProof: XCTestCase {
         }
         let field: StressField? = !lat.gradingMode.followsStress ? nil
             : (lat.densityMode.needsSimulation && stageField != nil ? sf(stageField!) : LatticeSDFScene.demandField(from: pm.run.outcome))
-        let wallStressField = stageField.map(sf) ?? LatticeSDFScene.demandField(from: pm.run.outcome)
         let bead = pm.printParams.strutLineWidthMM
         let params = lat.proxyParams(limits: TopOptKit.latticeLimits(topology: lat.topologyID), lineWidthMM: bead)
         let span = params.densitySpan
         let emission = pm.latticeJobRegions()
         var regions = emission.regions
-        if !lat.wallThickness.isThrough {
-            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face { regions[i].thickness = lat.wallThickness }
-        }
         let stageMode = lat.stageMode ?? .structural
-        let steps = LatticeWallDepthSteps.forWalls(lat, regions: regions, beadMM: bead)
         func scene(_ floorCells: [Double]) -> LatticeSDFScene {
             LatticeSDFScene(mesh: mesh, field: field, latticeID: params.latticeID,
                             stressField: stageField.map(sf),
@@ -130,8 +125,6 @@ final class LatticeOctreeFootprintProof: XCTestCase {
                             regions: regions, rhoMin: span.lo, rhoMax: span.hi, gamma: Swift.max(0.05, params.gamma),
                             whenEmpty: .latticeNothing, skinMM: lat.boundary.faceSkinMM(wallRingMM: pm.printParams.wallRingMM),
                             skippedFaces: emission.skippedFaces,
-                            wallThicknessFloorMM: floorCells.filter { $0 > 0 }.min() ?? lat.cellMM,
-                            wallDepthSteps: steps, wallStressField: wallStressField,
                             bandOverrides: lat.bandTreatments, octetBand: true,
                             bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0, beadMM: bead)
         }

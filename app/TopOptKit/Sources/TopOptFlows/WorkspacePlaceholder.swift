@@ -388,8 +388,6 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
-    /// ★ the wizard's wall editor is covering the stage — no gizmo over it (2026-09-21)
-    @State private var wizardCoversStage = false
 
     /// ★ WHICH STAGE THE WORKSPACE IS SHOWING (task 2026-08-14-lattice-separation
     /// §1/§2/§3). The TO page and the lattice page are the SAME page — same
@@ -1381,10 +1379,6 @@ public struct WorkspacePlaceholder: View {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
                     latticeSettingsSavedThisSession = true
-                    // ★ the gizmo hid with the wall editor and stayed hidden when the wizard
-                    // left with the editor still up (his 2026-09-21 22:44); the preference
-                    // dies with the wizard, so it is cleared here
-                    wizardCoversStage = false
                     // ★ SAVE BAKES (his 2026-09-21): a changed setting starts its bake now,
                     // superseding whatever is running; an unchanged one starts nothing.
                     if project.lattice.previewBakeInputs != latticeInputsLastBaked {
@@ -1408,8 +1402,6 @@ public struct WorkspacePlaceholder: View {
                 .wallMarking { goToWallMarking() }
                 // ★ the stage draws with the workspace-owned camera the one gizmo follows
                 .stageCamera(wizardCamera)
-                // ★ the wall editor's cover hides the gizmo (2026-09-21)
-                .onPreferenceChange(WizardStageCoveredKey.self) { wizardCoversStage = $0 }
                 .transition(.opacity)
             }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
@@ -1618,8 +1610,6 @@ public struct WorkspacePlaceholder: View {
                 OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
                                      size: gizmoSize)
                     .latticeBandChipKeepOut()
-                    // ★ leaves with the cube when the wizard's wall editor covers the stage
-                    .modifier(StageDepartureMotion(covered: wizardCoversStage))
             }
             Spacer()
         }
@@ -4831,8 +4821,7 @@ public struct WorkspacePlaceholder: View {
         for r in project.faceRegions.regions { h.combine(r.id) }
         let l = project.lattice
         h.combine(l.enabled)
-        // ★ the slab and the per-wall cells are inputs the bake reads (review #37)
-        h.combine(l.wallThickness)
+        // ★ the per-wall cells are inputs the bake reads (review #37)
         for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
         for (k, v) in l.selectableSyntheticFoci.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
         // ★★★ THE STAGE MODE. It changes the cells-per-member FLOOR the bake applies,
@@ -4992,16 +4981,6 @@ public struct WorkspacePlaceholder: View {
         } else {
             field = LatticeSDFScene.demandField(from: run.outcome)
         }
-        // ★ the wall-depth rule's field (review #31): the measured lattice sim if there is
-        // one, else the run's — independent of the density grading mode
-        let wallStressField: StressField? = {
-            if let f = latticeStressField {
-                return StressField(nx: f.nx, ny: f.ny, nz: f.nz,
-                                   origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
-                                   values: f.vonMises)
-            }
-            return LatticeSDFScene.demandField(from: run.outcome)
-        }()
         // ★ the printer's bead, captured on the main thread for the skin under unselected faces
         let beadForBake = project.printParams.strutLineWidthMM
         // ★ THE REGIONS THE RUN WILL ACTUALLY LATTICE (maintainer, 2026-08-17).
@@ -5009,16 +4988,8 @@ public struct WorkspacePlaceholder: View {
         // walks the selection and the settings. Empty on the settings page's
         // sample block, which is exactly when clipping must NOT happen.
         let emission = project.latticeJobRegions()
-        // ★ THE SLAB IS A PREVIEW REQUEST (2026-09-21): attached to the preview's copy of
-        // the regions only; `emission.regions` — the job's — stays as declared until the
-        // slab is agreed to work (his rule: preview first, core only then).
-        var regions = emission.regions
-        let wallThicknessAsk = project.lattice.wallThickness
-        if !wallThicknessAsk.isThrough {
-            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face {
-                regions[i].thickness = wallThicknessAsk
-            }
-        }
+        // ★ the job's regions, whole: the lattice fills every prism 0 to depthMM (his 2026-10-11)
+        let regions = emission.regions
         // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
@@ -5175,11 +5146,6 @@ public struct WorkspacePlaceholder: View {
                 NSLog("DIAG organic trace grid: the solve's own %.2f mm (%d×%d×%d); preview voxel %.2f mm",
                       o.spacingMM, o.dims.0, o.dims.1, o.dims.2, previewVoxelMM)
             }
-            organicIn?.seedBoost = lat.wallThickness.seedBoost
-            // ★ THE DEPTHS EACH WALL CAN BE PACKED TO (his D1, 2026-09-21) — the same rule
-            // the wizard's editor draws on: `LatticeWallDepthSteps.forWalls`.
-            let wallDepthSteps = LatticeWallDepthSteps.forWalls(lat, regions: regions,
-                                                                 beadMM: printParams.strutLineWidthMM)
             // Set on main when a newer bake takes over, read by the stage loop.
             let cancelledStages = LatticeBakeFlag()
             // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
@@ -5349,14 +5315,6 @@ public struct WorkspacePlaceholder: View {
                                         skinMM: skinMM,
                                         skippedFaces: skippedFaces,
                                         skippedRegionNames: skippedRegionNames,
-                                        // ★ one cell: the smallest per-region base for
-                                        // the octet, the window's low end for organic
-                                        wallThicknessFloorMM: algorithmForBake == "organic"
-                                            ? (organicIn?.separationMinMM ?? 0)
-                                            : (steppedCells.filter { $0 > 0 }.min()
-                                               ?? lat.cellMM),
-                                        wallDepthSteps: wallDepthSteps,
-                                        wallStressField: wallStressField,
                                         // ★ the band chips' choices (his 2026-09-27) — read
                                         // with the rest of `lat` on main; a change is a
                                         // `previewBakeInputs` change, so it rebakes

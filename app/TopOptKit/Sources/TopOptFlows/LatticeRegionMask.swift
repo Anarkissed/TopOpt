@@ -42,14 +42,6 @@ public enum LatticeRegionMask {
         contains(p, region: region, inPlaneReachMM: 0)
     }
 
-    /// `contains` over the WHOLE declared prism, ignoring any slab — what the slab's own
-    /// builder scans, and the reference the sim rule normalises against.
-    public static func containsWholePrism(_ p: SIMD3<Double>, region: LatticeRegionSpec) -> Bool {
-        var whole = region
-        whole.thicknessMap = nil
-        return contains(p, region: whole, inPlaneReachMM: 0)
-    }
-
     /// ★★★ `contains`, WITH THE IN-PLANE TEST RELAXED BY `inPlaneReachMM` — for
     /// deciding which base cells a face OWNS, as distinct from where its material is
     /// (2026-08-27).
@@ -89,8 +81,8 @@ public enum LatticeRegionMask {
             let s = simd_dot(d, n)
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
-            let (s0, s1) = region.slabRange(uv: uv)     // the slab, or the whole prism
-            guard s >= s0, s <= s1 else { return false }
+            // ★ the whole prism, 0 to depth — the lattice always fills it (his 2026-10-11)
+            guard s >= 0, s <= region.depthMM else { return false }
             // ★★ THE OUTLINE WINS WHEN THERE IS ONE. The rectangle was the face's
             // BOUNDING BOX — 41.2% and 29.8% of the emitted region was actually
             // the face on his two lattice walls, and the rest was solid material
@@ -205,7 +197,7 @@ public enum LatticeRegionMask {
             let edgeUV = near.point + near.outward * region.inPlaneOffsetMM
             let probeUV = edgeUV + near.outward * stepMM
             let probe = region.origin + u * probeUV.x + v * probeUV.y + n * s
-            guard solidAt(probe), signedDistanceWholePrism(probe, regions: regions) > 0 else { continue }
+            guard solidAt(probe), signedDistance(probe, regions: regions) > 0 else { continue }
             best = Swift.min(best, grown)
         }
         return best
@@ -223,13 +215,10 @@ public enum LatticeRegionMask {
             let s = simd_dot(d, n)
             let (u, v) = basis(n)
             let uv = SIMD2<Double>(simd_dot(d, u), simd_dot(d, v))
-            // ★ THE SLAB (2026-09-21): the whole prism unless a thickness map says
-            // otherwise — then [start, end(uv)] along the normal, so every reader of
-            // this distance (the shell clip, the march, the candidates, the octree)
-            // sees the one slab. See `LatticeWallThickness`.
-            let (s0, s1) = region.slabRange(uv: uv)
-            let half = 0.5 * Swift.max(0, s1 - s0)
-            let along = abs(s - (s0 + half)) - half
+            // ★ the whole prism along the normal, 0 to depth (his 2026-10-11: "the actual lattice
+            // depth NEVER changes")
+            let half = 0.5 * region.depthMM
+            let along = abs(s - half) - half
             // ★ THE OUTLINE DISTANCE IS THE EXPENSIVE TERM — O(outline vertices)
             // per voxel, and the field is baked over the whole part bbox. Measured
             // on his face 15 (63 vertices) it took the scene bake from 3.70 s to
@@ -287,23 +276,6 @@ public enum LatticeRegionMask {
         }
         return best
     }
-    /// ★★★ THE POCKET (his 2026-09-21 23:17, images 5–8: "Walls should never take the
-    /// place of the empty or too little lattice! Ever!"). A declared region is the whole
-    /// prism of material REMOVED; the slab only says where inside it the lattice goes.
-    /// The shell opens and the body is carved over the WHOLE prism; where the slab is
-    /// thin or absent there is air, never the part's own wall. Readers that PLACE
-    /// lattice (candidates, cells, the slab mesh) keep the slab-aware distance above.
-    public static func signedDistanceWholePrism(_ p: SIMD3<Double>,
-                                                regions: [LatticeRegionSpec],
-                                                reachMM: Double = 0) -> Double {
-        var best = 1e9
-        for r in regions where r.role == .include {
-            var whole = r
-            whole.thicknessMap = nil
-            best = Swift.min(best, signedDistance(p, region: whole, reachMM: reachMM))
-        }
-        return best
-    }
 
     /// True when `p` is inside ANY of the regions that will actually be latticed.
     ///
@@ -341,20 +313,6 @@ public enum LatticeRegionMask {
         /// No regions ⇒ nothing latticed. The STAGE: the user has declared no
         /// lattice, so none is drawn.
         case latticeNothing
-    }
-
-    /// ★ THE SAME CLIP OVER THE WHOLE PRISM (review 2026-09-22 #21): the slab-clipped
-    /// grid is where LATTICE goes; the measurers — the wall width along the normal, the
-    /// rim's attachment seed, the in-plane boundary distance, the octree's "is there
-    /// material here" — must read the whole declared prism, or every slab edge reads
-    /// as a boundary and grows a rim, a cap, or a solid wall across the pocket.
-    public static func clippedWholePrism(_ grid: LatticeVoxelGrid,
-                                         to regions: [LatticeRegionSpec],
-                                         whenEmpty: EmptyRegionPolicy = .latticeEverything)
-        -> LatticeVoxelGrid {
-        var whole = regions
-        for i in whole.indices { whole[i].thicknessMap = nil }
-        return clipped(grid, to: whole, whenEmpty: whenEmpty)
     }
 
     public static func clipped(_ grid: LatticeVoxelGrid,

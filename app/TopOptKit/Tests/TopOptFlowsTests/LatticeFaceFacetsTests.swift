@@ -59,21 +59,6 @@ final class LatticeFaceFacetsTests: XCTestCase {
         XCTAssertEqual(LatticeFaceFacets.facets(face: 7, in: mesh).count, 1)
         XCTAssertTrue(LatticeFaceFacets.facets(face: 99, in: mesh).isEmpty)
     }
-
-    /// The packer's slab test: a cell is laid only where its whole depth is inside the band.
-    func testACellIsLaidOnlyInsideTheDrawnBand() {
-        var r = LatticeRegionSpec(role: .include, kind: .face)
-        r.origin = .zero; r.normal = SIMD3(0, 0, 1); r.depthMM = 12
-        r.outlineLoops = [[SIMD2(-20, -20), SIMD2(20, -20), SIMD2(20, 20), SIMD2(-20, 20)]]
-        r.selectableKey = "f:g:1"
-        XCTAssertTrue(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 12, region: r, axis: 2), "no map: the whole prism")
-        r.thickness = LatticeWallThickness(depthBySim: false, density: .manualSingle, pct: 50, faces: ["f:g:1": .init()])
-        r.thicknessMap = LatticeWallThicknessBuilder.build(region: r, spec: r.thickness!, field: nil, referenceMPa: 0, floorMM: 0)
-        XCTAssertEqual(r.slabRange(uv: .zero).end, 6, accuracy: 1e-9)
-        XCTAssertFalse(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 12, region: r, axis: 2), "a whole-wall cell pokes out of a 6 mm band")
-        XCTAssertTrue(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 6, region: r, axis: 2), "the next rung fits")
-        XCTAssertFalse(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 6), 6, region: r, axis: 2), "not behind the band")
-    }
 }
 
 /// ★ SEAMS (his 2026-09-22 01:58): an outline edge shared with another latticed prism is

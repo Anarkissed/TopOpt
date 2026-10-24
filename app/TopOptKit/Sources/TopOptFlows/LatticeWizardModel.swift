@@ -184,8 +184,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var shapeFitBandMM: Double
     /// The grade's strength across the band (−1…+1) — see `LatticeSettings.shapeFitGradeStrength`.
     public var shapeFitGradeStrength: Double = 0
-    /// ★ the lattice's thickness through the wall (2026-09-21) — see `LatticeWallThickness`.
-    public var wallThickness: LatticeWallThickness = .standard
     /// The hand-set strut thickness (mm), or nil for derived — see
     /// `LatticeSettings.manualStrutThicknessMM`.
     public var manualStrutThicknessMM: Double?
@@ -376,7 +374,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         self.cellTransition = s.cellTransition
         self.singleCellMembers = s.singleCellMembers
         self.shapeFitGradeStrength = s.shapeFitGradeStrength
-        self.wallThickness = s.wallThickness
         // ★ the rule holds on load too: a saved single-cell project opens with Skin
         if s.singleCellMembers, self.boundary != .fullSkin { self.boundary = .fullSkin }
         self.gradingMode = s.gradingMode
@@ -412,7 +409,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         out.cellMinMM = cellMinMM
         out.shapeFitBandMM = shapeFitBandMM
         out.shapeFitGradeStrength = shapeFitGradeStrength
-        out.wallThickness = wallThickness
         out.cellMaxMM = cellMaxMM
         out.boundary = boundary
         out.manualStrutThicknessMM = manualStrutThicknessMM

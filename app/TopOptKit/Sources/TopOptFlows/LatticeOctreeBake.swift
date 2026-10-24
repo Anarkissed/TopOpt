@@ -486,7 +486,7 @@ extension LatticePreviewOccupancy {
         var inPrism = 0, bare = 0
         for k in 0..<occ.nz { for j in 0..<occ.ny { for i in 0..<occ.nx where occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 {
             let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * occ.spacing)
-            guard LatticeRegionMask.containsWholePrism(p, region: region) else { continue }
+            guard LatticeRegionMask.contains(p, region: region) else { continue }
             inPrism += 1
             let covered = (grid[key(p)] ?? []).contains { ci in
                 let c = cells[ci]
@@ -823,7 +823,6 @@ extension LatticePreviewOccupancy {
                 count[axis] = Swift.max(1, Int((ladder.span.hi / S).rounded(.up)) - axisI0)
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
-                    if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
                     // core's depth rule, as the placement's `fits` applies it (round 5)
                     if Self.coreDepthRuleEnabled, region.depthMM > 0 {
                         let s0 = simd_dot(lo - region.origin, n)
@@ -1062,26 +1061,14 @@ extension LatticePreviewOccupancy {
             }
             var lastFail = ""
             var outlineFailed = false
-            var slabFailed = false
             var depthFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
                 outlineFailed = false
-                slabFailed = false
                 depthFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
-                // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
-                // the rim … something is making the lattice move rather than thin"): a
-                // cell is laid only where its whole depth lies inside the drawn band, so
-                // a thinner band takes the next rung down instead of a whole cell
-                // poking out of it.
-                if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) {
-                    lastFail = "slab"
-                    slabFailed = true
-                    return (false, nearest, farthest)
-                }
                 // ★★ CORE'S DEPTH RULE, EXACTLY (round 5, 2026-10-08; stepped_plan.cpp:283-324, the
                 // reviewer's ruling 1 of 2026-10-05): the cube projected on the unit normal from the
                 // face plane — its CENTRE inside [0, depth] and its FAR side not past the depth, within
@@ -1341,11 +1328,7 @@ extension LatticePreviewOccupancy {
                 // that failed only on the part's depth (the plate thinner than the
                 // prism) is a plain cell, painted where there is material and clipped
                 // by the part like any other.
-                // ★ NEVER A CELL OUTSIDE THE SLAB (2026-09-23): a finest cell that failed
-                // the depth slab is air, not a plain cell — his "lattice jutting out of
-                // the rim" was this fall-through painting it.
-                if slabFailed { return }
-                // ★ round 5: nor past the prism's depth by core's rule — the same air as the slab
+                // ★ round 5: never past the prism's depth by core's rule — air
                 if depthFailed { return }
                 if yielded { return }                          // the finest rung: air
                 if outlineFailed {
@@ -1481,7 +1464,7 @@ extension LatticePreviewOccupancy {
                         if !fillIsFinest, shapeFit, shapeFitBandMM > 0, sBase > f + 1e-9,
                            dc < shapeFitBandMM * (fillS - f) / (sBase - f) - 1e-9 { continue }
                         let (ok, nearest, farthest) = fits(lo, fillS)
-                        if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
+                        if depthFailed { continue }  // ★ past the depth: air
                         if hasYielded(ladder.region, lo, fillS) { continue }   // R7: the finest rung yielded
                         if ok || !outlineFailed {
                             out.append(Placement(i: i, S: fillS, finest: fillIsFinest, edge: false, nearest: nearest))

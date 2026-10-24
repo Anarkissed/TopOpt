@@ -51,7 +51,7 @@ public enum LatticeRegionCells {
                 // buys is the quilt (see `wallWidthAlongNormalMM`). The isotropic measure
                 // stays as the fallback — a bolt has no single direction to walk.
                 let d = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
-                    region: r, occupancy: s.prismOccupancy, partSDF: s.partMaterialSDF,
+                    region: r, occupancy: s.occupancy, partSDF: s.partMaterialSDF,
                     percentile: widthPercentile)
                 if d > 0 {
                     w = d
@@ -157,8 +157,8 @@ public enum LatticeRegionCells {
             // Grade the per-region bake's cell (quiltStep) takes the first whole-number fit whose halving
             // ladder ends at the floor, not at prints-open. Stepped's any-step menu has no such stop.
             if quiltStep, project.lattice.gradeStepsAreHalves, cell > 0 {
-                let voxel = scene.map { Double(Swift.max($0.prismOccupancy.spacing.x,
-                                                         Swift.max($0.prismOccupancy.spacing.y, $0.prismOccupancy.spacing.z))) } ?? 0
+                let voxel = scene.map { Double(Swift.max($0.occupancy.spacing.x,
+                                                         Swift.max($0.occupancy.spacing.y, $0.occupancy.spacing.z))) } ?? 0
                 let topology = project.lattice.topologyID
                 let moved = Self.cellWhoseHalvesEndAtTheFloor(
                     depthMM: effDepth, cellMM: cell, tileFloorMM: tileFloor,

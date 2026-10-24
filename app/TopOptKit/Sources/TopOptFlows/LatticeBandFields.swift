@@ -167,7 +167,7 @@ public enum LatticeBandFields {
         func reached(_ t: Int, _ rg: LatticeRegionSpec) -> Bool {
             let p0 = A[t], p1 = B[t], p2 = C[t], nOut = N[t]
             let probes = [(p0 + p1 + p2) / 3, p0, p1, p2, 0.5 * (p0 + p1), 0.5 * (p1 + p2), 0.5 * (p2 + p0)].map { $0 - nOut * 1.5 }
-            for pr in probes where LatticeRegionMask.containsWholePrism(pr, region: rg) { return true }
+            for pr in probes where LatticeRegionMask.contains(pr, region: rg) { return true }
             let nr = LatticeRegionMask.unit(rg.normal)
             let (ru, rv) = LatticeRegionMask.basis(nr)
             var plan: [SIMD3<Double>] = [rg.origin]
@@ -183,7 +183,7 @@ public enum LatticeBandFields {
                 guard abs(den) > 1e-18 else { continue }
                 let v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den
                 guard v >= -1e-6, w >= -1e-6, v + w <= 1 + 1e-6 else { continue }
-                if LatticeRegionMask.containsWholePrism(q - nOut * 1.5, region: rg) { return true }
+                if LatticeRegionMask.contains(q - nOut * 1.5, region: rg) { return true }
             }
             return false
         }
@@ -290,7 +290,7 @@ public enum LatticeBandFields {
         let crossT = Swift.max(c, 3 * h) + 2 * h
         struct IncRegion { var rg: LatticeRegionSpec; var n: SIMD3<Double>; var u: SIMD3<Double>; var v: SIMD3<Double>; var lo: SIMD3<Double>; var hi: SIMD3<Double> }
         let incs: [IncRegion] = includeFaces.map { r0 in
-            var rg = r0; rg.thicknessMap = nil
+            let rg = r0
             let n = LatticeRegionMask.unit(rg.normal)
             let (u, v) = LatticeRegionMask.basis(n)
             var pts = rg.outlineLoops.flatMap { $0 }
@@ -315,7 +315,7 @@ public enum LatticeBandFields {
             var best: Double? = nil
             for ir in incs {
                 if simd_reduce_max(simd_max(ir.lo - p, p - ir.hi)) > 0 { continue }
-                guard LatticeRegionMask.containsWholePrism(p, region: ir.rg) else { continue }
+                guard LatticeRegionMask.contains(p, region: ir.rg) else { continue }
                 if abs(simd_dot(nf, ir.n)) > acrossCos { return nil }
                 let d = p - ir.rg.origin
                 let uv = SIMD2(simd_dot(d, ir.u), simd_dot(d, ir.v))
@@ -589,7 +589,7 @@ public enum LatticeBandFields {
         // voxel farther than the cap from a region skips its polygon entirely
         struct RegionEval { var slab: LatticeRegionSpec; var whole: LatticeRegionSpec; var lo: SIMD3<Double>; var hi: SIMD3<Double> }
         let evals: [RegionEval] = regions.filter { $0.role == .include }.map { r in
-            var w = r; w.thicknessMap = nil
+            let w = r
             var lo = SIMD3<Double>(repeating: -1e9), hi = SIMD3<Double>(repeating: 1e9)
             if r.kind == .face {
                 let n = LatticeRegionMask.unit(r.normal)

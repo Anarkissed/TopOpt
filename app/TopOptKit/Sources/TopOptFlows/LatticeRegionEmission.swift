@@ -589,7 +589,7 @@ public enum LatticeRegionEmission {
                     // though beyond that edge is air. The neighbour's lattice is only there
                     // if the part is.
                     if let solidAt, !solidAt(p) { continue }
-                    if LatticeRegionMask.containsWholePrism(p, region: o) { return (rj, off) }
+                    if LatticeRegionMask.contains(p, region: o) { return (rj, off) }
                 }
             }
             return nil

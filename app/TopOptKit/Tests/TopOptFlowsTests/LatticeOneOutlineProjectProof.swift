@@ -71,7 +71,7 @@ final class LatticeOneOutlineProjectProof: XCTestCase {
                                   TopOptKit.lastCoreRefusal ?? "").owners.map { $0 == 1 }
             let ms = Date().timeIntervalSince(t0) * 1000
             // the preview's own containment (the prism, the slab ignored — core has no slab)
-            let p = pts.map { LatticeRegionMask.containsWholePrism($0, region: r) }
+            let p = pts.map { LatticeRegionMask.contains($0, region: r) }
             let bad = zip(c, p).filter { $0 != $1 }.count
             // the positive control: today's mitred wire (each loop's offsetRing; seams pushed by min(depth, cap)·tilt)
             var mitred = r.wireDictionary

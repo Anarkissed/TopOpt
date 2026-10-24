@@ -81,17 +81,12 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         }
         let field: StressField? = !lat.gradingMode.followsStress ? nil
             : (lat.densityMode.needsSimulation && stageField != nil ? sf(stageField!) : LatticeSDFScene.demandField(from: pm.run.outcome))
-        let wallStressField = stageField.map(sf) ?? LatticeSDFScene.demandField(from: pm.run.outcome)
         let bead = pm.printParams.strutLineWidthMM
         let params = lat.proxyParams(limits: TopOptKit.latticeLimits(topology: lat.topologyID), lineWidthMM: bead)
         let span = params.densitySpan
         let emission = pm.latticeJobRegions()
         var regions = emission.regions
-        if !lat.wallThickness.isThrough {
-            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face { regions[i].thickness = lat.wallThickness }
-        }
         let stageMode = lat.stageMode ?? .structural
-        let steps = LatticeWallDepthSteps.forWalls(lat, regions: regions, beadMM: bead)
         func scene(_ floorCells: [Double]) -> LatticeSDFScene {
             LatticeSDFScene(mesh: mesh, field: field, latticeID: params.latticeID,
                             stressField: stageField.map(sf),
@@ -101,8 +96,6 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
                             regions: regions, rhoMin: span.lo, rhoMax: span.hi, gamma: Swift.max(0.05, params.gamma),
                             whenEmpty: .latticeNothing, skinMM: lat.boundary.faceSkinMM(wallRingMM: pm.printParams.wallRingMM),
                             skippedFaces: emission.skippedFaces,
-                            wallThicknessFloorMM: floorCells.filter { $0 > 0 }.min() ?? lat.cellMM,
-                            wallDepthSteps: steps, wallStressField: wallStressField,
                             bandOverrides: lat.bandTreatments, octetBand: true,
                             bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0, beadMM: bead)
         }
@@ -180,7 +173,7 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
         // the back strip is; report it per region before and after the packer fix). Counted on the scene's
         // prism-clipped occupancy at its own voxel; a voxel any region's cell covers is covered.
         do {
-            let po = s1.prismOccupancy
+            let po = s1.occupancy
             let h = Double(Swift.max(po.spacing.x, Swift.max(po.spacing.y, po.spacing.z)))
             let bucket = 8.0
             struct K: Hashable { let x: Int; let y: Int; let z: Int }
@@ -194,7 +187,7 @@ final class LatticeDefaultGradePlanProof: XCTestCase {
             for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
                 let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * po.spacing)
                 guard let ri = b.regions.indices.first(where: { b.regions[$0].role == .include && b.regions[$0].kind == .face
-                    && LatticeRegionMask.containsWholePrism(p, region: b.regions[$0]) }) else { continue }
+                    && LatticeRegionMask.contains(p, region: b.regions[$0]) }) else { continue }
                 prismVox[ri, default: 0] += 1
                 let covered = (grid[key(p)] ?? []).contains { ci in
                     let c = b.cells[ci]

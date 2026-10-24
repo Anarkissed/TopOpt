@@ -96,7 +96,6 @@ final class OrganicOneSizePreviewVsRunProbe: XCTestCase {
         for s in sizes {
             for strut in strutModes {
                 var tag = String(format: "s%g-%@", s, strut)
-                if env["ONESIZE_NOSLAB"] == "1" { tag += "-noslab" }
                 if let b = env["ONESIZE_SEEDBOOST"] { tag += "-seed\(b)" }
                 if env["ONESIZE_MIRROR_CORE"] == "1" { tag += "-mirrorcore" }
                 let dir = out.appendingPathComponent(tag, isDirectory: true)
@@ -154,14 +153,9 @@ final class OrganicOneSizePreviewVsRunProbe: XCTestCase {
                 }
                 let field: StressField? = !lat.gradingMode.followsStress ? nil
                     : (lat.densityMode.needsSimulation ? sf(f) : LatticeSDFScene.demandField(from: pm.run.outcome))
-                let wallStressField: StressField? = sf(f)
                 let beadForBake = pm.printParams.strutLineWidthMM
                 let emission = pm.latticeJobRegions()
                 var regions = emission.regions
-                // CONTROL (opt-in, NOT the app): ONESIZE_NOSLAB=1 keeps the job's whole prisms
-                if !lat.wallThickness.isThrough, env["ONESIZE_NOSLAB"] != "1" {
-                    for i in regions.indices where regions[i].role == .include && regions[i].kind == .face { regions[i].thickness = lat.wallThickness }
-                }
                 let params = lat.proxyParams(limits: TopOptKit.latticeLimits(topology: lat.topologyID), lineWidthMM: beadForBake)
                 let span = params.densitySpan
                 let gamma = Swift.max(0.05, params.gamma)
@@ -197,10 +191,8 @@ final class OrganicOneSizePreviewVsRunProbe: XCTestCase {
                     o.tensor = fine.tensor; o.dims = fine.dims; o.originMM = fine.originMM; o.spacingMM = fine.spacingMM
                     organicIn = o
                 }
-                organicIn?.seedBoost = lat.wallThickness.seedBoost
                 // CONTROL (opt-in, NOT the app): ONESIZE_SEEDBOOST=1 is core's own tracer
                 if let b = env["ONESIZE_SEEDBOOST"].flatMap(Double.init) { organicIn?.seedBoost = b }
-                let wallDepthSteps = LatticeWallDepthSteps.forWalls(lat, regions: regions, beadMM: beadForBake)
                 var synthPlan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [:])
                 if let o = organicIn {
                     synthPlan = OrganicSyntheticStress.plan(regions: regions, dims: o.dims, originMM: o.originMM,
@@ -250,8 +242,6 @@ final class OrganicOneSizePreviewVsRunProbe: XCTestCase {
                                                 whenEmpty: .latticeNothing, skinMM: skinMM,
                                                 skippedFaces: emission.skippedFaces,
                                                 skippedRegionNames: emission.skippedRegionNames,
-                                                wallThicknessFloorMM: organicIn?.separationMinMM ?? 0,
-                                                wallDepthSteps: wallDepthSteps, wallStressField: wallStressField,
                                                 bandOverrides: lat.bandTreatments, octetBand: false,
                                                 bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                                                 beadMM: beadForBake)

@@ -126,31 +126,20 @@ public struct LatticeSetupWizard: View {
             ZStack {
                 DS.Color.background.color.ignoresSafeArea()
                 stageView
-                wallEditorOverlay
                 // ★ ONE MODAL (maintainer, 2026-08-14): *"Combine the two modals
                 // together. Place the one on the right at the very bottom of the
                 // one on the left."* The floating wizard card is gone; its view
                 // switch is the last row inside this panel.
-                if wallEditorStage == nil {
-                    selectionsModal
-                        .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
-                } else {
-                    minimizedSettings
-                        .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
-                }
+                selectionsModal
+                    .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
                 disclaimer
-                // ★ NOT while a wall is being drawn (his image 4, 2026-09-21: "I have already
-                // drawn and saved face 2 … it never says it's saved"): Save & Exit above the
-                // editor left with the draft unsaved. The editor's own Save/Cancel decide.
-                if wallEditorStage == nil { saveAndExit }
-                if wallEditorStage == nil { refreshSample }
+                saveAndExit
+                refreshSample
             }
         }
         // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
         // camera was doing before.
         .onAppear { rebuild(force: true); frameSample() }
-        // ★ at the root, so the workspace's gizmo always hears the cover come and go
-        .preference(key: WizardStageCoveredKey.self, value: wallEditorStage != nil)
         .background(GeometryReader { g in
             Color.clear.onAppear { canvasHeight = g.size.height }
                 .onChange(of: g.size.height) { canvasHeight = $0 }
@@ -196,17 +185,8 @@ public struct LatticeSetupWizard: View {
     @State private var organicSampleStatus: String?
     /// Which (i) popover is open, by id — one at a time.
     @State private var infoShown: String?
-    /// ★ the wall editor over the viewer (his design, 2026-09-21): which stage, and the
-    /// draft it edits until Save
-    @State private var wallEditorStage: LatticeWallEditorStage? = nil
     /// the settings as they were when the page opened — "Exit" until they differ
     @State private var openedLattice: LatticeSettings? = nil
-    @State private var wallEditorDraft: LatticeWallThickness? = nil
-    /// ★ THE PANEL NEVER GROWS PAST ITS SIM-ON HEIGHT (his 2026-09-21, image 1: "It
-    /// should NEVER get that high … keep the exact size of image 2 and make it so the
-    /// menu scrolls"). The rows' height is measured while "Depth defined by sim" is on;
-    /// with it off the rows scroll inside that height.
-    @State private var panelRowsBaseHeight: CGFloat? = nil
     @State private var panelRowsHeight: CGFloat = 0
     @State private var canvasHeight: CGFloat = 0
     /// ★ The small pop-up for the single-cell ⇄ finish rule (2026-09-18): which one is
@@ -273,11 +253,6 @@ public struct LatticeSetupWizard: View {
             // is not named here: a source-text guard counts comments, and this file has
             // paid that toll before.)
             .task(id: sampleRefreshToken) { await loadOrganicSample(organicSamplePicks) }
-            // ★ THE CUBE LEAVES when the wall editor arrives (his 2026-09-21: "Something to
-            // do with the cube. It should be part of the motion … the profile gizmo should do
-            // the same motion that the cube does"): one modifier, driven by one value, on
-            // the stage here and on the gizmo in the workspace.
-            .modifier(StageDepartureMotion(covered: wallEditorStage != nil))
     }
 
     /// Model −Z (gravity, build plate down) → viewer −Y: the same map the workspace
@@ -469,7 +444,6 @@ public struct LatticeSetupWizard: View {
             // grown lattice does not have. Nothing here is shared by accident.
             if model.stage == .lattice, model.cellTransition == .organicGrade {
                 organicRow
-                wallThicknessRow
             } else if model.stage == .lattice {
                 gradeToggleRow
                 if model.gradingMode != LatticeGradingMode.none { gradeTypeRow }
@@ -482,7 +456,6 @@ public struct LatticeSetupWizard: View {
                 if (project.lattice.stageMode ?? .structural) == .aesthetic {
                     singleCellSwitch
                 }
-                wallThicknessRow
             }
             // ★ NOT IN AESTHETIC (his ruling, 2026-08-24 late: "we should REMOVE
             // the 'too thin to certify' button from the aesthetic mode"). The
@@ -687,260 +660,10 @@ public struct LatticeSetupWizard: View {
 
     /// ★ 3 — HOW the cells change: the algorithm. Always asked, whatever the
     /// grade, because it is what is laid down rather than how it varies.
-    // ★★★ THE LATTICE'S THICKNESS THROUGH THE WALL — his design `Lattice Wall
-    // Thickness.dc.html` (2026-09-21): "Depth defined by sim?", else the allowed range
-    // per wall in mm and "Density through the wall". Both lattice pages, both stages;
-    // a preview request until it is agreed to work. See `LatticeWallThickness`.
-    /// ★ COMPUTED ONCE PER CHANGE (review #41): `latticeJobRegions()` facets every curved
-    /// face; four readers per body pass called it four times per keystroke.
-    private var wallEditorFaces: [LatticeWallEditorFace] {
-        wallFacesCache.isEmpty ? computeWallEditorFaces() : wallFacesCache
-    }
-    private func computeWallEditorFaces() -> [LatticeWallEditorFace] {
-        computeWallEditorFaces(from: project.latticeJobRegions().regions)
-    }
-    private func computeWallEditorFaces(from regions: [LatticeRegionSpec]) -> [LatticeWallEditorFace] {
-        let all = regions
-            .filter { $0.role == .include && $0.kind == .face && $0.depthMM > 0 }
-        // ★ a keyless wall keeps its own card (review #42: every keyless region merged into "")
-        func keyOf(_ r: LatticeRegionSpec) -> String { r.selectableKey ?? "face:\(r.faceID ?? -1)" }
-        // ★ ONE card per selectable (a curved wall is many facet prisms under one key):
-        // the widest facet stands for the wall
-        var seen: [String: LatticeRegionSpec] = [:]
-        var order: [String] = []
-        for r in all {
-            let key = keyOf(r)
-            let w = LatticeWallThicknessBuilder.frame(r)?.widthMM ?? 0
-            if let prev = seen[key], (LatticeWallThicknessBuilder.frame(prev)?.widthMM ?? 0) >= w { continue }
-            if seen[key] == nil { order.append(key) }
-            seen[key] = r
-        }
-        return order.compactMap { seen[$0] }
-            .map { r in
-                let key = keyOf(r)
-                let tint: Color = {
-                    if let gid = key.split(separator: ":").dropFirst().first, let uuid = UUID(uuidString: String(gid)),
-                       let g = project.selection.groups.first(where: { $0.id == uuid }) { return g.color.color }
-                    return DS.Color.accent.color
-                }()
-                let fr = LatticeWallThicknessBuilder.frame(r)
-                // ★ the WHOLE wall's width across its facets (review #43), the axis the
-                // builder reads the drawing along — not the widest facet's chord
-                let group = all.filter { keyOf($0) == key }
-                let width = LatticeWallThicknessBuilder.sharedAxis(group)?.extent
-                    ?? fr?.widthMM ?? 2 * max(r.halfUMM, r.halfWMM)
-                let height = fr.map { $0.widthAlongU ? $0.hi.y - $0.lo.y : $0.hi.x - $0.lo.x } ?? 2 * min(r.halfUMM, r.halfWMM)
-                let lat = model.applied(to: project.lattice)
-                return LatticeWallEditorFace(id: key, name: r.faceID.map { "Face \($0)" } ?? "Wall",
-                                             tint: tint, widthMM: width, heightMM: max(1, height), thickMM: r.depthMM,
-                                             region: r,
-                                             depthStepsMM: LatticeWallDepthSteps.forWalls(
-                                                lat, regions: [r], beadMM: project.printParams.strutLineWidthMM)[key] ?? [],
-                                             columnMM: LatticeWallDepthSteps.columnMM(lat, region: r))
-            }
-    }
-
-    @State private var wallFacesCache: [LatticeWallEditorFace] = []
     /// ★ ruling (c): whether the job carries an include wall (ruling 4's one definition), from
     /// the SAME emission as the cache above (one per change, never one per read); nil until the
     /// first rebuild
     @State private var hasIncludeWallCache: Bool? = nil
-    private static let wallGreen = Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255)
-    /// What the mode list says about a wall's drawing.
-    static func profileSummary(_ p: LatticeWallProfile?) -> String {
-        guard let p else { return "not drawn yet" }
-        if let c = p.curves {
-            let pts = c.start.count + c.end.count
-            return "\(pts) pts · " + ((c.curveStart || c.curveEnd) ? "curved" : "straight")
-        }
-        return "\(p.columns) columns · drawn"
-    }
-    /// A field's arrows walk the wall's packable depths; a typed number lands on one.
-    /// No steps (organic) ⇒ the number as typed.
-    static func walkSteps(from cur: Double, to v: Double, steps: [Double]) -> Double {
-        let st = steps.filter { $0 >= 0 }.sorted()
-        guard !st.isEmpty else { return v }
-        if v > cur + 1e-9 { return st.first { $0 > cur + 1e-6 } ?? cur }
-        if v < cur - 1e-9 { return st.last { $0 < cur - 1e-6 } ?? cur }
-        return LatticeWallDepthSteps.snap(v, steps: st)
-    }
-
-    @ViewBuilder private var wallThicknessRow: some View {
-        let ask = model.wallThickness
-        let noSolve = !model.simulateStresses
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Lattice depth")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(DS.Color.textTertiary.color)
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Depth defined by sim?").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Text(noSolve && !ask.depthBySim ? "Needs Simulate Stresses"
-                         : ask.depthBySim ? "FEA decides how deep the lattice goes" : "You set how deep, per wall")
-                        .font(.system(size: 12)).foregroundStyle(DS.Color.textTertiary.color)
-                }
-                Spacer(minLength: 0)
-                Toggle("", isOn: Binding(get: { ask.depthBySim },
-                                         set: { on in
-                                             // ★ the panel's height at THIS moment is the size
-                                             // it keeps while the switch is off (his image 2)
-                                             panelRowsBaseHeight = on ? nil : (panelRowsHeight > 0 ? panelRowsHeight : nil)
-                                             model.wallThickness.depthBySim = on
-                                             if !on, !model.simulateStresses, model.wallThickness.density.readsTheSolve {
-                                                 model.wallThickness.density = .manualSingle
-                                             }
-                                             if on { wallEditorStage = nil; wallEditorDraft = nil }
-                                             rebuild()
-                                         }))
-                    .labelsHidden().toggleStyle(SwitchToggleStyle(tint: DS.Color.accent.color))
-                    .disabled(noSolve && !ask.depthBySim)
-                    .accessibilityIdentifier("wizard-wall-depth-by-sim")
-            }
-            .padding(.horizontal, 14).frame(minHeight: 56)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.05))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
-            // ★ the seeding slider is withdrawn from the panel (2026-09-22): the 1.71 mm trace
-            // grid closed the rim gap it was for; `seedBoost` and its bridge plumbing stay
-            // for a later expert control, the value rides at ×1
-            if !ask.depthBySim {
-                (Text("How deep the lattice ") + Text("may").italic() + Text(" go from each wall's surface — how deep it ")
-                 + Text("will").italic() + Text(" go follows below."))
-                    .font(.system(size: 13)).foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(wallEditorFaces) { f in
-                    let fa = ask.face(f.id)
-                    HStack(spacing: 10) {
-                        // ★ the NAME reads in full (his 00:31: "I just need to see the difference
-                        // between faces"): the fields are narrow, the swatch is gone
-                        Text(f.name).font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                            .layoutPriority(1)
-                            .onTapGesture { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .thickness } }
-                        Spacer(minLength: 0)
-                        // ★ where the lattice may START and how deep it may go (his 22:40: the
-                        // start is back). On an octet wall the arrows walk the wall's own
-                        // packable depths and a typed number lands on one (D1).
-                        // ★ organic has NO steps and the field moves freely (review #39: `[0] +
-                        // []` gave organic a single step at 0 and the start could never leave it)
-                        WallNumberField(text: String(format: "%.1f", fa.startMM), tint: Self.wallGreen,
-                                        step: 0.5, range: 0...max(0, (fa.endMM ?? f.thickMM) - 0.1),
-                                        steps: f.depthStepsMM.isEmpty ? [] : [0] + f.depthStepsMM) { v in
-                            let e = fa.endMM ?? f.thickMM
-                            let sv = f.depthStepsMM.isEmpty ? v : LatticeWallDepthSteps.snap(v, steps: [0] + f.depthStepsMM)
-                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].startMM = Swift.min(Swift.max(0, sv), e - 0.1)
-                            rebuild()
-                        }
-                        .accessibilityIdentifier("wizard-wall-start-\(f.id)")
-                        Text("–").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
-                        WallNumberField(text: String(format: "%.1f", fa.endMM ?? f.thickMM), tint: DS.Color.danger.color,
-                                        step: 0.5, range: (fa.startMM + 0.1)...f.thickMM,
-                                        steps: f.depthStepsMM) { v in
-                            var e = f.depthStepsMM.isEmpty ? v : LatticeWallDepthSteps.snap(v, steps: f.depthStepsMM)
-                            // ★ an end that snapped under the start takes the first step past it
-                            // (review #40) — never a non-packable `start + 0.1`
-                            if e < fa.startMM + 0.1 {
-                                e = f.depthStepsMM.first { $0 >= fa.startMM + 0.1 } ?? (f.depthStepsMM.isEmpty ? fa.startMM + 0.1 : f.thickMM)
-                            }
-                            e = Swift.min(e, f.thickMM)
-                            model.wallThickness.faces[f.id, default: LatticeFaceWallThickness()].endMM = e >= f.thickMM - 1e-9 ? nil : e
-                            rebuild()
-                        }
-                        .accessibilityIdentifier("wizard-wall-end-\(f.id)")
-                        Text("mm").font(.system(size: 12)).foregroundStyle(DS.Color.textQuaternary.color)
-                    }
-                    .padding(.horizontal, 14).frame(minHeight: 50)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04))
-                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.08))))
-                }
-                Text("Depth mode")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .padding(.top, 12)
-                VStack(spacing: 0) {
-                    ForEach(Array(LatticeWallDensityMode.allCases.enumerated()), id: \.element.rawValue) { i, o in
-                        let on = ask.density == o
-                        let off = o.readsTheSolve && noSolve
-                        VStack(spacing: 0) {
-                            Button {
-                                guard !off else { return }
-                                model.wallThickness.density = o
-                                if o == .manualGrade { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .grade } }
-                                else if wallEditorStage == .grade { wallEditorStage = nil; wallEditorDraft = nil }
-                                rebuild()
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Circle().strokeBorder(on ? DS.Color.accent.color : Color.white.opacity(0.3), lineWidth: 2)
-                                        .frame(width: 22, height: 22)
-                                        .overlay(Circle().fill(on ? DS.Color.accent.color : .clear).frame(width: 11, height: 11))
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(o.title).font(.system(size: 14.5, weight: .semibold))
-                                            .foregroundStyle((off ? DS.Color.textTertiary : DS.Color.textPrimary).color)
-                                        Text(off ? "Needs Simulate Stresses" : o.brief).font(.system(size: 11.5))
-                                            .foregroundStyle(DS.Color.textTertiary.color)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 14).frame(minHeight: 52)
-                                .background(on ? DS.Color.accent.opacity(0.10).color : .clear)
-                                .overlay(alignment: .top) { if i > 0 { Color.white.opacity(0.06).frame(height: 1) } }
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(off)
-                            .accessibilityIdentifier("wizard-wall-density-\(o.rawValue)")
-                            if on, o == .manualSingle {
-                                HStack(spacing: 10) {
-                                    WallNumberField(text: String(format: "%.0f", ask.pct), tint: DS.Color.textPrimary.color, wide: true,
-                                                    step: 5, range: 5...100, unit: "%") { v in
-                                        model.wallThickness.pct = Swift.min(100, Swift.max(5, v.rounded())); rebuild()
-                                    }
-                                    .accessibilityIdentifier("wizard-wall-pct")
-                                    Text("% of the allowed depth").font(.system(size: 15)).foregroundStyle(DS.Color.textSecondary.color)
-                                }
-                                .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 12)
-                            }
-                            if on, o == .manualGrade {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ForEach(wallEditorFaces) { f in
-                                        let p = ask.face(f.id).profile
-                                        HStack(spacing: 8) {
-                                            RoundedRectangle(cornerRadius: 2).fill(f.tint).frame(width: 8, height: 8)
-                                            Text(f.name).font(.system(size: 12.5))
-                                            Spacer(minLength: 0)
-                                            Text(Self.profileSummary(p))
-                                                .font(.system(size: 12.5))
-                                        }
-                                        .foregroundStyle(DS.Color.textSecondary.color)
-                                    }
-                                    let editing = wallEditorStage == .grade
-                                    Button {
-                                        if editing { wallEditorStage = nil; wallEditorDraft = nil }
-                                        else { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = model.wallThickness; wallEditorStage = .grade } }
-                                    } label: {
-                                        Text(editing ? "Editing in viewer…" : "Open grading tool")
-                                            .font(.system(size: 13.5, weight: .semibold))
-                                            .frame(maxWidth: .infinity, minHeight: 44)
-                                            .background(RoundedRectangle(cornerRadius: 12)
-                                                .fill(editing ? DS.Color.accent.opacity(0.22).color : Color.white.opacity(0.07))
-                                                .overlay(RoundedRectangle(cornerRadius: 12)
-                                                    .strokeBorder(editing ? DS.Color.accent.opacity(0.55).color : Color.white.opacity(0.12))))
-                                            .foregroundStyle(editing ? Color(red: 0.5, green: 0.75, blue: 1) : DS.Color.textPrimary.color)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("wizard-wall-open-grading")
-                                }
-                                .padding(.leading, 48).padding(.trailing, 14).padding(.bottom, 12)
-                            }
-                        }
-                    }
-                }
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.04))
-                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.09))))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
-        }
-    }
-
     /// ★ THE ROWS' HEIGHT IS THEIR CONTENT'S — never more than the sim-on height once
     /// the sim switch is off, never more than the page leaves (his 02:04: "the lattice
     /// settings should adjust the size as long as it's below the set amount … it is
@@ -948,71 +671,7 @@ public struct LatticeSetupWizard: View {
     private var panelRowsFrameHeight: CGFloat? {
         guard panelRowsHeight > 0 else { return nil }
         var cap = canvasHeight > 0 ? max(160, canvasHeight - 330) : .greatestFiniteMagnitude
-        if model.stage == .lattice, !model.wallThickness.depthBySim, let base = panelRowsBaseHeight { cap = min(cap, max(160, base)) }
         return min(panelRowsHeight, cap)
-    }
-
-    /// ★ The viewer editor COVERS the stage while a wall is being drawn (his 2026-09-21:
-    /// "a cool animation that covers the cube up and makes it so it is no longer visible
-    /// in the entirety of the screen"; the orientation gizmo hides with it — the
-    /// workspace reads `WizardStageCoveredKey`). The cover rises from the bottom and
-    /// settles; the sample and its Refresh sit under it until Cancel or Save.
-    @ViewBuilder private var wallEditorOverlay: some View {
-        ZStack {
-            if let stage = wallEditorStage {
-                // ★ far left to far right, ABOVE the minimised settings (his 02:12):
-                // the card fills the width, the rail floats beside it with air around it
-                // ★ curves for ORGANIC, steps for cell-based lattices (his 2026-09-21 22:40)
-                let draft = Binding(get: { wallEditorDraft ?? model.wallThickness }, set: { wallEditorDraft = $0 })
-                let cancel = { withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil } }
-                let save = {
-                    if let d = wallEditorDraft { model.wallThickness = d }
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) { wallEditorDraft = nil; wallEditorStage = nil }
-                    rebuild()
-                }
-                Group {
-                    if model.cellTransition.coreAlgorithm == "organic" {
-                        LatticeWallCurveEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
-                    } else {
-                        LatticeWallProfileEditor(faces: wallEditorFaces, stage: stage, ask: draft, onCancel: cancel, onSave: save)
-                    }
-                }
-                    .padding(.horizontal, PageChrome.edge)
-                    .padding(.top, 118)
-                    .padding(.bottom, PageChrome.edge + 92)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(DS.Color.background.color.opacity(0.97).ignoresSafeArea())
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .accessibilityIdentifier("wizard-wall-editor")
-            }
-        }
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: wallEditorStage)
-    }
-
-    /// ★ THE SETTINGS, MINIMISED under the editor (his 02:12: "Minimize the entirety of
-    /// the settings while editing the profile"): one strip that says what is being edited.
-    private var minimizedSettings: some View {
-        HStack(spacing: DS.Space.m) {
-            Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DS.Color.textTertiary.color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Lattice settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                Text(wallEditorStage == .grade ? "Minimised while you draw the wall profiles."
-                     : "Minimised while you set the walls' thickness.")
-                    .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
-            }
-            Spacer(minLength: 0)
-            Text("\(wallEditorFaces.count) wall\(wallEditorFaces.count == 1 ? "" : "s")")
-                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-        }
-        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
-        .frame(width: PageChrome.panelWidth, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
-            .fill(DS.Surface.panel.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .accessibilityIdentifier("wizard-settings-minimised")
     }
 
     @ViewBuilder private var gradeStyleRow: some View {
@@ -2755,11 +2414,7 @@ public struct LatticeSetupWizard: View {
                     // against the receipt, the same check a run gets).
                     // ★ ONE SHORT LINE (item 1): the label, or what the sample is doing
                     // right now; the census sits behind the (i).
-                    Text(wallEditorStage == .grade
-                         ? (model.cellTransition.coreAlgorithm == "organic" ? "Tap above the dotted line to shape the start, below for the end"
-                            : "Drag across a wall: above the dotted line shapes the start, below it the end")
-                         : wallEditorStage == .thickness ? "Drag the lines: where the lattice may start and how deep it may go"
-                         : organicSampleShown
+                    Text(organicSampleShown
                          ? (organicSampleStatus ?? OrganicSampleCube.label)
                          : LatticeWizardSample.provenanceNote)
                         .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
@@ -2906,7 +2561,6 @@ public struct LatticeSetupWizard: View {
     /// and waits — his rule, and it is what stops the pile-up.
     private func rebuild(force: Bool = false) {
         let regions = project.latticeJobRegions().regions
-        wallFacesCache = computeWallEditorFaces(from: regions)
         hasIncludeWallCache = LatticeJobIncludeGate.hasIncludeWall(regions)
         guard force else {
             sampleIsStale = true
@@ -3240,100 +2894,9 @@ private struct OrganicProbeTintModifier: ViewModifier {
 }
 
 
-/// A compact numeric field for the wall rows (mm or %): commits the typed number when
-/// the field loses focus or return is pressed.
-struct WallNumberField: View {
-    let text: String
-    let tint: Color
-    var wide: Bool = false
-    /// ★ arrows AND the app's own number pad on tap (his 2026-09-21: "If I click on the
-    /// number, it should automatically pop-up — this should be true across ALL numeric
-    /// inputs"). The pad is `NumberPad`, the one every other mm field opens; a text
-    /// field waited on the simulator's hidden software keyboard.
-    var step: Double = 0.1
-    var range: ClosedRange<Double> = 0...1e6
-    var unit: String = "mm"
-    /// ★ THE PACKABLE DEPTHS (review 2026-09-22 #38): the ARROWS walk these; a typed
-    /// number reaches `commit` as typed and the caller lands it on one. Before this the
-    /// caller walked both, so typing 10 into a field at 2 moved it to the NEXT step (4).
-    var steps: [Double] = []
-    let commit: (Double) -> Void
-    @State private var padShown = false
-
-    private var value: Double { Double(text) ?? 0 }
-    private func clamp(_ v: Double) -> Double { min(range.upperBound, max(range.lowerBound, v)) }
-    private func nudge(_ dir: Double) {
-        if steps.isEmpty { commit(clamp(value + dir * step)) }
-        else { commit(clamp(LatticeSetupWizard.walkSteps(from: value, to: value + dir * step, steps: steps))) }
-    }
-
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: wide ? 12 : 9) }
-
-    private var arrows: some View {
-        VStack(spacing: 0) {
-            Button { nudge(1) } label: {
-                Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold)).frame(width: 22, height: wide ? 22 : 17)
-            }.buttonStyle(.plain).accessibilityIdentifier("number-up")
-            Button { nudge(-1) } label: {
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).frame(width: 22, height: wide ? 22 : 17)
-            }.buttonStyle(.plain).accessibilityIdentifier("number-down")
-        }
-        .foregroundStyle(DS.Color.textSecondary.color)
-    }
-
-    var body: some View {
-        let w: CGFloat = wide ? 132 : 64
-        let h: CGFloat = wide ? 46 : 36
-        HStack(spacing: 2) {
-            Text(text)
-                .font(.system(size: wide ? 18 : 13, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(tint)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.leading, wide ? 12 : 6)
-                .contentShape(Rectangle())
-                .onTapGesture { padShown = true }
-                .numberPad($padShown,
-                           config: .init(title: "", unit: unit, allowsDecimal: step < 1),
-                           seed: value) { v in
-                    guard let v else { return }
-                    commit(clamp(v))
-                }
-            arrows
-        }
-        .frame(width: w, height: h)
-        .background(shape.fill(Color.white.opacity(0.08)))
-        .overlay(shape.strokeBorder(Color.white.opacity(0.12)))
-    }
-}
-
-/// ★ THE DEPARTURE (his 2026-09-21): the stage's cube and the orientation gizmo tip
-/// away together — a lean back, a slide down and a fade — while the editor's cover rises
-/// over them, and come back the same way. One modifier so the two motions cannot differ.
-public struct StageDepartureMotion: ViewModifier {
-    public let covered: Bool
-    public init(covered: Bool) { self.covered = covered }
-    public static let spring = Animation.spring(response: 0.62, dampingFraction: 0.84)
-    public func body(content: Content) -> some View {
-        content
-            .rotation3DEffect(.degrees(covered ? -16 : 0), axis: (x: 1, y: 0.25, z: 0),
-                              anchor: .bottom, perspective: 0.7)
-            .scaleEffect(covered ? 0.84 : 1, anchor: .bottom)
-            .offset(y: covered ? 220 : 0)
-            .opacity(covered ? 0 : 1)
-            .allowsHitTesting(!covered)
-            .animation(Self.spring, value: covered)
-    }
-}
-
 /// The measured height of the settings panel's scrolling rows.
 struct WizardPanelRowsHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// ★ True while the wizard's wall editor covers the stage — the workspace hides the
-/// orientation gizmo on it (his 2026-09-21: "The position gimbal should also be hidden").
-public struct WizardStageCoveredKey: PreferenceKey {
-    public static var defaultValue: Bool = false
-    public static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
-}

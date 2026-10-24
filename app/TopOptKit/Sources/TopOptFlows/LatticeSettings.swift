@@ -227,20 +227,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var selectableKey: String? = nil
     /// ★ BATCH E REVIEW: a prism CLIPPED to a split piece (LatticeSectorOutline) — not its face: no `face_id` on the wire, never a face's protection depth.
     public var sectorPiece: Bool = false
-    // ★ THE SLAB (2026-09-21, preview only — see `LatticeWallThickness`): what was asked
-    // for, and the answer the scene built. Neither reaches `wireDictionary`.
-    public var thickness: LatticeWallThickness? = nil
-    public var thicknessMap: LatticeWallThicknessMap? = nil
     /// ★ The generated outline polygon (P1/P6), cached by the emission and the scene — `withGeneratedOutline`.
     /// Not on the wire as such: the wire sends it as `outline_uv`.
     public var generatedOutline: [[SIMD2<Double>]]? = nil
-
-    /// Where the lattice lives along the normal at `uv`: the whole prism unless a slab
-    /// was built for this face.
-    public func slabRange(uv: SIMD2<Double>) -> (start: Double, end: Double) {
-        guard let m = thicknessMap else { return (0, depthMM) }
-        return m.range(at: uv, depthMM: depthMM)
-    }
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -1798,9 +1787,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// halves it; the band's length is untouched. Octet (quilt raise) and organic
     /// (spacing, and the bead that follows it) alike.
     public var shapeFitGradeStrength: Double = 0
-    /// ★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21) — see
-    /// `LatticeWallThickness`. `.through` with start 0 is every existing project.
-    public var wallThickness: LatticeWallThickness = .standard
     /// The grade's amount multiplier for a strength: 2^s — 2 at +1, ½ at −1, 1 at 0.
     public static func gradeAmount(strength s: Double) -> Double {
         pow(2.0, Swift.min(1, Swift.max(-1, s)))
@@ -2330,7 +2316,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // project keeps the grade it has always had.
         case shapeFitBandMM
         case shapeFitGradeStrength
-        case wallThickness
+        // ★ `wallThickness` (the "Lattice depth" section, 2026-09-21) is WITHDRAWN (his 2026-10-11:
+        // "I want the entire section removed"): a document that carries it opens, the key is ignored
+        // and never written again — the lattice always fills the whole prism.
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
@@ -2419,7 +2407,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
             ?? LatticeSettings.defaultShapeFitBandCells
         shapeFitGradeStrength = try c.decodeIfPresent(Double.self, forKey: .shapeFitGradeStrength) ?? 0
-        wallThickness = try c.decodeIfPresent(LatticeWallThickness.self, forKey: .wallThickness) ?? .standard
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -2564,7 +2551,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         if shapeFitGradeStrength != 0 { try c.encode(shapeFitGradeStrength, forKey: .shapeFitGradeStrength) }
-        if wallThickness != .standard { try c.encode(wallThickness, forKey: .wallThickness) }
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)

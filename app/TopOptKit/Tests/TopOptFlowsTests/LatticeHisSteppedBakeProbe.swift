@@ -75,7 +75,6 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
         }
         let field: StressField? = !lat.gradingMode.followsStress ? nil
             : (lat.densityMode.needsSimulation && stageField != nil ? sf(stageField!) : LatticeSDFScene.demandField(from: pm.run.outcome))
-        let wallStressField = stageField.map(sf) ?? LatticeSDFScene.demandField(from: pm.run.outcome)
 
         // ── the bake's inputs (WorkspacePlaceholder's preview bake)
         let params = lat.proxyParams(limits: TopOptKit.latticeLimits(topology: lat.topologyID), lineWidthMM: bead)
@@ -83,13 +82,9 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
         let gamma = Swift.max(0.05, params.gamma)
         let emission = pm.latticeJobRegions()
         var regions = emission.regions
-        if !lat.wallThickness.isThrough {
-            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face { regions[i].thickness = lat.wallThickness }
-        }
         let stageMode = lat.stageMode ?? .structural
         let allowable = model.yieldStrengthMPa(for: pm.material)
         let skinMM = lat.boundary.faceSkinMM(wallRingMM: pm.printParams.wallRingMM)
-        let steps = LatticeWallDepthSteps.forWalls(lat, regions: regions, beadMM: bead)
         func scene(_ floorCells: [Double]) -> LatticeSDFScene {
             LatticeSDFScene(mesh: mesh, field: field, latticeID: params.latticeID,
                             stressField: stageField.map(sf),
@@ -98,8 +93,6 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
                             allowableMPa: allowable, boundaryFinishWritten: lat.singleCellMembers,
                             regions: regions, rhoMin: span.lo, rhoMax: span.hi, gamma: gamma,
                             whenEmpty: .latticeNothing, skinMM: skinMM, skippedFaces: emission.skippedFaces,
-                            wallThicknessFloorMM: floorCells.filter { $0 > 0 }.min() ?? lat.cellMM,
-                            wallDepthSteps: steps, wallStressField: wallStressField,
                             bandOverrides: lat.bandTreatments,
                             octetBand: env["HIS_OCTET_BAND"] != "0", bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
                             beadMM: bead)
@@ -144,7 +137,7 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
         // ── ★ tilted facets: material within 3 mm of the part's surface, inside a tilted include
         // prism, that the bake left without a cell — with the tilted span and without it
         func uncovered(_ label: String) {
-            let po = s1.prismOccupancy
+            let po = s1.occupancy
             var total = 0, bare = 0
             for (ri, r) in regions.enumerated() where r.role == .include && r.kind == .face {
                 let n = LatticeRegionMask.unit(r.normal)
@@ -152,7 +145,7 @@ final class LatticeHisSteppedBakeProbe: XCTestCase {
                 _ = ri
                 for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
                     let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * po.spacing)
-                    guard LatticeRegionMask.containsWholePrism(p, region: r), s1.partMaterialSDF.sampleLinear(p) > -3 else { continue }
+                    guard LatticeRegionMask.contains(p, region: r), s1.partMaterialSDF.sampleLinear(p) > -3 else { continue }
                     total += 1
                     if layer.bakedCellMMAt(SIMD3<Float>(p)) <= 0 { bare += 1 }
                 } } }

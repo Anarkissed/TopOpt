@@ -4059,7 +4059,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 latticeShadowVersion = lat.regionCapVersion
                 var v: [Float] = [], idx: [Int32] = []
                 for r in scene.regions where r.role == .include && r.kind == .face {
-                    let m = LatticeWallSlabMesh.build(attached: r)
+                    let m = LatticePrismMesh.build(r)
                     let base = Int32(v.count / 3)
                     v += m.positions
                     idx += m.indices.map { Int32($0) + base }
