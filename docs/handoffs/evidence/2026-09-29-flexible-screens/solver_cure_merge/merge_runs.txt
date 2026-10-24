@@ -1,0 +1,154 @@
+# The solver cure merged into #362: the runs, raw counts (2026-10-24). The reviewer's ruling of 2026-10-24 17:46,
+# approved by the maintainer under the owner's core exception and his order "Install the solver": fix the iPad blocker
+# by OPTION 1 (the iPad app refuses a worker whose /health fingerprint differs from its CoreFingerprint.generated.swift,
+# RemoteRunner.swift:474; the worker ran 0e86a323b205, the app was built from 61cfce05e1ce).
+# This Mac (macOS 27.0.1, Xcode 27.0 27A266a, Swift 6.4). Merge only (git merge --no-ff), never rebased, forced, amended
+# or stashed; not pushed. No app source change. The simulator and device apps were not launched or installed.
+
+## 1. THE MERGE
+#   0e86a323 is reachable here: /Users/nadim/dev/TopOpt/worker-core-61cfce05 is a worktree of this repo (common dir
+#   /Users/nadim/dev/TopOpt/TopOpt/.git), branch core-solver-stall-fix, so nothing was fetched.
+#   Base 1bf7f2ea (merge-base with 0e86a323 = 61cfce05e1ceada60dbdca4a4193eb221dbef528; #362's core/ and
+#   app/scripts/build_core.sh unchanged since 61cfce05: git diff --stat 61cfce05 1bf7f2ea -- core/ app/scripts/build_core.sh empty).
+#   Dry run: git merge-tree --write-tree --name-only HEAD 0e86a323 -> exit 0, tree 2f24eecb1b34daae118d95a9491f8f56194c903d,
+#   no conflicts.
+#   git merge --no-ff 0e86a323 -> M = 03ad2df5797750c7f9bc271bdb7fbf847eed94f6 (sha12 03ad2df57977), tree 2f24eecb (= the dry run).
+#   19 files, +2319 -66, core/ and app/scripts/build_core.sh only. The 13 commits on 61cfce05:
+#     ae8779d6 GenEO: refuse a basis wider than the dense coarse cap; schedule the per-core eigensolves dynamically
+#     f378dc8d MG safe-smoother retry after a shipped stall (thin-wall cure S3 + S5 gate + S7 log)
+#     903e1057 Arm G callers: SIMP/PLSM permit the island drop, certification forbids it
+#     8148dd56 MG safe retry: progress-window budget, seed the fallback only on improvement
+#     8f85811f MG safe retry: 600-cycle progress window at 0.9 gain
+#     2597c39b Arm G: never drop an island that touches a clearance / keep-out voxel
+#     4ead5321 Arm G: drop the clearance / keep-out adjacency rule (reviewer ruling)
+#     0ca1c027 MG-PCG: an immediate breakdown reports its starting residual, not 0
+#     9722c17a MG safe retry: seed the fallback only if the iterate is better on the EXACT system
+#     1f5fb325 Certified final compliance solves forbid the island drop
+#     0d0caf94 MG safe retry: bound the per-solve [mg-safe] stderr lines
+#     69fec5a1 Core build fingerprint taken at BUILD time, with a dirty marker (item 44)
+#     0e86a323 MG safe retry: hold the exact-residual work vectors only while evaluating
+
+## 2. THE APP'S CORE: app/scripts/build_core.sh at M, exit 0, 14:51:10 -> 14:55:44
+#   VCPKG_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg LIB3MF_PREFIX=/nonexistent-keep-macos-slice-3mf-free ./app/scripts/build_core.sh
+#   (build_core.sh does not read VCPKG_ROOT. It reads LIB3MF_PREFIX, default <repo>/.vcpkg/installed/arm64-osx-dynamic, and
+#   that path NOW EXISTS in this worktree: a .vcpkg was bootstrapped here 2026-10-24 01:04-01:07 by a build_cli_macos.sh run
+#   into core/build. Left at the default it would have built the macOS slice WITH lib3mf and added vendor/lib3mf-lib, a link
+#   change no earlier round had. LIB3MF_PREFIX pointed at nothing keeps the macOS slice exactly as every earlier round:
+#   Eigen + OCCT, 3MF-free. The iOS slices are unaffected by it: OCCT + lib3mf from app/.build-occt-ios, as before.)
+#   Slices (vendor/TopOptCore.xcframework, regenerated, git-ignored):
+#     macos-arm64          Eigen + OCCT (arm64)            7 164 504 B  sha256 a427ab842fb3ee63...  "mg-safe" strings 4
+#     ios-arm64-simulator  Eigen + OCCT + lib3mf (arm64)   7 258 824 B  sha256 33712045bbdf6506...  "mg-safe" strings 4
+#     ios-arm64            Eigen + OCCT + lib3mf (arm64)   7 166 880 B  sha256 b32ed5d0a0743b05...  "mg-safe" strings 4
+#     control: git show 61cfce05:core/src/fea/multigrid.cpp | grep -c mg-safe -> 0 (M's: 5)
+#   Each slice's stamped fingerprint (app/.build-core/<slice>/generated/fingerprint/topopt_build_fingerprint.txt):
+#     macos 03ad2df57977 · iossimulator 03ad2df57977 · iphoneos 03ad2df57977 (no "-dirty-": tracked core/ == HEAD)
+#   CoreFingerprint.generated.swift (git-ignored): value "03ad2df57977" (was "61cfce05e1ce"), buildTime "Oct 24 2026 14:55:44"
+#   (was "Oct 14 2026 00:13:48"). == M's sha12, not dirty.
+
+## 3. THE WORKER'S CLI from the SAME commit M, new build dir, exit 0, 14:51:46 -> 14:53:16
+#   VCPKG_ROOT=/Users/nadim/dev/TopOpt/TopOpt/.vcpkg \
+#   TOPOPT_CLI_BUILD_DIR=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/core/build-cli-03ad2df57977 \
+#     ./app/scripts/build_cli_macos.sh
+#   (Release, TOPOPT_REQUIRE_DEPS=ON, lib3mf_DIR + CMAKE_PREFIX_PATH = Homebrew OCCT, Eigen, the main checkout's vcpkg lib3mf:
+#   the configuration of worker-core-61cfce05/core/build-cure and build-fix.) Nothing was built in core/build-fix.
+#   topopt-cli --version:
+#     topopt-cli: core 03ad2df57977 (dirty=false), built Oct 24 2026 14:53:16
+#     topopt-cli version=0.1.0 fingerprint=03ad2df57977 dirty=false
+#   otool -L and LC_RPATH identical to the 0e86a323 binary it replaced (lib3mf.2.5.0.0 from the main checkout's .vcpkg, OCCT
+#   from /opt/homebrew/opt/opencascade/lib). "mg-safe" strings 4.
+
+## 4. THE WORKER: in-place atomic swap of its cliPath (worker app settings untouched; nothing restarted or killed)
+#   staged: /Users/nadim/dev/TopOpt/worker-bin/03ad2df57977/topopt-cli (cp -p of the build)
+#   /health BEFORE (14:54:28): {"ok": true, "worker_version": "1.1.0",
+#     "cli": "/Users/nadim/dev/TopOpt/worker-core-61cfce05/core/build-fix/topopt-cli", "cli_version": "0.1.0",
+#     "fingerprint": "0e86a323b205", "active_jobs": 0, "queued_jobs": 0, "max_concurrency": 1}   -> idle, no wait needed
+#   kept beside it: build-fix/topopt-cli.0e86a323-replaced-20261024 (cp -p of the old file;
+#     sha256 0e1219e9a3efab38f6d1dee2c6943d7703f9a8deb28334bd7a7cbb645fe53cde = worker-bin/0e86a323b205/topopt-cli)
+#   swap: cp -p worker-bin/03ad2df57977/topopt-cli build-fix/.topopt-cli.swap-tmp-03ad2df57977
+#         mv -f build-fix/.topopt-cli.swap-tmp-03ad2df57977 build-fix/topopt-cli            (14:54:28)
+#   build-fix/topopt-cli now: sha256 7e6adad1f1b3db5a60a676aa53b63408b6f69dd8ae5167e858ac1279195bcff4 (4 906 264 B)
+#     (= core/build-cli-03ad2df57977/topopt-cli = worker-bin/03ad2df57977/topopt-cli)
+#   /health AFTER (14:54:28, and again 15:31:37): {"ok": true, "worker_version": "1.1.0",
+#     "cli": "/Users/nadim/dev/TopOpt/worker-core-61cfce05/core/build-fix/topopt-cli", "cli_version": "0.1.0",
+#     "fingerprint": "03ad2df57977", "active_jobs": 0, "queued_jobs": 0, "max_concurrency": 1}
+#   /health fingerprint 03ad2df57977 == CoreFingerprint.value 03ad2df57977 (the worker runs `--version` on every /health,
+#   topopt_worker.py _health; RemoteRunner compares /health's fingerprint only).
+
+## 5. TESTS AT M (narrow). Package app/TopOptKit, swift test --scratch-path /tmp/r7x20b-build --skip-build.
+#   swift build --build-tests --scratch-path /tmp/r7x20b-build: Build complete! (32.46 secs.) 14:57:59
+#   Linked core check: out/Products/Debug/libtopopt.a sha256 a427ab842fb3ee63... (= the vendored macos slice);
+#     TopOptFlowsTests binary 14:57:58: "03ad2df57977" 1, "61cfce05e1ce" 0, "mg-safe" 4; TopOptKitTests binary: "mg-safe" 4.
+#     (The runner's own check line read a stale path, debug/TopOptKitPackageTests.xctest, and printed zeros; re-checked
+#     by hand at the out/Products/Debug paths above.)
+#   Filters and XCTest totals:
+#     repair   'TopOptFlowsTests\.(StepMeshRepairTests|FlexibleStepRepairHookTests|LatticeStaleTypeTests)/'
+#              Executed 17 tests, with 0 failures (0 unexpected) in 4.551 (4.554) seconds
+#              StepMeshRepairTests 8/8 · FlexibleStepRepairHookTests 3/3 · LatticeStaleTypeTests 6/6
+#     fe_flows 'TopOptFlowsTests\.(FlexibleI1HoldTests|FlexibleI3LinkSimTests|FlexibleFEFieldTests|FlexibleBatchMXrayTests|
+#              FlexibleSquishPlayerTests|FlexibleSquishSolverTests|FlexibleBatchNRefineTests|FlexibleBatchNVerifyTests|
+#              FlexibleNozzleGradeTests|FlexibleSquishCoarsenTests|FlexibleSquishVerifyGTests|FlexibleFEVerifyGTests|
+#              LatticeStaleTypeTests)/'   (the classes that solve through core's FE in the bridge: squishSolve / squishSteps /
+#              FlexibleFERequest.solve / FlexibleSquishSolver)
+#              Executed 61 tests, with 6 failures (0 unexpected) in 1630.904 (1630.916) seconds — 58 passed, 3 failed
+#              FlexibleI1HoldTests 3/3 · FlexibleI3LinkSimTests 4/4 · FlexibleFEFieldTests 10/12 · FlexibleBatchMXrayTests 2/2 ·
+#              FlexibleSquishPlayerTests 7/7 · FlexibleSquishSolverTests 5/5 · FlexibleBatchNRefineTests 3/4 ·
+#              FlexibleBatchNVerifyTests 4/4 · FlexibleNozzleGradeTests 4/4 · FlexibleSquishCoarsenTests 2/2 ·
+#              FlexibleSquishVerifyGTests 6/6 · FlexibleFEVerifyGTests 2/2 · LatticeStaleTypeTests 6/6
+#     fe_kit   'TopOptKitTests\.(FlexibleSquishFETests|FlexibleSquishStepsTests|FlexibleSquishModulusTests)/|TopOptFlowsTests\.LatticeStaleTypeTests/'
+#              TopOptKitTests: Executed 20 tests, with 0 failures (0 unexpected) in 101.550 (101.553) seconds
+#              TopOptFlowsTests: Executed 6 tests, with 0 failures (0 unexpected) in 2.069 (2.070) seconds
+#              FlexibleSquishFETests 12/12 · FlexibleSquishStepsTests 6/6 · FlexibleSquishModulusTests 2/2 · LatticeStaleTypeTests 6/6
+#     stale    'TopOptFlowsTests\.LatticeStaleTypeTests/'
+#              Executed 6 tests, with 0 failures (0 unexpected) in 1.974 (1.976) seconds
+#     golden   'TopOptFlowsTests\.(FlexibleAngledGoldenTests|LatticeStaleTypeTests)/'
+#       SWIFT_DETERMINISTIC_HASHING=1: Executed 19 tests, with 0 failures (0 unexpected) in 17.506 (17.510) seconds
+#              — 38 "FLEX-AP GOLDEN … identical", 0 DIFFERS, 0 PART-SKIP
+#       unseeded (env -u SWIFT_DETERMINISTIC_HASHING): Executed 19 tests, with 0 failures (0 unexpected) in 16.121 (16.124) seconds
+#              — 32 identical, 0 DIFFERS, 1 PART-SKIP (testLatticeSubtreesReEncodeIdentically: the RAW subtree bytes need
+#              deterministic hashing; canonical subtrees and flexible blocks compared)
+#     (FlexibleAngledGoldenTests 13/13 in each mode + LatticeStaleTypeTests 6/6; round 8b: 13 tests, 38 / 32 + 1, the same.)
+#   Stage-job hashes: stage_job_hashes.sh unchanged, SWIFT_TEST_ARGS="--scratch-path /tmp/r7x20b-build", inputs checked
+#     against s0_frozen/SHA256SUMS + the r3/r5 sums (none moved), SWIFT_DETERMINISTIC_HASHING=1, TOPOPT_JOB_REPEAT=3:
+#     exit 0, 16 rows, every row "exit 0 … repeats 3: identical", control+ moves (ff25ee7e926931d6), control- does not
+#     (8daeed3065787165). WHOLE FILE identical (cmp) to round8_step_h47/stage_job_hashes_r8.txt (sha256 8630970ca6178167...,
+#     both) and to round7/t3_reveal/stage_job_hashes_t3.txt. Round 8b's set (round8b_rig_removed/r8b_runs.txt) recorded
+#     its run identical to that same r8 file, so it is matched too.
+
+## 6. THE THREE FAILURES (fe_flows) — what moved and why
+#   (a) FlexibleFEFieldTests.testASlenderAllLatticePartGetsItsField — FlexibleFEFieldTests.swift:432
+#       XCTAssertFalse failed - premise: multigrid stagnates on this part
+#       The cure did it: in this test's solves core printed
+#         [mg-safe] solve 1: shipped stalled (300 cycles, rel res 2.791e-01) -> l1-Jacobi MG-PCG CONVERGED in 756 cycles,
+#           rel res 9.948e-05, 3278 ms   (twice; the 1e-8 reference: CONVERGED in 868 cycles; the 600-iteration red control:
+#           "did not converge in 600 cycles, rel res 1.176e-03" then the Jacobi-CG fallback)
+#       i.e. the M2 stand's sim, which stagnated in multigrid and then ran Jacobi-CG (the test's pinned premise), now lands
+#       through the safe-smoother multigrid retry: usedMultigrid is true. The rest of the test's assertions held.
+#   (b) FlexibleFEFieldTests.testFiveFacePinchMovesEveryFace — :467, :472, :473
+#       XCTAssertTrue failed - the sliding solve did not converge; the bonded retry landed (+ the Squish (i) does not say
+#       "every rest held fast")
+#       The cure did it: [mg-safe] solve 1: shipped stalled (300 cycles, rel res 3.861e-03) -> l1-Jacobi MG-PCG CONVERGED
+#       in 459 cycles, rel res 9.883e-05, 8141 ms. His five faces' SLIDING-rest solve now converges, so the app no longer
+#       takes its one bonded retry: restsBonded is false and the legend's (i) no longer says the rests were held fast.
+#       This changes what the Squish view shows on that part (the sliding field instead of the bonded one).
+#   Both tests passed on core 61cfce05 (round7/batch_h39/h39_runs.txt, 2026-10-17: "fix1.log:=== exit 0 FlexibleFEFieldTests"
+#   after a465f66f; the app's core was 61cfce05e1ce from 2026-10-14 until this merge). Only
+#   these two solves engaged the safe retry in fe_flows (5 [mg-safe] solve lines, all inside these two tests).
+#   No test was edited (no app source change); re-pinning these premises, or keeping the squish FE off the retry
+#   (core's fea_matfree_set_mg_safe_retry), is the reviewer's ruling to make.
+#   (c) FlexibleBatchNRefineTests.testANewLatticeCancelsTheRefineAndAWaitingSolveGetsCoreBetweenIncrements — :359 ×2
+#       XCTAssertLessThan failed: ("17.604464054107666") is not less than ("5.0") ("rule") and ("5.54484498500824") ("new lattice")
+#       - …so the waiting solve got core within an increment
+#       NOT the safe retry: no [mg-safe] solve line in that test. Machine load: load average ~9 during the run (15:04-15:08).
+#       Re-run alone at 15:29:41 (load 2.46): filter 'TopOptFlowsTests\.(FlexibleBatchNRefineTests/testANewLatticeCancels
+#       TheRefineAndAWaitingSolveGetsCoreBetweenIncrements|LatticeStaleTypeTests/)' -> Executed 7 tests, with 0 failures
+#       (0 unexpected) in 96.717 (96.719) seconds; FLEX-N CANCEL rule 2.56 s · new lattice 2.54 s · ignores cancel 2.61 s ·
+#       never yields 27.24 s. A load-sensitive timing pin; passes at normal load.
+#   Other [mg-safe] engagements: fe_kit 1 — FlexibleSquishFETests.testAQueuedSimKeepsItsWholeBudget, whose first sim asks
+#   tolerance 1e-300 on purpose (it can never converge): the retry ran 767 cycles before the Jacobi fallback; the test passed.
+#   The new S7 line ("[mg] smoother check (S7)", once per solve here since the bridge's Posture resets the run per solve):
+#   fe_flows 444 (29 say UNSAFE), fe_kit 97 (5 UNSAFE), refine re-run 33 — stderr only.
+
+## 7. LEFT AS FOUND / NOT DONE
+#   Not pushed. The worker app's settings untouched; the worker process (PID 4437) neither restarted nor signalled.
+#   core/build-cli-03ad2df57977/ (the CLI's build dir) is untracked in this worktree and not committed.
+#   The worktree's stray .vcpkg (2026-10-24 01:04) and core/build (01:07) were left in place.
