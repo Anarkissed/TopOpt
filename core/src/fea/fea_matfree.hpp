@@ -539,5 +539,44 @@ inline double& mf_solve_deadline() {
   return deadline;
 }
 
+// SAFE-RETRY probes (tests / diagnostics only; production never calls these).
+// Build the matrix-free system + geometric hierarchy for (grid, elem_youngs)
+// and measure, deterministically:
+//   lambda_jacobi[l] / lambda_l1[l]  lambda_max(D^-1 A) / (D_l1^-1 A) on every
+//                                    SMOOTHED level, fine first (power iteration,
+//                                    `power_iters` steps — a LOWER bound);
+//   rho / rayleigh                   D4 on the V-cycle B: rho_A(I - BA) and the
+//                                    Rayleigh quotient of BA at the dominant
+//                                    error, for the shipped tuning and for l1.
+struct MgSmootherProbe {
+  bool built = false;
+  int levels = 0;
+  std::vector<double> lambda_jacobi, lambda_l1;
+  double rho_shipped = 0.0, rayleigh_shipped = 0.0;
+  double rho_l1 = 0.0, rayleigh_l1 = 0.0;
+};
+MgSmootherProbe mg_smoother_probe(const VoxelGrid& grid, double poisson,
+                                  const std::vector<DirichletBC>& bcs,
+                                  const std::vector<NodalLoad>& loads,
+                                  const std::vector<double>& elem_youngs,
+                                  int power_iters, int vcycle_iters);
+
+// Arm G's census on (grid, elem_youngs, bcs, loads), exactly as the safe retry
+// computes it.
+struct MgIslandCensus {
+  long long elements = 0, solid = 0;
+  int pieces = 0, unanchored = 0, largest_unanchored = 0;
+  long long unanchored_voxels = 0;
+  int kept_frozen = 0, kept_big = 0, kept_hinged = 0, droppable = 0;
+  long long droppable_voxels = 0;
+  bool capped = false;
+  double floor_e = 0.0;
+  std::vector<int> drop;
+};
+MgIslandCensus mg_island_census(const VoxelGrid& grid,
+                                const std::vector<double>& elem_youngs,
+                                const std::vector<DirichletBC>& bcs,
+                                const std::vector<NodalLoad>& loads);
+
 }  // namespace fea_detail
 }  // namespace topopt

@@ -805,6 +805,16 @@ if(Eigen3_FOUND)
   target_include_directories(test_mg_tuning PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME fea_mg_tuning COMMAND test_mg_tuning)
 
+  # SAFE-SMOOTHER RETRY tripwire (thin-wall solver cure S3 + S5 gate + arm G):
+  # lambda_max(D_l1^-1 A) <= 1 and a positive-definite l1 V-cycle (red control:
+  # the shipped omega is indefinite at nu = 0.38), bit-identity of solves the
+  # shipped path converges, and the floating-speck drop (red control: without
+  # it the gated l1 solve stalls). Uses the internal fea_matfree.hpp probes.
+  add_executable(test_mg_safe_retry tests/unit/test_mg_safe_retry.cpp)
+  target_link_libraries(test_mg_safe_retry PRIVATE topopt)
+  target_include_directories(test_mg_safe_retry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_mg_safe_retry COMMAND test_mg_safe_retry)
+
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
   # That task let a measurement harness supply the prolongators for levels 2..
   # (algebraic aggregation from A1 instead of halving the grid). This asserts the

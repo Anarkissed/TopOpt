@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -148,6 +149,69 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 // thread (the matvec worker threads never touch this); reset per run.
 thread_local int g_mg_consecutive_stagnations = 0;
 thread_local bool g_mg_latched = false;
+
+// --- SAFE-SMOOTHER RETRY (thin-wall cure S3 + S5 gate, arm G) ----------------
+// The shipped damped-Jacobi weight omega = 0.6 is only safe while
+// lambda_max(D^-1 A) <= 2/omega = 3.33 on every smoothed level. A hex8 at
+// nu = 0.38 already has an ELEMENT bound of ~7.3, and the six-checks probe on
+// the Carriage Arms measured 7.15 / 8.65 / 7.02 on levels 0-2: the V-cycle is
+// INDEFINITE there (Rayleigh(BA) = -852) and the residual grows to 30 over the
+// 300-cycle budget. Healthy parts converge despite it, so the shipped path is
+// left exactly as it is; this retry runs ONLY after that path has already
+// stalled (budget exhausted or broke down), before the Jacobi-CG fallback:
+//   * l1-Jacobi smoother on every level (D_l1 = row sums of |A|, computed
+//     element-by-element on the matrix-free fine level), omega = 1. Provably
+//     lambda_max(D_l1^-1 A) <= 1, so the cycle is SPD and contracts.
+//   * arm G, when the caller PERMITS it (FeaIslandDropPermit — the SIMP
+//     trajectory/compliance solve does, certification never does): tiny
+//     ISOLATED solid islands floating in the density floor are solved at the
+//     floor modulus, removing their ~6 near-rigid modes each. Isolated means:
+//     6-connected piece of <= 27 voxels that shares no node with a Dirichlet
+//     BC or a load, holds no frozen / Load / Fixture voxel, and has no solid
+//     or frozen voxel anywhere in its 26-neighbourhood (not even an edge or
+//     corner hinge to another body). All of them together <= 5 % of elements.
+// Every solve that converges on the shipped path never reaches this code, so
+// it is bit-identical. Deterministic: cycle-count gate, ascending BFS, no clock.
+//
+// A retry that does not reach tolerance hands its iterate to the exact
+// Jacobi-CG fallback as the starting guess (PCG never raises the energy error
+// of its start), so the fallback's answer is still the exact system's.
+//
+// After kMgLatchThreshold consecutive SHIPPED stalls the existing latch trips;
+// with the retry enabled a latched run skips the doomed shipped attempt and goes
+// straight to the safe path (it no longer drops to Jacobi-only). A safe attempt
+// is PRODUCTIVE if it converged or cut the residual >= 10x before seeding the
+// fallback; kMgLatchThreshold consecutive unproductive attempts latch the safe
+// path OFF too, which restores exactly today's latched behaviour (Jacobi-CG,
+// no build).
+thread_local bool g_mg_safe_retry = true;          // public switch (tests)
+thread_local int g_mg_safe_consecutive_failures = 0;
+thread_local bool g_mg_safe_latched = false;
+thread_local bool g_mg_safe_lambda_logged = false;  // S7: once per run
+thread_local bool g_mg_lambda_logged = false;       // S7 (shipped): once per run
+thread_local long long g_mg_safe_engagements = 0;
+thread_local long long g_mg_safe_carries = 0;
+thread_local long long g_mg_safe_solve_seq = 0;
+// The voxels the LAST matrix-free solve on this thread solved at the floor
+// modulus (arm G), ascending; empty unless the safe path dropped islands and
+// carried. The SIMP compliance reads it to keep its energy/sensitivity
+// consistent with the system that was actually solved.
+thread_local std::vector<int> g_mg_last_dropped;
+thread_local double g_mg_last_dropped_floor = 0.0;
+thread_local int g_island_drop_permit = 0;
+thread_local const std::vector<char>* g_island_keep_mask = nullptr;
+thread_local int g_island_drop_forbid = 0;
+
+// Arm G caps. Only SPECKS are ever dropped: each island at most this many
+// voxels, and all of them together at most this fraction of the system's
+// elements. If the cap would be exceeded nothing is dropped (and it is logged).
+// The cap is against the ELEMENT count, not the "solid" count: on a degenerate
+// rung almost everything is at the floor, so a fraction-of-solid cap refuses
+// exactly the case it exists for (his part: 8,703 island voxels = 21 % of solid
+// but 2.3 % of elements).
+constexpr int kIslandMaxVoxels = 27;              // a 3x3x3 block
+constexpr double kIslandMaxElementFraction = 0.05;
+constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
 // --- MEASUREMENT-ONLY latch RE-ARM period (task solver-speed-arm-and-diagnose)
 // The one thing handoff 2026-07-27-mg-stagnation-phase0 §7 named as missing to
@@ -261,6 +325,9 @@ struct MgOpts {
   int coarse_extra = kCoarseExtraSmooth;
   int gamma = kCycleGamma;
   bool point_block = false;
+  // l1-Jacobi (safe retry only): x <- x + D_l1^-1 r, omega ignored. Never set
+  // by mg_opts_now(), so the shipped cycle cannot reach it.
+  bool l1 = false;
 };
 
 MgOpts mg_opts_now() {
@@ -479,6 +546,7 @@ struct Level {
   SpMat P;                     // prolongation coarse(level+1) -> this (n x n_coarse)
   std::vector<int> active;     // (node*3+comp) -> local dof id, or -1
   BlockDiag pbd;               // point-block smoother data; EMPTY on the shipped path
+  Vec Dl1inv;                  // 1/rowsum|A| (l1-Jacobi); EMPTY unless the safe retry ran
   bool coarsest = false;
   // coarsest-level exact solve; held by pointer so Level stays movable in a
   // std::vector (Eigen's factorisation objects are not moveable).
@@ -779,6 +847,10 @@ std::vector<Level> build_hierarchy_from_prolongators(
 // point-block branch applies the per-node 3x3 inverse to the same residual.
 inline void jacobi_sweep(const Level& L, const Vec& b, Vec& x, const MgOpts& o) {
   const Vec r = b - L.A * x;
+  if (o.l1) {  // safe retry only (see g_mg_safe_retry)
+    x += (L.Dl1inv.array() * r.array()).matrix();
+    return;
+  }
   if (o.point_block && !L.pbd.empty()) {
     block_apply(L.pbd, o.omega, r, x);
     return;
@@ -1074,6 +1146,9 @@ struct MfHierarchy {
   // Point-block smoother data for the FINE (matrix-free) level: EMPTY on the
   // shipped scalar path. Coarse levels carry their own on Level::pbd.
   BlockDiag fine_pbd;
+  // l1-Jacobi inverse diagonal of the FINE level (safe retry only; empty on the
+  // shipped path).
+  Vec fine_dl1inv;
   int levels() const { return 1 + static_cast<int>(coarse.size()); }
 };
 
@@ -1128,6 +1203,10 @@ inline void mf_fine_matvec(const MfHierarchy& H, const Vec& x, Vec& y) {
 inline void mf_jacobi_sweep(const MfHierarchy& H, MfScratch& S, const Vec& b,
                             Vec& x, const MgOpts& o) {
   mf_fine_matvec(H, x, S.Ax);
+  if (o.l1) {  // safe retry only (see g_mg_safe_retry)
+    x += (H.fine_dl1inv.array() * (b - S.Ax).array()).matrix();
+    return;
+  }
   if (o.point_block && !H.fine_pbd.empty()) {
     S.vr = b - S.Ax;
     block_apply(H.fine_pbd, o.omega, S.vr, x);
@@ -1211,13 +1290,15 @@ void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
 bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
               int max_it, Vec& x, int& iters, double& resid, bool mixed,
               fea_detail::RecycleReport* rec = nullptr,
-              const Vec* x0 = nullptr) {
+              const Vec* x0 = nullptr, const MgOpts* opts_in = nullptr) {
   // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
   // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
   // test below — is FP64 regardless. A sloppier preconditioner costs iterations,
   // not accuracy; this outer FP64 loop is the correctness guarantee.
-  const MgOpts opts = mg_opts_now();
+  // `opts_in` is the safe retry's l1 recipe; null (every shipped call) reads the
+  // tuning exactly as before.
+  const MgOpts opts = opts_in != nullptr ? *opts_in : mg_opts_now();
   auto precondition = [&](const Vec& rr, Vec& zz) {
     if (mixed) mf_v_cycle_mixed(H, S, rr, zz, opts);
     else mf_v_cycle(H, S, rr, zz, opts);
@@ -2091,6 +2172,312 @@ void mf_build_point_block_fine(const MatfreeReduced& m,
   }
 }
 
+// ===========================================================================
+// SAFE-SMOOTHER RETRY helpers (see g_mg_safe_retry). None of these runs on the
+// shipped path: they are called only after the shipped MG-CG has stalled, or by
+// the test/diagnostic probes in fea_detail.
+// ===========================================================================
+
+// 1 / rowsum|A| over an assembled level, guarded like inverse_diagonal.
+Vec l1_inverse_diagonal(const SpMat& A) {
+  Vec s = Vec::Zero(A.rows());
+  for (int k = 0; k < A.outerSize(); ++k)
+    for (SpMat::InnerIterator it(A, k); it; ++it)
+      s[it.row()] += std::fabs(it.value());
+  Vec inv(s.size());
+  for (int i = 0; i < s.size(); ++i) inv[i] = (s[i] > 0.0) ? 1.0 / s[i] : 0.0;
+  return inv;
+}
+
+// l1-Jacobi data on every smoothed level of `H`. FINE level, matrix-free: each
+// element adds factor_e * sum_c |Ke(r,c)| to its row r's DOF (cubic elements
+// their exact |a K_A + b K_B + c K_C| row sums). Summing per-element absolute row
+// sums gives D >= the true l1 diagonal, and every element matrix is dominated by
+// its own l1 diagonal, so A = sum A_e <= sum D_e = D: lambda_max(D^-1 A) <= 1 is
+// guaranteed, not estimated. Coarse levels use the exact assembled row sums.
+void build_l1_smoother(MfHierarchy& H) {
+  const MatfreeReduced& m = *H.m;
+  constexpr int kD = Hex8Stiffness::kDof;
+  std::vector<double> full(static_cast<std::size_t>(m.ndof), 0.0);
+  double rowabs[kD];
+  for (int r = 0; r < kD; ++r) {
+    double a = 0.0;
+    for (int c = 0; c < kD; ++c) a += std::fabs(m.Ke(r, c));
+    rowabs[r] = a;
+  }
+  for (const MfElem& el : m.elems)
+    for (int r = 0; r < kD; ++r)
+      full[static_cast<std::size_t>(el.edof[r])] += el.factor * rowabs[r];
+  for (const MfCubElem& el : m.cub_elems)
+    for (int r = 0; r < kD; ++r) {
+      double a = 0.0;
+      for (int c = 0; c < kD; ++c)
+        a += std::fabs(el.a * m.KA(r, c) + el.b * m.KB(r, c) + el.c * m.KC(r, c));
+      full[static_cast<std::size_t>(el.edof[r])] += a;
+    }
+  H.fine_dl1inv.resize(m.ng);
+  for (int k = 0; k < m.ng; ++k) {
+    const double d =
+        full[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])];
+    H.fine_dl1inv[k] = (d > 0.0) ? 1.0 / d : 0.0;
+  }
+  for (Level& L : H.coarse)
+    if (!L.coarsest) L.Dl1inv = l1_inverse_diagonal(L.A);
+}
+
+// Deterministic power iteration for lambda_max(Dinv A) (Dinv a diagonal, A SPD):
+// the D-inner-product Rayleigh quotient x'Ax / x'Dx, which approaches
+// lambda_max from BELOW. Fixed, index-hashed start vector; no randomness.
+template <class ApplyA>
+double power_lambda_dinv_a(int n, const Vec& dinv, ApplyA apply_a, int iters) {
+  if (n <= 0) return 0.0;
+  Vec x(n), y(n);
+  for (int i = 0; i < n; ++i) {
+    const double h = std::fmod((i + 1) * 0.6180339887498949, 1.0);
+    x[i] = dinv[i] > 0.0 ? 0.5 + h : 0.0;
+  }
+  double nx = x.norm();
+  if (!(nx > 0.0)) return 0.0;
+  x /= nx;
+  double lam = 0.0;
+  for (int it = 0; it < iters; ++it) {
+    apply_a(x, y);
+    double xdx = 0.0;
+    for (int i = 0; i < n; ++i)
+      if (dinv[i] > 0.0) xdx += x[i] * x[i] / dinv[i];
+    if (!(xdx > 0.0)) break;
+    lam = x.dot(y) / xdx;
+    x = (dinv.array() * y.array()).matrix();
+    nx = x.norm();
+    if (!(nx > 0.0) || !std::isfinite(nx)) break;
+    x /= nx;
+  }
+  return lam;
+}
+
+// The reduced fine operator applied WITHOUT bumping the matvec counter (and
+// without touching m's own scratch), so the S7 lambda probe on the shipped path
+// leaves every reported number — the `matvecs` column included — unchanged.
+// Same element kernels as apply_kgg_raw.
+struct UncountedFineApply {
+  const MatfreeReduced& m;
+  std::vector<double> xf, yf;
+  explicit UncountedFineApply(const MatfreeReduced& mm)
+      : m(mm), xf(static_cast<std::size_t>(mm.ndof), 0.0),
+        yf(static_cast<std::size_t>(mm.ndof), 0.0) {}
+  void operator()(const Vec& x, Vec& y) {
+    std::fill(xf.begin(), xf.end(), 0.0);
+    for (int k = 0; k < m.ng; ++k)
+      xf[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] = x[k];
+    fea_detail::mf_apply_full(m.elems, m.color_offsets, m.Ke, xf, yf);
+    if (m.has_cubic)
+      fea_detail::mf_apply_cubic_add(m.cub_elems, m.cub_color_offsets, m.KA, m.KB,
+                                     m.KC, xf, yf);
+    y.resize(m.ng);
+    for (int k = 0; k < m.ng; ++k)
+      y[k] = yf[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])];
+  }
+};
+
+// lambda_max(Dinv A) on every SMOOTHED level of H (fine first; the coarsest,
+// solved directly, is skipped). l1 == true measures the l1 diagonal (must have
+// been built), false the shipped Jacobi diagonal.
+std::vector<double> hierarchy_lambdas(const MfHierarchy& H, bool l1, int iters) {
+  std::vector<double> out;
+  const int n0 = H.m->ng;
+  UncountedFineApply fine(*H.m);
+  out.push_back(power_lambda_dinv_a(
+      n0, l1 ? H.fine_dl1inv : H.fine_dinv,
+      [&fine](const Vec& x, Vec& y) { fine(x, y); }, iters));
+  for (const Level& L : H.coarse) {
+    if (L.coarsest) continue;
+    const Vec dinv = l1 ? L.Dl1inv : inverse_diagonal(L.A);
+    out.push_back(power_lambda_dinv_a(
+        L.n, dinv, [&L](const Vec& x, Vec& y) { y = L.A * x; }, iters));
+  }
+  return out;
+}
+
+// D4 on the V-cycle B as a stationary iteration: e <- (I - B A) e, normalised
+// in the A-norm. Returns rho_A(I - BA) (growth factor of the last step) and the
+// Rayleigh quotient of BA at the dominant error, <BAe, e>_A / <e, e>_A. A
+// positive-definite B gives Rayleigh in (0, 2) and rho < 1; the shipped omega on
+// a hex8 at nu = 0.38 gives a negative Rayleigh and rho >> 1.
+void vcycle_quality(const MfHierarchy& H, const MgOpts& o, int iters,
+                    double& rho, double& rayleigh) {
+  const int n = H.m->ng;
+  MfScratch S;
+  S.resize(n, static_cast<int>(H.P0.cols()));
+  Vec e(n), Ae(n), BAe(n);
+  for (int i = 0; i < n; ++i) e[i] = std::fmod((i + 1) * 0.7548776662466927, 1.0) - 0.5;
+  auto anorm = [&](const Vec& v) {
+    Vec t(n);
+    H.m->apply_kgg_raw(v.data(), t.data());
+    return std::sqrt(std::max(0.0, v.dot(t)));
+  };
+  double na = anorm(e);
+  e /= na;
+  rho = 0.0;
+  rayleigh = 0.0;
+  for (int it = 0; it < iters; ++it) {
+    H.m->apply_kgg_raw(e.data(), Ae.data());
+    mf_v_cycle(H, S, Ae, BAe, o);
+    rayleigh = Ae.dot(BAe) / e.dot(Ae);  // <BAe,e>_A / <e,e>_A
+    e -= BAe;
+    na = anorm(e);
+    rho = na;  // e had unit A-norm
+    if (!(na > 0.0) || !std::isfinite(na)) break;
+    e /= na;
+  }
+}
+
+// --- Arm G: tiny unanchored solid islands ----------------------------------
+struct IslandScan {
+  std::vector<int> drop;        // voxel indices to solve at the floor, ascending
+  double floor_e = 0.0;         // the floor modulus they are solved at
+  long long elements = 0;       // elements in the system
+  long long solid = 0;          // voxels with E >= threshold * Emax
+  int pieces = 0;               // 6-connected solid pieces
+  int unanchored = 0;           // pieces touching no Dirichlet / loaded node
+  long long unanchored_voxels = 0;
+  int largest_unanchored = 0;
+  int kept_frozen = 0;          // unanchored pieces kept: hold a frozen voxel
+  bool keep_mask = false;       // frozen = the registered mask (else the proxy)
+  int kept_big = 0;             // unanchored pieces kept: larger than kIslandMaxVoxels
+  int kept_hinged = 0;          // unanchored pieces kept: edge/corner-touch other solid or a frozen voxel
+  int droppable = 0;            // islands passing every rule
+  long long droppable_voxels = 0;
+  bool capped = false;          // total would exceed the cap -> nothing dropped
+};
+
+// Deterministic 6-connected census of the solid voxels (E >= 1e-3 * Emax) in
+// ascending voxel order. A piece is ANCHORED if any of its voxels has a node
+// carrying a Dirichlet BC or a non-zero load. A piece is KEPT if it is anchored,
+// larger than kIslandMaxVoxels, or holds a FROZEN voxel: a Load / Fixture tagged
+// voxel, or a voxel of the run's registered frozen mask (FeaIslandKeepMask). With
+// no mask registered the proxy is a full-modulus voxel (E >= Emax: FrozenSolid is
+// pinned at rho = 1, so this keeps every island that could hold one — and, more
+// conservatively, any rho = 1 design voxel). The remaining islands are dropped
+// only if together they stay within kIslandMaxElementFraction.
+IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
+                        const std::vector<DirichletBC>& bcs,
+                        const std::vector<NodalLoad>& loads,
+                        const std::vector<char>* active_mask) {
+  IslandScan R;
+  const std::size_t nv = grid.voxel_count();
+  if (ey.size() != nv) return R;
+  auto present = [&](std::size_t e) {
+    return grid.tags[e] != VoxelTag::Empty &&
+           (active_mask == nullptr || (*active_mask)[e] != 0) && ey[e] > 0.0;
+  };
+  double emax = 0.0, emin = 0.0;
+  bool any = false;
+  for (std::size_t e = 0; e < nv; ++e) {
+    if (!present(e)) continue;
+    ++R.elements;
+    if (!any || ey[e] > emax) emax = ey[e];
+    if (!any || ey[e] < emin) emin = ey[e];
+    any = true;
+  }
+  R.floor_e = emin;
+  if (!any || !(emin < kIslandSolidThreshold * emax)) return R;  // no floor phase
+  const std::vector<char>* keep =
+      (g_island_keep_mask != nullptr && g_island_keep_mask->size() == nv)
+          ? g_island_keep_mask
+          : nullptr;
+  R.keep_mask = keep != nullptr;
+  auto frozen_voxel = [&](std::size_t e) {
+    if (grid.tags[e] == VoxelTag::Load || grid.tags[e] == VoxelTag::Fixture)
+      return true;
+    return keep != nullptr ? (*keep)[e] != 0 : ey[e] >= emax;
+  };
+  const double thr = kIslandSolidThreshold * emax;
+  std::vector<char> solid(nv, 0);
+  for (std::size_t e = 0; e < nv; ++e)
+    if (present(e) && ey[e] >= thr) { solid[e] = 1; ++R.solid; }
+
+  const int nnodes = fea_node_count(grid);
+  std::vector<char> anchor(static_cast<std::size_t>(nnodes), 0);
+  for (const DirichletBC& b : bcs)
+    if (b.node >= 0 && b.node < nnodes) anchor[static_cast<std::size_t>(b.node)] = 1;
+  for (const NodalLoad& l : loads)
+    if (l.value != 0.0 && l.node >= 0 && l.node < nnodes)
+      anchor[static_cast<std::size_t>(l.node)] = 1;
+
+  std::vector<int> label(nv, -1);
+  std::vector<int> queue;
+  std::vector<int> members;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  for (std::size_t seed = 0; seed < nv; ++seed) {
+    if (!solid[seed] || label[seed] >= 0) continue;
+    const int id = R.pieces++;
+    queue.clear();
+    members.clear();
+    queue.push_back(static_cast<int>(seed));
+    label[seed] = id;
+    bool anchored = false, frozen = false;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+      const int e = queue[q];
+      members.push_back(e);
+      const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
+      if (frozen_voxel(static_cast<std::size_t>(e))) frozen = true;
+      if (!anchored) {
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        for (int nd : en)
+          if (anchor[static_cast<std::size_t>(nd)]) { anchored = true; break; }
+      }
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& c : nb) {
+        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 ||
+            c[2] >= nz)
+          continue;
+        const std::size_t f = grid.index(c[0], c[1], c[2]);
+        if (solid[f] && label[f] < 0) {
+          label[f] = id;
+          queue.push_back(static_cast<int>(f));
+        }
+      }
+    }
+    if (anchored) continue;
+    ++R.unanchored;
+    const int sz = static_cast<int>(members.size());
+    R.unanchored_voxels += sz;
+    R.largest_unanchored = std::max(R.largest_unanchored, sz);
+    if (sz > kIslandMaxVoxels) { ++R.kept_big; continue; }
+    if (frozen) { ++R.kept_frozen; continue; }
+    // ISOLATION: an island is a speck only if no voxel in its 26-neighbourhood
+    // is solid outside it or frozen — i.e. it shares not even an edge or a
+    // corner node with another body (a hinged appendage is part of whatever
+    // it hangs from, e.g. under a 26-connected keep-largest-component export).
+    bool hinged = false;
+    for (int e : members) {
+      const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
+      for (int dz = -1; dz <= 1 && !hinged; ++dz)
+        for (int dy = -1; dy <= 1 && !hinged; ++dy)
+          for (int dx = -1; dx <= 1 && !hinged; ++dx) {
+            const int a = i + dx, b = j + dy, c = k + dz;
+            if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
+            const std::size_t f = grid.index(a, b, c);
+            if (grid.tags[f] == VoxelTag::Empty) continue;
+            if ((solid[f] && label[f] != id) || frozen_voxel(f)) hinged = true;
+          }
+      if (hinged) break;
+    }
+    if (hinged) { ++R.kept_hinged; continue; }
+    ++R.droppable;
+    R.droppable_voxels += sz;
+    for (int e : members) R.drop.push_back(e);
+  }
+  if (static_cast<double>(R.droppable_voxels) >
+      kIslandMaxElementFraction * static_cast<double>(R.elements)) {
+    R.capped = true;
+    R.drop.clear();
+  }
+  std::sort(R.drop.begin(), R.drop.end());
+  return R;
+}
+
 // Matrix-free MG-CG solve, falling back to the exact matrix-free Jacobi-CG when
 // a hierarchy is not applicable or MG does not converge. Mirrors
 // solve_reduced_mgcg's fallback discipline and scatter, but the FINE level is
@@ -2125,6 +2512,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                          : "fea_solve_mgcg_matfree",
       info, active_mask, lattice);
   const double t_built = fea_detail::mf_steady_ms();
+  // Arm G report of THIS solve: cleared on entry, set only by a safe retry that
+  // dropped islands and carried.
+  g_mg_last_dropped.clear();
+  g_mg_last_dropped_floor = 0.0;
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -2154,7 +2545,14 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       rearmed_this_solve = true;
       ++g_mg_rearm_attempts;
     }
-    const bool try_mg = !g_mg_latched;
+    // SAFE RETRY gate (see g_mg_safe_retry). `safe_ok` = the retry may run on
+    // this solve; `safe_direct` = the shipped attempt is already latched off for
+    // the run, so build the hierarchy for the safe path alone. With the retry
+    // disabled or latched, both are false and the line below reads exactly as
+    // the shipped `try_mg = !g_mg_latched`.
+    const bool safe_ok = g_mg_safe_retry && !g_mg_safe_latched;
+    const bool safe_direct = g_mg_latched && safe_ok;
+    const bool try_mg = !g_mg_latched || safe_direct;
     const double t_h0 = fea_detail::mf_steady_ms();
     const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
     // 0 when the latch short-circuited the build — which is exactly the reading
@@ -2164,6 +2562,28 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // solve, and how many MG-CG cycles it attempted. hier_built==false when the
     // grid is not coarsenable (build-rejection) OR the 127 latch skipped the build.
     diag.hier_built = have_h;
+    // S7 observability on the SHIPPED path: once per run, on the first
+    // hierarchy built, log lambda_max(D^-1 A) per smoothed level against the
+    // shipped weight's bound 2/omega. Read-only: an uncounted operator apply
+    // on private scratch, so the solve below and every reported number
+    // (matvecs included) are unchanged; it costs ~20 fine applies per run.
+    if (have_h && !g_mg_lambda_logged) {
+      g_mg_lambda_logged = true;
+      const double om = mg_opts_now().omega;
+      const std::vector<double> lj = hierarchy_lambdas(H, false, 20);
+      std::fprintf(stderr,
+                   "[mg] smoother check (S7): %d levels, lambda_max(D^-1 A) per "
+                   "smoothed level:",
+                   H.levels());
+      bool unsafe = false;
+      for (double v : lj) {
+        std::fprintf(stderr, " %.3f", v);
+        unsafe = unsafe || om * v >= 2.0;
+      }
+      std::fprintf(stderr, " ; omega=%.2f => safe <= %.3f : %s\n", om, 2.0 / om,
+                   unsafe ? "UNSAFE (omega*lambda >= 2; the safe retry covers a stall)"
+                          : "safe");
+    }
 
     std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
     // WARM START (task 2026-08-10-plsm-production, S3). `m.kept_global[k]` is the
@@ -2192,7 +2612,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     fea_detail::RecycleReport rec;
     bool solved = false;
     const double t_mg0 = fea_detail::mf_steady_ms();
-    if (have_h) {
+    int shipped_it = 0;
+    double shipped_res = 0.0;
+    if (have_h && !safe_direct) {
       Vec rgv = Eigen::Map<const Vec>(m.rg.data(),
                                       static_cast<Eigen::Index>(m.ng));
       const int mg_cap = std::min(cap, kMgIterBudget);
@@ -2227,6 +2649,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
       // attempt was retried in FP64): honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;
+      shipped_it = it;
+      shipped_res = res;
       if (ok) {
         for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
         diag.iterations = it;
@@ -2239,7 +2663,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // MG did not converge / broke down -> fall through to the exact fallback.
     }
     // The V-cycle loop's wall, whether it carried or stagnated (0 when no
-    // hierarchy was attempted at all).
+    // hierarchy was attempted at all). Re-stamped below if the safe retry runs.
     diag.t_mg_ms = have_h ? fea_detail::mf_steady_ms() - t_mg0 : 0.0;
 
     // Latch bookkeeping (handoff 127): only when a hierarchy was actually built
@@ -2247,7 +2671,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // latches and is bit-identical); a stagnated one advances it, latching MG off
     // for the rest of the run once kMgLatchThreshold consecutive stagnations pile
     // up. A build-FAILURE (never coarsenable) is neither — leave the counter alone.
-    if (have_h) {
+    if (have_h && !safe_direct) {
       if (solved) {
         g_mg_consecutive_stagnations = 0;
         // Measurement accounting only (0 in production): a re-armed retry that
@@ -2256,6 +2680,143 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       } else if (++g_mg_consecutive_stagnations >= kMgLatchThreshold) {
         g_mg_latched = true;
       }
+    }
+
+    // SAFE RETRY (S3 + S5 gate + arm G). Reached ONLY when a hierarchy built and
+    // the shipped MG-CG did not converge (or was latched off for the run), so no
+    // solve that converges on the shipped path can see it. See g_mg_safe_retry.
+    if (!solved && have_h && safe_ok) {
+      const long long seq = ++g_mg_safe_solve_seq;
+      ++g_mg_safe_engagements;
+      const double t_s0 = fea_detail::mf_steady_ms();
+      // Arm G: only when the caller permits it and the operator is the plain
+      // graded isotropic one (a lattice/cubic or uniform-modulus solve keeps
+      // its system untouched).
+      const bool may_drop = g_island_drop_permit > 0 && g_island_drop_forbid == 0 &&
+                            elem_youngs != nullptr && lattice == nullptr;
+      IslandScan scan;
+      if (may_drop)
+        scan = scan_islands(grid, *elem_youngs, bcs, loads, active_mask);
+      MatfreeReduced m2;
+      MfHierarchy H2;
+      bool use2 = false;
+      if (!scan.drop.empty()) {
+        std::vector<double> ey2 = *elem_youngs;
+        for (int e : scan.drop) ey2[static_cast<std::size_t>(e)] = scan.floor_e;
+        // Release the shipped coarse levels before building the second set, so
+        // the peak holds one hierarchy, not two.
+        H = MfHierarchy();
+        m2 = fea_detail::mf_build_reduced(grid, youngs_modulus, poisson, bcs,
+                                          loads, &ey2, "fea_solve_mgcg_matfree",
+                                          nullptr, active_mask, nullptr);
+        // Same element set => same kept DOFs; anything else is refused.
+        use2 = m2.ng == m.ng && m2.kept_global == m.kept_global &&
+               build_mf_hierarchy(m2, nnx, nny, nnz, H2);
+        if (!use2) {
+          H2 = MfHierarchy();
+          if (!build_mf_hierarchy(m, nnx, nny, nnz, H)) H = MfHierarchy();
+        }
+      }
+      MfHierarchy& HS = use2 ? H2 : H;
+      bool ok = false;
+      bool seeded_fallback = false;
+      double r0 = 1.0;
+      int it = 0;
+      double res = 0.0;
+      if (HS.m != nullptr) {
+        build_l1_smoother(HS);
+        // S7 observability: lambda_max per smoothed level, shipped Jacobi vs
+        // l1, once per run (20 power iterations each, deterministic start).
+        if (!g_mg_safe_lambda_logged) {
+          g_mg_safe_lambda_logged = true;
+          const std::vector<double> lj = hierarchy_lambdas(HS, false, 20);
+          const std::vector<double> ll = hierarchy_lambdas(HS, true, 20);
+          std::fprintf(stderr,
+                       "[mg-safe] lambda_max(D^-1 A) per smoothed level "
+                       "(omega=%.2f => safe <= %.2f):",
+                       mg_opts_now().omega, 2.0 / mg_opts_now().omega);
+          for (double v : lj) std::fprintf(stderr, " %.3f", v);
+          std::fprintf(stderr, " ; lambda_max(D_l1^-1 A):");
+          for (double v : ll) std::fprintf(stderr, " %.3f", v);
+          std::fprintf(stderr, "\n");
+        }
+        MgOpts o = mg_opts_now();
+        o.l1 = true;
+        o.point_block = false;
+        Vec rgv = Eigen::Map<const Vec>(HS.m->rg.data(),
+                                        static_cast<Eigen::Index>(HS.m->ng));
+        MfScratch scratch;
+        scratch.resize(HS.m->ng, static_cast<int>(HS.P0.cols()));
+        Vec x0;
+        if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
+                                             static_cast<Eigen::Index>(m.ng));
+        // Starting relative residual (1 when cold), so a non-converged attempt
+        // can be judged PRODUCTIVE (>= 10x reduction) for the latch below.
+        if (warm && rgv.norm() > 0.0) {
+          UncountedFineApply A(*HS.m);
+          Vec ax;
+          A(x0, ax);
+          r0 = (rgv - ax).norm() / rgv.norm();
+        }
+        Vec xg;
+        ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kMgIterBudget),
+                      xg, it, res, /*mixed=*/false, &rec, warm ? &x0 : nullptr,
+                      &o);
+        diag.mg_cycles_attempted = shipped_it + it;
+        if (ok) {
+          for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
+          diag.iterations = it;
+          diag.residual = res;
+          diag.converged = true;
+          diag.used_multigrid = true;
+          diag.mg_levels = HS.levels();
+          solved = true;
+          if (use2) {
+            g_mg_last_dropped = scan.drop;
+            g_mg_last_dropped_floor = scan.floor_e;
+          }
+        } else if (xg.size() == m.ng && xg.allFinite()) {
+          // Did not reach tolerance: hand the iterate to the exact Jacobi-CG
+          // fallback as its starting guess. PCG never raises the energy-norm
+          // error of its start, so this is at least as good as the guess the
+          // fallback would otherwise use (measured on the Carriage Arms: rel
+          // res ~1e-2 after 300 l1 cycles, which Jacobi-CG needs ~8,000
+          // iterations to reach from zero). The fallback's stopping test is
+          // still ||r|| <= tol*||b|| on the EXACT system (the islands, if any
+          // were dropped above, are back), so its answer is unchanged in kind.
+          for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
+          seeded_fallback = true;
+        }
+      }
+      // Latch: an attempt that carried, or that cut the residual >= 10x and
+      // seeded the fallback with it, is productive; kMgLatchThreshold
+      // consecutive unproductive attempts latch the safe path off for the run.
+      const bool productive = ok || (seeded_fallback && res <= 0.1 * r0);
+      if (ok) ++g_mg_safe_carries;
+      if (productive) {
+        g_mg_safe_consecutive_failures = 0;
+      } else if (++g_mg_safe_consecutive_failures >= kMgLatchThreshold) {
+        g_mg_safe_latched = true;
+      }
+      std::fprintf(stderr,
+                   "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
+                   "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
+                   "islands: %s%d unanchored of %d pieces (%lld vox, largest %d), "
+                   "kept frozen %d (%s), kept big %d, kept hinged %d, dropped %d "
+                   "islands / %lld vox of %lld elements%s%s%s\n",
+                   seq, safe_direct ? "latched off" : "stalled", shipped_it,
+                   shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
+                   fea_detail::mf_steady_ms() - t_s0, may_drop ? "" : "(not permitted) ",
+                   scan.unanchored, scan.pieces, scan.unanchored_voxels,
+                   scan.largest_unanchored, scan.kept_frozen,
+                   scan.keep_mask ? "frozen mask" : "full-modulus proxy",
+                   scan.kept_big, scan.kept_hinged,
+                   use2 ? scan.droppable : 0,
+                   use2 ? scan.droppable_voxels : 0LL, scan.elements,
+                   scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
+                   g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
+                   seeded_fallback ? " ; Jacobi-CG fallback starts from the l1 iterate" : "");
+      diag.t_mg_ms = fea_detail::mf_steady_ms() - t_mg0;
     }
 
     if (!solved) {
@@ -2416,6 +2977,54 @@ bool mg_coarse_space_hook_installed() {
 const AlgCoarsenStats& mg_algebraic_level1_stats() { return g_mg_alg_stats; }
 void mg_reset_algebraic_level1_stats() { g_mg_alg_stats = AlgCoarsenStats{}; }
 
+MgSmootherProbe mg_smoother_probe(const VoxelGrid& grid, double poisson,
+                                  const std::vector<DirichletBC>& bcs,
+                                  const std::vector<NodalLoad>& loads,
+                                  const std::vector<double>& elem_youngs,
+                                  int power_iters, int vcycle_iters) {
+  MgSmootherProbe P;
+  MatfreeReduced m = mf_build_reduced(grid, 1.0, poisson, bcs, loads,
+                                      &elem_youngs, "mg_smoother_probe", nullptr);
+  if (m.ng <= 0) return P;
+  MfHierarchy H;
+  if (!build_mf_hierarchy(m, grid.nx + 1, grid.ny + 1, grid.nz + 1, H)) return P;
+  build_l1_smoother(H);
+  P.built = true;
+  P.levels = H.levels();
+  P.lambda_jacobi = hierarchy_lambdas(H, false, power_iters);
+  P.lambda_l1 = hierarchy_lambdas(H, true, power_iters);
+  MgOpts shipped = mg_opts_now();
+  MgOpts l1 = shipped;
+  l1.l1 = true;
+  l1.point_block = false;
+  vcycle_quality(H, shipped, vcycle_iters, P.rho_shipped, P.rayleigh_shipped);
+  vcycle_quality(H, l1, vcycle_iters, P.rho_l1, P.rayleigh_l1);
+  return P;
+}
+
+MgIslandCensus mg_island_census(const VoxelGrid& grid,
+                                const std::vector<double>& elem_youngs,
+                                const std::vector<DirichletBC>& bcs,
+                                const std::vector<NodalLoad>& loads) {
+  const IslandScan S = scan_islands(grid, elem_youngs, bcs, loads, nullptr);
+  MgIslandCensus C;
+  C.elements = S.elements;
+  C.solid = S.solid;
+  C.pieces = S.pieces;
+  C.unanchored = S.unanchored;
+  C.largest_unanchored = S.largest_unanchored;
+  C.unanchored_voxels = S.unanchored_voxels;
+  C.kept_frozen = S.kept_frozen;
+  C.kept_big = S.kept_big;
+  C.kept_hinged = S.kept_hinged;
+  C.droppable = S.droppable;
+  C.droppable_voxels = S.droppable_voxels;
+  C.capped = S.capped;
+  C.floor_e = S.floor_e;
+  C.drop = S.drop;
+  return C;
+}
+
 }  // namespace fea_detail
 
 // Per-run multigrid stagnation latch (handoff 127, Amendment 2). The driver
@@ -2426,12 +3035,46 @@ void mg_reset_algebraic_level1_stats() { g_mg_alg_stats = AlgCoarsenStats{}; }
 void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_consecutive_stagnations = 0;
   g_mg_latched = false;
+  // The safe retry's per-run state resets with the latch it extends (the
+  // enable switch and the island-drop permit are not per-run state).
+  g_mg_safe_consecutive_failures = 0;
+  g_mg_safe_latched = false;
+  g_mg_safe_lambda_logged = false;
+  g_mg_lambda_logged = false;
+  g_mg_safe_engagements = 0;
+  g_mg_safe_carries = 0;
+  g_mg_safe_solve_seq = 0;
+  g_mg_last_dropped.clear();
+  g_mg_last_dropped_floor = 0.0;
   g_mg_latched_solves = 0;
   g_mg_rearm_attempts = 0;
   g_mg_rearm_carries = 0;
 }
 
 bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
+
+void fea_matfree_set_mg_safe_retry(bool enable) { g_mg_safe_retry = enable; }
+bool fea_matfree_mg_safe_retry_enabled() { return g_mg_safe_retry; }
+long long fea_matfree_mg_safe_engagements() { return g_mg_safe_engagements; }
+long long fea_matfree_mg_safe_carries() { return g_mg_safe_carries; }
+bool fea_matfree_mg_safe_latched() { return g_mg_safe_latched; }
+const std::vector<int>& fea_matfree_last_dropped_islands() {
+  return g_mg_last_dropped;
+}
+double fea_matfree_last_dropped_floor_youngs() { return g_mg_last_dropped_floor; }
+const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char>* m) {
+  const std::vector<char>* prev = g_island_keep_mask;
+  g_island_keep_mask = m;
+  return prev;
+}
+void fea_matfree_island_drop_scope_enter(bool permit) {
+  if (permit) ++g_island_drop_permit;
+  else ++g_island_drop_forbid;
+}
+void fea_matfree_island_drop_scope_exit(bool permit) {
+  if (permit) { if (g_island_drop_permit > 0) --g_island_drop_permit; }
+  else if (g_island_drop_forbid > 0) --g_island_drop_forbid;
+}
 
 // The MEASUREMENT-ONLY latch re-arm period (task
 // solver-speed-arm-and-diagnose; closes handoff

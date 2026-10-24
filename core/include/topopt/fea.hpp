@@ -1271,6 +1271,69 @@ long long fea_geneo_decisions_dropped();
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
 
+// SAFE-SMOOTHER RETRY (thin-wall solver cure S3 + S5 gate + arm G). The shipped
+// V-cycle smoother (damped Jacobi, omega = 0.6) is formally unsafe on a hex8 at
+// nu >= ~0.3 (lambda_max(D^-1 A) ~ 5-9 > 2/omega); healthy parts converge
+// despite it. When the shipped matrix-free MG-CG has ALREADY stalled (cycle
+// budget exhausted or breakdown), the solve now retries MG-CG once with an
+// l1-Jacobi smoother (lambda_max(D_l1^-1 A) <= 1 by construction) before the
+// Jacobi-CG fallback; if it does not reach tolerance its iterate seeds that
+// fallback. When the caller holds a FeaIslandDropPermit (and no
+// FeaIslandDropForbid is active), the retry also solves tiny ISOLATED solid
+// islands at the floor modulus: 6-connected pieces of <= 27 voxels (<= 5 % of
+// the elements in all) sharing no node with a Dirichlet BC or a load, holding
+// no frozen (FeaIslandKeepMask) / Load / Fixture voxel, with no solid or frozen
+// voxel in their 26-neighbourhood. A solve that converges on the shipped path
+// never reaches any of this, so it is bit-identical. Per-run state resets with
+// fea_matfree_reset_mg_stagnation_latch(); a latched run (3 shipped stalls)
+// goes straight to the safe path, and 3 consecutive UNPRODUCTIVE safe attempts
+// (neither converged nor cut the residual 10x) latch it off too (today's
+// Jacobi-only behaviour). ON by default; the switch is for tests and A/B
+// measurement.
+void fea_matfree_set_mg_safe_retry(bool enable);
+bool fea_matfree_mg_safe_retry_enabled();
+long long fea_matfree_mg_safe_engagements();  // retries run since the reset
+long long fea_matfree_mg_safe_carries();      // ... of which CONVERGED
+bool fea_matfree_mg_safe_latched();
+// The voxels (ascending grid indices) the LAST matrix-free solve on this thread
+// solved at the floor modulus, and that modulus. Empty / 0 unless that solve's
+// safe retry dropped islands AND converged. A caller that computes energies or
+// sensitivities from the solution must use the floor modulus for these voxels.
+const std::vector<int>& fea_matfree_last_dropped_islands();
+double fea_matfree_last_dropped_floor_youngs();
+// RAII scopes (thread-local, nestable). Island dropping is OFF unless a permit is
+// held; any forbid (e.g. a certification solve, whose stresses would read the
+// floating speck's strain at its true modulus) overrides every permit.
+void fea_matfree_island_drop_scope_enter(bool permit);
+void fea_matfree_island_drop_scope_exit(bool permit);
+struct FeaIslandDropPermit {
+  FeaIslandDropPermit() { fea_matfree_island_drop_scope_enter(true); }
+  ~FeaIslandDropPermit() { fea_matfree_island_drop_scope_exit(true); }
+  FeaIslandDropPermit(const FeaIslandDropPermit&) = delete;
+  FeaIslandDropPermit& operator=(const FeaIslandDropPermit&) = delete;
+};
+// The run's FROZEN voxels (grid-indexed, non-zero = frozen/protected), which
+// arm G must never drop: an island holding any of them is kept. Without a
+// registered mask the census falls back to a conservative proxy (an island with
+// a full-modulus voxel is kept). Load / Fixture tagged voxels are always kept.
+// RAII, thread-local, restores the previous mask; the pointee must outlive it.
+const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char>* m);
+struct FeaIslandKeepMask {
+  explicit FeaIslandKeepMask(const std::vector<char>* m)
+      : prev_(fea_matfree_set_island_keep_mask(m)) {}
+  ~FeaIslandKeepMask() { fea_matfree_set_island_keep_mask(prev_); }
+  FeaIslandKeepMask(const FeaIslandKeepMask&) = delete;
+  FeaIslandKeepMask& operator=(const FeaIslandKeepMask&) = delete;
+ private:
+  const std::vector<char>* prev_;
+};
+struct FeaIslandDropForbid {
+  FeaIslandDropForbid() { fea_matfree_island_drop_scope_enter(false); }
+  ~FeaIslandDropForbid() { fea_matfree_island_drop_scope_exit(false); }
+  FeaIslandDropForbid(const FeaIslandDropForbid&) = delete;
+  FeaIslandDropForbid& operator=(const FeaIslandDropForbid&) = delete;
+};
+
 // MEASUREMENT-ONLY latch RE-ARM (task solver-speed-arm-and-diagnose). Handoff
 // 2026-07-27-mg-stagnation-phase0 refuted the rung-boundary re-arm on synthetic
 // fixtures and then named, in its own §7, the one thing it could not do: run
