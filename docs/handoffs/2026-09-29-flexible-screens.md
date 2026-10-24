@@ -21,8 +21,10 @@ Each item: what core does, where, the evidence, your numbers.
 2. **Edge and corner curves and stamps are not sent.** Core's Flexible block takes faces only: `core/src/flexible/job_block.cpp:76-78`
    (the block's keys) and `:208-211` (a face's keys: `curve_x`, `curve_y`, `curve_centre_edge`, `design_stamp`). A press reaches
    core as a face entry with `face_region_ids` + `press_direction`, built on `build_press_stack`
-   (`core/src/flexible/faces.cpp:648`); its map is the flat prism's (your drawn curves and stamp are display only: Play pushes
-   along them, core does not read them). Missing in core: (a) the F × M map (a press's own force times its curves'
+   (`core/src/flexible/faces.cpp:648`); its map is the flat prism's (your drawn curves and stamp are not designed by core: in Play
+   they only redistribute the press's force, F × M renormalised to F, `flexible_squish_fe.cpp:731-741, :761`; the dent's peak is
+   core's flat-prism depth; in Manual they can drive the Shape grade. A FACE's curves ARE designed by core, as depth: target =
+   S × deepest, `field.cpp:291-292`. The reviewer's Q4 answer of 2026-10-24 07:03). Missing in core: (a) the F × M map (a press's own force times its curves'
    multipliers on core's press grid); (b) a stamp laid on a PRESS stack (`stamp_on_columns` / `design_face` with
    `design_stamp`, `core/src/flexible/field.cpp:245-282`, and `check_stamp`, `:393`, take a face stack only); (c) a flat cut:
    core's squish map has only both (X·Y), either and centre_edge (no "flat_cut" anywhere in core/), so an edge is sent as
@@ -213,6 +215,7 @@ Core line numbers are as found today in this worktree (HEAD `e2c70bbf`). #361's 
    - **Now:** `recommend` scores every face over its whole column (`recommend.cpp:114-118`, `:154-161`; called at `run.cpp:628-631`). A pinched half runs at about twice the strain, so Auto's family or temperature can suit the whole column but not the half, or not a group's share of the combined field.
    - **Needed:** score each face over its real span.
    - Depends on 16, 17 and the pinch (see "Adds to item 9").
+   - Also from the round-3 brief's #7: Auto's grams are counted twice across faces that share voxels (`recommend.cpp:156-186`).
 
 20. **The Flexible exporter itself: STL and G-code (#361's C2/C3) [old #9].**
    - **Now:** core's Flexible runner writes receipts, SVG heat maps and CSVs (21 files on his project), but no mesh. Every other runner refuses a Flexible job (`run_job.cpp:9587, 10456, 11787, 11827`). The card shows both exports greyed: "Waits on core's Flexible exporter" (`FlexibleCoreRun.swift:184`). Item 4 asks only which field gets exported.
@@ -244,6 +247,7 @@ Core line numbers are as found today in this worktree (HEAD `e2c70bbf`). #361's 
    - The 3D sim spreads the press and merges close fingertips. Within 0-3 mm outside the stamp, Face 3 sinks 95 % (core's columns 37 %) and Top A 57 % (core 31 %).
    - **Needed:** design for one force spread over the merged fingertips, and take a group's presses together. #35: his Group 1's Face 5 is pressed through another face, RMS 0.31.
    - The spread rule is the one the app ships, two Gaussians: σ_near = min(0.25×depth, 0.4×feature) and σ_far = 0.5×depth (`FlexibleStampSpread.swift:30-33`). It is not #33's "~0.2 × depth". Item 2(b) only asks for a stamp on a press stack.
+   - From the round-3 brief's #5: rigid + rigid, or rigid + soft, stamps inside one group (`check_stamp` calls `rigid_press` once, `field.cpp:393-397`, `:458`).
    - **His words:** "it should have foci but expand out ... combining the foci into a single input".
 
 24. **A column-mask press: only the lattice section's columns, whatever its shape.**
@@ -312,9 +316,15 @@ Core line numbers are as found today in this worktree (HEAD `e2c70bbf`). #361's 
    - **Now:** `build_press_stack` refuses two sectors of the same face (`faces.cpp:741-746`). A cut is flat, so each sector is one convex piece (`:604`), and fillets are greyed out. None of this occurs on his pad.
    - **Needed, only if he asks:** both cases supported. Source: handoff :6621-6625.
 
-34. **(unverified) Items #3, #5, #8 and #11-#15 of the round-4 plan's core brief are not in the repo.**
-   - The handoff says three times that "the plan's items 1-15 ... stand" (:10619, :11108, :13135), but it restates only #1, #2, #4, #6, #7, #9 and #10.
-   - **Needed:** recover that brief and check the missing items against this list before #361 starts.
+34. **RESOLVED 2026-10-24: the round-3 plan's core brief, items 1-15, recovered verbatim.** (It is the ROUND-3 plan,
+   `flexible-round3-map-and-plan`, 2026-09-29, which the round-4 batches read.) It was never in the repo; the only full copy is
+   the old session's workflow result `wf_76bf0e9b-f3b.json` (`result.plan.core_brief`), posted to the reviewer verbatim at 07:03.
+   Where the eight that were never restated land: #3 (check stamps on resting faces) DROPPED, obsolete since round 4 D1/D2 removed
+   check stamps and "Rest the other end" (`FlexibleSettingsMigration.swift:23-25, :61`; core's refusal `job_block.cpp:257-271` is
+   unreachable); #5 (simultaneous stamp sets) → items 23 and 31, plus the rigid-in-one-group line under 23; #8 (cross-case
+   receipt) → item 17; #11 (beads chosen by recommend) → "Adds to item 12 (b)"; #12 (calibrate-first filaments) → item 22;
+   #13 (a flexible material in the FEA) → items 31, 32; #14 (per-piece materials) → item 49 (deferred); #15 (correct the
+   handoff) → done by this list.
 
 #### Adds to existing items
 
@@ -432,6 +442,10 @@ None of these are #361's Flexible code; the reviewer routes them. Items 35-38 we
    - **His words:** "it cut out a part of the holes that I specifically set to anchor".
 
 48. **(unverified) A max-stiffness-for-a-plastic-budget mode.** It was offered to him and he has not answered. Hold until he does (`job.cpp:491-496`).
+
+49. **(deferred) Per-piece materials (Mixed and the future Cut), the round-3 brief's #14.** "The job needs a material per piece."
+   `PartMaterials` never existed (`git log --all -S "PartMaterials" -- app/` is empty) and the plan's batch F (Rigid / Flexible /
+   Mixed) was never built; U21 batch A added the Flexible tab instead. Needed only if Mixed or Cut are built.
 
 ### D. Core changes already made outside #361 (not merged anywhere yet)
 
