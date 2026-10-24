@@ -510,6 +510,11 @@ target_compile_definitions(test_voxel PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME voxelize COMMAND test_voxel)
 
+# C2 B0 item 1 (2026-10-24): VoxelTies::Watertight, seam holes along a shared diagonal.
+add_executable(test_voxelize_ties tests/unit/test_voxelize_ties.cpp)
+target_link_libraries(test_voxelize_ties PRIVATE topopt)
+add_test(NAME voxelize_ties COMMAND test_voxelize_ties)
+
 # Hex element stiffness test (M2.1). Pure C++/std (no OCCT, no Eigen), so it
 # builds and runs in every configuration. Asserts against the human-authored
 # reference fixture, whose directory is injected here.

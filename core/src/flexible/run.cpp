@@ -537,7 +537,9 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   }
   if (!check_watertight(model.mesh).watertight)
     throw JobError("model tessellation is not watertight: " + job.model);
-  const VoxelGrid grid = voxelize(model.mesh, job.resolution);
+  // C2 B0 item 1: the Flexible stage voxelizes WATERTIGHT (voxel.hpp, VoxelTies), so a
+  // column centre on a diagonal two triangles share is not left Empty (his pad's rods).
+  const VoxelGrid grid = voxelize(model.mesh, job.resolution, VoxelTies::Watertight);
   std::vector<char> mask;
   std::vector<ResolvedFaceRegion> regions;
   try {
