@@ -40,7 +40,7 @@ static int g_checks = 0;
     }                                                              \
   } while (0)
 
-static_assert(kPressApiVersion == 7, "B2b: the press API version");
+static_assert(kPressApiVersion == 8, "B2c: the press API version");
 
 static const std::string kDir = std::string(FLEXIBLE_TMP_DIR) + "/flexible_b2b_test";
 
@@ -172,12 +172,12 @@ int main() {
                                "[{\"faces\":[103],\"force_n\":72},{\"faces\":[105],\"force_n\":144}]"),
             100, 60, 40);
     std::printf("  unreachable: %s\n", r.refusal_reason.c_str());
+    // RE-PINNED (C2 B2c): the hull certificate now PROVES this same-axis pair impossible.
     CHECK(r.refused && r.refusal_code == "combination_not_reachable" &&
               r.refusal_reason.find("group 1") != std::string::npos && r.refusal_reason.find("group 2") != std::string::npos &&
-              r.refusal_reason.find(" mm") != std::string::npos &&
-              r.refusal_reason.find("not proven impossible") != std::string::npos,
-          "17: an unreachable combination is refused before the run, naming the groups and the miss, and saying "
-          "it is not a proof (no hull certificate yet)");
+              r.refusal_reason.find("PROVEN") != std::string::npos &&
+              num(r.receipt_json, "proven_impossible_pairs") > 0,
+          "B2c: an unreachable same-axis pair is PROVEN impossible by the hull certificate, naming the groups");
   }
 
   // (5) REACHABLE on the same column: the heavier hand asks for more (72 N 3 mm, 144 N 6 mm).
@@ -193,6 +193,22 @@ int main() {
           "17: a reachable pair on one column: both groups hit");
   }
 
+  // (6) B2c, THE MIXTURE: top 3 mm + side 5.6 mm on the cube (separate hands). The pair is inside
+  // the hull only by mixing two densities; B2b's first-order solve stalled 0.115 mm short. The
+  // mixing start lays the two densities in blocks of two cells, and the projections refine it.
+  {
+    const FlexibleRunResult r =
+        run("mix", job("[" + face(101, 3) + "," + face(103, 5.6) + "]",
+                       "[{\"faces\":[101],\"force_n\":100},{\"faces\":[103],\"force_n\":180}]"),
+            60, 60, 60);
+    const std::string& j = r.receipt_json;
+    const std::size_t cb = j.find("\"combination\": {");
+    std::printf("  mixture (top 3 + side 5.6 mm): refused %d, mixed components %g, still missing %g, worst %.4f mm, steep %g\n",
+                r.refused ? 1 : 0, num(j, "mixed_components", cb), num(j, "columns_missing_band", cb),
+                num(j, "worst_miss_mm", cb), num(j, "steep_columns", cb));
+    CHECK(!r.refused && num(j, "mixed_components", cb) > 0,
+          "B2c: a pair reachable only by mixing is met (B2b's solver stalled 0.115 mm short)");
+  }
   std::printf("test_flexible_b2b: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

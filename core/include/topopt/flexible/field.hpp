@@ -113,7 +113,7 @@ struct ColumnDesign {
   double height_mm = 0.0;         // latticed length
   double target_depth_mm = 0.0;
   double target_strain = 0.0;
-  // "ok" | "too_firm" | "too_soft" | "beyond_data" | "no_lattice"
+  // "ok" | "too_firm" | "too_soft" | "beyond_data" | "no_lattice" | "rim" (flat_cut: target under one bead)
   std::string status;
   bool target_extrapolated = false;
   double target_density = 0.0;    // meaningful when status == "ok"
@@ -150,6 +150,7 @@ struct FaceDesign {
   double design_stamp_off_face_n = 0.0;
   bool design_stamp_off_face = false;  // some of the design stamp's force misses the face
   int ok = 0, too_firm = 0, too_soft = 0, beyond_data = 0, no_lattice = 0;
+  int rim = 0;  // C2 B2c: flat_cut columns whose target is under one bead (the densest tested lattice)
   int solid_under_map = 0;  // no_lattice columns with squish drawn over them (B2)
   int target_extrapolated = 0, buildable_extrapolated = 0, buildable_beyond_data = 0;
   int near_edge = 0;  // buildable density within 10 % of the table's span of an end

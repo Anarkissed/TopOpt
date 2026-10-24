@@ -59,7 +59,10 @@ inline constexpr double kSameAxisDeg = 15.0;
 //                  load case; one lattice where every group hits its "hit_band" (default
 //                  max(0.05 mm, 2 %)); groups in different hands may share material (same-axis
 //                  pairs across hands go to the combination); combination_not_reachable
-inline constexpr int kPressApiVersion = 7;
+//   8  2026-10-24  C2 B2c: the hull certificate on same-axis runs (PROVEN impossible, or a
+//                  two-density mixture); the mixing start for crossing components; a flat_cut
+//                  target under one bead is status "rim" (the densest tested lattice)
+inline constexpr int kPressApiVersion = 8;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is

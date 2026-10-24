@@ -12,6 +12,6 @@ wrote face103_density.svg
 wrote face103_cell_size.svg
 wrote face103_tier_flags.svg
 wrote run_info.json
-flexible: REFUSED (combination_not_reachable): core found no one lattice that lets every squeeze group reach its own depths when pressed alone (face 103 and face 101: 6926 columns miss by up to 22.4 mm; worst 22.354 mm, 545.0 % of its target, 1-D estimate). This is what the solver found, not proven impossible (the exact hull check is not built yet). Change a group's depth or force, or its band.
-topopt-cli: core 4f5de1d7d422, built Oct 24 2026 16:38:52
+flexible: REFUSED (combination_not_reachable): PROVEN: no lattice lets every squeeze group reach its own depths when pressed alone: on 0 shared run(s) and 100 shared region(s) the targets lie outside everything the tested lattices can reach, by up to 4.082 mm per column (exact in the 1-D model). (face 103 and face 101: 6926 columns miss by up to 22.4 mm; worst 22.354 mm, 545.0 % of its target, 1-D estimate). Change a group's depth or force, or its band.
+topopt-cli: core 6e4d4d46d064, built Oct 24 2026 18:55:28
 exit code 3

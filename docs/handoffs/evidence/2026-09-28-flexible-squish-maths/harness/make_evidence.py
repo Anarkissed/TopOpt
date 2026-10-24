@@ -254,8 +254,9 @@ def main():
     # in no squeeze group, i.e. two HANDS, separate load cases, so they are the combination's.
     # Core finds no one lattice that meets both (1-D estimate), and says so before the run.
     check(rc["refusal"] is not None and rc["refusal"]["code"] == "combination_not_reachable" and
-          "face 103" in rc["refusal"]["reason"] and "face 101" in rc["refusal"]["reason"],
-          "(c) two hands: core finds no one lattice for both, and refuses naming them (B2b)")
+          "face 103" in rc["refusal"]["reason"] and "face 101" in rc["refusal"]["reason"] and
+          rc["refusal"]["reason"].startswith("PROVEN"),
+          "(c) two hands: PROVEN impossible (B2c: every voxel on one column of each hand, outside the hull)")
     s = face(rc, 103)
     check(s["frame"]["side"] and s["tier"]["tier"] == "estimated" and s["tier"]["band"] == 0.5,
           "(c) the side stack is 'estimated', +/-50 %")
@@ -266,7 +267,8 @@ def main():
     check(s["stack"]["linked_faces"][0]["face_id"] == 5, "(c) the side's other end is the -X face")
     rc = run(a.cli, *scenario_d(), a.out)
     check(rc["refusal"] is not None and rc["refusal"]["code"] == "combination_not_reachable",
-          "(d) two hands (the top, the edge press): core finds no one lattice for both, and refuses (B2b)")
+          "(d) two hands (the top, the edge press): refused, still the solver's finding (B2c: the diagonal press's "
+          "columns do not cover each voxel once, so no proof)")
     e = face(rc, 103)
     check(e["press"]["footprint_face_region_ids"] == [103, 104] and e["press"]["side"] and
           abs(e["press"]["build_angle_deg"] - 90) < 1e-6, "(d) the edge press: footprint 103+104, 90 degrees, side")

@@ -1,6 +1,7 @@
 #include "topopt/flexible/run.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -1074,6 +1075,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         std::size_t stack = 0, k = 0;
         double p = 0, t = 0, band = 0;
         std::vector<std::pair<std::size_t, double>> runs;  // voxel, length along the run (mm)
+        std::vector<std::size_t> order;                     // the run's voxels in order from the entry
       };
       auto band_of = [&](const JobFlexibleFace& e, double t) {
         const JobHitBand& b = e.squeeze_group >= 0 ? fx.squeeze_groups[static_cast<std::size_t>(e.squeeze_group)].band : e.band;
@@ -1104,7 +1106,10 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
             const int gk = static_cast<int>(std::floor((o.z + st.frame.load.z * tt - grid.origin.z) / grid.spacing));
             if (gi < 0 || gj < 0 || gk < 0 || gi >= grid.nx || gj >= grid.ny || gk >= grid.nz) continue;
             const std::size_t v = grid.index(gi, gj, gk);
-            if (field.density[v] > 0.0) acc[v] += step;
+            if (field.density[v] > 0.0) {
+              if (acc.find(v) == acc.end()) col.order.push_back(v);
+              acc[v] += step;
+            }
           }
           col.runs.assign(acc.begin(), acc.end());
           cols.push_back(std::move(col));
@@ -1139,8 +1144,6 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         ok = e.ok;
         return e.strain;
       };
-      int sweeps = 0;
-      double worst = 0.0;
       // the miss BEFORE the solve (the independent designs, assembled): what the combination fixes
       double before_mm = 0.0;
       long long before_missing = 0;
@@ -1157,6 +1160,235 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         if (!known || std::fabs(d - c.t) > c.band) ++before_missing;
         if (known) before_mm = std::max(before_mm, std::fabs(d - c.t));
       }
+      // ── C2 B2c: THE HULL CERTIFICATE (same-axis runs) and THE MIXING START.
+      // On a run that two hands' columns traverse identically, column g's depth is
+      // Σ L_v·ε(p_g; ρ_v), so the pair of target strains (t_A/L_A, t_B/L_B) is reachable IFF it
+      // lies in the convex hull of the curve γ(ρ) = (ε(p_A; ρ), ε(p_B; ρ)) over the tested
+      // densities; a planar connected curve needs at most TWO of its points (Fenchel–Bunt), so a
+      // reachable pair is met by two densities, a fraction λ of the run at one. Outside the hull
+      // by more than the bands: PROVEN impossible (exact in core's 1-D model). For crossing
+      // components (no same-axis pair), the hands' mean target strains give the mixture, laid in
+      // blocks of two cells (Schumacher et al. 2015, Fig. 18), and the projections refine it.
+      const int kHullSamples = 400;
+      auto gamma = [&](double pa, double pb, std::vector<std::array<double, 3>>& pts) {
+        pts.clear();
+        for (int i = 0; i <= kHullSamples; ++i) {
+          const double rho = rmin + span * i / kHullSamples;
+          bool oa = true, ob = true;
+          const double ea = eps(pa, rho, oa), eb = eps(pb, rho, ob);
+          if (oa && ob) pts.push_back({ea, eb, rho});
+        }
+      };
+      // convex hull (monotone chain) of the curve's points, counter-clockwise
+      auto hull_of = [](std::vector<std::array<double, 3>> p) {
+        std::sort(p.begin(), p.end(), [](const auto& a, const auto& b) { return a[0] != b[0] ? a[0] < b[0] : a[1] < b[1]; });
+        std::vector<std::array<double, 3>> h(2 * p.size());
+        std::size_t k = 0;
+        auto cr = [](const std::array<double, 3>& o, const std::array<double, 3>& a, const std::array<double, 3>& b) {
+          return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        };
+        for (std::size_t i = 0; i < p.size(); ++i) {
+          while (k >= 2 && cr(h[k - 2], h[k - 1], p[i]) <= 0) --k;
+          h[k++] = p[i];
+        }
+        for (std::size_t i = p.size() - 1, t = k + 1; i > 0; --i) {
+          while (k >= t && cr(h[k - 2], h[k - 1], p[i - 1]) <= 0) --k;
+          h[k++] = p[i - 1];
+        }
+        h.resize(k > 0 ? k - 1 : 0);
+        return h;
+      };
+      // distance (in mm: strain × run length per axis) from (sa, sb) to the hull; 0 inside
+      auto hull_gap_mm = [](const std::vector<std::array<double, 3>>& h, double sa, double sb, double la, double lb) {
+        if (h.size() < 3) return std::numeric_limits<double>::infinity();
+        bool inside = true;
+        for (std::size_t i = 0; i < h.size(); ++i) {
+          const auto& a = h[i];
+          const auto& b = h[(i + 1) % h.size()];
+          if ((b[0] - a[0]) * (sb - a[1]) - (b[1] - a[1]) * (sa - a[0]) < 0) inside = false;
+        }
+        if (inside) return 0.0;
+        double best = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < h.size(); ++i) {
+          const auto& a = h[i];
+          const auto& b = h[(i + 1) % h.size()];
+          const double ax = a[0] * la, ay = a[1] * lb, bx = b[0] * la, by = b[1] * lb, px = sa * la, py = sb * lb;
+          const double dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+          double t = l2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0;
+          t = std::min(1.0, std::max(0.0, t));
+          best = std::min(best, std::hypot(px - (ax + t * dx), py - (ay + t * dy)));
+        }
+        return best;
+      };
+      // the two-density mixture through (sa, sb): the pair of curve points whose chord passes
+      // through it with the smallest density gap; returns false when none is found
+      auto mixture = [](const std::vector<std::array<double, 3>>& g, double sa, double sb, double& r1, double& r2,
+                        double& frac1) {
+        double best_gap = std::numeric_limits<double>::infinity();
+        for (std::size_t i = 0; i < g.size(); ++i) {
+          const double dx = sa - g[i][0], dy = sb - g[i][1];
+          const double d2 = dx * dx + dy * dy;
+          if (!(d2 > 0)) continue;
+          for (std::size_t j = 0; j + 1 < g.size(); ++j) {
+            if (j == i || j + 1 == i) continue;
+            const double c0 = (g[j][0] - g[i][0]) * dy - (g[j][1] - g[i][1]) * dx;
+            const double c1 = (g[j + 1][0] - g[i][0]) * dy - (g[j + 1][1] - g[i][1]) * dx;
+            if ((c0 > 0) == (c1 > 0) && c0 != 0 && c1 != 0) continue;
+            const double u = (c0 == c1) ? 0.0 : c0 / (c0 - c1);
+            const double qx = g[j][0] + u * (g[j + 1][0] - g[j][0]), qy = g[j][1] + u * (g[j + 1][1] - g[j][1]);
+            const double along = (qx - g[i][0]) * dx + (qy - g[i][1]) * dy;
+            if (!(along >= d2)) continue;  // the chord must pass THROUGH (sa, sb)
+            const double rq = g[j][2] + u * (g[j + 1][2] - g[j][2]);
+            if (std::fabs(rq - g[i][2]) < best_gap) {
+              best_gap = std::fabs(rq - g[i][2]);
+              r1 = g[i][2];
+              r2 = rq;
+              frac1 = 1.0 - std::sqrt(d2 / ((qx - g[i][0]) * (qx - g[i][0]) + (qy - g[i][1]) * (qy - g[i][1])));
+            }
+          }
+        }
+        return std::isfinite(best_gap);
+      };
+      long long same_axis_pairs = 0, proven_pairs = 0, mixed_runs = 0, mixed_components = 0, proven_components = 0;
+      double worst_proof_gap = 0.0;
+      std::set<std::size_t> proven_cols;
+      {
+        std::map<std::vector<std::size_t>, std::vector<std::size_t>> by_run;
+        for (std::size_t q : active) {
+          std::vector<std::size_t> key;
+          for (const auto& rv : cols[q].runs) key.push_back(rv.first);
+          by_run[key].push_back(q);
+        }
+        std::vector<std::array<double, 3>> g;
+        for (const auto& kv : by_run) {
+          std::map<int, std::size_t> one_per_hand;
+          for (std::size_t q : kv.second) one_per_hand.emplace(cols[q].hand, q);
+          if (one_per_hand.size() != 2) continue;  // two hands: the 2-D certificate
+          const Col& A = cols[one_per_hand.begin()->second];
+          const Col& B = cols[std::next(one_per_hand.begin())->second];
+          double la = 0, lb = 0;
+          for (const auto& rv : A.runs) la += rv.second;
+          for (const auto& rv : B.runs) lb += rv.second;
+          if (!(la > 0 && lb > 0)) continue;
+          ++same_axis_pairs;
+          gamma(A.p, B.p, g);
+          const std::vector<std::array<double, 3>> h = hull_of(g);
+          const double sa = A.t / la, sb = B.t / lb;
+          const double gap = hull_gap_mm(h, sa, sb, la, lb);
+          if (gap > std::hypot(A.band, B.band)) {  // no lattice comes within the bands: proven
+            ++proven_pairs;
+            worst_proof_gap = std::max(worst_proof_gap, gap);
+            for (std::size_t q : kv.second) proven_cols.insert(q);
+            continue;
+          }
+          double r1 = 0, r2 = 0, f1 = 0;
+          if (gap == 0.0 && mixture(g, sa, sb, r1, r2, f1) && f1 > 1e-6 && f1 < 1 - 1e-6) {
+            // the run's first f1 of its length (from A's entry) at r1, the rest at r2
+            double acc = 0.0;
+            std::map<std::size_t, double> len(A.runs.begin(), A.runs.end());
+            for (std::size_t v : A.order) {
+              field.density[v] = acc < f1 * la ? r1 : r2;
+              acc += len[v];
+            }
+            ++mixed_runs;
+          }
+        }
+      }
+      // crossing components with two hands and no same-axis pair: the mixture start
+      {
+        std::map<std::size_t, std::map<int, std::pair<double, double>>> per;  // root -> hand -> (Σt, ΣL)
+        std::map<std::size_t, std::map<int, double>> pres;                    // root -> hand -> mean p
+        std::map<std::size_t, std::map<int, int>> np;
+        for (std::size_t q : active) {
+          if (proven_cols.count(q)) continue;
+          const std::size_t rt = root(cols[q].runs[0].first);
+          double L = 0;
+          for (const auto& rv : cols[q].runs) L += rv.second;
+          auto& e = per[rt][cols[q].hand];
+          e.first += cols[q].t;
+          e.second += L;
+          pres[rt][cols[q].hand] += cols[q].p;
+          ++np[rt][cols[q].hand];
+        }
+        // A crossing component is EXACTLY covered when every voxel in it lies on one column of each
+        // hand with the same length (within 1 %) and each hand presses one pressure: then summing
+        // each hand's column equations gives (Σt_A, Σt_B) = Σ_v ℓ_v·γ(ρ_v), so the hands' mean
+        // target strains must lie in the hull: outside by more than the summed bands is PROVEN.
+        std::map<std::size_t, std::map<std::size_t, std::array<double, 4>>> cover;  // root -> voxel -> (nA, nB, lA, lB)
+        std::map<std::size_t, std::map<int, std::pair<double, double>>> prange;     // root -> hand -> (pmin, pmax)
+        std::map<std::size_t, std::map<int, double>> bsum;                          // root -> hand -> Σ band
+        for (std::size_t q : active) {
+          if (proven_cols.count(q)) continue;
+          const std::size_t rt = root(cols[q].runs[0].first);
+          const int slot = cols[q].hand == per[rt].begin()->first ? 0 : 1;
+          for (const auto& rv : cols[q].runs) {
+            auto& c = cover[rt][rv.first];
+            c[slot] += 1;
+            c[2 + slot] += rv.second;
+          }
+          auto pr = prange[rt].emplace(cols[q].hand, std::make_pair(cols[q].p, cols[q].p)).first;
+          pr->second.first = std::min(pr->second.first, cols[q].p);
+          pr->second.second = std::max(pr->second.second, cols[q].p);
+          bsum[rt][cols[q].hand] += cols[q].band;
+        }
+        std::vector<std::array<double, 3>> g;
+        for (const auto& kv : per) {
+          if (kv.second.size() != 2 || mixed_runs > 0) continue;
+          const int ha = kv.second.begin()->first, hb = std::next(kv.second.begin())->first;
+          const double pa = pres[kv.first][ha] / np[kv.first][ha], pb = pres[kv.first][hb] / np[kv.first][hb];
+          const double sa = kv.second.at(ha).first / kv.second.at(ha).second;
+          const double sb = kv.second.at(hb).first / kv.second.at(hb).second;
+          gamma(pa, pb, g);
+          const std::vector<std::array<double, 3>> h = hull_of(g);
+          bool exact = true;
+          double ell = 0.0;
+          for (const auto& cv : cover[kv.first]) {
+            const auto& c = cv.second;
+            if (c[0] != 1 || c[1] != 1 || std::fabs(c[2] - c[3]) > 0.01 * std::max(c[2], c[3])) {
+              exact = false;
+              break;
+            }
+            ell += 0.5 * (c[2] + c[3]);
+          }
+          for (const auto& pr : prange[kv.first])
+            if (pr.second.second - pr.second.first > 1e-9 * std::max(1.0, pr.second.second)) exact = false;
+          if (exact && ell > 0.0) {
+            const double ta = kv.second.at(ha).first, tb = kv.second.at(hb).first;
+            const double gap = hull_gap_mm(h, ta / ell, tb / ell, ell, ell);
+            if (gap > std::hypot(bsum[kv.first][ha], bsum[kv.first][hb])) {
+              ++proven_components;
+              // the summed gap, as a mean per column of the region (mm)
+              const double ncol = static_cast<double>(np[kv.first][ha] + np[kv.first][hb]);
+              worst_proof_gap = std::max(worst_proof_gap, gap / std::max(1.0, ncol));
+              continue;
+            }
+          }
+          double r1 = 0, r2 = 0, f1 = 0;
+          if (hull_gap_mm(h, sa, sb, 1.0, 1.0) > 0.0 || !mixture(g, sa, sb, r1, r2, f1) || !(f1 > 1e-6 && f1 < 1 - 1e-6))
+            continue;
+          // Diagonal bands along i + j + k with a period of four cells: every axis-aligned column
+          // steps one band position per voxel, so over each period it sees exactly f1 at r1, and each
+          // band is about two cells at f1 = ½ (Schumacher et al. 2015, Fig. 18: steeper steps are
+          // counted in steep_columns, not hidden).
+          const double cell = cell_size_mm(bp.topology, 0.5 * (r1 + r2), bp.beads_per_wall, bp.bead_width_mm);
+          const long long period = std::max<long long>(2, std::llround(4.0 * cell / grid.spacing));
+          for (std::size_t q : active) {
+            if (root(cols[q].runs[0].first) != kv.first) continue;
+            for (const auto& rv : cols[q].runs) {
+              const std::size_t v = rv.first;
+              const long long i = static_cast<long long>(v % static_cast<std::size_t>(grid.nx));
+              const long long j = static_cast<long long>((v / static_cast<std::size_t>(grid.nx)) % static_cast<std::size_t>(grid.ny));
+              const long long k = static_cast<long long>(v / (static_cast<std::size_t>(grid.nx) * static_cast<std::size_t>(grid.ny)));
+              const double u = static_cast<double>((i + j + k) % period) / static_cast<double>(period);
+              field.density[v] = u < f1 ? r1 : r2;
+            }
+          }
+          ++mixed_components;
+        }
+      }
+
+      int sweeps = 0;
+      double worst = 0.0;
       if (!active.empty()) {
         double best = 1e300;
         int stall = 0;
@@ -1266,11 +1498,22 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
           .add("columns_missing_band", jnum(static_cast<double>(missing)))
           .add("worst_miss_mm", jnum(worst_mm))
           .add("worst_miss_pct", jnum(worst_pct))
+          .add("hull_check", Obj().add("same_axis_pairs", jnum(static_cast<double>(same_axis_pairs)))
+                                    .add("proven_impossible_pairs", jnum(static_cast<double>(proven_pairs)))
+                                    .add("worst_proof_gap_mm", jnum(worst_proof_gap))
+                                    .add("mixed_runs", jnum(static_cast<double>(mixed_runs)))
+                                    .add("mixed_components", jnum(static_cast<double>(mixed_components)))
+                                    .add("proven_impossible_components", jnum(static_cast<double>(proven_components)))
+                                    .add("rule", jstr("a same-axis pair is reachable iff its target strains lie in the convex "
+                                                      "hull of (eps_A(rho), eps_B(rho)) over the tested densities; two "
+                                                      "densities suffice (Fenchel-Bunt); outside by more than the bands: "
+                                                      "proven impossible in the 1-D model"))
+                                    .str())
           .add("steep_columns", jnum(static_cast<double>(steep)))
           .add("steep_rule", jstr("a density swing over 0.35 of the tested span within under two cells along a column "
                                   "(Schumacher et al. 2015, Fig. 18): counted, not yet spread"))
-          .add("not_built", jstr("the exact convex-hull certificate per same-axis run and the min-max closest-"
-                                 "combination report (design note §2-§3) are not in this batch"));
+          .add("not_built", jstr("the min-max closest-combination report (design note §3); the certificate for "
+                                 "three or more hands on one run; a proof for crossing (not same-axis) components"));
       combination_json = comb.str();
       combination_active = !active.empty();
       if (missing > 0) {
@@ -1288,10 +1531,15 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                           kv.second.first == 1 ? "" : "s");
           who += (who.empty() ? "" : "; ") + std::string(b);
         }
-        refusal_reason = "core found no one lattice that lets every squeeze group reach its own depths when pressed "
-                         "alone (" + who + "; worst " + fmtd(worst_mm, 3) + " mm, " + fmtd(worst_pct, 1) +
-                         " % of its target, 1-D estimate). This is what the solver found, not proven impossible (the "
-                         "exact hull check is not built yet). Change a group's depth or force, or its band.";
+        refusal_reason = (proven_pairs + proven_components > 0
+                              ? "PROVEN: no lattice lets every squeeze group reach its own depths when pressed alone: on " +
+                                    std::to_string(proven_pairs) + " shared run(s) and " + std::to_string(proven_components) +
+                                    " shared region(s) the targets lie outside everything the tested lattices can reach, by up "
+                                    "to " + fmtd(worst_proof_gap, 3) + " mm per column (exact in the 1-D model). "
+                              : std::string("core found no one lattice that lets every squeeze group reach its own depths "
+                                            "when pressed alone; this is what the solver found, not a proof. ")) +
+                         "(" + who + "; worst " + fmtd(worst_mm, 3) + " mm, " + fmtd(worst_pct, 1) +
+                         " % of its target, 1-D estimate). Change a group's depth or force, or its band.";
       }
     }
 
@@ -1667,7 +1915,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
           .add("solid_under_map_columns", jnum(d.solid_under_map))
           .add("columns_by_status", Obj().add("ok", jnum(d.ok)).add("too_firm", jnum(d.too_firm))
                                         .add("too_soft", jnum(d.too_soft)).add("beyond_data", jnum(d.beyond_data))
-                                        .add("no_lattice", jnum(d.no_lattice)).str())
+                                        .add("no_lattice", jnum(d.no_lattice)).add("rim", jnum(d.rim)).str())
           .add("clamped_columns", jnum(d.too_firm + d.too_soft + d.beyond_data))
           .add("target_extrapolated_columns", jnum(d.target_extrapolated))
           .add("buildable_extrapolated_columns", jnum(d.buildable_extrapolated))

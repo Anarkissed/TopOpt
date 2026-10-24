@@ -372,6 +372,19 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       continue;
     }
     const double own = c.own_length_mm;
+    // C2 B2c (ruling 2026-10-24 21:35): a flat_cut target under one bead (the cut line's zero
+    // band) is the densest TESTED lattice, labelled the press's rim, never too_soft.
+    if (map.mode == "flat_cut" && c.target_depth_mm < build.bead_width_mm) {
+      c.status = "rim";
+      ++out.rim;
+      c.target_strain = c.target_depth_mm / c.height_mm;
+      c.clamped_density = set.density_max();
+      const StrainResult f = strain_under(set, c.pressure_mpa, c.clamped_density);
+      c.nearest_known = f.ok;
+      c.nearest_depth_mm = f.ok ? f.strain * own + D : kNaN;
+      c.clamped_depth_mm = c.nearest_depth_mm;
+      continue;
+    }
     if (ser != nullptr && !ser->fixed.empty() && !(c.target_depth_mm - D > 0.0)) {
       // (series only) the fixed segments alone squish at least the target: even the firmest own segment
       // cannot make the column shallower -> too_soft

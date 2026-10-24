@@ -274,6 +274,40 @@ static void test_auto_span() {
         "19: Auto scores each face over its own span, and the receipt says so");
 }
 
+// ── B2c ruling (2026-10-24 21:35): flat_cut's zero line. Where a flat_cut target is under one
+// bead, the column takes the densest tested lattice and is labelled the press's rim, never
+// too_soft. On the representative press of B2 part 2 (his pad, the Top/-Y edge at 45 degrees,
+// 3 mm): 192 of 576 columns read too_soft before.
+static void test_flat_cut_rim() {
+  const std::string dir = std::string(FLEXIBLE_FIXTURE_DIR) + "/his_pad_1021";
+  const double c = 3.0 * std::sqrt(2.0);
+  char cut[400];
+  std::snprintf(cut, sizeof(cut),
+                ",{\"id\":201,\"add\":[1],\"cuts\":[{\"point\":[0,%.17g,0],\"normal\":[0,-1,0]}]},"
+                "{\"id\":202,\"add\":[2],\"cuts\":[{\"point\":[0,0,%.17g],\"normal\":[0,0,1]}]}",
+                c, 20.0 - c);
+  const std::string press =
+      "{\"face_region_ids\":[201,202],\"press_direction\":[0,1,-1],\"flat_prism\":{\"apex_mm\":[0,0,20]},"
+      "\"mode\":\"flat_cut\",\"role\":\"loaded\",\"weight_n\":30,\"deepest_squish_mm\":3,\"skin_on\":true}";
+  std::string fr;
+  for (int f = 0; f < 6; ++f) fr += (f ? "," : "") + std::string("{\"id\":") + std::to_string(100 + f) + ",\"add\":[" + std::to_string(f) + "]}";
+  const std::string j =
+      "{\"model\":\"model.stl\",\"material\":\"varioshore_tpu\",\"mode\":\"analyze\",\"resolution\":96,"
+      "\"output\":{\"report\":\"r.json\",\"mesh_format\":\"stl\",\"mesh_prefix\":\"v\"},"
+      "\"loads\":{\"face_regions\":[" + fr + cut + "]},"
+      "\"flexible\":{\"material_id\":\"varioshore_tpu\",\"nozzle_temp_c\":240,\"topology\":\"gyroid\","
+      "\"feel\":\"springy\",\"beads_per_wall\":1,\"min_extrudable_width_mm\":0.42,\"faces\":[" + press + "]}}";
+  const FlexibleRunResult r = run_flexible_job(parse_job(j), dir, kDir + "/flat_cut_rim", FLEXIBLE_MATERIALS_JSON_PATH,
+                                               FlexibleProvenance{"test", "test", "now"});
+  const std::size_t cs = r.receipt_json.find("\"columns_by_status\"");
+  const double rim = num(r.receipt_json, "rim", cs), soft = num(r.receipt_json, "too_soft", cs);
+  std::printf("  flat_cut rim: rim %g, too_soft %g\n", rim, soft);
+  CHECK(!r.refused && rim > 0, "B2c: flat_cut columns with a target under one bead are the press's rim");
+  // before the ruling 192 columns read too_soft; exactly the under-one-bead ones moved to rim, and
+  // the rest (targets above one bead that even the firmest lattice overshoots) stay too_soft, said
+  CHECK(rim + soft == 192, "B2c: the 192 too-soft columns split into rim (under one bead) and too_soft (above it)");
+}
+
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::error_code ec;
@@ -282,6 +316,7 @@ int main() {
   test_groups();
   test_pinch();
   test_auto_span();
+  test_flat_cut_rim();
   std::printf("test_flexible_b2: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }
