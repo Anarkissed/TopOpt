@@ -160,7 +160,7 @@ Recommendation recommend(const FlexibleData& data, const std::string& material_i
         const TierBand tier = tier_band(data.catalogue.error_bands, cs.set.tier,
                                         f.stack->frame.side, beads_per_wall);
         const FaceDesign d = design_face(cs.set, *f.stack, f.map, f.weight_n, f.design_stamp,
-                                         build, tier);
+                                         build, tier, f.series);
         int built_bad = 0;  // reachable targets the smoothing pushes past the data
         for (const ColumnDesign& cd : d.columns)
           if (cd.status == "ok" && !cd.buildable_ok) ++built_bad;

@@ -40,6 +40,9 @@ struct FaceRequest {
   SquishMap map;
   double weight_n = 0.0;
   const StampGrid* design_stamp = nullptr;
+  // C2 B2, item 19: the face's own span (pinched halves, a press's prism segment) as series
+  // columns, the same the run designs over; null = the whole run.
+  const std::vector<SeriesColumn>* series = nullptr;
 };
 
 // Where one face fails for one candidate.

@@ -490,6 +490,7 @@ std::string recommendation_json(const Recommendation& r, const std::string& req_
   for (const FaceFailure& f : r.failures) fl.push_back(failure_json(f));
   return Obj()
       .add("requested", Obj().add("topology", jstr(req_topo)).add("nozzle_temp_c", req_temp).str())
+      .add("scored_over", jstr("each face's own span (pinched halves, prism segments)"))
       .add("chosen", jbool(r.chosen))
       .add("reachable", jbool(r.reachable))
       .add("topology", r.chosen ? jstr(r.topology) : "null")
@@ -867,7 +868,43 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   }
   std::vector<const Stack*> sp;
   for (const Stack& s : stacks) sp.push_back(&s);
-  const std::vector<StackConflict> conflicts = find_stack_conflicts(grid, mask, sp);
+  const std::vector<StackConflict> all_conflicts = find_stack_conflicts(grid, mask, sp);
+  // C2 B2, item 9(a): a PINCH (opposite arrows) of two entries in ONE hand is accepted; a pinch
+  // across hands (separate squeezes: the combination, B2b) and a step (the same arrow) are not.
+  std::vector<StackConflict> conflicts, pinches;
+  auto hand_of = [&](int face_id) {
+    for (std::size_t i = 0; i < stacks.size(); ++i)
+      if (stacks[i].face_region_id == face_id) return loaded[i]->squeeze_group;
+    return -1;
+  };
+  for (const StackConflict& c : all_conflicts) {
+    const int ha = hand_of(c.face_a), hb = hand_of(c.face_b);
+    if (c.pinch && ha >= 0 && ha == hb)
+      pinches.push_back(c);
+    else
+      conflicts.push_back(c);
+  }
+  std::vector<std::pair<int, int>> pinch_pairs;
+  for (const StackConflict& c : pinches) pinch_pairs.push_back({c.face_a, c.face_b});
+  // each face's pinched columns, and its own span as series columns (pinched: half the run)
+  std::vector<std::vector<char>> pinched(stacks.size());
+  std::vector<std::vector<SeriesColumn>> span_of(stacks.size());
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    std::vector<const Stack*> partners;
+    for (const StackConflict& c : pinches) {
+      const int other = c.face_a == stacks[i].face_region_id ? c.face_b
+                        : c.face_b == stacks[i].face_region_id ? c.face_a
+                                                               : -1;
+      if (other < 0) continue;
+      for (const Stack& q : stacks)
+        if (q.face_region_id == other) partners.push_back(&q);
+    }
+    if (partners.empty()) continue;
+    pinched[i] = pinched_columns(stacks[i], partners);
+    span_of[i].resize(stacks[i].columns.size());
+    for (std::size_t k = 0; k < stacks[i].columns.size(); ++k)
+      span_of[i][k].own_mm = stacks[i].columns[k].lattice_mm * (pinched[i][k] ? kPinchSegmentShare : 1.0);
+  }
 
   // ── the drawn maps (these need no data, so they are written even on a refusal) ──
   std::vector<std::vector<double>> target(stacks.size());
@@ -895,7 +932,27 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   std::vector<FaceRequest> requests;
   for (std::size_t i = 0; i < stacks.size(); ++i)
     requests.push_back({&stacks[i], squish_map_of(*loaded[i]), weight_of[i],
-                        loaded[i]->has_design_stamp ? &loaded[i]->design_stamp : nullptr});
+                        loaded[i]->has_design_stamp ? &loaded[i]->design_stamp : nullptr, nullptr});
+  // C2 B2, item 19: Auto scores each face over its OWN span: a pinched face over its halves; a
+  // flat-prism press over its prism segment (the run inside its plane).
+  std::vector<std::vector<SeriesColumn>> auto_span(stacks.size());
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    if (!span_of[i].empty()) {
+      requests[i].series = &span_of[i];
+    } else if (stacks[i].has_flat_prism) {
+      const Stack& st = stacks[i];
+      auto_span[i].resize(st.columns.size());
+      for (std::size_t k = 0; k < st.columns.size(); ++k) {
+        const StackColumn& c = st.columns[k];
+        const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+        const double t_plane = st.flat_depth_mm - ((o.x - st.flat_apex.x) * st.frame.load.x +
+                                                   (o.y - st.flat_apex.y) * st.frame.load.y +
+                                                   (o.z - st.flat_apex.z) * st.frame.load.z);
+        auto_span[i][k].own_mm = std::max(0.0, std::min(c.entry_t + c.lattice_mm, t_plane) - c.entry_t);
+      }
+      requests[i].series = &auto_span[i];
+    }
+  }
 
   Recommendation rec;
   std::string refusal_code, refusal_reason;
@@ -912,12 +969,14 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     refusal_reason = stack_refusal_reason;
   } else if (!conflicts.empty()) {
     refusal_code = "one_profile_per_stack";
-    refusal_reason = "faces " + std::to_string(conflicts[0].face_a) + " and " +
-                     std::to_string(conflicts[0].face_b) +
-                     " are both loaded and push the same material along the same axis (" +
-                     fmtd(conflicts[0].overlap_mm3, 0) +
-                     " mm3 shared). One squish profile per stack (M13): mark one of them as "
-                     "where it rests.";
+    const StackConflict& c0 = conflicts[0];
+    refusal_reason = "faces " + std::to_string(c0.face_a) + " and " + std::to_string(c0.face_b) +
+                     " are both loaded and push the same material along the same axis (" + fmtd(c0.overlap_mm3, 0) +
+                     " mm3 shared). " +
+                     (c0.pinch ? std::string("They press from opposite sides but in different hands (separate "
+                                             "squeezes): put them in one squeeze group to pinch, or mark one as where "
+                                             "it rests.")
+                               : std::string("One squish profile per stack (M13): mark one of them as where it rests."));
   } else if (temps.empty()) {
     const auto it = data.catalogue.materials.find(fx.material_id);
     if (it != data.catalogue.materials.end() && it->second.tier == "literature") {
@@ -966,7 +1025,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         continue;
       }
       designs[i] = design_face(set, stacks[i], requests[i].map, requests[i].weight_n, requests[i].design_stamp,
-                               bp, tier_of(i));
+                               bp, tier_of(i), span_of[i].empty() ? nullptr : &span_of[i]);
     }
     // Phase 2 (C2 B1b, items 5 + 18, Q1): each flat-prism press as a SERIES column. Its own
     // segment is the run inside its prism plus run nobody else owns; the rest of the run is
@@ -976,7 +1035,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       std::vector<LoadedStack> ls1;
       for (std::size_t i = 0; i < stacks.size(); ++i)
         if (!stacks[i].has_flat_prism) ls1.push_back({&stacks[i], &designs[i]});
-      const DensityField f1 = ls1.empty() ? DensityField{} : assemble_density_field(grid, mask, ls1, bp);
+      const DensityField f1 = ls1.empty() ? DensityField{} : assemble_density_field(grid, mask, ls1, bp, &pinch_pairs);
       for (std::size_t i = 0; i < stacks.size(); ++i) {
         if (!stacks[i].has_flat_prism) continue;
         series_of[i] = press_series(stacks[i], grid, f1);
@@ -986,7 +1045,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     }
     std::vector<LoadedStack> ls;
     for (std::size_t i = 0; i < stacks.size(); ++i) ls.push_back({&stacks[i], &designs[i]});
-    field = assemble_density_field(grid, mask, ls, bp);
+    field = assemble_density_field(grid, mask, ls, bp, &pinch_pairs);
 
     // ── C2 B1b, item 4a: THE FIELD EXPORT ──
     std::vector<float> filled;
@@ -1310,6 +1369,20 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                         .add("linked_regions", jlist(rlinks))
                         .add("exit_unresolved_fraction", jnum(st.exit_unresolved_fraction))
                         .str());
+    if (!pinched.empty() && !pinched[i].empty()) {
+      int np = 0;
+      for (char x : pinched[i]) np += x ? 1 : 0;
+      fo.add("pinched_columns", jnum(np));
+      double hsum = 0.0;
+      int hn = 0;
+      if (i < designs.size())
+        for (const ColumnDesign& cd : designs[i].columns)
+          if (cd.status != "no_lattice") {
+            hsum += cd.height_mm;
+            ++hn;
+          }
+      fo.add("design_height_mm", hn ? jnum(hsum / hn) : "null");
+    }
     fo.add("weight_n", jnum(weight_of[i]))
         .add("deepest_squish_mm", jnum(jf.deepest_squish_mm))
         .add("mode", jstr(jf.mode));
@@ -1589,6 +1662,16 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                        .add("face_region_a", jnum(x.face_region_a)).add("face_region_b", jnum(x.face_region_b))
                        .add("shared_mm2", jnum(x.shared_mm2)).str());
     r.add("shared_footprints", jlist(sf));
+  }
+  {
+    std::vector<std::string> pj;
+    for (const StackConflict& c : pinches)
+      pj.push_back(Obj().add("face_a", jnum(c.face_a)).add("face_b", jnum(c.face_b))
+                       .add("overlap_mm3", jnum(c.overlap_mm3))
+                       .add("rule", jstr("each face designs its pinched columns over half its run (the half nearer "
+                                         "it); one hand, one pressure on both ends; the field meets at the middle"))
+                       .str());
+    r.add("pinches", jlist(pj));
   }
   r.add("grams", grams_json);
   r.add("groups", groups_json);

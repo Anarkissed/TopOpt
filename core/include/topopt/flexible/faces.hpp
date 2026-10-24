@@ -51,7 +51,11 @@ inline constexpr double kSameAxisDeg = 15.0;
 //   5  2026-10-24  C2 B2: mode "flat_cut"; "squeeze_groups" (one force per hand, split by
 //                  area; an entry in a group carries no weight_n); the receipt's per-group
 //                  achieved-vs-target ("groups") and grams per group
-inline constexpr int kPressApiVersion = 5;
+//   6  2026-10-24  C2 B2 part 2: THE PINCH (two entries of one hand, opposite arrows, one axis)
+//                  is accepted: each face designs its pinched columns over half its run; the
+//                  receipt lists "pinches" and per face "pinched_columns"; Auto scores each
+//                  face over its own span (pinched halves, prism segments)
+inline constexpr int kPressApiVersion = 6;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is

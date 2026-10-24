@@ -123,6 +123,25 @@ bool in_stack(const Stack& s, const Vec3& p, int& col, double& depth) {
 
 }  // namespace
 
+std::vector<char> pinched_columns(const Stack& st, const std::vector<const Stack*>& partners) {
+  std::vector<char> out(st.columns.size(), 0);
+  for (std::size_t k = 0; k < st.columns.size(); ++k) {
+    const StackColumn& c = st.columns[k];
+    const double tm = 0.5 * (c.entry_t + c.exit_t);
+    const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+    const Vec3 p{o.x + st.frame.load.x * tm, o.y + st.frame.load.y * tm, o.z + st.frame.load.z * tm};
+    for (const Stack* q : partners) {
+      int col = -1;
+      double d = 0.0;
+      if (q != nullptr && q != &st && in_stack(*q, p, col, d)) {
+        out[k] = 1;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 double stamp_force_n(const StampGrid& s) {
   double f = 0.0;
   for (double v : s.values_mpa) f += v;
@@ -600,6 +619,7 @@ std::vector<StackConflict> find_stack_conflicts(const VoxelGrid& grid,
     c.overlap_mm3 = kv.second;
     c.axis_angle_deg = axis_angle_deg(stacks[kv.first.first]->frame.load,
                                       stacks[kv.first.second]->frame.load);
+    c.pinch = dot(stacks[kv.first.first]->frame.load, stacks[kv.first.second]->frame.load) < 0.0;
     out.push_back(c);
   }
   return out;
@@ -607,7 +627,8 @@ std::vector<StackConflict> find_stack_conflicts(const VoxelGrid& grid,
 
 DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<char>& lattice_mask,
                                     const std::vector<LoadedStack>& stacks,
-                                    const BuildParams& build) {
+                                    const BuildParams& build,
+                                    const std::vector<std::pair<int, int>>* allowed_pinches) {
   std::vector<const Stack*> ss;
   for (const LoadedStack& l : stacks) {
     if (l.stack == nullptr || l.design == nullptr)
@@ -615,10 +636,17 @@ DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<cha
     ss.push_back(l.stack);
   }
   const std::vector<StackConflict> cf = find_stack_conflicts(grid, lattice_mask, ss);
-  if (!cf.empty())
-    throw FlexibleError("faces " + std::to_string(cf[0].face_a) + " and " +
-                        std::to_string(cf[0].face_b) +
-                        " push the same material along the same axis (one profile per stack)");
+  auto allowed = [&](const StackConflict& c) {
+    if (!c.pinch || allowed_pinches == nullptr) return false;
+    for (const auto& pr : *allowed_pinches)
+      if ((pr.first == c.face_a && pr.second == c.face_b) || (pr.first == c.face_b && pr.second == c.face_a))
+        return true;
+    return false;
+  };
+  for (const StackConflict& c : cf)
+    if (!allowed(c))
+      throw FlexibleError("faces " + std::to_string(c.face_a) + " and " + std::to_string(c.face_b) +
+                          " push the same material along the same axis (one profile per stack)");
   for (const LoadedStack& l : stacks)
     if (l.design->columns.size() != l.stack->columns.size())
       throw FlexibleError("assemble_density_field: a design does not match its stack");

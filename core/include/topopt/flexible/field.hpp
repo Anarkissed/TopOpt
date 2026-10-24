@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "topopt/flexible/error.hpp"
@@ -205,7 +206,15 @@ struct StackConflict {
   int face_a = -1, face_b = -1;
   double overlap_mm3 = 0.0;
   double axis_angle_deg = 0.0;
+  // C2 B2, item 9(a): the loads point OPPOSITE ways (a PINCH), not the same way (a step).
+  bool pinch = false;
 };
+
+// C2 B2, item 9(a), the app's rule (FlexiblePinch.pinchedColumns): a column of `st` is PINCHED
+// when its midpoint (halfway between its entry and exit) lies in a partner's stack.
+std::vector<char> pinched_columns(const Stack& st, const std::vector<const Stack*>& partners);
+// The share of a pinched column each face designs for: the half nearer it (FlexiblePinch.segmentShare).
+inline constexpr double kPinchSegmentShare = 0.5;
 // Stacks on DIFFERENT axes that overlap: nearest loaded face, blended over one cell.
 struct Handover {
   int face_a = -1, face_b = -1;
@@ -236,11 +245,14 @@ struct DensityField {
   std::vector<Handover> handovers;
 };
 
-// Assemble the field over the lattice voxels. Throws FlexibleError when a conflict
-// exists (call find_stack_conflicts first to report it properly).
+// Assemble the field over the lattice voxels. Throws FlexibleError when a conflict exists
+// (call find_stack_conflicts first to report it properly), except a PINCH the caller names in
+// `allowed_pinches` (face_region_id pairs, either order): those meet at the middle by the
+// nearest-face handover (C2 B2, item 9(a)).
 DensityField assemble_density_field(const VoxelGrid& grid, const std::vector<char>& lattice_mask,
                                     const std::vector<LoadedStack>& stacks,
-                                    const BuildParams& build);
+                                    const BuildParams& build,
+                                    const std::vector<std::pair<int, int>>* allowed_pinches = nullptr);
 
 }  // namespace flexible
 }  // namespace topopt

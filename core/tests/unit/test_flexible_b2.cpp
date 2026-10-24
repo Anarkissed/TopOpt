@@ -47,7 +47,7 @@ static int g_checks = 0;
     }                                                              \
   } while (0)
 
-static_assert(kPressApiVersion == 5, "B2: the press API version");
+static_assert(kPressApiVersion == 6, "B2: the press API version");
 
 static const std::string kDir = std::string(FLEXIBLE_TMP_DIR) + "/flexible_b2_test";
 
@@ -200,12 +200,84 @@ static void test_groups() {
         "26: grams per squeeze group, summing to the total");
 }
 
+// ── 9(a): THE PINCH, the app's rule (FlexiblePinch.swift): two loaded entries of ONE hand on one
+// axis with OPPOSITE arrows. A column is pinched when its midpoint (entry → exit) lies in the
+// partner's stack; each face designs a pinched column over HALF its run (segmentShare 0.5);
+// the field meets at the middle by the existing nearest-face handover. One hand → one pressure
+// on both ends (force balance). Opposite arrows in DIFFERENT hands stay refused (separate
+// squeezes: the combination, B2b); the same arrow on one axis (a step) stays refused.
+static void test_pinch() {
+  // a 100 x 60 x 40 block: the -X face (105) and the +X face (103) in one 200 N hand
+  const std::string pinch = job("[" + face(103, "", 2) + "," + face(105, "", 2) + "]",
+                                ",\"squeeze_groups\":[{\"faces\":[103,105],\"force_n\":200}]");
+  FlexibleRunResult r;
+  bool threw = false;
+  try {
+    r = run("pinch", pinch, 100, 60, 40);
+  } catch (const std::exception& e) {
+    threw = true;
+    std::fprintf(stderr, "  (threw: %s)\n", e.what());
+  }
+  CHECK(!threw && !r.refused, "9(a): two faces of ONE hand with opposite arrows: a pinch, accepted");
+  if (r.refused) std::fprintf(stderr, "  (%s: %s)\n", r.refusal_code.c_str(), r.refusal_reason.c_str());
+  CHECK(r.receipt_json.find("\"pinches\": [{\"face_a\": 103, \"face_b\": 105") != std::string::npos,
+        "9(a): the receipt lists the pinch");
+  const std::size_t f3 = r.receipt_json.find("\"face_region_id\": 103"), f5 = r.receipt_json.find("\"face_region_id\": 105");
+  const double p3 = num(r.receipt_json, "pinched_columns", f3), p5 = num(r.receipt_json, "pinched_columns", f5);
+  const double c3 = num(r.receipt_json, "columns", r.receipt_json.find("\"stack\": {", f3));
+  std::printf("  pinch: face 103 %g of %g columns pinched, face 105 %g\n", p3, c3, p5);
+  CHECK(p3 > 0 && p3 == c3 && p5 == p3, "9(a): every column of each face is pinched, counted per face (per half)");
+  // each face designs over HALF the run: its design height is half the 100 mm column
+  double h_worst = 0.0;
+  if (r.stacks.size() == 2) {
+    const Stack& st = r.stacks[0];
+    for (const StackColumn& c : st.columns) h_worst = std::max(h_worst, std::fabs(c.lattice_mm - 100.0));
+  }
+  const double dh = num(r.receipt_json, "design_height_mm", f3);
+  std::printf("  pinch: run %.3f mm off 100 at worst, design height %.3f mm\n", h_worst, dh);
+  CHECK(std::fabs(dh - 50.0) < 1e-6, "9(a): a pinched face designs over half its run (segmentShare 0.5)");
+  // the same faces in DIFFERENT hands: refused (separate squeezes; the combination is B2b)
+  const FlexibleRunResult x = run("pinch_x", job("[" + face(103, "", 2) + "," + face(105, "", 2) + "]",
+                                                 ",\"squeeze_groups\":[{\"faces\":[103],\"force_n\":100},{\"faces\":[105],\"force_n\":100}]"),
+                                  100, 60, 40);
+  CHECK(x.refused && x.refusal_code == "one_profile_per_stack" && x.refusal_reason.find("different hands") != std::string::npos,
+        "9(a): opposite arrows in different hands: refused, saying they are different hands");
+  // a STEP (the same arrow on one axis): the top and an angled top press 10 degrees off, one hand
+  const std::string step = job("[" + face(101, "", 2) +
+                                   ",{\"face_region_id\":104,\"press_direction\":[0,0.17,-1],\"role\":\"loaded\","
+                                   "\"deepest_squish_mm\":2,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],"
+                                   "\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}]",
+                               ",\"squeeze_groups\":[{\"faces\":[101,104],\"force_n\":100}]");
+  bool step_refused = false;
+  try {
+    const FlexibleRunResult s = run("step", step, 60, 60, 60);
+    step_refused = s.refused && (s.refusal_code == "one_profile_per_stack" || s.refusal_code == "press_stack_failed");
+  } catch (const std::exception&) {
+  }
+  CHECK(step_refused, "9(a): the same arrow on one axis (a step) stays refused");
+}
+
+// ── 19: Auto over each face's REAL span ─────────────────────────────────────────────
+static void test_auto_span() {
+  // The pinched block in one hand: Auto's candidates score each face over its half. The
+  // receipt's recommendation scores the same columns as the design (series in recommend).
+  const FlexibleRunResult r = run("pinch_auto", job("[" + face(103, "", 2) + "," + face(105, "", 2) + "]",
+                                                    ",\"squeeze_groups\":[{\"faces\":[103,105],\"force_n\":200}]")
+                                                    .replace(job("[]").find("\"gyroid\""), 8, "\"auto\""),
+                                  100, 60, 40);
+  CHECK(!r.refused && r.receipt_json.find("\"scored_over\": \"each face's own span (pinched halves, prism segments)\"") !=
+                          std::string::npos,
+        "19: Auto scores each face over its own span, and the receipt says so");
+}
+
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::error_code ec;
   fs::remove_all(kDir, ec);
   test_flat_cut();
   test_groups();
+  test_pinch();
+  test_auto_span();
   std::printf("test_flexible_b2: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }
