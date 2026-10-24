@@ -15,7 +15,7 @@ WP = `WorkspacePlaceholder.swift`. "owns" = `flexibleMain.owns(project, stage)`.
 | (none) | WP | `@StateObject private var cameraModel` block (the `@State` list) | `@StateObject private var flexibleMain = FlexibleMainStage()` | unchanged by B1/B2/B3 |
 | H3 | WP | `latticeLayer: latticeLayerIsDrawn` … MetalMeshView's last argument (1066) | `flexibleLattice: flexibleMain.layer(project, stage:, pageUp: fullScreenPageUp)` | unchanged by B1/B2/B3 |
 | H4 | WP | `MetalMeshView(mesh: stageMesh,` (715); `vertexTints: … : nil` (736); `settleAnimated: !reduceMotion,` (767); `stressTints: stageSurfaceTints` (917); `bodyAlpha: latticePreviewBodyAlpha,` (1018) | `flexibleMain.mesh/tints/dents/bodyAlpha(…) ?? today's`; snap on owns | unchanged by B1/B2/B3 |
-| H5 | WP | `if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {` (1296) | `if owns { FlexibleMainViewToggles(…) } else if …` | B3: line unchanged (1318); `viewModeToggles` gained Forces and Design box buttons on Topology only · B5: line unchanged (1326); `visible.surfaceEditing` is now the Edit faces MODE (`WorkspaceStageVisibility.of(stage, editingFaces:)`), not a stage |
+| H5 | WP | `if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {` (1296) | `if owns { FlexibleMainViewToggles(…) } else if …` | B3: line unchanged (1318); `viewModeToggles` gained Forces and Design box buttons on Topology only · B5: line unchanged (1326); `visible.surfaceEditing` is now the Edit faces MODE (`WorkspaceStageVisibility.of(stage, editingFaces:)`), not a stage · B6: line unchanged (1331); its Design box view button is labelled "Design primitives" and shows whenever the list has a row |
 | H6 | WP | before `// ★ "Simulation running", top-centre (maintainer, 2026-08-18).` (1318) | `if owns { FlexibleMainLegends(…) }` | unchanged by B1/B2/B3 |
 | H7 | WP | `onPickPoint: { fid, pt in` (779), first line | `if flexibleMain.read(project, mode:, face:, point:) { return true }` | unchanged by B1/B2/B3 · B5: unchanged (811); its `visible.surfaceEditing` branch (the face tools) is the mode now |
 | H8 | WP | `onLatticeProbe: legendDrilledIn` (811); `setLatticeProbe(at: model, world: world,` (813) | `&& flexibleMain.wantsWallProbe(mode)`; `if flexibleMain.readLattice(…) { return }` | unchanged by B1/B2/B3 |
@@ -85,6 +85,30 @@ H41–H44 (ImportSheet, New TopOpt's Flexible process): untouched by B4 — the 
 H39, H45, H48; the unchanged ones are marked so a re-seat need not re-check them). No Flexible code was added or changed; #362's
 `WorkspaceStage.surface` uses (FlexibleStageCapsule.swift:68/:84, FlexibleStageNav.swift:21-22) stop compiling at the sync, as its
 plan's P5 expects — swap them for `.editFaces` / `enterEditFaces(from: .host(…), onReturn:)`.
+
+**B6 (Design primitives) moved no hook anchor** (0 of 49; H5's row notes its view button's new label): no anchor's text
+changed. WorkspacePlaceholder lines after the `@State` list shift by +3, after the MetalMeshView design-box arguments by +5 (H5
+1331, H15' 1024, H24 1302, H3 1103), and after the Setup panel by about +150. No Flexible code was added or changed.
+
+## B6: what a Topology run sends while the primitive list is not sent
+
+**A Topology run sends the FIRST POSITIVE BOX row as today's single design box, exactly as today's job carries it, and nothing
+else of the list** (his answer 2026-10-24: "Run with just the first design box for now. It's only me working on the app right
+now."). Negative rows, cylinders and further boxes are not sent until core takes the list; there is no card in the UI.
+A list with no Positive Box sends no design box (as today with none). `DesignBoxModel.bridgeBox` = the first Positive Box's
+bounds (its eye is view-only: a hidden row still sends); `bridgeKeepOuts` is empty — so an old project's KEEP-OUTS (they open as
+Negative box rows) are no longer sent either. Pinned: the cube's job with one Positive Box equal to today's design box is
+byte-identical to 9735ed42 (`DesignPrimitivesTests.jobWithBoxAtHEAD`, sorted-key SHA-256 c4af7bfa…), hidden or shown.
+
+Saved projects: today's `designBox` (`box`, `keepOuts`) opens as row 1 (Box, Positive) then Negative box rows; an untouched list
+encodes as before (the same two keys); a list the old keys cannot hold adds a `primitives` key beside them. Decoding never fails
+(an unreadable `primitives` falls back to the old keys, then to an empty list).
+
+## CORE LIST
+
+- **Design primitives list: up to 6, Box/Cylinder, Positive/Negative — core takes one design box today; a new core agent will
+  take the list.** The app holds the list (`DesignBoxModel.primitives`: shape, sign, bounds, cylinder axis, eye); the send for
+  the full list stays off (B6 above).
 
 ## B5 — Edit faces: what #362 and core get
 

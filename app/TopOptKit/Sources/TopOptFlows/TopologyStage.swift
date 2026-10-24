@@ -165,7 +165,7 @@ public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
         case .minimizePlastic: return "Plastic"
         case .protectSkin: return "Protect skin"
         case .cadFaces: return "CAD surfaces"
-        case .designBox: return "Design box"
+        case .designBox: return "Design primitives"   // B6: the list of up to 6
         case .printParameters: return "Print parameters"
         }
     }
@@ -199,6 +199,13 @@ public enum TopologySelectionsCopy {
     /// The face chip's filled button: the tapped face joins the group with its role.
     public static func joinLabel(_ group: String, role: String) -> String { "Add to \(group) as \(role)" }
     public static let joinNote = "or pick a role below for a new group"
+}
+
+/// What a design-primitive trash took away, for its one-step Undo (B6).
+public struct TrashedPrimitive: Equatable, Sendable {
+    public let id: Int
+    public let name: String
+    let after: EditSnapshot
 }
 
 /// What a trash took away, for its one-step Undo: the edit slice after the delete (the Undo is live only while nothing else
@@ -239,6 +246,28 @@ extension ProjectModel {
         guard selection.groups.contains(where: { $0.id == t.id }) else { return }
         if t.wasHidden != groupView.isHidden(t.id) { groupView.toggleHidden(t.id) }
         if t.wasLocked != groupView.isLocked(t.id) { groupView.toggleLocked(t.id) }
+    }
+
+    // MARK: ★ B6 — a design primitive's trash, as ONE undo step
+
+    /// The trash on a design-primitive row: sealed before and after (APP LIST 1), so one Undo restores exactly that row,
+    /// where it was.
+    @discardableResult
+    public func trashPrimitive(_ id: Int) -> TrashedPrimitive? {
+        guard let row = designBox.primitives.first(where: { $0.id == id }) else { return nil }
+        sealUndoStep()
+        designBox.remove(id)
+        sealUndoStep()
+        return TrashedPrimitive(id: id, name: row.name, after: editSnapshot)
+    }
+
+    /// Whether the trash's Undo still means "put that row back": nothing has changed since.
+    public func canUndoTrashPrimitive(_ t: TrashedPrimitive) -> Bool { editSnapshot == t.after }
+
+    /// The trash's one-step Undo: the history's own undo.
+    public func undoTrashPrimitive(_ t: TrashedPrimitive) {
+        guard canUndoTrashPrimitive(t) else { return }
+        performUndo()
     }
 
     /// ★ THE FACE CHIP'S "Add to <group>": the face(s) he just tapped (a fresh, still-pending group) join an existing group

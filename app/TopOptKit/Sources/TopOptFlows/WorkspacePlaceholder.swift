@@ -174,6 +174,9 @@ public struct WorkspacePlaceholder: View {
     @State private var topoNotice = TopologyResultsNotice()
     /// B3: the corner pair's Setup panel is open.
     @State private var setupPanelOpen = false
+    /// ★ B6: the design-primitive row whose trash is asking (in place), and the last trash (its one-step Undo).
+    @State private var primitiveDeleteAsk: Int?
+    @State private var primitiveTrashed: TrashedPrimitive?
     /// B3: the corner pair's measures (CornerPair).
     @StateObject private var chromeGeometry = ChromeGeometry()
     /// B3: the trash's in-place ask (a group id) and the last trash's one-step Undo.
@@ -975,14 +978,16 @@ public struct WorkspacePlaceholder: View {
                           // view toggle. See `surfacePreviewLineBuffer`.
                           showWireframe: (visible.wireframe && surfaceWireframeOn)
                               || !surfacePreviewLineBuffer.isEmpty,
-                          designBox: (showDesignGizmo && !showSmoothingPage
-                                      && visible.designBox
-                                      && !legendDrilledIn)
-                              ? project.designBox.box : nil,
-                          keepOutBoxes: (showDesignGizmo && !showSmoothingPage
-                                         && visible.keepOuts
-                                         && !legendDrilledIn)
-                              ? project.designBox.keepOuts : [],
+                          // ★ B6: every shown DESIGN PRIMITIVE row, by shape and sign (a Positive row through
+                          // today's design-box gate, a Negative one through the keep-outs'), and the gap of any
+                          // row that stops short of the part or another row, so it is plainly visible.
+                          designPrimitives: DesignPrimitiveDrawing.of(project.designBox, part: viewerMesh?.bounds,
+                              positives: (showDesignGizmo && !showSmoothingPage
+                                          && visible.designBox
+                                          && !legendDrilledIn),
+                              negatives: (showDesignGizmo && !showSmoothingPage
+                                          && visible.keepOuts
+                                          && !legendDrilledIn)),
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
@@ -6387,7 +6392,7 @@ public struct WorkspacePlaceholder: View {
     /// Whether the design-box gizmo (translucent box + drag handles) is shown: the
     /// tool is active and we're in the normal edit phase (not gravity setup).
     private var showDesignGizmo: Bool {
-        force.phase == .edit && force.gravityIsSet && project.designBox.isActive
+        force.phase == .edit && force.gravityIsSet && project.designBox.hasPrimitives   // ★ B6: any row (sent or not)
             && (stage != .topology || topoDesignBoxShown)   // ★ B3: the Design box VIEW (the box still bounds the run)
     }
 
@@ -6532,7 +6537,7 @@ public struct WorkspacePlaceholder: View {
 
     private var designGizmoOverlay: some View {
         ZStack(alignment: .topLeading) {
-            if let proj = projection, project.designBox.box != nil {
+            if let proj = projection, project.designBox.hasPrimitives {
                 boxHandleVisuals(proj)
                     .allowsHitTesting(false)                 // chrome only — the hit layer owns touches
                 boxHitLayer(resolvedBoxCandidates(proj))
@@ -6556,7 +6561,11 @@ public struct WorkspacePlaceholder: View {
         ForEach(targets.indices, id: \.self) { i in
             let t = targets[i]
             let pos = placed[boxHandleID(i)]?.center ?? t.screen
-            let keepOutTint: Bool = { if case .keepOut = t.handle.target { return true } else { return false } }()
+            let keepOutTint: Bool = {   // ★ B6: a handle in its row's colour (Negative red, Positive green)
+                guard case .keepOut(let k) = t.handle.target else { return false }
+                let idx = project.designBox.otherIndices
+                return idx.indices.contains(k) ? project.designBox.primitives[idx[k]].sign == .negative : true
+            }()
             let tint = keepOutTint ? Self.keepOutGlass : Self.designGlass
             if case .move = t.handle.kind {
                 moveHandle(tint: tint).position(pos)
@@ -6569,8 +6578,13 @@ public struct WorkspacePlaceholder: View {
     /// The canonical hit-test candidates (design box, then each keep-out) projected to
     /// stage points — the input to `DesignBoxHitTest.choose`.
     private func boxCandidates(_ proj: CameraProjection) -> [DesignBoxHitTest.Target] {
-        DesignBoxHandles.candidates(box: project.designBox.box, keepOuts: project.designBox.keepOuts,
-                                    settledWorld: settledWorld, project: proj.project)
+        // ★ B6: `.designBox` = the row the run sends (the first Positive Box), `.keepOut(i)` = every other row in list
+        // order; a hidden row (its eye off) draws no handles.
+        let d = project.designBox
+        let primaryShown = d.primaryIndex.map { d.primitives[$0].isShown } ?? false
+        let hidden = Set(d.otherIndices.enumerated().filter { !d.primitives[$0.element].isShown }.map(\.offset))
+        return DesignBoxHandles.candidates(box: primaryShown ? d.box : nil, keepOuts: d.keepOuts, hiddenKeepOuts: hidden,
+                                           settledWorld: settledWorld, project: proj.project)
     }
 
     /// `boxCandidates` with each handle moved to its RESOLVED keep-out position — the hit set the
@@ -6715,8 +6729,12 @@ public struct WorkspacePlaceholder: View {
         switch handle.target {
         case .designBox: project.designBox.box = bounds
         case .keepOut(let i):
-            guard project.designBox.keepOuts.indices.contains(i) else { return }
-            project.designBox.keepOuts[i] = bounds
+            // ★ B6: another row; a cylinder stays round (the dragged cross face sets its diameter)
+            let idx = project.designBox.otherIndices
+            guard idx.indices.contains(i) else { return }
+            var dragged: Int? = nil
+            if case .face(let axis, _) = handle.kind { dragged = axis }
+            project.designBox.writeBounds(project.designBox.primitives[idx[i]].id, bounds, draggedAxis: dragged)
         }
     }
 
@@ -7363,8 +7381,8 @@ public struct WorkspacePlaceholder: View {
                     viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
-                    if project.designBox.isActive {
-                        viewModeButton("cube", label: "Design box", on: topoDesignBoxShown) {
+                    if project.designBox.hasPrimitives {
+                        viewModeButton("cube", label: "Design primitives", on: topoDesignBoxShown) {
                             topoDesignBoxShown.toggle()
                         }
                     }
@@ -12307,7 +12325,7 @@ extension WorkspacePlaceholder {
                     .frame(minHeight: 44)
                     switch row {
                     case .plate where showBuildOrientation: buildOrientationDrawer
-                    case .designBox where showDesignGizmo: designBoxDrawer
+                    case .designBox: designPrimitivesList   // ★ B6: the list, always (not only while the gizmo is up)
                     default: EmptyView()
                     }
                 }
@@ -12328,8 +12346,156 @@ extension WorkspacePlaceholder {
         case .minimizePlastic: minimizePlasticChip
         case .protectSkin: faceProtectDepthChip
         case .cadFaces: cadFacesChip
-        case .designBox: designBoxChip
+        case .designBox:   // ★ B6: the row's control is its count; the list sits under it
+            Text(DesignPrimitivesCopy.count(project.designBox.primitives.count)).dsStyle(DS.TypeScale.footnote)
+                .foregroundStyle(DS.Color.textTertiary.color).accessibilityIdentifier("topology-primitives-count")
         case .printParameters: printParamsButton
+        }
+    }
+
+    // MARK: ★ B6 — the DESIGN PRIMITIVES list (Setup)
+
+    /// Up to 6 rows: name, Box | Cylinder, Positive | Negative, its number fields, eye (view only), trash (in place + one-step
+    /// Undo). Add appends a row underneath; at 6 it greys out. A row that stops short of the part or of another row says so here
+    /// and shows its gap on the model in amber. A run sends only the first Positive Box (DesignBoxModel.bridgeBox).
+    private var designPrimitivesList: some View {
+        let d = project.designBox
+        let gaps = DesignPrimitiveGaps.find(d.primitives, part: viewerMesh?.bounds)
+        return VStack(alignment: .leading, spacing: DS.Space.s) {
+            ForEach(d.primitives) { row in
+                designPrimitiveRow(row, gap: gaps.first { $0.primitiveID == row.id })
+            }
+            HStack(spacing: DS.Space.s) {
+                Button {
+                    guard let mesh = viewerMesh, project.designBox.add(around: mesh.bounds) != nil else { return }
+                    primitiveTrashed = nil
+                } label: {
+                    Label(DesignPrimitivesCopy.add, systemImage: "plus").font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, DS.Space.m).frame(height: 36)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(DS.Color.fillSubtle.color))
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!d.canAdd || viewerMesh == nil)
+                .opacity(d.canAdd ? 1 : 0.4)
+                .accessibilityIdentifier("topology-primitive-add")
+                Text(DesignPrimitivesCopy.addNote(count: d.primitives.count)).dsStyle(DS.TypeScale.footnote)
+                    .foregroundStyle(DS.Color.textTertiary.color).fixedSize(horizontal: false, vertical: true)
+            }
+            if let t = primitiveTrashed, project.canUndoTrashPrimitive(t) {
+                HStack(spacing: DS.Space.s) {
+                    Text(DesignPrimitivesCopy.deletedToast(t.name)).dsStyle(DS.TypeScale.footnote)
+                        .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                    CornerPairStyle.small(DesignPrimitivesCopy.undo, id: "topology-primitive-undo") {
+                        project.undoTrashPrimitive(t); primitiveTrashed = nil
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func primitiveColor(_ s: DesignPrimitiveSign) -> Color { s == .positive ? Self.designGreen : Self.keepOutRed }
+
+    private func gapReferenceName(_ r: DesignPrimitiveGap.Reference) -> String {
+        switch r {
+        case .part: return DesignPrimitivesCopy.partName
+        case .primitive(let id): return project.designBox.primitives.first { $0.id == id }?.name ?? DesignPrimitivesCopy.partName
+        }
+    }
+
+    private func designPrimitiveRow(_ row: DesignPrimitive, gap: DesignPrimitiveGap?) -> some View {
+        let id = row.id
+        return VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.s) {
+                Circle().fill(primitiveColor(row.sign)).frame(width: 10, height: 10)
+                Text(row.name).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                    .foregroundStyle((row.isShown ? DS.Color.textPrimary : DS.Color.textTertiary).color).lineLimit(1)
+                Spacer(minLength: DS.Space.s)
+                Picker("Shape", selection: Binding(get: { row.shape }, set: { project.designBox.setShape(id, $0) })) {
+                    ForEach(DesignPrimitiveShape.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).frame(width: 150)
+                .accessibilityIdentifier("topology-primitive-shape-\(id)")
+                Button {
+                    project.designBox.setShown(id, !row.isShown)
+                    if row.isShown { model.toast = DesignPrimitivesCopy.hiddenToast(row.name) }
+                } label: {
+                    Image(systemName: row.isShown ? "eye" : "eye.slash").font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color).frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(row.isShown ? "Hide \(row.name)" : "Show \(row.name)")
+                .accessibilityIdentifier("topology-primitive-eye-\(id)")
+                Button { primitiveDeleteAsk = id } label: {
+                    Image(systemName: "trash").font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color).frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(row.name)")
+                .accessibilityIdentifier("topology-primitive-trash-\(id)")
+                .modifier(ConfirmInPlace(asking: primitiveDeleteAsk == id, question: DesignPrimitivesCopy.deleteAsk(row.name),
+                                         destructive: DesignPrimitivesCopy.delete,
+                                         confirmKey: "primitiveDeleteConfirm", keepKey: "primitiveDeleteKeep",
+                                         idPrefix: "topology-primitive",
+                                         confirm: {
+                                             primitiveTrashed = project.trashPrimitive(id)
+                                             primitiveDeleteAsk = nil
+                                         },
+                                         cancel: { primitiveDeleteAsk = nil }))
+            }
+            Picker("Kind", selection: Binding(get: { row.sign }, set: { project.designBox.setSign(id, $0) })) {
+                ForEach(DesignPrimitiveSign.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("topology-primitive-sign-\(id)")
+            Text(row.sign.meaning).dsStyle(DS.TypeScale.footnote).foregroundStyle(primitiveColor(row.sign))
+            HStack(spacing: DS.Space.s) {
+                switch row.shape {
+                case .box:
+                    primitiveField("L", row.length, id: "\(id)-l") { project.designBox.setBoxSize(id, length: $0, width: row.width, height: row.height) }
+                    primitiveField("W", row.width, id: "\(id)-w") { project.designBox.setBoxSize(id, length: row.length, width: $0, height: row.height) }
+                    primitiveField("H", row.height, id: "\(id)-h") { project.designBox.setBoxSize(id, length: row.length, width: row.width, height: $0) }
+                case .cylinder:
+                    primitiveField("\u{2300}", row.diameter, id: "\(id)-d") { project.designBox.setCylinder(id, diameter: $0, height: row.height) }
+                    primitiveField("H", row.height, id: "\(id)-h") { project.designBox.setCylinder(id, diameter: row.diameter, height: $0) }
+                    Picker("Axis", selection: Binding(get: { row.axis }, set: { project.designBox.setAxis(id, $0) })) {
+                        Text("X").tag(0); Text("Y").tag(1); Text("Z").tag(2)
+                    }
+                    .pickerStyle(.segmented).frame(width: 110)
+                    .accessibilityIdentifier("topology-primitive-axis-\(id)")
+                }
+                Text("mm").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
+            }
+            if let gap {
+                // ★ A primitive that stops short is PLAINLY visible: named here, its gap amber on the model
+                Label(DesignPrimitivesCopy.gapNote(mm: gap.mm, of: gapReferenceName(gap.reference)),
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.95, green: 0.62, blue: 0.05))
+                    .accessibilityIdentifier("topology-primitive-gap-\(id)")
+            }
+        }
+        .padding(.vertical, DS.Space.xs)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(primitiveColor(row.sign)).frame(width: 3).offset(x: -DS.Space.s)
+        }
+        .accessibilityIdentifier("topology-primitive-row-\(id)")
+    }
+
+    private func primitiveField(_ label: String, _ value: Float, id: String,
+                                set: @escaping (Float) -> Void) -> some View {
+        HStack(spacing: 4) {
+            Text(label).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
+            TextField(label, value: Binding(get: { Double(value) }, set: { set(Float($0)) }),
+                      format: .number.precision(.fractionLength(0...1)))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13).monospacedDigit())
+                .frame(width: 60)
+                #if os(iOS)
+                .keyboardType(.decimalPad)
+                #endif
+                .accessibilityIdentifier("topology-primitive-field-\(id)")
         }
     }
 
