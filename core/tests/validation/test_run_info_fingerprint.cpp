@@ -72,20 +72,30 @@ static std::string json_str(const std::string& s, const std::string& key) {
   return s.substr(b, e - b);
 }
 
-// `topopt-cli --version` prints one line: "topopt-cli version=X fingerprint=Y".
-static std::string binary_fingerprint() {
+// `topopt-cli --version` prints one line of space-separated key=value tokens
+// (the worker's `_kv` parser): "topopt-cli version=X fingerprint=Y dirty=Z".
+static std::string version_line() {
   const std::string out = std::string(CLI_TMP_DIR) + "/fp_version.txt";
   const std::string cmd =
       std::string("\"") + TOPOPT_CLI_EXE + "\" --version > \"" + out + "\" 2>/dev/null";
   if (std::system(cmd.c_str()) != 0) return "";
-  const std::string text = read_file(out);
-  const std::string pat = "fingerprint=";
-  const std::string::size_type at = text.find(pat);
+  return read_file(out);
+}
+
+// The value of token `key=` in `line` (up to the next whitespace); "" if absent.
+static std::string version_token(const std::string& line, const std::string& key) {
+  const std::string pat = key + "=";
+  std::string::size_type at = line.find(" " + pat);
   if (at == std::string::npos) return "";
-  std::string v = text.substr(at + pat.size());
-  while (!v.empty() && (v.back() == '\n' || v.back() == '\r' || v.back() == ' '))
-    v.pop_back();
-  return v;
+  at += 1 + pat.size();
+  std::string::size_type end = at;
+  while (end < line.size() && line[end] != ' ' && line[end] != '\n' && line[end] != '\r')
+    ++end;
+  return line.substr(at, end - at);
+}
+
+static std::string binary_fingerprint() {
+  return version_token(version_line(), "fingerprint");
 }
 
 // Run a subcommand and return the run_info.json it wrote (empty when none).
@@ -115,6 +125,19 @@ int main() {
         "has no git SHA and the test below cannot distinguish the defect from the "
         "build (configure in a git checkout)");
   std::printf("  binary fingerprint: %s\n", fp.c_str());
+  // ★ Item 44: the fingerprint is taken at BUILD time with a dirty marker, and the
+  // version line says which: dirty=true exactly when the fingerprint carries
+  // "-dirty-<diff8>" (dirty=unknown only for a build without git, fingerprint "dev").
+  {
+    const std::string dirty = version_token(version_line(), "dirty");
+    std::printf("  binary dirty: %s\n", dirty.c_str());
+    CHECK(dirty == "true" || dirty == "false" || dirty == "unknown",
+          "--version must carry dirty=true|false|unknown (item 44)");
+    CHECK((dirty == "true") == (fp.find("-dirty-") != std::string::npos),
+          "the fingerprint carries \"-dirty-\" exactly when --version says dirty=true");
+    CHECK(dirty != "unknown" || fp == "dev",
+          "dirty=unknown only for a build without git (fingerprint \"dev\")");
+  }
 
   // ── 1. lattice-variant — the app's relattice path ───────────────────────────
   {
