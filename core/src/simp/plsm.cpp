@@ -1138,6 +1138,9 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // also the only compliance a loosened trajectory may be compared against, which
   // is what makes the S3 accuracy table meaningful.
   try {
+    // CERTIFIED (the compliance reported beside the shipped field): the
+    // solver's floating-speck drop (multigrid safe retry, arm G) is forbidden.
+    FeaIslandDropForbid no_island_drop;
     const SimpCompliance fc =
         simp_compliance(grid, params, r.physical_density, bcs, loads, tol_tight,
                         options.cg_max_iterations, nullptr, nullptr,

@@ -606,6 +606,18 @@ struct MgSafeAttemptReport {
 };
 const MgSafeAttemptReport& mg_last_safe_attempt();
 
+// Per matrix-free MG solve on this thread since the last
+// fea_matfree_reset_mg_stagnation_latch(): how many ran with the island drop
+// PERMITTED (a FeaIslandDropPermit held, no FeaIslandDropForbid) and how many
+// did not, and which the LAST one was. Observation only. A certified solve (a
+// run's final compliance, certification) must be a not-permitted one.
+struct MgIslandPermitStats {
+  long long permitted = 0;
+  long long not_permitted = 0;
+  bool last_permitted = false;
+};
+const MgIslandPermitStats& mg_island_permit_stats();
+
 // TEST ONLY — never set by production code. Forces the safe retry's MG-PCG to
 // break down before its first update: 1 = a non-finite preconditioned residual
 // (the r.z check), 2 = a zero first search direction (the p.Ap check at k = 1).

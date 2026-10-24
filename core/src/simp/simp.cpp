@@ -710,7 +710,9 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
     // modulus (only after the shipped MG has stalled); this compliance accounts
     // for that below, so the permit is held here — and nowhere a solution is
     // read back at the true modulus without that accounting (analyze.cpp
-    // forbids it for certification).
+    // forbids it for certification; the final compliance solves of
+    // simp_optimize, its masked / SEMDOT overload and plsm_optimize forbid it
+    // too, being certified numbers).
     {
       FeaIslandDropPermit permit;
       out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson,
@@ -2594,6 +2596,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // catch does not loosen the tolerance or retry — it records the failure and lets
     // the caller reject the rung.
     try {
+      // CERTIFIED: this is the compliance the run reports for the field it
+      // ships, so the solver's floating-speck drop (multigrid safe retry, arm
+      // G) is forbidden here whatever simp_compliance permits for trajectory
+      // solves — the specks are solved at their true modulus.
+      FeaIslandDropForbid no_island_drop;
       const SimpCompliance fc = simp_compliance(
           grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
@@ -3692,6 +3699,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // SEMDOT: the SAME linear law the trajectory ran with, so the reported
       // compliance is the compliance of the design under the physics that
       // produced it (semdot_law is the identity when the mode is off).
+      // CERTIFIED: no floating-speck drop (arm G) here; see the unconstrained
+      // overload.
+      FeaIslandDropForbid no_island_drop;
       const SimpCompliance fc = simp_compliance(
           analysis, semdot_law(params, options), result.physical_density, bcs,
           loads, options.cg_tolerance, options.cg_max_iterations, nullptr,

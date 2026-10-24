@@ -19,10 +19,18 @@
 //        l1 solve WITHOUT the drop does not converge while WITH it it does, to
 //        the same compliance as the exact Jacobi fallback.
 //   latch a latched run goes straight to the safe path.
+//   B    a safe attempt that breaks down before its first update reports its
+//        starting residual: not productive, seeds nothing, advances the latch.
+//   A    the fallback is seeded only by an iterate better on the EXACT system.
+//   D    the certified final compliance solves (simp_optimize, its masked /
+//        SEMDOT overload, plsm_optimize) never run with the island drop
+//        permitted, while the trajectory solves do.
 //
 // Same self-contained CHECK harness as the other unit tests.
 
 #include "topopt/fea.hpp"
+#include "topopt/plsm.hpp"
+#include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
 
 #include "fea/fea_matfree.hpp"
@@ -558,6 +566,70 @@ int main() {
                   F.specks &&
               std::fabs(w_u - w_ref) <= 1e-6 * std::fabs(w_ref),
           "G: the second body is solved at its true stiffness (load work matches exact)");
+  }
+
+  // ---------------------------------------------------------------------------
+  // D (certified solves): the FINAL compliance of simp_optimize, of its masked
+  // overload (here with SEMDOT on) and of plsm_optimize is the certified number
+  // a run reports for the field it ships, so it must never be solved with
+  // islands dropped (arm G): each is wrapped in a FeaIslandDropForbid. Observed
+  // per solve (mg_island_permit_stats): the trajectory solves of each run DO
+  // hold the permit (positive control), and its LAST matrix-free solve — the
+  // final compliance — does NOT. RED before the fix: every solve, the final one
+  // included, ran permitted.
+  // ---------------------------------------------------------------------------
+  {
+    const VoxelGrid g = make_grid(12, 6, 6);
+    topopt::SimpParams params;
+    params.youngs_modulus = 1000.0;
+    params.poisson = 0.3;
+    std::vector<DirichletBC> bcs;
+    clamp_x0(g, bcs);
+    std::vector<NodalLoad> loads;
+    for (int c = 2; c <= 4; ++c)
+      loads.push_back({topopt::fea_node_index(g, g.nx, 3, c), 2, -1.0});
+    const topopt::DesignMask mask(g.voxel_count(), topopt::MaskValue::Active);
+    auto stats_line = [](const char* what) {
+      const topopt::fea_detail::MgIslandPermitStats S =
+          topopt::fea_detail::mg_island_permit_stats();
+      std::printf("      %s: solves permitted=%lld not permitted=%lld, last "
+                  "(final compliance) permitted=%d\n",
+                  what, S.permitted, S.not_permitted, S.last_permitted ? 1 : 0);
+      return S.permitted >= 1 && S.not_permitted >= 1 && !S.last_permitted;
+    };
+
+    topopt::SimpOptions o;
+    o.solver = topopt::SolverKind::MultigridCG_Matfree;
+    o.volume_fraction = 0.4;
+    o.max_iterations = 3;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    const topopt::SimpOptimizeResult r1 = topopt::simp_optimize(g, params, bcs, loads, o);
+    const bool ok1 = stats_line("simp_optimize");
+    check(!r1.non_convergent && !r1.infeasible && r1.compliance > 0.0 && ok1,
+          "D: simp_optimize's final compliance solve forbids the island drop "
+          "(trajectory solves permit it)");
+
+    topopt::SimpOptions os = o;
+    os.semdot = true;
+    os.updater = topopt::SimpUpdater::MMA;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    const topopt::SimpOptimizeResult r2 =
+        topopt::simp_optimize(g, params, bcs, loads, os, mask);
+    const bool ok2 = stats_line("simp_optimize masked + SEMDOT");
+    check(!r2.non_convergent && !r2.infeasible && r2.compliance > 0.0 && ok2,
+          "D: the masked / SEMDOT overload's final compliance solve forbids the "
+          "island drop");
+
+    topopt::PlsmOptions po;
+    po.knots = topopt::PlsmKnots{2.0, 2.0, 2.0};
+    po.seed = "holes";
+    po.max_iterations = 3;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    const topopt::PlsmRunResult r3 =
+        topopt::plsm_optimize(g, params, bcs, loads, o, mask, po);
+    const bool ok3 = stats_line("plsm_optimize");
+    check(!r3.optimization.non_convergent && r3.optimization.compliance > 0.0 && ok3,
+          "D: plsm_optimize's final compliance solve forbids the island drop");
   }
 
   if (g_failures == 0) std::printf("mg_safe_retry: all checks passed\n");

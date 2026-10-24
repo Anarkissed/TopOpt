@@ -207,6 +207,9 @@ thread_local int g_island_drop_forbid = 0;
 // production code sets it; only the safe-retry MG-PCG call reads it).
 thread_local fea_detail::MgSafeAttemptReport g_mg_last_safe;
 thread_local int g_mg_safe_test_breakdown = 0;
+// Observation only (fea_detail::mg_island_permit_stats): per matrix-free solve,
+// whether it ran under an island-drop permit with no forbid. Reset per run.
+thread_local fea_detail::MgIslandPermitStats g_mg_permit_stats;
 
 // Arm G caps. Only SPECKS are ever dropped: each island at most this many
 // voxels, and all of them together at most this fraction of the system's
@@ -2557,6 +2560,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   // solve's `iterations` count describes only the last of those.
   const double t_entry = fea_detail::mf_steady_ms();
   const long long mv_entry = fea_matvec_count();
+  {  // observation only: did THIS solve run with the island drop permitted?
+    const bool permitted = g_island_drop_permit > 0 && g_island_drop_forbid == 0;
+    g_mg_permit_stats.last_permitted = permitted;
+    if (permitted) ++g_mg_permit_stats.permitted;
+    else ++g_mg_permit_stats.not_permitted;
+  }
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
       lattice != nullptr ? "fea_solve_cg_lattice_matfree"
@@ -3132,6 +3141,7 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
 }
 
 const MgSafeAttemptReport& mg_last_safe_attempt() { return g_mg_last_safe; }
+const MgIslandPermitStats& mg_island_permit_stats() { return g_mg_permit_stats; }
 void mg_safe_test_force_breakdown(int mode) {
   g_mg_safe_test_breakdown = (mode == 1 || mode == 2) ? mode : 0;
 }
@@ -3158,6 +3168,7 @@ void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_last_dropped.clear();
   g_mg_last_dropped_floor = 0.0;
   g_mg_last_safe = fea_detail::MgSafeAttemptReport();
+  g_mg_permit_stats = fea_detail::MgIslandPermitStats();
   g_mg_latched_solves = 0;
   g_mg_rearm_attempts = 0;
   g_mg_rearm_carries = 0;
