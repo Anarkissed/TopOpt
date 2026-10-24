@@ -214,14 +214,17 @@ constexpr int kIslandMaxVoxels = 27;              // a 3x3x3 block
 
 // Safe-retry cycle budget. The shipped 300-cycle budget is far too short for
 // the l1 cycle on a stalled thin-wall field (Carriage Arms: rel res 1.3e-2 at
-// 300 cycles, still falling ~0.75x per 300), but each cycle costs only ~3-4
-// Jacobi-CG iterations' worth of work and the fallback took 149,725 of them.
-// So the retry runs in windows of kSafeWindow cycles while each window at
-// least multiplies the best residual by kSafeMinGain, up to kSafeMaxCycles
-// (measured: 1e-4 reached at 4,382 cycles with arm G; the worst 300-cycle
-// window on the way improved only 0.9x, hence 0.95).
-constexpr int kSafeWindow = 300;
-constexpr double kSafeMinGain = 0.95;
+// 300 cycles, still falling), but each cycle costs only a few Jacobi-CG
+// iterations' worth of work and the fallback took 149,725 of them. So the
+// retry runs in windows of kSafeWindow cycles while each window's best
+// residual is at most kSafeMinGain x the previous window's, up to
+// kSafeMaxCycles. Measured on the first solve (arm G on): 1e-4 at 4,382 cycles,
+// 600-cycle window gains 0.52-0.76; the CG 2-norm residual is too erratic for
+// a 300-cycle window (a second warm-started solve stopped at 1,500 cycles on a
+// flat 300-cycle stretch). Without arm G the cycle plateaus near 1.5e-3 and
+// the 600/0.9 rule stops it at ~1,800 cycles.
+constexpr int kSafeWindow = 600;
+constexpr double kSafeMinGain = 0.9;
 constexpr int kSafeMaxCycles = 6000;
 constexpr double kIslandMaxElementFraction = 0.05;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
