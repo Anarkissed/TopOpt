@@ -536,7 +536,8 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
 **From his Carriage Arms Topology runs (2026-10-24; diagnosis of worker jobs 13185527 → ad68d4c0, the reviewer's ruling of
 07:30, 1). The optimizer honoured every constraint it was sent; these are what the app says or doesn't say.**
 
-8. **(a) HIS CALL: Protect promises more than core does.** The UI says the optimizer may not change the face's shape
+8. **CLOSED 2026-10-24 (his answer: "Neither. There is a dedicated 'Keep Clear'."): Protect and its words stay as they are;
+   he will explain the difference himself.** Was: **(a) Protect promises more than core does.** The UI says the optimizer may not change the face's shape
    (`WorkspacePlaceholder.swift:11388-11389`, `:11651`; `ResultsModel.swift:1035-1036`, "could not reshape it"). Core's
    protection only freezes the solid skin behind the face (`face_tag.cpp:190`; `loadcase.cpp:600-601`, "NEVER frees void"),
    and `voxelize.cpp:186-188` leaves the space in front fillable. In growth runs this buried his protected faces (bridge top
@@ -814,6 +815,27 @@ Writers of Topology state come first. "Leaf" means the edited face the resolver 
 - R3: "The most recent setting is cleared." Read as: when a combine meets two entries, the one set most recently is cleared and the earlier one stays. Weights summed or not: asked.
 - R4: "Painted area is only for STLs which require it to *create* the face shapes much better. There is likely no setting. But if there is, start fresh." A painted area starts with no Flexible entry.
 - R2: "Leave it." Union 105 stands; no carry, no re-record for it.
+
+**The reviewer's ruling on this plan (2026-10-24 08:45, for his approval): P0-P8 ACCEPTED.**
+- R1: a golden/hash that moves only because of a #354 commit counts as unchanged IF the sync commit lists every DIFFERS and
+  moved hash with the #354 commit that caused it and shows that cause (not a Flexible change); then re-record as the post-sync
+  base. Anchor-only re-pins need no separate approval (list them). A NEW gated hook needs approval first.
+- R10: the minimal compile fix may ride in the sync commit; behaviour changes (P2-P7) get their own commits after it, unless
+  the tree can't compile in between (then say so in the commit). PNG cmp plus the goldens is the pixel proof.
+- R5: a cut changes nothing physically. Both halves keep the face's entry: a rest stays a rest; a load is split BY AREA, so the
+  total force and the pressure are exactly as before.
+- R6: P8 (the FE bridge on pieces) is IN scope: Play must show what is drawn. Last, after P7; post its size before building.
+- R7: new link-wall keys only where an edit touches that wall (unedited projects keep their bytes). A link whose wall was cut
+  goes to both halves; combined → the combined face. No successor: the link stays, marked stale in its own row of the links
+  list, and is not sent until he re-points it. Never dropped silently.
+- R8: the mockup wins over H50d: the lattice re-run card has Save as new project (#354 builds it in B4, tested never to call
+  startRun()).
+- R9: ✂ grey but enabled; capsule ~320 pt keeping the 12 pt gizmo check; row details = the mockup's; the Squish leave-check
+  first; About keeps what it has; "Continue and lose all work" gets one-step Undo; keep H48 until #361's item 15 (fa3599d4) is
+  in our tree and the app's core is rebuilt, then retire it with H47 in their own commit; under Edit faces only the Edit faces
+  screen's layers are on, Flexible's are off, and Done restores them.
+- R11: "Delete 'X' from every stage?"; the after-Delete message is unchanged unless he asks.
+- THE MERGE REF: #354's LOCAL branch claude/lattice-stage-frontend-37bee1, at the commit #354 posts for each batch. Merge only.
 
 ### 4. Risks
 
