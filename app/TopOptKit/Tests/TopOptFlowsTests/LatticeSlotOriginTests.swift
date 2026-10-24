@@ -205,9 +205,11 @@ final class LatticeSlotOriginTests: XCTestCase {
         let a = tilted(SIMD3(20, 0, 20), SIMD3(0, 1, 0))
         let b = tilted(SIMD3(0, 20, 20), SIMD3(1, 0, 0))
         let ga = SIMD3<Double>(-1.25, 0, -2), gb = SIMD3<Double>(0, -1.25, -2)
-        let cells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(4.75, 0, 4), sizeMM: 6, slotOriginMM: ga,
+        // the cells sit on those grids INSIDE their regions' 10 mm boxes (a cell wholly outside its region's
+        // polygon withholds the plan, `PlanWithheld.cellOutsideRegion`; they were at x 1.75…10.75, outside 15…25)
+        let cells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(16.75, 0, 16), sizeMM: 6, slotOriginMM: ga,
                                             planBaseCellMM: 12),
-                     LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(1.75, 6, 1), sizeMM: 3, slotOriginMM: ga,
+                     LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(16.75, 6, 16), sizeMM: 3, slotOriginMM: ga,
                                             planBaseCellMM: 12)]
         let on = try latticeBlock(spec(regions: [ex, a, b], cells: cells), plans: true)
         XCTAssertEqual((on["stepped_cells"] as? [[String: Any]])?.count, 2)
@@ -220,7 +222,7 @@ final class LatticeSlotOriginTests: XCTestCase {
 
         // ★ K2: a tilted facet's grid now goes, as a phase — on the linked core
         var bt = b; bt.normal = simd_normalize(SIMD3(0.95, 0, -0.31))
-        let both = cells + [LatticeSteppedCellWire(regionID: 2, originMM: SIMD3(0, 1.75, 1), sizeMM: 6, slotOriginMM: gb,
+        let both = cells + [LatticeSteppedCellWire(regionID: 2, originMM: SIMD3(0, 16.75, 16), sizeMM: 6, slotOriginMM: gb,
                                                    planBaseCellMM: 6)]
         let tiltedJob = try latticeBlock(spec(regions: [ex, a, bt], cells: both), plans: true)
         XCTAssertEqual((tiltedJob["stepped_cells"] as? [[String: Any]])?.count, 3, "★ K2: sent whole")

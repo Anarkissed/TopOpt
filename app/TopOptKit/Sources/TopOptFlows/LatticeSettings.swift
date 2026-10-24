@@ -678,6 +678,9 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case rhoOverCap(regionID: Int, rho: Double, cap: Double)
         /// two cells of one region share volume (`count` pairs in that region)
         case cellsOverlap(regionID: Int, count: Int)
+        /// `count` cells of a region lie wholly outside its outline polygon (the one outline): the preview
+        /// cannot draw them, so they never go on the wire
+        case cellOutsideRegion(regionID: Int, count: Int)
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -700,6 +703,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "this core can't take the cell size each region's cells were stepped from"
             case .cellsOverlap(let id, let count):
                 return "\(count) pair\(count == 1 ? "" : "s") of cells overlap in region \(id)"
+            case .cellOutsideRegion(let id, let count):
+                return "\(count) cell\(count == 1 ? " lies" : "s lie") wholly outside region \(id)'s outline"
             case .rhoOverCap(let id, let rho, let cap):
                 return String(format: "a cell in region %d is drawn at %.6f, denser than the job's %.6f ceiling", id, rho, cap)
             }
@@ -781,6 +786,17 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         if let first = overlaps.first {
             return .failure(.cellsOverlap(regionID: first.region, count: overlaps.filter { $0.region == first.region }.count))
         }
+        // ★ every cell intersects its own region's polygon (the one outline): a cell the preview cannot
+        // draw is never on the wire — withheld by name, never trimmed
+        var includeAt: [Int: LatticeRegionSpec] = [:]
+        var nextID = 1
+        for r in regions where r.role == .include { includeAt[nextID] = r; nextID += 1 }
+        var outside: [Int: Int] = [:]
+        for c in cells {
+            guard let r = includeAt[c.regionID], !cellIntersectsOutline(c, region: r) else { continue }
+            outside[c.regionID, default: 0] += 1
+        }
+        if let id = outside.keys.min() { return .failure(.cellOutsideRegion(regionID: id, count: outside[id]!)) }
         let origins: [Int: SIMD3<Double>]
         switch slotOrigins(cells, regions: regions, slotOriginWired: slotOriginWired, slotOriginIsPhase: slotOriginIsPhase) {
         case .failure(let why): return .failure(why)
@@ -791,6 +807,62 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case .success(let bases):
             return .success(bases.reduce(into: [:]) { $0[$1.key] = PlannedRegion(slotOriginMM: origins[$1.key], baseCellMM: $1.value) })
         }
+    }
+
+    /// Whether a cell's box, projected on its face region's plane, meets the region's outline polygon
+    /// (`outlinePolygon`, even-odd; a manual primitive without an outline: its own half-extent box). Lenient
+    /// on the boundary — touching counts — so only a cell WHOLLY outside fails. A region with no polygon to
+    /// test against (a bolt, a zero normal, an outline-less CAD face) passes.
+    static func cellIntersectsOutline(_ c: LatticeSteppedCellWire, region r: LatticeRegionSpec) -> Bool {
+        guard r.kind == .face, r.depthMM > 0 else { return true }
+        let n = LatticeRegionMask.unit(r.normal)
+        guard simd_length(n) > 0.5 else { return true }
+        let loops: [[SIMD2<Double>]]
+        if !r.outlineLoops.isEmpty { loops = r.outlinePolygon }
+        else if r.faceID == nil {
+            loops = [[SIMD2(-r.halfUMM, -r.halfWMM), SIMD2(r.halfUMM, -r.halfWMM), SIMD2(r.halfUMM, r.halfWMM), SIMD2(-r.halfUMM, r.halfWMM)]]
+        } else { return true }
+        let (bu, bv) = LatticeRegionMask.basis(n)
+        var pts: [SIMD2<Double>] = []
+        for i in 0..<8 {
+            let corner = c.originMM + SIMD3<Double>(i & 1 == 0 ? 0 : 1, i & 2 == 0 ? 0 : 1, i & 4 == 0 ? 0 : 1) * c.sizeMM
+            let d = corner - r.origin
+            pts.append(SIMD2(simd_dot(d, bu), simd_dot(d, bv)))
+        }
+        // the box's shadow on the plane: the convex hull of its eight corners (monotone chain)
+        pts.sort { $0.x != $1.x ? $0.x < $1.x : $0.y < $1.y }
+        func cross(_ o: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double {
+            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        }
+        var hull: [SIMD2<Double>] = []
+        for pass in 0..<2 {
+            let start = hull.count
+            for q in (pass == 0 ? pts : pts.reversed()) {
+                while hull.count >= start + 2, cross(hull[hull.count - 2], hull[hull.count - 1], q) <= 0 { hull.removeLast() }
+                hull.append(q)
+            }
+            hull.removeLast()
+        }
+        let centre = pts.reduce(SIMD2<Double>.zero, +) / Double(pts.count)
+        if LatticeFaceOutline.contains(centre, loops: loops) { return true }
+        if hull.contains(where: { LatticeFaceOutline.contains($0, loops: loops) }) { return true }
+        func inHull(_ q: SIMD2<Double>) -> Bool {
+            guard hull.count >= 3 else { return false }
+            for k in hull.indices where cross(hull[k], hull[(k + 1) % hull.count], q) < -1e-9 { return false }
+            return true
+        }
+        func meets(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ p: SIMD2<Double>, _ q: SIMD2<Double>) -> Bool {
+            let d1 = cross(p, q, a), d2 = cross(p, q, b), d3 = cross(a, b, p), d4 = cross(a, b, q)
+            return (d1 * d2 <= 1e-12) && (d3 * d4 <= 1e-12)
+        }
+        for loop in loops where loop.count >= 2 {
+            for k in loop.indices {
+                let p = loop[k], q = loop[(k + 1) % loop.count]
+                if inHull(p) { return true }
+                for h in hull.indices where meets(hull[h], hull[(h + 1) % hull.count], p, q) { return true }
+            }
+        }
+        return false
     }
 
     /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells`, and on each
