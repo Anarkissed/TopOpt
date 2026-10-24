@@ -48,7 +48,10 @@ inline constexpr double kSameAxisDeg = 15.0;
 //                  it is designed as a SERIES column (its own segment at the ρ it solves, the
 //                  rest of the run at the other owners' ρ, one stress); the run exports the
 //                  field (flexible_field.json/.bin); grams per face and per include region
-inline constexpr int kPressApiVersion = 4;
+//   5  2026-10-24  C2 B2: mode "flat_cut"; "squeeze_groups" (one force per hand, split by
+//                  area; an entry in a group carries no weight_n); the receipt's per-group
+//                  achieved-vs-target ("groups") and grams per group
+inline constexpr int kPressApiVersion = 5;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is

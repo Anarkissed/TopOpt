@@ -76,7 +76,7 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
   const Value& b = json::as_object(json::require(root, "flexible", "the job"), w);
   json::reject_unknown(b, {"material_id", "nozzle_temp_c", "topology", "feel", "beads_per_wall",
                            "min_extrudable_width_mm", "regions", "faces", "check_stamps",
-                           "no_include_region"},
+                           "no_include_region", "squeeze_groups"},
                        w);
   json::require_all(b, {"material_id", "nozzle_temp_c", "topology", "feel", "beads_per_wall",
                         "min_extrudable_width_mm", "faces"},
@@ -241,15 +241,18 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
         json::fail(pw, "needs \"press_direction\": the prism's plane is normal to the press");
       face.has_flat_prism = true;
     }
-    json::require_all(fv, {"weight_n", "deepest_squish_mm", "mode"}, fw);
+    json::require_all(fv, {"deepest_squish_mm", "mode"}, fw);  // weight_n: see squeeze_groups below
     if (const Value* r = json::find(fv, "frame_rotation_deg")) {
       face.frame_rotation_deg = json::as_int(*r, fw + ".frame_rotation_deg");
       if (face.frame_rotation_deg != 0 && face.frame_rotation_deg != 90 &&
           face.frame_rotation_deg != 180 && face.frame_rotation_deg != 270)
         json::fail(fw + ".frame_rotation_deg", "must be 0, 90, 180 or 270");
     }
-    face.weight_n = json::as_number(*json::find(fv, "weight_n"), fw + ".weight_n");
-    if (!(face.weight_n > 0.0)) json::fail(fw + ".weight_n", "must be > 0");
+    if (const Value* wv = json::find(fv, "weight_n")) {
+      face.weight_n = json::as_number(*wv, fw + ".weight_n");
+      if (!(face.weight_n > 0.0)) json::fail(fw + ".weight_n", "must be > 0");
+      face.has_weight = true;
+    }
     face.deepest_squish_mm =
         json::as_number(*json::find(fv, "deepest_squish_mm"), fw + ".deepest_squish_mm");
     if (!(face.deepest_squish_mm > 0.0)) json::fail(fw + ".deepest_squish_mm", "must be > 0");
@@ -264,8 +267,14 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
         json::fail(fw, "\"curve_x\" / \"curve_y\" are only for modes \"both\" and \"either\"");
       curve_of(json::require(fv, "curve_centre_edge", fw), fw + ".curve_centre_edge",
                face.curve_c_x, face.curve_c_y);
+    } else if (face.mode == "flat_cut") {
+      // C2 B2, item 2(c): the target is the distance from each entry to the flat prism's plane.
+      if (!face.has_flat_prism)
+        json::fail(fw + ".mode", "\"flat_cut\" needs a \"flat_prism\" (its plane is what is cut to)");
+      for (const char* k : {"curve_x", "curve_y", "curve_centre_edge"})
+        if (json::find(fv, k)) json::fail(fw, std::string("\"") + k + "\" is not used by mode \"flat_cut\"");
     } else {
-      json::fail(fw + ".mode", "must be \"both\", \"either\" or \"centre_edge\"");
+      json::fail(fw + ".mode", "must be \"both\", \"either\", \"centre_edge\" or \"flat_cut\"");
     }
     if (const Value* ds = json::find(fv, "design_stamp")) {
       if (!ds->is_null()) {
@@ -276,6 +285,47 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     f.faces.push_back(face);
   }
   if (loaded == 0) json::fail(w + ".faces", "needs at least one \"loaded\" face");
+
+  // C2 B2, item 16: SQUEEZE GROUPS, one force per hand, split over its entries by area.
+  if (const Value* gs = json::find(b, "squeeze_groups")) {
+    json::as_array(*gs, w + ".squeeze_groups");
+    for (std::size_t gi = 0; gi < gs->arr.size(); ++gi) {
+      const std::string gw = w + ".squeeze_groups[" + std::to_string(gi) + "]";
+      const Value& gv = gs->arr[gi];
+      if (!gv.is_object()) json::fail(gw, "must be an object");
+      json::reject_unknown(gv, {"faces", "force_n"}, gw);
+      JobSqueezeGroup g;
+      g.force_n = json::as_number(json::require(gv, "force_n", gw), gw + ".force_n");
+      if (!(g.force_n > 0.0)) json::fail(gw + ".force_n", "must be > 0");
+      const Value& fl = json::require(gv, "faces", gw);
+      json::as_array(fl, gw + ".faces");
+      if (fl.arr.empty()) json::fail(gw + ".faces", "needs at least one loaded entry");
+      for (std::size_t k = 0; k < fl.arr.size(); ++k) {
+        const int id = json::as_int(fl.arr[k], gw + ".faces[" + std::to_string(k) + "]");
+        JobFlexibleFace* entry = nullptr;
+        for (JobFlexibleFace& fc : f.faces)
+          if (fc.role == "loaded" && fc.face_region_id == id) entry = &fc;
+        if (entry == nullptr)
+          json::fail(gw + ".faces", std::to_string(id) + " is not a loaded entry of this block");
+        if (entry->squeeze_group >= 0)
+          json::fail(gw + ".faces", std::to_string(id) + " is already in squeeze group " +
+                                        std::to_string(entry->squeeze_group + 1) + " (one hand per entry)");
+        entry->squeeze_group = static_cast<int>(gi);
+        g.faces.push_back(id);
+      }
+      f.squeeze_groups.push_back(g);
+    }
+  }
+  for (std::size_t i = 0; i < f.faces.size(); ++i) {
+    const JobFlexibleFace& fc = f.faces[i];
+    if (fc.role != "loaded") continue;
+    const std::string fw = w + ".faces[" + std::to_string(i) + "]";
+    if (fc.squeeze_group >= 0 && fc.has_weight)
+      json::fail(fw + ".weight_n", "an entry in a squeeze group takes its share of the group's force_n; it "
+                                   "states no weight of its own");
+    if (fc.squeeze_group < 0 && !fc.has_weight)
+      json::fail(fw, "missing \"weight_n\" (an entry in no squeeze group states its own)");
+  }
 
   if (const Value* cs = json::find(b, "check_stamps")) {
     json::as_array(*cs, w + ".check_stamps");

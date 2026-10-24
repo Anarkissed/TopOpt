@@ -850,6 +850,21 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     }
   }
   loaded = built;  // parallel to `stacks` again
+
+  // C2 B2, item 16: each entry's force. An entry in a squeeze group takes the group's force
+  // split by footprint area over the group's BUILT entries (the same pressure on every entry of
+  // one hand); an entry in no group keeps its own weight_n.
+  std::vector<double> weight_of(stacks.size(), 0.0);
+  std::vector<double> group_area(fx.squeeze_groups.size(), 0.0);
+  for (std::size_t i = 0; i < stacks.size(); ++i)
+    if (loaded[i]->squeeze_group >= 0)
+      group_area[static_cast<std::size_t>(loaded[i]->squeeze_group)] += stacks[i].footprint_area_mm2;
+  for (std::size_t i = 0; i < stacks.size(); ++i) {
+    const int g = loaded[i]->squeeze_group;
+    weight_of[i] = g < 0 ? loaded[i]->weight_n
+                         : fx.squeeze_groups[static_cast<std::size_t>(g)].force_n * stacks[i].footprint_area_mm2 /
+                               group_area[static_cast<std::size_t>(g)];
+  }
   std::vector<const Stack*> sp;
   for (const Stack& s : stacks) sp.push_back(&s);
   const std::vector<StackConflict> conflicts = find_stack_conflicts(grid, mask, sp);
@@ -865,7 +880,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     write_text(out_path("face" + id + "_target_depth.svg"),
                heatmap_svg(stacks[i], target[i], "Face " + id + " - target squish depth (what you drew)",
                            {"mode " + m.mode + ", deepest squish " + fmtd(m.deepest_squish_mm, 2) +
-                                " mm, weight " + fmtd(loaded[i]->weight_n, 1) + " N",
+                                " mm, weight " + fmtd(weight_of[i], 1) + " N",
                             "the drawn map: S x deepest squish. Not a prediction."},
                            "mm", 2));
   }
@@ -879,7 +894,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                             : std::vector<std::string>{fx.topology};
   std::vector<FaceRequest> requests;
   for (std::size_t i = 0; i < stacks.size(); ++i)
-    requests.push_back({&stacks[i], squish_map_of(*loaded[i]), loaded[i]->weight_n,
+    requests.push_back({&stacks[i], squish_map_of(*loaded[i]), weight_of[i],
                         loaded[i]->has_design_stamp ? &loaded[i]->design_stamp : nullptr});
 
   Recommendation rec;
@@ -930,6 +945,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   std::vector<FaceDesign> designs;
   std::vector<std::vector<SeriesColumn>> series_of;  // per stack; empty unless a flat-prism press
   std::string grams_json = "null";
+  std::string groups_json = "null";
   std::vector<std::string> face_json, check_json;
   DensityField field;
   CurveSet set;
@@ -1082,13 +1098,138 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         }
         br.add("region_" + std::to_string(r) + "_g", known ? jnum(g) : "null");
       }
+      // C2 B2, item 26: grams per squeeze group (its entries' face grams summed).
+      Obj bg;
+      for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+        double g = 0.0;
+        bool known = true;
+        for (int id : fx.squeeze_groups[gi].faces) {
+          if (unknown_face.count(id)) known = false;
+          const auto it = by_face.find(id);
+          if (it != by_face.end()) g += it->second;
+        }
+        bg.add("group_" + std::to_string(gi + 1) + "_g", known ? jnum(g) : "null");
+      }
       grams_json = Obj().add("basis", jstr("the measured specimen mass density at each voxel's density x the voxel's "
                                            "volume, on the clipped field; a blended voxel is shared by its weights"))
                        .add("by_face", bf.str())
                        .add("by_region", br.str())
+                       .add("by_group", bg.str())
                        .add("total_g", unknown ? "null" : jnum(total))
                        .add("unknown_voxels", jnum(static_cast<double>(unknown)))
                        .str();
+    }
+
+    // ── C2 B2, item 17: THE RECEIPT PER GROUP. Each column's ACHIEVED depth under its own
+    // pressure through the ASSEMBLED field: the series sum of ε(p; ρ_voxel) along its run
+    // (every quarter voxel). It works under any assembly rule; today's is "nearest_face".
+    // A group is a squeeze group, or a loaded entry in none (its own hand).
+    {
+      struct Acc {
+        std::string name;
+        std::vector<int> faces;
+        long long columns = 0, within = 0, unknown = 0, shared = 0;
+        double t_sum = 0, d_sum = 0, a_sum = 0, max_vs_target = 0, max_vs_design = 0, max_vs_target_pct = 0;
+      };
+      std::vector<Acc> groups;
+      std::vector<int> group_of(stacks.size(), -1);
+      for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+        Acc a;
+        a.name = "group " + std::to_string(gi + 1);
+        a.faces = fx.squeeze_groups[gi].faces;
+        groups.push_back(a);
+      }
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        if (loaded[i]->squeeze_group >= 0) {
+          group_of[i] = loaded[i]->squeeze_group;
+        } else {
+          Acc a;
+          a.name = "face " + std::to_string(loaded[i]->face_region_id);
+          a.faces = {loaded[i]->face_region_id};
+          group_of[i] = static_cast<int>(groups.size());
+          groups.push_back(a);
+        }
+      }
+      // which group owns each voxel (for "shared")
+      std::map<int, int> owner_group;  // face_region_id -> group index
+      for (std::size_t i = 0; i < stacks.size(); ++i) owner_group[stacks[i].face_region_id] = group_of[i];
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        Acc& a = groups[static_cast<std::size_t>(group_of[i])];
+        const Stack& st = stacks[i];
+        const FaceDesign& fd = designs[i];
+        std::set<std::size_t> shared_vox;
+        for (std::size_t k = 0; k < st.columns.size(); ++k) {
+          const StackColumn& c = st.columns[k];
+          const ColumnDesign& cd = fd.columns[k];
+          if (cd.status == "no_lattice" || !(c.lattice_mm > 0.0)) continue;
+          const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+          const int n = std::max(1, static_cast<int>(std::ceil(c.lattice_mm / (0.25 * grid.spacing))));
+          const double step = c.lattice_mm / n;
+          double achieved = 0.0;
+          bool known = true;
+          for (int sidx = 0; sidx < n; ++sidx) {
+            const double t = c.entry_t + (sidx + 0.5) * step;
+            const Vec3 p{o.x + st.frame.load.x * t, o.y + st.frame.load.y * t, o.z + st.frame.load.z * t};
+            const int gi = static_cast<int>(std::floor((p.x - grid.origin.x) / grid.spacing));
+            const int gj = static_cast<int>(std::floor((p.y - grid.origin.y) / grid.spacing));
+            const int gk = static_cast<int>(std::floor((p.z - grid.origin.z) / grid.spacing));
+            if (gi < 0 || gj < 0 || gk < 0 || gi >= grid.nx || gj >= grid.ny || gk >= grid.nz) continue;
+            const std::size_t v = grid.index(gi, gj, gk);
+            const double rho = field.density[v];
+            if (!(rho > 0.0)) continue;  // not lattice, or no density assigned: no squish counted
+            const auto og = owner_group.find(field.owner[v]);
+            if (og != owner_group.end() && og->second != group_of[i]) shared_vox.insert(v);
+            const StrainResult e = strain_under(set, cd.pressure_mpa, rho);
+            if (!e.ok) {
+              known = false;
+              break;
+            }
+            achieved += step * e.strain;
+          }
+          ++a.columns;
+          if (!known) {
+            ++a.unknown;
+            continue;
+          }
+          const double tgt = cd.target_depth_mm;
+          const double des = cd.buildable_ok ? cd.buildable_depth_mm : kNaN;
+          a.t_sum += tgt;
+          a.a_sum += achieved;
+          if (std::isfinite(des)) {
+            a.d_sum += des;
+            a.max_vs_design = std::max(a.max_vs_design, std::fabs(achieved - des));
+          }
+          const double miss = std::fabs(achieved - tgt);
+          a.max_vs_target = std::max(a.max_vs_target, miss);
+          if (tgt > 0.0) a.max_vs_target_pct = std::max(a.max_vs_target_pct, 100.0 * miss / tgt);
+          if (miss <= std::max(0.05, 0.02 * tgt)) ++a.within;
+        }
+        a.shared += static_cast<long long>(shared_vox.size());
+      }
+      std::vector<std::string> gj;
+      for (const Acc& a : groups) {
+        std::vector<double> ids(a.faces.begin(), a.faces.end());
+        const double nk = static_cast<double>(std::max<long long>(1, a.columns - a.unknown));
+        gj.push_back(Obj().add("group", jstr(a.name))
+                         .add("faces", jarr(ids))
+                         .add("columns", jnum(static_cast<double>(a.columns)))
+                         .add("target_mean_mm", jnum(a.t_sum / nk))
+                         .add("design_mean_mm", jnum(a.d_sum / nk))
+                         .add("achieved_mean_mm", jnum(a.a_sum / nk))
+                         .add("max_achieved_vs_target_mm", jnum(a.max_vs_target))
+                         .add("max_achieved_vs_target_pct", jnum(a.max_vs_target_pct))
+                         .add("max_achieved_vs_design_mm", jnum(a.max_vs_design))
+                         .add("columns_within_tolerance", jnum(static_cast<double>(a.within)))
+                         .add("columns_unknown", jnum(static_cast<double>(a.unknown)))
+                         .add("shared_voxels", jnum(static_cast<double>(a.shared)))
+                         .str());
+      }
+      groups_json = Obj().add("assembly", jstr("nearest_face"))
+                        .add("achieved_rule", jstr("each column's depth under its own pressure through the assembled "
+                                                   "field: the series sum of strain(p; rho_voxel) along its run"))
+                        .add("tolerance_mm", jstr("max(0.05, 2 % of the target) per column (provisional, Q-C2)"))
+                        .add("groups", jlist(gj))
+                        .str();
     }
   }
 
@@ -1169,7 +1310,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                         .add("linked_regions", jlist(rlinks))
                         .add("exit_unresolved_fraction", jnum(st.exit_unresolved_fraction))
                         .str());
-    fo.add("weight_n", jnum(jf.weight_n))
+    fo.add("weight_n", jnum(weight_of[i]))
         .add("deepest_squish_mm", jnum(jf.deepest_squish_mm))
         .add("mode", jstr(jf.mode));
     if (jf.mode == "centre_edge")
@@ -1450,6 +1591,29 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     r.add("shared_footprints", jlist(sf));
   }
   r.add("grams", grams_json);
+  r.add("groups", groups_json);
+  // C2 B2, item 16: each hand's force and its split.
+  if (!fx.squeeze_groups.empty()) {
+    std::vector<std::string> sg;
+    for (std::size_t gi = 0; gi < fx.squeeze_groups.size(); ++gi) {
+      Obj split;
+      double area = 0.0;
+      for (std::size_t i = 0; i < stacks.size(); ++i)
+        if (loaded[i]->squeeze_group == static_cast<int>(gi)) {
+          split.add("face_" + std::to_string(loaded[i]->face_region_id) + "_n", jnum(weight_of[i]));
+          area += stacks[i].footprint_area_mm2;
+        }
+      std::vector<double> ids(fx.squeeze_groups[gi].faces.begin(), fx.squeeze_groups[gi].faces.end());
+      sg.push_back(Obj().add("group", jnum(static_cast<double>(gi + 1)))
+                       .add("faces", jarr(ids))
+                       .add("force_n", jnum(fx.squeeze_groups[gi].force_n))
+                       .add("footprint_mm2", jnum(area))
+                       .add("pressure_mpa", area > 0 ? jnum(fx.squeeze_groups[gi].force_n / area) : "null")
+                       .add("split", split.str())
+                       .str());
+    }
+    r.add("squeeze_groups", jlist(sg));
+  }
   r.add("handover", jlist(hv))
       .add("field", refusal_code.empty()
                         ? Obj().add("lattice_voxels", jnum(static_cast<double>(field.lattice_voxels)))

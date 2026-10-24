@@ -57,7 +57,8 @@ static int g_checks = 0;
     }                                                              \
   } while (0)
 
-static_assert(kPressApiVersion == 4, "B1b: the press API version");
+// RE-PINNED (C2 B2): the current version is pinned in test_flexible_b2; B1b's meaning holds from 4 on.
+static_assert(kPressApiVersion >= 4, "B1b: the press API version");
 
 static const FlexibleData& data() {
   static const FlexibleData d = load_flexible_data(FLEXIBLE_MATERIALS_JSON_PATH);

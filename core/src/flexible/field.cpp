@@ -237,13 +237,29 @@ std::vector<double> squish_fraction(const Stack& stack, const SquishMap& map) {
     }
     return s;
   }
+  if (map.mode == "flat_cut") {
+    // C2 B2, item 2(c): the distance from each column's entry to the flat prism's plane,
+    // h − dot(entry − A, d), as a fraction of h (the app's FlexibleFlatPrism.latticeCap).
+    if (!stack.has_flat_prism || !(stack.flat_depth_mm > 0.0))
+      throw FlexibleError("squish map \"flat_cut\" needs a press with a flat prism");
+    const double h = stack.flat_depth_mm;
+    for (std::size_t k = 0; k < s.size(); ++k) {
+      const StackColumn& c = stack.columns[k];
+      const Vec3 o = stack.frame.from_uv(c.u_mm, c.v_mm);
+      const Vec3 e{o.x + stack.frame.load.x * c.entry_t, o.y + stack.frame.load.y * c.entry_t,
+                   o.z + stack.frame.load.z * c.entry_t};
+      const double height = dot(sub(e, stack.flat_apex), stack.frame.load);
+      s[k] = std::min(1.0, std::max(0.0, (h - height) / h));
+    }
+    return s;
+  }
   if (map.mode == "centre_edge") {
     const PenCurve C(map.c_x, map.c_y);
     const std::vector<double> t = edge_fraction(stack);
     for (std::size_t k = 0; k < s.size(); ++k) s[k] = C(t[k]);
     return s;
   }
-  throw FlexibleError("squish map mode must be \"both\", \"either\" or \"centre_edge\" (got \"" +
+  throw FlexibleError("squish map mode must be \"both\", \"either\", \"centre_edge\" or \"flat_cut\" (got \"" +
                       map.mode + "\")");
 }
 

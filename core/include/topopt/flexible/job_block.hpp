@@ -78,6 +78,10 @@ struct JobFlexibleFace {
   // the press owns its prism dot(p − apex, d) <= deepest_squish_mm and is designed in series.
   bool has_flat_prism = false;
   Vec3 flat_apex{0, 0, 0};
+  // C2 B2, item 16: the squeeze group (hand) this entry is in (index into
+  // JobFlexible::squeeze_groups), -1 = none; has_weight: weight_n was stated.
+  int squeeze_group = -1;
+  bool has_weight = false;
   bool has_design_stamp = false;
   flexible::StampGrid design_stamp;
   bool skin_on = true;
@@ -86,6 +90,13 @@ struct JobFlexibleFace {
 struct JobFlexibleCheckStamp {
   int face_region_id = -1;
   flexible::StampGrid stamp;
+};
+
+// C2 B2, item 16: one hand: its loaded entries (by face_region_id; a press by its first region)
+// and its force, split over them by area.
+struct JobSqueezeGroup {
+  std::vector<int> faces;
+  double force_n = 0.0;
 };
 
 struct JobFlexible {
@@ -103,6 +114,7 @@ struct JobFlexible {
   // the whole part, as before) | "no_lattice" (no include region = nothing is lattice; the
   // run refuses with code no_lattice_region).
   bool no_include_means_no_lattice = false;
+  std::vector<JobSqueezeGroup> squeeze_groups;  // C2 B2, item 16
 };
 
 // Parse the `flexible` block of a whole job document. Called by parse_job (the
