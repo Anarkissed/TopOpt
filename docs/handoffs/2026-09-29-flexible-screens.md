@@ -540,13 +540,6 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    the lattice request). In his words: "When a lattice run asks to replace results, the button starts a Topology run. This
    needs checking." Not changed here (the reviewer's ruling of 2026-10-24 04:31); round 9 only keeps "Save as new project"
    off that card (H50d). Ask: #354 gives the Lattice run's confirm its own action.
-12. **(his ruling of 2026-10-24 15:33 on CORE LIST item 17) The group field's "firmer wins" merge is RETIRED.** His words:
-   "The goal is to try to make all squeezes applicable to the same lattice. So if the lattice has 3 different groups, one in the
-   center, one on the side, and one in the corner, the job of the app is to create a lattice that allows for ALL of these
-   squishes to happen. Not a compromise, but a combination." `FlexibleGroupField.swift:86-92` merges per voxel, firmer wins.
-   Once #361 ships the combined design, the preview reads core's exported field instead and the merge goes. Redesign era.
-13. **(design question, later) When a combination cannot be met, core says so before the run, naming the groups.** How the
-   Flexible stage shows it, in line with his bend-limit wish (stop it being set, or flash it red), is his call then.
 7. **An edge whose ends are not known is silently dropped from the job (the reviewer's ruling of 2026-10-24 07:30, 3).**
    `app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+PressSend.swift:90-91` (`pressMap` returns nil) → `:107`
    (`pressDesignTargets` drops it): the press is not designed and nothing says so. Ask: say it on the card (which edge, why) or
@@ -569,7 +562,13 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    design box reached z 64.3, and the slot under the part got a floor (82 / 65 / 0 % of its columns closed).
 11. **(d) → #354's redesign build. Latent: the worker upload carries only the STEP and job.json** (`RemoteRunner.swift:1440-1460`),
    so a painted region's sidecar would never reach the worker. Not used in these runs.
-
+12. **(his ruling of 2026-10-24 15:33 on CORE LIST item 17) The group field's "firmer wins" merge is RETIRED.** His words:
+   "The goal is to try to make all squeezes applicable to the same lattice. So if the lattice has 3 different groups, one in the
+   center, one on the side, and one in the corner, the job of the app is to create a lattice that allows for ALL of these
+   squishes to happen. Not a compromise, but a combination." `FlexibleGroupField.swift:86-92` merges per voxel, firmer wins.
+   Once #361 ships the combined design, the preview reads core's exported field instead and the merge goes. Redesign era.
+13. **(design question, later) When a combination cannot be met, core says so before the run, naming the groups.** How the
+   Flexible stage shows it, in line with his bend-limit wish (stop it being set, or flash it red), is his call then.
 
 ## ★ REDESIGN PLAN: Flexible's part of the approved Topology/Lattice redesign (the reviewer's ruling of 2026-10-24 07:35) (read this first)
 
