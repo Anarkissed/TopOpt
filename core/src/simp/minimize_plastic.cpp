@@ -1044,6 +1044,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         " Refusing to redistribute and call it growth.");
   double active_effective = 0.0;   // voxels simp's volume constraint moves
   double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
+  // CORE LIST item 40 — the same frozen set COUNTED BY SOURCE, for the receipt of a
+  // rung whose ask falls under it: the Load/Fixture skin, and the mask's other
+  // FrozenSolid voxels (which options.frozen_mask_sources attributes). Plain counts,
+  // never read by the optimizer.
+  long long frozen_bc_voxels = 0;
+  long long frozen_mask_voxels = 0;
   if (part_relative) {
     for (int k = 0; k < G.nz; ++k)
       for (int j = 0; j < G.ny; ++j)
@@ -1069,6 +1075,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
             // declared a field, so this is `+= 1.0` bit-for-bit everywhere else.
             frozen_effective +=
                 (!fl_mask.empty() && fl_mask[idx]) ? fl_rho[idx] : 1.0;
+            if (t == VoxelTag::Load || t == VoxelTag::Fixture) ++frozen_bc_voxels;
+            else ++frozen_mask_voxels;
             continue;
           }
           if (mask[idx] != MaskValue::Active) continue;  // FrozenVoid
@@ -1459,12 +1467,78 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // ladder — but it must never be readable as if the request were honoured, so
     // it is recorded on the rung's report line and surfaced in the receipt.
     bool growth_target_saturated = false;
+    // CORE LIST item 40 — THE OTHER CLAMP. The `max(density_min, ...)` binds when a
+    // reduction rung asks for LESS than the frozen material alone prints (raw < the
+    // floor): the target is raised to the floor, the optimizer removes every free
+    // voxel, and the rung prints the frozen share whatever it asked for. His
+    // Carriage Arms (13185527, 29 protected faces): 0.68 / 0.52 / 0.38 / 0.26 all
+    // printed 0.758, and nothing said so.
+    bool rung_target_saturated = false;
     if (part_relative && active_effective > 0.0) {
       const double active_target = vf * part_solid - frozen_effective;
       const double raw = active_target / active_effective;
       growth_target_saturated = growth_ladder && raw > 1.0;
+      rung_target_saturated = !growth_ladder && raw < params.density_min;
       opt.volume_fraction =
           std::min(1.0, std::max(params.density_min, raw));
+    }
+    if (rung_target_saturated) {
+      FrozenShareReport& fs = result.report.frozen_share;
+      if (!fs.evaluated) {
+        fs.evaluated = true;
+        fs.part_solid_voxels = static_cast<long long>(part_solid);
+        fs.frozen_voxels = frozen_bc_voxels + frozen_mask_voxels;
+        fs.frozen_material_voxels = frozen_effective;
+        fs.active_voxels = static_cast<long long>(active_effective);
+        fs.share = frozen_effective / part_solid;
+        fs.smallest_honoured_fraction =
+            (frozen_effective + params.density_min * active_effective) / part_solid;
+        // What froze it, each voxel once: the BC skin, then the caller's own
+        // attribution of the mask, then whatever that attribution leaves over.
+        fs.sources.push_back({"anchor_and_load_faces", -1, -1, frozen_bc_voxels});
+        long long attributed = 0;
+        for (const FrozenSourceCount& s : options.frozen_mask_sources) {
+          fs.sources.push_back(s);
+          attributed += s.voxels;
+        }
+        if (frozen_mask_voxels != attributed)
+          fs.sources.push_back({"other", -1, -1, frozen_mask_voxels - attributed});
+      }
+      // THE SKIP. Every saturated rung gets the SAME target (the floor), so once the
+      // first floor rung has been run, a later one would only repeat its design.
+      // Whatever its verdict: an accepted floor rung seeds the next one with the
+      // floor design itself, and a rejected one (severed, infeasible, non-
+      // convergent) leaves the warm seed untouched, so the next floor rung would
+      // start from the very seed it started from, at the very same target.
+      // Measured, the skipped rung run alone reproduces the floor rung's density
+      // exactly (test_starved_rung), and on 13185527 the four rungs printed
+      // 0.7578-0.7580 at margins 7.93-8.17, i.e. warm-start noise. So it is not
+      // run: its line says why and names the rung it would repeat, and it writes
+      // no variant and no file. (A floor rung under the margin stops the walk
+      // before this is reached, as every rung under the margin does.)
+      const MinimizePlasticVariant* floor_rung = nullptr;
+      for (const MinimizePlasticVariant& ev : result.evaluated)
+        if (ev.report.target_saturated) {
+          floor_rung = &ev;
+          break;
+        }
+      if (floor_rung != nullptr) {
+        const std::string verdict =
+            floor_rung->accepted
+                ? std::string("accepted")
+                : "rejected: " + floor_rung->report.rejection_reason;
+        char reason[400];
+        std::snprintf(reason, sizeof(reason),
+                      "skipped: it asks for %.3g of the part, but the frozen "
+                      "material alone prints %.3g, so its target clamps to the "
+                      "density floor rung %.3g already ran with (%s); it would "
+                      "repeat that design",
+                      vf, fs.share, floor_rung->requested_volume_fraction,
+                      verdict.c_str());
+        fs.skipped_rungs.push_back(
+            {vf, floor_rung->requested_volume_fraction, reason});
+        continue;
+      }
     }
     // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
@@ -1607,6 +1681,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
+    // CORE LIST item 40 — the line carries its ask and the clamp verdict; both are
+    // emitted only if some rung of this run saturates (`request_reported`, set
+    // after the walk).
+    variant.report.requested_volume_fraction = vf;
+    variant.report.target_saturated = rung_target_saturated;
 
     // Playback keyframes (M7): capture ~keyframe_count meshes of the analysis
     // density across this rung's iterations (stride spreads them over the run —
@@ -2728,6 +2807,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       }
       continue;
     }
+  }
+
+  // CORE LIST item 40 — on a run where some rung's target clamped to the floor,
+  // EVERY line says what it asked for beside what it got (Q40a: only such runs, so
+  // every other document keeps its bytes). The copies in report.variants /
+  // report.rejected were taken during the walk, so they are marked too.
+  if (result.report.frozen_share.evaluated) {
+    for (MinimizePlasticVariant& v : result.evaluated) v.report.request_reported = true;
+    for (VariantReport& r : result.report.variants) r.request_reported = true;
+    for (VariantReport& r : result.report.rejected) r.request_reported = true;
   }
 
   // Finalize the multigrid-usage report: MG "ran" for the run iff it carried the

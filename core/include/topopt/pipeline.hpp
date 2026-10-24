@@ -166,6 +166,15 @@ struct MinimizePlasticOptions {
   // EMPTY (default) the driver uses make_active_mask(grid) — byte-identical to
   // every existing caller. Must be empty or size grid.voxel_count().
   DesignMask design_mask;
+  // CORE LIST item 40 — WHAT FROZE `design_mask`, as the caller built it. RECEIPT
+  // ONLY: the optimizer never reads it. One entry per source of the mask's
+  // FrozenSolid voxels (build_production_loadcase: the anchor pad, then each face
+  // protection), each counting only the voxels no earlier entry and no Load/Fixture
+  // tag froze, so the entries add up. Copied into report.frozen_share.sources when
+  // a rung's target clamps to the density floor; any frozen voxel the entries do
+  // not cover is reported there as "other". Empty (the default) attributes the
+  // whole mask to "other".
+  std::vector<FrozenSourceCount> frozen_mask_sources;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
   // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the

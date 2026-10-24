@@ -14466,6 +14466,27 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     std::fflush(stderr);
   }
 
+  // CORE LIST item 40 — LOUD STARVATION. A rung that asked for less than the frozen
+  // material alone prints got the density floor as its target and printed the
+  // frozen share instead; the worker log says so once, with the numbers.
+  if (result.pipeline.report.frozen_share.evaluated) {
+    const FrozenShareReport& fs = result.pipeline.report.frozen_share;
+    std::size_t protections = 0;
+    for (const FrozenSourceCount& s : fs.sources)
+      if (s.source == "face_protection") ++protections;
+    std::fprintf(stderr,
+                 "WARNING: %.3g of the part (%lld of %lld voxels) is FROZEN — the "
+                 "anchor and load faces, the anchor pad and %zu face "
+                 "protection(s) — so every rung that asked for less clamped to the "
+                 "density floor: it removed every free voxel and printed the frozen "
+                 "material alone. %zu later rung(s) would only repeat that design "
+                 "and were skipped. To reduce further, release protections. See "
+                 "report.json frozen_share.\n",
+                 fs.share, fs.frozen_voxels, fs.part_solid_voxels, protections,
+                 fs.skipped_rungs.size());
+    std::fflush(stderr);
+  }
+
   // Handoff 114 — record how many density snapshots were written (0 unless
   // opt-in snapshots ran). The CSV/run_info paths are already set above.
   if (snaps) result.snapshot_count = snaps->written();

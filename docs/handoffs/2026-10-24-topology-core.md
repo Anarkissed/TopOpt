@@ -7,7 +7,46 @@ Syncs one way from that branch, merge only, never force. Not pushed yet.
 ## Status
 
 - 2026-10-24 19:13: brief and the reviewer's 19:05 rulings received (#TO-core and #CoreGroup).
-- 2026-10-24: PLAN posted on #TO-core (below). **No code until the reviewer rules on it.**
+- 2026-10-24: PLAN posted on #TO-core (below).
+- 2026-10-24 19:40 + 20:08 + 20:13 + 20:25: PLAN ruled. Order: **40, 41+47, 50, 51, Keep Clear, 1(B), primitives,
+  61**. Answers: Q40a only saturated runs; Q40b skip; Q40c keep names and say so; Q41a new `export_mesh`; Q41b leave
+  `exported_shell_for` (reviewer takes it to #358); Q47 reject; Q-KC1/2 yes; Q1B-a no cherry-pick (d475fac8 comes down
+  the chain); pushes after each item's full suite. Item 50 REVERSED by him (see "Item 50, as ruled" below).
+- **Item 40: built** (this batch). See "Item 40, as built".
+
+## Item 40, as built (2026-10-24)
+
+The clamp at `minimize_plastic.cpp` (rung loop, `raw < density_min` on a reduction ladder) now:
+- flags the rung: `target_saturated`, with its `requested_volume_fraction`, on every line of such a run only;
+- writes a top-level `frozen_share` block in report.json, only on such a run: `part_solid_voxels`, `frozen_voxels`,
+  `frozen_material_voxels` (a frozen lattice at its density), `active_voxels`, `share`, `smallest_honoured_fraction`,
+  `files_named_by: "requested_volume_fraction"`, `sources` (each frozen voxel once: `anchor_and_load_faces`,
+  `anchor_pad`, one `face_protection` per face or region in job order, then `other` if anything is left), and
+  `skipped_rungs`;
+- SKIPS every later floor rung once the first floor rung has run, whatever its verdict (same target and same seed: an
+  accepted floor rung seeds the next with the floor design, a rejected one leaves the seed untouched). The skipped rung
+  run alone reproduces the floor design exactly (max |drho| = 0). The reason names the floor rung and its verdict.
+- The sources come from `build_production_loadcase` (`MinimizePlasticOptions::frozen_mask_sources`, receipt only).
+- The CLI prints the SATURATED line, one line per skipped rung and a `frozen:` line; run_job.cpp warns once on stderr.
+- The validator checks the new keys (together, typed) and that the sources add up to `frozen_voxels`.
+- Unsaturated runs: no new key anywhere, so their report.json bytes are unchanged.
+
+Test: `core/tests/validation/test_starved_rung.cpp` (ctest `starved_rung`, OCCT+Eigen block), red-first: 4 of 11 checks
+failed on `e0485f7d` (4 rungs ran, 0.52/0.38/0.26 all printed 0.5952 = 50/84, no block, no request). Green: 32/32.
+Full core suite: 140/140 (lib3mf tests not registered on this Mac).
+
+APP LIST (to #354 through the reviewer): the rung card shows `target_saturated`, the frozen share and what froze it
+(largest sources first), and the skipped rungs (a line, no file). On-device runs need the bridge to carry
+`report.frozen_share` and the two per-line keys; until then an on-device run shows fewer rungs with no reason.
+
+## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25)
+
+On a part that PASSES as drawn, "Redesign to strengthen" means stiffness: certify as drawn (margin, flex = max |u| over
+the load faces' nodes in mm, compliance), then an ASCENDING walk 1.00, 1.10, 1.25, 1.55, 2.00, each rung gated on
+margin; stop when an accepted step cuts flex by less than 5 % per +10 % of plastic (cut = 1 - (f_b/f_a)^(ln 1.1 /
+ln(m_b/m_a)), consecutive accepted rungs, achieved printed mass), or when the box is full (growth_target_saturated), or
+at the 2.0 cap ("more plastic would still cut flex"). Recommend the knee. A part that FAILS as drawn keeps today's
+descending walk byte-for-byte. Plan posted 20:24 and adjusted 20:27; code is third in the order.
 
 ## Who owns what (the reviewer's 19:05 split)
 

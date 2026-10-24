@@ -12,10 +12,12 @@
 // Exit codes: 0 success; 1 any job/pipeline failure (diagnostic on stderr);
 // 2 usage error.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <string>
+#include <vector>
 
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
@@ -517,11 +519,20 @@ int main(int argc, char** argv) {
                       "plastic as possible to reach the required margin"
                     : "REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove "
                       "as much plastic as possible while holding it");
-    std::printf("variants: %zu evaluated, %zu accepted%s\n",
+    // CORE LIST item 40 — rungs not run because an earlier rung already made their
+    // design (report.json frozen_share.skipped_rungs). Empty on every other run, so
+    // this line is unchanged there.
+    const topopt::FrozenShareReport& frozen = result.pipeline.report.frozen_share;
+    std::printf("variants: %zu evaluated, %zu accepted%s%s\n",
                 result.pipeline.evaluated.size(), accepted_variants,
                 result.pipeline.stopped_on_margin
                     ? " (stopped on margin)"
-                    : "");
+                    : "",
+                frozen.skipped_rungs.empty()
+                    ? ""
+                    : (", " + std::to_string(frozen.skipped_rungs.size()) +
+                       " skipped (below the frozen share)")
+                          .c_str());
     for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated) {
       // Handoff 131 — an infeasible rung has NO measured margin (its analysis was
       // skipped), so printing one would be a fabricated number: print the reason.
@@ -556,6 +567,41 @@ int main(int argc, char** argv) {
             v.report.growth_target_saturated
                 ? "  [SATURATED: the design box could not hold this rung's ask]"
                 : "");
+      // CORE LIST item 40 — the reduction mirror: this rung asked for less than
+      // the frozen material alone prints, so it printed the frozen share.
+      if (v.report.target_saturated)
+        std::printf(
+            "        [SATURATED: it asked for %.2f of the part, but the frozen "
+            "material alone is %.3g of it; it printed %.3g]\n",
+            v.requested_volume_fraction, frozen.share, v.report.printed_fraction);
+    }
+    if (frozen.evaluated) {
+      for (const topopt::SkippedRungReport& s : frozen.skipped_rungs)
+        std::printf("  vf %.2f: %s\n", s.requested_volume_fraction,
+                    s.reason.c_str());
+      // What froze it, largest first, so the line names what to release.
+      std::vector<topopt::FrozenSourceCount> by_size = frozen.sources;
+      std::stable_sort(by_size.begin(), by_size.end(),
+                       [](const topopt::FrozenSourceCount& a,
+                          const topopt::FrozenSourceCount& b) {
+                         return a.voxels > b.voxels;
+                       });
+      std::printf("frozen: %.3g of the part (%lld of %lld voxels) prints whatever "
+                  "the optimizer does:",
+                  frozen.share, frozen.frozen_voxels, frozen.part_solid_voxels);
+      std::size_t shown = 0;
+      for (const topopt::FrozenSourceCount& s : by_size) {
+        if (shown == 6) {
+          std::printf(" ...");
+          break;
+        }
+        std::printf("%s %s", shown == 0 ? "" : ",", s.source.c_str());
+        if (s.face_id >= 0) std::printf(" face %d", s.face_id);
+        if (s.region_id >= 0) std::printf(" region %d", s.region_id);
+        std::printf(" %lld", s.voxels);
+        ++shown;
+      }
+      std::printf(" (report.json frozen_share)\n");
     }
     // THE RECOMMENDATION, said out loud. The last accepted rung is the design the
     // user prints; on a growth ladder that is the SMALLEST addition that passed,

@@ -561,6 +561,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
                             !lc.face_protection_region_ids.empty();
   if (want_pad || want_protect) {
     DesignMask pad = make_active_mask(grid);
+    // CORE LIST item 40 — WHAT FROZE THE PART, each voxel once (pipeline.hpp
+    // frozen_mask_sources). A source is credited only with the voxels that neither
+    // the Load/Fixture skin (the driver's own first source) nor an earlier source
+    // froze, so the sources add up. Receipt only: the mask is unchanged.
+    auto bc_skin = [&](std::size_t idx) {
+      return grid.tags[idx] == VoxelTag::Load || grid.tags[idx] == VoxelTag::Fixture;
+    };
     if (want_pad) {
       for (int fid : lc.anchor_face_ids)
         mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
@@ -579,8 +586,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
       std::size_t pad_voxels = 0;
+      long long pad_beyond_skin = 0;
       for (std::size_t idx = 0; idx < pad.size(); ++idx)
-        if (pad[idx] == MaskValue::FrozenSolid) ++pad_voxels;
+        if (pad[idx] == MaskValue::FrozenSolid) {
+          ++pad_voxels;
+          if (!bc_skin(idx)) ++pad_beyond_skin;
+        }
+      opts.frozen_mask_sources.push_back({"anchor_pad", -1, -1, pad_beyond_skin});
       setup.anchor_pad_report = {
           true, kProductionAnchorPadDepthVoxels,
           lc.anchor_face_ids.size() + lc.anchor_region_ids.size(),
@@ -622,8 +634,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_face(
             grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this face alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", fid, -1, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {fid, -1, frozen, depth_vox, thin, requested_mm, effective_mm});
@@ -650,8 +669,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_region(
             grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this region alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", -1, rid, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {-1, rid, frozen, depth_vox, thin, requested_mm, effective_mm});

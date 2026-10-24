@@ -2252,6 +2252,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME face_protection_parity COMMAND test_face_protection_parity)
 
+  # CORE LIST item 40 (his Carriage Arms run 13185527): a reduction rung that asks
+  # for less than the part's frozen material alone prints clamps to the density
+  # floor. Pins the flag, the frozen share and what froze it (through the same
+  # build_production_loadcase seam, on the demo l-bracket with protected faces), and
+  # that the rungs below the floor rung (same target, same design) are reported
+  # skipped, not run. Drives OCCT (STEP) + Eigen.
+  add_executable(test_starved_rung tests/validation/test_starved_rung.cpp)
+  target_link_libraries(test_starved_rung PRIVATE topopt)
+  target_compile_definitions(test_starved_rung PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME starved_rung COMMAND test_starved_rung)
+
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries
   # ONE depth, and a job stating two is refused with both figures; per-face depths

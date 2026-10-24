@@ -233,6 +233,69 @@ struct VariantReport {
   // verdict), but no reader may be allowed to read the achieved fraction as if the
   // request had been honoured. Always false on a reduction ladder.
   bool growth_target_saturated = false;
+  // CORE LIST item 40 — THE REDUCTION MIRROR: the rung asked for LESS material than
+  // the part's frozen material alone prints, so its target fell under the density
+  // floor and was RAISED to it. The optimizer then removes every free voxel and the
+  // rung prints the frozen share, not its request (his Carriage Arms, 13185527:
+  // 0.68 / 0.52 / 0.38 / 0.26 all printed 0.758). `requested_volume_fraction` is the
+  // rung's ask, beside the achieved `volume_fraction` / `printed_fraction` above.
+  // Both are emitted only when `request_reported`, which the driver sets on EVERY
+  // line of a run where some rung saturated (and on no other run), so every other
+  // report.json keeps its exact bytes. Always false on a growth ladder.
+  bool request_reported = false;
+  double requested_volume_fraction = 0.0;
+  bool target_saturated = false;
+};
+
+// ── WHAT FROZE THE PART, and the rungs it made redundant (CORE LIST item 40) ──
+//
+// One source of the frozen material a reduction rung's target is taken net of.
+// Each entry counts only the voxels NO EARLIER ENTRY froze, so the entries add up
+// to `FrozenShareReport::frozen_voxels`, each voxel once. Sources, in order:
+//   "anchor_and_load_faces" — the voxels the anchor and load faces themselves tag
+//                             (their boundary-condition skin);
+//   "anchor_pad"            — the structural pad behind them (loadcase.hpp);
+//   "face_protection"       — one per protected face (`face_id`) or region
+//                             (`region_id`), in the order the job declares them;
+//   "other"                 — frozen voxels the caller did not attribute (present
+//                             only when non-zero).
+struct FrozenSourceCount {
+  std::string source;
+  int face_id = -1;    // >= 0 on a face protection declared on a face
+  int region_id = -1;  // >= 0 on a face protection declared on a region
+  long long voxels = 0;
+};
+
+// A rung that was NOT RUN because an earlier rung already made its design: its ask
+// was below the frozen share too, so its target clamps to the same floor the
+// `same_design_as` rung ran with. No variant, no file; this line says why.
+struct SkippedRungReport {
+  double requested_volume_fraction = 0.0;
+  double same_design_as = 0.0;  // the requested fraction of the floor rung
+  std::string reason;
+};
+
+// The frozen share of the part and what froze it. `evaluated == false` (the
+// default) unless some rung's target clamped to the density floor, and then the
+// block is omitted from report.json entirely, so every other document keeps its
+// exact bytes.
+struct FrozenShareReport {
+  bool evaluated = false;
+  long long part_solid_voxels = 0;
+  // Voxels printed whatever the optimizer does: the Load/Fixture skin plus every
+  // FrozenSolid voxel. `frozen_material_voxels` is the same set as the target
+  // counts it, a frozen LATTICE voxel at its relative density; it equals
+  // `frozen_voxels` on every run that declares no frozen lattice.
+  long long frozen_voxels = 0;
+  double frozen_material_voxels = 0.0;
+  long long active_voxels = 0;  // the voxels the volume constraint moves
+  // frozen_material_voxels / part_solid_voxels: what the frozen material alone
+  // prints, as a fraction of the part. A rung asking for less cannot be honoured.
+  double share = 0.0;
+  // The smallest ask the run CAN honour: (frozen + density_min x active) / part.
+  double smallest_honoured_fraction = 0.0;
+  std::vector<FrozenSourceCount> sources;
+  std::vector<SkippedRungReport> skipped_rungs;
 };
 
 // The whole run's report: the material used and one entry per requested variant.
@@ -251,6 +314,8 @@ struct JobReport {
   // optimizer ended as INFEASIBLE — which does NOT stop the ladder, so this array
   // can hold more than one entry.
   std::vector<VariantReport> rejected;
+  // CORE LIST item 40 — emitted as report.json "frozen_share" only when evaluated.
+  FrozenShareReport frozen_share;
 };
 
 // Serialize a job report to a single JSON document (2-space indented). Numeric
