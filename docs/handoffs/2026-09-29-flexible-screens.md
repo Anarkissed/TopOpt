@@ -158,6 +158,306 @@ Each item: what core does, where, the evidence, your numbers.
    repaired part (H48), because core's run re-tessellates the STEP itself and its triangle numbers differ; both lift when
    core does this.
 
+## CORE LIST, complete: the sweep of 2026-10-24 (items 16-48; the reviewer's ruling of 2026-10-24 06:36, 1)
+
+Posted to the reviewer on 2026-10-24 (06:22, three parts) for #361. Items 1-15 above stay as written; this section indexes them (A),
+adds what the sweep found (B, C), lists the core code that exists outside #361 (D) and what the verifier dropped (E).
+Part C (items 35-48): the reviewer is asking him who takes them; none is started (ruling of 06:36, 6).
+
+
+His rule is front end first, back end after. #362 changed nothing in core. Everything core must add, change or fix was written down instead, and this is all of it. Part A is the list that already existed. Part B adds the Flexible items the sweep found, most of them from the handoff's older numbered core briefs (#1 to #41), which were never carried into items 1-15. Their old numbers are given in brackets. Part C holds core items from other stages that came up during the same period. Part D lists core code that already exists outside #361.
+
+Core line numbers are as found today in this worktree (HEAD `e2c70bbf`). #361's branch tip is `099dcaed` (2026-10-10), and nothing in B or C is done there.
+
+### A. Already on the CORE LIST (handoff lines 3-159)
+
+1. Seam holes ("rods") along a diagonal that two triangles share: the voxelizer's edge test needs a tie rule. Open.
+2. Edge and corner curves and stamps are not sent: (a) the F × M map, (b) a stamp on a press stack, (c) a flat cut. Open.
+3. squish_envelope (how far a lattice may be squished), with his decisions of 10-17. Open.
+4. The export must carry the C1 clip (each press field cut to its flat prism). Open; waits on an export path.
+5. The press column runs through the whole part: bound it. Open.
+6. Exit crash (F15). **FIXED 2026-10-23 in our bridge (T1). Nothing for core.**
+7. "No include region = no lattice" as a Flexible job flag. Open.
+8. (a) `lattice_mm` per include region; (b) a TPU entry in Topology's materials. Open.
+9. Backlog: (a) a pinch is refused; (b) Balanced's empty top voxel layer; (c) edge presses designed too soft; (d) a press design ignores its curve. Open.
+10. Lattice-to-solid links as job input, and rules for a lattice fused inside a solid border. Open. Its (a) must be rewritten; see "Adds to item 10".
+11. A fixed (Manual) lattice that skips the design, plus a "check, don't design" call. Open.
+12. A per-region Manual lattice (type, beads 1-3, density, grade), and curve rows outside the tested data. Open.
+13. How two Manual regions meet (the join rule), and a per-face lattice depth. Open.
+14. Per-layer nozzle temperature in the job and export (needs a ruling on R10). Open.
+15. STEP import: drop repeated-corner triangles, and re-mesh a face that comes out open. Open.
+
+### B. Added 2026-10-24 (found by the sweep)
+
+#### New items
+
+16. **Several squeeze groups in one job: the schema [old #2].**
+   - **Now:** the Flexible block has no group key (`core/src/flexible/job_block.cpp:76-81`), and the force is set per face (`weight_n`, `:208-211`, `:228`). Every loaded face goes into one stack list, and A3 (shared footprint) is checked over that one job (`run.cpp:564-582`). So the app throws `.squeezeGroups` for 2 or more groups (`FlexibleJob.swift:118-120`) and offers "Send Group N only".
+   - **Needed:** `flexible.squeeze_groups: [{faces: [face_region_id], force_n}]`, with one force per hand. A main-page Load group is one hand, split by area; any other face is its own hand.
+   - One job and one export carry every group, including an edges group beside face groups (E2 finding 15). A3 and the stack-conflict check run across groups.
+   - **His words:** "like two hands pressing equally; each face keeps its own curve" (handoff :10523). Reviewer ruling 4: "Never silently drop a group" (:5647).
+   - (unverified) A press can't be a resting entry today (`job_block.cpp:201-205`). That gap goes away once several groups fit in one job.
+
+17. **Designing across groups, and a receipt per group [old #1, #17].**
+   - **Now:** core has no idea of groups. It designs each face alone and assembles the field nearest-face (`field.cpp:536-552`). The app designs each group alone and merges them per voxel, firmer wins (`FlexibleGroupField.swift:86-92`).
+   - **His pad (top | sides):** Group 1 is designed for 2.6 mm but squishes about 0.3 mm, because Group 2 is firmer on 45,831 of 53,248 voxels.
+   - **Needed, ruling first:** his decision D-R4-14 (`docs/design/flexibles/00-decisions.md:80`) is "Separate groups are separate squeezes; the firmer wins". Old brief #1 asked instead for one compromise field that reports each group's miss.
+   - Then a receipt block per group: its squish in the combined field, and the voxels the groups share. Today the app works these out itself (`sharedVoxels`, `FlexibleGroupEstimate`). The receipt code (`run.cpp:~1000-1045`) has no group block.
+
+18. **Series columns [old #4].**
+   - **Now:** a column's depth assumes one density along its whole height (`field.cpp:290`; `squish.cpp:243` `strain_under` takes one ρ). Where a column crosses groups, pinch halves, the handover blend or Stepped bands, the app's "squishes X of Y mm" uses the mean ρ, marked "~". On his pad that is 0.331 estimated vs 0.330 built.
+   - **Needed:** core adds up each column in series through the assembled field, d = Σ hⱼ·ε(p; ρⱼ). The result is used in the design, the receipt and the app's line.
+   - #361 already lists this as its problem 13 (C2) and has not built it (`2026-09-28-flexible-squish-maths.md:404-407`).
+
+19. **Auto (recommend) over groups and pinch halves [old #7].**
+   - **Now:** `recommend` scores every face over its whole column (`recommend.cpp:114-118`, `:154-161`; called at `run.cpp:628-631`). A pinched half runs at about twice the strain, so Auto's family or temperature can suit the whole column but not the half, or not a group's share of the combined field.
+   - **Needed:** score each face over its real span.
+   - Depends on 16, 17 and the pinch (see "Adds to item 9").
+
+20. **The Flexible exporter itself: STL and G-code (#361's C2/C3) [old #9].**
+   - **Now:** core's Flexible runner writes receipts, SVG heat maps and CSVs (21 files on his project), but no mesh. Every other runner refuses a Flexible job (`run_job.cpp:9587, 10456, 11787, 11827`). The card shows both exports greyed: "Waits on core's Flexible exporter" (`FlexibleCoreRun.swift:184`). Item 4 asks only which field gets exported.
+   - **Needed:** an exporter that writes from the COMBINED field: every group, both pinch halves, presses clipped (item 4), the Finish (21), Manual pieces (12-13) and per-layer temperatures (14).
+   - By his ruling the preview is the source of truth (handoff :12645), so the export must match `FlexibleLatticeField.swift:4-53`:
+     - a gyroid with cell size L = 3.0915 t/ρ, on a ladder of sizes 2^(1/4) apart, blended across the middle half of each step;
+     - walls of whole beads;
+     - a honeycomb with one width across flats;
+     - checked against `FlexibleLatticeFieldTests` on his pad.
+   - Core also owes answers on file size and the G-code route. The removed app exporter (recoverable at `85b1bdc0`) wrote 824 MB at Draft to 1.9 GB at Fine for the 100×100×20 pad. His plan: "STL now, G-code next" (:12646).
+   - **His words:** "The exports aren't supposed to happen until core gets to it" (:12845).
+
+21. **A model-wide Finish: none | rim | skin | covered [old #16].**
+   - **Now:** one `skin_on` flag per face (`job_block.cpp:200`), only echoed into the receipt (`run.cpp:698`, `:938`). No skin geometry is built. The app sends skin_on = (finish == covered), so Rim and Skin print as None.
+   - Rim (a 2 mm band) and Skin (0.8 mm thick, 3 mm holes on a 5 mm hex pitch, ~33 % open) exist only in the preview (`FlexibleFinish.swift:26-50`).
+   - **Needed:** `flexible.finish`, with rim width, hole size, pitch and skin thickness as core's numbers. C2/C3 build them the way the preview draws them.
+   - Source: handoff :11108-11117; his answer 4, `00-decisions.md:65`.
+
+22. **A shape-only grade in core, for no-data filaments and for faces at the floor (ruling first).**
+   - **Now, no-data filaments:** 9 of 10 catalogue filaments are refused on purpose (`squish.cpp:122-139`, "It can be built, but no squish is predicted"). The app builds a shape-only lattice for them that core never runs, so it can't be exported.
+   - **Now, faces at the floor:** under light loads every column that is too firm clamps to the softest row, 14.3 % (`field.cpp:311-318`). His l-bracket at 10 lb / 7 mm has 4549 of 4560 columns too firm. The app grades the drawn lattice by the face's curve or stamp, marked "not from data". But the job is unchanged, so an export would print a flat 14.3 %, not what the screen shows.
+   - **Needed:** a ruling (shape-only grade in core, or preview only). If core: a not-from-data grade that follows the face's active curve or stamp, flagged in the receipt, and printed. Core also reports "at the floor" with the depth range reachable at this weight. A pinched face's floor is judged on its own half.
+   - Rows below 14.3 % for Auto would go against his 10-17 decision (b), "softest tested only". That is a question for him, not an ask.
+   - **His words:** "the grading follows the curve OR stamp, not just the curves, right?" (:455).
+   - Data, (unverified as a core ask): curve rows for the other 9 filaments, or #361's C3 coupons.
+
+23. **A stamp designed for the spread press, with its fingertips merged into one press [old #33, #35, with the plan's #10].**
+   - **Now:** `design_face` with `design_stamp` designs under the stamp alone, and uses an even weight ÷ footprint everywhere else (`field.cpp:244-283`). The receipt says "no sideways spreading" (`run.cpp:889`, `:1035`).
+   - The 3D sim spreads the press and merges close fingertips. Within 0-3 mm outside the stamp, Face 3 sinks 95 % (core's columns 37 %) and Top A 57 % (core 31 %).
+   - **Needed:** design for one force spread over the merged fingertips, and take a group's presses together. #35: his Group 1's Face 5 is pressed through another face, RMS 0.31.
+   - The spread rule is the one the app ships, two Gaussians: σ_near = min(0.25×depth, 0.4×feature) and σ_far = 0.5×depth (`FlexibleStampSpread.swift:30-33`). It is not #33's "~0.2 × depth". Item 2(b) only asks for a stamp on a press stack.
+   - **His words:** "it should have foci but expand out ... combining the foci into a single input".
+
+24. **A column-mask press: only the lattice section's columns, whatever its shape.**
+   - **Now:** a press footprint is a face region cut by flat cuts, so every section is convex (`faces.cpp:600-604`, `:796`). The weight is spread over the whole face (`field.cpp:256`), the map spans the whole frame (`:222-231`), and columns over solid stay in as no_lattice (`:293-297`).
+   - The app cuts planar convex sections itself. A curved, bolt, non-convex or holed face-prism stays whole ("Curved lattice here · not yet"), and its press still spans the solid part (his img3).
+   - **Needed:** core presses only the columns that enter the face's include region, and the frame, curves, weight and stamp apply over those columns only. Item 5 bounds a press's depth; this bounds it sideways. The reviewer ruled it optional, in #361's queue (handoff :5402-5404).
+   - **His words:** "It must only be the lattice section - regardless of what shape it is" (:5296).
+
+25. **A face's column grid drops its far row.**
+   - **Now:** a face gets ceil(extent / pitch) columns, centred at (i + 0.5)·pitch from the frame's corner (`faces.cpp:233-234`, `:247-249`). A column exists only if its centre lands on the face.
+   - His Face 5 is 20.00 mm at a 1.042 mm pitch. Row 19's centre is at 20.32 mm, so that row gets 0 of 96 columns and a 0.20 mm strip is left uncovered.
+   - The footprint is the sum of pitch² (`:522`), so the even pressure is about 1 % high on Face 5. Lattice voxels under the strip have no column and get density 0 (`field.cpp:103-109`, `:585-589`; #361's problem 1).
+   - **Needed:** a grid that covers the face edge to edge, column areas that add up to the face, and no unassigned voxel under a pressed face. Source: handoff :1650-1654.
+
+26. **Lattice weight in grams, per face.**
+   - **Now:** core reports volume per face (`field.cpp:380` → `run.cpp:778`), but grams only as one total per Auto candidate (`recommend.cpp:156-186`, `run.cpp:483`), which #361 calls a relative measure.
+   - The face chip hides grams by his answer of 10-14: "HIDE the grams until core reports the real per-face lattice weight" (handoff :3704).
+   - **Needed:** grams per face, per include region and per group, in the design and the receipt, measured on the face's own clipped lattice once items 4, 5 and 8(a) are fixed. For Manual, it comes from item 11's fixed lattice.
+
+27. **A press that fails to stack inside a run gives a plain error, not a coded refusal.**
+   - **Now:** `run_flexible_job` catches the FlexibleError and rethrows a plain JobError with no code (`run.cpp:584-601`). A3's `shared_footprint` refusal does have a code (`:637-641`). So the app runs 8 checks before writing any press (`FlexiblePressSupport.swift:4-14`).
+   - **Needed:** a coded refusal in the same scheme: a code, the press's regions and core's reason.
+
+28. **A9: `specimen.load_build_angle_deg` (approved 2026-10-08; build it ONLY with the first angled coupons from his rig).**
+   - **Now:** every curve row comes from a coupon pressed along build Z. A press more than 15° off Z is a side press labelled "estimated" (`faces.cpp:461`, `squish.cpp:398-412`). #361 wrote the design as a proposal only (`2026-09-28-flexible-squish-maths.md:776-797`).
+   - **Needed, as approved, tests first:**
+     - a 0-90° angle per curve entry (absent = 0), one direction per set, rows that disagree refused;
+     - tier_band reads the press's build angle;
+     - "estimated" clears only with MEASURED rows within 15°;
+     - the side, edge and corner coupons are entered at 90 / 45 / 54.74°.
+   - His rig is nearly built.
+
+29. **Core's own 3D squish field, `flexible::squish_field` [old #19].**
+   - **Now:** the app's `flexible_squish_fe.cpp` (1,762 lines, in our bridge) does all of the 3D setup. That covers the modulus law, the loads, the holds (rests, far side, inertia relief) and the calibration k held within [0.5, 2]. None of it is in a receipt. #361 returns depths per column only, with no displacement field.
+   - **Needed:** a core API that owns this setup and writes it to the receipt. It runs calibrated to core's design, and uncalibrated on a fixed lattice. The second mode is item 11's "check, don't design", widened to Auto and to edge and corner presses.
+   - He wants the live sim always shown ("always see the squish simulation happening without the need to run core's process", 10-09). So core owns or checks the 3D answer; it does not replace the live sim.
+
+30. **Core's 1D columns disagree with the 3D solve [old #24, #35].**
+   - **Now:** core designs depth with independent columns. Side skins, shear between neighbours and bulge are not modelled (`field.cpp:244`; receipt at `run.cpp:1035-1036`).
+   - On his Covered pad the 3D sim is 3.6× stiffer than the columns (sides 4.5×; 13.6× with Face 5 resting). Group 1 wants k 6.8-7.4, so the app holds k at 2 and plays at 2× his weights.
+   - **Needed:** core designs, or at least reports, the 3D depth and its k beside the column depth, and owns the reconciliation.
+   - **His words:** "Show the sim's real depths" (:7000).
+
+31. **Nonlinear, large-strain TPU physics [old #20, #21, #26, #27, #29, #34, #36-#39].**
+   - **Now:** the FE is linear and small-strain (`fea.hpp:228`). It has no buckling, no snap-through, no self-contact and no large rotations. A rest is either fully bonded or sliding.
+   - On his Group 1 the Face 5 end leans about 30°, its top edge rises 7.96 mm, and 1,321 of 53,248 elements stretch by more than 30 %.
+   - **Needed, at research scale:**
+     - a large-strain rubber-like TPU law fitted to the curves (Ogden or Mooney-Rivlin);
+     - a Newton solve with load stepping;
+     - a buckling check, plus a path for snap-through;
+     - self-contact, and friction at the rests and at a platen;
+     - rigid stamp contact as a load case (low priority);
+     - element stresses, with how far the linear numbers are off.
+   - #361 put large deformation out of scope (`:725-726`).
+   - **His words:** "Is there no way to fold realistically instead?" (:7281).
+
+32. **Sideways-stretch (Poisson) data, and a finite element that doesn't lock [old #22, #23, #41].**
+   - **Now:** Poisson's ratio ν is assumed 0.3 for every voxel, because the curve tables have no sideways-strain data (`data.cpp:301`; one ν per solve, `fea.hpp:445`, `:668`). A crushed zone bulges like solid rubber, and solid TPU (ν ≈ 0.48) and thin skins come out too stiff.
+   - **Needed:**
+     - sideways-strain columns in the curve tables;
+     - a direction-dependent law for TPU gyroid and honeycomb;
+     - a per-voxel ν that falls as cells crush;
+     - a locking-free element (B-bar, or selective reduced integration).
+
+33. **Press sectors: two pieces of one face in one press, and cuts that follow fillets (low priority).**
+   - **Now:** `build_press_stack` refuses two sectors of the same face (`faces.cpp:741-746`). A cut is flat, so each sector is one convex piece (`:604`), and fillets are greyed out. None of this occurs on his pad.
+   - **Needed, only if he asks:** both cases supported. Source: handoff :6621-6625.
+
+34. **(unverified) Items #3, #5, #8 and #11-#15 of the round-4 plan's core brief are not in the repo.**
+   - The handoff says three times that "the plan's items 1-15 ... stand" (:10619, :11108, :13135), but it restates only #1, #2, #4, #6, #7, #9 and #10.
+   - **Needed:** recover that brief and check the missing items against this list before #361 starts.
+
+#### Adds to existing items
+
+**Adds to item 3 (squish_envelope).**
+- **(a) What it returns:** per column, the deepest allowed squish, which limit decides it (data, densification estimate, or the 2-cell rule), a check of the drawn map, and the family and temperature used. This lets the UI quote "4.2 mm at 10 lb on varioShore 240 °C". Until core gives this, nothing in the app stands in (ruling G).
+- **(b) No blank depths:** where even the firmest lattice squishes past the tested strain, core reports NaN, i.e. no number (`field.cpp:311-329`). That is 149 of 149 columns under his Face 5 thumb (handoff :9225-9228). Needed: a depth for every column, as an estimate if it must be, marked as one.
+- **(c) Data:** the tables stop at 25 % strain, and 34 % of Group 1 and 38 % of Group 2 are squeezed past that. The tested curve also softens before then: at ρ 0.15 it is 24 % softer at 25 % strain than at 10 %. Needed: tested rows up to densification from his rig, and a join to the estimate that respects the softening [old #40] (:7161-7169, :7443).
+
+**Adds to item 4 (the clip): the seam at the flat-prism plane and at the press's sideways ends.**
+- **Now:** the app's clip cuts voxel by voxel, so density jumps from 0.18-0.32 to 0.14 within one 1.04 mm voxel. That draws 0.215 thin fragments per mm. The app blends the seam for drawing only (`FlexibleGroupField.pressSeam`), which brings it to 0.0044 per mm. The press's sideways ends are still a plain step.
+- **Needed:** core cuts at the plane itself, and the two lattices meet there by batch H's rule (each side keeps its own gyroid, blended over ±1 voxel). The same applies at the sideways ends. Core hands back the boundary of the press footprint.
+- **His words:** "Edges/corners don't look great" (handoff :1425; :1436-1462).
+
+**Adds to item 8(a): for a press, the lattice run that is unbroken from each column's entry.**
+- **Now:** `lattice_mm` counts every latticed sample along the column (`faces.cpp:312-325`), and the design uses it as the column height (`field.cpp:290`).
+- Edge 16's columns also cross Face 5's prism, so core reads 68.4 mm where the real stop is 18.5 mm. A per-region depth (8(a)) would give 25 mm, also wrong. Our bridge measures the unbroken run itself (`flexible_bridge.cpp:686-734`).
+- **Needed:** core returns that run per press column and designs on it. Reviewer question R7-E1 Q1 is still open (:3395-3397).
+
+**Adds to item 9(a): the pinch in full [old #6, #28].**
+- **Now:** refused both in the run (`run.cpp:641-649`) and in `assemble_density_field` (`field.cpp:545-549`). The conflict test ignores direction (`faces.cpp:344-347`), so a pinch (opposite arrows) looks the same as a step (same arrow). The whole column is always used. Over 100 mm, one profile misses his drawing by 1.42 mm (832 columns); two halves miss by 0.48 mm.
+- **Needed:**
+  1. design over part of a column;
+  2. no refusal for two faces of one group;
+  3. a pinch told apart from a step;
+  4. the split placed by force balance;
+  5. warnings and counts per half (412 and 476, not one count of 832);
+  6. the same for two presses, or a press and a face, on one stack. The app has no workaround for that case (:2953).
+- **His words:** "you would absolutely squeeze the two sides together. One side wouldn't rest" (:10521).
+
+**Adds to item 9(b): the lattice must reach the part's surface.**
+- **Now:** core keeps a voxel only if its centre is inside the part (`voxelize.cpp:361-389`). His 20 mm pad at Balanced is 19.2 voxels tall, so the top layer is empty and a 0.21 mm solid sheet covers every pocket.
+- The app adds the 4,604 boundary voxels back, except at inside corners, where adding them cut a groove at 640 of 7,056 points (`FlexibleLatticeField.swift:836-852`).
+- **Needed:** core's lattice runs to the true surface, with the partial layer trimmed to the part's exact shape and the same inside-corner exception.
+
+**Adds to item 10: what holds the part (rewrite 10(a)).**
+- **Now:** every column is held at its far end (`faces.cpp:291-309`). Rests are read in, but only copied to the receipt (`run.cpp:935-938`), so a Rest holds nothing in core's design.
+- 10(a) says to squeeze "against the linked walls and not the far side". His answer of 10-22 reverses that: "All hold. Links and far side wall that is set to rest." (handoff :613-623).
+- **Needed:** core holds the part the way the app's sim does:
+  - links, Rests and the far side all hold together;
+  - with no Rest, Topology's fixed faces hold. This needs an anchor input in the job (I1: "It should absolutely be able to push the bottom face as long as there is not opposing push/rest!", :975);
+  - with neither, the far side holds.
+- R2 (every Rest grips, no far-side hold) waits on his yes or no (:845-848). Under R2, Group 1 moves 3.05 mm against 4.42 mm today.
+
+**Adds to item 10(b): a tear or stretch check at the bond (ruling first).**
+- **Now:** nothing checks tension where the lattice is bonded to solid, in core or in the app. Item 3 covers squeezing only.
+- **Needed:** a ruling on whether core owes this. If yes: element stresses (31) and a stretch limit from the curve data.
+- **His words:** "is it calculating how much the TPU can actually stretch at the edges without ripping? ... some kind of notification" (:1549).
+
+**Adds to item 12.**
+- **(a) Grade along the face's shape.** The app's grade options are now Depth | Across | Shape. Shape follows the stamp when the face is on Stamp, and the curves otherwise. Core's `design_face` uses the stamp only for Auto's density (`field.cpp:244-282`). Needed: core's grade can follow the shape too. **His words:** "If I set a custom stamp, I'd want the grading based on that" (:471-474).
+- **(b) Auto chooses 1 or 2 beads** once 2-bead coupons exist (D-R3-2). Today the bead count is always an input and never chosen (`recommend.cpp:154`).
+
+**Adds to item 14: solid stiffness per nozzle temperature [old #25].**
+- **Now:** one solid stiffness per filament (`data.cpp:158-167`). varioShore's is 50 MPa, measured at 210 °C, though it foams above about 210 °C. 8 filaments have no value at all, and the fallback is 20× the firmest lattice.
+- **Needed:** a solid stiffness per tested temperature, and real values instead of the fallback (:9667-9668).
+
+### C. Topology / solver / import items that came up during the front-end work (not Flexible)
+
+None of these are #361's Flexible code; the reviewer routes them. Items 35-38 were found by the Flexible display sim, which runs on core's FE solver. Items 39-42 and 44-45 came from his squish-rig parts on the Topology stage. Items 35-39 touch the same files as the solver cure in part D.
+
+35. **URGENT: two solves at once deadlock [old #18].**
+   - **Now:** the solver's thread pool is shared by the whole process and "Assumes applies are not issued concurrently from multiple threads" (`core/src/fea/matfree.cpp:233-263`). The thread count is also process-wide (`:219`). The app keeps its own solves apart, but can't see the octet's or Organic's.
+   - **Needed:** a pool that is safe across threads, or a thread count passed per call (handoff :9495-9503, :9647-9650).
+
+36. **Solver settings per call [old #32].**
+   - **Now:** `configure_production_options` (`core/src/simp/production.cpp:545`) switches on GenEO, caching, recycling and threads for the whole process, and nothing switches them off. A Topology run left GenEO on, and the squish sim's fallback then took 73-75 s instead of about 4 s. The stall flag is per thread (`multigrid.cpp:149-150`).
+   - **Needed:** settings passed per call, and the stall flag kept per solve (:9504-9520).
+
+37. **The deadline is checked too rarely, and the info is empty when it hits [old #30].**
+   - **Now:** the deadline is checked every 256 iterations (`fea_matfree.hpp:531`), both in CG and inside multigrid (`multigrid.cpp:1281-1285`). A 300-cycle multigrid attempt checks it at most once, so a slow solve overran its 20 s by about 130-150 s. The solve also throws before writing its info (`matfree.cpp:991-999`), so the app read zeros.
+   - **Needed:** a check by time or once per cycle, and the info filled in before throwing (:9484-9494).
+
+38. **Multigrid stalls on slender all-lattice parts and throws its progress away [old #31].**
+   - **Now:** on the M2 stand it needs 217 cycles even with uniform stiffness, and never converges at the real 220× contrast. Core then restarts Jacobi-CG from zero: 2,556 iterations (`multigrid.cpp:2168`, `:2222-2239`).
+   - **Needed:** fix multigrid on these parts, or at least restart from where it stalled, which saves about a third of the solve. Same family as 39.
+
+39. **Topology's thin-wall solver stall: the rest of the cure.**
+   - **Now, on his Carriage Arms:** multigrid diverges (residual 4.3 → 30.1). The smoother's 0.6 setting is unsafe on every hex8 solve (its safe bound is 3.33; the measured value is 7.0-8.7). 2,435 loose, unanchored islands leave the solve with no single answer. The algebraic path is refused and silently falls back. GenEO overflows (15,734 against a cap of 6000).
+   - **Needed:**
+     - S3 (a safe smoother), used only after a stall so solves that converge today stay bit-identical (his 10-23 decision);
+     - arm G (weld or drop the loose islands);
+     - fix the algebraic path's refusal;
+     - then S4, S6, S7 (the solver path reported in run_info.json) and S8;
+     - a reviewer ruling on whether healthy solves ever leave the 0.6 setting.
+   - Part of this is already code; see D. Source: `reports/Thin wall voxel solver cure.md:105-114`.
+   - **His words:** "consistent issue for months".
+
+40. **A starved optimization step goes unflagged.**
+   - **Now:** when frozen material is at least 0.68 of the part's solid, the step's target clamps to the minimum density 1e-3, leaving 81 % of elements at the floor, and nothing flags it (`core/src/simp/minimize_plastic.cpp:1461-1467`, `:1127-1133`).
+   - **Needed:** refuse, or warn in the receipt, naming the frozen share and what froze it.
+   - **His words:** "why is it thinning out this area where 50kg is going?"
+
+41. **Export keeps only the largest body.**
+   - **Now:** `keep_largest_component` drops every other body (`run_job.cpp:573`, `:1732`; `simp.cpp:4321`; `mesh.cpp:653`, `:694`). His split Carriage Arms saved one arm per variant.
+   - **Needed:** export every body, or warn when one is dropped, and re-pin `test_shell_iso_provenance.cpp:131`, `:197`.
+
+42. **A result can split one load group in two (research first).**
+   - **Now:** the only connectivity check is that every load reaches some anchor (`voxelize.cpp:609`, `:720`). Each arm reached its own anchor, so the check passed.
+   - **Needed:** a connectivity rule, after research.
+   - **His words:** "it should never have split a group sharing a load apart."
+
+43. **Lattice stage: the depth tie and the receipts are keyed by face id, so a cut piece loses them.**
+   - **Now:** the depth tie matches by face id only (`core/src/cli/job.cpp:2537-2569`). Sending a cut piece with its face id deepened a protected face across the whole top (5 → 25 mm), or got refused. So the app sends the piece without a face id, and the tie and receipts lose it.
+   - **Needed:** key both by region. Protecting a piece waits on his open call 3. This overlaps #358's brief (`2026-10-01-core-brief-region-protection-tie.md`; handoff :7916-7978).
+
+44. **The build fingerprint is taken when CMake configures, not when it builds.**
+   - **Now:** `core/CMakeLists.txt:2060-2073`. A rebuild keeps the old commit id, so the stopgap worker CLI reports `61cfce05e1ce` even though it contains `ae8779d6`.
+   - **Needed:** take the fingerprint at build time with a dirty marker. This matters for every core deploy, #361's included.
+
+45. **PA6-CF is missing from `materials.json` (low priority).** His Carriage Arms are PA6-CF but run as PA12_CF. Same file as item 8(b).
+
+46. **(unverified) A stale, unused face region refuses the whole Stress solve.** Core threw on region 101, which nothing uses (`loadcase.cpp:243`; `face_region.cpp:47-56`). The app's fix (sending only regions that are used) removed the need. It becomes a core ask only if the reviewer rules it one (handoff :11236-11241).
+
+47. **(unverified) Anchored holes cut away by bolt clearances.** All 22 anchored holes in run 13185527 also carried a bolt clearance. The lead is unconfirmed and most likely comes from how the app writes the job.
+   - **His words:** "it cut out a part of the holes that I specifically set to anchor".
+
+48. **(unverified) A max-stiffness-for-a-plastic-budget mode.** It was offered to him and he has not answered. Hold until he does (`job.cpp:491-496`).
+
+### D. Core changes already made outside #361 (not merged anywhere yet)
+
+#362 has no commits of its own under `core/`. Item 6's fix is in our bridge, and the STEP repair (H47) is app-side. But real core code does exist outside #361:
+
+- **`ae8779d6`, the GenEO cap (2026-10-23).** It is only on the LOCAL branch `core-solver-stall-fix` in `/Users/nadim/dev/TopOpt/worker-core-61cfce05`, on no remote. It is built on `61cfce05`, which syncs #354, #358 and #361. It makes GenEO refuse a basis wider than its 6000 cap, and schedules the per-core eigensolves dynamically. A stopgap worker CLI built from it is running. The iPad's on-device engine is NOT fixed.
+- **The safe-smoother retry, in progress and uncommitted** in the same worktree (checked 2026-10-24). It touches 6 files, about 655 lines added (`multigrid.cpp`, `fea.hpp`, `fea_matfree.hpp`, `simp.cpp`, `analyze.cpp`, `CMakeLists.txt`), plus an untracked `test_mg_safe_retry.cpp`. It covers S3, S5 and arm G from item 39: after multigrid stalls, it retries once with a safe smoother, optionally drops loose islands, and only then falls back. Solves that converge today stay bit-identical.
+- **#358's six K-series core commits** (`f0d8bf27` … `f9bbc4d6`) are on this branch and on `61cfce05`, but not on #361 or main. #361 should sync them before it starts.
+
+**These must be reconciled with #361 so the two don't collide.**
+- Items 35-38, and any #361 change in `core/src/fea`, `core/src/simp` or `core/CMakeLists.txt`, touch the same files as the cure.
+- The reviewer decides where `ae8779d6` and the cure land, and in what order.
+- Deploy the GenEO cap together with the cure, not alone.
+- The worker CLI and the app's `TopOptCore.xcframework` must be built from ONE commit. Fix item 44 first, so the fingerprint proves it.
+
+### E. Dropped by the verifier
+
+- Corner map error on the column grid (10.1 % at 10 mm, 3.4 % at 20 mm): already item 2(c). These numbers can be added there.
+- Core support for edge and corner strip presses: done by #361 (`3121151e`, `254cb137`, `5f3f5d20`). What remains is app wiring (AP9).
+- Building the core slice with lib3mf: app-side (APP LIST item 5).
+- Flexible jobs on the LAN worker: worker and app side. Core already has `topopt-cli flexible` (`main.cpp:422`).
+- Selecting part of a face in Topology: app-side. Core already takes region ids.
+- Graded honeycomb, and the 95 % floor line: app-side.
+- A rim-fade helper in core: superseded by ruling C (10-21).
+- Insole (two solids, a stamp on a contoured top): no gap yet. Check it when the insole work starts.
+
 ## APP LIST: for after the redesign (a running list; the reviewer's ruling 3 of 2026-10-22 06:38)
 
 Changes in #354's / main's files that the redesign would like. None is being made now: each is asked of their owner when the
