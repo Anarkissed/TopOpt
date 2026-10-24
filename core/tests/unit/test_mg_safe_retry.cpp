@@ -262,6 +262,23 @@ int main() {
       check(masked_kept && full_dropped && CM.kept_frozen == 1,
             "G: a registered frozen mask keeps exactly its islands");
     }
+    // A speck whose 26-neighbourhood holds a CLEARANCE voxel (FrozenVoid in the
+    // mask, Empty in the analysis grid) is kept too.
+    {
+      SpeckField C2 = F;
+      std::vector<char> keep(C2.g.voxel_count(), 0);
+      const std::size_t e_speck = C2.g.index(14, 1, 1);
+      const std::size_t e_clear = C2.g.index(15, 2, 1);  // edge-neighbour
+      C2.g.tags[e_clear] = VoxelTag::Empty;
+      keep[e_clear] = 1;
+      topopt::FeaIslandKeepMask scope(&keep);
+      auto CC2 = topopt::fea_detail::mg_island_census(C2.g, C2.ey, C2.bcs, C2.loads);
+      bool kept = true;
+      for (int e : CC2.drop)
+        if (static_cast<std::size_t>(e) == e_speck) kept = false;
+      check(kept && CC2.kept_hinged == 1 && CC2.droppable == F.specks - 1,
+            "G: a speck touching a clearance (FrozenVoid) voxel is never dropped");
+    }
 
     // Cap: isolated single-voxel specks on a stride-2 lattice (no shared node
     // between any two) are 1/8 of the elements -> the cap refuses them all.

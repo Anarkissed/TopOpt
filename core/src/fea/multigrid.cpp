@@ -2386,7 +2386,10 @@ struct IslandScan {
 // ascending voxel order. A piece is ANCHORED if any of its voxels has a node
 // carrying a Dirichlet BC or a non-zero load. A piece is KEPT if it is anchored,
 // larger than kIslandMaxVoxels, or holds a FROZEN voxel: a Load / Fixture tagged
-// voxel, or a voxel of the run's registered frozen mask (FeaIslandKeepMask). With
+// voxel, or a voxel of the run's registered frozen mask (FeaIslandKeepMask: its
+// FrozenSolid voxels and its in-part FrozenVoid ones — clearances, keep-outs),
+// and is ISOLATED only if none of those nor any other solid voxel lies in its
+// 26-neighbourhood. With
 // no mask registered the proxy is a full-modulus voxel (E >= Emax: FrozenSolid is
 // pinned at rho = 1, so this keeps every island that could hold one — and, more
 // conservatively, any rho = 1 design voxel). The remaining islands are dropped
@@ -2491,8 +2494,11 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
             const int a = i + dx, b = j + dy, c = k + dz;
             if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
             const std::size_t f = grid.index(a, b, c);
+            // Frozen first: a keep-mask voxel counts even where the analysis
+            // grid has it Empty (a clearance / keep-out is FrozenVoid).
+            if (frozen_voxel(f)) { hinged = true; continue; }
             if (grid.tags[f] == VoxelTag::Empty) continue;
-            if ((solid[f] && label[f] != id) || frozen_voxel(f)) hinged = true;
+            if (solid[f] && label[f] != id) hinged = true;
           }
       if (hinged) break;
     }

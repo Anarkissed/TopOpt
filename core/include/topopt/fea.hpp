@@ -1312,8 +1312,9 @@ struct FeaIslandDropPermit {
   FeaIslandDropPermit(const FeaIslandDropPermit&) = delete;
   FeaIslandDropPermit& operator=(const FeaIslandDropPermit&) = delete;
 };
-// The run's FROZEN voxels (grid-indexed, non-zero = frozen/protected), which
-// arm G must never drop: an island holding any of them is kept. Without a
+// The run's FROZEN voxels (grid-indexed, non-zero = frozen/protected, incl.
+// clearance / keep-out voxels), which arm G must never touch: an island holding
+// one, or with one in its 26-neighbourhood, is kept. Without a
 // registered mask the census falls back to a conservative proxy (an island with
 // a full-modulus voxel is kept). Load / Fixture tagged voxels are always kept.
 // RAII, thread-local, restores the previous mask; the pointee must outlive it.
