@@ -252,6 +252,13 @@ Q47: reject or warn? Is an anchor-only ring exported for the record? My pick: re
 
 Repro files: `~/.topopt-worker/13185527ac694165`, read-only.
 
+From #362 (2026-10-24 19:26):
+- The run was SIMP+PLSM at `smooth_factor` 2, so the delete is the smoothed path (`run_job.cpp:572-573`). The CAD
+  projection (`:611-617`) runs on the filtered mesh.
+- The Load/Fixture marks must be carried into `keep_largest_and_marked_components` (`mesh.cpp:694`) on that path too.
+- #362's cure touches `analyze.cpp` only near `:273` (the island-drop forbid by `analyze_fixed_design`), not
+  `:442`/`:446`. #362 agrees the gate goes in `minimize_plastic.cpp`.
+
 ### On hold
 
 42, 45, 46 and 48: untouched.
