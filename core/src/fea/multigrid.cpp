@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -210,6 +211,18 @@ thread_local int g_island_drop_forbid = 0;
 // exactly the case it exists for (his part: 8,703 island voxels = 21 % of solid
 // but 2.3 % of elements).
 constexpr int kIslandMaxVoxels = 27;              // a 3x3x3 block
+
+// Safe-retry cycle budget. The shipped 300-cycle budget is far too short for
+// the l1 cycle on a stalled thin-wall field (Carriage Arms: rel res 1.3e-2 at
+// 300 cycles, still falling ~0.75x per 300), but each cycle costs only ~3-4
+// Jacobi-CG iterations' worth of work and the fallback took 149,725 of them.
+// So the retry runs in windows of kSafeWindow cycles while each window at
+// least multiplies the best residual by kSafeMinGain, up to kSafeMaxCycles
+// (measured: 1e-4 reached at 4,382 cycles with arm G; the worst 300-cycle
+// window on the way improved only 0.9x, hence 0.95).
+constexpr int kSafeWindow = 300;
+constexpr double kSafeMinGain = 0.95;
+constexpr int kSafeMaxCycles = 6000;
 constexpr double kIslandMaxElementFraction = 0.05;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
@@ -1290,7 +1303,8 @@ void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
 bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
               int max_it, Vec& x, int& iters, double& resid, bool mixed,
               fea_detail::RecycleReport* rec = nullptr,
-              const Vec* x0 = nullptr, const MgOpts* opts_in = nullptr) {
+              const Vec* x0 = nullptr, const MgOpts* opts_in = nullptr,
+              int progress_window = 0, double progress_gain = 0.0) {
   // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
   // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
@@ -1348,6 +1362,13 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   Vec p = z;
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
+  // PROGRESS WINDOW (safe retry only; 0 on every shipped call): every
+  // `progress_window` cycles the window's best relative residual must be at
+  // most `progress_gain` x the previous checkpoint's (the start's for the first
+  // window), else the attempt ends as not converged. Cycle-count driven, so
+  // deterministic.
+  double prog_prev = r.norm() / bnorm;
+  double prog_min = std::numeric_limits<double>::infinity();
 
   const auto deadline = mg_attempt_deadline(kMgAttemptWallGuardSec);
   for (int k = 1; k <= max_it; ++k) {
@@ -1381,6 +1402,14 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
       // Rebuild the carried basis only from a solve that reached tolerance.
       if (ok) recycle.commit();
       return ok;
+    }
+    if (progress_window > 0) {
+      prog_min = std::min(prog_min, resid);
+      if (k % progress_window == 0) {
+        if (!(prog_min <= progress_gain * prog_prev)) return false;
+        prog_prev = prog_min;
+        prog_min = std::numeric_limits<double>::infinity();
+      }
     }
     precondition(r, S.zc);               // znew = M^{-1} r (reused buffer)
     recycle.augment(r.data(), S.zc.data());  // + U E^-1 U^T r
@@ -2759,9 +2788,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           r0 = (rgv - ax).norm() / rgv.norm();
         }
         Vec xg;
-        ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kMgIterBudget),
+        ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kSafeMaxCycles),
                       xg, it, res, /*mixed=*/false, &rec, warm ? &x0 : nullptr,
-                      &o);
+                      &o, kSafeWindow, kSafeMinGain);
         diag.mg_cycles_attempted = shipped_it + it;
         if (ok) {
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
@@ -2775,13 +2804,18 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
             g_mg_last_dropped = scan.drop;
             g_mg_last_dropped_floor = scan.floor_e;
           }
-        } else if (xg.size() == m.ng && xg.allFinite()) {
+        } else if (xg.size() == m.ng && xg.allFinite() && res < r0) {
           // Did not reach tolerance: hand the iterate to the exact Jacobi-CG
           // fallback as its starting guess. PCG never raises the energy-norm
           // error of its start, so this is at least as good as the guess the
           // fallback would otherwise use (measured on the Carriage Arms: rel
           // res ~1e-2 after 300 l1 cycles, which Jacobi-CG needs ~8,000
-          // iterations to reach from zero). The fallback's stopping test is
+          // iterations to reach from zero). Only an iterate whose residual is
+          // below the start's is handed over (on a near-singular system the
+          // 2-norm residual can rise while the energy error falls; the demo
+          // L-bracket showed rel res 10-140 after 300 l1 cycles), so the
+          // fallback never starts further from its own stopping test. The
+          // fallback's stopping test is
           // still ||r|| <= tol*||b|| on the EXACT system (the islands, if any
           // were dropped above, are back), so its answer is unchanged in kind.
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
