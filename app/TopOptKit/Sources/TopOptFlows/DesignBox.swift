@@ -89,8 +89,9 @@ public struct DesignBoxBounds: Equatable, Sendable, Codable {
 // and a trash (in place + one-step Undo). Every row is drawn on the model in its colour with today's handles.
 //
 // ★ WHAT A RUN SENDS (his answer, 2026-10-24: "Run with just the first design box for now"): the FIRST POSITIVE BOX row is
-// today's single design box, sent exactly as today's job carries it (`bridgeBox`). Negative rows, cylinders and further boxes
-// are NOT sent until core takes the list (`bridgeKeepOuts` is empty). Front end first: no core change, no card in the UI.
+// today's single design box, sent exactly as today's job carries it (`bridgeBox`); every NEGATIVE BOX row goes out as today's
+// keep-outs (`bridgeKeepOuts`, which core already takes). Cylinders and further Positive boxes are NOT sent until core takes
+// the list. Front end first: no core change, no card in the UI.
 
 /// A design primitive's shape.
 public enum DesignPrimitiveShape: String, Equatable, Sendable, Codable, CaseIterable {
@@ -425,9 +426,16 @@ public struct DesignBoxModel: Equatable, Sendable {
         return TopOptKit.DesignBoxSpec(min: SIMD3<Double>(b.min), max: SIMD3<Double>(b.max))
     }
 
-    /// ★ B6: EMPTY. Negative rows (today's keep-outs among them), cylinders and further boxes are not sent until core takes
-    /// the list (his answer 2026-10-24: "Run with just the first design box for now").
-    public var bridgeKeepOuts: [TopOptKit.DesignBoxSpec] { [] }
+    /// ★ Every NEGATIVE BOX row, in list order, while a design box exists: exactly today's keep-outs, which core already
+    /// takes. A Negative box is drawn as "no mass here", so it must be sent as one: a run never silently sends something other
+    /// than what is drawn, and an old project's keep-outs go out byte-identical. Cylinders and Positive boxes after the first
+    /// are not sent until core takes the list (his answer 2026-10-24: "Run with just the first design box for now").
+    public var bridgeKeepOuts: [TopOptKit.DesignBoxSpec] {
+        guard box != nil else { return [] }
+        return primitives.filter { $0.sign == .negative && $0.shape == .box }.map {
+            TopOptKit.DesignBoxSpec(min: SIMD3<Double>($0.bounds.min), max: SIMD3<Double>($0.bounds.max))
+        }
+    }
 }
 
 // MARK: saved projects

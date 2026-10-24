@@ -93,10 +93,11 @@ final class DesignPrimitivesTests: XCTestCase {
         var m = DesignBoxModel(primitives: [Self.row(1, .box, .negative, neg), Self.row(2, .cylinder, .positive, cyl),
                                             Self.row(3, .box, .positive, box2)])
         XCTAssertEqual(m.bridgeBox, TopOptKit.DesignBoxSpec(min: SIMD3<Double>(box2.min), max: SIMD3<Double>(box2.max)))
-        XCTAssertEqual(m.bridgeKeepOuts, [], "negative rows are not sent until core takes the list")
+        XCTAssertEqual(m.bridgeKeepOuts, [TopOptKit.DesignBoxSpec(min: SIMD3<Double>(neg.min), max: SIMD3<Double>(neg.max))],
+                       "★ a Negative BOX is today's keep-out and goes out as one (core takes it today)")
         m = DesignBoxModel(primitives: [Self.row(1, .box, .negative, neg), Self.row(2, .cylinder, .positive, cyl)])
         XCTAssertNil(m.bridgeBox, "no positive box: no design box")
-        XCTAssertEqual(m.bridgeKeepOuts, [])
+        XCTAssertEqual(m.bridgeKeepOuts, [], "no design box ⇒ no keep-outs, as today")
 
         // through the real request
         let (app, p) = try loadedCube()
@@ -104,7 +105,7 @@ final class DesignPrimitivesTests: XCTestCase {
                                                   Self.row(3, .box, .positive, box2)])
         var req = try XCTUnwrap(app.makeRunRequest())
         XCTAssertEqual(req.designBox, TopOptKit.DesignBoxSpec(min: SIMD3<Double>(box2.min), max: SIMD3<Double>(box2.max)))
-        XCTAssertEqual(req.keepOutBoxes, [])
+        XCTAssertEqual(req.keepOutBoxes, [TopOptKit.DesignBoxSpec(min: SIMD3<Double>(neg.min), max: SIMD3<Double>(neg.max))])
         p.designBox = DesignBoxModel(primitives: [Self.row(1, .box, .negative, neg), Self.row(2, .cylinder, .positive, cyl)])
         req = try XCTUnwrap(app.makeRunRequest())
         XCTAssertNil(req.designBox)

@@ -92,12 +92,13 @@ changed. WorkspacePlaceholder lines after the `@State` list shift by +3, after t
 
 ## B6: what a Topology run sends while the primitive list is not sent
 
-**A Topology run sends the FIRST POSITIVE BOX row as today's single design box, exactly as today's job carries it, and nothing
-else of the list** (his answer 2026-10-24: "Run with just the first design box for now. It's only me working on the app right
-now."). Negative rows, cylinders and further boxes are not sent until core takes the list; there is no card in the UI.
-A list with no Positive Box sends no design box (as today with none). `DesignBoxModel.bridgeBox` = the first Positive Box's
-bounds (its eye is view-only: a hidden row still sends); `bridgeKeepOuts` is empty — so an old project's KEEP-OUTS (they open as
-Negative box rows) are no longer sent either. Pinned: the cube's job with one Positive Box equal to today's design box is
+**A Topology run sends the FIRST POSITIVE BOX row as today's single design box, and every NEGATIVE BOX row as today's
+keep-outs, exactly as today's job carries both** (his answer 2026-10-24: "Run with just the first design box for now. It's only
+me working on the app right now."). Cylinders and Positive boxes after the first are not sent until core takes the list; there is
+no card in the UI. A list with no Positive Box sends no design box and no keep-outs (as today). `DesignBoxModel.bridgeBox` = the
+first Positive Box's bounds; `bridgeKeepOuts` = every Negative Box's bounds in list order (eyes are view-only: hidden rows still
+send). Coordinator's correction to the B6 build: the builder had made `bridgeKeepOuts` empty, which silently dropped an old
+project's keep-outs (drawn "no mass here", not sent) — core already takes keep-outs, so Negative boxes keep going out. Pinned: the cube's job with one Positive Box equal to today's design box is
 byte-identical to 9735ed42 (`DesignPrimitivesTests.jobWithBoxAtHEAD`, sorted-key SHA-256 c4af7bfa…), hidden or shown.
 
 Saved projects: today's `designBox` (`box`, `keepOuts`) opens as row 1 (Box, Positive) then Negative box rows; an untouched list
