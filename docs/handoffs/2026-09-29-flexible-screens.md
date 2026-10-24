@@ -809,6 +809,12 @@ Writers of Topology state come first. "Leaf" means the edited face the resolver 
 
 **Owner's calls, through the reviewer:** R2, R3, R4, R12.
 
+**His answers (2026-10-24, his words):**
+- R12: "Should drop topology results". The duplicate keeps today's behaviour (drops `optimized`, results.plist, run_job.json, run_design.bin). No ProjectDuplication change.
+- R3: "The most recent setting is cleared." Read as: when a combine meets two entries, the one set most recently is cleared and the earlier one stays. Weights summed or not: asked.
+- R4: "Painted area is only for STLs which require it to *create* the face shapes much better. There is likely no setting. But if there is, start fresh." A painted area starts with no Flexible entry.
+- R2: "Leave it." Union 105 stands; no carry, no re-record for it.
+
 ### 4. Risks
 
 The steps already cover the rest. These remain:
