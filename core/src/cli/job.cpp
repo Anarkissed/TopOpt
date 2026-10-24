@@ -1278,6 +1278,7 @@ JobDescription parse_job(const std::string& json_text) {
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
                          "outer_finish", "emit_welded_stl", "welded_pitch_mm", "emit_organic_spans",
+                         "emit_plan_laid",
                          "regions", "multiscale",
                          "stepped_cells",
                          "forecast_only", "organic_probe_cells_mm", "organic_probe_grades_mm",
@@ -1704,6 +1705,13 @@ JobDescription parse_job(const std::string& json_text) {
       if (os->type != JsonValue::Type::Bool)
         schema_fail("lattice \"emit_organic_spans\" must be a boolean");
       job.lattice.emit_organic_spans = (os->num != 0.0);
+    }
+    // ★ K4: the laid-plan ledger (job.hpp). A plain boolean, refused otherwise, and
+    // the writer itself does nothing on a run that sent no plan.
+    if (const JsonValue* pl = find_key(lat, "emit_plan_laid")) {
+      if (pl->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_plan_laid\" must be a boolean");
+      job.lattice.emit_plan_laid = (pl->num != 0.0);
     }
     if (const JsonValue* wp = find_key(lat, "welded_pitch_mm")) {
       job.lattice.welded_pitch_mm =

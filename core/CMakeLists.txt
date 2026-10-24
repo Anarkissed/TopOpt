@@ -2150,6 +2150,40 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_region_ownership COMMAND test_region_ownership)
 
+  # ★ K3: on a plan job the PLAN is the design (reviewer, 2026-10-10). The companion is
+  # printed minus the plan's cells, the certificate's posture is the plan's mask and the
+  # plan's own per-cell density, and the receipt states the solid remainder per region.
+  # Proven as DIFFERENCES between a partial-depth plan and a full-depth control, because
+  # the pre-K3 binary reported the same companion volume for both.
+  add_executable(test_plan_is_the_design tests/validation/test_plan_is_the_design.cpp)
+  target_link_libraries(test_plan_is_the_design PRIVATE topopt)
+  target_compile_definitions(test_plan_is_the_design PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_plan_is_the_design COMMAND test_plan_is_the_design)
+
+  # ★ K6 PART 2 (2026-10-10): the ownership clip and stepped_region_owner must agree at
+  # every point of a shared volume. The reviewer's "10,000 random points per shared
+  # volume" bar, as a unit test: the agreement is a property of two pure functions, and
+  # measuring it through a run would sample it only where struts happen to lie.
+  add_executable(test_owner_clip tests/unit/test_owner_clip.cpp)
+  target_link_libraries(test_owner_clip PRIVATE topopt)
+  add_test(NAME owner_clip COMMAND test_owner_clip)
+
+  # ★ RULING 2 (2026-10-10): the outline is a CLIP, in every job that sends one.
+  # clip_segment consulted the include region not at all, so a cell the outline cuts had
+  # its struts drawn across the cut in voxels the mask certified SOLID. Measured as a
+  # ratio against a no-outline control arm, because pre-clip the outlined job wrote 100.2%
+  # of the control's lattice for a quarter of the area.
+  add_executable(test_outline_clip tests/validation/test_outline_clip.cpp)
+  target_link_libraries(test_outline_clip PRIVATE topopt)
+  target_compile_definitions(test_outline_clip PRIVATE
+    ORGANIC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/organic"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_test(NAME cli_outline_clip COMMAND test_outline_clip)
+
   # ★ Every subcommand that writes a receipt stamps the binary that wrote it
   # (reviewer, 2026-10-01). `analyze` and `lattice-variant` return before main.cpp
   # populates the fingerprint, so their run_info.json carried "unknown". Runs the real

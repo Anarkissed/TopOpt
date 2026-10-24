@@ -1369,6 +1369,66 @@ std::string run_info_json(const RunInfo& info) {
         if (!info.stepped_anystep_rho_by_size.empty())
           gr += ", \"anystep_rho_radius_by_size\": \"" +
                 info.stepped_anystep_rho_by_size + "\"";
+        // ★ K3 (3): the solid remainder per region, and what the plan latticed.
+        if (!info.stepped_plan_solid_remainder_mm3.empty()) {
+          gr += ", \"plan_solid_remainder_mm3\": \"" +
+                info.stepped_plan_solid_remainder_mm3 + "\"";
+          gr += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
+          gr += ", \"plan_rho_fallback_by_region\": \"" +
+                info.stepped_plan_rho_fallback_by_region + "\"";
+          gr += ", \"clip_outside_region_mm3\": \"" +
+                info.stepped_clip_outside_region_mm3 + "\"";
+          // ★ K5: the plan's density reach over the generator's own radius queries.
+          gr += ", \"plan_rho_queries_plan\": " +
+                fmt_ll(info.stepped_plan_rho_queries_plan);
+          gr += ", \"plan_rho_queries_posture\": " +
+                fmt_ll(info.stepped_plan_rho_queries_posture);
+          gr += ", \"plan_rho_queries_floor\": " +
+                fmt_ll(info.stepped_plan_rho_queries_floor);
+        // ★ K4: the plan as laid, per region and per group. The summary above is the
+        // count; this is which.
+        if (!info.stepped_plan_by_region.empty()) {
+          gr += ", \"plan_laid_unattributed\": " +
+                fmt_ll(info.stepped_plan_laid_unattributed);
+          gr += ", \"plan_by_region\": [";
+          for (std::size_t i = 0; i < info.stepped_plan_by_region.size(); ++i) {
+            const RunInfo::PlanRegion& PR = info.stepped_plan_by_region[i];
+            if (i) gr += ", ";
+            gr += "{\"region\": " + std::to_string(PR.region_id);
+            gr += ", \"base_cell_mm\": " + fmt(PR.base_cell_mm);
+            gr += ", \"slot_origin_mm\": [" + fmt(PR.slot_origin_mm[0]) + ", " +
+                  fmt(PR.slot_origin_mm[1]) + ", " + fmt(PR.slot_origin_mm[2]) + "]";
+            gr += ", \"slot_origin_stated\": " + bool_json(PR.slot_origin_stated);
+            gr += ", \"plane_origin_mm\": [" + fmt(PR.plane_origin_mm[0]) + ", " +
+                  fmt(PR.plane_origin_mm[1]) + ", " + fmt(PR.plane_origin_mm[2]) + "]";
+            gr += ", \"normal\": [" + fmt(PR.normal[0]) + ", " + fmt(PR.normal[1]) +
+                  ", " + fmt(PR.normal[2]) + "]";
+            gr += ", \"depth_mm\": " + fmt(PR.depth_mm);
+            gr += ", \"cells\": " + fmt_ll(PR.cells);
+            gr += ", \"sizes\": \"" + PR.sizes + "\"";
+            gr += ", \"groups\": [";
+            for (std::size_t j = 0; j < PR.groups.size(); ++j) {
+              const RunInfo::PlanGroup& G = PR.groups[j];
+              if (j) gr += ", ";
+              gr += "{\"size_mm\": " + fmt(G.size_mm);
+              gr += ", \"origin_mm\": [" + fmt(G.origin_mm[0]) + ", " +
+                    fmt(G.origin_mm[1]) + ", " + fmt(G.origin_mm[2]) + "]";
+              gr += ", \"phase_mm\": [" + fmt(G.phase_mm[0]) + ", " +
+                    fmt(G.phase_mm[1]) + ", " + fmt(G.phase_mm[2]) + "]";
+              gr += ", \"nx\": " + std::to_string(G.nx);
+              gr += ", \"ny\": " + std::to_string(G.ny);
+              gr += ", \"nz\": " + std::to_string(G.nz);
+              gr += ", \"cells\": " + fmt_ll(G.cells);
+              gr += ", \"struts_laid\": " + fmt_ll(G.struts_laid);
+              gr += ", \"nodes_laid\": " + fmt_ll(G.nodes_laid);
+              gr += ", \"cells_with_no_strut\": " + fmt_ll(G.cells_with_no_strut);
+              gr += "}";
+            }
+            gr += "]}";
+          }
+          gr += "]";
+        }
+        }
       }
       // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.
       if (info.lattice_outline_beam_mm > 0.0) {

@@ -74,6 +74,21 @@ struct LatticeRegion {
   double cell_mm = 0.0;
   std::function<bool(int, int, int)> latticed;  // null => all cells latticed
 
+  // ── ★ K6 PART 2: DROP A CLIPPED PIECE SHORTER THAN ITS OWN STRUT DIAMETER ────
+  // (Reviewer, 2026-10-10.) The sliver guard is otherwise a fixed 1 um, which exists to
+  // stop a degenerate span becoming a prism with no length. Once a pass is clipped by the
+  // region that OWNS the space, a different kind of piece appears: a short stub left on
+  // the far side of an ownership boundary, shorter than it is thick, which prints as a
+  // bump rather than as a strut and carries no load into anything.
+  //
+  // `diameters` > 0 raises that guard to `diameters x (2r)` for THIS region's passes,
+  // where r is the piece's own radius. 0 (the default) keeps the 1 um guard, so every
+  // existing run is byte-identical -- this cannot be a global constant for exactly that
+  // reason. Dropped pieces are COUNTED (LatticeGenStats::stub_fragments_dropped) and
+  // their length summed, because a guard that silently eats geometry is the thing the
+  // receipts exist to prevent.
+  double min_fragment_diameters = 0.0;
+
   // The boundary finish (handoff 2026-07-29-lattice-boundary-finish). Null =>
   // the legacy whole-strut behaviour, byte-identical to every pre-boundary run.
   // Non-null => (a) a cell is ACTIVE iff `latticed` accepts it AND the boundary
@@ -191,6 +206,11 @@ struct LatticeGenStats {
   std::uint64_t clipped_struts = 0;    // struts trimmed at the boundary
   std::uint64_t dropped_struts = 0;    // struts entirely outside the eroded region
   std::uint64_t strut_fragments = 0;   // kept sub-struts emitted from clipped struts
+  // ★ K6 part 2: clipped pieces dropped for being shorter than their own strut diameter
+  // (LatticeRegion::min_fragment_diameters), and how much length that was. 0/0 on every
+  // run that does not raise the guard.
+  std::uint64_t stub_fragments_dropped = 0;
+  double stub_fragment_length_mm = 0.0;
   std::uint64_t landings = 0;          // cut ends (the skin's anchor sites)
   std::uint64_t anchor_nodes = 0;      // anchor balls emitted at landings
   std::uint64_t skin_struts = 0;       // diagrid edge fragments emitted
