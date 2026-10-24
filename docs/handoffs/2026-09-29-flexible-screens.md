@@ -158,7 +158,10 @@ Each item: what core does, where, the evidence, your numbers.
    repeated-corner triangles in step.cpp as `weld_and_clean` does, plus a per-face triangulation check (re-mesh a face finer
    when it comes out open). Until then the app repairs its OWN import (H47, `StepMeshRepair.swift`) and paint is off on a
    repaired part (H48), because core's run re-tessellates the STEP itself and its triangle numbers differ; both lift when
-   core does this.
+   core does this. Synthetic reproductions of both defects through core's own import (2026-10-24, round 8b, tests only, your
+   rig files removed): `SyntheticStepParts.swift`. `filleted_block` has 8 slivers. `lipped_plate_and_corner` has a top face
+   that breaks at 0.1 mm, with no error reported, and is whole at 0.05 mm. This is a synthetic shape that makes BRepMesh
+   break a face, which #361's `test_step_clean` lacked (its Q5).
 
 ## CORE LIST, complete: the sweep of 2026-10-24 (items 16-48; the reviewer's ruling of 2026-10-24 06:36, 1)
 
@@ -845,6 +848,54 @@ The steps already cover the rest. These remain:
 - **The duplicate re-encodes.** A coder asymmetry (LatticeSettings ~2150-2410) changes keys.
 - **H50d conflicts with the mockup.** The `startRun()` count of 4 is pinned.
 - **Batches arrive out of order.** P2 still goes before P3-P5.
+
+## ★ Round 8b · your rig STEP files REMOVED from the tree; the repair's tests now use synthetic STEP parts (2026-10-24)
+
+Your order (relayed by the reviewer's ruling of 2026-10-24 08:56, approved by you): "Remove the rig step files." Branch
+`claude/flexible-screens` (PR #362). NOT pushed (your HOLD). NOT installed. Tests, fixtures and this handoff only: no app
+source changed, core untouched.
+
+- **Removed:** all 7 files under `app/TopOptKit/Tests/TopOptFlowsTests/Fixtures/squish_rig/` (2040 Extrusion Stand, Base,
+  Carriage Arms, both PillowBlock stands, Pressing Plate Mount, Top Motor Mount). They were the only copies in this branch's
+  tree. **They stay in git history** (added in `9b11b6dc`, which is on origin): taking them out of history needs a force-push,
+  and that is never done.
+- **What replaces them:** `SyntheticStepParts.swift` (new, tests only) writes four STEP parts at run time. Every number is
+  chosen there; nothing comes from your files. Each one goes through core's own STEP import, the same path your parts took.
+  - `filleted_block`: a 40 × 30 × 20 mm block, every edge filleted at 3 mm. Its 8 fillet corners are sphere octants with a
+    pole, so it has **8 pole slivers**, one on each corner face (ids 18-25). This is the defect on Carriage Arms, Pressing
+    Plate Mount and Top Motor Mount. T1 closes it.
+  - `lipped_plate_and_corner`: a plate whose top face has a curved lip 0.02 mm wide with a **0.032 mm tip edge**, plus a small
+    fillet corner as a second solid. At 0.1 mm the top face comes back with a hole and with triangles over the air
+    (**72.50 mm² of triangles on a 70.10 mm² face**). The import reports no error. At 0.05 mm the face is whole. It also has
+    1 pole sliver. This is the 2040 stand's case. T2 closes it at 0.05 mm, then drops the sliver.
+  - `slot_plate`, `rounded_bracket`: clean parts, standing in for Base and the two stands. They import watertight, the gate
+    stays closed, and the mesh and face ids are exactly today's.
+- **Tests:** `StepMeshRepairTests` (8) and `FlexibleStepRepairHookTests` (3) still prove the same things, on these parts.
+  Two tests are renamed because "four" no longer fits: `testRepairClosesTheRefusedPartsAndKeepsEveryFaceID` and
+  `testHookedImportMeshAcceptsTheRefusedParts`. Added checks:
+  - each sliver is (a, a, b) with zero area, one self-edge used once and one edge used four times;
+  - the broken face has more triangle area than the face and open edges at 0.1 mm, and the face's own area at 0.05 mm;
+  - the clean parts show neither defect.
+  `TOPOPT_STEP_REPAIR_RED_CONTROL=1` sends every repaired import in these two classes down the unrepaired path. Run that
+  way, the tests that prove the repair fail.
+
+Run (`evidence/2026-09-29-flexible-screens/round8b_rig_removed/r8b_runs.txt`):
+- **RED first** (the repair disabled, `TOPOPT_STEP_REPAIR_RED_CONTROL=1`): 11 tests, **5 fail** (26 failures).
+  The 5 are `testRepairClosesTheRefusedParts…`, `testRepairedVolumeAndBoundingBox…` (the lipped plate is +1.05 % off the
+  B-rep), `testHookedImportMeshAcceptsTheRefusedParts`, and both paint-gate tests. The 6 that do not test the repair pass.
+- **Then GREEN** on the same build: StepMeshRepairTests 8/8 + FlexibleStepRepairHookTests 3/3.
+  - block: T1 drops 8, 628 → 620 triangles, volume exactly the stock's (−0.089 % vs the B-rep);
+  - lipped plate: T2 at 0.05 mm, 1 sliver dropped, −0.047 % vs the B-rep; both boxes exact.
+- The rest of round 8's narrow set:
+  - hook pins (7 classes) 30/30; PaintTests + PaintModeUITests 21/21; TopOptKitTests import 8/8;
+  - AppModelTests import: 12 executed, 9 pass, 3 fail. The 3 are the known 3MF ×3 (no macOS lib3mf), as in round 8;
+  - goldens: det 38 identical / 0 DIFFERS; unseeded 32 / 0 / 1 PART-SKIP;
+  - the 16 stage-job hashes are cmp-identical (whole file) to round 8's and to `t3_reveal`'s.
+- **Where else the files were (searched by md5 and by name):**
+  - the 7 originals: only this branch (removed here) and `origin/claude/flexible-screens` (history, 9b11b6dc). None in
+    any other local or remote branch, the stash, the worker-core checkout's `core-solver-stall-fix`, or a scratchpad;
+  - your edited `CarriageArms_repaired2.step`: in no git tree. It is untracked in 6 scratchpad copies (3 named
+    `model.step`), listed in the report, not deleted.
 
 ## ★ Round 8 · STEP import repair WIRED IN (H47) + paint off on a repaired STEP (H48) (2026-10-23) (read this first)
 

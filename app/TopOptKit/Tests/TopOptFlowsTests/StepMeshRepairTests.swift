@@ -1,54 +1,37 @@
-// StepMeshRepairTests — his four refused squish-rig STEPs import closed, with every
-// CAD face id kept, and every already-watertight STEP comes back byte-identical
-// (round 8, 2026-10-23; the repair is StepMeshRepair.swift).
+// StepMeshRepairTests — STEP parts core refuses as "not watertight" import closed, with every CAD face id
+// kept, and every already-watertight STEP comes back byte-identical (round 8, 2026-10-23; the repair is
+// StepMeshRepair.swift).
 //
-// Fixtures: Fixtures/squish_rig/*.step are his 7 printed rig parts, copied unchanged
-// from "TO_STEP-files" (spaces → underscores). B-rep references below are OCCT 7.9.3's
-// own numbers for these files: BRepGProp::VolumeProperties (the volume core's step.cpp
-// stores as brep_volume) and BRepBndLib::AddOptimal (exact box, no tolerance).
+// Parts: SyntheticStepParts.swift writes them at run time (his order of 2026-10-24 removed his seven rig
+// STEPs from the tree). `filletedBlock` reproduces the pole slivers his Carriage Arms, Pressing Plate Mount
+// and Top Motor Mount had (closed by T1); `lippedPlateAndCorner` reproduces his 2040 Extrusion Stand, a face
+// BRepMesh breaks at 0.1 mm plus a pole sliver (closed by T2 at 0.05 mm, then T1); `slotPlate` and
+// `roundedBracket` stand for his three parts that import without repair.
+//
+// RED CONTROL (2026-10-24): with TOPOPT_STEP_REPAIR_RED_CONTROL=1 in the environment, every call these tests
+// and FlexibleStepRepairHookTests make into the repair goes to the UNREPAIRED path instead (core's stock
+// import; the mesh handed back unchanged). The tests that prove the repair must then fail.
 import XCTest
 import simd
 import TopOptKit
 
 final class StepMeshRepairTests: XCTestCase {
 
-    struct Part {
-        let file: String
-        let faces: Int
-        let brepVolume: Double
-        let lo: SIMD3<Double>
-        let hi: SIMD3<Double>
-    }
+    typealias Part = SyntheticStepParts.Part
 
-    /// The four refused today.
-    static let refused: [Part] = [
-        Part(file: "Carriage_Arms", faces: 186, brepVolume: 107_627.9596,
-             lo: [-61.17334, 18.5, 91.5], hi: [61.17334, 75.54702, 159.5]),
-        Part(file: "Pressing_Plate_Mount", faces: 180, brepVolume: 39_983.4694,
-             lo: [-30.05761, 15.47, 76.5], hi: [30.05761, 71.27, 159.5]),
-        Part(file: "Top_Motor_Mount", faces: 285, brepVolume: 108_602.9939,
-             lo: [-67.461, -13.5058, 297.9], hi: [67.461, 99.68448, 368.0]),
-        Part(file: "2040_Extrusion_Stand", faces: 162, brepVolume: 114_349.4739,
-             lo: [-63.5, -13.5, 0], hi: [63.5, 14.5, 70]),
-    ]
-    /// Pole slivers in core's stock 0.1 mm tessellation of each refused part.
-    static let slivers: [String: Int] = [
-        "Carriage_Arms": 8, "Pressing_Plate_Mount": 4, "Top_Motor_Mount": 10,
-        "2040_Extrusion_Stand": 2,
-    ]
-    /// His three that import today.
-    static let accepted = ["Base", "PillowBlock_Block_Stand_Left", "PillowBlock_Block_Stand_Right"]
+    /// Refused today.
+    static let refused = SyntheticStepParts.refused
+    /// Import today without repair.
+    static let accepted = SyntheticStepParts.accepted
 
-    static let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    static func fixture(_ name: String) -> String {
-        here.appendingPathComponent("Fixtures/squish_rig/\(name).step").path
-    }
+    static func path(_ part: Part) -> String { SyntheticStepParts.path(part) }
     /// Repo-relative file: .../app/TopOptKit/Tests/TopOptFlowsTests/<this> → up 5.
     static func repoFile(_ rel: String) -> String {
         var u = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { u.deleteLastPathComponent() }
         return u.appendingPathComponent(rel).path
     }
+    static let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     /// Every other STEP the suites import, for the byte-identical check.
     static var otherWatertightSteps: [String] {
         [repoFile("core/tests/fixtures/demo/l-bracket.step"),
@@ -64,6 +47,31 @@ final class StepMeshRepairTests: XCTestCase {
         let geometry = try TopOptKit.importMesh(path: path).faceGeometry
         return try StepMeshRepair.stockImport(path: path, linearDeflectionMM: 0,
                                               faceGeometry: geometry)
+    }
+
+    // MARK: - the repair under test (or, under the red control, the unrepaired path)
+
+    static let redControl = ProcessInfo.processInfo.environment["TOPOPT_STEP_REPAIR_RED_CONTROL"] == "1"
+
+    static func repairedWithReport(_ m: ImportedMesh, path: String) -> (mesh: ImportedMesh, report: StepMeshRepairReport) {
+        // Red control: the gate held shut (a path that is not a STEP), so the mesh comes back untouched.
+        StepMeshRepair.repairedWithReport(m, path: redControl ? path + ".red-control-not-a-step" : path)
+    }
+    static func repaired(_ m: ImportedMesh, path: String) -> ImportedMesh {
+        redControl ? m : StepMeshRepair.repaired(m, path: path)
+    }
+    /// The hooked TopOptKit.importMesh (H47).
+    static func hookedImport(_ path: String) throws -> ImportedMesh {
+        redControl ? try unrepaired(path) : try TopOptKit.importMesh(path: path)
+    }
+    /// StepMeshRepair.importMesh: today's import, the gate, the repair.
+    static func pipelineImport(_ path: String) throws -> ImportedMesh {
+        redControl ? try unrepaired(path) : try StepMeshRepair.importMesh(path: path)
+    }
+    /// core's stock import with no call into the hooked importMesh at all (so nothing records the file
+    /// as repaired); face geometry is left empty. The red control's stand-in for every repaired import.
+    static func unrepaired(_ path: String) throws -> ImportedMesh {
+        try StepMeshRepair.stockImport(path: path, linearDeflectionMM: 0, faceGeometry: [])
     }
 
     // MARK: - T1 on a hand-built mesh
@@ -116,99 +124,140 @@ final class StepMeshRepairTests: XCTestCase {
         XCTAssertFalse(out.watertight)
     }
 
-    // MARK: - his parts: the diagnosis
+    // MARK: - the refused parts: the diagnosis
 
-    /// Core's stock tessellation of the four: not watertight; the pole slivers are the
-    /// whole defect on three of them; on the 2040 stand a broken face 16 remains.
+    /// Core's stock tessellation of the refused parts: not watertight. Each pole sliver is a welded
+    /// (a, a, b): zero area, a self-edge used once, an edge used four times; they sit on the fillet-corner
+    /// faces, one each, and are the whole defect on the block (T1 alone closes it). On the lipped plate a
+    /// broken face remains: at 0.1 mm its triangles cover MORE than the face (triangles over the air) and
+    /// leave edges open, with no error from the import; at 0.05 mm the same face has the face's area.
     func testDiagnosisOfTheStockTessellation() throws {
         for p in Self.refused {
-            let m = try Self.stock(Self.fixture(p.file))
-            XCTAssertFalse(m.watertight, p.file)
-            XCTAssertEqual(m.faceCount, p.faces, p.file)
-            XCTAssertEqual(StepMeshRepair.poleSliverCount(m), Self.slivers[p.file], p.file)
+            let path = Self.path(p)
+            let m = try Self.stock(path)
+            XCTAssertFalse(m.watertight, p.name)
+            XCTAssertEqual(m.faceCount, p.faces, p.name)
+            XCTAssertEqual(StepMeshRepair.poleSliverCount(m), p.slivers, p.name)
             let t1 = StepMeshRepair.droppingPoleSlivers(m).mesh
-            print("STEP-REPAIR-DIAG \(p.file) stockTris=\(m.triangleCount) "
+            print("STEP-REPAIR-DIAG \(p.name) stockTris=\(m.triangleCount) "
                 + "slivers=\(StepMeshRepair.poleSliverCount(m)) t1Watertight=\(t1.watertight)")
-            XCTAssertEqual(t1.watertight, p.file != "2040_Extrusion_Stand", p.file)
+            XCTAssertEqual(t1.watertight, p.brokenFace == nil, p.name)
+
+            // The slivers: one per fillet-corner face; (a, a, b) with zero area.
+            var sliverFaces: [Int32] = []
+            for t in 0..<m.triangleCount {
+                let a = m.indices[3 * t], b = m.indices[3 * t + 1], c = m.indices[3 * t + 2]
+                guard a == b || b == c || a == c else { continue }
+                sliverFaces.append(m.faceIDs[t])
+                XCTAssertEqual(Self.area(m, t), 0, "a pole sliver has zero area: \(p.name)")
+            }
+            XCTAssertEqual(sliverFaces.sorted(), p.sliverFaces, p.name)
+            let uses = Self.edgeUses(m)
+            let selfEdges = uses.filter { $0.key.a == $0.key.b }
+            XCTAssertEqual(selfEdges.count, p.slivers, "one self-edge per sliver: \(p.name)")
+            XCTAssertTrue(selfEdges.values.allSatisfy { $0 == 1 }, "each self-edge is used once: \(p.name)")
+
+            if let f = p.brokenFace {
+                // The broken face, at core's 0.1 mm: more triangle area than the face, and open edges.
+                let stockArea = Self.faceArea(m, f)
+                let open = Self.openFaces(m)
+                print(String(format: "STEP-REPAIR-DIAG %@ face %d: %.3f mm² of triangles on a %.3f mm² face, open faces %@",
+                             p.name, f, stockArea, p.brokenFaceArea, "\(open.sorted())"))
+                XCTAssertGreaterThan(stockArea, p.brokenFaceArea + 1, "triangles over the air beside the lip: \(p.name)")
+                XCTAssertTrue(open.contains(f), "the broken face is open: \(p.name)")
+                XCTAssertFalse(Self.openFaces(t1).isEmpty, "T1 leaves it open: \(p.name)")
+                // At half the deflection the same face is whole.
+                let finer = try StepMeshRepair.stockImport(path: path, linearDeflectionMM: 0.05,
+                                                           faceGeometry: m.faceGeometry)
+                XCTAssertEqual(Self.faceArea(finer, f), p.brokenFaceArea, accuracy: 0.001 * p.brokenFaceArea, p.name)
+                XCTAssertFalse(Self.openFaces(finer).contains(f), p.name)
+            } else {
+                // The four-use edges: one per sliver, and nothing else is open.
+                XCTAssertEqual(uses.filter { $0.key.a != $0.key.b && $0.value == 4 }.count, p.slivers, p.name)
+                XCTAssertTrue(uses.allSatisfy { $0.key.a == $0.key.b || $0.value == 2 || $0.value == 4 }, p.name)
+            }
         }
-        // The Carriage Arms slivers sit on its fillet-corner faces, one each.
-        let ca = try Self.stock(Self.fixture("Carriage_Arms"))
-        var sliverFaces: [Int32] = []
-        for t in 0..<ca.triangleCount {
-            let a = ca.indices[3 * t], b = ca.indices[3 * t + 1], c = ca.indices[3 * t + 2]
-            if a == b || b == c || a == c { sliverFaces.append(ca.faceIDs[t]) }
+        // The same checks' negative control: the clean parts show neither defect.
+        for p in Self.accepted {
+            let m = try Self.stock(Self.path(p))
+            XCTAssertTrue(m.watertight, p.name)
+            XCTAssertEqual(StepMeshRepair.poleSliverCount(m), 0, p.name)
+            XCTAssertEqual(Self.openFaces(m), [], p.name)
         }
-        XCTAssertEqual(sliverFaces.sorted(), [108, 112, 114, 118, 120, 134, 139, 155])
     }
 
-    // MARK: - his parts: the repair
+    // MARK: - the refused parts: the repair
 
-    /// All four come back closed + consistently oriented, with the B-rep's face count and
-    /// every face id the stock import carried. Three close at T1, the 2040 stand at T2.
-    func testRepairClosesTheFourAndKeepsEveryFaceID() throws {
+    /// Each comes back closed + consistently oriented, with the B-rep's face count and every face id the
+    /// stock import carried. The block closes at T1; the lipped plate at T2 (0.05 mm), whose own T1 then
+    /// drops its sliver.
+    func testRepairClosesTheRefusedPartsAndKeepsEveryFaceID() throws {
         for p in Self.refused {
-            let path = Self.fixture(p.file)
+            let path = Self.path(p)
             let stock = try Self.stock(path)
-            let (m, r) = StepMeshRepair.repairedWithReport(stock, path: path)
-            print("STEP-REPAIR \(p.file) pass=\(r.pass.rawValue) stockTris=\(r.stockTriangles) "
+            let (m, r) = Self.repairedWithReport(stock, path: path)
+            print("STEP-REPAIR \(p.name) pass=\(r.pass.rawValue) stockTris=\(r.stockTriangles) "
                 + "repairedTris=\(r.repairedTriangles) dropped=\(r.droppedSlivers) "
                 + "deflection=\(r.linearDeflectionMM.map { "\($0)" } ?? "0.1 (stock)") "
                 + "faces=\(m.faceCount)")
-            XCTAssertTrue(m.watertight, p.file)
-            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.file)
-            XCTAssertEqual(m.faceCount, p.faces, p.file)
-            XCTAssertEqual(m.faceIDs.count, m.triangleCount, p.file)
-            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.file)")
-            XCTAssertEqual(m.faceGeometry, stock.faceGeometry, p.file)
-            XCTAssertFalse(m.pseudoFaces, p.file)
-            if p.file == "2040_Extrusion_Stand" {
-                XCTAssertEqual(r.pass, .retessellated)
-                XCTAssertEqual(r.linearDeflectionMM, 0.05)
+            XCTAssertTrue(m.watertight, p.name)
+            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.name)
+            XCTAssertEqual(m.faceCount, p.faces, p.name)
+            XCTAssertEqual(m.faceIDs.count, m.triangleCount, p.name)
+            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.name)")
+            XCTAssertEqual(Set(m.faceIDs), Set((0..<Int32(p.faces)).map { $0 }), "every face has triangles: \(p.name)")
+            XCTAssertEqual(m.faceGeometry, stock.faceGeometry, p.name)
+            XCTAssertFalse(m.pseudoFaces, p.name)
+            if p.brokenFace != nil {
+                XCTAssertEqual(r.pass, .retessellated, p.name)
+                XCTAssertEqual(r.linearDeflectionMM, 0.05, p.name)
+                XCTAssertEqual(r.droppedSlivers, p.slivers, "T2's own T1 drops the re-meshed slivers: \(p.name)")
             } else {
-                XCTAssertEqual(r.pass, .poleSlivers, p.file)
-                XCTAssertEqual(r.repairedTriangles, r.stockTriangles - Self.slivers[p.file]!, p.file)
+                XCTAssertEqual(r.pass, .poleSlivers, p.name)
+                XCTAssertEqual(r.droppedSlivers, p.slivers, p.name)
+                XCTAssertEqual(r.repairedTriangles, r.stockTriangles - p.slivers, p.name)
                 // T1 touches nothing else: same vertices, same order of the kept triangles.
-                XCTAssertEqual(m.vertices, stock.vertices, p.file)
+                XCTAssertEqual(m.vertices, stock.vertices, p.name)
             }
-            // The full pipeline the hook will run gives the same mesh.
-            let piped = try StepMeshRepair.importMesh(path: path)
-            XCTAssertEqual(piped.indices, m.indices, p.file)
-            XCTAssertEqual(piped.faceIDs, m.faceIDs, p.file)
+            // The full pipeline the hook runs gives the same mesh.
+            let piped = try Self.pipelineImport(path)
+            XCTAssertEqual(piped.indices, m.indices, p.name)
+            XCTAssertEqual(piped.faceIDs, m.faceIDs, p.name)
         }
     }
 
-    /// Volume and box against the B-rep. The box is within 0.1 % per axis. The volume is
-    /// within 0.2 %, NOT 0.1 %: core's 0.1 mm / 0.5 rad tessellation itself sits 0.11–0.17 %
-    /// off these B-reps (small bores), and the two stands that import TODAY sit at +0.113 %
-    /// — a 0.1 % bar would refuse them too. What the repair adds is pinned separately:
-    /// T1 changes the volume by exactly nothing.
+    /// Volume and box against the exact B-rep: the box within 0.1 % per axis, the volume within 0.2 %
+    /// (the bar his parts needed: core's 0.1 mm / 0.5 rad tessellation itself sat 0.11-0.17 % off them).
+    /// The lipped plate's stock mesh is +1 % off (its broken face's triangles over the air); repaired it is
+    /// back within the bar. What T1 adds is pinned separately: it changes the volume by exactly nothing.
     func testRepairedVolumeAndBoundingBoxMatchTheBrep() throws {
         for p in Self.refused {
-            let path = Self.fixture(p.file)
+            let path = Self.path(p)
             let stock = try Self.stock(path)
-            let m = StepMeshRepair.repaired(stock, path: path)
+            let m = Self.repaired(stock, path: path)
             let vol = StepMeshRepair.signedVolume(m)
             let rel = (vol - p.brepVolume) / p.brepVolume
             let (lo, hi) = Self.box(m)
             let ext = p.hi - p.lo
             let dev = simd_max(simd_abs(lo - p.lo), simd_abs(hi - p.hi)) / ext
-            print(String(format: "STEP-REPAIR-VOL %@ vol=%.4f brep=%.4f rel=%+.4f%% "
-                         + "boxDev=%.5f%%/%.5f%%/%.5f%%", p.file, vol, p.brepVolume,
-                         rel * 100, dev.x * 100, dev.y * 100, dev.z * 100))
-            XCTAssertLessThan(abs(rel), 0.002, p.file)
-            XCTAssertLessThan(dev.max(), 0.001, p.file)
-            if p.file != "2040_Extrusion_Stand" {
-                XCTAssertEqual(vol, StepMeshRepair.signedVolume(stock), p.file)
+            print(String(format: "STEP-REPAIR-VOL %@ vol=%.4f brep=%.4f rel=%+.4f%% stockRel=%+.4f%% "
+                         + "boxDev=%.5f%%/%.5f%%/%.5f%%", p.name, vol, p.brepVolume, rel * 100,
+                         (StepMeshRepair.signedVolume(stock) - p.brepVolume) / p.brepVolume * 100,
+                         dev.x * 100, dev.y * 100, dev.z * 100))
+            XCTAssertLessThan(abs(rel), 0.002, p.name)
+            XCTAssertLessThan(dev.max(), 0.001, p.name)
+            if p.brokenFace == nil {
+                XCTAssertEqual(vol, StepMeshRepair.signedVolume(stock), p.name)
             }
         }
     }
 
     // MARK: - everything else: unchanged
 
-    /// His three that import today, and every other STEP fixture: the gate stays closed
-    /// and the mesh is byte-identical to today's import.
+    /// The parts that import today, and every other STEP fixture: the gate stays closed
+    /// and the mesh is byte-identical to today's import (every face id where it was).
     func testAlreadyWatertightImportsComeBackByteIdentical() throws {
-        let paths = Self.accepted.map(Self.fixture) + Self.otherWatertightSteps
+        let paths = Self.accepted.map(Self.path) + Self.otherWatertightSteps
         for path in paths {
             let today = try Self.stock(path)
             XCTAssertTrue(today.watertight, path)
@@ -223,44 +272,50 @@ final class StepMeshRepairTests: XCTestCase {
             XCTAssertEqual(Self.differences(today, StepMeshRepair.droppingPoleSlivers(today).mesh),
                            [], path)
         }
+        for p in Self.accepted {
+            let today = try Self.stock(Self.path(p))
+            XCTAssertEqual(today.faceCount, p.faces, p.name)
+            XCTAssertEqual(Set(today.faceIDs), Set((0..<Int32(p.faces)).map { $0 }), p.name)
+            XCTAssertEqual(StepMeshRepair.poleSliverCount(today), 0, p.name)
+        }
     }
 
-    /// RED CONTROL: force the repair's T2 on Base and the comparator above must see it.
+    /// RED CONTROL: force the repair's T2 on the clean parts and the comparator above must see it.
     /// Only the gate keeps already-watertight imports byte-identical.
     func testRedControlForcedRepairIsCaught() throws {
-        for name in Self.accepted {
-            let path = Self.fixture(name)
+        for p in Self.accepted {
+            let path = Self.path(p)
             let today = try Self.stock(path)
             let forced = StepMeshRepair.droppingPoleSlivers(
                 try StepMeshRepair.stockImport(path: path, linearDeflectionMM: 0.05,
                                                faceGeometry: today.faceGeometry)).mesh
             let diff = Self.differences(today, forced)
-            print("STEP-REPAIR-RED \(name) today=\(today.triangleCount) forced=\(forced.triangleCount) "
+            print("STEP-REPAIR-RED \(p.name) today=\(today.triangleCount) forced=\(forced.triangleCount) "
                 + "differs=\(diff)")
-            XCTAssertFalse(diff.isEmpty, "the comparator must catch a forced repair: \(name)")
+            XCTAssertFalse(diff.isEmpty, "the comparator must catch a forced repair: \(p.name)")
         }
     }
 
     // MARK: - the hook (H47, ruling 2026-10-23 18:56 (1))
 
-    /// The hooked TopOptKit.importMesh now ACCEPTS all four: watertight, closed and
+    /// The hooked TopOptKit.importMesh ACCEPTS the refused parts: watertight, closed and
     /// consistently wound, positive volume, the B-rep's face count with every face id the
     /// stock import carried, and exactly the mesh the repair gives on today's import.
     /// (Replaces testPinBeforeTheHookImportMeshStillRefusesTheFour.) The pin of the hook's
     /// text is FlexibleStepRepairHookTests.
-    func testHookedImportMeshAcceptsTheFour() throws {
+    func testHookedImportMeshAcceptsTheRefusedParts() throws {
         for p in Self.refused {
-            let path = Self.fixture(p.file)
+            let path = Self.path(p)
             let stock = try Self.stock(path)
-            XCTAssertFalse(stock.watertight, "today's bridge import is still open: \(p.file)")
-            let m = try TopOptKit.importMesh(path: path)
-            XCTAssertTrue(m.watertight, p.file)
-            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.file)
-            XCTAssertGreaterThan(StepMeshRepair.signedVolume(m), 0, p.file)
-            XCTAssertEqual(m.faceCount, p.faces, p.file)
-            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.file)")
+            XCTAssertFalse(stock.watertight, "today's bridge import is still open: \(p.name)")
+            let m = try Self.hookedImport(path)
+            XCTAssertTrue(m.watertight, p.name)
+            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.name)
+            XCTAssertGreaterThan(StepMeshRepair.signedVolume(m), 0, p.name)
+            XCTAssertEqual(m.faceCount, p.faces, p.name)
+            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.name)")
             let expected = StepMeshRepair.repaired(stock, path: path)
-            XCTAssertEqual(Self.differences(expected, m), [], p.file)
+            XCTAssertEqual(Self.differences(expected, m), [], p.name)
         }
     }
 
@@ -275,6 +330,44 @@ final class StepMeshRepairTests: XCTestCase {
             lo = simd_min(lo, p); hi = simd_max(hi, p)
         }
         return (lo, hi)
+    }
+
+    static func corner(_ m: ImportedMesh, _ i: Int32) -> SIMD3<Double> {
+        let k = Int(i) * 3
+        return SIMD3(Double(m.vertices[k]), Double(m.vertices[k + 1]), Double(m.vertices[k + 2]))
+    }
+    /// Triangle t's area (mm²).
+    static func area(_ m: ImportedMesh, _ t: Int) -> Double {
+        let a = corner(m, m.indices[3 * t]), b = corner(m, m.indices[3 * t + 1]), c = corner(m, m.indices[3 * t + 2])
+        return simd_length(simd_cross(b - a, c - a)) / 2
+    }
+    /// The triangle area of one face (mm²).
+    static func faceArea(_ m: ImportedMesh, _ face: Int32) -> Double {
+        (0..<m.triangleCount).filter { m.faceIDs[$0] == face }.reduce(0) { $0 + area(m, $1) }
+    }
+    /// Uses of each undirected edge (a self-edge (a, a) included).
+    static func edgeUses(_ m: ImportedMesh) -> [Pair: Int] {
+        var uses: [Pair: Int] = [:]
+        for t in 0..<m.triangleCount {
+            for k in 0..<3 {
+                let a = m.indices[3 * t + k], b = m.indices[3 * t + (k + 1) % 3]
+                uses[Pair(min(a, b), max(a, b)), default: 0] += 1
+            }
+        }
+        return uses
+    }
+    struct Pair: Hashable { let a: Int32, b: Int32; init(_ a: Int32, _ b: Int32) { self.a = a; self.b = b } }
+    /// The faces owning a triangle on an edge that is not used exactly twice (a self-edge counts).
+    static func openFaces(_ m: ImportedMesh) -> Set<Int32> {
+        let uses = edgeUses(m)
+        var out: Set<Int32> = []
+        for t in 0..<m.triangleCount {
+            for k in 0..<3 {
+                let a = m.indices[3 * t + k], b = m.indices[3 * t + (k + 1) % 3]
+                if a == b || uses[Pair(min(a, b), max(a, b))] != 2 { out.insert(m.faceIDs[t]) }
+            }
+        }
+        return out
     }
 
     /// Every field that differs, comparing floats by bit pattern.
