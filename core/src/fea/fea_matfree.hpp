@@ -578,5 +578,34 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
                                 const std::vector<DirichletBC>& bcs,
                                 const std::vector<NodalLoad>& loads);
 
+// The LAST safe-retry attempt on this thread (tests / diagnostics; read-only
+// observation of the decisions the retry already makes — nothing reads it back).
+// Reset with fea_matfree_reset_mg_stagnation_latch(); seq == 0 = none this run.
+//   res / r0         the retry's own relative residual at its end / start, on
+//                    the system it solved (the island-dropped one when
+//                    `dropped`); an attempt that breaks down before its first
+//                    update reports res == its starting residual.
+//   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback.
+//   productive       counted as productive by the safe-path latch.
+//   consecutive_failures  the safe-path latch counter AFTER this attempt.
+struct MgSafeAttemptReport {
+  long long seq = 0;
+  bool dropped = false;
+  bool converged = false;
+  bool seeded_fallback = false;
+  bool productive = false;
+  int cycles = 0;
+  double res = 0.0, r0 = 0.0;
+  int consecutive_failures = 0;
+};
+const MgSafeAttemptReport& mg_last_safe_attempt();
+
+// TEST ONLY — never set by production code. Forces the safe retry's MG-PCG to
+// break down before its first update: 1 = a non-finite preconditioned residual
+// (the r.z check), 2 = a zero first search direction (the p.Ap check at k = 1).
+// 0 (the default) = off. Only the safe-retry call reads it; the shipped MG-CG
+// never does.
+void mg_safe_test_force_breakdown(int mode);
+
 }  // namespace fea_detail
 }  // namespace topopt

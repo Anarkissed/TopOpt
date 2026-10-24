@@ -402,6 +402,49 @@ int main() {
   }
 
   // ---------------------------------------------------------------------------
+  // B (breakdown): a safe attempt that breaks down BEFORE its first update —
+  // either early return of the MG-PCG (non-finite r.z; zero p.Ap at k = 1) —
+  // reports its STARTING residual (1 on a cold start), not 0. So it is NOT
+  // productive, seeds nothing, and ADVANCES the safe-path latch counter (never
+  // resets it): three in a row latch the safe path off. The exact fallback
+  // still converges. RED before the fix: res read 0, i.e. "improved" and
+  // "productive", the counter stayed 0 and the safe path never latched.
+  // ---------------------------------------------------------------------------
+  {
+    SpeckField F = make_speck_field(true);
+    const double tol = 1e-8;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    const int modes[3] = {1, 2, 2};
+    bool reports_ok = true, fallback_ok = true;
+    for (int s = 0; s < 3; ++s) {
+      topopt::fea_detail::mg_safe_test_force_breakdown(modes[s]);
+      CgInfo bi;
+      {
+        topopt::FeaIslandDropPermit permit;
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &bi);
+      }
+      const topopt::fea_detail::MgSafeAttemptReport R =
+          topopt::fea_detail::mg_last_safe_attempt();
+      std::printf("      breakdown mode %d: seq=%lld cycles=%d res=%.3e r0=%.3e "
+                  "seeded=%d productive=%d failures=%d latched=%d fallback its=%d\n",
+                  modes[s], R.seq, R.cycles, R.res, R.r0, R.seeded_fallback ? 1 : 0,
+                  R.productive ? 1 : 0, R.consecutive_failures,
+                  topopt::fea_matfree_mg_safe_latched() ? 1 : 0, bi.iterations);
+      reports_ok = reports_ok && R.seq == s + 1 && !R.converged && R.cycles == 0 &&
+                   R.res == 1.0 && !R.seeded_fallback && !R.productive &&
+                   R.consecutive_failures == s + 1;
+      fallback_ok = fallback_ok && bi.converged && !bi.used_multigrid;
+    }
+    topopt::fea_detail::mg_safe_test_force_breakdown(0);
+    check(reports_ok,
+          "B: an immediate breakdown reports its starting residual (1), is not "
+          "productive, seeds nothing, and advances the latch counter 1, 2, 3");
+    check(topopt::fea_matfree_mg_safe_latched(),
+          "B: three consecutive breakdowns latch the safe path off");
+    check(fallback_ok, "B: the exact Jacobi-CG fallback still converges each time");
+  }
+
+  // ---------------------------------------------------------------------------
   // G: a SECOND, separate, anchored and loaded body survives the drop — even a
   // tiny one (6 voxels, under the 27-voxel size cap). This is the reviewer's
   // case of a split part (the second Carriage Arm carries its own anchors and

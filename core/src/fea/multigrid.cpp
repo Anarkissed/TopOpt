@@ -202,6 +202,11 @@ thread_local double g_mg_last_dropped_floor = 0.0;
 thread_local int g_island_drop_permit = 0;
 thread_local const std::vector<char>* g_island_keep_mask = nullptr;
 thread_local int g_island_drop_forbid = 0;
+// Observation only (fea_detail::mg_last_safe_attempt): the last safe attempt's
+// decisions, reset per run. And the TEST-ONLY breakdown injector (0 = off; no
+// production code sets it; only the safe-retry MG-PCG call reads it).
+thread_local fea_detail::MgSafeAttemptReport g_mg_last_safe;
+thread_local int g_mg_safe_test_breakdown = 0;
 
 // Arm G caps. Only SPECKS are ever dropped: each island at most this many
 // voxels, and all of them together at most this fraction of the system's
@@ -1359,9 +1364,23 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     x = Vec::Zero(n);
     r = b;                                // r = b - A*0
   }
+  // The STARTING relative residual is what an attempt that breaks down before
+  // its first update reports (the early returns below fire before the loop sets
+  // `resid`): reporting 0 there read as "improved" / "productive" to the safe
+  // retry's seeding and latch tests. Every converging solve overwrites it in
+  // the loop, so no reported number of a converging solve changes.
+  resid = r.norm() / bnorm;
   Vec z(n);
   precondition(r, z);                      // z = M^{-1} r
   recycle.augment(r.data(), z.data());     // + U E^-1 U^T r
+  // TEST ONLY (fea_detail::mg_safe_test_force_breakdown): only the safe retry
+  // passes `opts_in`, and the injector is 0 unless a test sets it.
+  if (opts_in != nullptr && g_mg_safe_test_breakdown != 0) {
+    if (g_mg_safe_test_breakdown == 1)
+      z.setConstant(std::numeric_limits<double>::quiet_NaN());
+    else
+      z.setZero();
+  }
   Vec p = z;
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
@@ -1370,7 +1389,7 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   // most `progress_gain` x the previous checkpoint's (the start's for the first
   // window), else the attempt ends as not converged. Cycle-count driven, so
   // deterministic.
-  double prog_prev = r.norm() / bnorm;
+  double prog_prev = resid;
   double prog_min = std::numeric_limits<double>::infinity();
 
   const auto deadline = mg_attempt_deadline(kMgAttemptWallGuardSec);
@@ -2835,6 +2854,18 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       } else if (++g_mg_safe_consecutive_failures >= kMgLatchThreshold) {
         g_mg_safe_latched = true;
       }
+      {  // observation only (fea_detail::mg_last_safe_attempt)
+        fea_detail::MgSafeAttemptReport& rep = g_mg_last_safe;
+        rep.seq = seq;
+        rep.dropped = use2;
+        rep.converged = ok;
+        rep.seeded_fallback = seeded_fallback;
+        rep.productive = productive;
+        rep.cycles = it;
+        rep.res = res;
+        rep.r0 = r0;
+        rep.consecutive_failures = g_mg_safe_consecutive_failures;
+      }
       std::fprintf(stderr,
                    "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
                    "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
@@ -3062,6 +3093,11 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
   return C;
 }
 
+const MgSafeAttemptReport& mg_last_safe_attempt() { return g_mg_last_safe; }
+void mg_safe_test_force_breakdown(int mode) {
+  g_mg_safe_test_breakdown = (mode == 1 || mode == 2) ? mode : 0;
+}
+
 }  // namespace fea_detail
 
 // Per-run multigrid stagnation latch (handoff 127, Amendment 2). The driver
@@ -3083,6 +3119,7 @@ void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_safe_solve_seq = 0;
   g_mg_last_dropped.clear();
   g_mg_last_dropped_floor = 0.0;
+  g_mg_last_safe = fea_detail::MgSafeAttemptReport();
   g_mg_latched_solves = 0;
   g_mg_rearm_attempts = 0;
   g_mg_rearm_carries = 0;
