@@ -410,6 +410,8 @@ final class FlexibleFEFieldTests: XCTestCase {
     /// needs ~2 600 iterations for 1e-4. The solve's cap is a WORK budget (elements × iterations),
     /// so the stand gets its field; a fixed 600 threw and the stand played the column squish.
     /// Run with core's GenEO deflation ARMED, as a topology run leaves the process.
+    /// (That was before the solver cure 03ad2df5: the stall is now cured by core's l1 multigrid retry —
+    /// see the ★ RE-PINNED premise below.)
     /// ★ RED CONTROL (8192): the old fixed 600 iterations.
     func testASlenderAllLatticePartGetsItsField() async throws {
         // as a topology run leaves the process: core's GenEO deflation armed (its eigenbasis build
@@ -429,8 +431,15 @@ final class FlexibleFEFieldTests: XCTestCase {
         let (s, r, sim) = try await FlexibleSquishFixture.resolve(m)
         XCTAssertTrue(s.ok, s.failure)
         XCTAssertTrue(s.geneoBefore && !s.geneoDuring, "GenEO armed in the process, off for the sim")
-        XCTAssertFalse(s.usedMultigrid, "premise: multigrid stagnates on this part")
-        XCTAssertGreaterThan(s.iterations, 600, "premise: Jacobi-CG needs more than the old fixed cap")
+        // ★ RE-PINNED 2026-10-24 (reviewer ruling 20:08, option a): the solver cure (03ad2df5) gave core's multigrid a
+        // safe-smoother (l1-Jacobi) retry after a shipped stall, and the stand's retry now converges (756 cycles, rel res
+        // 9.9e-5), old premise: multigrid stagnates on this part (usedMultigrid false; Jacobi-CG then ran ~2 600
+        // iterations), new premise: the shipped V-cycles still stall at core's 300-cycle budget and the l1 retry lands
+        // the field THROUGH multigrid — usedMultigrid true with more cycles than that budget (a shipped carry stops at
+        // ≤ 300; the bridge's posture resets the run's latches per solve, so the shipped attempt always runs first).
+        XCTAssertTrue(s.usedMultigrid, "premise: the field lands through multigrid (the cure's l1 retry)")
+        XCTAssertGreaterThan(s.iterations, 300, "premise: …past core's shipped 300-cycle budget, so the l1 retry carried it")
+        XCTAssertGreaterThan(s.iterations, 600, "premise: the l1 retry needs more cycles than the old fixed cap (the red control's 600)")
         XCTAssertLessThanOrEqual(s.iterations, s.maxIterations)
         XCTAssertGreaterThan(f.maxDisplacement, 0)
         // it IS the solve's answer: within 0.5 % of a 1e-8 reference (the budget lifted)
@@ -461,20 +470,32 @@ final class FlexibleFEFieldTests: XCTestCase {
         FlexibleSquishFixture.log(m, "his five faces")
         let f = try XCTUnwrap(m.squish["group-1"]?.field)
         XCTAssertEqual(m.squeezeGroups.count, 1)
-        // nothing of this group rests on an anvil: the sliding rests' solve stalls, and the one retry
-        // with every rest bonded lands (said behind the Squish legend's (i))
-        print("FLEX-G FIVE: rests bonded by the retry \(f.restsBonded)")
-        XCTAssertTrue(f.restsBonded, "the sliding solve did not converge; the bonded retry landed")
-        // …and the Squish legend's (i) says so: the view the main page draws, from this model
+        // nothing of this group rests on an anvil: its rests SLIDE (near-rigid modes, each held by one pin)
+        // ★ RE-PINNED 2026-10-24 (reviewer ruling 20:08, option a): the solver cure (03ad2df5) gave core's multigrid a
+        // safe-smoother (l1-Jacobi) retry after a shipped stall, and the sliding rests' solve now converges (459 cycles,
+        // rel res 9.9e-5), old premise: the sliding solve stalls and the app's one retry with every rest bonded lands
+        // (restsBonded true; the Squish legend's (i) says "every rest held fast"), new premise: the sliding solve itself
+        // lands (through multigrid, past core's 300-cycle shipped budget), so no bonded retry runs — restsBonded false
+        // and the (i) does not claim held fast.
+        let (s, _, _) = try await FlexibleSquishFixture.resolve(m)
+        print("FLEX-G FIVE: the sliding solve ok \(s.ok) · bc \(s.bcMode) · free modes \(s.freeModes) · multigrid \(s.usedMultigrid) · \(s.iterations) cycles · rests bonded by the retry \(f.restsBonded)")
+        XCTAssertTrue(s.ok, "the sliding solve converged: \(s.failure)")
+        XCTAssertEqual(s.bcMode, "rest")
+        XCTAssertGreaterThan(s.freeModes, 0, "premise: the rests slide (the bonded retry's case)")
+        XCTAssertTrue(s.usedMultigrid, "…through multigrid")
+        XCTAssertGreaterThan(s.iterations, 300, "…past core's shipped 300-cycle budget: the cure's l1 retry carried it")
+        XCTAssertFalse(f.restsBonded, "the sliding solve converged; no bonded retry ran")
+        // …and the Squish legend's (i) does not claim held fast: the view the main page draws, from this model
         let stage = FlexibleMainStage()
         stage.fe = stage.feView(m, drawn: g)
         XCTAssertTrue(stage.fe.active)
-        XCTAssertTrue(stage.fe.restsBonded)
-        XCTAssertTrue(stage.dentInfo.contains("every rest held fast"), stage.dentInfo)
+        XCTAssertFalse(stage.fe.restsBonded)
+        XCTAssertFalse(stage.dentInfo.contains("held fast"), stage.dentInfo)
         print("FLEX-G FIVE (i): \(stage.dentInfo)")
-        // ★ RED CONTROL: the same view without the flag says nothing of it
+        // ★ RED CONTROL: the same view with the flag forced on (a bonded retry's field) says so
+        stage.fe.restsBonded = true
+        XCTAssertTrue(stage.dentInfo.contains("every rest held fast"), "control: a bonded field says so: \(stage.dentInfo)")
         stage.fe.restsBonded = false
-        XCTAssertFalse(stage.dentInfo.contains("held fast"), "control: an unflagged field is silent")
         var moves: [Int: Float] = [:]
         for k in g.keys {
             let st = try XCTUnwrap(m.stacks[k])
