@@ -1,0 +1,7 @@
+DG-PROJECT DOUBLED test (Claude copy) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves true density sim cells auto
+DG-PLAN doubled: 6509 cell(s) over 2 region(s) | 10.31=82 6.02=265 5.16=430 3.01=3636 2.58=2096
+DG-PLAN per region: r1=2608 r2=3901
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.719 mm | r1 cells=2608 [10.31=82 5.16=430 2.58=2096] prism=183827 mm3 uncovered=9128 mm3 (4.97%) | r2 cells=3901 [6.02=265 3.01=3636] prism=152157 mm3 uncovered=9215 mm3 (6.06%)
+DG-SLOT-ORIGINS 2 region(s) carry slot_origin_mm
+DG-PLAN-BASES 2 region(s) carry plan_base_cell_mm | job region 1: 10.3122 mm; job region 2: 6.0155 mm
