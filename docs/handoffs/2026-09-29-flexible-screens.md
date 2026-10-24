@@ -190,6 +190,12 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    main checkout links it to `.vcpkg/installed/arm64-osx-dynamic/lib`), so `Package.swift:95-101` links no 3MF and the
    import refuses "3MF import requires lib3mf". Provisioning, not code: vendoring lib3mf-lib and rebuilding the core
    slice with it (build_core.sh) would make them run. Not done here (vendor/ and core are not ours).
+6. **A Lattice run's "replace results" confirm starts a TOPOLOGY run (round 9, 2026-10-24; pre-existing).**
+   `app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift:1711` (`requestLatticeRun` raises the shared replacement
+   card) and `:3044-3046` (the card's destructive button calls `startRun()`, the Optimize run, never `run.start(request)` for
+   the lattice request). In his words: "When a lattice run asks to replace results, the button starts a Topology run. This
+   needs checking." Not changed here (the reviewer's ruling of 2026-10-24 04:31); round 9 only keeps "Save as new project"
+   off that card (H50d). Ask: #354 gives the Lattice run's confirm its own action.
 
 ## ★ Round 8 · STEP import repair WIRED IN (H47) + paint off on a repaired STEP (H48) (2026-10-23) (read this first)
 

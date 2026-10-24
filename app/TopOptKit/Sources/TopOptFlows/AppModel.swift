@@ -751,6 +751,18 @@ public final class AppModel: ObservableObject {
         openPrintParams()
     }
 
+    /// Flexible (PR #362) H52: copy a project's setup (no results) into a new Library entry, beside the original (ProjectDuplication).
+    @discardableResult public func duplicateProject(id: UUID) -> RecentProject? {   // Flexible (PR #362) H52
+        if screen == .workspace, project?.id == id { persistCurrentProject() }   // Flexible (PR #362) H52: Save as new carries the live edits; from Home the original is not re-saved
+        guard let src = recentProjects.first(where: { $0.id == id }),   // Flexible (PR #362) H52
+              let copy = try? store.duplicate(id: id, name: ProjectDuplication.copyName(of: src.name, existing: recentProjects.map(\.name)), now: now())   // Flexible (PR #362) H52
+        else { toast = "Couldn’t duplicate this project."; return nil }   // Flexible (PR #362) H52
+        let recent = ProjectDuplication.recent(for: copy)   // Flexible (PR #362) H52
+        recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == id } ?? -1) + 1)   // Flexible (PR #362) H52
+        thumbnails[recent.id] = thumbnails[id]   // Flexible (PR #362) H52
+        return recent   // Flexible (PR #362) H52
+    }   // Flexible (PR #362) H52
+
     // MARK: - Deletion
 
     /// Delete a project from Home (Library card menu). Cancels any in-flight run,

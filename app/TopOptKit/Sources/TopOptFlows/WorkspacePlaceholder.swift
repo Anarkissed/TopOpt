@@ -497,6 +497,7 @@ public struct WorkspacePlaceholder: View {
     /// Non-nil presents it; the user either confirms (the run starts) or cancels
     /// (nothing happens, and the variants are untouched).
     @State private var pendingReplacement: ResultsReplacementPrompt?
+    @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d: the re-run card's Save as new project is for an Optimize re-run only
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -734,6 +735,7 @@ public struct WorkspacePlaceholder: View {
                     if open, project.lattice.flexible != nil { showLatticeWizard = false; showFlexiblePage = true }
                 }
                 .onAppear { if FlexibleNewProject.takeLatticeStage(for: project.id) { goToStage(.lattice) } }   // Flexible (PR #362) H45: New TopOpt's Flexible tab lands on the Flexible Lattice stage
+                .onAppear { if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } } }   // Flexible (PR #362) H50c: Save as new project runs in the copy as it opens (RerunCard)
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
                           selection: selection,
@@ -1697,7 +1699,7 @@ public struct WorkspacePlaceholder: View {
     private func requestRun() {
         guard canOptimize else { return }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
-            pendingReplacement = prompt
+            rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d: Optimize's card offers Save as new project
             return
         }
         startRun()
@@ -1713,7 +1715,7 @@ public struct WorkspacePlaceholder: View {
             return
         }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
-            pendingReplacement = prompt
+            rerunOffersCopy = false; pendingReplacement = prompt   // Flexible (PR #362) H50d: the Lattice run shares the card but offers no Save as new project
             return
         }
         run.start(request)
@@ -2175,7 +2177,7 @@ public struct WorkspacePlaceholder: View {
     /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
     private var keepOutRenderItems: [ClearanceRenderItem] {
         let active = selection.activeGroupID
-        return project.clearanceVolumes().map {
+        return project.groupView.showing(project.clearanceVolumes()) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
             ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
         }
     }
@@ -3038,12 +3040,13 @@ public struct WorkspacePlaceholder: View {
         }
         // BAR 4: a new run is the ONE remaining thing that retires finished
         // variants, and it says so before it does.
-        .alert("Replace your results?", isPresented: replacementPromptBinding) {
-            Button("Optimize anyway", role: .destructive) {
+        .alert(RerunCard.title, isPresented: replacementPromptBinding) {   // Flexible (PR #362) H50b: the re-run card — Re-run here / Save as new project / Cancel (RerunCard)
+            Button(RerunCard.rerunHereLabel, role: .destructive) {
                 pendingReplacement = nil
                 startRun()
             }
-            Button("Keep my results", role: .cancel) { pendingReplacement = nil }
+            if rerunOffersCopy { Button(RerunCard.saveAsNewLabel) { pendingReplacement = nil; if let copy = model.duplicateProject(id: project.id) { RerunCard.runOnOpen(copy.id); model.open(copy) } else { model.toast = RerunCard.copyFailedToast } } }   // Flexible (PR #362) H50b: only when Optimize raised the card (H50d)
+            Button(RerunCard.cancelLabel, role: .cancel) { pendingReplacement = nil }   // Flexible (PR #362) H50b
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
@@ -6839,7 +6842,7 @@ public struct WorkspacePlaceholder: View {
     private var clearanceHandleItems: [ClearanceHandleItem] {
         guard force.gravityIsSet else { return [] }
         var items: [ClearanceHandleItem] = []
-        for entry in project.clearanceHandles() {
+        for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
             for h in entry.handles {
                 items.append(ClearanceHandleItem(
                     id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
@@ -8926,7 +8929,7 @@ public struct WorkspacePlaceholder: View {
     /// a control so it can't nudge a primitive. The transform math is the pure, tested
     /// `PrimitiveGizmo`; THIS gesture + body draw are the device-QA'd layers.
     @ViewBuilder private var primitiveGizmoOverlay: some View {
-        if let proj = projection, let gid = selection.activeGroupID {
+        if let proj = projection, let gid = selection.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c: a hidden active group draws no move knobs / gizmo (GroupEyeHides)
             ZStack(alignment: .topLeading) {
                 ForEach(project.manualPrimitives(in: gid)) { mp in
                     if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
@@ -11840,7 +11843,7 @@ public struct WorkspacePlaceholder: View {
                                 latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
-        if let last = lastRunRequest, model.makeRunRequest() == last { return false }
+        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest() == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a: a finished project can be re-run with the same inputs; the re-run card confirms (RerunCard)
         return true
     }
 

@@ -34,7 +34,8 @@ public struct HomeView: View {
                                           running: model.runningIDs.contains(proj.id),
                                           onOpen: { model.open(proj) },
                                           onRename: { renameDraft = proj.name; renameTarget = proj },
-                                          onDelete: { deleteTarget = proj })
+                                          onDelete: { deleteTarget = proj },
+                                          onDuplicate: { _ = model.duplicateProject(id: proj.id) })   // Flexible (PR #362) H51
                     }
                     // ★ round 3 ruling (c): never dropped silently — no open, no rename, no delete
                     ForEach(model.unreadableProjects) { UnreadableProjectCard(entry: $0) }
@@ -154,6 +155,7 @@ private struct RecentProjectCard: View {
     let onOpen: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
+    var onDuplicate: () -> Void = {}   // Flexible (PR #362) H51: the long-press "Duplicate" (ProjectDuplication)
 
     var body: some View {
         Button(action: onOpen) {
@@ -197,6 +199,7 @@ private struct RecentProjectCard: View {
         .foregroundStyle(DS.Color.textPrimary.color)
         .contextMenu {
             Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
+            Button { onDuplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }   // Flexible (PR #362) H51
             Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
         }
     }
