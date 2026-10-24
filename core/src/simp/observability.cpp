@@ -1437,6 +1437,12 @@ std::string run_info_json(const RunInfo& info) {
         if (!info.stepped_plan_by_region.empty()) {
           gr2 += ", \"plan_laid_measured\": " +
                 bool_json(info.stepped_plan_laid_measured);
+          // ★ the law graded nothing and the run carried on: reported, never silent.
+          if (info.stepped_law_ungradeable_reported) {
+            gr2 += ", \"law_ungradeable_reported\": true";
+            gr2 += ", \"law_ungradeable_note\": \"" +
+                  info.stepped_law_ungradeable_note + "\"";
+          }
           if (info.stepped_plan_laid_measured)
             gr2 += ", \"plan_laid_unattributed\": " +
                 fmt_ll(info.stepped_plan_laid_unattributed);

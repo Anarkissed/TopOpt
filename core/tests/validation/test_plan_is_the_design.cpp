@@ -400,6 +400,42 @@ int main() {
   CHECK(!has(part.run_info, "\"struts_laid\""),
         "nor a strut count nobody measured");
 
+  // ── THE LAW GRADING NOTHING IS A REPORT, NOT A REFUSAL (ruling 2026-10-11) ──
+  // `plan_law_ungradeable` asks the grading block for a 40 mm cell on a 60 x 12 x 36 mm
+  // part, so every member is thinner than the cells-per-member floor demands and the law
+  // can grade NO candidate voxel. The plan's own 6 mm cells are unaffected: each carries
+  // its own rho and each passes D5 at the 0.45 mm bead, so core needs the law's grade for
+  // neither the geometry nor the certificate.
+  //
+  // MEASURED both ways on this fixture, same 3,040 candidate voxels:
+  //   at e0485f7d: exit 1, "the grading law could lattice NONE of this variant's 3040
+  //                candidate voxels, so there is no lattice to emit";
+  //   now:         exit 0, reported, and the plan's 8 cells laid (1953.125 mm3).
+  //
+  // The real case is 102117B9's Default Grade plan -- 12,112 cells over 177 regions,
+  // every one carrying a rho -- which this line refused over 66,710 voxels the LAW could
+  // not grade. That is core's own law gating a design it was not asked to produce.
+  const Run lug = run_job("plan_law_ungradeable");
+  CHECK(lug.rc == 0,
+        "the run must carry on: the plan is the design and carries its own density");
+  CHECK(has(lug.err, "law ungradeable, REPORTED not refused"),
+        "and it must SAY so -- core overriding its own law is never silent");
+  CHECK(has(lug.run_info, "\"law_ungradeable_reported\": true"),
+        "the receipt carries it too, with the law's own fallback counts");
+  CHECK(has(lug.run_info, "\"anystep_cells\": 8"),
+        "and the plan was laid, not merely accepted");
+  // ★ THE PREMISE: the law really did grade nothing here. Without this the check above
+  // passes on any job whose law happens to succeed, which is every other fixture.
+  CHECK(has(lug.err, "could lattice NONE of this variant's 3040 candidate voxels"),
+        "premise: the law graded NONE of the 3,040 candidates -- that is what makes this "
+        "fixture the case the ruling is about");
+  // ★ AND THE CONDITION IS THE PLAN'S OWN DENSITY, not the mere presence of a plan.
+  // K3's refusal still covers a cell with no rho and a law with nothing to offer; this
+  // fixture cannot prove that half, and `plan_rho_fallback_by_region` being all zeros is
+  // what says every cell here supplied its own.
+  CHECK(has(lug.run_info, "\"plan_rho_fallback_by_region\": \"r1=0\""),
+        "every cell supplied its own density, which is the condition that was tested");
+
   // ── THE ORDERING: THE PLAN'S REFUSAL COMES FIRST ────────────────────────────
   // `plan_before_law` is empty_after_beam's job -- a 31 mm outline beam that clears every
   // voxel the law graded -- plus a 4 mm cell on a 6 mm halving ladder. Both are refusals.
