@@ -61,15 +61,6 @@ final class LatticeWizardTests: XCTestCase {
 
     // MARK: §2 — the order is the teaching
 
-    func testTypeChangeMorphsAndSizeDoesNot() {
-        var m = LatticeWizardModel()
-        m.setTopology(LatticeType.bcc.id)
-        XCTAssertEqual(m.playing, .morph, "§2A: the cell MORPHS into the new type")
-        m.finishedPlaying()
-        m.cellMM = 4
-        XCTAssertNil(m.playing, "§2A: size is live, not a cinematic")
-    }
-
     func testTheCellBecomesALatticeByAnimation() {
         var m = LatticeWizardModel()
         XCTAssertEqual(m.stage, .cell, "§2A: the page opens on ONE cell")
@@ -77,26 +68,12 @@ final class LatticeWizardTests: XCTestCase {
                        LatticeSamplePatch.counts(lattice: m.lattice!, cells: 1).struts)
         m.enterLattice()
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertEqual(m.playing, .tile,
-                       "§2B: it is ANIMATED into the part, never cut to")
-    }
-
-    func testAutoDensityPlaysTheStressCinematicAndUniformDoesNot() {
-        var m = LatticeWizardModel()
-        m.setDensityMode(.sim)
-        XCTAssertEqual(m.playing, .stressWipeAndDive,
-                       "§2C: Auto density wipes the field down and dives in")
-        m.finishedPlaying()
-        m.setDensityMode(.uniform)
-        XCTAssertNotEqual(m.playing, .stressWipeAndDive,
-                          "a flat field has nothing to explain")
     }
 
     func testAutoCellSizeJumpsStraightToTheSample() {
         var m = LatticeWizardModel()
         m.setCellSizeMode(.auto)
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertEqual(m.playing, .jumpToSample, "§2C")
     }
 
     /// ★★ SINGLE-CELL MEMBERS REQUIRE THE SKIN (his 2026-09-18): the switch sets Skin,
@@ -126,9 +103,6 @@ final class LatticeWizardTests: XCTestCase {
         for b in [LatticeBoundaryTreatment.rim, .fullSkin, .none] {
             m.setBoundary(b)
             XCTAssertEqual(m.boundary, b)
-            XCTAssertEqual(m.playing, .boundarySwap,
-                           "§2C: switching a finish SHOWS it on the part")
-            m.finishedPlaying()
         }
     }
 
@@ -136,7 +110,6 @@ final class LatticeWizardTests: XCTestCase {
         var m = LatticeWizardModel()
         m.jump(to: .lattice)
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertNil(m.playing, "§2: a jump is not a lesson")
     }
 
     func testTheSelectionsRoundTripThroughTheProjectSettings() {
@@ -154,51 +127,6 @@ final class LatticeWizardTests: XCTestCase {
         XCTAssertEqual(back.cellMM, 3.5)
         XCTAssertEqual(back.boundary, .rim)
         XCTAssertTrue(back.enabled, "saving the page turns lattice mode on")
-    }
-
-    // MARK: §3 — the sample, and its disclaimer
-
-    func testTheSampleFieldIsBakedAndPeaksAtTheRootSkin() {
-        let mesh = LatticeWizardSample.mesh(subdiv: 6)
-        let f = LatticeWizardSample.stress(for: mesh)
-        XCTAssertEqual(f.count, mesh.positions.count / 3)
-        XCTAssertEqual(f.max() ?? 0, 1.0, accuracy: 1e-6, "normalised to 1")
-        XCTAssertEqual(f.min() ?? 1, 0.0, accuracy: 1e-6, "and to 0")
-        // The densest point is at the ROOT (−x) and off the neutral axis.
-        let p = LatticeWizardSample.densestPoint(for: mesh)
-        XCTAssertLessThan(p.x, 0, "§3a: peak stress is at the root")
-        XCTAssertGreaterThan(abs(p.z), Float(LatticeWizardSample.heightMM) * 0.4,
-                             "§3a: and at the skin, not the neutral axis")
-    }
-
-    func testTheSampleIsDeterministic() {
-        // A FIXED part: same mesh, same field, every call. Not a solve.
-        let a = LatticeWizardSample.stress(for: LatticeWizardSample.mesh(subdiv: 8))
-        let b = LatticeWizardSample.stress(for: LatticeWizardSample.mesh(subdiv: 8))
-        XCTAssertEqual(a, b)
-    }
-
-    func testTheDisclaimerIsOneLineAndDismissible() {
-        var m = LatticeWizardModel()
-        XCTAssertTrue(m.showDisclaimer)
-        let words = LatticeWizardSample.provenanceNote
-            .split(separator: " ").count
-        XCTAssertLessThanOrEqual(words, 12, "§3b: one line, not a paragraph")
-        m.showDisclaimer = false
-        XCTAssertFalse(m.showDisclaimer)
-    }
-
-    func testThePreviewTessellationStaysSmall() {
-        // §3c — the preview is fast because the SAMPLE is small and tessellated
-        // at screen resolution. The ceiling is enforced, not hoped for.
-        var m = LatticeWizardModel(cellMM: 0.6)      // absurdly fine
-        m.jump(to: .lattice)
-        XCTAssertLessThanOrEqual(m.cellsAcross, LatticeWizardModel.maxCellsAcross)
-        XCTAssertLessThan(m.stageTriangleCount, 150_000,
-                          "§3c: the worst case is still a small mesh")
-        let one = LatticeWizardModel()
-        XCTAssertLessThan(one.stageTriangleCount, 2_000,
-                          "§2A: one cell is a handful of triangles")
     }
 
     // MARK: §4 — Auto
@@ -491,7 +419,6 @@ final class LatticeWizardTests: XCTestCase {
     func testNoWallOfTextAnywhereInTheNewUI() {
         var longest = ""
         func consider(_ s: String) { if s.split(separator: " ").count > longest.split(separator: " ").count { longest = s } }
-        consider(LatticeWizardSample.provenanceNote)
         consider(LatticeFaceRoleGate.Block.undeclared.reason)
         consider(LatticeFaceRoleGate.Block.keepClear.reason)
         for v in [LatticeFaceCard.Verdict.certified, .outOfRegime, .noMaterial] {

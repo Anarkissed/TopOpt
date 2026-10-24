@@ -47,11 +47,6 @@ public struct WorkspacePlaceholder: View {
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
     @StateObject private var cameraModel = OrbitCameraModel()
-    /// ★ THE WIZARD'S CAMERA, OWNED HERE so the ONE gizmo can follow it (maintainer,
-    /// 2026-09-03, item 4.1: the sample cube and the gizmo were not mirroring each
-    /// other — the gizmo orbited the workspace camera while the wizard drew with its
-    /// own). One gizmo, one placement (L2), bound to whichever camera is on stage.
-    @StateObject private var wizardCamera = OrbitCameraModel()
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -358,6 +353,8 @@ public struct WorkspacePlaceholder: View {
     @State private var editFaces = EditFacesSession()
     /// A host page's own way back (`EditFacesOrigin.host`, #362's Flexible pages): Done calls it with the origin.
     @State private var editFacesHostReturn: ((EditFacesOrigin) -> Void)?
+    /// ★ B8: Discard is asking in place (ConfirmInPlace on the header's Discard).
+    @State private var editFacesDiscardAsking = false
 
     /// ★ The bottom bar's MEASURED height — its CONTENT only, without the inset
     /// that lifts it off the bottom edge. Seeded at the one-line Optimize height
@@ -1454,8 +1451,6 @@ public struct WorkspacePlaceholder: View {
                 .organicProbeDriver(makeOrganicProbeDriver())
                 // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
                 .wallMarking { goToWallMarking() }
-                // ★ the stage draws with the workspace-owned camera the one gizmo follows
-                .stageCamera(wizardCamera)
                 // ★ B4: the Cells page — this page's rows, over the live part, under the capsule
                 .cellsPage(regions: latticeRegionTabNames, closeToken: cellsCloseToken)
                 .transition(.opacity)
@@ -3078,8 +3073,10 @@ public struct WorkspacePlaceholder: View {
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
         // ★ B3 (T2): a run that lands puts a dot + a message on Topology; it never opens Results.
+        // ★ B8: ONLY a run that lands — a reopened project's results (restored after the page appeared) set neither.
         .onChange(of: acceptedVariantCount) { n in
-            topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal)
+            topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,
+                            landedByRun: TopologyResultsNotice.landedByRun(run.phase))
         }
         .onChange(of: run.isStreaming) { streaming in
             if !streaming { topoNotice.noteFinished(accepted: acceptedVariantCount, resultsOpen: !viewOriginal) }
@@ -12108,10 +12105,11 @@ extension WorkspacePlaceholder {
                      about: {},
                      tertiaryTitle: TopologyPage.smooth.title,
                      tertiary: { openTopologySmooth() },
-                     greyed: has ? [] : [.secondary, .tertiary],
+                     greyed: TopologyPage.hiddenSegments(hasResults: has),
                      noticeDot: topoNotice.dot,
                      menuRows: rows,
-                     editFaces: { openEditFaces() })
+                     editFaces: { openEditFaces() },
+                     hidden: TopologyPage.hiddenSegments(hasResults: has))
             .latticeBandChipKeepOut()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.leading, StageCapsuleLayout.capsuleLeft)
@@ -12140,12 +12138,15 @@ extension WorkspacePlaceholder {
         setupPanelOpen = false
         surfaceResetTools()
         editFacesHostReturn = onReturn
+        editFacesDiscardAsking = false
+        project.openFaceEditing()        // B8: what Discard goes back to
         editFaces.enter(from: origin)
     }
 
     /// ★ DONE — keep every edit (each already its own undo step), put the tools down, and go back to the exact page.
     func finishEditFaces() {
-        project.sealUndoStep()
+        project.closeFaceEditing()
+        editFacesDiscardAsking = false
         leaveEditFacesTools()
         let back = editFacesHostReturn
         editFacesHostReturn = nil
@@ -12167,6 +12168,13 @@ extension WorkspacePlaceholder {
         }
     }
 
+    /// ★ B8 — DISCARD (asked first, in place): every face edit since Edit faces opened is undone as ONE step (one Undo brings
+    /// them back), then the way back is Done's.
+    func discardEditFaces() {
+        project.discardFaceEdits()
+        finishEditFaces()
+    }
+
     /// The tools at rest, and Paint and the Regions panel shut — they live in Edit faces only.
     private func leaveEditFacesTools() {
         surfaceResetTools()
@@ -12181,6 +12189,24 @@ extension WorkspacePlaceholder {
                 .foregroundStyle(DS.Color.warning.color)
             Text(EditFacesCopy.header).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color)
                 .lineLimit(1).fixedSize()
+                .opacity(editFacesDiscardAsking ? 0 : 1)   // the ask's red button sits here while it asks
+            // ★ B8: DISCARD beside Done — asks in place; the question is the line under the header (it is too long to
+            // sit left of the button at the screen's edge).
+            Button { editFacesDiscardAsking = true } label: {
+                Text(EditFacesCopy.discard).font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle((project.canDiscardFaceEdits ? DS.Color.textPrimary : DS.Color.textDisabled).color)
+                    .padding(.horizontal, DS.Space.m).frame(height: StageCapsuleLayout.segmentHeight)
+                    .background(Capsule().fill(DS.Color.fillSubtle.color))
+                    .frame(minHeight: StageCapsuleLayout.capsuleHeight).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!project.canDiscardFaceEdits)
+            .accessibilityIdentifier("edit-faces-discard")
+            .modifier(ConfirmInPlace(asking: editFacesDiscardAsking, question: nil, destructive: EditFacesCopy.discard,
+                                     confirmKey: "editFacesDiscardConfirm", keepKey: "editFacesDiscardKeep",
+                                     idPrefix: "edit-faces",
+                                     confirm: { discardEditFaces() },
+                                     cancel: { editFacesDiscardAsking = false }))
             Button { finishEditFaces() } label: {
                 Text(EditFacesCopy.done).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
                     .padding(.horizontal, DS.Space.l).frame(height: StageCapsuleLayout.segmentHeight)
@@ -12197,6 +12223,16 @@ extension WorkspacePlaceholder {
         .dsShadow(DS.Shadow.panel)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("edit-faces-header")
+        .overlay(alignment: .bottomLeading) {
+            if editFacesDiscardAsking {
+                Text(EditFacesCopy.discardAsk).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).fixedSize()
+                    .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+                    .background(Capsule().fill(DS.Surface.bar.color))
+                    .offset(y: StageCapsuleLayout.capsuleHeight)
+                    .accessibilityIdentifier("edit-faces-discard-question")
+            }
+        }
         .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.leading, StageCapsuleLayout.capsuleLeft)
@@ -12719,8 +12755,8 @@ extension WorkspacePlaceholder {
     // MARK: the Regions page (B1 list)
 
     /// Groups and lattice regions in ONE list: the eye (view only), the trash (asked in place, "from every stage", one
-    /// Undo — ProjectModel.trashGroup), the open group's rows (today's: role chips, depth and expand boxes); then the Grade
-    /// pair (today's density band).
+    /// Undo — ProjectModel.trashGroup), the open group's rows (today's: role chips, depth and expand boxes). B8: no Grade
+    /// pair — Grade lives only on the Cells page.
     var latticeSelectionsList: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             SelectionsList(project: project, collapsed: $selectionsCollapsed, picked: selection.activeGroupID,
@@ -12745,20 +12781,7 @@ extension WorkspacePlaceholder {
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
             if !selectionsCollapsed {
-                HStack(spacing: DS.Space.s) {
-                    Text("Grade").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
-                    regionsGradeBox("regions-grade-from", title: "Grade from", value: project.lattice.maxRelativeDensity) { v in
-                        project.lattice.maxRelativeDensity = Swift.max(Swift.min(v, 1), project.lattice.minRelativeDensity + 0.02)
-                    }
-                    Text("\u{2192}").font(.system(size: 13, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
-                    regionsGradeBox("regions-grade-to", title: "Grade to", value: project.lattice.minRelativeDensity) { v in
-                        project.lattice.minRelativeDensity = Swift.min(Swift.max(v, 0), project.lattice.maxRelativeDensity - 0.02)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, DS.Space.m)
-                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
-                .accessibilityIdentifier("lattice-regions-grade")
+                // ★ B8 (his answer 2026-10-24): Grade lives ONLY on the Cells page — no Grade pair here.
                 HStack(spacing: DS.Space.s) {
                     if let t = topoTrashed, project.canUndoTrash(t) {
                         HStack(spacing: DS.Space.s) {
@@ -12774,29 +12797,6 @@ extension WorkspacePlaceholder {
                 }
             }
         }
-    }
-
-    /// A Grade box: types on the keypad; closing it is the commit (one bake), as the region rows' pads do.
-    private func regionsGradeBox(_ key: String, title: String, value: Double,
-                                 write: @escaping (Double) -> Void) -> some View {
-        Text("\(Int((value * 100).rounded())) %")
-            .font(.system(size: 12, weight: .bold)).monospacedDigit()
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .padding(.vertical, 4).padding(.horizontal, DS.Space.m)
-            .background(Capsule().fill(DS.Color.fillSelected.color))
-            .frame(minHeight: 44).contentShape(Rectangle())
-            .onTapGesture { depthPadKey = key }
-            .numberPad(Binding(get: { depthPadKey == key },
-                               set: { if !$0 {
-                                   depthPadKey = nil
-                                   if showStrutPreview, project.lattice.enabled { buildStrutScene() }
-                               } }),
-                       config: .init(title: title, unit: "%", allowsDecimal: false),
-                       seed: (value * 100).rounded()) { v in
-                guard let v else { return }
-                write(v / 100)
-            }
-            .accessibilityIdentifier(key)
     }
 }
 

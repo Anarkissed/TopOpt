@@ -64,13 +64,17 @@ public struct EditFacesSession: Equatable, Sendable {
 public enum EditFacesCopy {
     public static let header = "Editing faces"
     public static let done = "Done"
+    /// ★ B8: Discard, beside Done — asks in place first (ConfirmInPlace).
+    public static let discard = "Discard"
+    public static let discardAsk = "Discard every face edit since you opened Edit faces?"
     public static let paint = "Paint"
-    public static let paintSTL = "Drag across the mesh to paint a face. STL parts only."
+    /// ★ B8: any non-STEP mesh paints (STL, 3MF, OBJ) — the line names no one format.
+    public static let paintSTL = "Drag across the mesh to paint a face."
     public static let paintSTEP = "Not for STEP: its CAD faces are already exact."
 }
 
-/// ★ PAINT LIVES IN EDIT FACES (his pick): shown only there, and only usable on a mesh (STL) part; on a STEP part it is
-/// greyed with one line why. Outside Edit faces it is absent on every stage.
+/// ★ PAINT LIVES IN EDIT FACES (his pick): shown only there, and usable on ANY non-STEP mesh (STL, 3MF, OBJ — his answer
+/// 2026-10-24); on a STEP part it is greyed with one line why. Outside Edit faces it is absent on every stage.
 public enum EditFacesPaint {
     public enum Row: Equatable, Sendable {
         case hidden

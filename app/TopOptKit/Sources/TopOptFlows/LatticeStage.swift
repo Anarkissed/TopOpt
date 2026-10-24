@@ -343,6 +343,8 @@ public enum LatticeCellsRow: String, Equatable, Sendable, CaseIterable {
     public static let overhangsLine = "Printed as traced: core removed the flare stage (#358)."
     /// The tabs share one set of settings today.
     public static let tabsNote = "These settings apply to every region today."
+    /// ★ B8: the Density row's choices. No "Sim": Along's "By stress" sets it (the same `densityMode = .sim`).
+    public static let densityChoices: [LatticeDensityMode] = [.uniform, .perRegion]
 }
 
 extension NumberPad.Config {

@@ -19,7 +19,7 @@ import TopOptKit
 
 // MARK: - the pages (T2)
 
-/// Topology's three pages. Setup is always open to him; Results and Smooth stay grey until a run has results.
+/// Topology's three pages. Setup is always open to him; Results and Smooth are hidden until the project has results (B8).
 public enum TopologyPage: String, Equatable, Sendable, CaseIterable {
     case setup, results, smooth
 
@@ -39,6 +39,15 @@ public enum TopologyPage: String, Equatable, Sendable, CaseIterable {
 
     /// Results and Smooth need a run's results; Setup never greys.
     public static func enabled(_ p: TopologyPage, hasResults: Bool) -> Bool { p == .setup || hasResults }
+
+    /// ★ B8 (his answer 2026-10-24): Results and Smooth are HIDDEN while the project has no results — not greyed. They
+    /// appear when a run lands, or on reopening a project that has results.
+    public static func shown(hasResults: Bool) -> [TopologyPage] { hasResults ? allCases : [.setup] }
+
+    /// The capsule's segments to hide (Results = secondary, Smooth = tertiary). The greyed ✂ is not a page: it stays.
+    public static func hiddenSegments(hasResults: Bool) -> Set<StageCapsule.Page> {
+        hasResults ? [] : [.secondary, .tertiary]
+    }
 
     /// The variant Smooth opens on: the recommendation — "the last accepted rung" (ResultsModel.isRecommended's one rule).
     public static func smoothVariant(_ outcome: OptimizeOutcome?) -> Int? {
@@ -60,8 +69,12 @@ public struct TopologyResultsNotice: Equatable, Sendable {
 
     /// The run's accepted-variant count moved. More variants than he was told about, while Results is shut: the dot and the
     /// message. NEVER a page change — this type cannot open anything.
-    public mutating func note(accepted: Int, streaming: Bool, resultsOpen: Bool) {
+    /// ★ B8 (his answer 2026-10-24): the dot means "new results since you last looked" — only a run that LANDS sets it.
+    /// A reopened project's results arrive after the page appears (persist-c restores them off the main thread), so the
+    /// count moves with no run: `landedByRun: false` takes them as already seen (no dot, no message).
+    public mutating func note(accepted: Int, streaming: Bool, resultsOpen: Bool, landedByRun: Bool = true) {
         if accepted < told { told = accepted }            // a new run retired the old variants
+        guard landedByRun else { told = accepted; return }
         guard accepted > told else { return }
         told = accepted
         guard !resultsOpen else { return }
@@ -77,6 +90,11 @@ public struct TopologyResultsNotice: Equatable, Sendable {
 
     /// A project opened with results already on it: nothing new has landed, so no dot (the Results segment is simply live).
     public mutating func seed(accepted: Int) { told = accepted }
+
+    /// Whether the outcome moved because a run is landing (streaming, or resolved with results of its own). Never a restore
+    /// from disk (only while idle, `RunModel.restoreOutcome`), nor a failed or cancelled run putting the PREVIOUS run's
+    /// variants back (`restorePreservedOutcome`): neither is new.
+    public static func landedByRun(_ phase: RunPhase) -> Bool { phase == .running || phase == .succeeded }
 
     /// He opened Results.
     public mutating func opened() { dot = false; message = nil }

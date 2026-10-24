@@ -104,7 +104,7 @@ final class TopologyStageTests: XCTestCase {
         let start = try XCTUnwrap(ws.range(of: "private func startRun() {"))
         let body = String(ws[start.lowerBound...].prefix(3000))
         XCTAssertFalse(body.contains("viewOriginal = false"), "a run must not open Results")
-        XCTAssertTrue(ws.contains("topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal)"))
+        XCTAssertTrue(ws.contains("topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,"))
     }
 
     // MARK: - B1: the eye is view-only; the trash asks, then one Undo
@@ -193,7 +193,7 @@ final class TopologyStageTests: XCTestCase {
         let ws = try Self.workspaceSource()
         XCTAssertFalse(ws.contains("ForEach(stage.drawsForwardButtons ? stage.forward : [], id: \\.rawValue)"),
                        "B5: the forward column of stage buttons is gone with the Surface stage")
-        XCTAssertTrue(ws.contains("editFaces: { openEditFaces() })"), "the capsule's ✂ opens Edit faces")
+        XCTAssertTrue(ws.contains("editFaces: { openEditFaces() },"), "the capsule's ✂ opens Edit faces")
         // the capsule's menu row and the ✂ both take the same action
         var went: [WorkspaceStage] = []; var edited = 0
         StageCapsule.perform(.editFaces, fold: nil, go: { went.append($0) }, about: {}, editFaces: { edited += 1 })

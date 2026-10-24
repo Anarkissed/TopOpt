@@ -7,6 +7,11 @@
 // holds the moves as data — what changes, what it animates from and to, and how
 // long — so the cinematics are testable and the view stays a renderer.
 //
+// ★ B8 (his answer 2026-10-24): the full-screen page these cinematics played on is DELETED, and with it the cinematics
+// (the cinematic enum, its player state, the stress-wipe reveal) and the sample cube's mesh. What is left is
+// the selections and their rules, which the lattice stage's Cells page reads. The stage list below is now the Cells
+// page's two views (One cell / In the part); nothing animates.
+//
 // THE ORDER IS THE TEACHING (§2):
 //
 //   STAGE A — ONE CELL, ALONE. Pick the TYPE → the cell MORPHS into it. Set the
@@ -24,7 +29,6 @@
 // walked through it.
 
 import Foundation
-import simd
 
 /// Which stage the page is showing.
 ///
@@ -121,41 +125,11 @@ public enum LatticeWizardSetting: String, Equatable, Sendable, CaseIterable {
     public var isRenderedByCellSize: Bool { self == .size }
 }
 
-/// One cinematic. The view plays it; this says what it IS.
-public enum LatticeWizardCinematic: String, Equatable, Sendable {
-    /// Type changed: the struts morph from the old family into the new one.
-    case morph
-    /// The single cell flies into the part and tiles outward.
-    case tile
-    /// The stress field wipes down the part, then the camera dives into the
-    /// densest lattice — "density follows stress", shown.
-    case stressWipeAndDive
-    /// Auto cell size: jump straight to the sample at the derived cell.
-    case jumpToSample
-    /// Boundary finish: the same part, the four finishes, switchable.
-    case boundarySwap
-
-    /// Seconds. Long enough to read as a move, short enough not to be a wait.
-    public var duration: Double {
-        switch self {
-        case .morph: return 0.45
-        case .tile: return 1.1
-        case .stressWipeAndDive: return 2.2
-        case .jumpToSample: return 0.5
-        case .boundarySwap: return 0.35
-        }
-    }
-}
-
 /// The page's own state — the user's selections plus where the cinematics are.
 /// A value type: the view owns one, the tests drive one.
 public struct LatticeWizardModel: Equatable, Sendable {
 
     public var stage: LatticeWizardStage = .cell
-    /// The cinematic currently playing, and a token that changes on every replay
-    /// so the view restarts an animation even when the same one is re-requested.
-    public private(set) var playing: LatticeWizardCinematic?
-    public private(set) var playToken: Int = 0
 
     // ── the selections (Stage A) ────────────────────────────────────────────
     public var topologyID: String
@@ -203,10 +177,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
     /// one the stored settings enforce — not a second, similar rule written in
     /// the view.
     public var simulateStresses: Bool = true
-
-    /// The top-centre disclaimer (§3b) — one line, an X, dismissible, and it
-    /// stays dismissed for the session.
-    public var showDisclaimer: Bool = true
 
     public init(topologyID: String = LatticeType.octet.id,
                 cellMM: Double = 6,
@@ -509,15 +479,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
 
     // MARK: the moves
 
-    /// Play a cinematic. Always bumps the token, so re-requesting the same one
-    /// restarts it (the "tap the lit chip again" case).
-    public mutating func play(_ c: LatticeWizardCinematic) {
-        playing = c
-        playToken += 1
-    }
-
-    public mutating func finishedPlaying() { playing = nil }
-
     /// ★ GO BACK AND FORTH BETWEEN THE TWO VIEWS (maintainer, 2026-08-14). This
     /// was `advance()` — a one-way Next through three stages. The views are now
     /// switchable in either direction from the segment at the bottom of the modal,
@@ -542,10 +503,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public mutating func move(to s: LatticeWizardStage) {
         guard s != stage else { return }
         stage = s
-        switch s {
-        case .cell: playing = nil; playToken += 1
-        case .lattice: play(.tile)
-        }
     }
 
     /// Setting the TYPE morphs the cell (§2 Stage A). Never a swap.
@@ -553,7 +510,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         guard id != topologyID else { return }
         topologyID = id
         stage = .cell            // §5c: the type's visual output is the lone cell
-        play(.morph)
     }
 
     /// ★ THE STAGE-A → STAGE-B TRANSITION. Once type, size and thickness are set,
@@ -561,14 +517,12 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public mutating func enterLattice() {
         guard stage != .lattice else { return }
         stage = .lattice
-        play(.tile)
     }
 
     /// The user who knows what they want: jump anywhere, any time (§2, the
     /// persistent modal). No cinematic — a jump is not a lesson.
     public mutating func jump(to s: LatticeWizardStage) {
         stage = s
-        playing = nil
     }
 
     /// Auto DENSITY plays the stress explanation; uniform does not (there is
@@ -579,7 +533,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         // Density is an IN-THE-PART setting now, so showing it means showing the
         // tiled sample — never the lone cell.
         stage = LatticeWizardSetting.density.stage
-        play(m == .sim ? .stressWipeAndDive : .tile)
     }
 
     /// Auto CELL SIZE jumps straight to the sample and shows how it looks (§2 C).
@@ -593,7 +546,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         cellSizeMode = m
         if m == .auto {
             stage = LatticeWizardSetting.cellSize.stage
-            play(.jumpToSample)
         }
     }
 
@@ -626,7 +578,7 @@ public struct LatticeWizardModel: Equatable, Sendable {
     public var finishLockedBySingleCell: Bool { singleCellMembers }
     public mutating func setSingleCellMembers(_ on: Bool) {
         singleCellMembers = on
-        if on, boundary != .fullSkin { boundary = .fullSkin; play(.boundarySwap) }
+        if on, boundary != .fullSkin { boundary = .fullSkin }
     }
     @discardableResult
     public mutating func setBoundary(_ b: LatticeBoundaryTreatment) -> Bool {
@@ -634,146 +586,6 @@ public struct LatticeWizardModel: Equatable, Sendable {
         if finishLockedBySingleCell, b != .fullSkin { return false }
         boundary = b
         stage = LatticeWizardSetting.finish.stage
-        play(.boundarySwap)
         return true
-    }
-
-    // MARK: what the centre stage should render
-
-    /// How many cells across the sample at the current cell size — the number the
-    /// tile animation counts up to. Bounded so a tiny cell cannot ask for a mesh
-    /// the device will not draw in time (§3c: the sample is tessellated small).
-    public var cellsAcross: Int {
-        let n = Int((LatticeWizardSample.lengthMM / max(0.5, cellMM)).rounded())
-        return min(Self.maxCellsAcross, max(1, n))
-    }
-
-    /// The tessellation ceiling. Chosen so the worst case stays a few thousand
-    /// triangles — the reason the preview is fast is that the sample is SMALL and
-    /// tessellated at screen resolution, not anything about a file format.
-    public static let maxCellsAcross = 5
-
-    /// The mesh the centre stage shows right now: one cell in Stage A, the tiled
-    /// block in Stage B. `progress` in [0, 1] drives the tile expansion.
-    /// - Parameter derivedCellMM: the cell CORE'S OWN DERIVATION gives the declared
-    ///   member under the CURRENT floor — supplied by the page, which owns the print
-    ///   bead and the declared depths this model does not carry. Non-nil ⇒ the sample
-    ///   is drawn at that cell, so the single-cell/member toggle (floor 2 → 1) is
-    ///   VISIBLE on the sample instead of decorative (his backlog, 2026-08-24: "the
-    ///   settings-page sample patch does not change when the single-cell/member
-    ///   toggle moves"). nil ⇒ the stored `cellMM`, exactly as before.
-    public func stageMesh(progress: Double = 1,
-                          derivedCellMM: Double? = nil,
-                          // ★ The single-cell floor, for the stepped sample's
-                          // coarse half (1 ⇒ one cell fills it). nil ⇒ legacy.
-                          steppedCoarsePerHalf: Int? = nil,
-                          /// ★ Dyadic stepping — the sample run grades in twos.
-                          dyadicSteps: Bool = false) -> ViewerMesh {
-        let cellMM = derivedCellMM ?? self.cellMM
-        let cells = stage == .cell
-            ? 1
-            : max(1, Int((Double(cellsAcross) * max(0, min(1, progress))).rounded()))
-        // ★ THE SAMPLE, SAID OUT LOUD — the 2026-08-25 round burned an hour on a
-        // sample that never changed while every control claimed it should.
-        NSLog("DIAG sampleMesh stage=\(stage) transition=\(cellTransition.rawValue) "
-              + "k=\(steppedCoarsePerHalf.map(String.init) ?? "nil") cells=\(cells) "
-              + "cellMM=\(String(format: "%.2f", cellMM)) derived=\(derivedCellMM != nil)")
-        // ★ §10 — THE FINISH REACHES THE GEOMETRY. This call omitted `boundary`
-        // entirely, so None / Rim / Skin all produced the same mesh and the chips
-        // were decoration. The lone cell shows no boundary — a single cell has no
-        // block to dress — so the finish appears in the IN THE PART view, which is
-        // also the view its control now lives in.
-        // ★ AND THE GRADE REACHES IT TOO. A single cell has no transition to show, so
-        // the cell view stays the one cell; the IN THE PART view is where the three
-        // algorithms differ, which is also where the control lives.
-        // ★ no strut table for the id (item a): an empty sample — the Type row already says why
-        // (the type catalog's refusal line); never an octet cell under another name
-        guard let lattice else { return ViewerMesh(vertices: [], indices: [], faceIDs: []) }
-        return LatticeSamplePatch.mesh(lattice: lattice, cellMM: cellMM,
-                                       cells: cells,
-                                       // ★ CLAMPED FOR LEGIBILITY, DISPLAY-ONLY,
-                                       // IN-THE-PART ONLY (2026-08-25): his
-                                       // aesthetic band stores max = 1.0, and at
-                                       // solid density every strut fuses — the
-                                       // block sample WAS the quilt ("It looks
-                                       // terrible"). The block's job is
-                                       // STRUCTURE, so its struts draw at a
-                                       // density that never fuses. The ONE CELL
-                                       // view keeps the honest thickness (that
-                                       // view exists to show it), and the
-                                       // model's own value round-trips to
-                                       // maxRelativeDensity on Save & Exit and
-                                       // must not move.
-                                       relativeDensity: stage == .cell
-                                           ? relativeDensity
-                                           : min(0.35, relativeDensity),
-                                       boundary: stage == .cell ? .none : boundary,
-                                       transition: stage == .cell
-                                           ? .defaultGrade : cellTransition,
-                                       steppedCoarsePerHalf: stage == .cell
-                                           ? nil : steppedCoarsePerHalf,
-                                       dyadicSteps: dyadicSteps)
-    }
-
-    /// The triangle count the current stage will draw — the latency budget, known
-    /// before the mesh is built.
-    public var stageTriangleCount: Int {
-        lattice.map { LatticeSamplePatch.triangleCount(lattice: $0,
-                                                       cells: stage == .cell ? 1 : cellsAcross) } ?? 0
-    }
-}
-
-/// ★ §7 — WHY THE SAMPLE WAS INVISIBLE, AS A TYPE THAT CANNOT DO IT AGAIN.
-///
-/// THE DEFECT, with the two lines that caused it. `LatticeSetupWizard` passed the
-/// renderer
-///
-///     reveal: Float(model.densityMode == .sim ? wipe : 1)     (line 75)
-///     @State private var wipe: Double = 0                      (line 42)
-///
-/// and `MetalMeshView`'s fragment shader discards every fragment above the reveal
-/// height:
-///
-///     if (t > reveal.x) discard_fragment();                    (line 126)
-///
-/// §4b of the previous task had already made `densityMode` default to `.auto` on a
-/// new project, so the page opened with `reveal = 0` and the shader threw away
-/// every pixel of a mesh that had been built, uploaded and counted. That is the
-/// maintainer's report exactly: an empty viewport with "1 ms · 544 tris" beside it.
-/// Nothing was wrong with the camera, the scale or the frustum — the geometry was
-/// on screen and each of its fragments was individually discarded.
-///
-/// THE SHAPE OF THE FIX. The wipe is a CINEMATIC — a thing that runs and finishes —
-/// not a property of a setting. So it is modelled as one: the reveal is 1 unless a
-/// wipe is actually running, and `begin`/`end` bracket it. A density mode can no
-/// longer hold the page blank, because the density mode is not an input here.
-public struct LatticeWizardReveal: Equatable, Sendable {
-
-    /// How far the wipe has come, 0…1. Meaningless unless `wiping`.
-    public private(set) var fraction: Double = 0
-    /// Whether a wipe is running RIGHT NOW.
-    public private(set) var wiping: Bool = false
-
-    public init() {}
-
-    /// ★ WHAT THE RENDERER GETS. 1 — everything drawn — unless a wipe is running.
-    public var value: Double { wiping ? fraction : 1 }
-
-    public mutating func begin() {
-        wiping = true
-        fraction = 0
-    }
-
-    public mutating func step(to f: Double) {
-        guard wiping else { return }
-        fraction = Swift.min(1, Swift.max(0, f))
-    }
-
-    /// The wipe landed (or was interrupted by a stage change): the part is whole
-    /// again. Every exit from a wipe goes through here, so there is no path that
-    /// leaves the page holding a partial reveal.
-    public mutating func end() {
-        wiping = false
-        fraction = 1
     }
 }

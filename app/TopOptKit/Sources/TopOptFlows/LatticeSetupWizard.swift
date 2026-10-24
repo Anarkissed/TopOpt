@@ -13,27 +13,14 @@
 // was a wizard. Every control lived in the left modal, so the page was a settings
 // panel that happened to animate.
 //
-// THE LAYOUT NOW.
-//
-//   centre        the object, AND the wizard card directly beneath it: this
-//                 stage's decision, alone, with NEXT (§5a).
-//   centre-left   the persistent modal — every selection, always live, grouped
-//                 under SUB-TITLES THAT ARE THE WIZARD'S STAGES (§5c). Centred
-//                 vertically, clear of the top and bottom edges (§6).
-//   top-centre    the disclaimer: one line, an X.
-//   bottom-right  Save & Exit → back to the lattice page.
-//
-// ★ AND THEY ARE ONE STATE MACHINE, NOT TWO UIs (§5c / bar R5). Changing a
-// setting in the modal calls `model.touched(_:)`, which moves the wizard to that
-// setting's stage so the change is SEEN; Next calls `model.advance()`, which moves
-// the modal's highlighted sub-title. The mapping is `LatticeWizardSetting.stage` —
-// one table, read by both.
-//
-// ★ §7 — THE SAMPLE IS VISIBLE. See `LatticeWizardReveal` for the defect this
-// page shipped with and why the fix is a type rather than a condition.
+// ★ B8 (his answer 2026-10-24): THE FULL-SCREEN PAGE IS DELETED. Since B4 every presentation was the lattice stage's
+// CELLS page (`.cellsPage`), so the full-screen settings page — the sample cube in the centre, its cinematics (morph,
+// tile, stress wipe and dive, boundary swap), the disclaimer, the top-left Save & Exit and the Refresh cube button — was
+// unreachable. What is left is the one panel: every selection, grouped under the two views (One cell / In the part,
+// `viewSwitcher`), with the Cells page's header, tabs and added rows. A setting still has ONE way in and ONE way to the
+// job: Save (the header) or the capsule's Regions (`closeToken`) runs `saveAndClose`.
 
 import SwiftUI
-import simd
 import TopOptDesign
 import TopOptKit
 
@@ -43,30 +30,6 @@ public struct LatticeSetupWizard: View {
     let onExit: () -> Void
 
     @State private var model: LatticeWizardModel
-    /// The stage camera — OWNED BY THE WORKSPACE so its single gizmo follows it
-    /// (item 4.1); a fresh one when the wizard is shown alone (tests, previews).
-    @ObservedObject private var camera: OrbitCameraModel
-    /// The tile expansion, 0…1 — animated by `.tile`, and what `stageMesh` reads.
-    @State private var tileProgress: Double = 1
-    /// ★ §7 — the stress wipe. A CINEMATIC that runs and finishes, never a
-    /// property of a setting: `reveal.value` is 1 unless a wipe is running.
-    @State private var reveal = LatticeWizardReveal()
-    /// Last measured build+upload time for the centre object, in ms (R4 of the
-    /// previous task — kept, because it is the page's own honesty about latency).
-    @State private var lastLatencyMS: Double = 0
-    @State private var mesh: ViewerMesh?
-    // ★★★ THE SAMPLE REFRESHES WHEN HE ASKS (his instruction, 2026-09-07: "we need to
-    // have it so there is a 'Refresh Cube' button that brings in the latest
-    // modifications since the previous refresh — this way we don't have to do 6
-    // different bakes simultaneously after changing 6 settings"). Bumping this is the
-    // only thing that re-traces; every control below simply marks the sample stale.
-    @State private var sampleRefreshToken = 0
-    /// Settings have moved since the last refresh — the button says so.
-    @State private var sampleIsStale = false
-    /// The picks the cube on screen was traced with, so a refresh that changes nothing
-    /// is not offered as one.
-    @State private var appliedOrganicPicks: OrganicSampleCube.Picks?
-    @State private var refreshInfoShown = false
     /// ★ §5 — which numeric field has the keypad open. One at a time, keyed by the
     /// field's id, so every number on this page types as well as drags.
     @State private var numberPadField: String?
@@ -106,19 +69,8 @@ public struct LatticeSetupWizard: View {
 
     public init(project: ProjectModel, onExit: @escaping () -> Void) {
         self.project = project
-        self.camera = OrbitCameraModel()
         self.onExit = onExit
         _model = State(initialValue: LatticeWizardModel(settings: project.lattice))
-    }
-
-    /// Draw the stage with the WORKSPACE's camera for it, so the one gizmo (bound to
-    /// that camera while the wizard is up) mirrors the sample. A modifier rather than
-    /// an init argument: the call site's literal shape is pinned by
-    /// `LatticeStressTintTests.testSaveAndExitIsWhatCallsIt`.
-    public func stageCamera(_ c: OrbitCameraModel) -> LatticeSetupWizard {
-        var v = self
-        v._camera = ObservedObject(wrappedValue: c)
-        return v
     }
 
     // MARK: ★ B4 — THE CELLS PAGE (the redesign's Lattice stage, 2026-10-24)
@@ -147,26 +99,15 @@ public struct LatticeSetupWizard: View {
     public var body: some View {
         GeometryReader { geo in
             ZStack {
-                if cellsPage == nil {
-                DS.Color.background.color.ignoresSafeArea()
-                stageView
-                }
                 // ★ ONE MODAL (maintainer, 2026-08-14): *"Combine the two modals
                 // together. Place the one on the right at the very bottom of the
                 // one on the left."* The floating wizard card is gone; its view
                 // switch is the last row inside this panel.
                 selectionsModal
                     .modifier(WizardModalPlacement(canvasHeight: geo.size.height))
-                if cellsPage == nil {
-                disclaimer
-                saveAndExit
-                refreshSample
-                }
             }
         }
-        // ★ §7b — FRAME THE SAMPLE ON ENTRY, at a sensible size, whatever the
-        // camera was doing before.
-        .onAppear { rebuild(force: true); frameSample() }
+        .onAppear { rebuild() }
         // ★ B4: the capsule's Regions leaves the Cells page through today's Save
         .onChange(of: cellsPage?.closeToken) { _ in saveAndClose() }
         .background(GeometryReader { g in
@@ -189,29 +130,10 @@ public struct LatticeSetupWizard: View {
         } message: {
             Text(organicNotice?.message ?? "")
         }
-        .onChange(of: model.playToken) { _ in playCurrent() }
-        // ★ §7b — …AND ON EVERY STAGE TRANSITION. A stage change swaps one cell
-        // for a tiled block (or back), which is a different object at a different
-        // scale, and the previous stage may have left the camera mid-dive.
-        .onChange(of: model.stage) { _ in rebuild(force: true); frameSample() }
+        .onChange(of: model.stage) { _ in rebuild() }
         .onAppear { if openedLattice == nil { openedLattice = project.lattice } }
     }
 
-    // MARK: the centre — the object
-
-    /// ★★★ THE ORGANIC SAMPLE IS THE PR 353 TEST CUBE, AS PRINTED (maintainer,
-    /// 2026-09-03) — its real emitted spans, rendered through the SAME path a run's
-    /// spans take (`OrganicSpanIndex` bake + the march, `LatticeSDFScene`), at the
-    /// radius in the span file, free tips kept, no rescale. The box mesh is drawn at
-    /// alpha 0: it only clips the march to the part, exactly as a run's part does.
-    @State private var organicScene: LatticeSDFScene?
-    @State private var organicSceneToken = 0
-    /// What the sample bake indexed against the receipt bundled beside the spans —
-    /// the same §10 check a run gets. Shown in the banner; nil when not organic.
-    @State private var organicSampleMeasurement: String?
-    /// What the sample is doing right now (solving, re-tracing, refused) — the banner
-    /// shows it while it lasts; the census stays behind the (i).
-    @State private var organicSampleStatus: String?
     /// Which (i) popover is open, by id — one at a time.
     @State private var infoShown: String?
     /// the settings as they were when the page opened — "Exit" until they differ
@@ -247,158 +169,6 @@ public struct LatticeSetupWizard: View {
     /// ★ THE SETTING, NOT VIEW STATE (2026-09-07) — see `LatticeSettings.organicShowRepairs`.
     private var organicShowRepairs: Bool { project.lattice.organicShowRepairs }
     private var organicSampleShown: Bool { model.cellTransition == .organicGrade }
-
-    private var stageView: some View {
-        MetalMeshView(mesh: mesh, camera: camera,
-                      // ★ STAND THE SAMPLE UP (maintainer, 2026-09-03: "the top face
-                      // should be the left side and the left face should be the
-                      // bottom"). The viewer is Y-up (+Y is the gizmo's "Top", +Z its
-                      // "Front"); the samples — the cube's FEA, its STL, the block —
-                      // are Z-up. The workspace settles a part with the same
-                      // quaternion from its gravity (ForceModel.settleRotation); the
-                      // wizard passed none, so the cube's top faced the camera.
-                      settleRotation: Self.settleZUp,
-                      stressTints: model.stage != .cell && model.densityMode == .sim
-                          ? sampleTints : nil,
-                      // ★ §7 — ONE input, and it is the cinematic's own progress.
-                      // It was `densityMode == .sim ? wipe : 1`, with `wipe`
-                      // starting at 0 and `.auto` the default: the page opened
-                      // with every fragment discarded.
-                      reveal: Float(reveal.value),
-                      bodyAlpha: organicSampleShown ? 0 : 1,
-                      latticeLayer: organicScene.map {
-                          LatticeLayerInputs(scene: $0, params: LatticeProxyParams(),
-                                             sceneToken: organicSceneToken, faceTints: [:],
-                                             // ★ Thicker is LIVE: a radius uniform on
-                                             // the march, never a re-trace (2026-09-04)
-                                             organicRadiusMM: Float(model.organicStrutWidthMM > 0
-                                                                    ? model.organicStrutWidthMM / 2 : 0))
-                      })
-            .ignoresSafeArea()
-            // ★ ONLY ON REFRESH (2026-09-07). The task used to be keyed to the PICKS,
-            // so every control re-keyed it — and while SwiftUI cancels the outer task,
-            // the DETACHED trace inside `OrganicSampleCube.baked` runs to completion
-            // regardless, so six changes left six traces grinding at once. (The old key
-            // is not named here: a source-text guard counts comments, and this file has
-            // paid that toll before.)
-            .task(id: sampleRefreshToken) { await loadOrganicSample(organicSamplePicks) }
-    }
-
-    /// Model −Z (gravity, build plate down) → viewer −Y: the same map the workspace
-    /// applies to a part once gravity is set.
-    static let settleZUp = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
-
-    /// Re-fit the camera to whatever is on the stage now. `reframe` re-anchors the
-    /// look-at target on the object's own centre and refits the distance, so it
-    /// also clears the pan the Stage-C dive left behind.
-    private func frameSample() {
-        guard let m = mesh, !m.isEmpty else { return }
-        camera.reframe(m.bounds)
-    }
-
-    /// The BAKED field mapped onto the tiled block's vertices by height — the
-    /// sample's own field, never a solve.
-    private var sampleTints: [SIMD4<Float>] {
-        guard let m = mesh else { return [] }
-        let p = m.positions
-        let n = p.count / 3
-        guard n > 0 else { return [] }
-        let half = Float(LatticeWizardSample.heightMM) / 2
-        var out = [SIMD4<Float>](); out.reserveCapacity(n)
-        for i in 0..<n {
-            let z = p[i * 3 + 2], x = p[i * 3]
-            let moment = max(0, (Float(LatticeWizardSample.lengthMM) / 2 - x))
-                / Float(LatticeWizardSample.lengthMM)
-            let fraction = Double(min(1, moment * abs(z) / max(1e-6, half) * 2))
-            let c = LatticeDensityProxy.densityColor(fraction: fraction)
-            out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
-        }
-        return out
-    }
-
-    // MARK: ★ §5a — THE WIZARD, CENTRE STAGE
-
-    /// ★ §11(a) — THE CARD IS THE WIZARD'S PROGRESS, NOT A SECOND COPY OF THE
-    /// CONTROLS.
-    ///
-    /// ★ THE DEFECT, IN HIS SCREENSHOT: "A DUPLICATE 'FINISH' PANEL FLOATS IN THE
-    /// MIDDLE-BOTTOM OF THE SCREEN, overlapping the model, carrying its own
-    /// Density and Finish rows AND ITS OWN 'SAVE & EXIT' — while a second
-    /// 'Save & Exit' sits bottom-right."
-    ///
-    /// ★ ROOT CAUSE. This card rendered `model.stage.settings` through
-    /// `settingControl`, and `selectionsModal` rendered EVERY stage's settings
-    /// through the same function — so on the Finish stage the Density and Finish
-    /// editors existed TWICE on one screen, once in the left modal and once in a
-    /// 380 pt panel floating over the model. It was duplication by construction,
-    /// not a layout accident.
-    ///
-    /// ★ THE FIX. Each control exists ONCE, in the left modal — the panel §11(c)
-    /// requires every page to have. The card keeps what only it can carry: which
-    /// stage you are on, and the way forward. It is now a short bar rather than a
-    /// stack of editors, so it stops covering the object the page exists to show.
-    private var wizardCard: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: DS.Space.m) {
-                HStack(spacing: DS.Space.s) {
-                    ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
-                        Capsule()
-                            .fill((s == model.stage ? DS.Color.accent
-                                                    : DS.Color.strokeSubtle).color)
-                            .frame(width: s == model.stage ? 22 : 10, height: 4)
-                    }
-                    Text(organicSampleShown && model.stage == .cell ? "Sample" : model.stage.title)
-                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Spacer(minLength: 0)
-                }
-                nextButton
-            }
-            .padding(DS.Space.ml)
-            .frame(width: 380)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                .fill(DS.Surface.panel.color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
-                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(DS.Shadow.panel)
-            .padding(.bottom, PageChrome.edge + PageChrome.actionButton)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Centred in the STAGE — the space the object occupies — not in the raw
-        // canvas, so the card can never land on top of the left modal. On a
-        // portrait iPad a full-width centring puts a 380 pt card 50 pt into a
-        // 348 pt panel, and overlapping chrome is the complaint this page is
-        // being rebuilt to answer.
-        .padding(.leading, PageChrome.panelWidth + PageChrome.edge * 2)
-        .accessibilityIdentifier("wizard-card")
-    }
-
-    /// ★ NEXT advances the wizard (§5a).
-    ///
-    /// ★ §11(a)/R13 — AND ON THE LAST STAGE IT IS NOT A SECOND "SAVE & EXIT".
-    /// It used to relabel itself, which put TWO buttons carrying that exact text
-    /// on one screen: this one, mid-card, and the page's own bottom-right action.
-    /// There is now ONE Save & Exit on the page and it is the corner's, which is
-    /// where every other page in the app puts its primary action (§0 rule S17).
-    @ViewBuilder private var nextButton: some View {
-        if model.hasNext {
-            Button { model.advance() } label: {
-                HStack(spacing: DS.Space.s) {
-                    Text("Next")
-                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(Capsule().fill(DS.Color.accent.color))
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("wizard-next")
-        }
-    }
 
     // MARK: the persistent left modal (§5b/§5c) — every selection, always live
 
@@ -506,7 +276,6 @@ public struct LatticeSetupWizard: View {
             }
             .frame(height: panelRowsFrameHeight)
             .onPreferenceChange(WizardPanelRowsHeightKey.self) { h in panelRowsHeight = h }
-            latencyReadout
             // ★ THE CARD, MOVED HERE: "place the one on the right at the very
             // bottom of the one on the left."
             viewSwitcher
@@ -589,7 +358,7 @@ public struct LatticeSetupWizard: View {
         HStack(spacing: 2) {
             ForEach(LatticeWizardStage.allCases, id: \.rawValue) { s in
                 let on: Bool = (model.stage == s)
-                Button { model.jump(to: s); rebuild(); frameSample() } label: {
+                Button { model.jump(to: s); rebuild() } label: {
                     // ★ "One cell" has no meaning for organic (maintainer, 2026-09-03):
                     // the first tab is the printed cube — "Sample".
                     Text(organicSampleShown && s == .cell ? "Sample" : s.title)
@@ -2044,16 +1813,12 @@ public struct LatticeSetupWizard: View {
                 // does not exist is not a mode — `setSimulateStresses` has
                 // already moved this axis to Uniform, so the segment cannot show
                 // a selection it no longer holds.
-                segmentRow(model.simulateStresses
-                           ? [LatticeDensityMode.sim.title,
-                              LatticeDensityMode.uniform.title,
-                              LatticeDensityMode.perRegion.title]
-                           : [LatticeDensityMode.uniform.title,
-                              LatticeDensityMode.perRegion.title],
+                // ★ B8 (his answer 2026-10-24): NO "Sim" HERE. Along's "By stress" is the one place for it — the same
+                // setting (`densityMode = .sim`, through `chooseAlong(.load)` → `setDensityMode(.sim)`). While it is
+                // on, neither segment is lit and the line says so.
+                segmentRow(LatticeCellsRow.densityChoices.map(\.title),
                            selected: densityModeIndex) { i in
-                    let modes: [LatticeDensityMode] = model.simulateStresses
-                        ? [.sim, .uniform, .perRegion] : [.uniform, .perRegion]
-                    model.setDensityMode(modes[i])
+                    model.setDensityMode(LatticeCellsRow.densityChoices[i])
                 }
                 if model.densityMode.needsSimulation {
                     simDerivedNote("Each region graded from its own stress.")
@@ -2339,18 +2104,9 @@ public struct LatticeSetupWizard: View {
         return modes.firstIndex(of: model.cellSizeMode) ?? 0
     }
     private var densityModeIndex: Int {
-        // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS. With the Sim
-        // permission off, Sim is not in it and everything shifts down one — an
-        // index into a list that is not on screen is how a segment lights the
-        // wrong cell.
-        guard model.simulateStresses else {
-            return model.densityMode == .perRegion ? 1 : 0
-        }
-        switch model.densityMode {
-        case .sim: return 0
-        case .uniform: return 1
-        case .perRegion: return 2
-        }
+        // ★ THE INDEX FOLLOWS THE LIST THE SEGMENT ACTUALLY SHOWS (B8: Uniform, Per region — Sim is Along's "By stress").
+        // Sim lights neither (-1): an index into a list that is not on screen is how a segment lights the wrong cell.
+        LatticeCellsRow.densityChoices.firstIndex(of: model.densityMode) ?? -1
     }
     /// The printable thickness range for the CURRENT topology and cell — see
     /// `LatticeSettings.manualThicknessRangeMM`.
@@ -2416,133 +2172,14 @@ public struct LatticeSetupWizard: View {
         }
     }
 
-    /// The measured build+upload time for the object on screen, always visible.
-    /// A number, not a claim.
-    private var latencyReadout: some View {
-        HStack(spacing: DS.Space.xs) {
-            Text(String(format: "%.0f ms", lastLatencyMS))
-                .font(.system(size: 11, weight: .bold)).monospacedDigit()
-            // ★ THE MESH ON SCREEN, not the uniform-block PREDICTION — the
-            // prediction ignores the transition, so it read 118,920 whatever the
-            // stepped sample drew and cost an hour of "nothing changed" (2026-08-25).
-            Text("\((mesh?.indices.count ?? 0) / 3) tris")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(DS.Color.textQuaternary.color)
-        }
-        .foregroundStyle(DS.Color.textTertiary.color)
-    }
-
     // MARK: chrome
 
-    /// A SMALL TOP-CENTRE MODAL WITH AN X. One line. Dismissible.
-    @ViewBuilder private var disclaimer: some View {
-        if model.showDisclaimer {
-            VStack {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "info.circle.fill").font(.system(size: 11))
-                    // ★ Organic: the truth about the sample, with its measurement
-                    // (maintainer, 2026-09-03: "The PR 353 test cube, as printed. Your
-                    // part will differ." — and the count/length the bake indexed
-                    // against the receipt, the same check a run gets).
-                    // ★ ONE SHORT LINE (item 1): the label, or what the sample is doing
-                    // right now; the census sits behind the (i).
-                    Text(organicSampleShown
-                         ? (organicSampleStatus ?? OrganicSampleCube.label)
-                         : LatticeWizardSample.provenanceNote)
-                        .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .lineLimit(2)
-                    if organicSampleShown, let census = organicSampleMeasurement {
-                        infoButton("sample-census", census)
-                    }
-                    Button { model.showDisclaimer = false } label: {
-                        Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-disclaimer-dismiss")
-                }
-                .foregroundStyle(DS.Color.textSecondary.color)
-                .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
-                .background(Capsule().fill(DS.Surface.bar.color))
-                .padding(.top, PageChrome.topInset)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    /// ★ SAVE & EXIT MOVED TO THE TOP LEFT (his instruction, 2026-09-07) so the
-    /// bottom-right corner carries the button he reaches for while working: Refresh.
-    /// ★ "Exit" when nothing changed since the page opened, "Save & Exit" when something
-    /// did — and that save starts the bake (his 2026-09-21 22:40).
+    /// ★ "Done" when nothing changed since the page opened, "Save" when something did — and that save starts the bake
+    /// (his 2026-09-21 22:40; B4's Cells header).
     private var settingsChangedSinceOpen: Bool {
         guard let opened = openedLattice else { return true }
         return model.applied(to: project.lattice).previewBakeInputs != opened.previewBakeInputs
     }
-    private var saveAndExit: some View {
-        VStack {
-            HStack {
-                Button { saveAndClose() } label: {
-                    Text(settingsChangedSinceOpen ? "Save & Exit" : "Exit")
-                        .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, 12).padding(.horizontal, DS.Space.xl5)
-                        .background(Capsule().fill(DS.Color.accent.color))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("wizard-save-exit")
-                Spacer()
-            }
-            Spacer()
-        }
-        .padding(PageChrome.edge)
-    }
-
-    /// Is there anything a refresh would change?
-    private var sampleNeedsRefresh: Bool {
-        sampleIsStale || (organicSampleShown && organicSamplePicks != appliedOrganicPicks)
-    }
-
-    /// ★★★ REFRESH THE SAMPLE — the one control that starts work. Bottom right, where
-    /// Save & Exit used to be, with the (i) that says what it does.
-    private var refreshSample: some View {
-        VStack {
-            Spacer()
-            HStack {
-                Spacer()
-                HStack(spacing: DS.Space.s) {
-                    Button {
-                        rebuild(force: true)
-                        appliedOrganicPicks = organicSamplePicks
-                        sampleRefreshToken += 1
-                    } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 15, weight: .bold))
-                            Text(organicSampleShown ? "Refresh cube" : "Refresh sample")
-                                .dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, 12).padding(.horizontal, DS.Space.xl4)
-                        .background(Capsule().fill((sampleNeedsRefresh ? DS.Color.accent
-                                                    : DS.Color.textTertiary).color))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("wizard-refresh-sample")
-                    infoButton("refresh", Self.infoRefresh)
-                }
-            }
-            .padding(PageChrome.edge)
-        }
-    }
-
-    static let infoRefresh =
-        "Refresh rebuilds the sample with the settings you have entered since the last "
-        + "refresh.\n\nNothing is rebuilt while you are still choosing, so you can set "
-        + "several things, turn the sample and leave the page without waiting. Your "
-        + "settings are saved whether or not you refresh — the sample is a picture of "
-        + "them, not the record of them.\n\nA lattice traced from your own part's "
-        + "stresses can take minutes to build; this cube is 20 mm and stands in for it." 
-
     /// The window the Look slider is asking for, from the part's declared walls, the
     /// bead and the solve grid — core's band, mapped by the percentage.
     private var lookWindowMM: (lo: Double, hi: Double)? {
@@ -2709,232 +2346,11 @@ public struct LatticeSetupWizard: View {
 
     // MARK: the moves
 
-    /// Rebuild the centre object and MEASURE it. Everything the page draws goes
-    /// through here, so the number on screen is the number for every change.
-    /// ★ `force` is the refresh (and the two moments that are not a settings change:
-    /// opening the page, and switching sheet). Everything else marks the sample stale
-    /// and waits — his rule, and it is what stops the pile-up.
-    private func rebuild(force: Bool = false) {
+    /// What a settings change refreshes on this page: whether any region latticed is an include wall (the refusal lines
+    /// read it). B8: the sample cube this used to rebuild is gone with the full-screen page.
+    private func rebuild() {
         let regions = project.latticeJobRegions().regions
         hasIncludeWallCache = LatticeJobIncludeGate.hasIncludeWall(regions)
-        guard force else {
-            sampleIsStale = true
-            return
-        }
-        guard cellsPage == nil else { return }   // ★ B4: the Cells page draws no sample cube
-        sampleIsStale = false
-        let t0 = CFAbsoluteTimeGetCurrent()
-        mesh = model.stageMesh(progress: tileProgress,
-                               derivedCellMM: derivedSampleCellMM,
-                               // The floor decides how many derived cells fill the
-                               // stepped sample's coarse half: single-cell ⇒ ONE.
-                               steppedCoarsePerHalf: model.cellTransition == .stepped
-                                   ? (model.singleCellMembers ? 1 : 2) : nil,
-                               dyadicSteps: model.cellTransition == .defaultGrade)
-        // ★★★ ORGANIC: the printed cube, through the run's own preview path. Built
-        // ONCE per sheet (the spans do not change with any control here — they are
-        // what core built for that job; the controls describe what the user's run
-        // will ask for), and MEASURED: what the bake indexed against the receipt.
-        // The bake itself is OFF the main thread and cached (`OrganicSampleCube.baked`,
-        // kicked by `.task` on the stage view); here we only show what has landed.
-        if organicSampleShown {
-            // ★★★ A CUBE FROM THE FIRST FRAME (his walk, 2026-09-07: "the cube is not
-            // rendered for quite some time at the start … we need to start with a basic
-            // Organic cube that is always loaded"). The plain 20 mm block is the same
-            // body the traced sample is clipped to, so it costs nothing and the page
-            // can be turned, set and left while the trace is still to be asked for.
-            if let scene = organicScene { mesh = scene.mesh }
-            else { mesh = LatticeWizardSample.cube(edgeMM: OrganicSampleCube.edgeMM, at: .zero) }
-        } else if organicScene != nil {
-            organicScene = nil; organicSampleMeasurement = nil; organicSampleStatus = nil
-        }
-        lastLatencyMS = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-    }
-
-    /// ★ EVERYTHING THE SAMPLE'S TRACE DEPENDS ON, from the sheet's current picks. The
-    /// `.task(id:)` below re-traces exactly when this changes (maintainer, 2026-09-03:
-    /// the sample must follow every permutation of the user's settings).
-    private var organicSamplePicks: OrganicSampleCube.Picks? {
-        guard organicSampleShown else { return nil }
-        // ★ THE SAMPLE KEEPS ITS EMISSION STAGE (core reply 8, 2026-09-20: "Do NOT stop
-        // sending the emission stage for the sample"). His image 1 — the trace's 7462
-        // capsules replaced by 1440 fat sticks — was TWO core bugs: `node_merge`'s
-        // transitive union chained consecutive samples of one member (0.203 mm apart at
-        // r 0.489, 4.8× inside the merge radius) onto one centroid, and every span shorter
-        // than half its radius was then deleted. Both fixed in core 6d6177c4 (spans carry
-        // chain/node ids; short runs coalesce along the chain). Until that core is linked
-        // the sample still collapses — "Preview: show print repairs" OFF keeps the trace.
-        return OrganicSampleCube.Picks(settings: model.applied(to: project.lattice),
-                                       layerHeightMM: project.printParams.layerHeightMM,
-                                       showRepairs: organicShowRepairs)
-    }
-
-    /// Re-traces the PR 353 cube's 20 mm corner with the current picks, off the main
-    /// thread (the cube's FEA is solved once per launch and cached), then publishes the
-    /// scene. Cancels cleanly if the picks change again meanwhile.
-    private func loadOrganicSample(_ picks: OrganicSampleCube.Picks?) async {
-        let token = sampleRefreshToken
-        guard let picks else {
-            if organicScene != nil { organicScene = nil; organicSampleMeasurement = nil }
-            organicSampleStatus = nil
-            return
-        }
-        organicSampleStatus = organicScene == nil
-            ? "Solving the test cube, then tracing it with your settings…"
-            : "Re-tracing the test cube with your settings…"
-        // ★★★ ONE CUBE, NOT TWO (his walk, 2026-09-07, 22:27: "took ~30 seconds for
-        // the first image to show up. It then changed to image 2 after some more time.
-        // This shouldn't happen. It should be a singular sample cube").
-        //
-        // ★ AN HOUR EARLIER I ADDED A SHIPPED CUBE HERE as a stand-in while his own
-        // traced, on the reasoning that a picture beats a wait. He is right and I was
-        // wrong: a cube that is replaced by a DIFFERENT cube is not a faster first
-        // picture, it is two pictures, and the first one describes settings that are not
-        // his. It is gone. The cost belongs where it actually is — see the two-stage
-        // bake below and `OrganicSampleCube.baked`.
-        // ★★ THE TRACED CUBE FIRST (2026-09-06: 46–53 s per sample, all of it core's
-        // emission). With repairs hidden the bridge skips the emission, so this stage
-        // is the solve plus a sub-second trace; the repaired cube replaces it when
-        // core is done. A newer pick cancels both.
-        if picks.showRepairs {
-            var quick = picks
-            quick.showRepairs = false
-            let first = await OrganicSampleCube.baked(picks: quick, latticeID: model.topologyID)
-            guard !Task.isCancelled, sampleRefreshToken == token else { return }
-            if let b = first {
-                let wasEmpty = organicScene == nil
-                organicScene = b.scene; organicSceneToken += 1
-                organicSampleMeasurement = b.measurement
-                mesh = b.mesh
-                if wasEmpty { frameSample() }
-                organicSampleStatus = "Traced. Adding the file's repairs…"
-            }
-        }
-        let baked = await OrganicSampleCube.baked(picks: picks, latticeID: model.topologyID)
-        guard !Task.isCancelled, sampleRefreshToken == token else { return }
-        if let b = baked {
-            let first = organicScene == nil
-            organicScene = b.scene; organicSceneToken += 1
-            organicSampleMeasurement = b.measurement
-            organicSampleStatus = nil
-            mesh = b.mesh
-            appliedOrganicPicks = picks
-            if first { frameSample() }
-        } else {
-            organicSampleStatus = "The cube could not be traced with these settings."
-            organicSampleMeasurement = "Core refused the trace, or the sample's model/materials are not bundled in this build."
-        }
-    }
-
-    /// ★★★ THE CELL THE SAMPLE SHOWS, DERIVED — so the single-cell/member toggle
-    /// moves the sample (his backlog, 2026-08-24). The chain is the BAKE's own:
-    /// core's `latticeRegionDerivation` at the mode's floor, then the
-    /// whole-number-of-cells fit against the declared depth — no law re-derived
-    /// here. The member is the smallest declared include depth, which is exactly
-    /// the pre-measurement fallback the bake itself uses before a scene exists.
-    /// nil (no auto mode, no bead, nothing declared) ⇒ the stored cell, as before.
-    private var derivedSampleCellMM: Double? {
-        guard model.cellSizeMode == .auto else { return nil }
-        let bead = project.printParams.strutLineWidthMM
-        guard bead > 0 else { return nil }
-        let depths = project.lattice.selectableRoles.compactMap {
-            key, role -> Double? in
-            guard role == .include, let d = project.lattice.selectableDepthMM[key],
-                  d > 0 else { return nil }
-            return d
-        }
-        guard let member = depths.min() else { return nil }
-        // The MODEL's live toggles, not the saved settings — the sample must answer
-        // the switch as it moves, before Save & Exit writes anything.
-        let floor = (project.lattice.stageMode ?? .structural).cellsPerMemberFloor(
-            topology: model.topologyID, utilisation: .nan,
-            boundaryFinishWritten: model.singleCellMembers)
-        // ★ at the job's cap (the reviewer, 2026-10-09 19:41, item 3): the sample's cell is never
-        // under the run's floor — the live Allow quilt toggle, as the job will write it
-        let d = TopOptKit.latticeRegionDerivation(
-            topology: model.topologyID, memberWidthMM: member,
-            minExtrudableWidthMM: bead, cellsPerMemberFloor: floor,
-            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: model.topologyID,
-                                                              allowQuilt: project.lattice.allowQuilt,
-                                                              algorithm: project.lattice.algorithm))
-        guard d.valid, d.cellMM > 0 else { return nil }
-        let n = Swift.max(1, (member / d.cellMM).rounded())
-        return member / n
-    }
-
-    private func playCurrent() {
-        guard let c = model.playing else { return }
-        switch c {
-        case .morph:
-            // The struts rebuild into the new family. A cross-fade over the
-            // rebuild reads as a morph and costs one mesh build.
-            withAnimation(.easeInOut(duration: c.duration)) { rebuild() }
-        case .tile, .jumpToSample:
-            // The single cell EXPANDS OUTWARD to tile the part — animated, not cut
-            // to. `tileProgress` drives the cell count, so the block really grows a
-            // ring at a time.
-            tileProgress = 0
-            rebuild()
-            animateTile(over: c.duration)
-        case .stressWipeAndDive:
-            // The field wipes DOWN the object, then the camera DIVES into the
-            // densest part of the lattice.
-            tileProgress = 1
-            rebuild()
-            animateWipe(over: c.duration * 0.5)
-            DispatchQueue.main.asyncAfter(deadline: .now() + c.duration * 0.55) {
-                dive()
-            }
-        case .boundarySwap:
-            // ★ §10 — AND PULL THE CAMERA BACK OUT TO SEE IT.
-            //
-            // The Auto-density cinematic ends with `dive()`, which pans to the
-            // densest point and zooms to 0.45 — INSIDE the lattice. A boundary
-            // swap used to only cross-fade the mesh, so a rim or a skin was being
-            // built correctly and drawn from a viewpoint buried inside the struts.
-            // That is the second half of "there is no skin or rim visible": a
-            // FINISH is a thing you look at from OUTSIDE, so showing one re-frames.
-            withAnimation(.easeInOut(duration: c.duration)) { rebuild() }
-            withAnimation(.easeInOut(duration: c.duration)) { frameSample() }
-        }
-        model.finishedPlaying()
-    }
-
-    /// ★ THE DIVE (Stage C): after the field has wiped down the part, the camera
-    /// closes on the DENSEST point of the baked field — the user sees the lattice
-    /// get denser where the stress is, from the inside.
-    private func dive() {
-        let target: SIMD3<Float> =
-            LatticeWizardSample.densestPoint(for: mesh ?? model.stageMesh())
-        camera.pan(dx: -target.x, dy: -target.z, viewportHeight: 800)
-        withAnimation(.easeInOut(duration: 0.9)) { camera.zoom(0.45) }
-    }
-
-    /// ★ §7 — STEP the wipe, so it really wipes, and END it whether it lands or is
-    /// pre-empted. A value handed straight to a Metal view is not interpolated by
-    /// `withAnimation`, so the previous single assignment was a jump; stepping it
-    /// on the same clock the tile expansion uses is what makes it a MOVE.
-    private func animateWipe(over seconds: Double) {
-        let steps = 18
-        reveal.begin()
-        for i in 1...steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + seconds * Double(i) / Double(steps)) {
-                if i == steps { reveal.end() } else { reveal.step(to: Double(i) / Double(steps)) }
-            }
-        }
-    }
-
-    /// Step the tile expansion so the block grows ring by ring rather than
-    /// appearing whole. One rebuild per ring — that is what makes it a MOVE.
-    private func animateTile(over seconds: Double) {
-        let rings = max(1, model.cellsAcross)
-        let step = seconds / Double(rings)
-        for r in 1...rings {
-            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(r)) {
-                tileProgress = Double(r) / Double(rings)
-                withAnimation(.easeOut(duration: step)) { rebuild() }
-            }
-        }
     }
 
     // MARK: small shared bits (no prose anywhere)

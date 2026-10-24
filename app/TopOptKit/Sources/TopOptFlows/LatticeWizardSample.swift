@@ -20,27 +20,16 @@
 // stress explanation needs, and it is honest about being a sample and nothing
 // more: `provenanceNote` says so in nine words.
 //
+// ★ B8 (his answer 2026-10-24): the full-screen settings page that drew the cantilever sample is DELETED, and the
+// cantilever with it (its size, its baked field, its tint, its densest point, its disclaimer). What stays is `cube`: the
+// organic sample's 40 mm body, which the organic variant path (`OrganicSampleCube`) still clips its march to.
+//
 // Pure value types + arithmetic, so the sample is headlessly testable.
 
 import Foundation
 import simd
 
 public enum LatticeWizardSample {
-
-    /// The sample's own size (mm). A stubby cantilever — big enough that a 2–8 mm
-    /// cell tiles it visibly, small enough that tessellating it is trivial.
-    public static let lengthMM = 60.0
-    public static let widthMM = 20.0
-    public static let heightMM = 24.0
-
-    /// Nine words. The whole disclaimer (§3b) — not a paragraph, not a banner.
-    public static let provenanceNote = "A sample part. Your settings, not your result."
-
-    /// The sample's triangle mesh: a rectangular cantilever, subdivided so the
-    /// per-vertex stress tint has somewhere to land. `subdiv` cells per axis.
-    public static func mesh(subdiv: Int = 12) -> ViewerMesh {
-        box(sx: Float(lengthMM), sy: Float(widthMM), sz: Float(heightMM), subdiv: subdiv)
-    }
 
     /// ★ THE ORGANIC SAMPLE'S BODY: the PR 353 test cube's own 40 mm box, centred on
     /// the origin like the span file's grid (`GRID 0 0 0 0.625 64 64 64` ⇒ 0…40 mm), so
@@ -84,49 +73,5 @@ public enum LatticeWizardSample {
         addFace(origin: o, u: Y, v: Z)                    // root
         addFace(origin: o + X, u: Z, v: Y)                // tip
         return ViewerMesh(vertices: pos, indices: idx, faceIDs: [], smoothShaded: false)
-    }
-
-    /// The BAKED field, one normalised value in [0, 1] per vertex of `mesh`.
-    /// Closed form, no solve: bending stress in a cantilever loaded at the tip.
-    public static func stress(for mesh: ViewerMesh) -> [Float] {
-        let p = mesh.positions
-        let count = p.count / 3
-        guard count > 0 else { return [] }
-        var out = [Float](repeating: 0, count: count)
-        let halfL = Float(lengthMM) / 2, halfH = Float(heightMM) / 2
-        var peak: Float = 0
-        for i in 0..<count {
-            let x = p[i * 3], z = p[i * 3 + 2]
-            // Moment falls linearly from the root (x = -L/2) to the tip; the
-            // fibre stress rises linearly from the neutral axis to the skins.
-            let moment = max(0, (halfL - x)) / Float(lengthMM)
-            let fibre = abs(z) / max(1e-6, halfH)
-            let s = moment * fibre
-            out[i] = s
-            peak = max(peak, s)
-        }
-        if peak > 0 { for i in 0..<count { out[i] /= peak } }
-        return out
-    }
-
-    /// The field as the renderer's per-vertex tint (`MetalMeshView.stressTints`),
-    /// through the SAME density ramp the lattice overlay uses — one colour
-    /// language across the app, never a second table.
-    public static func stressTints(for mesh: ViewerMesh) -> [SIMD4<Float>] {
-        stress(for: mesh).map { s in
-            let c = LatticeDensityProxy.densityColor(fraction: Double(s))
-            return SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
-        }
-    }
-
-    /// Where the field is DENSEST — the point the "dive into the denser part"
-    /// move flies to (§2 Stage C). Derived from the baked field, never guessed.
-    public static func densestPoint(for mesh: ViewerMesh) -> SIMD3<Float> {
-        let f = stress(for: mesh)
-        let p = mesh.positions
-        var best = 0, bestV: Float = -1
-        for i in 0..<f.count where f[i] > bestV { bestV = f[i]; best = i }
-        guard best * 3 + 2 < p.count else { return .zero }
-        return SIMD3<Float>(p[best * 3], p[best * 3 + 1], p[best * 3 + 2])
     }
 }

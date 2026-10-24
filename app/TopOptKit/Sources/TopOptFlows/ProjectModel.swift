@@ -430,6 +430,47 @@ public final class ProjectModel: ObservableObject {
         sealUndoStep()
     }
 
+    // MARK: ★ B8 — Edit faces' DISCARD (his answer 2026-10-24)
+
+    /// The edit slice as it was when Edit faces opened (nil outside the mode).
+    private var faceEditingEntry: EditSnapshot?
+
+    /// In Edit faces (the model's half of the mode: what Discard goes back to).
+    public var isEditingFaces: Bool { faceEditingEntry != nil }
+
+    /// Edit faces opened: seal what is on screen as a step and remember it (a fresh entry each time it opens — a mode left
+    /// without Done, e.g. by closing the project, never leaves a stale one behind).
+    public func openFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = editSnapshot
+    }
+
+    /// Done: every edit stays (each is already its own undo step).
+    public func closeFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = nil
+    }
+
+    /// Something to discard: the slice moved since Edit faces opened.
+    public var canDiscardFaceEdits: Bool {
+        guard let entry = faceEditingEntry else { return false }
+        return entry != editSnapshot
+    }
+
+    /// ★ DISCARD — the faces go back to how they were when Edit faces opened (regions, painted faces, every group's and
+    /// region's membership — the whole edit slice), as ONE undo step, so one Undo brings the discarded edits back. Leaves
+    /// the mode. False (and nothing changes) outside Edit faces.
+    @discardableResult
+    public func discardFaceEdits() -> Bool {
+        guard let entry = faceEditingEntry else { return false }
+        faceEditingEntry = nil
+        sealUndoStep()                       // the edits are a step of their own: Undo comes back to them
+        guard entry != editSnapshot else { return true }
+        applyEditSnapshot(entry)
+        sealUndoStep()                       // the discard is ONE step
+        return true
+    }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }

@@ -171,8 +171,7 @@ final class OrganicPreviewSpeedAndRimTests: XCTestCase {
                       "★ one rule for every mode")
         XCTAssertFalse(ws.contains("? Swift.min(o.separationMinMM, o.separationMaxMM) : 0)"),
                        "★ the window's low end is not a rim anywhere")
-        let wz = try String(contentsOf: root.appendingPathComponent("TopOptFlows/LatticeSetupWizard.swift"), encoding: .utf8)
-        XCTAssertTrue(wz.contains("quick.showRepairs = false"), "★ the sample cube traces first too")
+        // (B8: the settings page's sample cube, which traced first too, is deleted with the full-screen page)
         let br = try String(contentsOf: root.appendingPathComponent("TopOptBridge/bridge.cpp"), encoding: .utf8)
         XCTAssertTrue(br.contains("if (emit_repairs != 0) {"), "★ the bridge skips the emission when repairs are hidden")
     }

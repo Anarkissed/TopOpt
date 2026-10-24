@@ -152,9 +152,7 @@ final class LatticeCapOneSourceTests: XCTestCase {
         func src(_ f: String) throws -> String {
             try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/" + f), encoding: .utf8)
         }
-        let wizard = try src("LatticeSetupWizard.swift")
-        XCTAssertTrue(wizard.contains("maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: model.topologyID,"),
-                      "★ the wizard's sample cell")
+        // (B8: the wizard's sample cell is deleted with the full-screen page and its sample cube)
         XCTAssertTrue(try src("ProjectModel.swift").contains(
             "maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: lattice.topologyID,"), "★ the sector readout")
         let posture = try src("LatticeAutoPosture.swift")

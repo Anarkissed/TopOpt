@@ -27,6 +27,9 @@
 //
 // B4 (Lattice, 2026-10-24) — ONE MORE ADDITION, defaulted: the `.changeType` action and its `changeType` closure (the lattice
 // ● menu's "Change lattice type…", which asks in place).
+//
+// B8 (his answer 2026-10-24) — ONE MORE ADDITION, defaulted: `hidden` pages are not drawn at all (Topology's Results and Smooth
+// while the project has no results). `[]` draws every page, as before.
 
 import SwiftUI
 import TopOptDesign
@@ -86,19 +89,21 @@ public struct StageCapsule: View {
     let editFaces: (() -> Void)?
     /// B4: the lattice stage's "Change lattice type…" row (asks in place). nil ⇒ no such row acts.
     let changeType: (() -> Void)?
+    /// B8: pages not drawn (no segment at all). The ✂ is not a page and always draws.
+    let hidden: Set<Page>
 
     public init(project: ProjectModel, title: String, accent: Color, primaryTitle: String, secondaryTitle: String,
                 idPrefix: String = "stage", page: Page, go: @escaping (WorkspaceStage) -> Void, primary: @escaping () -> Void = {},
                 secondary: @escaping () -> Void, about: @escaping () -> Void, modified: Bool = false, fixDot: Bool = false,
                 fold: (() -> Void)? = nil, tertiaryTitle: String? = nil, tertiary: @escaping () -> Void = {},
                 greyed: Set<Page> = [], noticeDot: Bool = false, menuRows: [Item]? = nil, editFaces: (() -> Void)? = nil,
-                changeType: (() -> Void)? = nil) {
+                changeType: (() -> Void)? = nil, hidden: Set<Page> = []) {
         self.project = project; self.title = title; self.accent = accent
         self.primaryTitle = primaryTitle; self.secondaryTitle = secondaryTitle; self.idPrefix = idPrefix
         self.page = page; self.go = go; self.primary = primary; self.secondary = secondary; self.about = about
         self.modified = modified; self.fixDot = fixDot; self.fold = fold
         self.tertiaryTitle = tertiaryTitle; self.tertiary = tertiary; self.greyed = greyed; self.noticeDot = noticeDot
-        self.menuRows = menuRows; self.editFaces = editFaces; self.changeType = changeType
+        self.menuRows = menuRows; self.editFaces = editFaces; self.changeType = changeType; self.hidden = hidden
     }
 
     // MARK: the rules, as values
@@ -114,6 +119,11 @@ public struct StageCapsule: View {
                  detail: "cuts \u{00B7} unions \u{00B7} patterns", enabled: true, checked: false, action: .editFaces),
             Item(id: "\(idPrefix)-menu-about", title: "About \(title)\u{2026}", detail: "limits \u{00B7} delete", enabled: true, checked: false, action: .about),
         ]
+    }
+
+    /// The pages drawn, in order: primary, secondary, the tertiary when there is one, less the hidden ones.
+    public static func drawnPages(hasTertiary: Bool, hidden: Set<Page>) -> [Page] {
+        ([.primary, .secondary] + (hasTertiary ? [.tertiary] : [])).filter { !hidden.contains($0) }
     }
 
     /// The white dot on the secondary segment: the secondary page holds unsaved changes.
@@ -155,9 +165,10 @@ public struct StageCapsule: View {
             menu
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 22)
             HStack(spacing: 0) {
-                segment(.primary, primaryTitle, id: "\(idPrefix)-capsule-\(primaryTitle.lowercased())")
-                segment(.secondary, secondaryTitle, id: "\(idPrefix)-capsule-\(secondaryTitle.lowercased())")
-                if let t = tertiaryTitle { segment(.tertiary, t, id: "\(idPrefix)-capsule-\(t.lowercased())") }
+                ForEach(Self.drawnPages(hasTertiary: tertiaryTitle != nil, hidden: hidden), id: \.self) { p in
+                    let t = pageTitle(p)
+                    segment(p, t, id: "\(idPrefix)-capsule-\(t.lowercased())")
+                }
             }
             .padding(.horizontal, 0)
             .frame(height: StageCapsuleLayout.segmentHeight)
@@ -239,6 +250,14 @@ public struct StageCapsule: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    private func pageTitle(_ p: Page) -> String {
+        switch p {
+        case .primary: return primaryTitle
+        case .secondary: return secondaryTitle
+        case .tertiary: return tertiaryTitle ?? ""
+        }
     }
 
     private func segment(_ target: Page, _ title: String, id: String) -> some View {
