@@ -18,6 +18,12 @@
 // loads, ● <Stage> ✓ where he is, Surface ›, then About <Stage>…); every target is 44 pt tall, the segments drawn 36 tall inside
 // it; never greyed. A 6 pt amber dot on the secondary segment while the one thing to fix lives there; a 6 pt white dot while the
 // secondary page holds unsaved changes.
+//
+// B3 (Topology, 2026-10-24) — ADDITIONS ONLY, every one defaulted so the two-page capsule above draws and behaves exactly as
+// lifted: a third page (`tertiaryTitle` / `tertiary`, Topology's Setup | Results | Smooth), `greyed` pages (T2: Results and
+// Smooth stay grey until a run), an accent `noticeDot` on the secondary segment (a run landed: Results never opens by itself),
+// the menu's rows as a parameter (`menuRows`, Topology's ● menu) with two more actions (`.lattice`, `.editFaces`), and the greyed
+// ✂ set apart after the last page (`editFaces`, S3 amended).
 
 import SwiftUI
 import TopOptDesign
@@ -34,8 +40,8 @@ public enum StageCapsuleLayout {
 }
 
 public struct StageCapsule: View {
-    public enum Page: Equatable, Sendable { case primary, secondary }
-    public enum Action: Equatable, Sendable { case topology, surface, about, none }
+    public enum Page: Equatable, Sendable { case primary, secondary, tertiary }
+    public enum Action: Equatable, Sendable { case topology, surface, about, none, lattice, editFaces }
     /// One row of the ● <Stage> menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -44,6 +50,10 @@ public struct StageCapsule: View {
         public let enabled: Bool
         public let checked: Bool
         public let action: Action
+        public init(id: String, title: String, detail: String?, enabled: Bool, checked: Bool, action: Action) {
+            self.id = id; self.title = title; self.detail = detail; self.enabled = enabled; self.checked = checked
+            self.action = action
+        }
     }
 
     @ObservedObject var project: ProjectModel
@@ -63,15 +73,25 @@ public struct StageCapsule: View {
     let fixDot: Bool
     /// Folds every card of the page (a stage change, the sheet, the secondary page opening).
     let fold: (() -> Void)?
+    // B3 additions (defaulted: nil / empty / false draws the lifted capsule)
+    let tertiaryTitle: String?
+    let tertiary: () -> Void
+    let greyed: Set<Page>
+    let noticeDot: Bool
+    let menuRows: [Item]?
+    let editFaces: (() -> Void)?
 
     public init(project: ProjectModel, title: String, accent: Color, primaryTitle: String, secondaryTitle: String,
                 idPrefix: String = "stage", page: Page, go: @escaping (WorkspaceStage) -> Void, primary: @escaping () -> Void = {},
                 secondary: @escaping () -> Void, about: @escaping () -> Void, modified: Bool = false, fixDot: Bool = false,
-                fold: (() -> Void)? = nil) {
+                fold: (() -> Void)? = nil, tertiaryTitle: String? = nil, tertiary: @escaping () -> Void = {},
+                greyed: Set<Page> = [], noticeDot: Bool = false, menuRows: [Item]? = nil, editFaces: (() -> Void)? = nil) {
         self.project = project; self.title = title; self.accent = accent
         self.primaryTitle = primaryTitle; self.secondaryTitle = secondaryTitle; self.idPrefix = idPrefix
         self.page = page; self.go = go; self.primary = primary; self.secondary = secondary; self.about = about
         self.modified = modified; self.fixDot = fixDot; self.fold = fold
+        self.tertiaryTitle = tertiaryTitle; self.tertiary = tertiary; self.greyed = greyed; self.noticeDot = noticeDot
+        self.menuRows = menuRows; self.editFaces = editFaces
     }
 
     // MARK: the rules, as values
@@ -93,7 +113,8 @@ public struct StageCapsule: View {
     public static func unsavedDot(page: Page, modified: Bool) -> Bool { page == .secondary && modified }
 
     /// A menu row: a stage change or the sheet folds every card first.
-    @MainActor static func perform(_ a: Action, fold: (() -> Void)?, go: (WorkspaceStage) -> Void, about: () -> Void) {
+    @MainActor static func perform(_ a: Action, fold: (() -> Void)?, go: (WorkspaceStage) -> Void, about: () -> Void,
+                                   editFaces: (() -> Void)? = nil) {
         guard a != .none else { return }
         fold?()
         switch a {
@@ -101,14 +122,21 @@ public struct StageCapsule: View {
         case .surface: go(.surface)
         case .about: about()
         case .none: break
+        case .lattice: go(.lattice)
+        case .editFaces: if let editFaces { editFaces() } else { go(.surface) }
         }
     }
 
     /// A segment: the lit one does nothing; the other changes page (the secondary page opening folds every card).
-    @MainActor static func tapSegment(_ target: Page, on page: Page, fold: (() -> Void)?, primary: () -> Void, secondary: () -> Void) {
-        guard target != page else { return }
+    @MainActor static func tapSegment(_ target: Page, on page: Page, fold: (() -> Void)?, primary: () -> Void, secondary: () -> Void,
+                                      tertiary: () -> Void = {}, greyed: Set<Page> = []) {
+        guard target != page, !greyed.contains(target) else { return }
         fold?()
-        if target == .secondary { secondary() } else { primary() }
+        switch target {
+        case .secondary: secondary()
+        case .tertiary: tertiary()
+        case .primary: primary()
+        }
     }
 
     // MARK: the view
@@ -122,10 +150,12 @@ public struct StageCapsule: View {
             HStack(spacing: 0) {
                 segment(.primary, primaryTitle, id: "\(idPrefix)-capsule-\(primaryTitle.lowercased())")
                 segment(.secondary, secondaryTitle, id: "\(idPrefix)-capsule-\(secondaryTitle.lowercased())")
+                if let t = tertiaryTitle { segment(.tertiary, t, id: "\(idPrefix)-capsule-\(t.lowercased())") }
             }
             .padding(.horizontal, 0)
             .frame(height: StageCapsuleLayout.segmentHeight)
             .background(Capsule().fill(DS.Color.background.opacity(0.35).color))
+            if let editFaces { scissors(editFaces) }
         }
         .padding(.horizontal, StageCapsuleLayout.segmentInset)
         .frame(height: StageCapsuleLayout.capsuleHeight)
@@ -141,14 +171,14 @@ public struct StageCapsule: View {
     }
 
     private var menu: some View {
-        let items = Self.menuItems(title: title, idPrefix: idPrefix,
+        let items = menuRows ?? Self.menuItems(title: title, idPrefix: idPrefix,
                                    anchors: project.force.anchorCount(in: project.selection.groups),
                                    loads: project.force.loadCount(in: project.selection.groups))
         return Menu {
             ForEach(items, id: \.id) { item in
                 if item.id == "\(idPrefix)-menu-about" { Divider() }
                 Button {
-                    Self.perform(item.action, fold: pageFold, go: go, about: about)
+                    Self.perform(item.action, fold: pageFold, go: go, about: about, editFaces: editFaces)
                 } label: {
                     if item.checked {
                         Label(item.title, systemImage: "checkmark")
@@ -185,6 +215,11 @@ public struct StageCapsule: View {
 
     @ViewBuilder private var dots: some View {
         HStack(spacing: 3) {
+            if noticeDot {
+                Circle().fill(DS.Color.accent.color).frame(width: 6, height: 6)
+                    .accessibilityLabel("New results on the \(secondaryTitle) page")
+                    .accessibilityIdentifier("\(idPrefix)-capsule-notice-dot")
+            }
             if fixDot {
                 Circle().fill(DS.Color.warning.color).frame(width: 6, height: 6)
                     .accessibilityLabel("A fix waits on the \(secondaryTitle) page")
@@ -201,12 +236,14 @@ public struct StageCapsule: View {
 
     private func segment(_ target: Page, _ title: String, id: String) -> some View {
         let lit = page == target
+        let grey = greyed.contains(target)
         return Button {
-            Self.tapSegment(target, on: page, fold: pageFold, primary: primary, secondary: secondary)
+            Self.tapSegment(target, on: page, fold: pageFold, primary: primary, secondary: secondary, tertiary: tertiary,
+                            greyed: greyed)
         } label: {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle((lit ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                .foregroundStyle((grey ? DS.Color.textDisabled : lit ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                 .padding(.horizontal, DS.Space.m)
                 .frame(minWidth: 44)
                 .frame(height: StageCapsuleLayout.segmentHeight)
@@ -219,8 +256,32 @@ public struct StageCapsule: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(grey)
         .background(CornerPairStyle.publish("capsule" + title))
         .accessibilityAddTraits(lit ? .isSelected : [])
         .accessibilityIdentifier(id)
+    }
+
+    /// The greyed ✂ set apart after the last page by a thin divider: Edit faces (S3 amended). Greyed in LOOK only — it always
+    /// opens.
+    private func scissors(_ action: @escaping () -> Void) -> some View {
+        HStack(spacing: 2) {
+            Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 22)
+            Button {
+                fold?()
+                action()
+            } label: {
+                Image(systemName: "scissors")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .opacity(0.55)
+                    .frame(width: 44, height: StageCapsuleLayout.capsuleHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("capsuleScissors"))
+            .accessibilityLabel("Edit faces")
+            .accessibilityIdentifier("\(idPrefix)-capsule-edit-faces")
+        }
     }
 }

@@ -70,6 +70,8 @@ struct JoinButton: View {
     let group: SelectionGroup
     let note: String
     var idPrefix: String = "stage"
+    /// B3: the button's words (Topology's "Add to <group> as load"); nil: SelectionsCopy.joinLabel (lattice).
+    var label: String? = nil
     let action: () -> Void
     static let height: CGFloat = 48
     static let fill = DS.Color.accent
@@ -83,7 +85,7 @@ struct JoinButton: View {
                     .overlay(Circle().strokeBorder(Color.black.opacity(0.45), lineWidth: 3))
                     .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(SelectionsCopy.joinLabel(group.name))
+                    Text(label ?? SelectionsCopy.joinLabel(group.name))
                         .font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                         .accessibilityIdentifier("\(idPrefix)-chip-join-label")
                     Text(note).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.white.opacity(0.82)).lineLimit(1)
@@ -96,7 +98,7 @@ struct JoinButton: View {
         .buttonStyle(JoinButtonStyle())
         .background(GeometryReader { g in Color.clear.preference(key: ChromeKeepOutKey.self, value: ["chipJoin": g.frame(in: .global)]) }
             .allowsHitTesting(false))
-        .accessibilityLabel(SelectionsCopy.joinLabel(group.name))
+        .accessibilityLabel(label ?? SelectionsCopy.joinLabel(group.name))
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("\(idPrefix)-chip-join")
     }

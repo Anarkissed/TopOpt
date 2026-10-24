@@ -59,9 +59,12 @@ final class SelectionsListTests: XCTestCase {
         let src = try String(contentsOf: Self.sources.appendingPathComponent("SelectionsList.swift"), encoding: .utf8)
         let code = src.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }.joined(separator: "\n")
         for id in ["regionsOpen", "keepClearQuickAction", "unitToggle", "groupHideToggle", "\"Regions\"", "square.on.square.dashed",
-                   "WeightUnit.allCases", "eyeSymbol"] {
+                   "WeightUnit.allCases"] {
             XCTAssertFalse(code.contains(id), "★ not in the list: \(id)")
         }
+        // B3: the eye is on a group LINE, and only when the caller asks (Topology's B1 list); the lifted default draws none
+        XCTAssertTrue(code.contains("toggleEye: ((UUID) -> Void)? = nil") && code.contains("if let toggleEye {"),
+                      "★ the eye is opt-in: Flexible's list (no toggleEye) draws no eye")
         XCTAssertEqual(SelectionsCopy.empty, "Tap a face on the model to start.")
         XCTAssertTrue(code.contains("\"Selections\""))
         XCTAssertTrue(code.contains("-sel-pill"), "minimised: the pill 'Selections 3'")

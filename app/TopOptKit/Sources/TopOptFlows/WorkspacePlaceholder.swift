@@ -165,9 +165,24 @@ public struct WorkspacePlaceholder: View {
     @State private var topEdges = TopClusterEdges()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// When a project has saved variants, results show by default; tapping "See
-    /// Original" flips this to reveal the editable workspace (the variants stay).
-    @State private var viewOriginal = false
+    /// Whether the Results page is SHUT (the editable workspace shows; the variants stay).
+    /// ★ B3 (T2, his pick 2026-10-24): "Results never opens by itself". It starts shut — the
+    /// stage opens on Setup — and no run opens it: a run that lands puts a dot on the capsule's
+    /// Results segment and a message with Open Results (`topoNotice`). Only he opens it.
+    @State private var viewOriginal = true
+    /// B3: the Results dot + message (TopologyResultsNotice — it can never open a page).
+    @State private var topoNotice = TopologyResultsNotice()
+    /// B3: the corner pair's Setup panel is open.
+    @State private var setupPanelOpen = false
+    /// B3: the corner pair's measures (CornerPair).
+    @StateObject private var chromeGeometry = ChromeGeometry()
+    /// B3: the trash's in-place ask (a group id) and the last trash's one-step Undo.
+    @State private var topoDeleteAsk: UUID?
+    @State private var topoTrashed: TrashedGroup?
+    /// B3: the Forces view (the load arrows and pills) — a VIEW: hiding it changes no run.
+    @State private var topoForcesShown = true
+    /// B3: the Design box view (the box drawn and its handles) — a VIEW: the box still bounds the run.
+    @State private var topoDesignBoxShown = true
     /// Rename dialog (tap the project title).
     @State private var renaming = false
     @State private var nameDraft = ""
@@ -494,6 +509,8 @@ public struct WorkspacePlaceholder: View {
     /// Non-nil presents it; the user either confirms (the run starts) or cancels
     /// (nothing happens, and the variants are untouched).
     @State private var pendingReplacement: ResultsReplacementPrompt?
+    /// The re-run card's Save as new project is for an Optimize re-run only (as #362's H50d).
+    @State private var rerunOffersCopy = false
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -712,6 +729,11 @@ public struct WorkspacePlaceholder: View {
     public var body: some View {
         ZStack(alignment: .topLeading) {
             DS.Color.background.color.ignoresSafeArea()
+                // B3: Save as new project runs in the copy as it opens (RerunCard; as #362's H50c)
+                .onAppear {
+                    topoNotice.seed(accepted: acceptedVariantCount)
+                    if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }
+                }
             MetalMeshView(mesh: stageMesh,
                           camera: cameraModel,
                           selection: selection,
@@ -1190,7 +1212,7 @@ public struct WorkspacePlaceholder: View {
                 // legend!"). The first cut gated only the three GIZMO overlays; the
                 // ⬇ load/anchor markers are drawn here and were still sitting over
                 // the struts he was trying to read.
-                if visible.groupPrimitives, !legendDrilledIn {
+                if visible.groupPrimitives, !legendDrilledIn, stage != .topology || topoForcesShown {
                     arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
                 }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -1519,6 +1541,10 @@ public struct WorkspacePlaceholder: View {
             // `seeResultsShown` already refuses a full-screen page; the guard is
             // spelled out here too because the page-chrome audit reads this line.
             if !fullScreenPageUp, seeResultsShown { seeResultsChip }
+            // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup, on to Smooth),
+            // and a landed run says so here — it never opens Results by itself.
+            if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp { topologyCapsuleOverlay }
+            if stage == .topology, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
         }
         // ★ the stage UI the band chips stay out of — every reporter is a descendant
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
@@ -1558,7 +1584,7 @@ public struct WorkspacePlaceholder: View {
     /// split when a banner is up, a banner goes right by it when See Results is up.
     /// One condition each, read from the same two facts.
     private var seeResultsShown: Bool {
-        guard viewOriginal, !fullScreenPageUp, let outcome = run.outcome else { return false }
+        guard viewOriginal, !fullScreenPageUp, stage != .topology, let outcome = run.outcome else { return false }
         return outcome.variants.contains(where: { $0.accepted })
     }
     /// Either top-centre banner is up (the FEA's, or the rebake's when the FEA's is
@@ -1640,7 +1666,7 @@ public struct WorkspacePlaceholder: View {
     private func requestRun() {
         guard canOptimize else { return }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
-            pendingReplacement = prompt
+            rerunOffersCopy = true; pendingReplacement = prompt
             return
         }
         startRun()
@@ -1656,7 +1682,7 @@ public struct WorkspacePlaceholder: View {
             return
         }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
-            pendingReplacement = prompt
+            rerunOffersCopy = false; pendingReplacement = prompt
             return
         }
         run.start(request)
@@ -1682,7 +1708,8 @@ public struct WorkspacePlaceholder: View {
                 break
             }
         }
-        viewOriginal = false   // a fresh run replaces the saved variants → show results
+        // ★ B3 (T2): a fresh run NO LONGER opens Results ("Results never opens by itself"): the
+        // Results segment gets a dot and a message with Open Results when variants land.
         guard let request = model.makeRunRequest() else {
             model.toast = "Can’t start — import a model and choose a material first."
             return
@@ -3000,17 +3027,29 @@ public struct WorkspacePlaceholder: View {
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
+        // ★ B3 (T2): a run that lands puts a dot + a message on Topology; it never opens Results.
+        .onChange(of: acceptedVariantCount) { n in
+            topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal)
+        }
+        .onChange(of: run.isStreaming) { streaming in
+            if !streaming { topoNotice.noteFinished(accepted: acceptedVariantCount, resultsOpen: !viewOriginal) }
+        }
+        .onChange(of: viewOriginal) { shut in if !shut { topoNotice.opened() } }
         .onChange(of: run.restoredPreviousResults) { restored in
             announceRestoredResults(restored)
         }
         // BAR 4: a new run is the ONE remaining thing that retires finished
         // variants, and it says so before it does.
-        .alert("Replace your results?", isPresented: replacementPromptBinding) {
-            Button("Optimize anyway", role: .destructive) {
+        // ★ B3: THE RE-RUN CARD (RerunCard's words; TopologyRerunChoice): Re-run here / Save as new
+        // project (an Optimize re-run only) / Cancel. (Re-run here still calls startRun() for the
+        // Lattice run too — APP LIST 6, B4's.)
+        .alert(RerunCard.title, isPresented: replacementPromptBinding) {
+            Button(TopologyRerunChoice.rerunHere.label, role: .destructive) {
                 pendingReplacement = nil
                 startRun()
             }
-            Button("Keep my results", role: .cancel) { pendingReplacement = nil }
+            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
+            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
@@ -5476,7 +5515,12 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private var stageNavigationButtonOverlay: some View {
         // ★ THE WAY BACK — top-left, under the project name. Topology is the root
         // and carries none.
-        if let back = stage.back {
+        if stage == .topology {
+            // ★ B3 (S3 amended, 2026-10-24): Topology's stage buttons are its capsule —
+            // ● Topology ⌄ | Setup | Results | Smooth | ✂. The ● menu carries `forward`.
+            // (Over the Results page it is mounted above ResultsScreen instead — see the body.)
+            if !topologyResultsPageUp { topologyCapsuleOverlay }
+        } else if let back = stage.back {
             stageNavButton(to: back, icon: "chevron.left")
                 .latticeBandChipKeepOut()
                 .modifier(StageNavPlacement(stage: stage))
@@ -5488,7 +5532,8 @@ public struct WorkspacePlaceholder: View {
         // stage's Settings button renders BELOW it, offset by
         // `settingsButtonTopInset`, never among it.
         VStack(alignment: .trailing, spacing: PageChrome.gap) {
-            ForEach(stage.forward, id: \.rawValue) { dest in
+            // ★ B3: NOT ON TOPOLOGY — its ● menu and ✂ go to Lattice and Edit faces (no Surface button).
+            ForEach(stage.drawsForwardButtons ? stage.forward : [], id: \.rawValue) { dest in
                 stageNavButton(to: dest, icon: Self.stageIcon(dest))
                     .latticeBandChipKeepOut()
             }
@@ -5938,6 +5983,8 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
+            // ★ B3: on Topology the chip column's settings are the Setup chip's rows; Paint stays here (B5 moves it).
+            if stage == .topology, id != .paint { return false }
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
@@ -6376,6 +6423,7 @@ public struct WorkspacePlaceholder: View {
     /// tool is active and we're in the normal edit phase (not gravity setup).
     private var showDesignGizmo: Bool {
         force.phase == .edit && force.gravityIsSet && project.designBox.isActive
+            && (stage != .topology || topoDesignBoxShown)   // ★ B3: the Design box VIEW (the box still bounds the run)
     }
 
     /// The design-box tool toggle chip. Off → tap to open (seeds a grow-room box
@@ -7350,6 +7398,17 @@ public struct WorkspacePlaceholder: View {
                 }
                 viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
                     surfaceXrayOn.toggle()
+                }
+                // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
+                if stage == .topology {
+                    viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
+                        topoForcesShown.toggle()
+                    }
+                    if project.designBox.isActive {
+                        viewModeButton("cube", label: "Design box", on: topoDesignBoxShown) {
+                            topoDesignBoxShown.toggle()
+                        }
+                    }
                 }
             }
             // ★★ THE LATTICE PREVIEW IS A *VIEW*, SO IT LIVES WITH THE VIEWS
@@ -9542,7 +9601,10 @@ public struct WorkspacePlaceholder: View {
             // selections modal when it is in the bottom left corner"). Below it
             // when the panel is open, where "under the modal" is what reads.
             if selectionsCollapsed { latticePreviewNotice }
+            // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
+            if stage == .topology, !showLatticePage { topologySelectionsList } else {
             selectionsLibraryCard
+            }
             if !selectionsCollapsed { latticePreviewNotice }
         }
         .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
@@ -9767,7 +9829,8 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
     }
 
-    private func groupRow(_ g: SelectionGroup) -> some View {
+    /// `inList`: the open group's rows under SelectionsList's line (B3) — the line already carries the eye and the trash.
+    private func groupRow(_ g: SelectionGroup, inList: Bool = false) -> some View {
         let active = g.id == selection.activeGroupID
         let tint = force.tint(for: g)
         return VStack(alignment: .trailing, spacing: 5) {
@@ -9822,14 +9885,14 @@ public struct WorkspacePlaceholder: View {
                 // are looking at and what you may change are questions the
                 // lattice and surface stages ask as much as the TO page does.
                 HStack(spacing: DS.Space.s) {
-                    groupHideToggle(g)
+                    if !inList { groupHideToggle(g) }
                     groupLockToggle(g)
                 }
                 // Round-2 L23/M2: NO destructive affordance in the lattice context —
                 // groups and faces can be removed only back on the TO page.
                 // ★ AND A LOCKED GROUP CANNOT BE DELETED — "no changes can be
                 // made to this group" includes the largest change of all.
-                if !showLatticePage, stage == .topology,
+                if !inList, !showLatticePage, stage == .topology,
                    project.groupView.canEdit(g.id) {
                     Button { removeGroup(g.id) } label: {
                         Image(systemName: "trash")
@@ -11351,12 +11414,10 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func removeGroup(_ id: UUID) {
-        selection.remove(id)
-        force.clearKind(id)
-        force.sync(groups: selection.groups)
-        // ★ A DELETED GROUP'S hide/lock STATE GOES WITH IT. Left behind, a stale
-        // entry would silently lock or hide whichever group later took the id.
-        project.groupView.forget(id)
+        // ★ B3 / APP LIST 1: every trash is ONE undo step (sealed before and after) — the removal
+        // itself (selection, kind, sync, and the group's hide/lock state going with it, so a stale
+        // entry never locks or hides whichever group later takes the id) is `ProjectModel.trashGroup`.
+        topoTrashed = project.trashGroup(id)
     }
 
     // MARK: ★ THE EYE AND THE PADLOCK
@@ -11503,10 +11564,22 @@ public struct WorkspacePlaceholder: View {
                         // nudged clear of the weight pills. Fallback = the old centroid-above anchor.
                         let fallback = CGPoint(x: pt?.x ?? W / 2,
                                                y: pt.map { clamp($0.y - 60, H) } ?? H - 150)
-                        anchorLoadChip(g)
+                        // ★ B3: the chip at the face also offers the most recent group (filled) — the face
+                        // joins it — above today's Anchor | Load (a new group).
+                        VStack(spacing: DS.Space.xs) {
+                            if stage == .topology, let target = project.joinTarget(excluding: g.id) {
+                                JoinButton(group: target, note: TopologySelectionsCopy.joinNote, idPrefix: "topology",
+                                           label: TopologySelectionsCopy.joinLabel(target.name, role: topologyRoleWord(target.id))) {
+                                    project.joinPending(g.id, into: target.id)
+                                }
+                                .frame(width: 300)
+                            }
+                            anchorLoadChip(g)
+                        }
                             .position(placed["load.pendingchip"]?.center ?? fallback)
                     }
-                    ForEach(loadGroups) { g in
+                    // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
+                    ForEach(stage != .topology || topoForcesShown ? loadGroups : []) { g in
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                             let active = g.id == selection.activeGroupID
                             // Keep-out pass owns placement (handoff 2026-07-27): the weight pill is
@@ -11698,12 +11771,18 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             }
             Spacer()
+            if stage == .topology {
+                // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
+                // parameters and the chip column, as rows) and the Optimize split button.
+                topologyCornerPair
+            } else {
             ComputeLocationControl(compute: compute)
             printParamsButton
             // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: "Make
             // it exactly like Optimize button, but to the left of it").
             latticeThisButton
             optimizeButton
+            }
         }
         // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows
         // a second line when it is DISABLED (it says what is missing), and the
@@ -11773,7 +11852,7 @@ public struct WorkspacePlaceholder: View {
                                 latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
-        if let last = lastRunRequest, model.makeRunRequest() == last { return false }
+        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest() == last, existing: run.outcome) { return false }   // B3: a finished project can be re-run with the same inputs; the re-run card confirms (as #362's H50a)
         return true
     }
 
@@ -11991,6 +12070,340 @@ public struct WorkspacePlaceholder: View {
         .buttonStyle(.plain)
         .disabled(!ok && !marks && !opensType)
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
+    }
+}
+
+// MARK: - ★ B3 — THE TOPOLOGY STAGE'S CHROME (his picks, 2026-10-24)
+//
+// A re-layout of the controls above it (TopologyStage.swift says what moved where). Every view here
+// calls today's actions — requestRun, requestLatticeRun, goToStage, openSmoothingPage, the chips —
+// and nothing here reaches the job (TopologyStageTests pins its bytes).
+extension WorkspacePlaceholder {
+
+    /// The run's accepted variants (what the Results page would show).
+    var acceptedVariantCount: Int { run.outcome?.variants.filter { $0.accepted }.count ?? 0 }
+
+    /// The Results page is up: open (not "Original"), and there is something on it.
+    var topologyResultsPageUp: Bool { !viewOriginal && acceptedVariantCount > 0 }
+
+    /// The page the capsule lights.
+    private var topologyPage: TopologyPage {
+        TopologyPage.current(resultsOpen: !viewOriginal, smoothing: showSmoothingPage, hasResults: acceptedVariantCount > 0)
+    }
+
+    /// ● Topology ⌄ | Setup | Results | Smooth | ✂ — where the lattice and surface stages put their back button.
+    @ViewBuilder var topologyCapsuleOverlay: some View {
+        let has = acceptedVariantCount > 0
+        let gate = LatticeEntryButtonGate.compute(gravitySet: force.gravityIsSet,
+                                                  anchors: force.anchorCount(in: selection.groups),
+                                                  loads: force.loadCount(in: selection.groups))
+        let rows = TopologyStageMenu.rows(typeInUse: project.lattice.stageMode, latticeGate: gate).map { r in
+            StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
+                              action: r.target == .lattice ? .lattice : r.target == .editFaces ? .editFaces : .none)
+        }
+        let page: StageCapsule.Page = {
+            switch topologyPage {
+            case .setup: return .primary
+            case .results: return .secondary
+            case .smooth: return .tertiary
+            }
+        }()
+        StageCapsule(project: project, title: WorkspaceStage.topology.title, accent: DS.Color.accent.color,
+                     primaryTitle: TopologyPage.setup.title, secondaryTitle: TopologyPage.results.title, idPrefix: "topology",
+                     page: page,
+                     go: { goToStage($0) },
+                     primary: { if showSmoothingPage { closeSmoothingPage() }; viewOriginal = true },
+                     secondary: { if showSmoothingPage { closeSmoothingPage() }; viewOriginal = false },
+                     about: {},
+                     tertiaryTitle: TopologyPage.smooth.title,
+                     tertiary: { openTopologySmooth() },
+                     greyed: has ? [] : [.secondary, .tertiary],
+                     noticeDot: topoNotice.dot,
+                     menuRows: rows,
+                     editFaces: { openEditFaces() })
+            .latticeBandChipKeepOut()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.leading, StageCapsuleLayout.capsuleLeft)
+            .padding(.top, StageCapsuleLayout.capsuleTop)
+    }
+
+    /// ✂ and "Edit faces…": today's Surface stage until B5 builds Edit faces.
+    private func openEditFaces() {
+        if showSmoothingPage { closeSmoothingPage() }
+        viewOriginal = true
+        if let dest = TopologyStageMenu.stage(for: .editFaces) { goToStage(dest) }
+    }
+
+    /// Smooth: the smoothing page on the recommended variant, gated as Results' own Smooth entry is.
+    private func openTopologySmooth() {
+        guard let idx = TopologyPage.smoothVariant(run.outcome) else { return }
+        let verdict = smoothEntry(idx)
+        guard verdict.enabled else { model.toast = "Smooth isn’t available: \(verdict.reason ?? verdict.label)."; return }
+        viewOriginal = true
+        openSmoothingPage(variantIndex: idx)
+    }
+
+    /// "Optimization finished — 4 variants." [Open Results] — top centre, where See Results sat.
+    func topologyResultsMessage(_ text: String) -> some View {
+        VStack {
+            HStack(spacing: DS.Space.m) {
+                Text(text).dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.textPrimary.color)
+                    .lineLimit(1).fixedSize()
+                Button { viewOriginal = false } label: {
+                    Text(TopologyResultsNotice.openLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, DS.Space.m).frame(height: 32)
+                        .background(Capsule().fill(DS.Color.accent.color))
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("topology-open-results")
+                CornerPairStyle.x44("xmark", label: "Dismiss", id: "topology-results-message-dismiss") { topoNotice.dismiss() }
+            }
+            .padding(.leading, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.panel.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .dsShadow(DS.Shadow.panel)
+            .padding(.top, DS.Space.xl3)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("topology-results-message")
+    }
+
+    // MARK: the corner pair (A1)
+
+    var topologyCornerPair: some View {
+        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil) {
+            topologySetupChip
+        } split: {
+            topologyOptimizeSplit
+        } panel: {
+            if setupPanelOpen {
+                CornerPairStyle.panel(width: showBuildOrientation ? 600 : 420, maxHeight: 620) { topologySetupRows }
+            }
+        }
+    }
+
+    private var topologySetupChip: some View {
+        Button { withAnimation(DS.Motion.emphasized) { setupPanelOpen.toggle() } } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
+                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                Image(systemName: setupPanelOpen ? "chevron.down" : "chevron.up").font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.horizontal, DS.Space.l)
+            .frame(minHeight: 52)
+            .background(Capsule().fill(setupPanelOpen ? DS.Color.fillSelected.color : DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .background(CornerPairStyle.publish("setupChip"))
+        .accessibilityIdentifier("topology-setup-chip")
+    }
+
+    /// Optimize (today's button, one tap) + ⌃: the Lattice run (today's Lattice button's action and gate).
+    private var topologyOptimizeSplit: some View {
+        let ok = canLatticeThis
+        let summary = latticeThisSummary
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        let opensType = opensLatticeType(ok, summary)
+        return HStack(spacing: 2) {
+            optimizeButton
+            Menu {
+                Button {
+                    if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+                } label: {
+                    Text("Lattice the part (no optimization)")
+                    Text(summary)
+                }
+                .disabled(!ok && !marks && !opensType)
+                .accessibilityIdentifier("topology-split-lattice")
+            } label: {
+                Image(systemName: "chevron.up").font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 44, height: 52)
+                    .background(Capsule().fill(DS.Surface.bar.color)
+                        .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+                    .contentShape(Capsule())
+            }
+            .menuIndicator(.hidden)
+            .accessibilityLabel("More runs")
+            .accessibilityIdentifier("topology-split-more")
+        }
+        .background(CornerPairStyle.publish("optimizeSplit"))
+    }
+
+    /// The Setup panel: today's chips and bar controls, one row each (TopologySetupRow).
+    private var topologySetupRows: some View {
+        let rows = TopologySetupRow.visible(protectCount: force.explicitProtectCount(in: selection.groups),
+                                            isStep: isStepPart, designBoxDrawn: visible.designBox)
+        return VStack(alignment: .leading, spacing: DS.Space.s) {
+            HStack {
+                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                CornerPairStyle.x44("chevron.down", label: "Close Setup", id: "topology-setup-close") { setupPanelOpen = false }
+            }
+            ForEach(rows, id: \.self) { row in
+                VStack(alignment: .trailing, spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.m) {
+                        Text(row.title).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
+                        Spacer(minLength: DS.Space.s)
+                        topologySetupControl(row)
+                    }
+                    .frame(minHeight: 44)
+                    switch row {
+                    case .plate where showBuildOrientation: buildOrientationDrawer
+                    case .designBox where showDesignGizmo: designBoxDrawer
+                    default: EmptyView()
+                    }
+                }
+                .accessibilityIdentifier("topology-setup-row-\(row.rawValue)")
+            }
+        }
+        .animation(DS.Motion.emphasized, value: showBuildOrientation)
+    }
+
+    @ViewBuilder private func topologySetupControl(_ row: TopologySetupRow) -> some View {
+        switch row {
+        case .quality: qualityChip
+        case .plate: buildOrientationChip
+        // re-entering gravity setup puts the gizmo up: the panel steps out of its way
+        case .gravity: gravityChip.simultaneousGesture(TapGesture().onEnded { setupPanelOpen = false })
+        case .compute: ComputeLocationControl(compute: compute)
+        case .units: unitToggle
+        case .minimizePlastic: minimizePlasticChip
+        case .protectSkin: faceProtectDepthChip
+        case .cadFaces: cadFacesChip
+        case .designBox: designBoxChip
+        case .printParameters: printParamsButton
+        }
+    }
+
+    // MARK: the Selections list (B1)
+
+    var topologySelectionsList: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            SelectionsList(project: project, collapsed: $selectionsCollapsed, picked: selection.activeGroupID,
+                           deleteAsk: topoDeleteAsk,
+                           isLocked: { !project.groupView.canEdit($0) },
+                           pick: { id in
+                               topoDeleteAsk = nil
+                               if selection.activeGroupID == id { leaveGroupEditing() } else { selection.setActive(id) }
+                           },
+                           askDelete: { topoDeleteAsk = $0 },
+                           confirmDelete: { confirmTopologyTrash() },
+                           cancelDelete: { topoDeleteAsk = nil },
+                           noteFrame: { chromeGeometry.noteSelections($0) },
+                           idPrefix: "topology",
+                           rows: { g in AnyView(topologyGroupRows(g)) },
+                           summary: { g in topologyGroupSummary(g) },
+                           isHidden: { project.groupView.isHidden($0) },
+                           toggleEye: { toggleTopologyEye($0) },
+                           ask: TopologySelectionsCopy.deleteAsk)
+            if !selectionsCollapsed {
+                HStack(spacing: DS.Space.s) {
+                    if let t = topoTrashed, project.canUndoTrash(t) {
+                        HStack(spacing: DS.Space.s) {
+                            Text(TopologySelectionsCopy.deletedToast(t.name)).dsStyle(DS.TypeScale.footnote)
+                                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                            CornerPairStyle.small(TopologySelectionsCopy.undo, id: "topology-trash-undo") {
+                                project.undoTrash(t); topoTrashed = nil
+                            }
+                        }
+                        .padding(.leading, DS.Space.m)
+                        .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
+                    }
+                    // the Regions surface (union / split) — today's header toggle, kept until Edit faces (B5)
+                    CornerPairStyle.small("Regions", id: "topology-regions") { regionsOpen.toggle() }
+                }
+            }
+        }
+    }
+
+    /// The role word for the face chip's join button ("anchor", "load", "keep clear", "protect").
+    func topologyRoleWord(_ id: UUID) -> String {
+        let k = force.kind(for: id)
+        if k.isAnchor { return "anchor" }
+        if case .load = k { return "load" }
+        return force.panelKindLabel(for: id).lowercased()
+    }
+
+    /// The group line's words: its role (and a Load's weight · direction), a Protect's depth.
+    private func topologyGroupSummary(_ g: SelectionGroup) -> String {
+        let role = force.panelKindLabel(for: g.id)
+        if force.isProtected(g.id), !role.hasPrefix("Protect") {
+            return role + " \u{00B7} " + SelectionsSummary.format(force.faceProtectDepthMM, decimals: 1) + " mm"
+        }
+        if role == "Protect" { return role + " " + SelectionsSummary.format(force.faceProtectDepthMM, decimals: 1) + " mm" }
+        return role
+    }
+
+    /// The open group: today's row (rename, colour, role, Keep clear / Protect, lock, primitives, the clearance editor), then
+    /// its faces, each with an (i).
+    private func topologyGroupRows(_ g: SelectionGroup) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            groupRow(g, inList: true)
+            ForEach(g.faces, id: \.self) { f in
+                HStack(spacing: DS.Space.s) {
+                    Text("Face \(f)").font(.system(size: 12.5)).foregroundStyle(DS.Color.textSecondary.color)
+                    Spacer()
+                    InfoPopoverButton(text: "Face \(f) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
+                                      + "Tap it on the model to take it out of the group.",
+                                      id: "topology-face-info-\(f)")
+                }
+                .padding(.horizontal, DS.Space.l)
+            }
+        }
+        .padding(.bottom, DS.Space.s)
+    }
+
+    private func confirmTopologyTrash() {
+        guard let id = topoDeleteAsk else { return }
+        topoDeleteAsk = nil
+        removeGroup(id)
+    }
+
+    /// ★ THE EYE IS VIEW-ONLY: the group still goes in the job; the toast says so.
+    private func toggleTopologyEye(_ id: UUID) {
+        project.groupView.toggleHidden(id)
+        if project.groupView.isHidden(id) { model.toast = TopologySelectionsCopy.hiddenToast }
+    }
+
+    // MARK: the re-run card's Save as new project (as #362's H50b)
+
+    func saveAsNewProjectAndRun() {
+        if let copy = model.duplicateProject(id: project.id) {
+            RerunCard.runOnOpen(copy.id)
+            model.open(copy)
+        } else {
+            model.toast = RerunCard.copyFailedToast
+        }
+    }
+}
+
+/// A 44 pt (i) that shows one sentence (the open group's face lines).
+private struct InfoPopoverButton: View {
+    let text: String
+    let id: String
+    @State private var shown = false
+    var body: some View {
+        Button { shown = true } label: {
+            Image(systemName: "info.circle").font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: 44, height: 36).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("About this face")
+        .accessibilityIdentifier(id)
+        .popover(isPresented: $shown) {
+            Text(text).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textPrimary.color)
+                .fixedSize(horizontal: false, vertical: true).padding(16).frame(maxWidth: 320)
+        }
     }
 }
 

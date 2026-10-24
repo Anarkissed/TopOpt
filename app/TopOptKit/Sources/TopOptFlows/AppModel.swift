@@ -751,6 +751,19 @@ public final class AppModel: ObservableObject {
         openPrintParams()
     }
 
+    /// Copy a project's setup (no results) into a new Library entry, beside the original (ProjectDuplication). B3: lifted
+    /// from #362's H52 at b472880b, code unchanged — Topology's re-run card's "Save as new project" calls it.
+    @discardableResult public func duplicateProject(id: UUID) -> RecentProject? {
+        if screen == .workspace, project?.id == id { persistCurrentProject() }   // Save as new carries the live edits; from Home the original is not re-saved
+        guard let src = recentProjects.first(where: { $0.id == id }),
+              let copy = try? store.duplicate(id: id, name: ProjectDuplication.copyName(of: src.name, existing: recentProjects.map(\.name)), now: now())
+        else { toast = "Couldn’t duplicate this project."; return nil }
+        let recent = ProjectDuplication.recent(for: copy)
+        recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == id } ?? -1) + 1)
+        thumbnails[recent.id] = thumbnails[id]
+        return recent
+    }
+
     // MARK: - Deletion
 
     /// Delete a project from Home (Library card menu). Cancels any in-flight run,

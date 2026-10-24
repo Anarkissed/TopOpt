@@ -24,6 +24,9 @@ public struct RootView: View {
             case .workspace:
                 if let project = model.project {
                     WorkspacePlaceholder(model: model, project: project)
+                        // B3 (as #362's H53): a new project is a new workspace — the re-run card's Save as new
+                        // project opens the copy, whose onAppear must run (RerunCard.takeRunOnOpen) with fresh state.
+                        .id(project.id)
                 } else {
                     HomeView(model: model)   // no active project — shouldn't happen
                 }

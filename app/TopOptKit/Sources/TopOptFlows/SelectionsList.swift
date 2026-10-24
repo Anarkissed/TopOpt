@@ -29,6 +29,10 @@
 //     [Cancel] on the trash, the question with [Delete] in the header's place); a tap = the whole group picked;
 //   * ONLY the picked group opens (its rows: the caller's);
 //   * empty: "Tap a face on the model to start."
+//
+// B3 (Topology, 2026-10-24) — ADDITIONS ONLY, defaulted so the list draws as lifted: `summary` (the line's text — Topology's
+// role / weight / mm instead of the lattice ▦ / ■ summary), the EYE (`isHidden` + `toggleEye`; view-only, GroupViewState) and
+// the trash's question (`ask`; Topology deletes "from every stage").
 
 import SwiftUI
 import TopOptDesign
@@ -116,17 +120,24 @@ public struct SelectionsList: View {
     let idPrefix: String
     /// The picked group's rows, under its line.
     let rows: (SelectionGroup) -> AnyView
+    let summary: ((SelectionGroup) -> String)?
+    let isHidden: (UUID) -> Bool
+    let toggleEye: ((UUID) -> Void)?
+    let ask: ((String) -> String)?
 
     public init(project: ProjectModel, collapsed: Binding<Bool>, picked: UUID?, deleteAsk: UUID?,
                 isLocked: @escaping (UUID) -> Bool = { _ in false }, readsLattice: @escaping (UUID) -> Bool = { _ in false },
                 loadWeight: @escaping (UUID) -> String? = { _ in nil }, pick: @escaping (UUID) -> Void,
                 askDelete: @escaping (UUID) -> Void, confirmDelete: @escaping () -> Void, cancelDelete: @escaping () -> Void,
                 noteFrame: @escaping (CGRect?) -> Void = { _ in }, idPrefix: String = "stage",
-                rows: @escaping (SelectionGroup) -> AnyView = { _ in AnyView(EmptyView()) }) {
+                rows: @escaping (SelectionGroup) -> AnyView = { _ in AnyView(EmptyView()) },
+                summary: ((SelectionGroup) -> String)? = nil, isHidden: @escaping (UUID) -> Bool = { _ in false },
+                toggleEye: ((UUID) -> Void)? = nil, ask: ((String) -> String)? = nil) {
         self.project = project; self._collapsed = collapsed; self.picked = picked; self.deleteAsk = deleteAsk
         self.isLocked = isLocked; self.readsLattice = readsLattice; self.loadWeight = loadWeight
         self.pick = pick; self.askDelete = askDelete; self.confirmDelete = confirmDelete; self.cancelDelete = cancelDelete
         self.noteFrame = noteFrame; self.idPrefix = idPrefix; self.rows = rows
+        self.summary = summary; self.isHidden = isHidden; self.toggleEye = toggleEye; self.ask = ask
     }
 
     static let lineHeight: CGFloat = 44
@@ -150,7 +161,7 @@ public struct SelectionsList: View {
             // a trash's ask takes the header's line — the same height, so nothing moves and [Cancel] stays exactly where the
             // trash was
             if !collapsed, let id = deleteAsk, let g = groups.first(where: { $0.id == id }), !ConfirmInPlace.controlOldPlacement {
-                DeleteConfirm(name: g.name, delete: confirmDelete, oneLine: true, idPrefix: idPrefix)
+                DeleteConfirm(name: g.name, delete: confirmDelete, oneLine: true, idPrefix: idPrefix, ask: ask)
                     .frame(height: Self.lineHeight)
             } else {
                 header
@@ -244,7 +255,7 @@ public struct SelectionsList: View {
                         Text(w).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                     }
                     Spacer(minLength: DS.Space.xs)
-                    SummaryLabel(summary: SelectionsSummary.summary(project: project, group: g))
+                    SummaryLabel(summary: summary?(g) ?? SelectionsSummary.summary(project: project, group: g))
                         .accessibilityIdentifier("\(idPrefix)-sel-summary-\(g.id.uuidString)")
                     if locked {
                         Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)
@@ -255,6 +266,17 @@ public struct SelectionsList: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
+            if let toggleEye {
+                let hidden = isHidden(g.id)
+                Button { toggleEye(g.id) } label: {
+                    Image(systemName: GroupViewState.eyeSymbol(hidden: hidden)).font(.system(size: 14, weight: .medium))
+                        .foregroundStyle((hidden ? DS.Color.textQuaternary : DS.Color.textSecondary).color)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(hidden ? "Show \(g.name)" : "Hide \(g.name) (it still counts in the run)")
+                .accessibilityIdentifier("\(idPrefix)-sel-eye-\(g.id.uuidString)")
+            }
             if !locked {
                 Button { askDelete(g.id) } label: {
                     Image(systemName: "trash").font(.system(size: 14, weight: .medium))
@@ -266,7 +288,7 @@ public struct SelectionsList: View {
                 .modifier(CancelInPlace(asking: deleteAsk == g.id, keepKey: "deleteCancel", idPrefix: idPrefix,
                                         cancel: cancelDelete))
                 .background(publish("selTrash-\(g.id.uuidString)"))
-                .accessibilityLabel("Delete \(g.name), here and in Topology")
+                .accessibilityLabel(ask?(g.name) ?? "Delete \(g.name), here and in Topology")
                 .accessibilityIdentifier("\(idPrefix)-sel-trash-\(g.id.uuidString)")
             }
         }
@@ -276,7 +298,7 @@ public struct SelectionsList: View {
 
     /// "Delete Group C here and in Topology?" [Delete] — the red control's old place, under the group's line.
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
-        DeleteConfirm(name: g.name, delete: confirmDelete, idPrefix: idPrefix)
+        DeleteConfirm(name: g.name, delete: confirmDelete, idPrefix: idPrefix, ask: ask)
             .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
     }
 
@@ -383,6 +405,8 @@ struct DeleteConfirm: View {
     /// so the trash's spot — now [Cancel] — never moves).
     var oneLine = false
     var idPrefix: String = "stage"
+    /// The question (B3: Topology's "from every stage"); nil: SelectionsCopy.deleteAsk.
+    var ask: ((String) -> String)? = nil
     var body: some View {
         if oneLine { line } else { stacked }
     }
@@ -403,7 +427,7 @@ struct DeleteConfirm: View {
     private var line: some View {
         HStack(spacing: DS.Space.s) {
             deleteButton
-            Text(SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
+            Text(ask?(name) ?? SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("\(idPrefix)-delete-question")
@@ -417,7 +441,7 @@ struct DeleteConfirm: View {
     private var stacked: some View {
         VStack(alignment: .leading, spacing: 0) {
             // never fixed-size (a 50-character question widened the 348 pt list and cut every trash)
-            Text(SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
+            Text(ask?(name) ?? SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, DS.Space.s).padding(.horizontal, DS.Space.xs)
