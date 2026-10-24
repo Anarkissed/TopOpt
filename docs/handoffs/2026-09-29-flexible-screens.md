@@ -416,6 +416,10 @@ None of these are #361's Flexible code; the reviewer routes them. Items 35-38 we
    - **Now:** when frozen material is at least 0.68 of the part's solid, the step's target clamps to the minimum density 1e-3, leaving 81 % of elements at the floor, and nothing flags it (`core/src/simp/minimize_plastic.cpp:1461-1467`, `:1127-1133`).
    - **Needed:** refuse, or warn in the receipt, naming the frozen share and what froze it.
    - **His words:** "why is it thinning out this area where 50kg is going?"
+   - **Adds (f), 2026-10-24, his Carriage Arms run 13185527:** a REDUCTION ladder hits the same floor silently. Rungs
+     0.68 / 0.52 / 0.38 / 0.26 all came out at 0.758 (79 % of the part frozen by 29 Protect faces at 5 mm plus the anchor pads),
+     report.json keeps no requested-vs-achieved value, and the files are still named variant_068 / 052 / 038 / 026. Needed: a
+     saturated flag per rung (requested vs achieved), and rungs below the floor skipped or merged.
 
 41. **Export keeps only the largest body.**
    - **Now:** `keep_largest_component` drops every other body (`run_job.cpp:573`, `:1732`; `simp.cpp:4321`; `mesh.cpp:653`, `:694`). His split Carriage Arms saved one arm per variant.
@@ -440,12 +444,26 @@ None of these are #361's Flexible code; the reviewer routes them. Items 35-38 we
 
 47. **(unverified) Anchored holes cut away by bolt clearances.** All 22 anchored holes in run 13185527 also carried a bolt clearance. The lead is unconfirmed and most likely comes from how the app writes the job.
    - **His words:** "it cut out a part of the holes that I specifically set to anchor".
+   - **2026-10-24:** NOT explained by the clearances. A clearance never removes the part's own material (`clearance.cpp:364-369`),
+     and the 3-voxel anchor pad keeps every anchored ring solid; in run ad68d4c0 all 44 anchor faces are 0 % filled and intact.
+     Waiting on his screenshot of the cut hole (run 13185527). Nothing is built for it (the reviewer's ruling of 07:30, 2).
 
 48. **(unverified) A max-stiffness-for-a-plastic-budget mode.** It was offered to him and he has not answered. Hold until he does (`job.cpp:491-496`).
 
 49. **(deferred) Per-piece materials (Mixed and the future Cut), the round-3 brief's #14.** "The job needs a material per piece."
    `PartMaterials` never existed (`git log --all -S "PartMaterials" -- app/` is empty) and the plan's batch F (Rigid / Flexible /
    Mixed) was never built; U21 batch A added the Flexible tab instead. Needed only if Mixed or Cut are built.
+
+50. **(e) Growth ("Add to strengthen") on a part that already passes (2026-10-24, his Carriage Arms run ad68d4c0).**
+   - **Now:** the growth ladder has no 1.00 rung (`core/src/simp/production.cpp:818-821`); `main.cpp:614-628` recommends the
+     last accepted rung, "+10% — the SMALLEST addition that passes" (worker.log:307); `loadcase.cpp:545-547` assumes the part is
+     under-strength. His part AS DRAWN passes (core analyze: effective margin 3.71 against 1.5 required); the rungs were 9.3-10.2.
+   - **Needed:** certify the part as drawn first, and say "already passes, nothing to add" (or add a 1.00 rung).
+   - The reviewer routes it with him, with the other Topology items (ruling of 07:30, 1).
+
+51. **(g) A stale comment: a keep-out does NOT void part material.** `core/src/pipeline.hpp:201` says it does;
+   `voxelize.cpp:157-170` handles part voxels before it checks the keep-out, so part material inside a keep-out stays.
+   Docs only. Found on the same run.
 
 ### D. Core changes already made outside #361 (not merged anywhere yet)
 
@@ -510,6 +528,27 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    the lattice request). In his words: "When a lattice run asks to replace results, the button starts a Topology run. This
    needs checking." Not changed here (the reviewer's ruling of 2026-10-24 04:31); round 9 only keeps "Save as new project"
    off that card (H50d). Ask: #354 gives the Lattice run's confirm its own action.
+7. **An edge whose ends are not known is silently dropped from the job (the reviewer's ruling of 2026-10-24 07:30, 3).**
+   `app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+PressSend.swift:90-91` (`pressMap` returns nil) → `:107`
+   (`pressDesignTargets` drops it): the press is not designed and nothing says so. Ask: say it on the card (which edge, why) or
+   refuse the send. Flexible's own file, but front-end work, so it waits for the redesign build.
+
+**From his Carriage Arms Topology runs (2026-10-24; diagnosis of worker jobs 13185527 → ad68d4c0, the reviewer's ruling of
+07:30, 1). The optimizer honoured every constraint it was sent; these are what the app says or doesn't say.**
+
+8. **(a) HIS CALL: Protect promises more than core does.** The UI says the optimizer may not change the face's shape
+   (`WorkspacePlaceholder.swift:11388-11389`, `:11651`; `ResultsModel.swift:1035-1036`, "could not reshape it"). Core's
+   protection only freezes the solid skin behind the face (`face_tag.cpp:190`; `loadcase.cpp:600-601`, "NEVER frees void"),
+   and `voxelize.cpp:186-188` leaves the space in front fillable. In growth runs this buried his protected faces (bridge top
+   104: 89 / 83 / 46 % of the 1.5-5 mm in front filled; underside 13: 75 / 65 / 82 %) and plugged bores and M3 holes wherever
+   no keep-clear reached. His choice: Protect also keeps the space in front clear, or the words change.
+9. **(b) → #354's redesign build. "Add to strengthen" reads as add-only.** `LadderMode.swift:55` ("Add as little plastic as
+   possible"). It is a whole-domain redesign: it removed 7.6 / 12.3 / 14.8 % of his part (report.json inside_part
+   13,948 / 13,242 / 12,870 of 15,102 voxels).
+10. **(c) → #354's redesign build. No warning when a keep-out box does not span the design box.** His box stopped at z 91.5, the
+   design box reached z 64.3, and the slot under the part got a floor (82 / 65 / 0 % of its columns closed).
+11. **(d) → #354's redesign build. Latent: the worker upload carries only the STEP and job.json** (`RemoteRunner.swift:1440-1460`),
+   so a painted region's sidecar would never reach the worker. Not used in these runs.
 
 ## ★ Round 8 · STEP import repair WIRED IN (H47) + paint off on a repaired STEP (H48) (2026-10-23) (read this first)
 
