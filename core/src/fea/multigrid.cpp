@@ -2859,25 +2859,20 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         // fallback solves: an iterate of the island-DROPPED system can sit far
         // below HS's start yet far above the exact one's (the dropped specks
         // carry the near-rigid motion's forces). Uncounted applies, so no
-        // matvec count moves; HS is m itself when nothing was dropped.
-        UncountedFineApply Ax(m);
-        const Vec bx = Eigen::Map<const Vec>(m.rg.data(),
-                                             static_cast<Eigen::Index>(m.ng));
+        // matvec count moves; HS is m itself when nothing was dropped. The
+        // apply's two full-DOF work vectors live only for the evaluation (not
+        // through the l1 solve), so the retry's peak memory is unchanged.
+        const Eigen::Map<const Vec> bx(m.rg.data(), static_cast<Eigen::Index>(m.ng));
         const double bxn = bx.norm();
-        Vec ax;
-        if (warm && rgv.norm() > 0.0) {
-          UncountedFineApply A(*HS.m);
-          A(x0, ax);
-          r0 = (rgv - ax).norm() / rgv.norm();
-        }
-        if (warm && bxn > 0.0) {
-          if (use2) {
-            Ax(x0, ax);
-            r0x = (bx - ax).norm() / bxn;
-          } else {
-            r0x = r0;
-          }
-        }
+        auto rel_res = [](const MatfreeReduced& sys, const Eigen::Ref<const Vec>& b,
+                          double bn, const Vec& x) {
+          UncountedFineApply A(sys);
+          Vec ax;
+          A(x, ax);
+          return (b - ax).norm() / bn;
+        };
+        if (warm && rgv.norm() > 0.0) r0 = rel_res(*HS.m, rgv, rgv.norm(), x0);
+        if (warm && bxn > 0.0) r0x = use2 ? rel_res(m, bx, bxn, x0) : r0;
         Vec xg;
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kSafeMaxCycles),
                       xg, it, res, /*mixed=*/false, &rec, warm ? &x0 : nullptr,
@@ -2910,8 +2905,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           // never starts further from its own stopping test, which is still
           // ||r|| <= tol*||b|| on the EXACT system: its answer is unchanged in
           // kind.
-          Ax(xg, ax);
-          resx = (bx - ax).norm() / bxn;
+          resx = rel_res(m, bx, bxn, xg);
           if (resx < r0x) {
             for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
             seeded_fallback = true;
