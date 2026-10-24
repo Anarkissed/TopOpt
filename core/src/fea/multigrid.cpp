@@ -207,6 +207,46 @@ thread_local int g_island_drop_forbid = 0;
 // production code sets it; only the safe-retry MG-PCG call reads it).
 thread_local fea_detail::MgSafeAttemptReport g_mg_last_safe;
 thread_local int g_mg_safe_test_breakdown = 0;
+// [mg-safe] stderr BOUND. A latched run takes the safe path on EVERY solve, so
+// one line per attempt is unbounded (thousands on a long ladder). Per run: the
+// first kSafeLogFirst attempts print their full line; after that attempts are
+// accumulated and one summary line is printed per kSafeLogEvery of them; the
+// attempt that latches the safe path off always prints its full line (once per
+// run, after flushing the partial summary). Stderr only: no number depends on
+// any of this. The two periods are overridable by tests only.
+constexpr int kSafeLogFirst = 5;
+constexpr int kSafeLogEvery = 50;
+thread_local int g_mg_safe_log_first = kSafeLogFirst;
+thread_local int g_mg_safe_log_every = kSafeLogEvery;
+struct SafeLogWindow {
+  long long first_seq = 0, last_seq = 0;
+  int attempts = 0, converged = 0, seeded = 0, dropped = 0;
+  long long cycles = 0;
+  double ms = 0.0;
+};
+thread_local SafeLogWindow g_mg_safe_log_win;
+thread_local long long g_mg_safe_log_lines = 0;
+thread_local long long g_mg_safe_log_summaries = 0;
+void mg_safe_log_flush_window() {
+  SafeLogWindow& w = g_mg_safe_log_win;
+  if (w.attempts == 0) return;
+  std::fprintf(stderr,
+               "[mg-safe] solves %lld-%lld: %d safe attempts (%d converged, %d "
+               "seeded the Jacobi-CG fallback, %d solved with islands dropped), "
+               "%lld l1 cycles, %.0f ms ; per-solve lines: the first %d of a run, "
+               "then one summary per %d\n",
+               w.first_seq, w.last_seq, w.attempts, w.converged, w.seeded,
+               w.dropped, w.cycles, w.ms, g_mg_safe_log_first, g_mg_safe_log_every);
+  ++g_mg_safe_log_summaries;
+  w = SafeLogWindow();
+}
+// A run's last partial window is flushed when the next run resets the state,
+// and at thread exit (this holder is constructed on the first summarised
+// attempt), so no attempt goes unreported.
+struct SafeLogTail {
+  ~SafeLogTail() { mg_safe_log_flush_window(); }
+};
+thread_local SafeLogTail g_mg_safe_log_tail;
 // Observation only (fea_detail::mg_island_permit_stats): per matrix-free solve,
 // whether it ran under an island-drop permit with no forbid. Reset per run.
 thread_local fea_detail::MgIslandPermitStats g_mg_permit_stats;
@@ -2913,24 +2953,46 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         std::snprintf(exact_note, sizeof exact_note,
                       " ; l1 iterate NOT handed over (exact rel res %.3e >= start "
                       "%.3e)", resx, r0x);
-      std::fprintf(stderr,
-                   "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
-                   "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
-                   "islands: %s%d unanchored of %d pieces (%lld vox, largest %d), "
-                   "kept frozen %d (%s), kept big %d, kept hinged %d, dropped %d "
-                   "islands / %lld vox of %lld elements%s%s%s\n",
-                   seq, safe_direct ? "latched off" : "stalled", shipped_it,
-                   shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
-                   fea_detail::mf_steady_ms() - t_s0, may_drop ? "" : "(not permitted) ",
-                   scan.unanchored, scan.pieces, scan.unanchored_voxels,
-                   scan.largest_unanchored, scan.kept_frozen,
-                   scan.keep_mask ? "frozen mask" : "full-modulus proxy",
-                   scan.kept_big, scan.kept_hinged,
-                   use2 ? scan.droppable : 0,
-                   use2 ? scan.droppable_voxels : 0LL, scan.elements,
-                   scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
-                   g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
-                   exact_note);
+      const double safe_ms = fea_detail::mf_steady_ms() - t_s0;
+      // Bounded (see kSafeLogFirst): the full line for the first attempts of a
+      // run and for the one that latches the safe path off; a summary per
+      // kSafeLogEvery attempts otherwise.
+      if (seq <= g_mg_safe_log_first || g_mg_safe_latched) {
+        if (g_mg_safe_latched) mg_safe_log_flush_window();
+        std::fprintf(stderr,
+                     "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
+                     "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
+                     "islands: %s%d unanchored of %d pieces (%lld vox, largest %d), "
+                     "kept frozen %d (%s), kept big %d, kept hinged %d, dropped %d "
+                     "islands / %lld vox of %lld elements%s%s%s%s\n",
+                     seq, safe_direct ? "latched off" : "stalled", shipped_it,
+                     shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
+                     safe_ms, may_drop ? "" : "(not permitted) ",
+                     scan.unanchored, scan.pieces, scan.unanchored_voxels,
+                     scan.largest_unanchored, scan.kept_frozen,
+                     scan.keep_mask ? "frozen mask" : "full-modulus proxy",
+                     scan.kept_big, scan.kept_hinged,
+                     use2 ? scan.droppable : 0,
+                     use2 ? scan.droppable_voxels : 0LL, scan.elements,
+                     scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
+                     g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
+                     exact_note,
+                     (seq == g_mg_safe_log_first && !g_mg_safe_latched)
+                         ? " ; further [mg-safe] solves are summarised" : "");
+        ++g_mg_safe_log_lines;
+      } else {
+        static_cast<void>(&g_mg_safe_log_tail);  // arm the thread-exit flush
+        SafeLogWindow& w = g_mg_safe_log_win;
+        if (w.attempts == 0) w.first_seq = seq;
+        w.last_seq = seq;
+        ++w.attempts;
+        if (ok) ++w.converged;
+        if (seeded_fallback) ++w.seeded;
+        if (use2) ++w.dropped;
+        w.cycles += it;
+        w.ms += safe_ms;
+        if (w.attempts >= g_mg_safe_log_every) mg_safe_log_flush_window();
+      }
       diag.t_mg_ms = fea_detail::mf_steady_ms() - t_mg0;
     }
 
@@ -3142,6 +3204,17 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
 
 const MgSafeAttemptReport& mg_last_safe_attempt() { return g_mg_last_safe; }
 const MgIslandPermitStats& mg_island_permit_stats() { return g_mg_permit_stats; }
+MgSafeLogCounts mg_safe_log_counts() {
+  MgSafeLogCounts c;
+  c.lines = g_mg_safe_log_lines;
+  c.summaries = g_mg_safe_log_summaries;
+  c.pending = g_mg_safe_log_win.attempts;
+  return c;
+}
+void mg_safe_test_log_periods(int first, int every) {
+  g_mg_safe_log_first = first > 0 ? first : kSafeLogFirst;
+  g_mg_safe_log_every = every > 0 ? every : kSafeLogEvery;
+}
 void mg_safe_test_force_breakdown(int mode) {
   g_mg_safe_test_breakdown = (mode == 1 || mode == 2) ? mode : 0;
 }
@@ -3169,6 +3242,10 @@ void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_last_dropped_floor = 0.0;
   g_mg_last_safe = fea_detail::MgSafeAttemptReport();
   g_mg_permit_stats = fea_detail::MgIslandPermitStats();
+  mg_safe_log_flush_window();  // the previous run's tail, if any
+  g_mg_safe_log_win = SafeLogWindow();
+  g_mg_safe_log_lines = 0;
+  g_mg_safe_log_summaries = 0;
   g_mg_latched_solves = 0;
   g_mg_rearm_attempts = 0;
   g_mg_rearm_carries = 0;

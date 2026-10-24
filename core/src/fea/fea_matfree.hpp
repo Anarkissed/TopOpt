@@ -618,6 +618,19 @@ struct MgIslandPermitStats {
 };
 const MgIslandPermitStats& mg_island_permit_stats();
 
+// The bounded [mg-safe] stderr log since the per-run reset: full per-solve
+// lines printed, summary lines printed, and attempts waiting in the current
+// summary window. Observation only.
+struct MgSafeLogCounts {
+  long long lines = 0;
+  long long summaries = 0;
+  int pending = 0;
+};
+MgSafeLogCounts mg_safe_log_counts();
+// TEST ONLY: override the log bound's two periods (first N full lines per run,
+// then one summary per `every` attempts); <= 0 restores the shipped 5 / 50.
+void mg_safe_test_log_periods(int first, int every);
+
 // TEST ONLY — never set by production code. Forces the safe retry's MG-PCG to
 // break down before its first update: 1 = a non-finite preconditioned residual
 // (the r.z check), 2 = a zero first search direction (the p.Ap check at k = 1).

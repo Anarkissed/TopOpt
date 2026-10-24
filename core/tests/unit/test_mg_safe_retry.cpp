@@ -22,6 +22,8 @@
 //   B    a safe attempt that breaks down before its first update reports its
 //        starting residual: not productive, seeds nothing, advances the latch.
 //   A    the fallback is seeded only by an iterate better on the EXACT system.
+//   L    the [mg-safe] stderr lines are bounded per run (first N, then one
+//        summary per M attempts) and the bound changes no number.
 //   D    the certified final compliance solves (simp_optimize, its masked /
 //        SEMDOT overload, plsm_optimize) never run with the island drop
 //        permitted, while the trajectory solves do.
@@ -566,6 +568,52 @@ int main() {
                   F.specks &&
               std::fabs(w_u - w_ref) <= 1e-6 * std::fabs(w_ref),
           "G: the second body is solved at its true stiffness (load work matches exact)");
+  }
+
+  // ---------------------------------------------------------------------------
+  // L (log bound): a latched run takes the safe path on every solve, so the
+  // per-solve [mg-safe] line must be bounded. With the periods overridden to
+  // (first 1, then a summary per 2), six safe attempts print 1 full line and 2
+  // summaries, with 1 attempt pending (flushed at the next reset / thread
+  // exit). The same six solves with every line printed (first 100) give
+  // BIT-IDENTICAL fields and the same cycle counts: the bound changes nothing
+  // but stderr. (Shipped periods: 5 / 50.)
+  // ---------------------------------------------------------------------------
+  {
+    SpeckField F = make_speck_field(true);
+    const double tol = 1e-8;
+    auto six = [&](int first, int every, std::vector<FeaSolution>& us,
+                   std::vector<int>& its) {
+      topopt::fea_matfree_reset_mg_stagnation_latch();  // flushes a pending tail
+      topopt::fea_detail::mg_safe_test_log_periods(first, every);
+      topopt::FeaIslandDropPermit permit;
+      for (int s = 0; s < 6; ++s) {
+        CgInfo ci;
+        us.push_back(
+            topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ci));
+        its.push_back(ci.iterations);
+      }
+      return topopt::fea_detail::mg_safe_log_counts();
+    };
+    std::vector<FeaSolution> ua, ub;
+    std::vector<int> ia, ib;
+    const auto CA = six(1, 2, ua, ia);
+    std::printf("      log (1, 2): lines=%lld summaries=%lld pending=%d engaged=%lld\n",
+                CA.lines, CA.summaries, CA.pending,
+                topopt::fea_matfree_mg_safe_engagements());
+    const auto CB = six(100, 100, ub, ib);
+    std::printf("      log (100, 100): lines=%lld summaries=%lld pending=%d\n",
+                CB.lines, CB.summaries, CB.pending);
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    topopt::fea_detail::mg_safe_test_log_periods(0, 0);  // shipped 5 / 50
+    check(CA.lines == 1 && CA.summaries == 2 && CA.pending == 1,
+          "L: six safe attempts under (1, 2) print 1 full line + 2 summaries");
+    check(CB.lines == 6 && CB.summaries == 0 && CB.pending == 0,
+          "L: under (100, 100) every attempt prints its full line");
+    bool same = ua.size() == ub.size() && ia == ib;
+    for (std::size_t q = 0; same && q < ua.size(); ++q)
+      same = bit_identical(ua[q], ub[q]);
+    check(same, "L: the log bound changes no number (fields bit-identical, same cycles)");
   }
 
   // ---------------------------------------------------------------------------
