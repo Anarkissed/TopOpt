@@ -91,6 +91,21 @@ std::vector<double> edge_fraction(const Stack& stack);
 //
 // ★ "Buildable" is a LABELLED HEURISTIC (R14): C2's realised lattice replaces it.
 // ════════════════════════════════════════════════════════════════════════════════
+// C2 B1b, item 18: A SERIES COLUMN. The column's run, split into its OWN segment (the
+// density design_face solves for) and FIXED segments at densities already designed (other
+// owners'). One stress runs through them all, so the depth is
+//     d = own_mm · ε(p; ρ_own) + Σ length · ε(p; ρ_fixed).
+// The fixed part is independent of ρ_own, so solving for ρ_own is one inversion on the own
+// segment's share of the target.
+struct FixedSegment {
+  double length_mm = 0.0;
+  double density = 0.0;
+};
+struct SeriesColumn {
+  double own_mm = 0.0;
+  std::vector<FixedSegment> fixed;
+};
+
 struct ColumnDesign {
   double s = 0.0;
   double pressure_mpa = 0.0;
@@ -111,6 +126,11 @@ struct ColumnDesign {
   bool buildable_extrapolated = false;
   double cell_mm = 0.0;           // at the buildable density
   double sigma_mm = 0.0;          // the smoothing σ used at this column
+  // C2 B1b (series): the own segment's length (= height_mm for a single-ρ column) and the
+  // fixed segments' depth at this column's pressure (0 for a single-ρ column; NaN when a fixed
+  // segment is past the data).
+  double own_length_mm = 0.0;
+  double fixed_depth_mm = 0.0;
 };
 
 struct Range1 {
@@ -138,9 +158,12 @@ struct FaceDesign {
   Range1 sigma;  // the smoothing σ used (mm), R14 / F7
 };
 
+// `series` (optional, parallel to stack.columns): each column as a series column (item 18).
+// Null = every column is single-ρ over its whole run, exactly as before.
 FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap& map,
                        double weight_n, const StampGrid* design_stamp,
-                       const BuildParams& build, const TierBand& tier);
+                       const BuildParams& build, const TierBand& tier,
+                       const std::vector<SeriesColumn>* series = nullptr);
 
 // ════════════════════════════════════════════════════════════════════════════════
 // F8 — CHECK MODE: press a stamp on the designed lattice and read the dent.

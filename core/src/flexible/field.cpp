@@ -111,6 +111,8 @@ bool in_stack(const Stack& s, const Vec3& p, int& col, double& depth) {
   const double t = dot(sub(p, s.frame.centroid), s.frame.load);
   if (t < c.entry_t - 1e-9 || t > c.exit_t + 1e-9) return false;
   depth = t - c.entry_t;
+  // C2 B1b, item 5: a press with a FLAT PRISM owns nothing past its plane.
+  if (s.has_flat_prism && dot(sub(p, s.flat_apex), s.frame.load) > s.flat_depth_mm + 1e-9) return false;
   // A SECTOR owns only what projects onto its side of its cuts (B5): the column cell a
   // voxel falls in may straddle the cut.
   // A SECTOR stack owns only what projects onto its sectors (B5): the voxel's own ray
@@ -247,7 +249,9 @@ std::vector<double> squish_fraction(const Stack& stack, const SquishMap& map) {
 
 FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap& map,
                        double weight_n, const StampGrid* design_stamp, const BuildParams& build,
-                       const TierBand& tier) {
+                       const TierBand& tier, const std::vector<SeriesColumn>* series) {
+  if (series != nullptr && series->size() != stack.columns.size())
+    throw FlexibleError("design_face: one series entry per column is required");
   if (!(weight_n > 0.0) || !std::isfinite(weight_n))
     throw FlexibleError("face " + std::to_string(stack.face_region_id) + ": weight must be > 0");
   if (!(map.deepest_squish_mm > 0.0) || !std::isfinite(map.deepest_squish_mm))
@@ -287,20 +291,67 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
   }
   const double lim = set.strain_limit();
   out.columns.resize(stack.columns.size());
+  // The fixed segments' depth at a pressure (series columns, item 18): NaN when one of them is
+  // past the data. Cached per (pressure, density) pair: a column's fixed segments repeat values.
+  auto fixed_depth = [&](const SeriesColumn& sc, double pressure) {
+    double d = 0.0;
+    for (const FixedSegment& f : sc.fixed) {
+      if (!(f.length_mm > 0.0)) continue;
+      const StrainResult r = strain_under(set, pressure, f.density);
+      if (!r.ok) return kNaN;
+      d += f.length_mm * r.strain;
+    }
+    return d;
+  };
   for (std::size_t k = 0; k < stack.columns.size(); ++k) {
     const StackColumn& sc = stack.columns[k];
     ColumnDesign& c = out.columns[k];
     c.s = S[k];
-    c.height_mm = sc.lattice_mm;
+    // A single-ρ column is its whole run (own = height, no fixed part: D = 0, exactly as
+    // before). A SERIES column's height is own + fixed; only its own segment is designed.
+    const SeriesColumn* ser = series != nullptr ? &(*series)[k] : nullptr;
+    double fixed_len = 0.0;
+    if (ser != nullptr)
+      for (const FixedSegment& f : ser->fixed) fixed_len += std::max(0.0, f.length_mm);
+    c.height_mm = ser != nullptr ? ser->own_mm + fixed_len : sc.lattice_mm;
+    c.own_length_mm = ser != nullptr ? ser->own_mm : sc.lattice_mm;
     c.pressure_mpa = stamp_cov[k] ? stamp_p[k] : out.design_pressure_even_mpa;
     c.target_depth_mm = S[k] * map.deepest_squish_mm;
-    if (!(c.height_mm > 0.0)) {
+    if (!(c.height_mm > 0.0) || !(c.own_length_mm > 0.0)) {
       c.status = "no_lattice";
       ++out.no_lattice;
       if (c.target_depth_mm > 0.0) ++out.solid_under_map;  // squish drawn over solid (B2)
       continue;
     }
-    c.target_strain = c.target_depth_mm / c.height_mm;
+    const double D = ser != nullptr ? fixed_depth(*ser, c.pressure_mpa) : 0.0;
+    c.fixed_depth_mm = D;
+    if (!std::isfinite(D)) {
+      // a fixed segment is past the data at this pressure: the column's depth is unknown
+      c.status = "beyond_data";
+      ++out.beyond_data;
+      c.target_strain = c.target_depth_mm / c.height_mm;
+      c.clamped_density = set.density_max();
+      c.nearest_known = false;
+      c.nearest_depth_mm = kNaN;
+      c.clamped_depth_mm = kNaN;
+      continue;
+    }
+    const double own = c.own_length_mm;
+    if (ser != nullptr && !ser->fixed.empty() && !(c.target_depth_mm - D > 0.0)) {
+      // (series only) the fixed segments alone squish at least the target: even the firmest own segment
+      // cannot make the column shallower -> too_soft
+      c.status = "too_soft";
+      ++out.too_soft;
+      c.target_strain = 0.0;
+      c.clamped_density = set.density_max();
+      const StrainResult f = strain_under(set, c.pressure_mpa, c.clamped_density);
+      c.nearest_known = f.ok;
+      c.nearest_depth_mm = f.ok ? f.strain * own + D : kNaN;
+      c.clamped_depth_mm = c.nearest_depth_mm;
+      continue;
+    }
+    // the own segment's strain target (for a single-ρ column, target / height as before)
+    c.target_strain = (c.target_depth_mm - D) / own;
     const InverseResult inv = density_for(set, c.target_strain, c.pressure_mpa);
     c.status = inv.status;
     if (inv.ok) {
@@ -317,7 +368,7 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       c.clamped_density = inv.nearest_density;
       c.nearest_known = inv.nearest_known;
       // H1: no known depth is NaN with the status saying why — never a stand-in number.
-      c.nearest_depth_mm = inv.nearest_known ? inv.nearest_strain * c.height_mm : kNaN;
+      c.nearest_depth_mm = inv.nearest_known ? inv.nearest_strain * own + D : kNaN;
       c.clamped_depth_mm = c.nearest_depth_mm;
       continue;
     }
@@ -330,7 +381,7 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
       c.clamped_density = at_lim.status == "too_firm" ? set.density_min() : set.density_max();
     const StrainResult f = strain_under(set, c.pressure_mpa, c.clamped_density);
     c.nearest_known = f.ok;
-    c.nearest_depth_mm = f.ok ? f.strain * c.height_mm : kNaN;
+    c.nearest_depth_mm = f.ok ? f.strain * own + D : kNaN;
     c.clamped_depth_mm = c.nearest_depth_mm;
   }
 
@@ -366,9 +417,9 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
     c.cell_mm = cell_size_mm(build.topology, c.buildable_density, build.beads_per_wall,
                              build.bead_width_mm);
     const StrainResult f = strain_under(set, c.pressure_mpa, c.buildable_density);
-    c.buildable_ok = f.ok;
-    if (f.ok) {
-      c.buildable_depth_mm = f.strain * c.height_mm;
+    c.buildable_ok = f.ok && std::isfinite(c.fixed_depth_mm);
+    if (c.buildable_ok) {
+      c.buildable_depth_mm = f.strain * c.own_length_mm + c.fixed_depth_mm;
       c.buildable_extrapolated = f.extrapolated;
       if (f.extrapolated) ++out.buildable_extrapolated;
       if (std::isfinite(c.clamped_depth_mm))
@@ -381,7 +432,8 @@ FaceDesign design_face(const CurveSet& set, const Stack& stack, const SquishMap&
     if (c.buildable_density - set.density_min() < 0.1 * span ||
         set.density_max() - c.buildable_density < 0.1 * span)
       ++out.near_edge;
-    out.material_volume_mm3 += c.buildable_density * stack.columns[k].area_mm2 * c.height_mm;
+    // this face's material is its own segment (a single-ρ column: its whole height)
+    out.material_volume_mm3 += c.buildable_density * stack.columns[k].area_mm2 * c.own_length_mm;
     accumulate(out.target_depth, c.target_depth_mm, nt);
     accumulate(out.buildable_density, c.buildable_density, nd);
     accumulate(out.cell, c.cell_mm, nc);

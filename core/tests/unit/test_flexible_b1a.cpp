@@ -57,7 +57,9 @@ static int g_checks = 0;
     }                                                              \
   } while (0)
 
-static_assert(kPressApiVersion == 3, "B1a: the press API version");
+// RE-PINNED (C2 B1b): the current version is pinned in test_flexible_b1b; B1a's meaning holds
+// from 3 on.
+static_assert(kPressApiVersion >= 3, "B1a: the press API version");
 
 static const Vec3 kZ{0, 0, 1};
 

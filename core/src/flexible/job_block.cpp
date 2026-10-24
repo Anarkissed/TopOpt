@@ -216,7 +216,7 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     }
     if (face.role != "loaded") json::fail(fw + ".role", "must be \"loaded\" or \"resting\"");
     ++loaded;
-    json::reject_unknown(fv, {"face_region_id", "face_region_ids", "press_direction", "role", "skin_on",
+    json::reject_unknown(fv, {"face_region_id", "face_region_ids", "press_direction", "flat_prism", "role", "skin_on",
                               "frame_rotation_deg", "weight_n", "deepest_squish_mm", "mode", "curve_x",
                               "curve_y", "curve_centre_edge", "design_stamp"},
                          fw);
@@ -228,6 +228,18 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
       const Vec3& d = face.press_direction;
       if (!(d.x * d.x + d.y * d.y + d.z * d.z > 0.0)) json::fail(pw, "must be non-zero");
       face.has_press_direction = true;
+    }
+    if (const Value* fp = json::find(fv, "flat_prism")) {
+      const std::string pw = fw + ".flat_prism";
+      if (!fp->is_object()) json::fail(pw, "must be an object {\"apex_mm\": [x, y, z]}");
+      json::reject_unknown(*fp, {"apex_mm"}, pw);
+      const Value& a = json::require(*fp, "apex_mm", pw);
+      if (!a.is_array() || a.arr.size() != 3) json::fail(pw + ".apex_mm", "must be [x, y, z]");
+      face.flat_apex = {json::as_number(a.arr[0], pw + ".apex_mm[0]"), json::as_number(a.arr[1], pw + ".apex_mm[1]"),
+                        json::as_number(a.arr[2], pw + ".apex_mm[2]")};
+      if (!face.has_press_direction)
+        json::fail(pw, "needs \"press_direction\": the prism's plane is normal to the press");
+      face.has_flat_prism = true;
     }
     json::require_all(fv, {"weight_n", "deepest_squish_mm", "mode"}, fw);
     if (const Value* r = json::find(fv, "frame_rotation_deg")) {
@@ -434,6 +446,21 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
   if (job.flexible->no_include_means_no_lattice && !any_include)
     return std::vector<char>(grid.voxel_count(), 0);
   return region_mask_impl(job, model, grid, nullptr);
+}
+
+std::vector<std::vector<char>> flexible_include_region_masks(const JobDescription& job, const StepModel& model,
+                                                             const VoxelGrid& grid) {
+  if (!job.flexible) throw FlexibleError("flexible_include_region_masks: the job has no flexible block");
+  std::vector<std::vector<char>> out(job.flexible->regions.size());
+  for (std::size_t i = 0; i < job.flexible->regions.size(); ++i) {
+    if (job.flexible->regions[i].role != "include") continue;
+    const JobLatticeRegion* want = &job.flexible->regions[i];
+    const std::function<bool(const JobLatticeRegion&, const ResolvedFaceRegion*)> admit =
+        [want](const JobLatticeRegion& r, const ResolvedFaceRegion*) { return &r == want; };
+    out[i] = region_mask_impl(job, model, grid, &admit);
+    flexible_fill_surface(grid, out[i]);
+  }
+  return out;
 }
 
 std::vector<char> flexible_face_lattice_mask(const JobDescription& job, const StepModel& model,

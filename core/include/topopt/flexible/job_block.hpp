@@ -74,6 +74,10 @@ struct JobFlexibleFace {
   std::vector<int> footprint_region_ids;
   bool has_press_direction = false;
   Vec3 press_direction{0, 0, 0};
+  // C2 B1b, item 5: "flat_prism": {"apex_mm": [x, y, z]} on a press (needs press_direction):
+  // the press owns its prism dot(p − apex, d) <= deepest_squish_mm and is designed in series.
+  bool has_flat_prism = false;
+  Vec3 flat_apex{0, 0, 0};
   bool has_design_stamp = false;
   flexible::StampGrid design_stamp;
   bool skin_on = true;
@@ -144,6 +148,12 @@ SurfaceFill flexible_fill_surface(const VoxelGrid& grid, std::vector<char>& mask
 // drawing).
 std::vector<char> flexible_lattice_mask(const JobDescription& job, const StepModel& model,
                                         const VoxelGrid& grid, SurfaceFill* fill = nullptr);
+
+// C2 B1b, item 26: each INCLUDE region's own lattice (its voxels, minus exclusions and
+// keep-outs, plus the surface fill), parallel to job.flexible->regions (an empty vector for
+// an exclude region). Regions that overlap share voxels.
+std::vector<std::vector<char>> flexible_include_region_masks(const JobDescription& job, const StepModel& model,
+                                                             const VoxelGrid& grid);
 
 // C2 B1a, item 8(a): a loaded face's OWN lattice: the job's lattice restricted to the include
 // regions that are its own (a face-prism on a region sharing a CAD face with it, and every

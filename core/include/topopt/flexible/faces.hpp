@@ -43,7 +43,12 @@ inline constexpr double kSameAxisDeg = 15.0;
 //                  enter its lattice (restrict_to_lattice); two pieces of one face may be
 //                  one press; pieces are adjacent by their clipped footprints; the run's
 //                  coded refusals no_lattice_region and press_stack_failed
-inline constexpr int kPressApiVersion = 3;
+//   4  2026-10-24  C2 B1b: a press may carry a FLAT PRISM ("flat_prism": {"apex_mm"}): its
+//                  field is clipped at the plane dot(p − A, d) = h (h = deepest_squish_mm), and
+//                  it is designed as a SERIES column (its own segment at the ρ it solves, the
+//                  rest of the run at the other owners' ρ, one stress); the run exports the
+//                  field (flexible_field.json/.bin); grams per face and per include region
+inline constexpr int kPressApiVersion = 4;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is
@@ -171,6 +176,12 @@ struct Stack {
   // Equal (0, 0) means the frame's whole extent [0, u_extent] x [0, v_extent].
   double map_u0 = 0.0, map_u1 = 0.0, map_v0 = 0.0, map_v1 = 0.0;
   int over_solid_columns = 0;  // columns restrict_to_lattice dropped (no lattice at their entry)
+  // C2 B1b, item 5: the press's FLAT PRISM. It owns the field only where
+  // dot(p − flat_apex, frame.load) <= flat_depth_mm (the plane P = {p : dot(p − A, d) = h}).
+  bool has_flat_prism = false;
+  Vec3 flat_apex{0, 0, 0};
+  double flat_depth_mm = 0.0;
+  int outside_flat_prism_columns = 0;  // columns entering past the plane (not pressed)
 
   int column_at(int iu, int iv) const {
     if (iu < 0 || iv < 0 || iu >= nu || iv >= nv) return -1;
@@ -199,6 +210,13 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
 // to the kept columns' cells, so the weight and the curves are over the lattice section only.
 // Throws FlexibleError naming the region when no column enters any lattice.
 void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& regions);
+
+// C2 B1b, item 5: give the press its FLAT PRISM (apex A, depth h along frame.load) and keep
+// only the columns that enter at or before the plane (dot(entry − A, load) <= h); the rest
+// are counted in `outside_flat_prism_columns`, and the map spans the kept cells. Throws
+// FlexibleError naming the region when no column enters the prism.
+void restrict_to_flat_prism(Stack& s, const Vec3& apex, double depth_mm,
+                            const std::vector<ResolvedFaceRegion>& regions);
 
 // Does `p` satisfy every half-space (the voxel-centre rule of face_region.hpp)?
 bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p);
@@ -251,6 +269,12 @@ std::vector<SharedFootprint> find_shared_footprints(const TriangleMesh& mesh,
                                                     const std::vector<PressFootprint>& presses);
 // "presses A and B share surface (face region a and face region b overlap by N mm2); ..."
 std::string shared_footprint_sentence(const SharedFootprint& s);
+
+// Clip `triangles` of `mesh` by every half-space in `cuts` and append the pieces (fanned) to
+// `clipped`, their indices to `ids`. The winding is kept. (Public since C2 B1b: the run's
+// field export draws a press's footprint boundary from it.)
+void clip_into(const TriangleMesh& mesh, const std::vector<int>& triangles,
+               const std::vector<RegionCut>& cuts, TriangleMesh& clipped, std::vector<int>& ids);
 
 // Angle between two load LINES (0..90°): the sign of a direction does not matter.
 double axis_angle_deg(const Vec3& a, const Vec3& b);

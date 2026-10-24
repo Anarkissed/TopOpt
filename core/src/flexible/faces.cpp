@@ -1055,12 +1055,15 @@ void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressF
   if (!sh.empty()) throw FlexibleError(shared_footprint_sentence(sh.front()));
 }
 
-void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& regions) {
+namespace {
+// Keep the columns `keep` accepts; the map spans the kept cells. Returns how many were dropped.
+template <class Pred>
+int keep_columns(Stack& s, const std::vector<ResolvedFaceRegion>& regions, Pred keep, const char* why) {
   std::vector<StackColumn> kept;
   int dropped = 0;
   double u0 = 1e300, u1 = -1e300, v0 = 1e300, v1 = -1e300;
   for (const StackColumn& c : s.columns) {
-    if (!(c.lattice_mm > 0.0)) {
+    if (!keep(c)) {
       ++dropped;
       continue;
     }
@@ -1071,17 +1074,39 @@ void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& region
     v1 = std::max(v1, (c.iv + 1) * s.pitch_mm);
   }
   if (kept.empty())
-    throw FlexibleError("face region " + std::to_string(s.face_region_id) +
-                        " has no lattice under it: none of its " + std::to_string(s.columns.size()) +
-                        " columns enters a lattice");
+    throw FlexibleError("face region " + std::to_string(s.face_region_id) + " " + why + ": none of its " +
+                        std::to_string(s.columns.size()) + " columns qualifies");
   s.columns = std::move(kept);
-  s.over_solid_columns = dropped;
   // the map spans the kept cells, clipped to the frame
   s.map_u0 = std::max(0.0, u0);
   s.map_u1 = std::min(s.frame.u_extent_mm, u1);
   s.map_v0 = std::max(0.0, v0);
   s.map_v1 = std::min(s.frame.v_extent_mm, v1);
   finish_stack(s, regions);
+  return dropped;
+}
+}  // namespace
+
+void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& regions) {
+  s.over_solid_columns =
+      keep_columns(s, regions, [](const StackColumn& c) { return c.lattice_mm > 0.0; }, "has no lattice under it");
+}
+
+void restrict_to_flat_prism(Stack& s, const Vec3& apex, double depth_mm,
+                            const std::vector<ResolvedFaceRegion>& regions) {
+  if (!(depth_mm > 0.0) || !std::isfinite(depth_mm))
+    throw FlexibleError("face region " + std::to_string(s.face_region_id) + ": a flat prism's depth must be > 0");
+  s.has_flat_prism = true;
+  s.flat_apex = apex;
+  s.flat_depth_mm = depth_mm;
+  const double tol = 1e-9 * std::max(1.0, depth_mm);
+  s.outside_flat_prism_columns = keep_columns(
+      s, regions,
+      [&](const StackColumn& c) {
+        const Vec3 e = add(s.frame.from_uv(c.u_mm, c.v_mm), mul(s.frame.load, c.entry_t));
+        return dot(sub(e, apex), s.frame.load) <= depth_mm + tol;
+      },
+      "has no column inside its flat prism");
 }
 
 bool stack_owns_projection(const Stack& s, const Vec3& p) {

@@ -1,5 +1,7 @@
 $ topopt-cli flexible job.json --out out
 wrote face101_target_depth.svg
+wrote flexible_field.json
+wrote flexible_field.bin
 wrote face101_columns.csv
 wrote face101_buildable_depth.svg
 wrote face101_density.svg
@@ -13,5 +15,5 @@ wrote field_xz_density.svg
 wrote field_xz_owner.svg
 wrote run_info.json
 flexible: ran; receipt in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-squish-maths-7a3bc8/docs/handoffs/evidence/2026-09-28-flexible-squish-maths/b_pad_thumb_design_palm_heel_check/out/run_info.json
-topopt-cli: core e0dce3952ae7, built Oct 24 2026 05:52:22
+topopt-cli: core 430542b9428a, built Oct 24 2026 14:57:46
 exit code 0
