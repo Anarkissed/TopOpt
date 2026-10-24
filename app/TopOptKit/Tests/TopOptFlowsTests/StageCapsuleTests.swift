@@ -16,10 +16,10 @@ final class StageCapsuleTests: XCTestCase {
     func testTheMenuIsTopologyStageSurfaceThenAbout() {
         // the source's own literals, one for one
         let items = StageCapsule.menuItems(title: "Flexible", idPrefix: "flexible", anchors: 1, loads: 1)
-        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-surface", "flexible-menu-about"])
-        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Surface \u{203A}", "About Flexible\u{2026}"])
+        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-edit-faces", "flexible-menu-about"])
+        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Edit faces\u{2026}", "About Flexible\u{2026}"])
         XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "cuts \u{00B7} unions \u{00B7} patterns", "limits \u{00B7} delete"])
-        XCTAssertEqual(items.map(\.action), [.topology, .none, .surface, .about])
+        XCTAssertEqual(items.map(\.action), [.topology, .none, .editFaces, .about])
         let here = items[1]
         XCTAssertFalse(here.enabled, "● <Stage> is where he is: disabled …")
         XCTAssertTrue(here.checked, "… with a check")
@@ -29,7 +29,7 @@ final class StageCapsuleTests: XCTestCase {
         for i in items { XCTAssertLessThanOrEqual((i.title + "  " + (i.detail ?? "")).count, 44, "one line each (≤ 44): \(i.title)") }
         // the neutral default
         let lattice = StageCapsule.menuItems(title: "Lattice", anchors: 1, loads: 1)
-        XCTAssertEqual(lattice.map(\.id), ["stage-menu-topology", "stage-menu-stage", "stage-menu-surface", "stage-menu-about"])
+        XCTAssertEqual(lattice.map(\.id), ["stage-menu-topology", "stage-menu-stage", "stage-menu-edit-faces", "stage-menu-about"])
         XCTAssertEqual(lattice[1].title, "Lattice")
         XCTAssertEqual(lattice[3].title, "About Lattice\u{2026}")
     }
@@ -40,13 +40,16 @@ final class StageCapsuleTests: XCTestCase {
         StageCapsule.perform(.topology, fold: fold, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(went, [.topology], "Topology → go(.topology) once")
         XCTAssertEqual(folds, 1, "a stage change folds every card")
-        StageCapsule.perform(.surface, fold: fold, go: { went.append($0) }, about: { abouts += 1 })
-        XCTAssertEqual(went, [.topology, .surface])
+        var edits = 0   // B5: "Edit faces…" (was Surface ›) opens the mode, never a stage
+        StageCapsule.perform(.editFaces, fold: fold, go: { went.append($0) }, about: { abouts += 1 },
+                             editFaces: { edits += 1 })
+        XCTAssertEqual(went, [.topology])
+        XCTAssertEqual(edits, 1)
         StageCapsule.perform(.about, fold: fold, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(abouts, 1, "About → the limits sheet")
         XCTAssertEqual(folds, 3)
         StageCapsule.perform(.none, fold: fold, go: { went.append($0) }, about: { abouts += 1 })
-        XCTAssertEqual(went.count, 2); XCTAssertEqual(abouts, 1, "the <Stage> row does nothing")
+        XCTAssertEqual(went.count, 1); XCTAssertEqual(abouts, 1, "the <Stage> row does nothing")
         XCTAssertEqual(folds, 3, "… and folds nothing")
     }
 

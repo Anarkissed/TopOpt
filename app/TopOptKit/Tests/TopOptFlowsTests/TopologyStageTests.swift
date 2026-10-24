@@ -182,17 +182,17 @@ final class TopologyStageTests: XCTestCase {
     func testTopologyHasNoSurfaceButtonAndTheMenuReachesEditFaces() throws {
         XCTAssertFalse(WorkspaceStage.topology.drawsForwardButtons, "Topology draws no stage buttons")
         XCTAssertFalse(WorkspaceStage.lattice.drawsForwardButtons, "B4: the lattice stage's capsule carries them")
-        XCTAssertTrue(WorkspaceStage.surface.drawsForwardButtons, "the surface stage keeps its own until B5")
         let gate = LatticeEntryButtonGate.compute(gravitySet: true, anchors: 1, loads: 1)
         let rows = TopologyStageMenu.rows(typeInUse: nil, latticeGate: gate)
         XCTAssertEqual(rows.map(\.title), ["Topology", "Lattice\u{2026}", "Edit faces\u{2026}"])
         XCTAssertEqual(TopologyStageMenu.rows(typeInUse: .aesthetic, latticeGate: gate)[1].title, "Aesthetic",
                        "the ONE lattice type in use")
-        XCTAssertEqual(TopologyStageMenu.stage(for: .editFaces), .surface, "Edit faces is today's Surface stage until B5")
+        XCTAssertNil(TopologyStageMenu.stage(for: .editFaces), "B5: Edit faces is a mode, not a stage")
         let closed = TopologyStageMenu.rows(typeInUse: nil, latticeGate: .compute(gravitySet: false, anchors: 0, loads: 0))
         XCTAssertFalse(closed[1].enabled, "the lattice row is gated as the Lattice button was")
         let ws = try Self.workspaceSource()
-        XCTAssertTrue(ws.contains("ForEach(stage.drawsForwardButtons ? stage.forward : [], id: \\.rawValue)"))
+        XCTAssertFalse(ws.contains("ForEach(stage.drawsForwardButtons ? stage.forward : [], id: \\.rawValue)"),
+                       "B5: the forward column of stage buttons is gone with the Surface stage")
         XCTAssertTrue(ws.contains("editFaces: { openEditFaces() })"), "the capsule's ✂ opens Edit faces")
         // the capsule's menu row and the ✂ both take the same action
         var went: [WorkspaceStage] = []; var edited = 0

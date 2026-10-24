@@ -195,7 +195,7 @@ final class SurfaceStageTests: XCTestCase {
 
     /// ★ "NO PRIMITIVES ARE VISIBLE IN THIS MODE. None. Not dimmed — hidden."
     func testTheSurfaceStageHidesEveryPrimitiveAndShowsTheWireframe() {
-        let v = WorkspaceStageVisibility.of(.surface)
+        let v = WorkspaceStageVisibility.editingFaces   // B5: the Surface stage's column is Edit faces'
         XCTAssertFalse(v.designBox)
         XCTAssertFalse(v.groupPrimitives)
         XCTAssertFalse(v.keepOuts)
@@ -233,13 +233,13 @@ final class SurfaceStageTests: XCTestCase {
 
     /// ★ "WHERE YOU GO" ABOVE "WHAT YOU CONFIGURE" — the navigation column, and
     /// Surface reachable from BOTH other stages (§6, the maintainer's own ask).
+    /// ★ B5: reachable from both stages as a MODE ("Edit faces…" in each ● menu and the ✂), not a forward stage.
     func testSurfaceIsReachableFromBothOtherStages() {
-        XCTAssertTrue(WorkspaceStage.topology.forward.contains(.surface))
-        XCTAssertTrue(WorkspaceStage.lattice.forward.contains(.surface))
-        XCTAssertEqual(WorkspaceStage.topology.forward, [.lattice, .surface],
-                       "the TO page offers both onward stages")
-        XCTAssertEqual(WorkspaceStage.lattice.forward, [.surface],
-                       "the lattice page's column is Surface, with Settings BELOW it")
+        XCTAssertEqual(WorkspaceStage.topology.forward, [.lattice], "the TO page's one onward stage")
+        XCTAssertEqual(WorkspaceStage.lattice.forward, [], "no onward stage from the lattice page")
+        for stage in WorkspaceStage.allCases {
+            XCTAssertTrue(WorkspaceStageVisibility.of(stage, editingFaces: true).surfaceEditing, "\(stage.title)")
+        }
     }
 
     /// Topology is the root — every other stage goes back to it, and it has no
@@ -247,7 +247,6 @@ final class SurfaceStageTests: XCTestCase {
     func testTopologyIsTheRoot() {
         XCTAssertNil(WorkspaceStage.topology.back)
         XCTAssertEqual(WorkspaceStage.lattice.back, .topology)
-        XCTAssertEqual(WorkspaceStage.surface.back, .topology)
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -262,7 +261,7 @@ final class SurfaceStageTests: XCTestCase {
     /// call site did not read it. Pinned here as a PROPERTY of the table rather
     /// than of one call site, so the same mistake in a fourth stage fails.
     func testAStageThatWantsNeitherVolumeSetAsksForNeither() {
-        let v = WorkspaceStageVisibility.of(.surface)
+        let v = WorkspaceStageVisibility.editingFaces
         XCTAssertFalse(v.keepOuts, "no keep-out boxes")
         XCTAssertFalse(v.latticeDepthPlanes, "and no depth planes")
         XCTAssertFalse(v.designBox)

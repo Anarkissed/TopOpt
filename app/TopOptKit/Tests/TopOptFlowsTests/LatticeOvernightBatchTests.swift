@@ -107,8 +107,8 @@ final class LatticeActionBarTests: XCTestCase {
                       "★ Topology keeps it — it is how a new user learns to select")
         XCTAssertFalse(WorkspaceStageVisibility.of(.lattice).showsSelectionHint,
                        "★ gone from Lattice")
-        XCTAssertFalse(WorkspaceStageVisibility.of(.surface).showsSelectionHint,
-                       "★ gone from Surface")
+        XCTAssertFalse(WorkspaceStageVisibility.editingFaces.showsSelectionHint,
+                       "★ gone from Edit faces (the Surface stage's column)")
     }
 
     /// ★★ AND IT RUNS ON DEVICE (maintainer, 2026-08-17: "Can you please make it

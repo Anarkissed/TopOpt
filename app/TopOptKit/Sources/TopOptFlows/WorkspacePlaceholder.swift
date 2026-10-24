@@ -350,14 +350,11 @@ public struct WorkspacePlaceholder: View {
                                       pencilSeen: surfacePencilSeen)
     }
 
-    /// ★ THE SURFACE STAGE'S SCRATCHPAD (maintainer, 2026-08-16: "I think we should
-    /// have a 'Save' button on the Surfaces page. This way someone can fuck around
-    /// and mess things up, and just go back and nothing is saved. Everything should
-    /// reset when you leave and come back — unless it has been saved").
-    ///
-    /// What the model looked like on ENTERING the stage. Leaving without saving puts
-    /// it back; Save drops it, which is what makes the edits permanent.
-    @State private var surfaceEntrySnapshot: SurfaceScratch?
+    /// ★ B5 — THE EDIT FACES MODE FLAG (`editFaces.isEditing`) and where its Done returns (`editFaces.origin`). The
+    /// Surface stage's scratchpad and Save are gone with it: every edit is its own undo step, and Done keeps them.
+    @State private var editFaces = EditFacesSession()
+    /// A host page's own way back (`EditFacesOrigin.host`, #362's Flexible pages): Done calls it with the origin.
+    @State private var editFacesHostReturn: ((EditFacesOrigin) -> Void)?
 
     /// ★ The bottom bar's MEASURED height — its CONTENT only, without the inset
     /// that lifts it off the bottom edge. Seeded at the one-line Optimize height
@@ -420,7 +417,7 @@ public struct WorkspacePlaceholder: View {
     @State private var draggingDepthPlane: String?
 
     /// What this stage may draw. Every visibility site reads THIS, never `stage`.
-    private var visible: WorkspaceStageVisibility { .of(stage) }
+    private var visible: WorkspaceStageVisibility { .of(stage, editingFaces: editFaces.isEditing) }
     /// The variants-entry demand field (that run's own von Mises); nil from the
     /// workspace entry (bar B6's two paths).
     @State private var latticePageVariantField: LatticeDemandField?
@@ -626,7 +623,7 @@ public struct WorkspacePlaceholder: View {
     /// the choice rather than inheriting one nobody made.
     private var latticeStageModeNeeded: Bool {
         // ★ B4 (L1 amended): the selector on first entry — one type per project
-        LatticeTypeSelector.isShown(onLatticeStage: stage == .lattice || showLatticePage,
+        !editFaces.isEditing && LatticeTypeSelector.isShown(onLatticeStage: stage == .lattice || showLatticePage,
                                     typeInUse: project.lattice.stageMode)
     }
 
@@ -712,7 +709,7 @@ public struct WorkspacePlaceholder: View {
     /// notification has to clear it, so the answer lives in ONE place rather than being
     /// re-derived at each banner.
     private var latticeStageModeShown: Bool {
-        stage == .lattice && project.lattice.stageMode != nil && viewerMesh != nil
+        stage == .lattice && !editFaces.isEditing && project.lattice.stageMode != nil && viewerMesh != nil
     }
 
     /// ★★★ THE MODE, IN THE TOP-CENTRE SLOT (maintainer, 2026-08-21: "place the mode
@@ -1313,8 +1310,6 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil { latticeSettingsButtonOverlay }
-                // ★ SAVE, in the slot the greyed-out "Lattice" button vacated.
-                surfaceSaveButtonOverlay
                 // ★ §6 — THE SURFACE STAGE'S TOOLS, on the right BELOW THE GIZMO
                 // (maintainer, 2026-08-14: "I am not seeing any of the tools
                 // required for the Surface stage").
@@ -1579,7 +1574,7 @@ public struct WorkspacePlaceholder: View {
             // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup, on to Smooth),
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp { topologyCapsuleOverlay }
-            if stage == .topology, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
+            if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
         }
         // ★ the stage UI the band chips stay out of — every reporter is a descendant
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
@@ -5576,7 +5571,10 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private var stageNavigationButtonOverlay: some View {
         // ★ THE WAY BACK — top-left, under the project name. Topology is the root
         // and carries none.
-        if stage == .topology {
+        if editFaces.isEditing {
+            // ★ B5: Edit faces' slim header — "✂ Editing faces · Done", where the stage's capsule sits.
+            editFacesHeader
+        } else if stage == .topology {
             // ★ B3 (S3 amended, 2026-10-24): Topology's stage buttons are its capsule —
             // ● Topology ⌄ | Setup | Results | Smooth | ✂. The ● menu carries `forward`.
             // (Over the Results page it is mounted above ResultsScreen instead — see the body.)
@@ -5585,30 +5583,9 @@ public struct WorkspacePlaceholder: View {
             // ★ B4: the Lattice stage's capsule — ● <Type> ⌄ | Regions | Cells | ✂ (its ● menu: ‹ Topology,
             // the one type, Change lattice type…, Edit faces…, About)
             latticeCapsuleOverlay
-        } else if let back = stage.back {
-            stageNavButton(to: back, icon: "chevron.left")
-                .latticeBandChipKeepOut()
-                .modifier(StageNavPlacement(stage: stage))
         }
-        // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
-        //
-        // ★ "WHERE YOU GO" ABOVE "WHAT YOU CONFIGURE" (the maintainer's phrase,
-        // approved 2026-08-14). This column is NAVIGATION ONLY; the lattice
-        // stage's Settings button renders BELOW it, offset by
-        // `settingsButtonTopInset`, never among it.
-        VStack(alignment: .trailing, spacing: PageChrome.gap) {
-            // ★ B3: NOT ON TOPOLOGY — its ● menu and ✂ go to Lattice and Edit faces (no Surface button).
-            ForEach(stage.drawsForwardButtons ? stage.forward : [], id: \.rawValue) { dest in
-                stageNavButton(to: dest, icon: Self.stageIcon(dest))
-                    .latticeBandChipKeepOut()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.trailing, PageChrome.gizmoClearance)
-        // ★ THE GIZMO'S VISIBLE TOP, NOT ITS FRAME'S. See
-        // `PageChrome.gizmoAlignedTop` — the housing is 90% of the frame and
-        // centred, so `gizmoInset` alone left these ~10 pt high.
-        .padding(.top, PageChrome.gizmoAlignedTop)
+        // ★ B5: the back button and the forward column of stage buttons drew on the Surface stage only; with it gone,
+        // no stage draws them (`drawsForwardButtons` is false everywhere). `stageNavButton(to:icon:)` is kept, uncalled.
     }
 
     /// One stage's glyph.
@@ -5616,37 +5593,18 @@ public struct WorkspacePlaceholder: View {
         switch s {
         case .topology: return "chevron.left"
         case .lattice:  return "square.grid.3x3.fill"
-        case .surface:  return "square.on.square.dashed"
         }
     }
 
-    // MARK: ★ CHANGING STAGE — and the Surface stage's save/revert
-    //
-    // Maintainer, 2026-08-16: "I think we should have a 'Save' button on the
-    // 'Surfaces' page. This way someone can fuck around and mess things up, and
-    // just go back and nothing is saved. Everything should reset when you leave and
-    // come back — unless it has been saved."
+    // MARK: ★ CHANGING STAGE
 
-    /// ★ THE ONE PLACE THE STAGE CHANGES. Routed through a function rather than
-    /// assigned at each button, because "leaving Surface reverts unsaved work" has
-    /// to be true of EVERY way out — a second `stage = dest` somewhere else is a
-    /// silent hole in the promise.
+    /// ★ THE ONE PLACE THE STAGE CHANGES. B5: a stage change made while Edit faces is open (a "go to where walls are
+    /// marked" tap, a copy opening on Lattice) leaves the mode first — its edits are kept, each its own undo step.
     private func goToStage(_ dest: WorkspaceStage) {
-        if stage == .surface, dest != .surface {
-            if let snap = surfaceEntrySnapshot,
-               project.surfaceHasEdits(since: snap) {
-                project.surfaceRestore(snap)
-                // ★ SAY SO. A silent revert is indistinguishable from a crash that
-                // ate the work; the whole point is that discarding is SAFE, and
-                // safe is only useful if it is also legible.
-                model.toast = "Surface edits discarded — use Save to keep them."
-            }
-            surfaceEntrySnapshot = nil
-            surfaceResetTools()
-        }
-        if dest == .surface, stage != .surface {
-            surfaceEntrySnapshot = project.surfaceCaptureScratch()
-            surfaceResetTools()
+        if editFaces.isEditing {
+            _ = editFaces.done()
+            editFacesHostReturn = nil
+            leaveEditFacesTools()
         }
         stage = dest
         latticeDisclosure.closeAll()
@@ -5666,23 +5624,6 @@ public struct WorkspacePlaceholder: View {
     /// already where walls are marked, so the line stays a plain line — never a dead tap.
     private var wallMarkingTapGoesSomewhere: Bool {
         showLatticePage || stage != .lattice || selectionsCollapsed
-    }
-
-    /// Whether anything has been committed since entering the stage (or since the
-    /// last save). DERIVED, never a flag: a flag has to be set at every commit site
-    /// and one missed site makes Save quietly do nothing.
-    private var surfaceDirty: Bool {
-        guard let snap = surfaceEntrySnapshot else { return false }
-        return project.surfaceHasEdits(since: snap)
-    }
-
-    /// ★ SAVE: keep what has been done, and make THAT the new "back to". Nothing is
-    /// written anywhere new — the edits were always live in the model — what
-    /// changes is that leaving no longer takes them away.
-    private func surfaceSave() {
-        surfaceEntrySnapshot = project.surfaceCaptureScratch()
-        project.sealUndoStep()
-        model.toast = "Surface edits saved."
     }
 
     /// Put every tool back to its resting state, so the stage is entered the same
@@ -5804,7 +5745,7 @@ public struct WorkspacePlaceholder: View {
                 // across the two pages, so they must share its stature.
                 content.padding(.horizontal, DS.Space.xl5)
                     .frame(height: PageChrome.compactButton)
-            case .lattice, .surface:
+            case .lattice:
                 content.padding(.vertical, 9).padding(.horizontal, DS.Space.l)
             }
         }
@@ -5824,7 +5765,7 @@ public struct WorkspacePlaceholder: View {
                     // ★ Aligned to the gizmo's VISIBLE top — see
                     // `PageChrome.gizmoAlignedTop`.
                     .padding(.top, PageChrome.gizmoAlignedTop)
-            case .lattice, .surface:
+            case .lattice:
                 // ★★ THE WAY BACK SITS UNDER THE IDENTITY ROW — restored (maintainer,
                 // 2026-08-21: "First, I was wrong about the placement … Please put the
                 // button back *Below* the project name and undo/redo button").
@@ -5839,64 +5780,6 @@ public struct WorkspacePlaceholder: View {
                     .padding(.top, DS.Space.xl3 + Self.identityRowHeight
                              + PageChrome.gap)
             }
-        }
-    }
-
-    /// ★ THE SURFACE STAGE'S TOP SLOT: SAVE, AT FULL STATURE.
-    ///
-    /// Maintainer, 2026-08-16: "Please make the Save button much larger and place
-    /// it where the greyed out 'Lattice' button is (removing the greyed out lattice
-    /// button)."
-    ///
-    /// ★ AND IT EARNS THAT SLOT. This stage's default is DISCARD — walk away and
-    /// the work goes — so Save is not one control among several, it is the only one
-    /// that makes anything permanent. It gets the size and the position the page's
-    /// most consequential action gets everywhere else (`PageChrome.actionButton`,
-    /// the stature "Lattice" and "Optimize" wear), and it says how much is riding on
-    /// it rather than making the user remember.
-    @ViewBuilder private var surfaceSaveButtonOverlay: some View {
-        if stage == .surface, viewerMesh != nil {
-            Button { surfaceSave() } label: {
-                VStack(spacing: 2) {
-                    HStack(spacing: DS.Space.s) {
-                        Image(systemName: surfaceDirty
-                              ? "checkmark.circle.fill" : "checkmark.circle")
-                            .font(.system(size: 15, weight: .bold))
-                        Text("Save").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                    }
-                    // ★ THE SECOND LINE IS THE WARNING, not decoration. With edits
-                    // pending it says what leaving would cost; with none it says
-                    // there is nothing to lose.
-                    Text(surfaceDirty ? "or leave and lose these edits"
-                                      : "no changes yet")
-                        .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
-                        .lineLimit(1)
-                }
-                .foregroundStyle((surfaceDirty ? DS.Color.textPrimary
-                                               : DS.Color.textDisabled).color)
-                .padding(.horizontal, DS.Space.xl3)
-                .frame(height: PageChrome.actionButton)
-                .background(
-                    RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                        .fill(surfaceDirty ? DS.Color.accent.color
-                                           : DS.Color.fillDisabled.color)
-                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                            .strokeBorder((surfaceDirty ? DS.Color.accentDeepEdge
-                                                        : DS.Color.strokeSubtle).color,
-                                          lineWidth: 1.5)))
-                .dsShadow(surfaceDirty ? DS.Shadow.accentDeepGlow : DS.Shadow.panel)
-            }
-            .buttonStyle(.plain)
-            .disabled(!surfaceDirty)
-            .accessibilityIdentifier("surface-save")
-            .accessibilityLabel(surfaceDirty ? "Save surface edits"
-                                             : "Save — nothing to save yet")
-            // The slot the greyed-out "Lattice" button used to occupy.
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .padding(.trailing, PageChrome.gizmoClearance)
-            // ★ Aligned to the gizmo's VISIBLE top — see
-            // `PageChrome.gizmoAlignedTop`.
-            .padding(.top, PageChrome.gizmoAlignedTop)
         }
     }
 
@@ -6050,8 +5933,10 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
-            // ★ B3: on Topology the chip column's settings are the Setup chip's rows; Paint stays here (B5 moves it).
-            if stage == .topology, id != .paint { return false }
+            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —
+            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.
+            if editFaces.isEditing { return id == .paint && viewerMesh != nil }
+            if stage == .topology { return false }
             switch id {
             // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
             case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
@@ -6063,7 +5948,7 @@ public struct WorkspacePlaceholder: View {
             case .designBox: return visible.designBox
             // The Paint toggle needs a mesh to brush on, and it paints face
             // regions, which are the TO stage's business.
-            case .paint: return viewerMesh != nil && visible.groupPrimitives
+            case .paint: return false
             // CAD-face projection has nothing to project ONTO unless the part
             // came from a STEP B-rep. On an STL/3MF import every face is a
             // manufactured pseudo-face (handoff 134) with no analytic surface
@@ -6159,6 +6044,19 @@ public struct WorkspacePlaceholder: View {
     /// faces into the active group — the escape when tap-selection over-selects); ON → tap to leave.
     /// Styled like the other settings chips; brightens when active.
     private var paintChip: some View {
+        // ★ B5: Paint is an Edit faces tool for a mesh (STL) part; on STEP it is greyed with one line why.
+        let row = EditFacesPaint.row(modelPath: project.importedFile?.path, editingFaces: editFaces.isEditing)
+        let greyedLine: String? = { if case .greyed(let why) = row { return why } else { return nil } }()
+        return VStack(alignment: .trailing, spacing: 2) {
+            paintChipButton.disabled(greyedLine != nil).opacity(greyedLine != nil ? 0.45 : 1)
+            if let greyedLine {
+                Text(greyedLine).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .lineLimit(1).fixedSize().accessibilityIdentifier("edit-faces-paint-why")
+            }
+        }
+    }
+
+    private var paintChipButton: some View {
         Button {
             paintActive.toggle()
             if paintActive {
@@ -7122,17 +7020,11 @@ public struct WorkspacePlaceholder: View {
         // still contained them, by the other of its two memberships. A face covered
         // by a region has to be reached through that region or it cannot be reached
         // at all.
-        let covering = project.faceRegions.regions.filter {
-            FaceRegionGeometry.members(of: $0, in: mesh).contains(faceID)
-        }
-        guard !covering.isEmpty else { return false }
-
-        // Which piece is under the finger, resolved up through any union.
-        let hit = point.flatMap {
-            SurfaceTint.regionAt(point: SIMD3<Double>($0), face: faceID,
-                                 mesh: mesh, regions: project.faceRegions)
-        } ?? project.surfaceCutTarget(face: faceID)
-        guard let piece = hit.map({ project.faceRegions.outermostUnion(containing: $0) })
+        // Which piece is under the finger, resolved up through any union — ★ B5: the ONE edited-face resolver
+        // (`EditedFaces.leaf`), so every stage selects the edited face, never the original underneath.
+        guard case .region(let piece) = EditedFaces.leaf(face: faceID, point: point.map { SIMD3<Double>($0) },
+                                                         mesh: mesh, regions: project.faceRegions,
+                                                         fallback: project.surfaceCutTarget(face: faceID))
         else { return false }
 
         project.sealUndoStep()
@@ -7467,7 +7359,7 @@ public struct WorkspacePlaceholder: View {
                     surfaceXrayOn.toggle()
                 }
                 // ★ B3: Topology's views, icon only — Forces, and the Design box while one is on.
-                if stage == .topology {
+                if stage == .topology, !editFaces.isEditing {
                     viewModeButton("arrow.down.to.line", label: "Forces", on: topoForcesShown) {
                         topoForcesShown.toggle()
                     }
@@ -9668,8 +9560,10 @@ public struct WorkspacePlaceholder: View {
             // selections modal when it is in the bottom left corner"). Below it
             // when the panel is open, where "under the modal" is what reads.
             if selectionsCollapsed { latticePreviewNotice }
+            // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
+            if editFaces.isEditing { selectionsLibraryCard }
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
-            if stage == .topology, !showLatticePage { topologySelectionsList }
+            else if stage == .topology, !showLatticePage { topologySelectionsList }
             // ★ B4: the Lattice stage's Regions page — the same list: groups and lattice regions, eye, trash + Undo
             else if stage == .lattice, !showLatticePage { latticeSelectionsList } else {
             selectionsLibraryCard
@@ -9961,7 +9855,7 @@ public struct WorkspacePlaceholder: View {
                 // groups and faces can be removed only back on the TO page.
                 // ★ AND A LOCKED GROUP CANNOT BE DELETED — "no changes can be
                 // made to this group" includes the largest change of all.
-                if !inList, !showLatticePage, stage == .topology,
+                if !inList, !showLatticePage, !editFaces.isEditing, stage == .topology,
                    project.groupView.canEdit(g.id) {
                     Button { removeGroup(g.id) } label: {
                         Image(systemName: "trash")
@@ -11842,11 +11736,12 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             }
             Spacer()
-            if stage == .topology {
+            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
+            if !editFaces.isEditing, stage == .topology {
                 // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
                 // parameters and the chip column, as rows) and the Optimize split button.
                 topologyCornerPair
-            } else if stage == .lattice {
+            } else if !editFaces.isEditing, stage == .lattice {
                 // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)
                 ComputeLocationControl(compute: compute)
                 printParamsButton
@@ -12203,11 +12098,89 @@ extension WorkspacePlaceholder {
             .padding(.top, StageCapsuleLayout.capsuleTop)
     }
 
-    /// ✂ and "Edit faces…": today's Surface stage until B5 builds Edit faces.
+    // MARK: ★ B5 — EDIT FACES, the mode (EditFaces.swift)
+
+    /// ✂ and "Edit faces…" on Topology and on the lattice stage: the mode, opened from the page that is up.
     private func openEditFaces() {
+        let origin: EditFacesOrigin = stage == .lattice
+            ? .lattice(LatticeStagePage.current(cellsUp: showLatticeWizard))
+            : .topology(topologyPage, smoothVariant: showSmoothingPage ? smoothingPageModel?.context.variantIndex : nil)
+        enterEditFaces(from: origin)
+    }
+
+    /// ★ THE ENTRY POINT — every way into Edit faces ends here: the ● menu's "Edit faces…" row and the greyed ✂ on
+    /// Topology and the lattice stage, and (#362) a Flexible page, which passes `.host(<its page>)` and the closure that
+    /// puts that page back. The page that was up closes (Results, Smooth, Cells — each through its own way out) and the
+    /// mode opens over the stage; Done (`finishEditFaces`) reopens it.
+    func enterEditFaces(from origin: EditFacesOrigin, onReturn: ((EditFacesOrigin) -> Void)? = nil) {
+        guard !editFaces.isEditing else { return }
         if showSmoothingPage { closeSmoothingPage() }
+        if showLatticeWizard { cellsCloseToken += 1 }   // the Cells page's own Save (today's onExit bakes and persists)
         viewOriginal = true
-        if let dest = TopologyStageMenu.stage(for: .editFaces) { goToStage(dest) }
+        setupPanelOpen = false
+        surfaceResetTools()
+        editFacesHostReturn = onReturn
+        editFaces.enter(from: origin)
+    }
+
+    /// ★ DONE — keep every edit (each already its own undo step), put the tools down, and go back to the exact page.
+    func finishEditFaces() {
+        project.sealUndoStep()
+        leaveEditFacesTools()
+        let back = editFacesHostReturn
+        editFacesHostReturn = nil
+        guard let origin = editFaces.done() else { return }
+        switch origin {
+        case .topology(let page, let variant):
+            if stage != .topology { goToStage(.topology) }
+            switch page {
+            case .setup: viewOriginal = true
+            case .results: viewOriginal = false
+            case .smooth:
+                if let idx = variant { openSmoothingPage(variantIndex: idx) } else { openTopologySmooth() }
+            }
+        case .lattice(let page):
+            if stage != .lattice { goToStage(.lattice) }
+            if page == .cells { showLatticeWizard = true }
+        case .host:
+            back?(origin)
+        }
+    }
+
+    /// The tools at rest, and Paint and the Regions panel shut — they live in Edit faces only.
+    private func leaveEditFacesTools() {
+        surfaceResetTools()
+        paintActive = false
+        regionsOpen = false
+    }
+
+    /// "✂ Editing faces · Done" — slim, in the capsule's place.
+    var editFacesHeader: some View {
+        HStack(spacing: DS.Space.m) {
+            Image(systemName: "scissors").font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DS.Color.warning.color)
+            Text(EditFacesCopy.header).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).fixedSize()
+            Button { finishEditFaces() } label: {
+                Text(EditFacesCopy.done).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, DS.Space.l).frame(height: StageCapsuleLayout.segmentHeight)
+                    .background(Capsule().fill(DS.Color.accent.color))
+                    .frame(minHeight: StageCapsuleLayout.capsuleHeight).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("edit-faces-done")
+        }
+        .padding(.leading, DS.Space.l).padding(.trailing, StageCapsuleLayout.segmentInset)
+        .frame(height: StageCapsuleLayout.capsuleHeight)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("edit-faces-header")
+        .latticeBandChipKeepOut()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.leading, StageCapsuleLayout.capsuleLeft)
+        .padding(.top, StageCapsuleLayout.capsuleTop)
     }
 
     /// Smooth: the smoothing page on the recommended variant, gated as Results' own Smooth entry is.
@@ -12394,8 +12367,6 @@ extension WorkspacePlaceholder {
                         .padding(.leading, DS.Space.m)
                         .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
                     }
-                    // the Regions surface (union / split) — today's header toggle, kept until Edit faces (B5)
-                    CornerPairStyle.small("Regions", id: "topology-regions") { regionsOpen.toggle() }
                 }
             }
         }
@@ -12498,7 +12469,7 @@ extension WorkspacePlaceholder {
                          about: { showLatticeModeSheet = true },
                          greyed: mode == nil ? [.primary, .secondary] : [],
                          menuRows: rows,
-                         editFaces: { leaveLatticeCells(); openEditFaces() },
+                         editFaces: { openEditFaces() },
                          changeType: { showChangeLatticeType = true })
             Text(LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction))
                 .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
@@ -12632,8 +12603,6 @@ extension WorkspacePlaceholder {
                         .padding(.leading, DS.Space.m)
                         .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
                     }
-                    // the Regions surface (union / split) — today's header toggle, kept until Edit faces (B5)
-                    CornerPairStyle.small("Regions", id: "lattice-regions") { regionsOpen.toggle() }
                 }
             }
         }

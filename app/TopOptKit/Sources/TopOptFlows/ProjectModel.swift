@@ -149,6 +149,10 @@ public final class ProjectModel: ObservableObject {
     @Published public private(set) var undo = UndoHistory(depth: 50)
     /// The debounce that turns bursts of `objectWillChange` into one settled `commit`.
     private var undoAutoCommit: AnyCancellable?
+    /// ★ B5: the post-edit hooks (`onFaceEdit`), in registration order, and the open face edit (`beginFaceEdit`).
+    private var faceEditHooks: [(key: String, run: @MainActor (FaceEditEvent) -> Void)] = []
+    private var faceEditDepth = 0
+    private var faceEditBefore: FaceRegionModel?
     /// How long the edit slice must be quiet before it commits as an undo step. Long enough that a
     /// drag/scrub coalesces into one entry, short enough to feel immediate on a discrete tap.
     private static let undoSettleInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(400)
@@ -389,6 +393,43 @@ public final class ProjectModel: ObservableObject {
     /// lose. Every surface commit seals first, so its predecessor is already a step.
     public func sealUndoStep() { commitUndoSnapshot() }
 
+    // MARK: ★ B5 — every face edit is ONE undo step, with a hook inside it
+
+    /// ★ THE POST-EDIT HOOK. `hook` runs after every edit made in Edit faces (a cut, an isolate, a union, a pattern, a
+    /// region verb, a paint stroke) and INSIDE that edit's undo step: whatever it changes in the undo slice undoes and
+    /// redoes with the edit, atomically. One hook per `key` (a second registration replaces the first).
+    public func onFaceEdit(_ key: String, _ hook: @escaping @MainActor (FaceEditEvent) -> Void) {
+        faceEditHooks.removeAll { $0.key == key }
+        faceEditHooks.append((key, hook))
+    }
+
+    public func removeFaceEditHook(_ key: String) { faceEditHooks.removeAll { $0.key == key } }
+
+    /// Open a face edit: the state before it becomes a step (as every surface action always sealed first). Nested
+    /// edits (a cut across several faces) are one edit.
+    func beginFaceEdit() {
+        if faceEditDepth == 0 {
+            sealUndoStep()
+            faceEditBefore = faceRegions
+        }
+        faceEditDepth += 1
+    }
+
+    /// ★ CLOSE IT — APP LIST 1's undo-merge, for faces: the hooks run, then the step is SEALED, so an edit made right
+    /// after (inside the 400 ms settle) can no longer fold into it and one Undo takes back exactly this edit. An edit
+    /// that changed nothing runs no hook and seals nothing.
+    func endFaceEdit(_ kind: FaceEditKind) {
+        faceEditDepth = max(0, faceEditDepth - 1)
+        guard faceEditDepth == 0, let before = faceEditBefore else { return }
+        faceEditBefore = nil
+        guard before != faceRegions else { return }
+        let was = Set(before.regions.map(\.id)), now = Set(faceRegions.regions.map(\.id))
+        let ev = FaceEditEvent(kind: kind, made: now.subtracting(was).sorted(), removed: was.subtracting(now).sorted(),
+                               paintedFaces: [])
+        for h in faceEditHooks { h.run(ev) }
+        sealUndoStep()
+    }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }
@@ -447,9 +488,19 @@ public final class ProjectModel: ObservableObject {
         // router still records onto a `PaintHistory`, so hand it a throwaway we discard — we do not
         // fork a second undo stack.
         var ignoredHistory = PaintHistory()
+        let before = paint?.assignments
         WorkspacePaint.stroke(mode, triangles: triangles, paint: &overlay,
                               selection: &selection, history: &ignoredHistory)
         paint = overlay
+        // ★ B5: the post-edit hook, inside the stroke's step. A stroke is a DRAG — many calls folded into one undo step
+        // by the settle — so it is never sealed here; the hook's own changes ride the same settled step.
+        if before != overlay.assignments {
+            let touched = Set(triangles.compactMap { t -> FaceID? in
+                overlay.assignments[Int32(t)] ?? before?[Int32(t)]
+            }).sorted()
+            let ev = FaceEditEvent(kind: .paint, made: [], removed: [], paintedFaces: touched)
+            for h in faceEditHooks { h.run(ev) }
+        }
     }
 
     /// The per-triangle EFFECTIVE face ids (native ids with painted overrides applied) the viewer
@@ -1238,7 +1289,7 @@ public final class ProjectModel: ObservableObject {
     /// Returns the two children, or [] when nothing could be cut.
     @discardableResult
     public func commitSurfaceCut(_ cut: SurfaceCut) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // each surface action is its own undo step (B5: sealed after too)
         guard let mesh = viewerMesh else { return [] }
         let target: RegionID
         if let existing = surfaceCutTarget(face: cut.faceID) {
@@ -1372,8 +1423,8 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceIsolate(faces: [FaceID],
                                      named name: String) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.isolate) }
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
-        sealUndoStep()
 
         // ★ CONNECTED GROUPS OF THE SELECTED FACES. Adjacency is face-level and
         // already derived for the loop walk; here it is restricted to the selection,
@@ -1437,6 +1488,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceCut(faces: [FaceID], rotationDegrees: Double = 0,
                                  offsetMM: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // B5: the whole batch is one edit, one Undo
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1453,6 +1505,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfacePattern(faces: [FaceID], columns: Int, rows: Int,
                                      rotationDegrees: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // B5: the whole batch is one edit, one Undo
         guard viewerMesh != nil, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1542,7 +1595,7 @@ public final class ProjectModel: ObservableObject {
     /// rather than shipping the wrong behaviour quietly.
     @discardableResult
     public func commitSurfaceUnion(_ u: SurfaceUnion) -> RegionID? {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.union) }   // each surface action is its own undo step (B5: sealed after too)
         guard viewerMesh != nil, u.hasEnoughToCombine else { return nil }
         guard let rid = faceRegions.unionOfParts(u.pieces,
                                                  named: "Union of \(u.count)")
@@ -1717,7 +1770,7 @@ public final class ProjectModel: ObservableObject {
     public func commitSurfacePattern(face: FaceID, columns: Int, rows: Int,
                                      rotationDegrees: Double = 0,
                                      piece: RegionID? = nil) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // each surface action is its own undo step (B5: sealed after too)
         guard let p = surfacePatternPreview(face: face, columns: columns, rows: rows,
                                             rotationDegrees: rotationDegrees,
                                             piece: piece),
@@ -1848,6 +1901,7 @@ public final class ProjectModel: ObservableObject {
     /// step. Returns the refusal, in words, when the aim is not a whole face region.
     @discardableResult
     public func surfaceRegionToggleFace(_ id: RegionID, face: FaceID) -> String? {
+        beginFaceEdit(); defer { endFaceEdit(.regionFace) }
         guard let mesh = viewerMesh else { return "No model open." }
         switch SurfaceRegionTool.tapEdit(aim: id, face: face, regions: faceRegions, mesh: mesh) {
         case .refused(let why):
@@ -1868,8 +1922,8 @@ public final class ProjectModel: ObservableObject {
     /// its parts — and every id that went leaves every group, so nothing dangles.
     @discardableResult
     public func surfaceUndoSplit(_ id: RegionID) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
         guard SurfaceRegionTool.canUndoSplit(id, regions: faceRegions) else { return [] }
-        sealUndoStep()
         let before = Set(faceRegions.regions.map(\.id))
         faceRegions.revertSplit(id)
         let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
@@ -1884,8 +1938,8 @@ public final class ProjectModel: ObservableObject {
     /// region cannot be dissolved (`SurfaceDissolve.refusal` says why).
     @discardableResult
     public func surfaceDissolve(_ id: RegionID) -> SurfaceDissolve.Result? {
+        beginFaceEdit(); defer { endFaceEdit(.dissolve) }
         guard let mesh = viewerMesh, SurfaceDissolve.refusal(id, regions: faceRegions) == nil else { return nil }
-        sealUndoStep()
         let r = SurfaceDissolve.apply(id, regions: &faceRegions, selection: &selection, mesh: mesh)
         force.sync(groups: selection.groups)
         objectWillChange.send()

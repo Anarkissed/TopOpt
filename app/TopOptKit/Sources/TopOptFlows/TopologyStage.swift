@@ -130,21 +130,21 @@ public enum TopologyStageMenu {
         ]
     }
 
-    /// Where a target goes, as a stage. Edit faces is today's Surface stage until B5.
+    /// Where a target goes, as a stage. B5: Edit faces is a mode, not a stage (nil — the row opens the mode).
     public static func stage(for t: Target) -> WorkspaceStage? {
         switch t {
         case .none: return nil
         case .lattice: return .lattice
-        case .editFaces: return .surface
+        case .editFaces: return nil
         }
     }
 }
 
 extension WorkspaceStage {
     /// Whether the stage draws its forward column of stage BUTTONS. Topology does not: its capsule's ● menu and ✂ carry
-    /// `forward` ([.lattice, .surface]) instead (S3 amended — "no Surface button"). B4: nor does the lattice stage (its capsule's
-    /// ● menu and ✂ reach Topology and Edit faces). The surface stage keeps its own until B5.
-    public var drawsForwardButtons: Bool { self == .surface }
+    /// `forward` instead (S3 amended — "no Surface button"). B4: nor does the lattice stage (its capsule's ● menu and ✂
+    /// reach Topology and Edit faces). B5: the Surface stage that kept them is gone — no stage draws them.
+    public var drawsForwardButtons: Bool { false }
 }
 
 // MARK: - the Setup chip's rows (A1)

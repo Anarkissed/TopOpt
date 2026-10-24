@@ -15,7 +15,7 @@
 //   * FlexibleChromeLayout's capsule numbers are StageCapsuleLayout's (the same values); FlexibleKeepOutKey is ChromeKeepOutKey.
 //
 // The rules the source kept: one capsule under the project name; the menu is a native menu (‹ Topology with its anchors and
-// loads, ● <Stage> ✓ where he is, Surface ›, then About <Stage>…); every target is 44 pt tall, the segments drawn 36 tall inside
+// loads, ● <Stage> ✓ where he is, Edit faces… (B5; was Surface ›), then About <Stage>…); every target is 44 pt tall, the segments drawn 36 tall inside
 // it; never greyed. A 6 pt amber dot on the secondary segment while the one thing to fix lives there; a 6 pt white dot while the
 // secondary page holds unsaved changes.
 //
@@ -44,7 +44,8 @@ public enum StageCapsuleLayout {
 
 public struct StageCapsule: View {
     public enum Page: Equatable, Sendable { case primary, secondary, tertiary }
-    public enum Action: Equatable, Sendable { case topology, surface, about, none, lattice, editFaces, changeType }
+    /// B5: `.surface` is gone with the Surface stage — the menu's "Edit faces…" row is `.editFaces`.
+    public enum Action: Equatable, Sendable { case topology, about, none, lattice, editFaces, changeType }
     /// One row of the ● <Stage> menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -102,15 +103,15 @@ public struct StageCapsule: View {
 
     // MARK: the rules, as values
 
-    /// The menu's rows: ‹ Topology (its anchors and loads), ● <title> ✓, Surface ›, About <title>….
+    /// The menu's rows: ‹ Topology (its anchors and loads), ● <title> ✓, Edit faces… (B5: was "Surface ›"), About <title>….
     public static func menuItems(title: String, idPrefix: String = "stage", anchors: Int, loads: Int) -> [Item] {
         func count(_ n: Int, _ w: String) -> String { n == 0 ? "no \(w)" : "\(n) \(w)\(n == 1 ? "" : "s")" }
         return [
             Item(id: "\(idPrefix)-menu-topology", title: "\u{2039} Topology", detail: "\(count(anchors, "anchor")) \u{00B7} \(count(loads, "load"))",
                  enabled: true, checked: false, action: .topology),
             Item(id: "\(idPrefix)-menu-\(idPrefix)", title: title, detail: "You are here", enabled: false, checked: true, action: .none),
-            Item(id: "\(idPrefix)-menu-surface", title: "Surface \u{203A}", detail: "cuts \u{00B7} unions \u{00B7} patterns", enabled: true, checked: false,
-                 action: .surface),
+            Item(id: "\(idPrefix)-menu-edit-faces", title: TopologyStageMenu.editFacesTitle,
+                 detail: "cuts \u{00B7} unions \u{00B7} patterns", enabled: true, checked: false, action: .editFaces),
             Item(id: "\(idPrefix)-menu-about", title: "About \(title)\u{2026}", detail: "limits \u{00B7} delete", enabled: true, checked: false, action: .about),
         ]
     }
@@ -125,11 +126,10 @@ public struct StageCapsule: View {
         fold?()
         switch a {
         case .topology: go(.topology)
-        case .surface: go(.surface)
         case .about: about()
         case .none: break
         case .lattice: go(.lattice)
-        case .editFaces: if let editFaces { editFaces() } else { go(.surface) }
+        case .editFaces: editFaces?()
         case .changeType: changeType?()
         }
     }
@@ -216,7 +216,7 @@ public struct StageCapsule: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background(CornerPairStyle.publish("capsuleMenu"))
-        .accessibilityLabel("\(title): Topology, Surface and About \(title)")
+        .accessibilityLabel("\(title): Topology, Edit faces and About \(title)")
         .accessibilityIdentifier("\(idPrefix)-capsule-menu")
     }
 
