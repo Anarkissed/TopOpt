@@ -1575,7 +1575,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         var s = self
         s.selectableWallCoreDead = [:]
         s.organicForecast = nil
-        s.gradeAlong = nil   // ★ B4: Along's UI-only pick never re-keys the bake
         return s
     }
     /// LATTICE MODE. Off (the default) ⇒ no lattice block reaches the job and the
@@ -1591,9 +1590,10 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// is what makes the modal appear; it is deliberately NOT defaulted, because a
     /// default would silently pick which claim the receipt makes.
     public var stageMode: LatticeStageMode?
-    /// ★ B4 (the Cells page's Along, decided 2026-10-24): which way he wants the grade to run. A DISPLAY choice: only
-    /// "By stress" has a backing (`densityMode == .sim`, set through the wizard's own setter); "Through the depth" and
-    /// "Across the face" are saved and SHOWN, and no job key reads this (LatticeStageTests pins the job). nil ⇒ unpicked.
+    /// ★ B4 (the Cells page's Along, decided 2026-10-24): which way he wants the grade to run. "By stress" is
+    /// `densityMode == .sim` (set through the wizard's own setter); "Through the depth" and "Across the face" are DRAWN
+    /// by the preview's octree bake (ruling 2026-10-24 17:46 — a bake input, so a pick rebakes) and no job key reads
+    /// this (LatticeStageTests pins the job; core's side is on the CORE LIST). nil ⇒ unpicked.
     public var gradeAlong: LatticeGradeAlong? = nil
 
     /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own

@@ -280,9 +280,10 @@ public enum LatticeRerunChoice: String, Equatable, Sendable, CaseIterable {
 
 // MARK: - the Cells page's Along (decided 2026-10-24: keep all three)
 
-/// Which way the grade runs. Only "By stress" / "Along the load" has a backing today: core's stress-graded density
-/// (`densityMode == .sim`). "Through the depth" and "Across the face" have none — they are SHOWN and SAVED (`gradeAlong`) and
-/// change nothing in the job; the row says so.
+/// Which way the grade runs. "By stress" / "Along the load" is core's stress-graded density (`densityMode == .sim`).
+/// "Through the depth" and "Across the face" are SAVED (`gradeAlong`) and DRAWN by the preview's octree bake
+/// (`LatticePreviewOccupancy.alongFraction`); the job does not read them (core's side is on the CORE LIST). No notice:
+/// his standing rule (10-21) — the preview shows what's set, core is told through the CORE LIST.
 public enum LatticeGradeAlong: String, Codable, Equatable, Sendable, CaseIterable {
     case depth, face, load
 
@@ -294,32 +295,17 @@ public enum LatticeGradeAlong: String, Codable, Equatable, Sendable, CaseIterabl
         }
     }
 
-    /// Whether core builds this grade today.
-    public var isBacked: Bool { self == .load }
-
-    /// The lit choice: core's stress grade when it is on and nothing else was picked; a UI-only pick as picked; "By stress"
+    /// The lit choice: core's stress grade when it is on and nothing else was picked; a drawn pick as picked; "By stress"
     /// only while the density really is the simulated one.
     public static func lit(stored: LatticeGradeAlong?, densityMode: LatticeDensityMode) -> LatticeGradeAlong? {
         if stored == .load || stored == nil { return densityMode == .sim ? .load : nil }
         return stored
     }
-
-    /// The line under the row for a UI-only pick.
-    public static func note(lit: LatticeGradeAlong?, densityMode: LatticeDensityMode, mode: LatticeStageMode?) -> String? {
-        guard let lit, !lit.isBacked else { return nil }
-        let runs: String
-        switch densityMode {
-        case .sim: runs = "by stress"
-        case .uniform: runs = "at one density"
-        case .perRegion: runs = "per region"
-        }
-        return "Saved, not sent: core has no \u{201C}\(lit.title(mode).lowercased())\u{201D} grade yet. The run grades \(runs)."
-    }
 }
 
 extension LatticeWizardModel {
     /// Along's tap. "By stress" is today's Sim density (the wizard's own setter, refused without the simulation permission:
-    /// returns false). The other two are recorded only — the job does not move.
+    /// returns false). The other two are saved and drawn by the preview's bake — the job does not move.
     @discardableResult
     public mutating func chooseAlong(_ a: LatticeGradeAlong) -> Bool {
         if a == .load {

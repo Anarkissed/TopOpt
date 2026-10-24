@@ -110,6 +110,53 @@ encodes as before (the same two keys); a list the old keys cannot hold adds a `p
 - **Design primitives list: up to 6, Box/Cylinder, Positive/Negative — core takes one design box today; a new core agent will
   take the list.** The app holds the list (`DesignBoxModel.primitives`: shape, sign, bounds, cylinder axis, eye); the send for
   the full list stays off (B6 above).
+- **Grade direction: Through the depth / Across the face — core's grading reads only stress today; key map to #358.** The app
+  saves `LatticeSettings.gradeAlong` (`depth` / `face` / `load`) and the preview DRAWS the first two (below); no job key carries
+  it (`LatticeStageTests` pins the stage lattice job at b39c1560… with either pick). Core needs a grading key for the direction
+  (e.g. `grading.grade_along`: `stress` | `depth` | `face`, absent = `stress`) and a density law per direction: ρ from
+  `grading.max_relative_density`'s side at the face plane (or the outline) to the floor at the prism's far end (or the face's
+  middle), per lattice region, through the printability floor and the cap as today. `stepped_cells[].rho` would then follow it.
+
+## APP LIST (this branch)
+
+- **Along, drawn (ruling 2026-10-24 17:46: no notice; draw it).** Both picks are drawn by the octree bake
+  (`LatticePreviewOccupancy.alongFraction`, LatticeOctreeBake.swift): "Through the depth" maps each texel's depth in from the
+  face plane (inward normal ÷ `depthMM`) onto the drawn band, top at the face → floor at the far end; "Across the face" maps
+  its in-plane distance from the outline (`inPlaneDistance`, ÷ that region's largest) the same way, top at the outline → floor
+  at the middle. Both go through the band raise, the bead's floor and the job's cap as today. Only the DRAWN activation moves:
+  each plan cell's ρ (what `stepped_cells` sends) keeps the demand's value. `gradeAlong` is now a bake input
+  (`previewBakeInputs` no longer strips it), so a pick rebakes. "Saved, not sent" is gone. Pinned:
+  `LatticeGradeAlongPreviewTests`. Not drawn yet: the older stepped (non-octree) path, the organic preview, and a texel no face
+  region owns (a body/primitive region keeps the demand's draw) — none of these grades by Along until core does.
+
+## Per-region lattice values: what it would take
+
+Not built (ruling 2026-10-24 17:46). Today every Cells row is global (`LatticeSettings`: topology, cell, density band,
+grade from→to, Along, strength, transition); the approved design has a tab per region.
+
+APP
+- **Model (M).** Per-region overrides keyed by the selectable key, as already done for `selectableCellMM`, `selectableDensity`,
+  `selectableDepthMM`, `selectableExpandMM`, `selectableRoles`, `selectableSyntheticFoci` (LatticeSettings): add the rest —
+  grade from/to, Along, strength — as `[String: …]` maps (or one `selectableCells: [String: RegionCellsOverride]`), nil =
+  inherits the global row. Codec: `decodeIfPresent` + an untouched project writes no new key.
+- **Cells page (M).** The tab per region (B4 already lays out the tabs): a tab edits that key's overrides, the "All" tab the
+  globals; a row shows "inherits" vs its own value; Duplicate / Continue carry the maps.
+- **Preview bake (M).** The octree bake takes the band, gamma, Along and grade strength as globals; it needs them per owning
+  region (`owner[i]` → region → its key's values) in `shapedRho` / `alongFraction`, and `previewBakeInputs` already re-keys on
+  every map. The legend and the face card read per-region bands.
+- **Persistence (S).** The maps above live in `project.json` like today's `selectable*` maps; the variant / re-lattice copies
+  carry them.
+
+CORE (core/src/cli/job.cpp, read only)
+- **Per region today** (`lattice.regions[]`): `role`, `kind`, `face_id` / `region_id`, `relative_density` (a stated density),
+  `synthetic_stress` / `_foci` / `_soft_mm`, and `geometry` (`depth_mm`, `outline_uv`, `slot_origin_mm`,
+  `plan_base_cell_mm`, frame); the plan's `lattice.stepped_cells[]` carry a cell size and ρ per region. Depth protections are
+  per face (`face_protections[].depth_mm`).
+- **Global only** (`grading.*`): `topology`, `cell_mm`, `cell_mode` / `cell_min_mm` / `cell_max_mm`, `demand_exponent`,
+  `max_relative_density`, the aesthetic ρ min/max, `shape_grade` / `shape_grade_band_mm`, `algorithm` and the organic keys.
+- **What core would need (L).** Per-region grading overrides on `lattice.regions[]` (a density band min/max, demand exponent,
+  cell size or cell window, shape grade band, and Along once it exists), each falling back to `grading.*`; the grader and the
+  plan check read them per region. One topology per project stays global (B4's one type). Goes to #358's key map with Along.
 
 ## B5 — Edit faces: what #362 and core get
 

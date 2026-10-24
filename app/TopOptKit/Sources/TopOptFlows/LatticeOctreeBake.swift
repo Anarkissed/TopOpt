@@ -420,6 +420,7 @@ extension LatticePreviewOccupancy {
                                        bandAmount: Double = 1,
                                        bandQuiltCeiling: Double = 1,
                                        densityCap: Double = 0,
+                                       gradeAlong: LatticeGradeAlong? = nil,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         func bake(_ cells: [Double], _ st: inout OctreeBakeStats) -> LatticeCellField? {
             octreeCellFieldOnce(occupancy: occ, demand: demand, regions: regions, cellMM: cells, lineWidthMM: lineWidthMM,
@@ -427,7 +428,8 @@ extension LatticePreviewOccupancy {
                                 solidBandMM: solidBandMM, densityLo: densityLo, densityHi: densityHi,
                                 densityGamma: densityGamma, latticeID: latticeID, dyadicSteps: dyadicSteps,
                                 finestPrintsOpen: finestPrintsOpen, bandAmount: bandAmount,
-                                bandQuiltCeiling: bandQuiltCeiling, densityCap: densityCap, stats: &st)
+                                bandQuiltCeiling: bandQuiltCeiling, densityCap: densityCap,
+                                gradeAlong: gradeAlong, stats: &st)
         }
         let moved = regions.indices.filter { r in
             r < cellMM.count && r < cellMMBeforeBaseRule.count && cellMMBeforeBaseRule[r] > 0
@@ -534,6 +536,12 @@ extension LatticePreviewOccupancy {
                                        /// `LatticeSettings.jobDensityCap`; 0 = none). Core's printability
                                        /// floor is taken at it, and no cell is drawn or sent denser.
                                        densityCap: Double = 0,
+                                       /// ★ THE CELLS PAGE'S ALONG, DRAWN (ruling 2026-10-24 17:46). `.depth` / `.face`
+                                       /// replace the demand's activation in the DRAWN density only — the band's top at
+                                       /// the face plane (or the outline) to its floor at the prism's far end (or the
+                                       /// face's middle). The plan's per-cell ρ keeps today's value: the job does not
+                                       /// move. nil / `.load` ⇒ today's bake exactly.
+                                       gradeAlong: LatticeGradeAlong? = nil,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
@@ -1717,10 +1725,14 @@ extension LatticePreviewOccupancy {
             coreFloor[s] = f
             return f
         }
-        var solidDepth = [Float](repeating: 0, count: grid.count)
-        for i in 0..<grid.count where size[i] > 0 {
+        // ★ ALONG: each painted texel's place in its owner's grade, 0 at the face plane (or the outline) … 1 at the
+        // far end (or the face's middle); nil ⇒ none (By stress, unpicked, or not a face region's texel).
+        let alongT: [Float]? = Self.alongFraction(gradeAlong, owner: owner, size: size, regions: regions,
+                                                  nx: gnx, ny: gny, nz: gnz, origin: gorigin, pitch: pitch)
+        // One texel's ρ from a law's ρ: the band's raise toward the quilt, the bead's floor, the job's cap.
+        func shapedRho(_ r0: Double, _ i: Int) -> Double {
             let s = Double(size[i])
-            var r = rho(activation[i] < 0 ? 0 : activation[i])
+            var r = r0
             if let lat {
                 if shapeFit, shapeFitBandMM > 0, bandT[i] < 1 {
                     let q = Swift.min(Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s)), bandQuiltCeiling)
@@ -1740,9 +1752,6 @@ extension LatticePreviewOccupancy {
                     // and overshot the ceiling with Allow quilt off; past the quilt row it drew the
                     // same saturated strut anyway)
                     r = Swift.max(r, Swift.min(q, r + (q - r) * (1 - Double(bandT[i])) * share * (bandAmount > 0 ? bandAmount : 1)))
-                    // the bleed: solid wherever the voxel is within beam + bleed of
-                    // the outline — the march tests the in-plane distance per voxel
-                    if bleed > 0 { solidDepth[i] = Float(band) }
                 }
                 if lineWidthMM > 0 {
                     r = Swift.max(r, printFloor(size[i], lat))
@@ -1750,7 +1759,19 @@ extension LatticePreviewOccupancy {
             }
             // ★ never denser than the job allows — drawn or sent
             if densityCap > 0 { r = Swift.min(r, densityCap) }
-            activation[i] = act(Swift.min(r, drawnHi))
+            return r
+        }
+        var solidDepth = [Float](repeating: 0, count: grid.count)
+        for i in 0..<grid.count where size[i] > 0 {
+            // the bleed: solid wherever the voxel is within beam + bleed of the outline (the band's texels)
+            if lat != nil, shapeFit, shapeFitBandMM > 0, bandT[i] < 1, bleed > 0 { solidDepth[i] = Float(band) }
+            let r = shapedRho(rho(activation[i] < 0 ? 0 : activation[i]), i)
+            // the drawn ρ: Along's when it has one here, the plan's otherwise
+            let drawn: Double
+            if let t = alongT?[i], t >= 0 {
+                drawn = shapedRho(densityLo + (densityHi - densityLo) * (1 - Double(t)), i)
+            } else { drawn = r }
+            activation[i] = act(Swift.min(drawn, drawnHi))
             // ruling C: the cell carries its densest texel's ρ
             let ci = Int(cellOf[i])
             if ci >= 0, ci < cells.count { cells[ci].rho = Swift.max(cells[ci].rho, Swift.min(r, drawnHi)) }
@@ -1787,5 +1808,54 @@ extension LatticePreviewOccupancy {
         field.steppedCells = cells
         field.steppedTexelCell = cellOf
         return field
+    }
+}
+
+// MARK: - the Cells page's Along, drawn (ruling 2026-10-24 17:46)
+
+extension LatticePreviewOccupancy {
+    /// Each painted texel's place in its owning face region's grade, 0…1, for the drawn density:
+    /// - `.depth` ("Through the depth"): the texel middle's distance in from the face plane along the region's inward
+    ///   normal over the prism's depth — 0 at the face, 1 at the far end.
+    /// - `.face` ("Across the face"): the in-plane distance in from the outline (`inPlaneDistance`; the half-extent
+    ///   rectangle when the region has no loops) over that region's largest — 0 at the outline, 1 at the middle.
+    /// −1 for a texel no face region owns. nil for `.load` / nil (By stress: the demand draws, today's bake).
+    static func alongFraction(_ along: LatticeGradeAlong?, owner: [Int32], size: [Float], regions: [LatticeRegionSpec],
+                              nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, pitch: Double) -> [Float]? {
+        guard let along, along != .load else { return nil }
+        var raw = [Double](repeating: -1, count: owner.count)
+        var most = [Double](repeating: 0, count: regions.count)
+        for idx in owner.indices where owner[idx] >= 0 && size[idx] > 0 {
+            let r = Int(owner[idx])
+            guard r < regions.count, regions[r].kind == .face else { continue }
+            let region = regions[r]
+            let n = LatticeRegionMask.unit(region.normal)
+            guard simd_length(n) > 0.5 else { continue }
+            let i = idx % nx, j = (idx / nx) % ny, k = idx / (nx * ny)
+            let p = origin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+            let rel = p - region.origin
+            switch along {
+            case .depth:
+                guard region.depthMM > 0 else { continue }
+                raw[idx] = Swift.max(0, Swift.min(1, simd_dot(rel, n) / region.depthMM))
+            case .face:
+                let (bu, bv) = LatticeRegionMask.basis(n)
+                let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
+                let d = region.outlineLoops.isEmpty
+                    ? Swift.min(region.halfUMM - abs(uv.x), region.halfWMM - abs(uv.y))
+                    : region.inPlaneDistance(uv)
+                raw[idx] = Swift.max(0, d)
+                most[r] = Swift.max(most[r], raw[idx])
+            case .load:
+                return nil
+            }
+        }
+        if along == .face {
+            for idx in raw.indices where raw[idx] >= 0 {
+                let m = most[Int(owner[idx])]
+                raw[idx] = m > 0 ? raw[idx] / m : 0
+            }
+        }
+        return raw.map { Float($0) }
     }
 }

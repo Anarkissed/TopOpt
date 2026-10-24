@@ -290,6 +290,10 @@ final class LatticeStageTests: XCTestCase {
     // MARK: - the Cells page
 
     func testGradeAlongKeepsThreeValuesAndOnlyByStressIsSent() throws {
+        // ★ ruling 2026-10-24 17:46: no notice for what core can't do yet — the preview draws it, core hears via the CORE LIST
+        for f in ["LatticeStage.swift", "LatticeSetupWizard.swift", "WorkspacePlaceholder.swift"] {
+            XCTAssertFalse(try Self.src(f).contains("Saved, not sent"), "\(f): no Along notice")
+        }
         XCTAssertEqual(LatticeGradeAlong.allCases.map { $0.title(.structural) },
                        ["Through the depth", "Across the face", "By stress"])
         XCTAssertEqual(LatticeGradeAlong.load.title(.aesthetic), "Along the load")
@@ -302,20 +306,20 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertEqual(w.densityMode, .sim, "By stress IS today's simulated density")
         XCTAssertEqual(LatticeGradeAlong.lit(stored: w.gradeAlong, densityMode: w.densityMode), .load)
         XCTAssertTrue(w.chooseAlong(.depth))
-        XCTAssertEqual(w.densityMode, .sim, "a display pick moves nothing core reads")
+        XCTAssertEqual(w.densityMode, .sim, "a drawn pick moves nothing core reads")
         XCTAssertEqual(LatticeGradeAlong.lit(stored: w.gradeAlong, densityMode: w.densityMode), .depth)
-        XCTAssertTrue(LatticeGradeAlong.note(lit: .depth, densityMode: .sim, mode: .structural)?.hasPrefix("Saved, not sent") == true)
-        XCTAssertNil(LatticeGradeAlong.note(lit: .load, densityMode: .sim, mode: .structural))
         var off = LatticeWizardModel(settings: s)
         off.simulateStresses = false
         XCTAssertFalse(off.chooseAlong(.load), "no simulation: By stress is refused, as Sim is")
         XCTAssertEqual(w.applied(to: s).gradeAlong, .depth, "saved")
-        // the job does not move for a display pick, nor the bake
+        // the job does not move for either drawn pick (the B4 pin); the preview re-bakes to draw it
         let (m, p, _, _) = try latticedCube()
         let bake = p.lattice.previewBakeInputs
+        p.lattice.gradeAlong = .depth
+        XCTAssertEqual(sha(try stageLatticeJob(m)), Self.stageLatticeJobAtB3, "Through the depth is not sent")
         p.lattice.gradeAlong = .face
         XCTAssertEqual(sha(try stageLatticeJob(m)), Self.stageLatticeJobAtB3, "Across the face is not sent")
-        XCTAssertEqual(p.lattice.previewBakeInputs, bake, "…nor re-bakes")
+        XCTAssertNotEqual(p.lattice.previewBakeInputs, bake, "…but the preview re-bakes to draw it")
         // it survives a save, and an unknown value never fails the project
         let enc = try JSONEncoder().encode(p.lattice)
         XCTAssertEqual(try JSONDecoder().decode(LatticeSettings.self, from: enc).gradeAlong, .face)

@@ -475,7 +475,9 @@ final class LatticeGradeToSolidBandTests: XCTestCase {
                       // ★ and (2026-09-28) the band's quilt ceiling: no quilt in the grade band unless Allow quilt
                       && renderer.contains("bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt\n                        ? scene.drawnCeilingRho : 1,\n")
                       // ★ and (2026-10-10) the job's cap: core's floor at it, no cell denser
-                      && renderer.contains("densityCap: LatticeSettings.jobDensityCap(topologyID: params.latticeID, allowQuilt: scene.allowQuilt),\n                    stats: &st)"),
+                      && renderer.contains("densityCap: LatticeSettings.jobDensityCap(topologyID: params.latticeID, allowQuilt: scene.allowQuilt),\n")
+                      // ★ and (2026-10-24) the Cells page's Along, drawn only
+                      && renderer.contains("gradeAlong: scene.gradeAlong,\n                    stats: &st)"),
                       "★ the octree call must pass the step style and the structural floor, or Default Grade takes thirds "
                       + "and Structural keeps the aesthetic quilt bound")
         let wizard = try String(contentsOf: src.appendingPathComponent("LatticeSetupWizard.swift"), encoding: .utf8)

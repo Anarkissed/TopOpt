@@ -2674,9 +2674,6 @@ public struct LatticeSetupWizard: View {
                                 .accessibilityIdentifier("lattice-cells-along-\(a.rawValue)")
                             }
                         }
-                        if let note = LatticeGradeAlong.note(lit: lit, densityMode: model.densityMode, mode: mode) {
-                            shortNote(note, warning: true)
-                        }
                     case .strength:
                         shortNote(LatticeCellsRow.strengthLine)
                     case .ties:

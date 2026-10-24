@@ -5385,6 +5385,8 @@ public struct WorkspacePlaceholder: View {
                                         // (`shellClipMSL`), not because the region was
                                         // eroded away from it.
                                         stageMode: stageMode,
+                                        // ★ the Cells page's Along — the bake draws it; nothing sends it
+                                        gradeAlong: lat.gradeAlong,
                                         // ★ Carried so the BANNER can say which
                                         // algorithm the run will build — the marcher
                                         // draws only the doubled ladder.

@@ -380,6 +380,9 @@ public struct LatticeSDFScene {
     /// ★★★ THE MODE HE CHOSE ON ENTERING THE STAGE, and it is not decoration: it picks
     /// the denominator core grades by AND the floor below. See `LatticeStageMode`.
     public var stageMode: LatticeStageMode = .structural
+    /// ★ The Cells page's Along (`LatticeSettings.gradeAlong`): the octree bake DRAWS "Through the depth" / "Across the
+    /// face" (`LatticePreviewOccupancy.alongFraction`); the plan's ρ and the job never read it. nil / `.load` ⇒ today's.
+    public var gradeAlong: LatticeGradeAlong? = nil
     /// ★★ THE ALGORITHM THE RUN WILL USE, in core's own name. "" is "not stated",
     /// which core resolves to doubled — the one the marcher can actually draw.
     public var algorithm: String = ""
@@ -588,6 +591,8 @@ public struct LatticeSDFScene {
                 // declared face. It is GONE — see the bake below for why it was the
                 // wrong instrument and where the rule actually lives now.
                 stageMode: LatticeStageMode = .structural,
+                /// The Cells page's Along — drawn only (see `gradeAlong`).
+                gradeAlong: LatticeGradeAlong? = nil,
                 // ★ Core's `LatticeAlgorithm` name. Defaults to "" so every existing
                 // call — and every test — still describes a doubled ladder, which is
                 // the picture the marcher draws.
@@ -2252,6 +2257,7 @@ public struct LatticeSDFScene {
         // ★ AND IT IS NOT COMPUTED WITHOUT A MEASUREMENT. No field or no allowable
         // leaves the array empty, and every voxel then takes the accuracy floor.
         self.stageMode = stageMode
+        self.gradeAlong = gradeAlong
         self.algorithm = algorithm
         // ★★★ AESTHETIC: THE FLOOR IS FLAT, AND IT DOES NOT WAIT FOR A SOLVE
         // (maintainer, 2026-08-21: "The rule is we lattice *WHEREVER* it is asked of
@@ -3106,6 +3112,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                         ? scene.drawnCeilingRho : 1,
                     // ★ the cap the job writes: core's floor at it, and no cell denser
                     densityCap: LatticeSettings.jobDensityCap(topologyID: params.latticeID, allowQuilt: scene.allowQuilt),
+                    // ★ the Cells page's Along, drawn (ruling 2026-10-24 17:46); the plan's ρ is untouched
+                    gradeAlong: scene.gradeAlong,
                     stats: &st) {
                     baked = o
                     octreeCells = o.steppedCells
