@@ -550,6 +550,274 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
 11. **(d) → #354's redesign build. Latent: the worker upload carries only the STEP and job.json** (`RemoteRunner.swift:1440-1460`),
    so a painted region's sidecar would never reach the worker. Not used in these runs.
 
+
+## ★ REDESIGN PLAN: Flexible's part of the approved Topology/Lattice redesign (the reviewer's ruling of 2026-10-24 07:35) (read this first)
+
+Posted to the reviewer 2026-10-24. Nothing is built: each step waits for #354's batch (B2 shared components, B4 type selector, B5 Edit faces) and a merge. The approved mockup: https://claude.ai/artifact/PCxnaiuoVhyyapzvNX71ax (v5).
+
+
+Files are in `app/TopOptKit/Sources/TopOptFlows/` unless noted. **WP** = `WorkspacePlaceholder.swift`. This version applies the skeptic's 35 corrections. WP lines are today's; re-cite them after each sync.
+
+### 0. Scope, gating, invariants
+
+**Scope.** Points 1-6 only. Outside them, Flexible stays exactly as built. Two conflicts are raised, not decided: the duplicate drops Topology results (R12), and the after-Delete message (R11).
+
+**Gating.** Each #354 batch is merged with `git merge --no-ff`, never rebased or forced.
+- P1 (point 6): every batch.
+- P2 (point 5): B2.
+- P3 (point 3): B2, after P2.
+- P4 (point 2): B4, after P2.
+- P5-P7 (points 1 and 4): B5.
+- B2 and B4 also bring in B1 and B3.
+
+**Status now.**
+- **Redesign branch.** `claude/lattice-stage-frontend-37bee1` is at b0eee77f (10-24 04:11 -0400), local only; origin is ec2af861.
+  - 34 commits are not in HEAD (27 non-merge): 31 up to 2353efb4, then 22214031, 8641e16b and b0eee77f.
+  - Its worktree has only PNG changes.
+- **#354's PR branch** (c0b3f60b) is in HEAD. No ref has Edit faces, type-selector or shared-component code.
+- **Dry run.** `git merge-tree` against b0eee77f is clean.
+  - All 45 `H*` markers survive, plus H12, H40 (MetalMeshView :4099) and H47.
+  - WP shifts: H27 1307→1294, H38' 1397→1384, H36 1415→1402.
+- **That first sync:**
+  - It needs one compile fix, at `FlexibleFaceStatsPopover.swift:65`.
+  - It reds `testLatticeSubtreesReEncodeIdentically`: `lattice_subtree_102117B9.json` carries `wallThickness`, which 2353efb4 drops.
+  - It can move `outline_uv` in 9 goldens (his_0004, his_r5 and A1_0004, three each). 56eadfd7/162a3f95 make `wireOutlineLoops` (LatticeSettings.swift:275) a Clipper2 union, and 62ec11bc puts the plan base on the wire. Flexible reads that wire at FlexibleLatticeSections.swift:85 and FlexibleLatticeWalls.swift:243.
+  - The 16 hashes, built by #354's `makeLatticeRunRequest`, can move too.
+
+**Invariants.**
+- **Tests.** Every Flexible test stays unchanged except attributed re-pins (P1), the per-sync golden re-record, and these, which the ruling changes:
+  - Point 1:
+    - `FlexibleStageCapsuleTests` `testTheMenuIsTopologyFlexibleSurfaceThenAbout` and `testEachMenuRowDoesOneThingAndFoldsTheCards`.
+    - `FlexibleChromeLayoutTests` :31 (≤300). Its 12 pt gizmo check (:34-37) stays.
+    - `FlexibleRound7ScreenHookTests.testTheGateIsTheFlexibleStageOnly`.
+    - `FlexibleSurfaceNavTests` (3), which retire.
+  - Point 2: the H38' pin in `FlexibleR7U21HookTests`.
+  - Point 3: `FlexibleFaceCommitTests` :175-176, and `FlexibleR7D2ReviewTests` :192-202 (:194 only under R11).
+- **Goldens and hashes, at each sync:**
+  1. Run `FlexibleAngledGoldenTests`, `FlexibleI2AttachTests` (`side:w<n>` at FlexibleLatticeWalls.swift:292 comes from the wire) and the 16 hashes (`docs/handoffs/evidence/2026-09-29-flexible-screens/angled_presses/stage_job_hashes.sh`).
+  2. Report every DIFFERS and every moved hash, with the #354 commit that caused it.
+  3. Re-record them as the post-sync base (S1 precedent, `Fixtures/angled_press_goldens/MANIFEST.txt:5-6`).
+  4. Hold that base across P2-P7: det 38 / unseeded 32 + 1 PART-SKIP, 0 DIFFERS, with hashes cmp-identical for unedited projects. Today's base is `round8_step_h47/stage_job_hashes_r8.txt`.
+- **Why the hashes are ours.** The dump (#354's `makeLatticeRunRequest`) never opens Flexible. Flexible does write Topology state: faceRegions (FlexibleSectorMigration.swift:166-169), selection (FlexibleFaceCommits.swift:198-219, :371, :406-408, :432-436), and selection, roles and depths (FlexibleLatticeUnder.swift:296-320).
+- **P2** makes no test edits. **Point 4** moves no golden without R2.
+
+### 1. Order of work
+
+**P0: Baseline (now).**
+- Write the hook table: H1-H53 at HEAD lines. R7-D3's (handoff :4016-4042) is stale.
+- Take PNG baselines from `FlexibleRound7{Screen,Selections,Design,D1Review,Views}EvidenceProbe` and `FlexibleR7D2ReviewEvidenceProbe` (env `FLEX_R7D1/R7D2/R7D/R7D1R/R7V/R7D2R_EVIDENCE_DIR`).
+
+**P1: Sync each batch (point 6).**
+1. Dry-run `git merge-tree --write-tree HEAD <batch>` and list the expected red pins.
+2. Merge, with only the compile fixes the batch forces.
+3. Run the hook-pin classes:
+   - `FlexibleMainPageHookTests`, `FlexibleBatchCHookTests`, `FlexibleSurfaceNavTests`, `FlexibleRound6Tests`, `FlexibleR7M1Tests`, `FlexibleRound7ScreenHookTests`, `FlexibleRound7SelectionsHookTests`, `FlexibleH39HotfixHookTests`, `FlexibleR7U21HookTests`, `FlexibleStepRepairHookTests`, `FlexibleRound9HookTests`, `FlexibleS1VerifyTests`.
+   - Seven more that read #354's sources: `FlexibleMainPageRound4Tests.testTheHooksAreInPlace`, `FlexibleChromeLayoutTests.testTheCapsuleTopIsStageNavPlacementsFormula`, `FlexibleSettingsRound4Tests.testTheDepthPrismAndChipAreTheLatticeStagesFacePrismPurple`, `FlexibleRound6HostedTests` (:597), `FlexibleSelectionsListTests`, `FlexibleBatchMXrayTests`, `FlexibleSquishPlayerTests`.
+4. Check each red pin against #354's moved-anchor list.
+   - If only the anchor moved: an attributed re-pin.
+   - If the statement is gone: a new gated line, after the reviewer approves.
+5. Do the golden/hash steps (§0).
+6. Run every Flexible class plus `LatticeStaleTypeTests`.
+7. Update the handoff and post to the reviewer.
+
+**Expected reds:**
+- **B2:** H10, H24-H28, H30-H34, H39, H50b/d, and `testTheCapsuleTopIsStageNavPlacementsFormula`.
+- **B4:** H29, H36-H38', maybe H45.
+- **B5:** H9, the H22/H23 after-lines, H36, H48, and every `.surface`.
+- **Batch unknown:** H20 (WP:1254) and H3/H4/H7/H8/H14 (WP:739-1173, :7634).
+- **Design primitives:** H15' and H49a-c.
+
+**Done:** hook pins green; the only changes are re-pins, forced compile fixes and the reported re-record (B5: see P5).
+
+**P2: Shared components (point 5).** Trigger: B2.
+- **Adapters over #354's shells:** `FlexibleStageCapsule` (:25), `FlexibleCornerPair` (:43), `FlexibleSelectionsList` (:57), `FlexibleFaceChip` (:23), `FlexibleFaceChipLayout` (:18) and `FlexibleConfirmInPlace` (:58).
+- **`RerunCard` too.** The ruling lists it, and APP LIST 6 makes it one card with two actions. It stays out only if B2 says so. `RerunCardTests` (5) and H50a-d stay unchanged.
+- **`FlexibleLatticeCard` and `FlexibleLegendPlacement`** are in the mockup, not the ruling. Swap them only if B2 lifts them.
+- **Each adapter keeps** its file, name, init, statics, `control*` flags, keep-out keys and ids. Content goes in through slots, so source-read strings stay.
+- **Untouched:** GroupEyeHides, ProjectDuplication, and the mount text at H25, H27, H30 and H32.
+- **RED:** flip `controlOldPlacement` and `controlRedAlwaysLeading`. `FlexibleU2Tests.testU21ConfirmKeepSitsOnTheTappedControl` must go red.
+- **Done:** P0 PNGs cmp-identical (R10), hosted keep-outs within ±1 pt.
+
+**P3: Delete wording (point 3).** Trigger: B2, after P2.
+- **Question.** `deleteAsk` (FlexibleFaceCommits.swift:63-66) becomes "Delete ‘X’ from every stage?". It fits 44 characters up to a 17-character name; longer names fall back to "Delete this group from every stage?".
+- The accessibility labels follow (FlexibleSelectionsList.swift:212, FlexibleFaceChip.swift:213). `deleted()` (:67-70) changes only under R11. Undo (FlexibleMainStage+Selections.swift:186-216) and the squeeze-group trash (FlexibleSquishFollowUps.swift:39-65) stay.
+- **New test:** 17 characters keeps the name. RED: 18 falls back.
+
+**P4: One type per project (point 2).** Trigger: B4, after P2.
+- **Row.** "Change lattice type…" (`.changeType`) goes after ● Flexible ✓ (FlexibleStageCapsule.swift:61-71), detail ≤22 characters (R9).
+  - It is wired at H27 and through H36 (FlexibleStagePage.swift:809-816).
+  - On the Squish page it first runs `leave(then:)` (FlexibleStagePage.swift:821), which also saves the draft.
+- **The card and the duplicate are B4's.** We call its API: Duplicate → B4's duplicate-and-choose; Continue → today's delete (WP:1408, :643-655); Cancel → nothing. The draft's one-shot at H52 is dropped; if B4 lacks one, ours is a new hook with its own id, pin and approval.
+- **H38'.** Today it is unconditional (WP:1397), safe only because the modal needs `flexible == nil` (WP:626-629, :1390). It will write only when nil.
+- **B4's side:**
+  - Open the selector for a type-pending copy.
+  - Clear `lattice.flexible` in `onChoose` (WP:1391-1395) for Structural or Aesthetic, or `owns()` (FlexibleMainStage.swift:592-594) takes the copy.
+  - Keep `stageMode` (LatticeSettings.swift:1371) and `flexible` (:1373) exclusive, still decoding today's key.
+- **The copy.** `ProjectStore.duplicate` (ProjectDuplication.swift:48-58; ProjectStore.swift:285, :312-325) carries settings, links, faceRegions, selection, force, designBox, paint and both sidecars.
+  - It drops `optimized` (:55), results.plist, run_job.json and run_design.bin (ProjectDuplicationTests.swift:57-58).
+  - **So it does not carry Topology results,** which a Structural or Aesthetic lattice "on −35 %" needs. That is R12; nothing changes until it is ruled.
+- **New tests (RED in brackets):**
+  1. His rich frozen pad (links, Manual, nozzleGrade, presses, stamp, faceRegions, sidecars) duplicates equal by value except id, name, savedAt and `optimized`. The original's snapshot equals its live state before the copy (not its SHA: H52 re-saves it, AppModel.swift:756). [drop `.faces` from `sidecarSuffixes`]
+  2. A duplicate from the Squish page carries the unsaved Squish edits. [skip `leave(then:)`]
+  3. The copy opens the selector once. [never consume B4's flag]
+  4. Choosing Flexible keeps the settings. [unconditional `.newSetup()`]
+  5. Choosing Structural makes `owns()` false. [leave `flexible` set]
+
+**P5: Edit faces entry (point 1).** Trigger: B5.
+- **If B5 removes `.surface`,** the sync and P5 go in one commit, or the sync carries a minimal compile fix (R1). It breaks FlexibleStageCapsule.swift:68 and :84, FlexibleStageNav.swift:21-22, H9, and four tests: `FlexibleRound7ScreenHookTests` :177-189, `FlexibleRound7OtherStagesProbe`, `FlexibleSurfaceNavTests` and `FlexibleStageCapsuleTests`.
+- **Row.** `.surface` becomes `.editFaces`, "Edit faces…" / "cuts · unions · patterns", after a divider (FlexibleStageCapsule.swift:27, :61-71, :79-88, :164).
+- **✂.** It goes after a second divider following [Lattice | Squish] (:101-124), grey but enabled (R9). Id `flexible-capsule-editfaces`, key `capsuleEditFaces`, same closure.
+- **Width.** 263 → about 312 pt, so `capsuleMaxWidth` (FlexibleChromeLayout.swift:34) goes to about 320 (R9); the 12 pt gizmo check holds. Re-measure FlexibleFaceChipLayout.swift:79-80 and FlexibleStagePage.swift:876-881.
+- **Mounts.** `editFaces:` at H27; `onEditFaces` through H36; `leave(then: onEditFaces)` on the Squish page.
+- **Gate (HIGH). `owns()` stays.**
+  - It has 10 negated sites: :791 (H4), :946, :1021, :1254 (H20), :1294 (H24), :1302 (H26), :1310 (H28), :1352, :1419 (`FlexibleExportMount`) and :9723 (H39).
+  - Flipping it would show #354's handles, settings button, regions panel and Export step on Flexible. It would also blank the `current()` layers (FlexibleMainStage.swift:596-597; H3 :1173; H4's mesh, tints, dents, bodyAlpha).
+  - Instead, `owns && !<B5 mode flag>` gates only the 9 positive sites: :824 (H22), :889, :1307, :1326, :1332, :1350, :1380, :9614, :11771.
+  - Which `current()` layers stay on: R9.
+- **Retire** FlexibleStageNav.swift:17-26 and H9 (WP:5548, :5671-5715), today's way back. Done takes over that job (Q-B5g).
+- **H48** (WP:5995): re-seat it on Edit faces' Paint, or retire it (R9).
+- **Re-measure:** `FlexibleRound7ScreenHostedTests` (3) and `testTheKeepOutsAcrossTheBatchesAtSixViewports`.
+- **New tests (RED in brackets):**
+  1. The row and the ✂ share one closure, and the ✂ is enabled. [`.disabled`]
+  2. Under Edit faces, no tap reaches `flexibleMain.tapFace`. [drop the mode term]
+  3. Under Edit faces on Flexible, H28, H26 and `FlexibleExportMount` stay hidden. [gate through `owns()`]
+  4. On the Squish page, Edit faces runs `leave(then:)` first. [call it directly]
+  5. Done returns to the Flexible page it came from, main or Squish. [it lands on Topology]
+
+**P6: Edited faces, read side (point 4).** Trigger: B5 and Q-B5a.
+- **Adapter.** `FlexibleEditedFaces.swift` (new) is the resolver. `FlexibleRegions` (FlexibleRegions.swift:31-52) becomes its single adapter: `faces(of:)`, `cuts(of:)`, `region(at:face:mesh:)` and names answer from edited faces.
+- **Callers.** About 30 sites already use `FlexibleRegions`; the "Direct callers" row moves the rest onto it.
+- Unedited projects get the identity, so their bytes are kept. No pre-B5 fallback. Writers (W1-W3) go first. New B5 storage must round-trip through `duplicate` (a new sidecar joins `sidecarSuffixes`).
+- **New tests (RED in brackets):**
+  1. A tap on a combined face returns its union id. [undeclare the union]
+  2. A painted area returns its run id. [native mesh]
+  3. A cut piece has a wall on its cut edge. [whole-face outline]
+  4. The edge light lights only the piece. [the original's boundary]
+  5. The face (i) on a cut half reads only its own specs (FlexibleMainStage+Selections.swift:228). [the parent's key]
+  6. A commit from a cut half writes the half's ref, never `.face(original)`. [`owner`'s parent walk]
+  7. Migration never reverts an Edit-faces cut under an unheld I2 root. [`used` without B5's faces]
+  8. A duplicate round-trips B5's storage. [sidecar left out]
+
+**P7: Edited-face carry (point 4).** Trigger: P6, Q-B5c and R3-R5.
+- **No merge of the existing carries.** `planCarry` (FlexibleStageModel+Sectors.swift:172-246), EdgePick's re-express (FlexibleStageModel+EdgePick.swift:433-480) and `FlexiblePressReframe` (:104) stay as built.
+  - A new carry, driven by `successors`, calls them.
+  - `FlexibleSectorMigrationTests`, `FlexiblePressReframeTests` and `FlexibleLatticeSectionsTests` stay byte-identical.
+- **Carries:** faces, check stamps, `removedRegions`, press regions/snap/drawnIn, strip roots, link wall keys and link lattice keys (`f:<g>:<face>` → `r:<g>:<rid>`).
+- **Runs** in the edit's undo step if B5 has a post-edit hook. Otherwise it runs at Flexible open, idempotently, with the undo baseline seeded like `migrateSectorsAtOpen` (:153-165).
+- **Closes** the orphan at FlexibleMainPageLoads.swift:112-115.
+- **New tests (RED in brackets):**
+  1. Cutting a pressed face presses both halves, and the whole face is gone. [no carry: core refuses `shared_footprint`]
+  2. A removed face stays removed on its halves. [skip `removedRegions`]
+  3. One Undo restores both the face and its entry. [carry after the undo step]
+  4. A second open makes no diff. [drop the stale-id check]
+  5. A link on a cut face keeps its remapped lattice key. [no remap]
+
+**P8: FE solver.** Only if R6 rules it in.
+- `flexible_squish_fe.cpp:672-677, :824-828, :937-946, :994-1025, :1045-1048` move to region triangles ∩ cuts.
+- New test: pressing a cut half leaves the other half an anvil. [hold by raw face]
+
+### 2. Face-id table (point 4)
+
+Writers of Topology state come first. "Leaf" means the edited face the resolver returns.
+
+| Place | Today's key (file:line) | How it takes a cut half / painted STL area / combined face | Pinned by | Saved projects |
+|---|---|---|---|---|
+| **W1 Selections commits (writes selection)** | FlexibleFaceCommits.swift:188-219 (`refs`, `add` → `addFaces`/`addRegions`, `newGroup`), :371, :406-408, :432-436 | Writes the leaf's ref; never `.face(original)` | FlexibleFaceCommitTests; new P6-6 | None (writes #354's selection) |
+| **W2 Lattice under (writes selection and roles)** | FlexibleLatticeUnder.swift:296-320 (`.declare` sets selectableRoles by ref; `.newGroup` uses `addRegions`/`addFaces`, groupRoles, groupDepthMM); reverse map :198-225 | Leaf ref in, leaf ref out | FlexibleU21OneLatticeRuleTests (incl. testNoFacePrismStageSaysTheSame) | None |
+| **W3 Sector migration (writes faceRegions)** | FlexibleSectorMigration.swift:68-169 (`move`; `assignRegions` :166-169), "revertible" :72-86, MemoKey :59-64 | `used` counts B5-edited faces; MemoKey adds the resolver version | FlexibleSectorMigrationTests (3); new P6-7 | Legacy: an Edit-faces cut under an I2 root that no group holds would be reverted today |
+| Direct callers that skip `FlexibleRegions` | `FaceRegionGeometry.members`: FlexibleEdgeStrips.swift:365, FlexibleFacePick.swift:88, FlexibleMainPageLoads.swift:137, :176, :181, :202, FlexibleMainStage.swift:769, FlexibleMeet.swift:130, FlexiblePageChannels.swift:44, FlexibleSectorMigration.swift:120, :123, FlexibleSectors.swift:127, FlexibleStageModel.swift:646. Native `mesh.faceIDs`: FlexibleGroupWalls, FlexibleEdgeStrips, FlexibleOnModelLayer, FlexibleLatticeWalls, FlexibleMainPageLoads, FlexibleStageModel+Meet, FlexibleMeet, FlexibleProbe, FlexiblePageChannels, FlexibleSectors, FlexibleReadiness, FlexibleSettingsOpenGroup, FlexibleStageModel+Aim, FlexibleStageModel+Sectors, FlexibleStageModel | All move onto the `FlexibleRegions` adapter (identity when unedited) | The rows below | None |
+| Region-id space, declared set | FlexibleRegions.swift:36-41 (cuts only, `!isUnionOfParts`), :46-50 (1M+rid); FlexibleJob.swift:22-24; FlexibleSectors.swift:83 (2M+n) | Cut: 1M+rid, unchanged. Paint: its run face id. Combined: new declared leaf 1M+union rid, wire `add` = members | FlexibleRegionsTests.testSectorsAreDeclaredNamedAndPicked; FlexibleSectorStoreTests.testTheSurfaceStageAndTopologyNeverSeeAFlexibleSector | Unedited and cut-only identical (c1_pad, A1_0002/3, his_0004). Union 105 in his_r5/A1_0004: R2 |
+| Job face_regions, faceCount | FlexibleJob.swift:225-229; FlexibleStageModel.swift:577, :585, :1877, :1884-1888 | `sectorRegions` = resolver `wire`; faceCount from the effective mesh; `persistPaint` before scene open | FlexibleLatticeSectionsTests.testTheJobDeclaresSectionsAndEveryOtherEntryIsByteIdentical; FlexibleAngledGoldenTests.testEveryExistingSendKeepsItsJobBytes | None |
+| Squish-page tap | FlexibleStagePage.swift:411-434 (native mesh); FlexibleStageModel.swift:773-836; FlexibleRegions.swift:91-114 | `id(face:point:)`: Flexible piece first, then the leaf, on the effective mesh | FlexibleLatticeSectionsTests.testATapOnTheTopSelectsTheLatticeUnderIt; FlexibleU21OneLatticeRuleTests.testEveryNoLatticeTapSaysTheSame | None |
+| Main-page tap (H22) | FlexibleFacePick.swift:88-103 (`outermostUnion`); :96-100 (an unheld identity region reads as the raw face); `owner` :104-130 (walks `parentID` up, falls back to `.face(f)`) | Ask the adapter. :96-100 and `owner` both land a cut half on its original; both must stop at the leaf | FlexibleFacePickTests (7) | None |
+| Squeeze and rest entries | FlexibleSettings.swift:57-60 `faceRegionID` | Cut: copied to each half, reframed; the share rule is R5. Combined: merge (R3). Paint: R4. Rests stay whole today (`planCarry`, D2) | FlexibleSqueezeGroupsPressTests; FlexibleLatticeSectionsTests.testTheTopsLoadPressesOnlyItsSectionsAtEqualShares | Stale ids carried at open |
+| Weight split | FlexibleR7ReviewFixes.swift:28-50 (`FlexibleSectionShares.parts`), :89 (`rootOf`), :178-186; FlexibleMainPageLoads.swift:157-177 | `rootOf` follows B5's lineage. Two rules exist today: one root's sections share equally; a main-page group splits by area. Which an Edit-faces cut takes is R5 | testTheTopsLoadPressesOnlyItsSectionsAtEqualShares; FlexibleMainPageLoadsTests.testAGroupsWeightIsSplitByArea | None |
+| removedRegions | FlexibleSettings.swift:187 | Every successor stays removed | FlexibleMainPageLoadsTests.testTheTrashDeletesAFaceAGroupHoldsAndTheReSyncLeavesItDeleted | Carried at open |
+| Main-page groups as Flexible faces | FlexibleMainPageLoads.swift:157-177 (expand), :112-115 (orphan) | `expand` uses the leaves; adopt runs after the carry | FlexibleMainPageLoadsTests.testAGroupsWeightIsSplitByArea, testWeightsInheritWriteBackAndHisOwnSurvive | Carried at open |
+| Face-prisms (include specs) | FlexibleLatticeSections.swift:82-87 (key; reads `wireOutlineLoops` :85), :92 (curved) | Follow B5's emission; curved decided by coplanarity | FlexibleR7M1Tests.testHisFacePrismsLatticeOnlyUnderThem | None (#354's keys) |
+| Depth prisms | FlexibleDepthPrism.swift:185, :272 (one per `loadedFaces.faceRegionID`) | One per leaf | FlexibleR7M1Tests; FlexibleLatticeUnderReviewTests | None |
+| Flat cuts, sections | FlexibleSectors.swift:104-136 (roots), :139-157 (token), :222 (key) | `roots` = the leaves; token form unchanged (`f<face>` / `r<rid>`) | FlexibleSectorStoreTests.testNumbersNeverShiftOrRecycle; his_0004_scene_job.json | Old numbers kept, new pieces get new numbers |
+| Open group (rail, history, issue key, free face) | FlexibleSettingsOpenGroup.swift:63-113, :166-175, :296-310 (`rootOf`; identity reads as the face), :338-345 (`hasFreeFace` counts whole B-rep faces) | Leaves; `hasFreeFace` counts leaves, so a half-held cut face still has a free half | FlexibleR7E3Tests (none found for `hasFreeFace`) | None |
+| Presses | FlexiblePress.swift:47, :59 + :119-153 (snap), :69 (drawnIn), :335-339 | A split becomes its leaves in member order; a combine becomes the union id | FlexibleSqueezeGroupsPressTests.testPressesAreRenumberedMergedAndForcedWithTheirGroup | Carried at open (parked) |
+| Press send, shared footprint | FlexibleStageModel+PressSend.swift:179-195, :282 (`regs.faces(of:)`) | Leaves through the adapter; this is where P7's `shared_footprint` refusal comes from | FlexibleR7E2Tests; FlexibleLatticeSectionsTests | None |
+| Press heat, aim | FlexiblePressPushHeat.swift:154; FlexibleStageModel+Aim.swift:235-244 (native `mesh.faceIDs`) | The effective mesh | FlexiblePressAimReviewTests (none found for heat) | None |
+| Edge/corner strips | FlexibleEdgeStrips.swift:42-80 (`Member.face`/`root`); FlexibleMeet.swift:104-130 | `Member` gains a leaf id; Meet's partition = leaves | FlexibleMeetTests.testNumbersAreStableAcrossOpens; FlexibleEdgeGroupsTests.testPickOrderCutsNeverOverlap | Root re-expressed |
+| Group walls | FlexibleGroupWalls.swift:101-150 (`regions.faces(of:)`, native `mesh.faceIDs`, no paint), :222, :279, :321; shell cache :377-383 (region Int + scope) | Adapter faces including paint; cache key adds the resolver version | FlexibleEdgeGroupsTests; FlexibleEdgeGroupsHostedTests | None |
+| Stamps, curves | FlexibleSettings.swift:35-46, :140-143 | Reframed from the old leaf to the new ones | FlexiblePressReframeTests (2); FlexibleStageTests.testWholeFaceStampCoversOnlyTheFace | Carried at open |
+| Links: walls, skin, lattice key | FlexibleSettings.swift:312-323; FlexibleLatticeWalls.swift:123 (`Int(t.dropFirst(6))`), :139-170, :243, :250-262, :276, :292 (`side:w`), :324 (`skin:f`); FlexibleAttach.swift:30, :156, :226-232; FlexibleMainStage+Attach.swift:164, :195, :253; FlexibleAttachViews.swift:288 | Walls come from the piece's own outline; neighbour = leaf. A new key form must parse at every site listed (`skin:<leaf>` / `side:r<rid>` would fail the Int parses silently), so unedited keeps `skin:f<face>` / `side:w<n>` (R7). P7 remaps the lattice key `f:<g>:<face>` → `r:<g>:<rid>` | FlexibleI2AttachTests.testOldSavesDecodeAndReencodeByteIdentical, testAStaleLinkSaysWhyAndIsKept; new P7-5 | Mapped through lineage, else marked stale and kept |
+| Face (i), Selections rows, chip | FlexibleFaceStatsPopover.swift:42-65; FlexibleMainStage+Selections.swift:228 (filters `selectableKey == ref.key`) | No change beyond W1/W2; new P6-5 proves a half reads only its own specs | FlexibleR7D2ReviewTests; FlexibleRound7SelectionsHookTests; new P6-5 | None |
+| Edge light, outline | FlexibleOnModelLayer.swift:133-153, :598-620 | The leaf's clipped boundary and centroid | FlexibleR7X1VerifyTests; new P6-4 | None |
+| Topology anchors, pushesInto | FlexibleHold.swift:148-156, :250-256 | `leaves(ofRegion:)` | FlexibleI1HoldTests.testOnHisPadWithRestsTodaysChainRunsByteForByte | None |
+| Stress requests | FlexibleStressSolve.swift:29-50 (`want` from `anchorRegionIDs`, load-group `regionIDs`, `anchorFaceIDs`); FlexibleFERequest.swift:184-185 | Leaves | FlexibleBatchCVerifyTests; FlexibleI1HoldTests | None |
+| Readiness | FlexibleReadiness.swift:455-470 (`suggestedFace`, native ids), :572-586 (`latticedShare`/`hasOwnLattice` per region) | The effective mesh; per leaf | FlexibleBatchBReviewUXTests; FlexibleU21OneLatticeRuleTests | None |
+| Names | FlexibleRegions.swift:67-87; FlexibleSettingsReset.swift:42-112 (`freshSettings` over `restoredFaceRegions`); FlexibleLatticeCard.swift:78-89 (`"Face \(faceID)"` from `LatticeRegionSpec.faceID`, so a cut half reads as its original); FlexibleMainStage.swift:756-775 (heat key, `members` expansion) | The leaf's name and members | FlexibleSettingsRound4Tests.testTheFaceListListsHisFacesAndATapSelectsThatFace; FlexibleRound7D1ReviewTests; FlexibleR7SettingsTests | None |
+| Memo and cache keys | FlexibleMainStage+Attach.swift:31-32 (`FlexibleIncludeMemoKey`); FlexibleMainStage.swift:756; FlexibleSectorMigration.swift:59-64; FlexibleGroupWalls.swift:377-383 | Add the resolver version (B5 table + paint) | None found | None |
+| Painted faces in session | ProjectModel.swift:458-461, :509-513; FlexibleStageModel+Meet.swift:175-190 | The effective mesh, in run ids | New P6-2 (nothing paints today) | Sidecar, unchanged |
+| Tints | FlexiblePageChannels.swift:100-131 | Follow the declared set | FlexibleOverlayClipTests.testHisProjectSectorTintStopsAtTheCutBeforeAnyStack | None |
+| FE solver (bridge) | flexible_squish_fe.cpp:672-677, :824-828, :1045-1048 | Region triangles ∩ cuts; `exit_regions` | FlexibleI1HoldTests; FlexibleI3LinkSimTests | None (R6) |
+
+
+**Not keyed by face:** Finish, Manual (FlexibleManual.swift:102-121), nozzle grade, and the bridge's design side (flexible_bridge.cpp:169-215).
+
+**Mechanism.**
+- **`FlexibleEditedFaces`** is pure and memoised on B5's table version, the mesh signature and the paint. It exposes `leaves`, `id(face:point:)`, `leaves(ofFace:)`, `leaves(ofRegion:)`, `successors(of:)`, `wire` and the effective mesh.
+- **`FlexibleRegions`** is its only adapter.
+- **Ids** (unedited bytes are kept):
+  - An unedited, identity, STL or painted face keeps its run id.
+  - A cut piece is 1M+rid, and a combined face is 1M+union rid.
+  - A Flexible sector is 2M+n.
+- **No schema change.** Stale ids are carried at open.
+
+### 3. Questions
+
+**For #354**
+- **B2:**
+  - What are the shells' signatures? Do they take slots, our constants and our `control*` flags?
+  - Will the bodies be copied or moved? Moving them reds 8 tests that read source.
+  - Can the Selections list run without the eye, Regions and Keep clear?
+  - Does B2 lift RerunCard, FlexibleLatticeCard and FlexibleLegendPlacement?
+- **B4:**
+  - What is the type value? Is the `flexible` key still decoded?
+  - What opens the selector for a pending copy?
+  - What are the duplicate, pending-flag and card APIs?
+  - Does `onChoose` clear `flexible`?
+  - Does it replace New TopOpt's Flexible tab (H41-H45)?
+- **B5:**
+  - (a) Are FaceRegionModel ids (100…) and `.faces`/`exportRemap` kept? If not, we need an id map, or saved 1M+rid keys break.
+  - (b) What are the entry point and the mode flag?
+  - (c) Is there a post-edit hook in the undo step?
+  - (d) Is there one outline per edited face, with the lineage exposed?
+  - (e) Does the undo-merge (APP LIST 1) come with it?
+  - (f) Does it remove `.surface`?
+  - (g) Can Done return to the Flexible page?
+  - (h) Does it add new storage?
+- **Every batch, B1 and B3 too:** what is its moved-anchor list? Do we merge the PR branch or 37bee1?
+
+**For the reviewer**
+- **R1.** Do re-pins and the per-sync re-record count as outside "unchanged"? Does each re-seat need its own approval? For B5, one commit, or a compile fix?
+- **R2.** Union 105 (his_0004_r5, A1_0004): carry it and re-record, or let it stand?
+- **R3.** When a combine merges different entries, which wins? Are the weights summed?
+- **R4.** Does a painted area inherit its face's entry?
+- **R5.** After a cut, do both halves rest (today rests stay whole)? Is the share equal (sections) or by area (main-page groups)?
+- **R6.** Is the FE solver in scope?
+- **R7.** New wall keys only for an edited neighbour? Is a link that loses its wall kept as stale?
+- **R8.** H50d, or the mockup's "Save as new project"?
+- **R9.** ✂ grey but enabled? Capsule about 320 pt? Row details? Squish leave check first? Does About keep its delete? Is "Continue" final, though today's delete is undoable? Keep H48? Which `current()` layers stay on under Edit faces?
+- **R10.** Can the compile fix ride in the sync? Is PNG cmp the pixel proof?
+- **R11.** ‘X’ or “X”? Does the after-Delete message change?
+- **R12 (new).** The duplicate drops Topology results (`optimized`, results.plist, run_job.json, run_design.bin), yet the ruling says it carries everything. Do we carry them (a ProjectDuplication change, so a new hook), or does the copy re-run?
+
+**Owner's calls, through the reviewer:** R2, R3, R4, R12.
+
+### 4. Risks
+
+The steps already cover the rest. These remain:
+- **B5 renumbers regions.** The saved 1M+rid keys break (his_0004's 1000103/1000104).
+- **#354 moves bodies or shares its constants.** Source pins and ±1 pt frames drift. The 11" landscape hosted test already fails.
+- **The duplicate re-encodes.** A coder asymmetry (LatticeSettings ~2150-2410) changes keys.
+- **H50d conflicts with the mockup.** The `startRun()` count of 4 is pinned.
+- **Batches arrive out of order.** P2 still goes before P3-P5.
+
 ## ★ Round 8 · STEP import repair WIRED IN (H47) + paint off on a repaired STEP (H48) (2026-10-23) (read this first)
 
 Branch `claude/flexible-screens` (PR #362), on `9b11b6dc` (phase 1: `StepMeshRepair.swift`, own files). NOT pushed (your
