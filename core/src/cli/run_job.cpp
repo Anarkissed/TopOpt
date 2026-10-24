@@ -4298,12 +4298,17 @@ struct LatticeVariantOutcome {
   // ★ ruling 2: per region, the volume its own plan cells cover that the region does
   // not reach -- the set the outline clip stops struts from filling. "r1=5097.656".
   std::string clip_outside_region_mm3;
+  // ★ ruling 3b: the same volume split by cause, per region.
+  std::string clip_outside_by_cause_mm3;
   // ★ K5: where the generator's strut and node radius queries got their density.
   long long plan_rho_queries_plan = 0, plan_rho_queries_posture = 0,
             plan_rho_queries_floor = 0;
   // ★ K4: the plan as laid, per region and per group, and the generator's own ledger.
   std::vector<RunInfo::PlanRegion> plan_by_region;
   long long plan_laid_unattributed = 0;
+  // ★ whether the ledger tap ran at all (lattice.emit_plan_laid): without it the laid
+  // counts are not measured and must not be reported as zeros.
+  bool plan_laid_measured = false;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -6671,6 +6676,140 @@ LatticeVariantOutcome lattice_one_variant(
     }
     return false;
   };
+  // ── ★ K6 PART 2: ONE BOUNDARY PER REGION, CLIPPED TO WHAT THAT REGION OWNS ───
+  // Where two include prisms overlap, both regions' passes used to lay a lattice through
+  // the shared volume and the file carried two. Each region gets its own boundary,
+  // clipped by the owner rule (clip_to_owned_region), and its passes point at that.
+  //
+  // ★ A DEQUE, AND AT THIS SCOPE ON PURPOSE. `stepped_passes` holds raw pointers into
+  // these objects and outlives the block that builds them; an earlier cut declared them
+  // inside that block and the generator read freed memory. A deque rather than a vector
+  // because the pointers must stay valid as regions are added. Declared HERE, above the
+  // ledger's classifier, because that classifier asks the pass's own boundary whether
+  // the cell could overlap at all.
+  std::deque<LatticeBoundary> owned_boundaries;
+  std::map<int, const LatticeBoundary*> owned_boundary_for;
+
+  // ── ★ WHY A PLAN CELL GOT NO STRUT (reviewer's ruling 3, 2026-10-11) ─────────
+  // "152 of 4,198 cells have no strut" is a count, not a diagnosis, and the reviewer is
+  // right that any cell the PICTURE draws and core leaves empty is a mismatch. These are
+  // the causes core can actually distinguish, tested in this order so each cell is filed
+  // once, under the FIRST thing that would have stopped it:
+  //
+  //   outside_rect     the centre is outside the region's in-plane rectangle;
+  //   beyond_depth     in-plane but outside [0, depth] along the face normal;
+  //   outside_outline  inside the rectangle and the depth, but outside `outline_uv` --
+  //                    this is ruling 2's clip, and it is the app's outline deciding;
+  //   owned_elsewhere  inside this region, but another region owns the centre (K6);
+  //   no_material      inside and owned, but the optimizer left no printed material, or
+  //                    the final mask does not lattice it (the outline beam's band lands
+  //                    here, since it clears the mask);
+  //   never_generated  none of the above. The cell is inside, owned, printed and masked,
+  //                    and the generator still put nothing in it. THIS is the mismatch;
+  //                    every other row has a reason the app can see.
+  //
+  // Each test is core's own exported predicate, not a re-derivation: the containment is
+  // point_in_clearance_region, the outline is point_in_clearance_outline, the owner is
+  // stepped_region_owner.
+  enum class NoStrutCause { OutsideRect, BeyondDepth, OutsideOutline, OwnedElsewhere,
+                            NoMaterial, CellOverlapDropped, NeverGenerated };
+  auto classify_no_strut = [&](int region_id, const Vec3& centre, double size_mm) {
+    const ClearanceGeometry* R = nullptr;
+    for (std::size_t i = 0; i < lattice_roles.includes.size(); ++i) {
+      const ClearanceGeometry& g = lattice_roles.includes[i];
+      const int id = g.declared_region_id > 0 ? g.declared_region_id
+                                              : static_cast<int>(i) + 1;
+      if (g.valid && id == region_id) { R = &g; break; }
+    }
+    if (R == nullptr) return NoStrutCause::OutsideRect;   // no such region: not ours
+    const Vec3 d{centre.x - R->origin.x, centre.y - R->origin.y, centre.z - R->origin.z};
+    const double nl = std::sqrt(R->normal.x * R->normal.x + R->normal.y * R->normal.y +
+                                R->normal.z * R->normal.z);
+    const double sdep = nl > 0.0 ? (d.x * R->normal.x + d.y * R->normal.y +
+                                    d.z * R->normal.z) / nl
+                                 : 0.0;
+    const double du = d.x * R->u.x + d.y * R->u.y + d.z * R->u.z;
+    const double dw = d.x * R->w.x + d.y * R->w.y + d.z * R->w.z;
+    if (!(du >= R->u_lo && du <= R->u_hi && dw >= R->w_lo && dw <= R->w_hi))
+      return NoStrutCause::OutsideRect;
+    if (nl > 0.0 && !(sdep >= 0.0 && sdep <= R->depth))
+      return NoStrutCause::BeyondDepth;
+    if (!point_in_clearance_outline(*R, du, dw)) return NoStrutCause::OutsideOutline;
+    if (stepped_region_owner(centre, lattice_roles.includes) != region_id)
+      return NoStrutCause::OwnedElsewhere;
+    // ── ★ MATERIAL AND MASK, ON THE CELL'S OWN VOXELS ────────────────────────
+    // Voxels whose CENTRE lies inside the cell's box, and where the cell is smaller
+    // than a voxel and so contains no centre, the voxel the cell's own centre sits in.
+    //
+    // ★ MEASURED WRONG FIRST, and it mattered. The first cut took a +/-1 voxel
+    // neighbourhood, which for 68BF7B74's 2.578 mm cells on a 3.411 mm grid is a 10.2 mm
+    // box -- sixteen times the cell -- so `any_masked` was true almost everywhere and
+    // `no_material` almost never fired. 645 and 965 cells on that project's two arms
+    // came out as `never_generated`, i.e. as core's fault, when the question had simply
+    // been asked of the wrong voxels. A classifier that over-reaches reports its own
+    // reach as a defect.
+    bool any_masked = false;
+    const Vec3 lo{centre.x - 0.5 * size_mm, centre.y - 0.5 * size_mm,
+                  centre.z - 0.5 * size_mm};
+    const Vec3 hi{centre.x + 0.5 * size_mm, centre.y + 0.5 * size_mm,
+                  centre.z + 0.5 * size_mm};
+    auto vox_of = [&](double x, double o) {
+      return static_cast<int>(std::floor((x - o) / solved_grid.spacing));
+    };
+    const int i0 = vox_of(lo.x, solved_grid.origin.x), i1 = vox_of(hi.x, solved_grid.origin.x);
+    const int j0 = vox_of(lo.y, solved_grid.origin.y), j1 = vox_of(hi.y, solved_grid.origin.y);
+    const int k0 = vox_of(lo.z, solved_grid.origin.z), k1 = vox_of(hi.z, solved_grid.origin.z);
+    bool held_a_centre = false;
+    for (int k = k0; k <= k1 && !any_masked; ++k)
+      for (int j = j0; j <= j1 && !any_masked; ++j)
+        for (int i = i0; i <= i1 && !any_masked; ++i) {
+          if (i < 0 || j < 0 || k < 0 || i >= solved_grid.nx || j >= solved_grid.ny ||
+              k >= solved_grid.nz)
+            continue;
+          const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          if (vc.x < lo.x || vc.x > hi.x || vc.y < lo.y || vc.y > hi.y ||
+              vc.z < lo.z || vc.z > hi.z)
+            continue;                       // that voxel's centre is not in this cell
+          held_a_centre = true;
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (e < mask.size() && mask[e]) any_masked = true;
+        }
+    if (!held_a_centre) {
+      // A cell smaller than a voxel holds no voxel centre at all: ask the voxel its own
+      // centre sits in, which is the voxel every other reader of this cell uses.
+      const int i = vox_of(centre.x, solved_grid.origin.x);
+      const int j = vox_of(centre.y, solved_grid.origin.y);
+      const int k = vox_of(centre.z, solved_grid.origin.z);
+      if (i >= 0 && j >= 0 && k >= 0 && i < solved_grid.nx && j < solved_grid.ny &&
+          k < solved_grid.nz) {
+        const std::size_t e = solved_grid.index(i, j, k);
+        any_masked = e < mask.size() && mask[e] != 0;
+      }
+    }
+    if (!any_masked) return NoStrutCause::NoMaterial;
+    // ── ★ AND CORE'S OWN CELL-OVERLAP PROOF ──────────────────────────────────
+    // `cell_may_overlap` is the generator's activation test: a cell whose box provably
+    // misses the allowed region is dropped WHOLE, before any strut is considered. That
+    // is a core decision, not a plan one, and it has to be told apart from "inside,
+    // owned, printed, masked and still empty" -- which is the only row that is a real
+    // mismatch. Measured first without this test: 647 and 971 cells on 68BF7B74's two
+    // arms came out as `never_generated`, which was true but useless.
+    //
+    // Asked on the boundary the PASS used -- the region's own owner-clipped copy where
+    // K6 built one -- so the answer is the one the generator acted on and not an
+    // approximation of it.
+    {
+      const Vec3 cmin{centre.x - 0.5 * size_mm, centre.y - 0.5 * size_mm,
+                      centre.z - 0.5 * size_mm};
+      auto ob = owned_boundary_for.find(region_id);
+      const LatticeBoundary& B =
+          ob != owned_boundary_for.end() ? *ob->second : boundary;
+      if (!B.cell_may_overlap(cmin, size_mm)) return NoStrutCause::CellOverlapDropped;
+    }
+    return NoStrutCause::NeverGenerated;
+  };
   // Per group, per cell (in the group's own ascending order): what the generator laid
   // there. Filled by the tap below, which fires once per emitted element.
   std::vector<std::vector<long long>> plan_laid_struts, plan_laid_nodes;
@@ -6999,6 +7138,56 @@ LatticeVariantOutcome lattice_one_variant(
     for (std::size_t e = 0; e < beam_band.size() &&
                             e < gf.posture.relative_density.size(); ++e)
       if (beam_band[e]) gf.posture.relative_density[e] = 0.0;
+    // ── ★ THE BAND'S OWN VOXELS, EXPORTED (reviewer's ruling 4a, 2026-10-10) ────
+    // #354 is measuring how many of these lie inside the PREVIEW's solid band, and the
+    // two bands are not the same width: the formula takes the VOXEL, and the two sides
+    // have different voxels (1.719 mm in the preview, 3.411 mm here on 570B38E2). It
+    // needs the centres to do that, so here they are -- behind an env var, like every
+    // other diagnostic dump in this file, because it is evidence and not an output.
+    //
+    // ★ AND IT STATES max_steps, which is the defect: `floor(inward / spacing)` is 0 on
+    // his grid, so the flood never advances and the band is the SEED LAYER -- one voxel,
+    // 3.4106 mm, where the rule computes 2.0553. Every width from just above 0 to one
+    // whole voxel gives the same band, so the derived number has no effect on his part.
+    if (const char* bp = std::getenv("TOPOPT_BEAM_BAND_DUMP")) {
+      std::ofstream bf(bp);
+      if (bf) {
+        bf.setf(std::ios::fmtflags(0), std::ios::floatfield);
+        bf.precision(10);
+        bf << "# the outline beam's band, as core applies it\n"
+           << "# GRID <origin.x> <origin.y> <origin.z> <spacing> <nx> <ny> <nz>\n"
+           << "# RULE <bead_mm> <voxel_mm> <band_mm> <beam_mm> <bleed_mm> <inward_mm> "
+              "<max_steps>\n"
+           << "#   beam = max(2*bead, clamp(0.35*voxel, 0.10, 0.35) + 0.5*voxel)\n"
+           << "#   bleed = band >= 25 ? 0.5*(band-15) : 0      inward = beam + bleed\n"
+           << "#   max_steps = floor(inward/spacing): 0 means the band is the SEED LAYER\n"
+           << "#   (lattice voxels with a non-lattice 6-neighbour IN the face plane,\n"
+           << "#    |dir.normal| < 0.5; the two directions along the normal are exempt)\n"
+           << "# BAND <i> <j> <k> <cx> <cy> <cz> <region_id>   centres in model mm\n";
+        bf << "GRID " << solved_grid.origin.x << ' ' << solved_grid.origin.y << ' '
+           << solved_grid.origin.z << ' ' << solved_grid.spacing << ' '
+           << solved_grid.nx << ' ' << solved_grid.ny << ' ' << solved_grid.nz << '\n';
+        bf << "RULE " << job.grading.min_extrudable_width_mm << ' '
+           << solved_grid.spacing << ' ' << job.grading.shape_grade_band_mm << ' '
+           << beam << ' ' << bleed << ' ' << inward << ' '
+           << static_cast<int>(std::floor(inward / solved_grid.spacing + 1e-9)) << '\n';
+        std::size_t wrote = 0;
+        for (int k = 0; k < solved_grid.nz; ++k)
+          for (int j = 0; j < solved_grid.ny; ++j)
+            for (int i = 0; i < solved_grid.nx; ++i) {
+              const std::size_t e = solved_grid.index(i, j, k);
+              if (e >= beam_band.size() || !beam_band[e]) continue;
+              bf << "BAND " << i << ' ' << j << ' ' << k << ' '
+                 << (solved_grid.origin.x + (i + 0.5) * solved_grid.spacing) << ' '
+                 << (solved_grid.origin.y + (j + 0.5) * solved_grid.spacing) << ' '
+                 << (solved_grid.origin.z + (k + 0.5) * solved_grid.spacing) << ' '
+                 << (e < region_ids_for_stepped.size() ? region_ids_for_stepped[e] : 0)
+                 << '\n';
+              ++wrote;
+            }
+        std::printf("beam band: %zu voxel(s) written to %s\n", wrote, bp);
+      }
+    }
     R.outline_beam_mm = beam;
     R.outline_bleed_mm = bleed;
     R.outline_beam_voxels = static_cast<long long>(cleared);
@@ -7032,6 +7221,8 @@ LatticeVariantOutcome lattice_one_variant(
     const double vox_mm3 =
         solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
     std::map<int, long long> solid_vox, latticed_vox, law_rho_vox, outside_vox;
+    std::map<int, long long> outside_rect_vox, outside_depth_vox, outside_outline_vox,
+        outside_owned_vox, outside_other_vox;
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
@@ -7051,7 +7242,18 @@ LatticeVariantOutcome lattice_one_variant(
           // a counterfactual, and a number that needed two runs would not be a receipt.
           {
             const int rid = plan_cell_region_at(c);
-            if (rid != 0 && owner != rid) ++outside_vox[rid];
+            if (rid != 0 && owner != rid) {
+              ++outside_vox[rid];
+              // ★ ruling 3b: and WHY the region does not reach it, by the same test
+              // order the per-cell classifier uses, so the volume is a diagnosis too.
+              switch (classify_no_strut(rid, c, solved_grid.spacing)) {
+                case NoStrutCause::OutsideRect:    ++outside_rect_vox[rid]; break;
+                case NoStrutCause::BeyondDepth:    ++outside_depth_vox[rid]; break;
+                case NoStrutCause::OutsideOutline: ++outside_outline_vox[rid]; break;
+                case NoStrutCause::OwnedElsewhere: ++outside_owned_vox[rid]; break;
+                default:                           ++outside_other_vox[rid]; break;
+              }
+            }
           }
           if (owner == 0) continue;            // outside every include region
           if (mask[e]) ++latticed_vox[owner];
@@ -7106,6 +7308,17 @@ LatticeVariantOutcome lattice_one_variant(
                     R.clip_outside_region_mm3.empty() ? "" : ", ", pr.region_id,
                     static_cast<double>(outside_vox[pr.region_id]) * vox_mm3);
       R.clip_outside_region_mm3 += rbuf;
+      // ★ ruling 3b: the same volume, split by what put it out of the region's reach.
+      // mm3 on the same voxel basis, so the five add back to the figure above.
+      std::snprintf(rbuf, sizeof rbuf,
+                    "%sr%d: outline=%.3f depth=%.3f rect=%.3f owned=%.3f other=%.3f",
+                    R.clip_outside_by_cause_mm3.empty() ? "" : " | ", pr.region_id,
+                    static_cast<double>(outside_outline_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_depth_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_rect_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_owned_vox[pr.region_id]) * vox_mm3,
+                    static_cast<double>(outside_other_vox[pr.region_id]) * vox_mm3);
+      R.clip_outside_by_cause_mm3 += rbuf;
     }
     std::fprintf(stderr,
                  "[stepped] plan solid remainder per region: %s mm3 | the plan lattices "
@@ -7189,8 +7402,7 @@ LatticeVariantOutcome lattice_one_variant(
   // into these objects and outlives the block that builds them; an earlier cut declared
   // them inside that block and the generator read freed memory. A deque rather than a
   // vector because the pointers must stay valid as regions are added.
-  std::deque<LatticeBoundary> owned_boundaries;
-  std::map<int, const LatticeBoundary*> owned_boundary_for;
+  // (declared above the ledger's classifier, which asks the pass's own boundary)
   if (graded && R.algorithm == LatticeAlgorithm::Stepped) {
     R.stepped = run_stepped_step(solved_grid, dens, mask,
                                  gf.posture.relative_density, region_ids_for_stepped,
@@ -7871,6 +8083,7 @@ LatticeVariantOutcome lattice_one_variant(
   // check its own packer against.
   if (!plan_groups.empty()) {
     R.plan_laid_unattributed = plan_laid_unattributed;
+    R.plan_laid_measured = (laid_fn != nullptr);
     for (const SteppedPlanRegion& pr : plan_regions) {
       RunInfo::PlanRegion rr;
       rr.region_id = pr.region_id;
@@ -7912,7 +8125,24 @@ LatticeVariantOutcome lattice_one_variant(
           for (std::size_t n = 0; n < plan_laid_struts[gi].size(); ++n) {
             gg.struts_laid += plan_laid_struts[gi][n];
             gg.nodes_laid += plan_laid_nodes[gi][n];
-            if (plan_laid_struts[gi][n] == 0) ++gg.cells_with_no_strut;
+            if (plan_laid_struts[gi][n] != 0) continue;
+            ++gg.cells_with_no_strut;
+            // ★ ruling 3: and WHY, per cell, so the count is a diagnosis.
+            if (laid_fn == nullptr) continue;   // nobody counted: no cause to give
+            const std::array<int, 3>& c = g.cells[n];
+            const Vec3 ctr{g.origin.x + (c[0] + 0.5) * g.size_mm,
+                           g.origin.y + (c[1] + 0.5) * g.size_mm,
+                           g.origin.z + (c[2] + 0.5) * g.size_mm};
+            switch (classify_no_strut(g.region_id, ctr, g.size_mm)) {
+              case NoStrutCause::OutsideRect:    ++gg.no_strut_outside_rect; break;
+              case NoStrutCause::BeyondDepth:    ++gg.no_strut_beyond_depth; break;
+              case NoStrutCause::OutsideOutline: ++gg.no_strut_outside_outline; break;
+              case NoStrutCause::OwnedElsewhere: ++gg.no_strut_owned_elsewhere; break;
+              case NoStrutCause::NoMaterial:     ++gg.no_strut_no_material; break;
+              case NoStrutCause::CellOverlapDropped:
+                ++gg.no_strut_cell_overlap_dropped; break;
+              case NoStrutCause::NeverGenerated: ++gg.no_strut_never_generated; break;
+            }
           }
         rr.groups.push_back(std::move(gg));
         rr.cells += static_cast<long long>(g.cells.size());
@@ -7945,20 +8175,39 @@ LatticeVariantOutcome lattice_one_variant(
               "# centre in part coordinates. struts/nodes are what the GENERATOR emitted\n"
               "# and attributed to that cell (a ball at its centre, a strut fragment at\n"
               "# its midpoint, which is where its radius was sampled).\n"
-              "# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes>\n";
+              "# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes> <why>\n"
+              "#   why is \"laid\" when struts > 0, else the FIRST thing that stopped it:\n"
+              "#   outside_rect | beyond_depth | outside_outline | owned_elsewhere |\n"
+              "#   no_material | cell_overlap_dropped | never_generated. Only\n"
+              "#   never_generated is unexplained --\n"
+              "#   every other value is a reason the app can see in its own data.\n";
         lf << "PLAN " << plan_chk.cells << ' ' << plan_chk.regions << ' '
            << plan_groups.size() << ' ' << plan_laid_unattributed << '\n';
         for (std::size_t gi = 0; gi < plan_groups.size(); ++gi) {
           const SteppedCellGroup& g = plan_groups[gi];
           for (std::size_t n = 0; n < g.cells.size(); ++n) {
             const std::array<int, 3>& c = g.cells[n];
-            lf << "LAID " << g.region_id << ' '
-               << (g.origin.x + (c[0] + 0.5) * g.size_mm) << ' '
-               << (g.origin.y + (c[1] + 0.5) * g.size_mm) << ' '
-               << (g.origin.z + (c[2] + 0.5) * g.size_mm) << ' ' << g.size_mm << ' '
-               << (n < g.rho.size() ? g.rho[n] : 0.0) << ' '
-               << (gi < plan_laid_struts.size() ? plan_laid_struts[gi][n] : 0) << ' '
-               << (gi < plan_laid_nodes.size() ? plan_laid_nodes[gi][n] : 0) << '\n';
+            const Vec3 ctr{g.origin.x + (c[0] + 0.5) * g.size_mm,
+                           g.origin.y + (c[1] + 0.5) * g.size_mm,
+                           g.origin.z + (c[2] + 0.5) * g.size_mm};
+            const long long st = gi < plan_laid_struts.size()
+                                     ? plan_laid_struts[gi][n] : 0;
+            const char* why = "laid";
+            if (st == 0) switch (classify_no_strut(g.region_id, ctr, g.size_mm)) {
+              case NoStrutCause::OutsideRect:    why = "outside_rect"; break;
+              case NoStrutCause::BeyondDepth:    why = "beyond_depth"; break;
+              case NoStrutCause::OutsideOutline: why = "outside_outline"; break;
+              case NoStrutCause::OwnedElsewhere: why = "owned_elsewhere"; break;
+              case NoStrutCause::NoMaterial:     why = "no_material"; break;
+              case NoStrutCause::CellOverlapDropped:
+                why = "cell_overlap_dropped"; break;
+              case NoStrutCause::NeverGenerated: why = "never_generated"; break;
+            }
+            lf << "LAID " << g.region_id << ' ' << ctr.x << ' ' << ctr.y << ' '
+               << ctr.z << ' ' << g.size_mm << ' '
+               << (n < g.rho.size() ? g.rho[n] : 0.0) << ' ' << st << ' '
+               << (gi < plan_laid_nodes.size() ? plan_laid_nodes[gi][n] : 0) << ' '
+               << why << '\n';
           }
         }
         std::printf("plan laid: %zu cell(s) written to %s\n", plan_chk.cells,
@@ -11059,11 +11308,13 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
       gi.stepped_plan_rho_fallback_by_region = R.plan_rho_fallback_by_region;
       gi.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
+      gi.stepped_clip_outside_by_cause_mm3 = R.clip_outside_by_cause_mm3;
       gi.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
       gi.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
       gi.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
       gi.stepped_plan_by_region = R.plan_by_region;
       gi.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
+      gi.stepped_plan_laid_measured = R.plan_laid_measured;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;
@@ -13249,6 +13500,45 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                                v.optimization.physical_density,
                                run_printed_iso(options), lattice_roles.includes, gf);
       fill_grading_subfloor(lat_agg.g_cell_ri, gf);
+      // ── ★ THE PLAN'S OWN RECEIPTS, ON THIS PATH TOO (found by running his job) ──
+      // This path -- the ladder, which is what `lattice-variant` takes on his jobs --
+      // aggregates per-variant lattice numbers into `lat_agg` and copies a hand-kept
+      // list into run_info. The plan receipts (K3's remainder, K4's per-region detail,
+      // K5's density reach, ruling 2's clip volume) were wired only into the OTHER
+      // receipt writer, the single-variant one at lattice_variant_job's tail. So every
+      // one of them was absent from run_info on 570B38E2 -- the run printed them on
+      // stderr and the receipt did not carry one.
+      //
+      // Found by running HIS job and reading the file, not by reading the code: my own
+      // fixtures take the single-variant path, where the keys were there all along. A
+      // receipt wired into one of two writers is a receipt that is missing exactly where
+      // it is needed.
+      //
+      // Carried from the last graded variant, which is the convention every grading
+      // field above already follows (g_cell_ri's own comment says so). The plan's cells,
+      // regions, passes, sizes and phases are identical across rungs -- they are the
+      // job's -- so only the LAID counts and the voxel-basis volumes are rung-dependent.
+      lat_agg.g_cell_ri.stepped_anystep_cells = R.anystep_cells;
+      lat_agg.g_cell_ri.stepped_anystep_regions = R.anystep_regions;
+      lat_agg.g_cell_ri.stepped_anystep_passes = R.anystep_passes;
+      lat_agg.g_cell_ri.stepped_anystep_histogram = R.anystep_histogram;
+      lat_agg.g_cell_ri.stepped_anystep_rho_by_size = R.anystep_rho_by_size;
+      lat_agg.g_cell_ri.stepped_plan_solid_remainder_mm3 = R.plan_solid_remainder_mm3;
+      lat_agg.g_cell_ri.stepped_plan_latticed_mm3 = R.plan_latticed_mm3;
+      lat_agg.g_cell_ri.stepped_plan_rho_fallback_by_region =
+          R.plan_rho_fallback_by_region;
+      lat_agg.g_cell_ri.stepped_clip_outside_region_mm3 = R.clip_outside_region_mm3;
+      lat_agg.g_cell_ri.stepped_clip_outside_by_cause_mm3 = R.clip_outside_by_cause_mm3;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_plan = R.plan_rho_queries_plan;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_posture = R.plan_rho_queries_posture;
+      lat_agg.g_cell_ri.stepped_plan_rho_queries_floor = R.plan_rho_queries_floor;
+      lat_agg.g_cell_ri.stepped_plan_by_region = R.plan_by_region;
+      lat_agg.g_cell_ri.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
+      lat_agg.g_cell_ri.stepped_plan_laid_measured = R.plan_laid_measured;
+      lat_agg.g_cell_ri.lattice_outline_beam_mm = R.outline_beam_mm;
+      lat_agg.g_cell_ri.lattice_outline_bleed_mm = R.outline_bleed_mm;
+      lat_agg.g_cell_ri.lattice_outline_inward_mm = R.outline_inward_mm;
+      lat_agg.g_cell_ri.lattice_outline_voxels = R.outline_beam_voxels;
     }
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
@@ -13537,6 +13827,37 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.grading_fit_printed_outside_regions =
           lat_agg.g_cell_ri.grading_fit_printed_outside_regions;
       run_info.grading_fit_regions = lat_agg.g_cell_ri.grading_fit_regions;
+      // ★ and the plan's own receipts, carried the same way (see the note above).
+      run_info.stepped_anystep_cells = lat_agg.g_cell_ri.stepped_anystep_cells;
+      run_info.stepped_anystep_regions = lat_agg.g_cell_ri.stepped_anystep_regions;
+      run_info.stepped_anystep_passes = lat_agg.g_cell_ri.stepped_anystep_passes;
+      run_info.stepped_anystep_histogram = lat_agg.g_cell_ri.stepped_anystep_histogram;
+      run_info.stepped_anystep_rho_by_size =
+          lat_agg.g_cell_ri.stepped_anystep_rho_by_size;
+      run_info.stepped_plan_solid_remainder_mm3 =
+          lat_agg.g_cell_ri.stepped_plan_solid_remainder_mm3;
+      run_info.stepped_plan_latticed_mm3 = lat_agg.g_cell_ri.stepped_plan_latticed_mm3;
+      run_info.stepped_plan_rho_fallback_by_region =
+          lat_agg.g_cell_ri.stepped_plan_rho_fallback_by_region;
+      run_info.stepped_clip_outside_region_mm3 =
+          lat_agg.g_cell_ri.stepped_clip_outside_region_mm3;
+      run_info.stepped_clip_outside_by_cause_mm3 =
+          lat_agg.g_cell_ri.stepped_clip_outside_by_cause_mm3;
+      run_info.stepped_plan_rho_queries_plan =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_plan;
+      run_info.stepped_plan_rho_queries_posture =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_posture;
+      run_info.stepped_plan_rho_queries_floor =
+          lat_agg.g_cell_ri.stepped_plan_rho_queries_floor;
+      run_info.stepped_plan_by_region = lat_agg.g_cell_ri.stepped_plan_by_region;
+      run_info.stepped_plan_laid_unattributed =
+          lat_agg.g_cell_ri.stepped_plan_laid_unattributed;
+      run_info.stepped_plan_laid_measured =
+          lat_agg.g_cell_ri.stepped_plan_laid_measured;
+      run_info.lattice_outline_beam_mm = lat_agg.g_cell_ri.lattice_outline_beam_mm;
+      run_info.lattice_outline_bleed_mm = lat_agg.g_cell_ri.lattice_outline_bleed_mm;
+      run_info.lattice_outline_inward_mm = lat_agg.g_cell_ri.lattice_outline_inward_mm;
+      run_info.lattice_outline_voxels = lat_agg.g_cell_ri.lattice_outline_voxels;
     }
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.
