@@ -12,6 +12,14 @@ public enum LatticeRegionCells {
     public struct RegionCell: Equatable, Sendable {
         public let measuredWidthMM: Double
         public let cellMM: Double
+        /// ★ The cell BEFORE Default Grade's base rule (b) — the whole-number fit n₀. Equal to `cellMM` wherever (b)
+        /// did not move it. The bake's "do no harm" guard (the reviewer, 2026-10-11 04:31) keeps this one when (b)'s
+        /// candidate would leave more of the region uncovered.
+        public let cellBeforeBaseRuleMM: Double
+        public init(measuredWidthMM: Double, cellMM: Double, cellBeforeBaseRuleMM: Double? = nil) {
+            self.measuredWidthMM = measuredWidthMM; self.cellMM = cellMM
+            self.cellBeforeBaseRuleMM = cellBeforeBaseRuleMM ?? cellMM
+        }
         public static let none = RegionCell(measuredWidthMM: 0, cellMM: 0)
     }
 
@@ -141,6 +149,7 @@ public enum LatticeRegionCells {
                       s.regionDrawnDensityP90[ri], s.drawnCeilingRho, s.allowQuilt ? "yes" : "no", n, effDepth / n)
             }
             var cell = Self.wholeCellsAcross(depthMM: effDepth, derivedCellMM: d.cellMM, tileFloorMM: tileFloor, extraCells: extra)
+            let beforeBaseRule = cell
             // ★★ DEFAULT GRADE: A BASE WHOSE HALVES END AT THE FLOOR (the reviewer's ruling (b), 2026-10-11 00:35,
             // approved by the maintainer). His 68BF7B74 face 23 middle facet: a one-voxel move of its measured
             // wall took the cell 10.31 → 9.45, whose half 2.36 is over the floor but does not print open, so
@@ -161,7 +170,7 @@ public enum LatticeRegionCells {
                 }
                 cell = moved
             }
-            return RegionCell(measuredWidthMM: w, cellMM: cell)
+            return RegionCell(measuredWidthMM: w, cellMM: cell, cellBeforeBaseRuleMM: beforeBaseRule)
         }
     }
 
@@ -238,10 +247,19 @@ public enum LatticeRegionCells {
                                   widthPercentile: 0.5, quiltStep: true)
         // the stated cell wins, exactly as `steppedCellsMM` (the bake's cells) does it
         let stated = statedCellByFace(project.lattice)
+        // ★ where Default Grade's base rule (b) moved a region, the bake's "do no harm" guard may have kept n₀ — the
+        // drawer says the bake's own base (its last plan), so drawer and bake still say one number
+        var bakedBase: [Int: Double] = [:]
+        for c in project.latticePreviewSteppedCells { if let b = c.planBaseCellMM, bakedBase[c.regionID] == nil { bakedBase[c.regionID] = b } }
         let cells = regions.indices.map { i -> Double in
             guard i < derived.count else { return 0 }
             if let f = regions[i].faceID, let mm = stated[f], mm > 0 { return mm }
-            return derived[i].cellMM
+            let d = derived[i]
+            if abs(d.cellMM - d.cellBeforeBaseRuleMM) > 1e-9, regions[i].role == .include {
+                let includeID = regions[..<i].filter { $0.role == .include }.count + 1
+                if let b = bakedBase[includeID], abs(b - d.cellBeforeBaseRuleMM) < 1e-9 { return b }
+            }
+            return d.cellMM
         }
         var out: [String: SelectableCell] = [:]
         for (i, r) in regions.enumerated() where r.role == .include && i < derived.count && i < cells.count {
@@ -295,12 +313,21 @@ public enum LatticeRegionCells {
     /// The stepped bake's cells as the app hands them to the renderer: the p50 derivation, a
     /// user-stated cell winning (`WorkspacePlaceholder.latticePreviewSteppedCells`).
     public static func steppedCellsMM(project: ProjectModel, scene: LatticeSDFScene?) -> [Double] {
+        steppedCellChoices(project: project, scene: scene).cells
+    }
+
+    /// The bake's cells and, per region, the cell BEFORE Default Grade's base rule (b) — what the bake's "do no harm"
+    /// guard falls back to (`LatticePreviewOccupancy.octreeCellField(cellMMBeforeBaseRule:)`). A stated cell wins in both.
+    public static func steppedCellChoices(project: ProjectModel, scene: LatticeSDFScene?)
+        -> (cells: [Double], beforeBaseRule: [Double]) {
+        guard project.printParams.strutLineWidthMM > 0 else { return ([], []) }
         let regions = project.latticeJobRegions().regions
-        var cells = cellsMM(project: project, scene: scene, regions: regions, widthPercentile: 0.5, quiltStep: true)
+        let derived = regionCells(project: project, scene: scene, regions: regions, widthPercentile: 0.5, quiltStep: true)
+        var cells = derived.map(\.cellMM), before = derived.map(\.cellBeforeBaseRuleMM)
         let stated = statedCellByFace(project.lattice)
         for (i, r) in regions.enumerated() where i < cells.count {
-            if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm }
+            if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm; before[i] = mm }
         }
-        return cells
+        return (cells, before)
     }
 }

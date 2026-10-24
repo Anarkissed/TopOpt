@@ -45,6 +45,10 @@ extension LatticePreviewOccupancy {
         public var noLadderRegions: [Int] = []
         /// Face regions whose base cell is under the tile floor (a stated cell can be) — they get no cells.
         public var baseUnderFloorRegions: [Int] = []
+        /// ★ Default Grade's base rule (b) under its "do no harm" guard (the reviewer, 2026-10-11 04:31): regions whose
+        /// (b) cell was KEPT (it left less of the region uncovered than n₀) and regions GUARDED back to n₀.
+        public var baseRuleKept: [Int] = []
+        public var baseRuleGuarded: [Int] = []
         /// The in-plane anchor chosen for the base slots (mm, subtracted from the
         /// occupancy origin), so the most base-cell volume fits whole.
         public var anchorShiftMM = SIMD3<Double>(repeating: 0)
@@ -388,7 +392,113 @@ extension LatticePreviewOccupancy {
     /// The packer's grid inside a base slot, in steps per base: base/12.
     public static let steppedPackGrid = 2 * steppedMenuMaxDivisor
 
+    /// ★★ THE BAKE, WITH DEFAULT GRADE'S BASE RULE UNDER ITS "DO NO HARM" GUARD (the reviewer's ruling, 2026-10-11 04:31,
+    /// approved by the maintainer: "Take a (b) candidate only if its uncovered share is no larger than n0's. Otherwise
+    /// keep n0. Ties keep n0. (b) exists to restore coverage, so it must never cost coverage."). `cellMM` carries (b)'s
+    /// cells; `cellMMBeforeBaseRule` each region's n₀ (empty ⇒ no guard, `cellMM` as given). Where they differ the bake
+    /// runs with each and every such region keeps (b)'s cell only if its uncovered share — the share of its prism's
+    /// occupancy voxels no plan cell covers, `uncoveredShare` — is STRICTLY smaller; a mixed choice bakes once more.
+    /// Measured on 3418E167 Default Grade r1 (2026-10-11): (b)'s 3.50 left 75.0 % uncovered against n₀'s 4.67 at
+    /// 62.5 % (the preview's wall-thickness slab fits a 4.67 grid better), so it keeps 4.67; 68BF7B74 r4 takes 6.30
+    /// (27.60 → 8.29 %). Every other arm of the seven projects has no region (b) moves, so it bakes once, as before.
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
+                                       demand: LatticeVoxelGrid?,
+                                       regions: [LatticeRegionSpec],
+                                       cellMM: [Double],
+                                       cellMMBeforeBaseRule: [Double] = [],
+                                       lineWidthMM: Double,
+                                       realFloorMM: Double,
+                                       shapeFitBandMM: Double,
+                                       shapeFit: Bool,
+                                       solidBandMM: Double = 0,
+                                       densityLo: Double,
+                                       densityHi: Double,
+                                       densityGamma: Double,
+                                       latticeID: String,
+                                       dyadicSteps: Bool = false,
+                                       finestPrintsOpen: Bool = true,
+                                       bandAmount: Double = 1,
+                                       bandQuiltCeiling: Double = 1,
+                                       densityCap: Double = 0,
+                                       stats: inout OctreeBakeStats) -> LatticeCellField? {
+        func bake(_ cells: [Double], _ st: inout OctreeBakeStats) -> LatticeCellField? {
+            octreeCellFieldOnce(occupancy: occ, demand: demand, regions: regions, cellMM: cells, lineWidthMM: lineWidthMM,
+                                realFloorMM: realFloorMM, shapeFitBandMM: shapeFitBandMM, shapeFit: shapeFit,
+                                solidBandMM: solidBandMM, densityLo: densityLo, densityHi: densityHi,
+                                densityGamma: densityGamma, latticeID: latticeID, dyadicSteps: dyadicSteps,
+                                finestPrintsOpen: finestPrintsOpen, bandAmount: bandAmount,
+                                bandQuiltCeiling: bandQuiltCeiling, densityCap: densityCap, stats: &st)
+        }
+        let moved = regions.indices.filter { r in
+            r < cellMM.count && r < cellMMBeforeBaseRule.count && cellMMBeforeBaseRule[r] > 0
+                && abs(cellMMBeforeBaseRule[r] - cellMM[r]) > 1e-9
+        }
+        guard !moved.isEmpty else {
+            let f = bake(cellMM, &stats)
+            if let f { Self.octreeBakeObserver?(f, stats) }
+            return f
+        }
+        let start = stats
+        var stB = start, st0 = start
+        let fB = bake(cellMM, &stB)
+        var n0 = cellMM
+        for r in moved { n0[r] = cellMMBeforeBaseRule[r] }
+        let f0 = bake(n0, &st0)
+        var keep: [Int] = [], guarded: [Int] = []
+        for r in moved {
+            let uB = fB.map { Self.uncoveredShare(region: r, regions: regions, cells: $0.steppedCells, occupancy: occ) } ?? 1
+            let u0 = f0.map { Self.uncoveredShare(region: r, regions: regions, cells: $0.steppedCells, occupancy: occ) } ?? 1
+            if uB < u0 - 1e-12 { keep.append(r) } else { guarded.append(r) }   // ties keep n₀
+            NSLog("DIAG octree base rule (b) r\(r): %.4f mm leaves %.2f%% uncovered, n0's %.4f mm %.2f%% ⇒ %@",
+                  cellMM[r], 100 * uB, cellMMBeforeBaseRule[r], 100 * u0, uB < u0 - 1e-12 ? "(b)" : "n0 (guard)")
+        }
+        var out: LatticeCellField?
+        if guarded.isEmpty { stats = stB; out = fB }
+        else if keep.isEmpty { stats = st0; out = f0 }
+        else {
+            var mixed = n0
+            for r in keep { mixed[r] = cellMM[r] }
+            var stM = start
+            out = bake(mixed, &stM)
+            stats = stM
+        }
+        stats.baseRuleKept = keep
+        stats.baseRuleGuarded = guarded
+        if let out { Self.octreeBakeObserver?(out, stats) }
+        return out
+    }
+
+    /// The share of region `region`'s prism (its occupancy voxels, at their centres, inside the whole prism) that no
+    /// plan cell of ANY region covers — the guard's measure. The plan proof's DG-REGIONS counts the same way, except
+    /// that it gives a voxel inside two prisms to the first region only.
+    static func uncoveredShare(region r: Int, regions: [LatticeRegionSpec], cells: [LatticeSteppedCell],
+                               occupancy occ: LatticeVoxelGrid) -> Double {
+        let bucket = 8.0
+        struct K: Hashable { let x: Int; let y: Int; let z: Int }
+        func key(_ p: SIMD3<Double>) -> K { K(x: Int((p.x / bucket).rounded(.down)), y: Int((p.y / bucket).rounded(.down)),
+                                              z: Int((p.z / bucket).rounded(.down))) }
+        var grid: [K: [Int]] = [:]
+        for (ci, c) in cells.enumerated() {
+            let k0 = key(c.originMM), k1 = key(c.originMM + c.sizeMM)
+            for x in k0.x...k1.x { for y in k0.y...k1.y { for z in k0.z...k1.z { grid[K(x: x, y: y, z: z), default: []].append(ci) } } }
+        }
+        let region = regions[r]
+        var inPrism = 0, bare = 0
+        for k in 0..<occ.nz { for j in 0..<occ.ny { for i in 0..<occ.nx where occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 {
+            let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * occ.spacing)
+            guard LatticeRegionMask.containsWholePrism(p, region: region) else { continue }
+            inPrism += 1
+            let covered = (grid[key(p)] ?? []).contains { ci in
+                let c = cells[ci]
+                return p.x >= c.originMM.x && p.x < c.originMM.x + c.sizeMM && p.y >= c.originMM.y && p.y < c.originMM.y + c.sizeMM
+                    && p.z >= c.originMM.z && p.z < c.originMM.z + c.sizeMM
+            }
+            if !covered { bare += 1 }
+        }}}
+        return inPrism > 0 ? Double(bare) / Double(inPrism) : 0
+    }
+
+    static func octreeCellFieldOnce(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
                                        regions: [LatticeRegionSpec],
                                        cellMM: [Double],
@@ -1693,7 +1803,6 @@ extension LatticePreviewOccupancy {
                                 solidBandMM: beam)
         field.steppedCells = cells
         field.steppedTexelCell = cellOf
-        Self.octreeBakeObserver?(field, stats)
         return field
     }
 }
