@@ -1331,9 +1331,26 @@ std::string run_info_json(const RunInfo& info) {
             "lattice certifies CLEAN. floating_ends must be 0 for a certified any-step "
             "job; organic legitimately has free tips.\"";
     }
-    if (info.stepped_present) {
+    // ── ★ ONE PATH FOR THE PLAN, BOTH SIDES (reviewer's ruling 6, 2026-10-11) ───
+    // #354's readers look for `grading.stepped.plan_by_region`, and on a plan run they
+    // say "the run didn't report the plan" when it is absent -- they never fall back to
+    // the law's figures, which is right. So the `stepped` OBJECT opens whenever a plan
+    // was sent, whichever algorithm laid it, and the stepped ALGORITHM's own fields stay
+    // gated on `stepped_present` inside it. A run with neither emits nothing, so a
+    // legacy receipt is byte-identical.
+    //
+    // This is the second half of the defect found on his own run_info: moving the plan
+    // keys out of `if (stepped_present)` got them emitted, but it put them at
+    // `grading.plan_by_region` where nobody reads them. Emitted and unread is not much
+    // better than dropped.
+    const bool stepped_obj = info.stepped_present || info.stepped_anystep_cells > 0;
+    if (stepped_obj) {
       gr += ", \"stepped\": {";
-      gr += "\"regions\": " + fmt_ll(info.stepped_regions);
+      gr += "\"plan_present\": " + bool_json(info.stepped_anystep_cells > 0);
+      gr += ", \"algorithm_ran\": " + bool_json(info.stepped_present);
+    }
+    if (info.stepped_present) {
+      gr += ", \"regions\": " + fmt_ll(info.stepped_regions);
       gr += ", \"min_cell_mm\": " + fmt(info.stepped_min_cell_mm);
       gr += ", \"max_cell_mm\": " + fmt(info.stepped_max_cell_mm);
       gr += ", \"regions_out_of_regime\": " +
@@ -1358,91 +1375,131 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.stepped_adjacent_region_pairs);
       gr += ", \"adjacent_pairs_joined\": " +
             fmt_ll(info.stepped_adjacent_pairs_joined);
-      // ★ the any-step plan and its seams -- 0/absent on a legacy Stepped run
-      if (info.stepped_anystep_cells > 0) {
-        gr += ", \"anystep_cells\": " + fmt_ll(info.stepped_anystep_cells);
-        gr += ", \"anystep_regions\": " + fmt_ll(info.stepped_anystep_regions);
-        gr += ", \"anystep_passes\": " + fmt_ll(info.stepped_anystep_passes);
-        gr += ", \"anystep_size_histogram\": \"" + info.stepped_anystep_histogram + "\"";
-        // ★ §3: the density and radius actually used, per size, so the app can diff a
-        // size at a time against its own DIAG rather than comparing pictures.
-        if (!info.stepped_anystep_rho_by_size.empty())
-          gr += ", \"anystep_rho_radius_by_size\": \"" +
-                info.stepped_anystep_rho_by_size + "\"";
-        // ★ K3 (3): the solid remainder per region, and what the plan latticed.
-        if (!info.stepped_plan_solid_remainder_mm3.empty()) {
-          gr += ", \"plan_solid_remainder_mm3\": \"" +
-                info.stepped_plan_solid_remainder_mm3 + "\"";
-          gr += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
-          gr += ", \"plan_rho_fallback_by_region\": \"" +
-                info.stepped_plan_rho_fallback_by_region + "\"";
-          gr += ", \"clip_outside_region_mm3\": \"" +
-                info.stepped_clip_outside_region_mm3 + "\"";
-          // ★ K5: the plan's density reach over the generator's own radius queries.
-          gr += ", \"plan_rho_queries_plan\": " +
-                fmt_ll(info.stepped_plan_rho_queries_plan);
-          gr += ", \"plan_rho_queries_posture\": " +
-                fmt_ll(info.stepped_plan_rho_queries_posture);
-          gr += ", \"plan_rho_queries_floor\": " +
-                fmt_ll(info.stepped_plan_rho_queries_floor);
-        // ★ K4: the plan as laid, per region and per group. The summary above is the
-        // count; this is which.
-        if (!info.stepped_plan_by_region.empty()) {
-          gr += ", \"plan_laid_unattributed\": " +
-                fmt_ll(info.stepped_plan_laid_unattributed);
-          gr += ", \"plan_by_region\": [";
-          for (std::size_t i = 0; i < info.stepped_plan_by_region.size(); ++i) {
-            const RunInfo::PlanRegion& PR = info.stepped_plan_by_region[i];
-            if (i) gr += ", ";
-            gr += "{\"region\": " + std::to_string(PR.region_id);
-            gr += ", \"base_cell_mm\": " + fmt(PR.base_cell_mm);
-            gr += ", \"slot_origin_mm\": [" + fmt(PR.slot_origin_mm[0]) + ", " +
-                  fmt(PR.slot_origin_mm[1]) + ", " + fmt(PR.slot_origin_mm[2]) + "]";
-            gr += ", \"slot_origin_stated\": " + bool_json(PR.slot_origin_stated);
-            gr += ", \"plane_origin_mm\": [" + fmt(PR.plane_origin_mm[0]) + ", " +
-                  fmt(PR.plane_origin_mm[1]) + ", " + fmt(PR.plane_origin_mm[2]) + "]";
-            gr += ", \"normal\": [" + fmt(PR.normal[0]) + ", " + fmt(PR.normal[1]) +
-                  ", " + fmt(PR.normal[2]) + "]";
-            gr += ", \"depth_mm\": " + fmt(PR.depth_mm);
-            gr += ", \"cells\": " + fmt_ll(PR.cells);
-            gr += ", \"sizes\": \"" + PR.sizes + "\"";
-            gr += ", \"groups\": [";
-            for (std::size_t j = 0; j < PR.groups.size(); ++j) {
-              const RunInfo::PlanGroup& G = PR.groups[j];
-              if (j) gr += ", ";
-              gr += "{\"size_mm\": " + fmt(G.size_mm);
-              gr += ", \"origin_mm\": [" + fmt(G.origin_mm[0]) + ", " +
-                    fmt(G.origin_mm[1]) + ", " + fmt(G.origin_mm[2]) + "]";
-              gr += ", \"phase_mm\": [" + fmt(G.phase_mm[0]) + ", " +
-                    fmt(G.phase_mm[1]) + ", " + fmt(G.phase_mm[2]) + "]";
-              gr += ", \"nx\": " + std::to_string(G.nx);
-              gr += ", \"ny\": " + std::to_string(G.ny);
-              gr += ", \"nz\": " + std::to_string(G.nz);
-              gr += ", \"cells\": " + fmt_ll(G.cells);
-              gr += ", \"struts_laid\": " + fmt_ll(G.struts_laid);
-              gr += ", \"nodes_laid\": " + fmt_ll(G.nodes_laid);
-              gr += ", \"cells_with_no_strut\": " + fmt_ll(G.cells_with_no_strut);
-              gr += "}";
-            }
-            gr += "]}";
-          }
-          gr += "]";
-        }
-        }
-      }
-      // ★ §3: the outline beam as APPLIED. Absent when the shape grade is off.
-      if (info.lattice_outline_beam_mm > 0.0) {
-        gr += ", \"outline_beam_mm\": " + fmt(info.lattice_outline_beam_mm);
-        gr += ", \"outline_bleed_mm\": " + fmt(info.lattice_outline_bleed_mm);
-        gr += ", \"outline_inward_mm\": " + fmt(info.lattice_outline_inward_mm);
-        gr += ", \"outline_voxels\": " + fmt_ll(info.lattice_outline_voxels);
-      }
       gr += ", \"seam_note\": \"regions carry unrelated cell edges, so their nodes "
             "do not line up; an adjacent pair that is not joined is a mechanical "
             "disconnection at that seam. DOUBLED's dyadic ladder exists to prevent "
             "exactly this.\"";
-      gr += "}";
     }
+
+    // ── ★ THE PLAN'S RECEIPTS ARE NOT THE STEPPED ALGORITHM'S ────────────────
+    // This block used to sit INSIDE `if (info.stepped_present)`, which is the STEPPED
+    // algorithm's own receipt. A plan can be sent on a DOUBLED job -- four of #354's six
+    // arms are, 570B38E2 among them -- and `stepped_present` is false there, so every
+    // one of these keys was dropped: the run printed the plan on stderr and the receipt
+    // carried nothing. Found by reading HIS run_info, not by reading the code; my own
+    // fixtures are all `algorithm: stepped`, where the keys were there all along.
+    //
+    // `anystep_cells > 0` is the right guard: a plan was validated and laid, whichever
+    // algorithm laid it. A run with no plan emits none of this, so a legacy receipt is
+    // byte-identical.
+    // ★ AND THE OUTLINE BEAM, for the same reason: its four numbers were inside the
+    // stepped-only block too, so a DOUBLED run's receipt said nothing about a beam that
+    // had turned 804 of its voxels solid. The beam is not the stepped algorithm's.
+    if (info.lattice_outline_beam_mm > 0.0) {
+      gr += ", \"outline_beam_mm\": " + fmt(info.lattice_outline_beam_mm);
+      gr += ", \"outline_bleed_mm\": " + fmt(info.lattice_outline_bleed_mm);
+      gr += ", \"outline_inward_mm\": " + fmt(info.lattice_outline_inward_mm);
+      gr += ", \"outline_voxels\": " + fmt_ll(info.lattice_outline_voxels);
+    }
+    if (info.stepped_anystep_cells > 0) {
+      std::string gr2;
+      {
+        gr2 += ", \"anystep_cells\": " + fmt_ll(info.stepped_anystep_cells);
+        gr2 += ", \"anystep_regions\": " + fmt_ll(info.stepped_anystep_regions);
+        gr2 += ", \"anystep_passes\": " + fmt_ll(info.stepped_anystep_passes);
+        gr2 += ", \"anystep_size_histogram\": \"" + info.stepped_anystep_histogram + "\"";
+        // ★ §3: the density and radius actually used, per size, so the app can diff a
+        // size at a time against its own DIAG rather than comparing pictures.
+        if (!info.stepped_anystep_rho_by_size.empty())
+          gr2 += ", \"anystep_rho_radius_by_size\": \"" +
+                info.stepped_anystep_rho_by_size + "\"";
+        // ★ K3 (3): the solid remainder per region, and what the plan latticed.
+        if (!info.stepped_plan_solid_remainder_mm3.empty()) {
+          gr2 += ", \"plan_solid_remainder_mm3\": \"" +
+                info.stepped_plan_solid_remainder_mm3 + "\"";
+          gr2 += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
+          gr2 += ", \"plan_rho_fallback_by_region\": \"" +
+                info.stepped_plan_rho_fallback_by_region + "\"";
+          gr2 += ", \"clip_outside_region_mm3\": \"" +
+                info.stepped_clip_outside_region_mm3 + "\"";
+          if (!info.stepped_clip_outside_by_cause_mm3.empty())
+            gr2 += ", \"clip_outside_by_cause_mm3\": \"" +
+                  info.stepped_clip_outside_by_cause_mm3 + "\"";
+          // ★ K5: the plan's density reach over the generator's own radius queries.
+          gr2 += ", \"plan_rho_queries_plan\": " +
+                fmt_ll(info.stepped_plan_rho_queries_plan);
+          gr2 += ", \"plan_rho_queries_posture\": " +
+                fmt_ll(info.stepped_plan_rho_queries_posture);
+          gr2 += ", \"plan_rho_queries_floor\": " +
+                fmt_ll(info.stepped_plan_rho_queries_floor);
+        // ★ K4: the plan as laid, per region and per group. The summary above is the
+        // count; this is which.
+        if (!info.stepped_plan_by_region.empty()) {
+          gr2 += ", \"plan_laid_measured\": " +
+                bool_json(info.stepped_plan_laid_measured);
+          if (info.stepped_plan_laid_measured)
+            gr2 += ", \"plan_laid_unattributed\": " +
+                fmt_ll(info.stepped_plan_laid_unattributed);
+          gr2 += ", \"plan_by_region\": [";
+          for (std::size_t i = 0; i < info.stepped_plan_by_region.size(); ++i) {
+            const RunInfo::PlanRegion& PR = info.stepped_plan_by_region[i];
+            if (i) gr2 += ", ";
+            gr2 += "{\"region\": " + std::to_string(PR.region_id);
+            gr2 += ", \"base_cell_mm\": " + fmt(PR.base_cell_mm);
+            gr2 += ", \"slot_origin_mm\": [" + fmt(PR.slot_origin_mm[0]) + ", " +
+                  fmt(PR.slot_origin_mm[1]) + ", " + fmt(PR.slot_origin_mm[2]) + "]";
+            gr2 += ", \"slot_origin_stated\": " + bool_json(PR.slot_origin_stated);
+            gr2 += ", \"plane_origin_mm\": [" + fmt(PR.plane_origin_mm[0]) + ", " +
+                  fmt(PR.plane_origin_mm[1]) + ", " + fmt(PR.plane_origin_mm[2]) + "]";
+            gr2 += ", \"normal\": [" + fmt(PR.normal[0]) + ", " + fmt(PR.normal[1]) +
+                  ", " + fmt(PR.normal[2]) + "]";
+            gr2 += ", \"depth_mm\": " + fmt(PR.depth_mm);
+            gr2 += ", \"cells\": " + fmt_ll(PR.cells);
+            gr2 += ", \"sizes\": \"" + PR.sizes + "\"";
+            gr2 += ", \"groups\": [";
+            for (std::size_t j = 0; j < PR.groups.size(); ++j) {
+              const RunInfo::PlanGroup& G = PR.groups[j];
+              if (j) gr2 += ", ";
+              gr2 += "{\"size_mm\": " + fmt(G.size_mm);
+              gr2 += ", \"origin_mm\": [" + fmt(G.origin_mm[0]) + ", " +
+                    fmt(G.origin_mm[1]) + ", " + fmt(G.origin_mm[2]) + "]";
+              gr2 += ", \"phase_mm\": [" + fmt(G.phase_mm[0]) + ", " +
+                    fmt(G.phase_mm[1]) + ", " + fmt(G.phase_mm[2]) + "]";
+              gr2 += ", \"nx\": " + std::to_string(G.nx);
+              gr2 += ", \"ny\": " + std::to_string(G.ny);
+              gr2 += ", \"nz\": " + std::to_string(G.nz);
+              gr2 += ", \"cells\": " + fmt_ll(G.cells);
+              // ★ Only when the ledger tap ran. 0 struts because nobody counted is not
+              // the same claim as 0 struts because none were laid, and a receipt that
+              // cannot tell them apart is worse than one that stays quiet.
+              if (info.stepped_plan_laid_measured) {
+                gr2 += ", \"struts_laid\": " + fmt_ll(G.struts_laid);
+                gr2 += ", \"nodes_laid\": " + fmt_ll(G.nodes_laid);
+                gr2 += ", \"cells_with_no_strut\": " + fmt_ll(G.cells_with_no_strut);
+                if (G.cells_with_no_strut > 0) {
+                  gr2 += ", \"no_strut_by_cause\": {";
+                  gr2 += "\"outside_rect\": " + fmt_ll(G.no_strut_outside_rect);
+                  gr2 += ", \"beyond_depth\": " + fmt_ll(G.no_strut_beyond_depth);
+                  gr2 += ", \"outside_outline\": " + fmt_ll(G.no_strut_outside_outline);
+                  gr2 += ", \"owned_elsewhere\": " + fmt_ll(G.no_strut_owned_elsewhere);
+                  gr2 += ", \"no_material\": " + fmt_ll(G.no_strut_no_material);
+                  gr2 += ", \"cell_overlap_dropped\": " +
+                        fmt_ll(G.no_strut_cell_overlap_dropped);
+                  gr2 += ", \"never_generated\": " + fmt_ll(G.no_strut_never_generated);
+                  gr2 += "}";
+                }
+              }
+              gr2 += "}";
+            }
+            gr2 += "]}";
+          }
+          gr2 += "]";
+        }
+        }
+      }
+      gr += gr2;
+    }
+    if (stepped_obj) gr += "}";       // ★ the one object both sides read
     // ── ★ ORGANIC's report. Absent entirely unless the organic algorithm ran.
     if (info.organic_present) {
       gr += ", \"organic\": {";
