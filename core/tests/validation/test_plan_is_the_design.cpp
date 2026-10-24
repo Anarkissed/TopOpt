@@ -279,6 +279,10 @@ int main() {
   // Every number below is read from the receipt, not recomputed here.
   CHECK(has(led.run_info, "\"plan_laid_unattributed\": 0"),
         "no emitted element may fall outside every cell of the plan");
+  CHECK(has(led.run_info, "\"plan_present\": true") &&
+            has(led.run_info, "\"algorithm_ran\": true"),
+        "on a STEPPED plan run both flags are true, and the plan sits under the same "
+        "grading.stepped path as on a doubled run -- one path, both sides");
   CHECK(has(led.run_info, "\"slot_origin_stated\": true"),
         "the receipt must say the slot grid was the app's, not one core assumed");
   CHECK(has(led.run_info, "\"base_cell_mm\": 6"),
@@ -291,6 +295,40 @@ int main() {
   double led_struts = 0.0;
   CHECK(num_after(led.run_info, "struts_laid", &led_struts) && led_struts > 0.0,
         "the receipt states what the GENERATOR laid, not what the plan asked for");
+
+  // ── RULING 3: THE COUNT IS A DIAGNOSIS, NOT A TALLY ─────────────────────────
+  // "24 of 32 cells have no strut" says nothing about whose fault that is. Every
+  // strutless cell is now filed under the FIRST thing that would have stopped it, each
+  // test being core's own exported predicate -- point_in_clearance_region,
+  // point_in_clearance_outline, stepped_region_owner, cell_may_overlap.
+  //
+  // On this fixture all 24 are outside the region's outline and NOTHING else, which is
+  // the shape the answer took on his parts too: 148 of 570B38E2's 152 are
+  // outside_outline and only 4 are unexplained. The split is what turns "core left 152
+  // cells empty" into "the app placed 148 outside its own outline, and 4 are ours".
+  //
+  // `never_generated` is the only row that is a defect; every other value names
+  // something the app can see in its own data. Asserting the OTHER six are zero is what
+  // makes this test fail if a cell is ever misfiled into an excuse.
+  CHECK(has(led.run_info, "\"no_strut_by_cause\""),
+        "every strutless cell must be filed under a cause");
+  CHECK(has(led.run_info, "\"outside_outline\": 24"),
+        "all 24 are outside the region's own outline_uv");
+  CHECK(has(led.run_info, "\"never_generated\": 0"),
+        "and none is unexplained -- that row is the only one that would be core's fault");
+  CHECK(has(led.run_info, "\"outside_rect\": 0") &&
+            has(led.run_info, "\"beyond_depth\": 0") &&
+            has(led.run_info, "\"owned_elsewhere\": 0") &&
+            has(led.run_info, "\"no_material\": 0") &&
+            has(led.run_info, "\"cell_overlap_dropped\": 0"),
+        "and no cell is misfiled into one of the other five causes");
+  // ★ The same split on the VOLUME (ruling 3b), mm3 on one voxel basis so the five add
+  // back to clip_outside_region_mm3 -- 5097.656 here, all of it outline.
+  CHECK(has(led.run_info, "\"clip_outside_by_cause_mm3\""),
+        "the clipped volume is split by cause too");
+  CHECK(has(led.run_info, "outline=5097.656") &&
+            has(led.run_info, "depth=0.000") && has(led.run_info, "rect=0.000"),
+        "and it balances against clip_outside_region_mm3, with nothing beyond depth");
 
   // ★ OBSERVING MUST NOT MOVE THE BYTES. lattice_gen.hpp says so; this is where it is
   // checked. The ledger fixture differs from `outline_clip_quadrant` only by the key and
@@ -307,6 +345,60 @@ int main() {
     CHECK(sa == sb,
           "arming the ledger must not change one byte of the emitted mesh");
   }
+
+  // ── THE RECEIPT MUST REACH A **DOUBLED** PLAN RUN ───────────────────────────
+  // Every other plan fixture here is `algorithm: stepped`, and that is exactly why this
+  // defect survived five commits: run_info's plan keys sat inside observability.cpp's
+  // `if (info.stepped_present)` block, which is FALSE on a doubled run. FOUR of #354's
+  // six published arms are doubled, so on his own jobs the run printed every plan number
+  // on stderr and the receipt carried NONE of them -- no anystep_cells, no
+  // plan_solid_remainder_mm3, no plan_by_region, no plan_rho_queries_*, and not even the
+  // outline beam's four numbers (which were in that block too, and had therefore been
+  // unreported on every doubled run since they were added).
+  //
+  // Found by reading his run_info.json, not by reading the code. A receipt wired into one
+  // of two writers is a receipt that is missing exactly where it is needed, so the arm
+  // that proves it has to be the algorithm the fixtures did not cover.
+  const Run dbl = run_job("plan_doubled_receipt");
+  CHECK(dbl.rc == 0, "the doubled plan run must be ACCEPTED");
+  CHECK(has(dbl.run_info, "\"algorithm\": \"doubled\""),
+        "premise: this arm really is DOUBLED, not stepped -- without that the check "
+        "below passes for the wrong reason");
+  CHECK(has(dbl.run_info, "\"anystep_cells\": 20"),
+        "the plan's own summary reaches a doubled run's receipt");
+  CHECK(has(dbl.run_info, "\"anystep_passes\": 2"),
+        "and its pass count: two sizes on the halving ladder, two groups");
+  CHECK(has(dbl.run_info, "\"plan_by_region\""),
+        "K4's per-region detail reaches it");
+  // ★ AT THE PATH #354 READS (reviewer's ruling 6): its readers look for
+  // grading.stepped.plan_by_region and say "the run didn't report the plan" when it is
+  // absent -- they never fall back to the law's figures. Emitting the keys but at
+  // `grading.plan_by_region` would have been emitted-and-unread, which is barely better
+  // than dropped. So the `stepped` OBJECT opens whenever a plan was sent, whichever
+  // algorithm laid it, and says which: `plan_present` true, `algorithm_ran` FALSE here.
+  CHECK(has(dbl.run_info, "\"stepped\": {\"plan_present\": true"),
+        "the stepped object opens on a DOUBLED plan run, and says a plan was sent");
+  CHECK(has(dbl.run_info, "\"algorithm_ran\": false"),
+        "and says the stepped algorithm did NOT run, so a reader cannot confuse the two");
+  CHECK(has(dbl.run_info, "\"plan_solid_remainder_mm3\""),
+        "K3's solid remainder reaches it");
+  CHECK(has(dbl.run_info, "\"plan_rho_queries_plan\""),
+        "K5's density reach reaches it");
+  CHECK(has(dbl.run_info, "\"clip_outside_region_mm3\""),
+        "and ruling 2's clip volume");
+  CHECK(has(dbl.run_info, "\"plan_laid_measured\": true"),
+        "the ledger says it MEASURED, which is what makes the counts below readable");
+  // ★ AND THE COUNTS ARE OMITTED WHEN NOBODY COUNTED. With the tap unarmed the receipt
+  // used to read `struts_laid: 0` and `cells_with_no_strut: <every cell>` -- "nobody
+  // counted" and "the generator laid nothing" are different claims, and a receipt that
+  // cannot tell them apart is worse than one that stays quiet. plan_partial_depth does
+  // not arm the ledger, so it must carry neither.
+  CHECK(has(part.run_info, "\"plan_laid_measured\": false"),
+        "a run without the ledger key says so");
+  CHECK(!has(part.run_info, "\"cells_with_no_strut\""),
+        "and does NOT report a per-cell count nobody measured");
+  CHECK(!has(part.run_info, "\"struts_laid\""),
+        "nor a strut count nobody measured");
 
   // ── THE ORDERING: THE PLAN'S REFUSAL COMES FIRST ────────────────────────────
   // `plan_before_law` is empty_after_beam's job -- a 31 mm outline beam that clears every
