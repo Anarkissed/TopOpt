@@ -450,6 +450,15 @@ None of these are #361's Flexible code; the reviewer routes them. Items 35-38 we
    - **2026-10-24:** NOT explained by the clearances. A clearance never removes the part's own material (`clearance.cpp:364-369`),
      and the 3-voxel anchor pad keeps every anchored ring solid; in run ad68d4c0 all 44 anchor faces are 0 % filled and intact.
      Waiting on his screenshot of the cut hole (run 13185527). Nothing is built for it (the reviewer's ruling of 07:30, 2).
+   - **DIAGNOSED 2026-10-24 (his screenshot + variant_026.stl; read-only; a skeptic confirmed): CORE, to TO-core with 40/41.**
+     The top-right hole (faces 119 bore + 121 countersink) was anchored, so core froze a 3-voxel pad ring around it
+     (`loadcase.cpp:564-570`, a local skin that ties nothing to the body, despite its comment at :571-574). Its only link to
+     the arm was free wall around the hole below (126/111, his choice to leave free). Every rung was below the frozen floor
+     (item 40, `minimize_plastic.cpp:1462-1467`), so all free material went; the ring became a 106-voxel island at density 1
+     and `keep_largest_component` (`run_job.cpp:573`) deleted it silently. Same for ALL 12 anchored holes in the y = 25.3 row
+     (both arms, every rung): variant_026 keeps 9 of 22 anchored holes. Core counts these islands (`voxelize.cpp:813`,
+     unread), `keep_largest_and_marked_components` exists (`mesh.cpp:694`), and the gate ignores them (`analyze.cpp:442`).
+     TO-core's plan: keep anchored and loaded pieces, report the count, reject a rung that loses one with a named reason.
 
 48. **(unverified) A max-stiffness-for-a-plastic-budget mode.** It was offered to him and he has not answered. Hold until he does (`job.cpp:491-496`).
 
@@ -531,6 +540,13 @@ redesign is done, the same way as the CORE LIST above. Line numbers are at `cdf2
    the lattice request). In his words: "When a lattice run asks to replace results, the button starts a Topology run. This
    needs checking." Not changed here (the reviewer's ruling of 2026-10-24 04:31); round 9 only keeps "Save as new project"
    off that card (H50d). Ask: #354 gives the Lattice run's confirm its own action.
+12. **(his ruling of 2026-10-24 15:33 on CORE LIST item 17) The group field's "firmer wins" merge is RETIRED.** His words:
+   "The goal is to try to make all squeezes applicable to the same lattice. So if the lattice has 3 different groups, one in the
+   center, one on the side, and one in the corner, the job of the app is to create a lattice that allows for ALL of these
+   squishes to happen. Not a compromise, but a combination." `FlexibleGroupField.swift:86-92` merges per voxel, firmer wins.
+   Once #361 ships the combined design, the preview reads core's exported field instead and the merge goes. Redesign era.
+13. **(design question, later) When a combination cannot be met, core says so before the run, naming the groups.** How the
+   Flexible stage shows it, in line with his bend-limit wish (stop it being set, or flash it red), is his call then.
 7. **An edge whose ends are not known is silently dropped from the job (the reviewer's ruling of 2026-10-24 07:30, 3).**
    `app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+PressSend.swift:90-91` (`pressMap` returns nil) → `:107`
    (`pressDesignTargets` drops it): the press is not designed and nothing says so. Ask: say it on the card (which edge, why) or
