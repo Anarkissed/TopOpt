@@ -657,6 +657,11 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       }
 
   SimpCompliance out;
+  // Arm G (multigrid.cpp, safe retry): the voxels the matrix-free solve below
+  // solved at the floor modulus, if any. Empty on every solve whose shipped MG
+  // converged, so the energy loop further down is then byte-for-byte unchanged.
+  std::vector<char> dropped;
+  double dropped_e = 0.0;
   if (LM != nullptr) {
     // The COMPOSITE isotropic-or-cubic system (fea.hpp): a masked voxel is
     // hex8_stiffness_cubic(C11, C12, C44), every other solid voxel is the
@@ -701,9 +706,24 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
     // the final compliance solve and every certification solve pass nullptr
     // unconditionally. So a default run reaches this line with
     // initial_guess == nullptr and is byte-for-byte what it was.
-    out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson, bcs,
-                                          loads, tolerance, max_iterations,
-                                          &out.cg, active_mask, initial_guess);
+    // The safe retry may solve tiny floating solid islands at the floor
+    // modulus (only after the shipped MG has stalled); this compliance accounts
+    // for that below, so the permit is held here — and nowhere a solution is
+    // read back at the true modulus without that accounting (analyze.cpp
+    // forbids it for certification).
+    {
+      FeaIslandDropPermit permit;
+      out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson,
+                                            bcs, loads, tolerance,
+                                            max_iterations, &out.cg,
+                                            active_mask, initial_guess);
+    }
+    const std::vector<int>& dv = fea_matfree_last_dropped_islands();
+    if (!dv.empty()) {
+      dropped.assign(grid.voxel_count(), 0);
+      for (int e : dv) dropped[static_cast<std::size_t>(e)] = 1;
+      dropped_e = fea_matfree_last_dropped_floor_youngs();
+    }
   } else if (solver_kind == SolverKind::MultigridCG) {
     // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
     // CG solves the identical system to the same tolerance. It is stateless, so
@@ -817,6 +837,16 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
           q += ue[static_cast<std::size_t>(r)] * kr;
         }
 
+        // Arm G: a voxel the solve held at the floor modulus contributes the
+        // energy of THAT system (so compliance stays f.u of what was solved)
+        // and no sensitivity — the solved system does not depend on its
+        // density, exactly as an out-of-domain voxel above (an unanchored
+        // speck carries no load either way).
+        if (!dropped.empty() && dropped[e]) {
+          compliance += dropped_e * q;
+          out.dcompliance[e] = 0.0;
+          continue;
+        }
         compliance += std::pow(rho, params.penalty) * params.youngs_modulus * q;
         out.dcompliance[e] = -params.penalty *
                              std::pow(rho, params.penalty - 1.0) *

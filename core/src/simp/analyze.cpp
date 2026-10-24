@@ -267,6 +267,10 @@ FixedDesignAnalysis analyze_fixed_design(
                                          loads, cg_tolerance, cg_max_iterations,
                                          &sc.cg);
     } else {
+      // Certification reads stresses from this field at each voxel's TRUE
+      // modulus, so it must never solve a floating speck at the floor
+      // (the safe retry's arm G): forbid it whatever an outer scope permits.
+      FeaIslandDropForbid no_island_drop;
       sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
