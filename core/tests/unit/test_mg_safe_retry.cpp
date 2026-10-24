@@ -262,8 +262,11 @@ int main() {
       check(masked_kept && full_dropped && CM.kept_frozen == 1,
             "G: a registered frozen mask keeps exactly its islands");
     }
-    // A speck whose 26-neighbourhood holds a CLEARANCE voxel (FrozenVoid in the
-    // mask, Empty in the analysis grid) is kept too.
+    // REVIEWER RULING 2026-10-24: there is NO clearance / keep-out adjacency
+    // rule. A speck whose 26-neighbourhood holds a clearance voxel (FrozenVoid:
+    // Empty in the analysis grid, no element) is still droppable — even with
+    // that voxel set in a registered keep mask (PLSM registers FrozenSolid only;
+    // an Empty voxel is never a hinge). Pinned against 2597c39b, which kept it.
     {
       SpeckField C2 = F;
       std::vector<char> keep(C2.g.voxel_count(), 0);
@@ -273,11 +276,12 @@ int main() {
       keep[e_clear] = 1;
       topopt::FeaIslandKeepMask scope(&keep);
       auto CC2 = topopt::fea_detail::mg_island_census(C2.g, C2.ey, C2.bcs, C2.loads);
-      bool kept = true;
+      bool dropped = false;
       for (int e : CC2.drop)
-        if (static_cast<std::size_t>(e) == e_speck) kept = false;
-      check(kept && CC2.kept_hinged == 1 && CC2.droppable == F.specks - 1,
-            "G: a speck touching a clearance (FrozenVoid) voxel is never dropped");
+        if (static_cast<std::size_t>(e) == e_speck) dropped = true;
+      check(dropped && CC2.kept_hinged == 0 && CC2.droppable == F.specks,
+            "G: a speck next to a clearance (FrozenVoid / Empty) voxel is droppable "
+            "(no clearance-adjacency rule)");
     }
 
     // Cap: isolated single-voxel specks on a stride-2 lattice (no shared node

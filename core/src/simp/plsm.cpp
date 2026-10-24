@@ -261,16 +261,10 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   // the Load/Fixture voxels this path pins are exactly the ones SIMP pins.
   const DesignMask eff = effective_design_mask(grid, mask);
   // The solver's floating-speck drop (multigrid safe retry, arm G) must never
-  // touch a frozen voxel: hand it this run's FrozenSolid set plus every
-  // FrozenVoid voxel inside the part (clearances / keep-outs; an Empty voxel is
-  // normalised to FrozenVoid too, and is NOT a protected region).
+  // touch a frozen voxel: hand it exactly this run's FrozenSolid set.
   std::vector<char> island_keep(n, 0);
   for (std::size_t v = 0; v < n; ++v)
-    island_keep[v] = (eff[v] == MaskValue::FrozenSolid ||
-                      (eff[v] == MaskValue::FrozenVoid &&
-                       grid.tags[v] != VoxelTag::Empty))
-                         ? 1
-                         : 0;
+    island_keep[v] = eff[v] == MaskValue::FrozenSolid ? 1 : 0;
   const FeaIslandKeepMask island_keep_scope(&island_keep);
 
   // ★ ALL THREE ZERO MEANS "DERIVE FROM THE GRID"; A PARTIAL SPEC IS REFUSED.
