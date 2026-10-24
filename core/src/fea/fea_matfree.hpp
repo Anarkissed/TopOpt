@@ -539,5 +539,104 @@ inline double& mf_solve_deadline() {
   return deadline;
 }
 
+// SAFE-RETRY probes (tests / diagnostics only; production never calls these).
+// Build the matrix-free system + geometric hierarchy for (grid, elem_youngs)
+// and measure, deterministically:
+//   lambda_jacobi[l] / lambda_l1[l]  lambda_max(D^-1 A) / (D_l1^-1 A) on every
+//                                    SMOOTHED level, fine first (power iteration,
+//                                    `power_iters` steps — a LOWER bound);
+//   rho / rayleigh                   D4 on the V-cycle B: rho_A(I - BA) and the
+//                                    Rayleigh quotient of BA at the dominant
+//                                    error, for the shipped tuning and for l1.
+struct MgSmootherProbe {
+  bool built = false;
+  int levels = 0;
+  std::vector<double> lambda_jacobi, lambda_l1;
+  double rho_shipped = 0.0, rayleigh_shipped = 0.0;
+  double rho_l1 = 0.0, rayleigh_l1 = 0.0;
+};
+MgSmootherProbe mg_smoother_probe(const VoxelGrid& grid, double poisson,
+                                  const std::vector<DirichletBC>& bcs,
+                                  const std::vector<NodalLoad>& loads,
+                                  const std::vector<double>& elem_youngs,
+                                  int power_iters, int vcycle_iters);
+
+// Arm G's census on (grid, elem_youngs, bcs, loads), exactly as the safe retry
+// computes it.
+struct MgIslandCensus {
+  long long elements = 0, solid = 0;
+  int pieces = 0, unanchored = 0, largest_unanchored = 0;
+  long long unanchored_voxels = 0;
+  int kept_frozen = 0, kept_big = 0, kept_hinged = 0, droppable = 0;
+  long long droppable_voxels = 0;
+  bool capped = false;
+  double floor_e = 0.0;
+  std::vector<int> drop;
+};
+MgIslandCensus mg_island_census(const VoxelGrid& grid,
+                                const std::vector<double>& elem_youngs,
+                                const std::vector<DirichletBC>& bcs,
+                                const std::vector<NodalLoad>& loads);
+
+// The LAST safe-retry attempt on this thread (tests / diagnostics; read-only
+// observation of the decisions the retry already makes — nothing reads it back).
+// Reset with fea_matfree_reset_mg_stagnation_latch(); seq == 0 = none this run.
+//   res / r0         the retry's own relative residual at its end / start, on
+//                    the system it solved (the island-dropped one when
+//                    `dropped`); an attempt that breaks down before its first
+//                    update reports res == its starting residual.
+//   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback
+//                    (only when res_exact < r0_exact).
+//   productive       counted as productive by the safe-path latch.
+//   consecutive_failures  the safe-path latch counter AFTER this attempt.
+struct MgSafeAttemptReport {
+  long long seq = 0;
+  bool dropped = false;
+  bool converged = false;
+  bool seeded_fallback = false;
+  bool productive = false;
+  int cycles = 0;
+  double res = 0.0, r0 = 0.0;
+  // The same iterate / start on the EXACT system (the one the Jacobi-CG
+  // fallback solves; differs from res / r0 when islands were dropped). Seeding
+  // and `productive` are judged on these. res_exact = -1 when not evaluated
+  // (the attempt converged, or its iterate was unusable).
+  double res_exact = -1.0, r0_exact = -1.0;
+  int consecutive_failures = 0;
+};
+const MgSafeAttemptReport& mg_last_safe_attempt();
+
+// Per matrix-free MG solve on this thread since the last
+// fea_matfree_reset_mg_stagnation_latch(): how many ran with the island drop
+// PERMITTED (a FeaIslandDropPermit held, no FeaIslandDropForbid) and how many
+// did not, and which the LAST one was. Observation only. A certified solve (a
+// run's final compliance, certification) must be a not-permitted one.
+struct MgIslandPermitStats {
+  long long permitted = 0;
+  long long not_permitted = 0;
+  bool last_permitted = false;
+};
+const MgIslandPermitStats& mg_island_permit_stats();
+
+// The bounded [mg-safe] stderr log since the per-run reset: full per-solve
+// lines printed, summary lines printed, and attempts waiting in the current
+// summary window. Observation only.
+struct MgSafeLogCounts {
+  long long lines = 0;
+  long long summaries = 0;
+  int pending = 0;
+};
+MgSafeLogCounts mg_safe_log_counts();
+// TEST ONLY: override the log bound's two periods (first N full lines per run,
+// then one summary per `every` attempts); <= 0 restores the shipped 5 / 50.
+void mg_safe_test_log_periods(int first, int every);
+
+// TEST ONLY — never set by production code. Forces the safe retry's MG-PCG to
+// break down before its first update: 1 = a non-finite preconditioned residual
+// (the r.z check), 2 = a zero first search direction (the p.Ap check at k = 1).
+// 0 (the default) = off. Only the safe-retry call reads it; the shipped MG-CG
+// never does.
+void mg_safe_test_force_breakdown(int mode);
+
 }  // namespace fea_detail
 }  // namespace topopt

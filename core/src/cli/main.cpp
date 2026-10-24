@@ -24,14 +24,24 @@
 #include "topopt/settings.hpp"
 #include "topopt/version.hpp"
 
-// A build fingerprint (typically the core git commit SHA), injected by CMake. A
-// LAN worker exposes it via /health so the iPad app can REFUSE a worker whose
-// core differs from its own — the version-skew guard (handoff 093 STEP 3d): two
-// cores that differ silently produce different parts. Defaults to "dev" for an
-// un-instrumented local build.
+// A build fingerprint: the core git commit at BUILD time, "<sha12>" when the
+// core tree is clean and "<sha12>-dirty-<diff8>" when tracked files under core/
+// differ from HEAD (item 44; core/cmake/TopoptFingerprint.cmake, restamped on
+// every build by the topopt_fingerprint target). A LAN worker exposes it via
+// /health so the iPad app can REFUSE a worker whose core differs from its own —
+// the version-skew guard (handoff 093 STEP 3d): two cores that differ silently
+// produce different parts. Defaults to "dev" for an un-instrumented local build.
+#if defined(TOPOPT_HAVE_BUILD_FINGERPRINT_H)
+#include "topopt_build_fingerprint.h"
+#endif
 #ifndef TOPOPT_BUILD_FINGERPRINT
 #define TOPOPT_BUILD_FINGERPRINT "dev"
 #endif
+#ifndef TOPOPT_BUILD_DIRTY
+#define TOPOPT_BUILD_DIRTY -1  // unknown (no git at build time)
+#endif
+#define TOPOPT_BUILD_DIRTY_WORD \
+  (TOPOPT_BUILD_DIRTY == 1 ? "true" : TOPOPT_BUILD_DIRTY == 0 ? "false" : "unknown")
 
 namespace {
 
@@ -383,15 +393,16 @@ static int run_flexible(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   // ── ★★ SAY WHICH BINARY THIS IS, ON EVERY SUBCOMMAND ──────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time: it answers "which
-  // source era" and NOT "is this binary current", which is the failure that cost
+  // TOPOPT_BUILD_FINGERPRINT is the core commit at BUILD time (+ a dirty marker;
+  // it was the SHA at CONFIGURE time until item 44). It answers "which source"
+  // and still NOT "is this binary current", which is the failure that cost
   // time here. `cmake --build --target topopt topopt-cli` reported success without
   // relinking the CLI, so libtopopt.a carried a change topopt-cli did not — for 21
   // minutes and three runs that read as "the code path is never reached", with the
   // SHA correct throughout. __DATE__/__TIME__ are baked when THIS TU is compiled,
   // so a stale binary announces itself before it does any work.
-  std::fprintf(stderr, "topopt-cli: core %s, built %s %s\n",
-               TOPOPT_BUILD_FINGERPRINT, __DATE__, __TIME__);
+  std::fprintf(stderr, "topopt-cli: core %s (dirty=%s), built %s %s\n",
+               TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD, __DATE__, __TIME__);
   // ★ AND STATE IT TO THE LIBRARY, BEFORE ANY DISPATCH. `analyze` (below),
   // `preflight` and `lattice-variant` all return before the RunObservability further
   // down is built, and both `analyze_job` and `lattice_variant_job` used to construct
@@ -399,11 +410,14 @@ int main(int argc, char** argv) {
   // fingerprint "unknown" on every run. Stated here, once, so no receipt path has to
   // remember it and there is no second copy of these two macros anywhere.
   topopt::set_build_identity(TOPOPT_BUILD_FINGERPRINT, __DATE__ " " __TIME__);
-  // Version / build fingerprint, one parseable line, for the worker /health probe.
+  // Version / build fingerprint, one parseable line of space-separated key=value
+  // tokens, for the worker /health probe (topopt_worker.py `_kv`). `dirty` is
+  // true when the binary was built from uncommitted core changes (the
+  // fingerprint then carries "-dirty-<diff8>"), unknown without git.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
-    std::printf("topopt-cli version=%s fingerprint=%s\n", topopt::version(),
-                TOPOPT_BUILD_FINGERPRINT);
+    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s\n", topopt::version(),
+                TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD);
     return 0;
   }
   // `analyze` — ONE analysis solve on a fixed design, no optimization.
@@ -429,8 +443,9 @@ int main(int argc, char** argv) {
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
   // (announce moved to the top of main -- every subcommand, not just `run`)
   // ── ★★ SAY WHICH BINARY THIS IS, EVERY RUN ────────────────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time. It answers "which
-  // source era" and it does NOT answer "is this binary current", which is the
+  // TOPOPT_BUILD_FINGERPRINT is the core commit at BUILD time (+ dirty marker;
+  // configure time before item 44). It answers "which source" and it does NOT
+  // answer "is this binary current", which is the
   // failure that actually cost time: `cmake --build --target topopt topopt-cli`
   // reported success and did not relink the CLI, so libtopopt.a carried a change
   // that topopt-cli did not, for 21 minutes and three runs that read as "the code

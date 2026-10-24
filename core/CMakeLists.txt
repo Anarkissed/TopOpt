@@ -6,6 +6,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ★ THE CORE BUILD FINGERPRINT IS TAKEN AT BUILD TIME (item 44). An always-run
+# target restamps <build>/generated/fingerprint/topopt_build_fingerprint.h on
+# every build (rewritten only when it changes): the core's git HEAD, plus
+# "-dirty-<diff8>" when tracked files under core/ differ from it. It used to be
+# an execute_process here at CONFIGURE time, so a rebuild after a new commit
+# kept the old SHA until cmake was re-run, and a binary built from uncommitted
+# changes claimed a clean commit. topopt-cli (--version, run_info.json) and
+# app/scripts/build_core.sh (the app's CoreFingerprint) both read this target.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TopoptFingerprintTarget.cmake")
+topopt_add_fingerprint_target(topopt_fingerprint "${CMAKE_CURRENT_SOURCE_DIR}"
+                              "${CMAKE_CURRENT_BINARY_DIR}/generated/fingerprint")
+
 # CI configures with -DTOPOPT_REQUIRE_DEPS=ON so the pipeline proves the
 # locked dependencies (ARCHITECTURE.md §4) are installed and findable.
 option(TOPOPT_REQUIRE_DEPS "Fail configure unless OCCT, Eigen and lib3mf are found" OFF)
@@ -302,6 +314,18 @@ if(lib3mf_FOUND)
 endif()
 
 enable_testing()
+
+# ★ Item 44: the fingerprint is BUILD-time. A throwaway git repo + a toy project
+# wired through the SAME cmake/TopoptFingerprintTarget.cmake: configure once,
+# build, commit, build again (no configure) -> the new commit; edit a tracked
+# file -> "-dirty-<diff8>"; restore -> clean again; configure ran exactly once.
+add_test(NAME build_fingerprint_rebuild
+  COMMAND "${CMAKE_COMMAND}"
+          "-DCORE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+          "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/fp_rebuild_test"
+          "-DGENERATOR=${CMAKE_GENERATOR}"
+          "-DCXX=${CMAKE_CXX_COMPILER}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/test_build_fingerprint.cmake")
 
 add_executable(test_materials tests/unit/test_materials.cpp)
 target_link_libraries(test_materials PRIVATE topopt)
@@ -804,6 +828,16 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mg_tuning PRIVATE topopt)
   target_include_directories(test_mg_tuning PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME fea_mg_tuning COMMAND test_mg_tuning)
+
+  # SAFE-SMOOTHER RETRY tripwire (thin-wall solver cure S3 + S5 gate + arm G):
+  # lambda_max(D_l1^-1 A) <= 1 and a positive-definite l1 V-cycle (red control:
+  # the shipped omega is indefinite at nu = 0.38), bit-identity of solves the
+  # shipped path converges, and the floating-speck drop (red control: without
+  # it the gated l1 solve stalls). Uses the internal fea_matfree.hpp probes.
+  add_executable(test_mg_safe_retry tests/unit/test_mg_safe_retry.cpp)
+  target_link_libraries(test_mg_safe_retry PRIVATE topopt)
+  target_include_directories(test_mg_safe_retry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_mg_safe_retry COMMAND test_mg_safe_retry)
 
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
   # That task let a measurement harness supply the prolongators for levels 2..
@@ -2059,18 +2093,11 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
   target_link_libraries(topopt_cli PRIVATE topopt)
   # Build fingerprint for `topopt-cli --version` (handoff 093, worker /health +
-  # the app's version-skew refusal): the core git commit SHA when available, else
-  # "dev". Two cores that differ silently produce different parts, so the app
-  # refuses a worker whose fingerprint != its own.
-  execute_process(
-    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short=12 HEAD
-    OUTPUT_VARIABLE TOPOPT_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET RESULT_VARIABLE TOPOPT_GIT_RC)
-  if(NOT TOPOPT_GIT_RC EQUAL 0 OR TOPOPT_GIT_SHA STREQUAL "")
-    set(TOPOPT_GIT_SHA "dev")
-  endif()
-  target_compile_definitions(topopt_cli PRIVATE
-    TOPOPT_BUILD_FINGERPRINT="${TOPOPT_GIT_SHA}")
+  # the app's version-skew refusal): the core git commit at BUILD time, with a
+  # dirty marker (see topopt_fingerprint at the top of this file), else "dev".
+  # Two cores that differ silently produce different parts, so the app refuses
+  # a worker whose fingerprint != its own.
+  topopt_use_fingerprint(topopt_cli topopt_fingerprint)
   # Dev/CI defaults for --materials / --rules: the committed files. The flags
   # override them; the integration test passes both explicitly.
   target_compile_definitions(topopt_cli PRIVATE
