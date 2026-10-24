@@ -1,8 +1,6 @@
 $ topopt-cli flexible job.json --out out
 wrote face101_target_depth.svg
 wrote face103_target_depth.svg
-wrote flexible_field.json
-wrote flexible_field.bin
 wrote face101_columns.csv
 wrote face101_buildable_depth.svg
 wrote face101_density.svg
@@ -13,9 +11,7 @@ wrote face103_buildable_depth.svg
 wrote face103_density.svg
 wrote face103_cell_size.svg
 wrote face103_tier_flags.svg
-wrote field_xz_density.svg
-wrote field_xz_owner.svg
 wrote run_info.json
-flexible: ran; receipt in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-squish-maths-7a3bc8/docs/handoffs/evidence/2026-09-28-flexible-squish-maths/d_cube_top_and_vertical_edge_press/out/run_info.json
-topopt-cli: core 234dc0680ec0, built Oct 24 2026 16:09:50
-exit code 0
+flexible: REFUSED (combination_not_reachable): core found no one lattice that lets every squeeze group reach its own depths when pressed alone (face 103 and face 101: 5582 columns miss by up to 10.2 mm; worst 10.242 mm, 356.3 % of its target, 1-D estimate). This is what the solver found, not proven impossible (the exact hull check is not built yet). Change a group's depth or force, or its band.
+topopt-cli: core 4f5de1d7d422, built Oct 24 2026 16:38:52
+exit code 3

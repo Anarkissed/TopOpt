@@ -57,6 +57,14 @@ namespace topopt {
 // synthetic_*) are refused here first.
 // ════════════════════════════════════════════════════════════════════════════════
 
+// C2 B2b, Q-C2: a group's HIT BAND: a column hits when |achieved − target| <= max(min_mm, pct %
+// of the target). Absent = the default max(0.05 mm, 2 %).
+struct JobHitBand {
+  bool given = false;
+  double min_mm = 0.05;
+  double pct = 2.0;
+};
+
 struct JobFlexibleFace {
   int face_region_id = -1;
   std::string role;  // "loaded" | "resting"
@@ -82,6 +90,7 @@ struct JobFlexibleFace {
   // JobFlexible::squeeze_groups), -1 = none; has_weight: weight_n was stated.
   int squeeze_group = -1;
   bool has_weight = false;
+  JobHitBand band;  // C2 B2b: an entry in no group (its own hand) may state its own hit_band
   bool has_design_stamp = false;
   flexible::StampGrid design_stamp;
   bool skin_on = true;
@@ -97,6 +106,7 @@ struct JobFlexibleCheckStamp {
 struct JobSqueezeGroup {
   std::vector<int> faces;
   double force_n = 0.0;
+  JobHitBand band;
 };
 
 struct JobFlexible {

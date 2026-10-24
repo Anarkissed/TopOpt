@@ -223,15 +223,19 @@ int main() {
                        "[" + kTop + ",{\"face_region_id\":100,\"role\":\"loaded\",\"weight_n\":100,"
                                     "\"deepest_squish_mm\":2,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],"
                                     "\"curve_y\":[[0,1],[1,1]],\"skin_on\":true}]"));
-  CHECK(r.refused && r.refusal_code == "one_profile_per_stack" &&
-            r.refusal_reason.find("101") != std::string::npos &&
-            r.refusal_reason.find("100") != std::string::npos,
-        "top + bottom loaded: refused, naming both");
-  CHECK(fs::exists(kDir + "/stack/out/run_info.json") && fs::exists(kDir + "/stack/out/face101_target_depth.svg"),
-        "a refusal still writes the receipt and the drawn map");
-  CHECK(!fs::exists(kDir + "/stack/out/face101_density.svg"), "... and no prediction");
+  // RE-PINNED (C2 B2b, his rulings of 2026-10-24 on item 17 and Q-C1): two loaded entries in no
+  // squeeze group are two HANDS, separate load cases, so top + bottom is the combination's to
+  // design, not a one-profile-per-stack refusal. (Within ONE hand they are a pinch: B2.)
+  CHECK(!r.refused && r.receipt_json.find("\"combination\": {") != std::string::npos &&
+            r.receipt_json.find("\"group\": \"face 100\"") != std::string::npos,
+        "top + bottom in separate hands: designed as load cases, each reported");
   r = run("cf", job("tpu95a_generic", "220", "auto", "[" + kTop + "]"));
   CHECK(r.refused && r.refusal_code == "calibrate_first", "calibrate_first: no numbers, a reason");
+  // (moved here from the top + bottom case, unchanged in meaning) a refusal still writes the
+  // receipt and the drawn map, and no prediction
+  CHECK(fs::exists(kDir + "/cf/out/run_info.json") && fs::exists(kDir + "/cf/out/face101_target_depth.svg"),
+        "a refusal still writes the receipt and the drawn map");
+  CHECK(!fs::exists(kDir + "/cf/out/face101_density.svg"), "... and no prediction");
   r = run("temp", job("varioshore_tpu", "205", "auto", "[" + kTop + "]"));
   CHECK(r.refused && r.refusal_code == "temperature_not_tested", "205 C: never interpolated");
   r = run("side", job("varioshore_tpu", "220", "honeycomb",

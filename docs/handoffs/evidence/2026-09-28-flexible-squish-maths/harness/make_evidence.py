@@ -204,10 +204,12 @@ def run(cli, name, dims, job, out_root):
         f.write("$ topopt-cli flexible job.json --out out\n" + p.stdout + p.stderr +
                 "exit code %d\n" % p.returncode)
     print(name, "exit", p.returncode)
-    if p.returncode != 0:
+    ri = os.path.join(d, "out", "run_info.json")
+    # C2 B2b: a REFUSAL still writes its receipt; the scenario checks what it says
+    if p.returncode != 0 and not os.path.exists(ri):
         print(p.stdout, p.stderr)
         sys.exit(1)
-    with open(os.path.join(d, "out", "run_info.json")) as f:
+    with open(ri) as f:
         return json.load(f)["flexible"]
 
 
@@ -248,15 +250,23 @@ def main():
     check(names == ["palm", "heel"], "(b) palm and heel checked")
 
     rc = run(a.cli, *scenario_c(), a.out)
+    # C2 B2b (his rulings of 2026-10-24 on item 17 and Q-C1): the top and the side are loaded entries
+    # in no squeeze group, i.e. two HANDS, separate load cases, so they are the combination's.
+    # Core finds no one lattice that meets both (1-D estimate), and says so before the run.
+    check(rc["refusal"] is not None and rc["refusal"]["code"] == "combination_not_reachable" and
+          "face 103" in rc["refusal"]["reason"] and "face 101" in rc["refusal"]["reason"],
+          "(c) two hands: core finds no one lattice for both, and refuses naming them (B2b)")
     s = face(rc, 103)
     check(s["frame"]["side"] and s["tier"]["tier"] == "estimated" and s["tier"]["band"] == 0.5,
           "(c) the side stack is 'estimated', +/-50 %")
-    check(rc["topology"] == "gyroid", "(c) gyroid only")
+    check(rc["recommendation"]["topology"] == "gyroid", "(c) gyroid only")
     check(any(r["code"] == "honeycomb_side_stack" for r in rc["recommendation"]["reasons"]),
           "(c) the reason names the side stack")
-    check(len(rc["handover"]) == 1 and rc["handover"][0]["blended_mm3"] > 0, "(c) a blended handover zone")
+    check(len(rc["handover"]) == 1 and rc["handover"][0]["blended_mm3"] > 0, "(c) a blended handover zone (before the combination)")
     check(s["stack"]["linked_faces"][0]["face_id"] == 5, "(c) the side's other end is the -X face")
     rc = run(a.cli, *scenario_d(), a.out)
+    check(rc["refusal"] is not None and rc["refusal"]["code"] == "combination_not_reachable",
+          "(d) two hands (the top, the edge press): core finds no one lattice for both, and refuses (B2b)")
     e = face(rc, 103)
     check(e["press"]["footprint_face_region_ids"] == [103, 104] and e["press"]["side"] and
           abs(e["press"]["build_angle_deg"] - 90) < 1e-6, "(d) the edge press: footprint 103+104, 90 degrees, side")

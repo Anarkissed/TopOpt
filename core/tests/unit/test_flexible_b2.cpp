@@ -47,7 +47,8 @@ static int g_checks = 0;
     }                                                              \
   } while (0)
 
-static_assert(kPressApiVersion == 6, "B2: the press API version");
+// RE-PINNED (C2 B2b): the current version is pinned in test_flexible_b2b; B2's meaning holds from 6 on.
+static_assert(kPressApiVersion >= 6, "B2: the press API version");
 
 static const std::string kDir = std::string(FLEXIBLE_TMP_DIR) + "/flexible_b2_test";
 
@@ -240,8 +241,11 @@ static void test_pinch() {
   const FlexibleRunResult x = run("pinch_x", job("[" + face(103, "", 2) + "," + face(105, "", 2) + "]",
                                                  ",\"squeeze_groups\":[{\"faces\":[103],\"force_n\":100},{\"faces\":[105],\"force_n\":100}]"),
                                   100, 60, 40);
-  CHECK(x.refused && x.refusal_code == "one_profile_per_stack" && x.refusal_reason.find("different hands") != std::string::npos,
-        "9(a): opposite arrows in different hands: refused, saying they are different hands");
+  // RE-PINNED (C2 B2b, his ruling on item 17): opposite arrows in DIFFERENT hands are separate load
+  // cases and go to the combination (they were refused until it existed). Equal 2 mm targets at
+  // equal force on one column are reachable, so the pair runs.
+  CHECK(!x.refused, "9(a)/B2b: opposite arrows in different hands go to the combination (reachable here)");
+  if (x.refused) std::fprintf(stderr, "  (%s: %s)\n", x.refusal_code.c_str(), x.refusal_reason.c_str());
   // a STEP (the same arrow on one axis): the top and an angled top press 10 degrees off, one hand
   const std::string step = job("[" + face(101, "", 2) +
                                    ",{\"face_region_id\":104,\"press_direction\":[0,0.17,-1],\"role\":\"loaded\","

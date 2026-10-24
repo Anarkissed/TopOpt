@@ -877,15 +877,25 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       if (stacks[i].face_region_id == face_id) return loaded[i]->squeeze_group;
     return -1;
   };
+  // C2 B2b (his ruling on item 17, Q-C1): entries in DIFFERENT hands are separate load cases; a
+  // same-axis pair across hands is the COMBINATION's to design (cross_hand), not a refusal.
+  std::vector<StackConflict> cross_hand;
+  auto hand_key = [&](int face_id) {  // a hand: its squeeze group, or the entry itself
+    const int g = hand_of(face_id);
+    return g >= 0 ? g : -1000 - face_id;
+  };
   for (const StackConflict& c : all_conflicts) {
-    const int ha = hand_of(c.face_a), hb = hand_of(c.face_b);
-    if (c.pinch && ha >= 0 && ha == hb)
+    const int ha = hand_key(c.face_a), hb = hand_key(c.face_b);
+    if (ha != hb)
+      cross_hand.push_back(c);
+    else if (c.pinch)
       pinches.push_back(c);
     else
       conflicts.push_back(c);
   }
-  std::vector<std::pair<int, int>> pinch_pairs;
+  std::vector<std::pair<int, int>> pinch_pairs;  // the pairs the assembly may hand over (pinches + cross-hand)
   for (const StackConflict& c : pinches) pinch_pairs.push_back({c.face_a, c.face_b});
+  for (const StackConflict& c : cross_hand) pinch_pairs.push_back({c.face_a, c.face_b});
   // each face's pinched columns, and its own span as series columns (pinched: half the run)
   std::vector<std::vector<char>> pinched(stacks.size());
   std::vector<std::vector<SeriesColumn>> span_of(stacks.size());
@@ -1005,6 +1015,8 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   std::vector<std::vector<SeriesColumn>> series_of;  // per stack; empty unless a flat-prism press
   std::string grams_json = "null";
   std::string groups_json = "null";
+  std::string combination_json = Obj().add("components", jnum(0)).str();
+  bool combination_active = false;
   std::vector<std::string> face_json, check_json;
   DensityField field;
   CurveSet set;
@@ -1047,6 +1059,243 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     for (std::size_t i = 0; i < stacks.size(); ++i) ls.push_back({&stacks[i], &designs[i]});
     field = assemble_density_field(grid, mask, ls, bp, &pinch_pairs);
 
+    // ── C2 B2b: THE COMBINATION (his ruling on item 17). Each hand is its own load case (Q-C1).
+    // A column's depth under its own pressure through the field is the series sum
+    //     d = Σ_v L_v · ε(p; ρ_v)            (the 1-D estimate, Q-C3)
+    // so columns and voxels form a graph. A connected component with ONE hand is left exactly as
+    // designed (byte-identical); in a component with two or more hands, every column of every hand
+    // must hit its band (Q-C2). Solved by row projections (Kaczmarz / ART): each missing column's
+    // linearised equation is projected onto, clamped to the tested densities. From the independent
+    // designs as the start, this is the least change that meets every column, for a consistent
+    // linear system. A column the hands cannot all meet is refused before the run, named.
+    {
+      struct Col {
+        int hand = 0;
+        std::size_t stack = 0, k = 0;
+        double p = 0, t = 0, band = 0;
+        std::vector<std::pair<std::size_t, double>> runs;  // voxel, length along the run (mm)
+      };
+      auto band_of = [&](const JobFlexibleFace& e, double t) {
+        const JobHitBand& b = e.squeeze_group >= 0 ? fx.squeeze_groups[static_cast<std::size_t>(e.squeeze_group)].band : e.band;
+        return std::max(b.min_mm, 0.01 * b.pct * t);
+      };
+      std::vector<Col> cols;
+      for (std::size_t i = 0; i < stacks.size(); ++i) {
+        const Stack& st = stacks[i];
+        for (std::size_t k = 0; k < st.columns.size(); ++k) {
+          const StackColumn& c = st.columns[k];
+          const ColumnDesign& cd = designs[i].columns[k];
+          if (cd.status != "ok" || !(c.lattice_mm > 0.0)) continue;
+          Col col;
+          col.hand = hand_key(loaded[i]->face_region_id);
+          col.stack = i;
+          col.k = k;
+          col.p = cd.pressure_mpa;
+          col.t = cd.target_depth_mm;
+          col.band = band_of(*loaded[i], col.t);
+          const Vec3 o = st.frame.from_uv(c.u_mm, c.v_mm);
+          const int n = std::max(1, static_cast<int>(std::ceil(c.lattice_mm / (0.25 * grid.spacing))));
+          const double step = c.lattice_mm / n;
+          std::map<std::size_t, double> acc;
+          for (int sidx = 0; sidx < n; ++sidx) {
+            const double tt = c.entry_t + (sidx + 0.5) * step;
+            const int gi = static_cast<int>(std::floor((o.x + st.frame.load.x * tt - grid.origin.x) / grid.spacing));
+            const int gj = static_cast<int>(std::floor((o.y + st.frame.load.y * tt - grid.origin.y) / grid.spacing));
+            const int gk = static_cast<int>(std::floor((o.z + st.frame.load.z * tt - grid.origin.z) / grid.spacing));
+            if (gi < 0 || gj < 0 || gk < 0 || gi >= grid.nx || gj >= grid.ny || gk >= grid.nz) continue;
+            const std::size_t v = grid.index(gi, gj, gk);
+            if (field.density[v] > 0.0) acc[v] += step;
+          }
+          col.runs.assign(acc.begin(), acc.end());
+          cols.push_back(std::move(col));
+        }
+      }
+      // components (union-find over voxels, joined by columns)
+      std::map<std::size_t, std::size_t> parent;
+      std::function<std::size_t(std::size_t)> root = [&](std::size_t x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      for (const Col& c : cols)
+        for (const auto& rv : c.runs) parent.emplace(rv.first, rv.first);
+      for (const Col& c : cols)
+        for (std::size_t q = 1; q < c.runs.size(); ++q) {
+          const std::size_t a = root(c.runs[0].first), b = root(c.runs[q].first);
+          if (a != b) parent[a] = b;
+        }
+      std::map<std::size_t, std::set<int>> hands_in;
+      for (const Col& c : cols)
+        if (!c.runs.empty()) hands_in[root(c.runs[0].first)].insert(c.hand);
+      std::vector<std::size_t> active;  // indices into cols
+      std::set<std::size_t> active_roots;
+      for (std::size_t q = 0; q < cols.size(); ++q)
+        if (!cols[q].runs.empty() && hands_in[root(cols[q].runs[0].first)].size() >= 2) {
+          active.push_back(q);
+          active_roots.insert(root(cols[q].runs[0].first));
+        }
+      const double rmin = set.density_min(), rmax = set.density_max(), span = rmax - rmin;
+      auto eps = [&](double p, double rho, bool& ok) {
+        const StrainResult e = strain_under(set, p, rho);
+        ok = e.ok;
+        return e.strain;
+      };
+      int sweeps = 0;
+      double worst = 0.0;
+      // the miss BEFORE the solve (the independent designs, assembled): what the combination fixes
+      double before_mm = 0.0;
+      long long before_missing = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        double d = 0.0;
+        bool known = true;
+        for (const auto& rv : c.runs) {
+          bool ok = true;
+          const double e = eps(c.p, field.density[rv.first], ok);
+          if (!ok) known = false;
+          d += rv.second * e;
+        }
+        if (!known || std::fabs(d - c.t) > c.band) ++before_missing;
+        if (known) before_mm = std::max(before_mm, std::fabs(d - c.t));
+      }
+      if (!active.empty()) {
+        double best = 1e300;
+        int stall = 0;
+        for (sweeps = 1; sweeps <= 400; ++sweeps) {
+          worst = 0.0;
+          for (std::size_t q : active) {
+            const Col& c = cols[q];
+            double d = 0.0;
+            bool known = true;
+            std::vector<double> grad(c.runs.size(), 0.0);
+            for (std::size_t m = 0; m < c.runs.size(); ++m) {
+              const std::size_t v = c.runs[m].first;
+              const double rho = field.density[v];
+              bool ok = true;
+              const double e0 = eps(c.p, rho, ok);
+              if (!ok) {  // past the data at this density: firm it up
+                field.density[v] = std::min(rmax, rho + 0.05 * span);
+                known = false;
+                continue;
+              }
+              d += c.runs[m].second * e0;
+              const double dr = 1e-4 * span;
+              const double r1 = rho + dr <= rmax ? rho + dr : rho - dr;
+              bool ok1 = true;
+              const double e1 = eps(c.p, r1, ok1);
+              if (ok1) grad[m] = c.runs[m].second * (e1 - e0) / (r1 - rho);
+            }
+            if (!known) {
+              worst = std::max(worst, 1e9);
+              continue;
+            }
+            const double r = d - c.t;
+            worst = std::max(worst, std::fabs(r) / c.band);
+            if (std::fabs(r) <= 0.5 * c.band) continue;
+            double g2 = 0.0;
+            for (double g : grad) g2 += g * g;
+            if (!(g2 > 0.0)) continue;
+            for (std::size_t m = 0; m < c.runs.size(); ++m) {
+              double& rho = field.density[c.runs[m].first];
+              rho = std::min(rmax, std::max(rmin, rho - r * grad[m] / g2));
+            }
+          }
+          if (worst <= 1.0) break;
+          if (worst < best * (1.0 - 1e-4)) {
+            best = worst;
+            stall = 0;
+          } else if (++stall >= 25) {
+            break;
+          }
+        }
+      }
+      // the result, judged on the field as it now is: who misses, by how much
+      std::map<std::set<int>, std::pair<long long, double>> miss_by_comp;  // the hands sharing -> (count, worst mm; inf = past the data)
+      double worst_mm = 0.0, worst_pct = 0.0;
+      long long missing = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        double d = 0.0;
+        bool known = true;
+        for (const auto& rv : c.runs) {
+          bool ok = true;
+          const double e = eps(c.p, field.density[rv.first], ok);
+          if (!ok) known = false;
+          d += rv.second * e;
+        }
+        const double miss = known ? std::fabs(d - c.t) : 1e300;
+        if (miss <= c.band) continue;
+        ++missing;
+        auto& mc = miss_by_comp[hands_in[root(c.runs[0].first)]];
+        ++mc.first;
+        mc.second = std::max(mc.second, known ? miss : std::numeric_limits<double>::infinity());
+        if (known) {
+          worst_mm = std::max(worst_mm, miss);
+          if (c.t > 0.0) worst_pct = std::max(worst_pct, 100.0 * miss / c.t);
+        }
+      }
+      // the Schumacher et al. 2015 (Fig. 18) check: a swing of more than 0.35 of the tested
+      // density span within less than two cells along a column, counted (reported, not hidden)
+      long long steep = 0;
+      for (std::size_t q : active) {
+        const Col& c = cols[q];
+        if (c.runs.size() < 2) continue;
+        double lo = 1e300, hi = -1e300, mean = 0.0;
+        for (const auto& rv : c.runs) {
+          lo = std::min(lo, field.density[rv.first]);
+          hi = std::max(hi, field.density[rv.first]);
+          mean += field.density[rv.first];
+        }
+        mean /= static_cast<double>(c.runs.size());
+        double run_mm = 0.0;
+        for (const auto& rv : c.runs) run_mm += rv.second;
+        const double two_cells = 2.0 * cell_size_mm(bp.topology, mean, bp.beads_per_wall, bp.bead_width_mm);
+        if (hi - lo > 0.35 * span && run_mm < two_cells) ++steep;
+      }
+      auto hand_name = [&](int hand) {
+        if (hand >= 0) return "group " + std::to_string(hand + 1);
+        return "face " + std::to_string(-1000 - hand);
+      };
+      Obj comb;
+      comb.add("components", jnum(static_cast<double>(active_roots.size())))
+          .add("columns", jnum(static_cast<double>(active.size())))
+          .add("method", jstr("row projections (Kaczmarz / ART) on the 1-D series columns, from the independent "
+                              "designs, clamped to the tested densities; components with one hand untouched"))
+          .add("before", Obj().add("columns_missing_band", jnum(static_cast<double>(before_missing)))
+                                 .add("worst_miss_mm", jnum(before_mm)).str())
+          .add("sweeps", jnum(sweeps))
+          .add("columns_missing_band", jnum(static_cast<double>(missing)))
+          .add("worst_miss_mm", jnum(worst_mm))
+          .add("worst_miss_pct", jnum(worst_pct))
+          .add("steep_columns", jnum(static_cast<double>(steep)))
+          .add("steep_rule", jstr("a density swing over 0.35 of the tested span within under two cells along a column "
+                                  "(Schumacher et al. 2015, Fig. 18): counted, not yet spread"))
+          .add("not_built", jstr("the exact convex-hull certificate per same-axis run and the min-max closest-"
+                                 "combination report (design note §2-§3) are not in this batch"));
+      combination_json = comb.str();
+      combination_active = !active.empty();
+      if (missing > 0) {
+        refusal_code = "combination_not_reachable";
+        std::string who;
+        for (const auto& kv : miss_by_comp) {
+          std::string hs;
+          for (int h : kv.first) hs += (hs.empty() ? "" : " and ") + hand_name(h);
+          char b[200];
+          if (std::isfinite(kv.second.second))
+            std::snprintf(b, sizeof(b), "%s: %lld column%s miss by up to %.3g mm", hs.c_str(), kv.second.first,
+                          kv.second.first == 1 ? "" : "s", kv.second.second);
+          else
+            std::snprintf(b, sizeof(b), "%s: %lld column%s squish past the tested data", hs.c_str(), kv.second.first,
+                          kv.second.first == 1 ? "" : "s");
+          who += (who.empty() ? "" : "; ") + std::string(b);
+        }
+        refusal_reason = "core found no one lattice that lets every squeeze group reach its own depths when pressed "
+                         "alone (" + who + "; worst " + fmtd(worst_mm, 3) + " mm, " + fmtd(worst_pct, 1) +
+                         " % of its target, 1-D estimate). This is what the solver found, not proven impossible (the "
+                         "exact hull check is not built yet). Change a group's depth or force, or its band.";
+      }
+    }
+
+    if (refusal_code.empty()) {
     // ── C2 B1b, item 4a: THE FIELD EXPORT ──
     std::vector<float> filled;
     std::vector<int> filled_owner;
@@ -1179,6 +1428,8 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                        .str();
     }
 
+    }  // refusal_code.empty(): the export and the grams
+
     // ── C2 B2, item 17: THE RECEIPT PER GROUP. Each column's ACHIEVED depth under its own
     // pressure through the ASSEMBLED field: the series sum of ε(p; ρ_voxel) along its run
     // (every quarter voxel). It works under any assembly rule; today's is "nearest_face".
@@ -1187,6 +1438,9 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       struct Acc {
         std::string name;
         std::vector<int> faces;
+        JobHitBand band;
+        std::string tier;
+        double tier_band = 0.0;
         long long columns = 0, within = 0, unknown = 0, shared = 0;
         double t_sum = 0, d_sum = 0, a_sum = 0, max_vs_target = 0, max_vs_design = 0, max_vs_target_pct = 0;
       };
@@ -1196,6 +1450,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         Acc a;
         a.name = "group " + std::to_string(gi + 1);
         a.faces = fx.squeeze_groups[gi].faces;
+        a.band = fx.squeeze_groups[gi].band;
         groups.push_back(a);
       }
       for (std::size_t i = 0; i < stacks.size(); ++i) {
@@ -1205,6 +1460,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
           Acc a;
           a.name = "face " + std::to_string(loaded[i]->face_region_id);
           a.faces = {loaded[i]->face_region_id};
+          a.band = loaded[i]->band;
           group_of[i] = static_cast<int>(groups.size());
           groups.push_back(a);
         }
@@ -1216,6 +1472,11 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
         Acc& a = groups[static_cast<std::size_t>(group_of[i])];
         const Stack& st = stacks[i];
         const FaceDesign& fd = designs[i];
+        // the uncertainty (tier band) beside the hit band: the widest of the group's entries
+        if (fd.tier.band >= a.tier_band) {
+          a.tier_band = fd.tier.band;
+          a.tier = fd.tier.tier;
+        }
         std::set<std::size_t> shared_vox;
         for (std::size_t k = 0; k < st.columns.size(); ++k) {
           const StackColumn& c = st.columns[k];
@@ -1261,7 +1522,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
           const double miss = std::fabs(achieved - tgt);
           a.max_vs_target = std::max(a.max_vs_target, miss);
           if (tgt > 0.0) a.max_vs_target_pct = std::max(a.max_vs_target_pct, 100.0 * miss / tgt);
-          if (miss <= std::max(0.05, 0.02 * tgt)) ++a.within;
+          if (cd.status == "ok" && miss <= std::max(a.band.min_mm, 0.01 * a.band.pct * tgt)) ++a.within;
         }
         a.shared += static_cast<long long>(shared_vox.size());
       }
@@ -1278,15 +1539,21 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                          .add("max_achieved_vs_target_mm", jnum(a.max_vs_target))
                          .add("max_achieved_vs_target_pct", jnum(a.max_vs_target_pct))
                          .add("max_achieved_vs_design_mm", jnum(a.max_vs_design))
-                         .add("columns_within_tolerance", jnum(static_cast<double>(a.within)))
+                         .add("band", Obj().add("min_mm", jnum(a.band.min_mm)).add("pct", jnum(a.band.pct))
+                                          .add("source", jstr(a.band.given ? "job" : "default")).str())
+                         .add("uncertainty", Obj().add("tier", jstr(a.tier)).add("band", jnum(a.tier_band))
+                                                .add("meaning", jstr("the real part may differ by this fraction of the depth")).str())
+                         .add("columns_within_band", jnum(static_cast<double>(a.within)))
                          .add("columns_unknown", jnum(static_cast<double>(a.unknown)))
                          .add("shared_voxels", jnum(static_cast<double>(a.shared)))
                          .str());
       }
-      groups_json = Obj().add("assembly", jstr("nearest_face"))
+      groups_json = Obj().add("assembly", jstr(combination_active ? "combination" : "nearest_face"))
+                        .add("estimate", jstr("1-D estimate"))
                         .add("achieved_rule", jstr("each column's depth under its own pressure through the assembled "
                                                    "field: the series sum of strain(p; rho_voxel) along its run"))
-                        .add("tolerance_mm", jstr("max(0.05, 2 % of the target) per column (provisional, Q-C2)"))
+                        .add("tolerance_mm", jstr("per group: max(band.min_mm, band.pct % of the target), per column; "
+                                                  "only columns whose own design reached its target can hit"))
                         .add("groups", jlist(gj))
                         .str();
     }
@@ -1675,6 +1942,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   }
   r.add("grams", grams_json);
   r.add("groups", groups_json);
+  r.add("combination", combination_json);
   // C2 B2, item 16: each hand's force and its split.
   if (!fx.squeeze_groups.empty()) {
     std::vector<std::string> sg;

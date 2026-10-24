@@ -70,6 +70,22 @@ flexible::StampGrid stamp_of(const Value& v, const std::string& where, bool with
 
 }  // namespace
 
+namespace {
+// C2 B2b, Q-C2: "hit_band": {"min_mm", "pct"}, both >= 0 and at least one > 0.
+JobHitBand hit_band_of(const json::Value& v, const std::string& where) {
+  if (!v.is_object()) json::fail(where, "must be an object {\"min_mm\", \"pct\"}");
+  json::reject_unknown(v, {"min_mm", "pct"}, where);
+  JobHitBand b;
+  b.given = true;
+  b.min_mm = json::as_number(json::require(v, "min_mm", where), where + ".min_mm");
+  b.pct = json::as_number(json::require(v, "pct", where), where + ".pct");
+  if (!(b.min_mm >= 0.0) || !(b.pct >= 0.0) || !std::isfinite(b.min_mm) || !std::isfinite(b.pct))
+    json::fail(where, "min_mm and pct must be >= 0");
+  if (!(b.min_mm > 0.0) && !(b.pct > 0.0)) json::fail(where, "needs min_mm > 0 or pct > 0 (a zero band hits nothing)");
+  return b;
+}
+}  // namespace
+
 std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_json_text) {
   const Value root = json::parse(job_json_text, "job.json");
   const std::string w = "flexible";
@@ -216,7 +232,7 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     }
     if (face.role != "loaded") json::fail(fw + ".role", "must be \"loaded\" or \"resting\"");
     ++loaded;
-    json::reject_unknown(fv, {"face_region_id", "face_region_ids", "press_direction", "flat_prism", "role", "skin_on",
+    json::reject_unknown(fv, {"face_region_id", "face_region_ids", "press_direction", "flat_prism", "hit_band", "role", "skin_on",
                               "frame_rotation_deg", "weight_n", "deepest_squish_mm", "mode", "curve_x",
                               "curve_y", "curve_centre_edge", "design_stamp"},
                          fw);
@@ -229,6 +245,7 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
       if (!(d.x * d.x + d.y * d.y + d.z * d.z > 0.0)) json::fail(pw, "must be non-zero");
       face.has_press_direction = true;
     }
+    if (const Value* hb = json::find(fv, "hit_band")) face.band = hit_band_of(*hb, fw + ".hit_band");
     if (const Value* fp = json::find(fv, "flat_prism")) {
       const std::string pw = fw + ".flat_prism";
       if (!fp->is_object()) json::fail(pw, "must be an object {\"apex_mm\": [x, y, z]}");
@@ -293,8 +310,9 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
       const std::string gw = w + ".squeeze_groups[" + std::to_string(gi) + "]";
       const Value& gv = gs->arr[gi];
       if (!gv.is_object()) json::fail(gw, "must be an object");
-      json::reject_unknown(gv, {"faces", "force_n"}, gw);
+      json::reject_unknown(gv, {"faces", "force_n", "hit_band"}, gw);
       JobSqueezeGroup g;
+      if (const Value* hb = json::find(gv, "hit_band")) g.band = hit_band_of(*hb, gw + ".hit_band");
       g.force_n = json::as_number(json::require(gv, "force_n", gw), gw + ".force_n");
       if (!(g.force_n > 0.0)) json::fail(gw + ".force_n", "must be > 0");
       const Value& fl = json::require(gv, "faces", gw);
@@ -323,6 +341,8 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     if (fc.squeeze_group >= 0 && fc.has_weight)
       json::fail(fw + ".weight_n", "an entry in a squeeze group takes its share of the group's force_n; it "
                                    "states no weight of its own");
+    if (fc.squeeze_group >= 0 && fc.band.given)
+      json::fail(fw + ".hit_band", "an entry in a squeeze group takes the group's hit_band");
     if (fc.squeeze_group < 0 && !fc.has_weight)
       json::fail(fw, "missing \"weight_n\" (an entry in no squeeze group states its own)");
   }

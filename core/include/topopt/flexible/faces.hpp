@@ -55,7 +55,11 @@ inline constexpr double kSameAxisDeg = 15.0;
 //                  is accepted: each face designs its pinched columns over half its run; the
 //                  receipt lists "pinches" and per face "pinched_columns"; Auto scores each
 //                  face over its own span (pinched halves, prism segments)
-inline constexpr int kPressApiVersion = 6;
+//   7  2026-10-24  C2 B2b: THE COMBINATION (his ruling on item 17): each squeeze group is its own
+//                  load case; one lattice where every group hits its "hit_band" (default
+//                  max(0.05 mm, 2 %)); groups in different hands may share material (same-axis
+//                  pairs across hands go to the combination); combination_not_reachable
+inline constexpr int kPressApiVersion = 7;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is
