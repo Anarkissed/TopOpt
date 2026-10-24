@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/face_region.hpp"     // ResolvedFaceRegion
 #include "topopt/flexible/field.hpp"  // StampGrid, SquishMap
 #include "topopt/job.hpp"             // JobDescription, JobLatticeRegion
 #include "topopt/step.hpp"
@@ -94,6 +95,10 @@ struct JobFlexible {
   std::vector<JobLatticeRegion> regions;
   std::vector<JobFlexibleFace> faces;
   std::vector<JobFlexibleCheckStamp> check_stamps;
+  // C2 B1a, item 7: "no_include_region": "whole_part" (the default: no include region =
+  // the whole part, as before) | "no_lattice" (no include region = nothing is lattice; the
+  // run refuses with code no_lattice_region).
+  bool no_include_means_no_lattice = false;
 };
 
 // Parse the `flexible` block of a whole job document. Called by parse_job (the
@@ -120,5 +125,33 @@ flexible::SquishMap squish_map_of(const JobFlexibleFace& face);
 // in the always-built library so the app can call it on every slice.
 std::vector<char> flexible_region_mask(const JobDescription& job, const StepModel& model,
                                        const VoxelGrid& grid);
+
+// C2 B1a, item 9(b): THE SURFACE FILL, the app's rule (FlexibleLatticeField.swift:836-852).
+// Core keeps a voxel only when the part encloses its centre, so where a face's last voxel
+// centre falls just outside the part (his 20 mm pad at Balanced is 19.2 voxels tall) that layer
+// is Empty and the lattice stops short of the surface. Each Empty voxel with a lattice voxel as
+// a 6-neighbour joins `mask`, unless it touches, face to face, a SOLID voxel that is not lattice
+// (an inside corner: adding it would cut a groove into a face no prism names). One pass, so a
+// fill voxel never seeds another.
+struct SurfaceFill {
+  long long added = 0;
+  long long refused_at_inside_corner = 0;
+};
+SurfaceFill flexible_fill_surface(const VoxelGrid& grid, std::vector<char>& mask);
+
+// The Flexible RUN's lattice mask: flexible_region_mask plus the surface fill.
+// flexible_region_mask itself is unchanged (the app's bridge reads it and fills for its own
+// drawing).
+std::vector<char> flexible_lattice_mask(const JobDescription& job, const StepModel& model,
+                                        const VoxelGrid& grid, SurfaceFill* fill = nullptr);
+
+// C2 B1a, item 8(a): a loaded face's OWN lattice: the job's lattice restricted to the include
+// regions that are its own (a face-prism on a region sharing a CAD face with it, and every
+// primitive include region), plus the surface fill. With no include region in the job, it is
+// the job's lattice (the whole part is everyone's). Exclusions and keep-outs always apply.
+std::vector<char> flexible_face_lattice_mask(const JobDescription& job, const StepModel& model,
+                                             const VoxelGrid& grid,
+                                             const std::vector<const ResolvedFaceRegion*>& faces,
+                                             SurfaceFill* fill = nullptr);
 
 }  // namespace topopt

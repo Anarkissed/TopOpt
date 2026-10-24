@@ -37,7 +37,13 @@ inline constexpr double kSameAxisDeg = 15.0;
 //   2  2026-10-10  the run REFUSES a shared footprint with code "shared_footprint" (receipt
 //                  and drawn maps written; `shared_footprints` in the receipt) instead of
 //                  throwing JobError; find_shared_footprints added
-inline constexpr int kPressApiVersion = 2;
+//   3  2026-10-24  C2 B1a: a column's lattice_mm is the RUN unbroken from its entry (the
+//                  app's bridge rule); the grid runs edge to edge (partial cells are
+//                  columns with their exact area); a run presses only the columns that
+//                  enter its lattice (restrict_to_lattice); two pieces of one face may be
+//                  one press; pieces are adjacent by their clipped footprints; the run's
+//                  coded refusals no_lattice_region and press_stack_failed
+inline constexpr int kPressApiVersion = 3;
 
 // THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
 // (build_press_stack, face_frame, the receipt) takes its result, so the direction is
@@ -143,6 +149,7 @@ struct Stack {
   struct FootTri {
     Vec3 a, b, c;
     int part = 0;
+    int tri = -1;  // the mesh triangle it is (two pieces of one face list it once per part)
   };
   std::vector<FootTri> foot_tris;
   std::vector<std::vector<int>> cell_tris;  // nu*nv -> indices into foot_tris
@@ -160,6 +167,10 @@ struct Stack {
   int latticed_columns = 0;               // columns with lattice_mm > 0
   double lattice_mm_min = 0.0, lattice_mm_max = 0.0, lattice_mm_mean = 0.0;
   double stack_mm_max = 0.0;              // longest entry->exit run
+  // C2 B1a, item 24: the span of the columns the curves' map covers, in frame (u, v) mm.
+  // Equal (0, 0) means the frame's whole extent [0, u_extent] x [0, v_extent].
+  double map_u0 = 0.0, map_u1 = 0.0, map_v0 = 0.0, map_v1 = 0.0;
+  int over_solid_columns = 0;  // columns restrict_to_lattice dropped (no lattice at their entry)
 
   int column_at(int iu, int iv) const {
     if (iu < 0 || iv < 0 || iu >= nu || iv >= nv) return -1;
@@ -182,6 +193,12 @@ Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
                   const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
                   const std::vector<char>& lattice_mask, int rotation_deg,
                   const Vec3& build_dir, double pitch_mm);
+
+// C2 B1a, item 24 (a column-mask press): keep only the columns whose lattice run is > 0
+// (they enter the lattice), count the rest in `over_solid_columns`, and set the map's span
+// to the kept columns' cells, so the weight and the curves are over the lattice section only.
+// Throws FlexibleError naming the region when no column enters any lattice.
+void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& regions);
 
 // Does `p` satisfy every half-space (the voxel-centre rule of face_region.hpp)?
 bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p);

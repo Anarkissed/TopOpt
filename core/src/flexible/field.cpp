@@ -223,10 +223,14 @@ std::vector<double> squish_fraction(const Stack& stack, const SquishMap& map) {
   std::vector<double> s(stack.columns.size(), 0.0);
   if (map.mode == "both" || map.mode == "either") {
     const PenCurve X(map.x_x, map.x_y), Y(map.y_x, map.y_y);
-    const double U = stack.frame.u_extent_mm, V = stack.frame.v_extent_mm;
+    // The map spans the frame, or (C2 B1a, item 24) the lattice section's columns.
+    const bool section = stack.map_u1 > stack.map_u0 || stack.map_v1 > stack.map_v0;
+    const double u0 = section ? stack.map_u0 : 0.0, v0 = section ? stack.map_v0 : 0.0;
+    const double U = section ? stack.map_u1 - stack.map_u0 : stack.frame.u_extent_mm;
+    const double V = section ? stack.map_v1 - stack.map_v0 : stack.frame.v_extent_mm;
     for (std::size_t k = 0; k < s.size(); ++k) {
-      const double x = X(U > 0 ? stack.columns[k].u_mm / U : 0.5);
-      const double y = Y(V > 0 ? stack.columns[k].v_mm / V : 0.5);
+      const double x = X(U > 0 ? std::min(1.0, std::max(0.0, (stack.columns[k].u_mm - u0) / U)) : 0.5);
+      const double y = Y(V > 0 ? std::min(1.0, std::max(0.0, (stack.columns[k].v_mm - v0) / V)) : 0.5);
       s[k] = map.mode == "both" ? x * y : std::max(x, y);
     }
     return s;

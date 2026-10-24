@@ -37,7 +37,8 @@
 <rect x="119.53" y="463.76" width="6.64" height="6.64" fill="#457b9d"/>
 <rect x="126.12" y="463.76" width="6.64" height="6.64" fill="#e9c46a"/>
 <rect x="132.71" y="463.76" width="454.64" height="6.64" fill="#2a9d8f"/>
-<rect x="587.29" y="463.76" width="13.23" height="6.64" fill="#457b9d"/>
+<rect x="587.29" y="463.76" width="6.64" height="6.64" fill="#e9c46a"/>
+<rect x="593.88" y="463.76" width="6.64" height="6.64" fill="#457b9d"/>
 <rect x="600.47" y="463.76" width="39.58" height="6.64" fill="#9b2226"/>
 <rect x="80.00" y="457.18" width="39.58" height="6.64" fill="#9b2226"/>
 <rect x="119.53" y="457.18" width="13.23" height="6.64" fill="#457b9d"/>
@@ -327,7 +328,8 @@
 <rect x="119.53" y="140.94" width="6.64" height="6.64" fill="#457b9d"/>
 <rect x="126.12" y="140.94" width="6.64" height="6.64" fill="#e9c46a"/>
 <rect x="132.71" y="140.94" width="454.64" height="6.64" fill="#2a9d8f"/>
-<rect x="587.29" y="140.94" width="13.23" height="6.64" fill="#457b9d"/>
+<rect x="587.29" y="140.94" width="6.64" height="6.64" fill="#e9c46a"/>
+<rect x="593.88" y="140.94" width="6.64" height="6.64" fill="#457b9d"/>
 <rect x="600.47" y="140.94" width="39.58" height="6.64" fill="#9b2226"/>
 <rect x="80.00" y="134.35" width="39.58" height="6.64" fill="#9b2226"/>
 <rect x="119.53" y="134.35" width="6.64" height="6.64" fill="#457b9d"/>
@@ -376,9 +378,9 @@
 <rect x="670.0" y="102.0" width="14" height="14" fill="#2a9d8f" stroke="#555555"/>
 <text x="690.0" y="114.0" >ok (measured, &lt;= 0.20 strain): 4112</text>
 <rect x="670.0" y="124.0" width="14" height="14" fill="#e9c46a" stroke="#555555"/>
-<text x="690.0" y="136.0" >extrapolated (0.20 - 0.25 strain): 54</text>
+<text x="690.0" y="136.0" >extrapolated (0.20 - 0.25 strain): 56</text>
 <rect x="670.0" y="146.0" width="14" height="14" fill="#457b9d" stroke="#555555"/>
-<text x="690.0" y="158.0" >too firm: cannot squish that deep: 172</text>
+<text x="690.0" y="158.0" >too firm: cannot squish that deep: 170</text>
 <rect x="670.0" y="168.0" width="14" height="14" fill="#e76f51" stroke="#555555"/>
 <text x="690.0" y="180.0" >too soft: cannot stay that shallow: 0</text>
 <rect x="670.0" y="190.0" width="14" height="14" fill="#9b2226" stroke="#555555"/>

@@ -542,8 +542,10 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
   const VoxelGrid grid = voxelize(model.mesh, job.resolution, VoxelTies::Watertight);
   std::vector<char> mask;
   std::vector<ResolvedFaceRegion> regions;
+  SurfaceFill surface_fill;
   try {
-    mask = flexible_region_mask(job, model, grid);
+    // C2 B1a, 9(b): the run's lattice reaches the part's surface (the app's rule).
+    mask = flexible_lattice_mask(job, model, grid, &surface_fill);
     regions = resolve_face_regions(model, job.loads.face_regions);
   } catch (const FlexibleError& e) {
     throw JobError(e.what());
@@ -583,25 +585,52 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
     }
     shared = find_shared_footprints(model.mesh, presses);  // refused below, with a code
   }
+  // C2 B1a, item 7: "no include region = no lattice", when the job says so.
+  bool any_include = false;
+  for (const JobLatticeRegion& r : fx.regions) any_include = any_include || r.role == "include";
+  const bool no_lattice_region = fx.no_include_means_no_lattice && !any_include;
+  // Each loaded entry's stack. A FACE's lattice is its OWN include regions' (item 8(a)); a
+  // PRESS's is the job's lattice (Q2: the app's run). The run then presses only the columns
+  // that enter that lattice (item 24). A stack that cannot be built is a coded refusal (27).
+  std::string stack_refusal_code, stack_refusal_reason;
+  std::vector<const JobFlexibleFace*> built;
   for (const JobFlexibleFace* f : loaded) {
+    const bool press = !f->footprint_region_ids.empty() || f->has_press_direction;
+    std::vector<const ResolvedFaceRegion*> fp;
+    if (f->footprint_region_ids.empty())
+      fp.push_back(&find_region(f->face_region_id));
+    else
+      for (int id : f->footprint_region_ids) fp.push_back(&find_region(id));
+    std::string ids;
+    for (const ResolvedFaceRegion* r : fp) ids += (ids.empty() ? "" : ", ") + std::to_string(r->id);
     try {
-      if (f->footprint_region_ids.empty() && !f->has_press_direction) {
-        stacks.push_back(build_stack(model, find_region(f->face_region_id), regions, grid, mask,
-                                     f->frame_rotation_deg, build, pitch));
-      } else {
-        // C1 addendum: an angled and/or edge/corner press — one footprint, one stack.
-        std::vector<const ResolvedFaceRegion*> fp;
-        if (f->footprint_region_ids.empty())
-          fp.push_back(&find_region(f->face_region_id));
-        else
-          for (int id : f->footprint_region_ids) fp.push_back(&find_region(id));
-        stacks.push_back(build_press_stack(model, fp, regions, grid, mask, f->frame_rotation_deg, build,
-                                           pitch, f->has_press_direction ? &f->press_direction : nullptr));
+      const std::vector<char> own =
+          press || no_lattice_region ? mask : flexible_face_lattice_mask(job, model, grid, fp);
+      Stack st = press ? build_press_stack(model, fp, regions, grid, own, f->frame_rotation_deg, build, pitch,
+                                           f->has_press_direction ? &f->press_direction : nullptr)
+                       : build_stack(model, *fp[0], regions, grid, own, f->frame_rotation_deg, build, pitch);
+      if (!no_lattice_region) {
+        try {
+          restrict_to_lattice(st, regions);
+        } catch (const FlexibleError& e) {
+          if (stack_refusal_code.empty()) {
+            stack_refusal_code = "no_lattice_under_press";
+            stack_refusal_reason = e.what();
+          }
+          continue;
+        }
       }
+      stacks.push_back(std::move(st));
+      built.push_back(f);
     } catch (const FlexibleError& e) {
-      throw JobError(e.what());
+      if (stack_refusal_code.empty()) {
+        stack_refusal_code = "press_stack_failed";
+        stack_refusal_reason = std::string(press ? "press " : "face ") + std::to_string(f->face_region_id) +
+                               " (face regions " + ids + ") cannot be stacked: " + e.what();
+      }
     }
   }
+  loaded = built;  // parallel to `stacks` again
   std::vector<const Stack*> sp;
   for (const Stack& s : stacks) sp.push_back(&s);
   const std::vector<StackConflict> conflicts = find_stack_conflicts(grid, mask, sp);
@@ -636,10 +665,17 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
 
   Recommendation rec;
   std::string refusal_code, refusal_reason;
-  if (!shared.empty()) {
-    // First: two presses sharing surface usually ALSO conflict; the sharing is the cause.
+  if (no_lattice_region) {
+    refusal_code = "no_lattice_region";
+    refusal_reason = "no include region is set, and this job says no include region means no lattice "
+                     "(\"no_include_region\": \"no_lattice\"): set a face to Lattice first";
+  } else if (!shared.empty()) {
+    // Two presses sharing surface usually ALSO conflict; the sharing is the cause.
     refusal_code = "shared_footprint";
     refusal_reason = shared_footprint_sentence(shared.front());
+  } else if (!stack_refusal_code.empty()) {
+    refusal_code = stack_refusal_code;
+    refusal_reason = stack_refusal_reason;
   } else if (!conflicts.empty()) {
     refusal_code = "one_profile_per_stack";
     refusal_reason = "faces " + std::to_string(conflicts[0].face_a) + " and " +
@@ -733,6 +769,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
       rlinks.push_back(Obj().add("face_region_id", jnum(l.id)).add("area_fraction", jnum(l.area_fraction)).str());
     fo.add("stack", Obj()
                         .add("columns", jnum(static_cast<double>(st.columns.size())))
+                        .add("columns_over_solid_not_pressed", jnum(st.over_solid_columns))
                         .add("column_pitch_mm", jnum(st.pitch_mm))
                         .add("footprint_mm2", jnum(st.footprint_area_mm2))
                         .add("latticed_columns", jnum(st.latticed_columns))
@@ -1009,6 +1046,7 @@ FlexibleRunResult run_flexible_job(const JobDescription& job, const std::string&
                                     return v;
                                   }()))
                                   .add("voxels", jnum(static_cast<double>(lattice_voxels)))
+                                  .add("surface_fill_voxels", jnum(static_cast<double>(surface_fill.added)))
                                   .add("volume_mm3", jnum(lattice_voxels * grid.voxel_volume())).str())
       .add("faces", jlist(face_json))
       .add("resting_faces", jlist(resting))

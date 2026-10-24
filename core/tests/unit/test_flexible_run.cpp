@@ -144,13 +144,18 @@ int main() {
         "{\"face_region_id\":101,\"press_direction\":[0,0,1],\"role\":\"loaded\",\"weight_n\":100,"
         "\"deepest_squish_mm\":1,\"mode\":\"both\",\"curve_x\":[[0,1],[1,1]],\"curve_y\":[[0,1],[1,1]],"
         "\"skin_on\":true}";
+    // RE-PINNED (C2 B1a, item 27, the reviewer's ruling of 2026-10-24 08:45): a press that
+    // fails to stack is a CODED refusal, not a thrown JobError. It still names the region.
     bool threw = false;
+    FlexibleRunResult ru;
     try {
-      run("up", job("varioshore_tpu", "220", "auto", "[" + up + "]"));
-    } catch (const JobError& e) {
-      threw = std::string(e.what()).find("101") != std::string::npos;
+      ru = run("up", job("varioshore_tpu", "220", "auto", "[" + up + "]"));
+    } catch (const JobError&) {
+      threw = true;
     }
-    CHECK(threw, "an outward press is refused, naming the region");
+    CHECK(!threw && ru.refused && ru.refusal_code == "press_stack_failed" &&
+              ru.refusal_reason.find("101") != std::string::npos,
+          "an outward press is refused (coded: press_stack_failed), naming the region");
   }
 
   // FOLLOW-UP (reviewer 2026-10-08). A5: the run's stacks (and its field) as VALUES, for

@@ -109,7 +109,11 @@ static void test_edge_and_corner(const Cube& c) {
             k.frame.side,
         "corner at 54.74 degrees: load stated, side press");
   const double hex = 3.0 * 3600.0 / std::sqrt(3.0);  // three faces at cos = 1/√3
-  CHECK(std::fabs(k.columns.size() - hex) <= 0.02 * hex, "corner: columns cover the projected hexagon");
+  // RE-PINNED (C2 B1a, item 25): a partial cell is a column with its exact area now, so the
+  // FOOTPRINT is the projected hexagon (it was a column count at pitch², within 2 %).
+  std::printf("  corner: %zu columns, footprint %.4f mm2 (the hexagon: %.4f)\n", k.columns.size(),
+              k.footprint_area_mm2, hex);
+  CHECK(std::fabs(k.footprint_area_mm2 - hex) <= 1e-6 * hex, "corner: the footprint is the projected hexagon");
   CHECK(std::fabs(share(k, 100) - 1.0 / 3) < 0.03 && std::fabs(share(k, 105) - 1.0 / 3) < 0.03 &&
             std::fabs(share(k, 102) - 1.0 / 3) < 0.03,
         "corner: the other end is bottom, left and front, a third each");
@@ -194,7 +198,10 @@ static void test_corner_sectors() {
   const Stack k = build_press_stack(m, {&region(rs, 301), &region(rs, 303), &region(rs, 304)}, rs, g, lat, 0, kZ,
                                     1.0, &dc);
   const double hex = 3.0 * 400.0 / std::sqrt(3.0);  // three 20x20 areas seen at cos = 1/√3
-  CHECK(veq(k.frame.load, dc) && k.frame.side && std::fabs(k.columns.size() - hex) <= 0.03 * hex,
+  // RE-PINNED (C2 B1a, item 25): the footprint area, exact (it was a column count within 3 %).
+  std::printf("  corner sectors: %zu columns, footprint %.4f mm2 (the hexagon: %.4f)\n", k.columns.size(),
+              k.footprint_area_mm2, hex);
+  CHECK(veq(k.frame.load, dc) && k.frame.side && std::fabs(k.footprint_area_mm2 - hex) <= 1e-6 * hex,
         "a corner press of three corner SECTORS: its own stack, the projected hexagon");
   CHECK(std::fabs(k.frame.area_mm2 - 1200.0) < 1e-6, "the frame is the three sectors' area (clipped), not the faces'");
   bool inside = true;
@@ -409,7 +416,9 @@ static void test_one_normaliser(const Cube& c) {
 }
 
 // A7 / A12: the press API's version, and the three functions the app calls stay public.
-static_assert(kPressApiVersion == 2, "A7: the press API version (2: the A3 refusal is a coded refusal)");
+// RE-PINNED (C2 B1a): the current version is pinned in test_flexible_b1a; here, 2 or later
+// (the A3 refusal is a coded refusal since 2).
+static_assert(kPressApiVersion >= 2, "A7: the press API version (2: the A3 refusal is a coded refusal)");
 static void test_public_surface() {
   FaceFrame (*ffc)(const TriangleMesh&, const std::vector<int>&, const std::vector<RegionCut>&, int,
                    const Vec3&, const Vec3*) = &face_frame_cut;

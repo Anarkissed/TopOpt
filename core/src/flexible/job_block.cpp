@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -74,7 +75,8 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
   const std::string w = "flexible";
   const Value& b = json::as_object(json::require(root, "flexible", "the job"), w);
   json::reject_unknown(b, {"material_id", "nozzle_temp_c", "topology", "feel", "beads_per_wall",
-                           "min_extrudable_width_mm", "regions", "faces", "check_stamps"},
+                           "min_extrudable_width_mm", "regions", "faces", "check_stamps",
+                           "no_include_region"},
                        w);
   json::require_all(b, {"material_id", "nozzle_temp_c", "topology", "feel", "beads_per_wall",
                         "min_extrudable_width_mm", "faces"},
@@ -111,6 +113,15 @@ std::shared_ptr<const JobFlexible> parse_flexible_block(const std::string& job_j
     json::fail(w + ".min_extrudable_width_mm",
                "must be > 0: it is the bead width the walls are built from, and "
                "printability is user input, never a default");
+
+  // C2 B1a, item 7.
+  if (const Value* ni = json::find(b, "no_include_region")) {
+    const std::string v = json::as_string(*ni, w + ".no_include_region");
+    if (v == "no_lattice")
+      f.no_include_means_no_lattice = true;
+    else if (v != "whole_part")
+      json::fail(w + ".no_include_region", "must be \"whole_part\" or \"no_lattice\"");
+  }
 
   // The face regions the job declares (ids only; the lattice parser checks the rest).
   std::set<int> declared;
@@ -287,10 +298,15 @@ flexible::SquishMap squish_map_of(const JobFlexibleFace& face) {
   return m;
 }
 
-std::vector<char> flexible_region_mask(const JobDescription& job, const StepModel& model,
-                                       const VoxelGrid& grid) {
-  if (!job.flexible) throw FlexibleError("flexible_region_mask: the job has no flexible block");
+namespace {
+// The lattice region's voxels. `admit` (optional) decides which INCLUDE regions count (a
+// face's own lattice, C2 B1a item 8(a)); exclusions and keep-outs always apply. When the job
+// has include regions and none is admitted, nothing is lattice.
+std::vector<char> region_mask_impl(
+    const JobDescription& job, const StepModel& model, const VoxelGrid& grid,
+    const std::function<bool(const JobLatticeRegion&, const ResolvedFaceRegion*)>* admit) {
   LatticeBoundary members;
+  bool job_has_includes = false;
   // Keep-outs: the job's clearances, resolved exactly as run_job.cpp's
   // lattice_keep_outs_from_job resolves them.
   if (job.loads.present)
@@ -331,6 +347,7 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
   bool resolved_done = false;
   for (const JobLatticeRegion& r : job.flexible->regions) {
     ClearanceGeometry g;
+    const ResolvedFaceRegion* found_region = nullptr;
     if (r.kind == "region") {
       if (!resolved_done) {
         resolved = resolve_face_regions(model, job.loads.face_regions);
@@ -342,6 +359,7 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
       if (found == nullptr)
         throw FlexibleError("flexible region names region_id " + std::to_string(r.region_id) +
                             ", which is not declared in \"loads.face_regions\"");
+      found_region = found;
       auto m = std::make_shared<ClearanceVoxelMask>();
       m->nx = grid.nx;
       m->ny = grid.ny;
@@ -383,12 +401,16 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
       g = resolve_clearance_manual(mg, p);
       if (!g.valid) continue;
     }
-    if (r.role == "include")
-      members.add_include_region(g);
-    else
+    if (r.role == "include") {
+      job_has_includes = true;
+      if (admit == nullptr || (*admit)(r, r.kind == "region" ? found_region : nullptr))
+        members.add_include_region(g);
+    } else {
       members.add_exclude_region(g);
+    }
   }
   std::vector<char> mask(grid.voxel_count(), 0);
+  if (job_has_includes && !members.has_include_regions()) return mask;  // none admitted
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
@@ -399,6 +421,81 @@ std::vector<char> flexible_region_mask(const JobDescription& job, const StepMode
         if (members.has_include_regions() && !members.in_include_region(c, 0.0)) continue;
         mask[grid.index(i, j, k)] = 1;
       }
+  return mask;
+}
+}  // namespace
+
+std::vector<char> flexible_region_mask(const JobDescription& job, const StepModel& model,
+                                       const VoxelGrid& grid) {
+  if (!job.flexible) throw FlexibleError("flexible_region_mask: the job has no flexible block");
+  bool any_include = false;
+  for (const JobLatticeRegion& r : job.flexible->regions) any_include = any_include || r.role == "include";
+  // C2 B1a, item 7: "no include region = no lattice" when the job says so.
+  if (job.flexible->no_include_means_no_lattice && !any_include)
+    return std::vector<char>(grid.voxel_count(), 0);
+  return region_mask_impl(job, model, grid, nullptr);
+}
+
+std::vector<char> flexible_face_lattice_mask(const JobDescription& job, const StepModel& model,
+                                             const VoxelGrid& grid,
+                                             const std::vector<const ResolvedFaceRegion*>& faces,
+                                             SurfaceFill* fill) {
+  if (!job.flexible) throw FlexibleError("flexible_face_lattice_mask: the job has no flexible block");
+  bool any_include = false;
+  for (const JobLatticeRegion& r : job.flexible->regions) any_include = any_include || r.role == "include";
+  if (!any_include) return flexible_lattice_mask(job, model, grid, fill);  // the whole part is everyone's
+  // A face's OWN include regions: a face-prism (kind "region") on a region that shares a CAD
+  // face with it, and every primitive include region (those name no face, so they are no one
+  // else's either).
+  const std::function<bool(const JobLatticeRegion&, const ResolvedFaceRegion*)> admit =
+      [&](const JobLatticeRegion& r, const ResolvedFaceRegion* rr) {
+        if (r.kind != "region") return true;
+        if (rr == nullptr) return false;
+        for (const ResolvedFaceRegion* f : faces)
+          for (int a : f->member_faces)
+            if (std::find(rr->member_faces.begin(), rr->member_faces.end(), a) != rr->member_faces.end())
+              return true;
+        return false;
+      };
+  std::vector<char> mask = region_mask_impl(job, model, grid, &admit);
+  const SurfaceFill sf = flexible_fill_surface(grid, mask);
+  if (fill != nullptr) *fill = sf;
+  return mask;
+}
+
+SurfaceFill flexible_fill_surface(const VoxelGrid& grid, std::vector<char>& mask) {
+  SurfaceFill out;
+  if (mask.size() != grid.voxel_count()) return out;
+  const std::vector<char> lat = mask;  // one pass: a fill voxel never seeds another
+  const int d[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (grid.solid(i, j, k)) continue;  // only voxels core left Empty
+        bool by_lattice = false, by_solid = false;
+        for (const auto& o : d) {
+          const int a = i + o[0], b = j + o[1], c = k + o[2];
+          if (a < 0 || b < 0 || c < 0 || a >= grid.nx || b >= grid.ny || c >= grid.nz) continue;
+          const std::size_t n = grid.index(a, b, c);
+          if (lat[n]) by_lattice = true;
+          else if (grid.solid(a, b, c)) by_solid = true;
+        }
+        if (!by_lattice) continue;
+        if (by_solid) {
+          ++out.refused_at_inside_corner;
+          continue;
+        }
+        mask[grid.index(i, j, k)] = 1;
+        ++out.added;
+      }
+  return out;
+}
+
+std::vector<char> flexible_lattice_mask(const JobDescription& job, const StepModel& model,
+                                        const VoxelGrid& grid, SurfaceFill* fill) {
+  std::vector<char> mask = flexible_region_mask(job, model, grid);
+  const SurfaceFill sf = flexible_fill_surface(grid, mask);
+  if (fill != nullptr) *fill = sf;
   return mask;
 }
 
