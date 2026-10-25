@@ -20,7 +20,7 @@ public struct RootView: View {
         ZStack {
             switch model.screen {
             case .home:
-                HomeView(model: model)
+                LibraryRootView(model: model)
             case .workspace:
                 if let project = model.project {
                     WorkspacePlaceholder(model: model, project: project)

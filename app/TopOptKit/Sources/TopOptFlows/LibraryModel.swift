@@ -53,7 +53,7 @@ public final class LibraryModel: ObservableObject {
     /// One picture per result, rendered from its mesh.
     @Published public private(set) var thumbnails: [CompareItem: CGImage] = [:]
     /// The project the next new part joins (the import sheet's Project row). Used once.
-    public var importTargetProject: UUID?
+    @Published public var importTargetProject: UUID?
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
     /// The last few versions' decoded results (each can be tens of MB).
@@ -380,10 +380,21 @@ public final class LibraryModel: ObservableObject {
     /// its part's newest 2 versions with results.
     public func keepsAllResults(_ folder: UUID) -> Bool {
         guard let v = version(folder) else { return true }
+        if let his = v.keepAll { return his }
         if v.marks.contains(where: { $0.stars >= 4 || $0.printThis }) { return true }
         guard let part = index.part(containing: folder) else { return true }
         let newest = part.versions.filter { !isDraft($0) }.sorted { $0.number > $1.number }.prefix(2)
         return newest.contains { $0.folderID == folder }
+    }
+
+    /// His Storage switch for one version (nil = the rule again).
+    public func setKeepAll(_ on: Bool?, folder: UUID) { edit(folder) { $0.keepAll = on } }
+
+    /// The versions Trim would take: optimized, more than one result, not kept by the rule or by him.
+    public var trimmable: [LibraryVersion] {
+        index.parts.flatMap(\.versions).filter { v in
+            v.trimmed != true && !isDraft(v) && (v.summary?.count ?? 0) > 1 && !keepsAllResults(v.folderID)
+        }
     }
 
     /// Keep only the result he picked (his tap on Storage, never by itself).

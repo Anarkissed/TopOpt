@@ -165,6 +165,8 @@ public final class AppModel: ObservableObject {
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
     private let store: ProjectStore
+    /// The Library: Project → Part → Version over the same store (approved Library mockup, 2026-10-25).
+    public let library: LibraryModel
     /// App-wide print-preset persistence (separate from per-project `store`).
     private let presetStore: PrintParamsPresetStore
     private let now: () -> Date
@@ -213,6 +215,7 @@ public final class AppModel: ObservableObject {
         self.inspector = inspector
         self.rescaler = rescaler
         self.store = store
+        self.library = LibraryModel(store: store)
         self.presetStore = presetStore
         self.now = now
         self.remoteJobDefaults = remoteJobDefaults
@@ -795,6 +798,7 @@ public final class AppModel: ObservableObject {
         // them managed between that check and its write — a deleted project never comes back.
         let s = store
         Self.resultsQueue.async { s.delete(id: id) }
+        library.refresh()   // Library: the version's entry goes with its folder
     }
 
     // MARK: - Recents / navigation
@@ -837,6 +841,7 @@ public final class AppModel: ObservableObject {
         if printParamsSheetPresented { closePrintParams() }
         persistCurrentProject()
         screen = .home
+        library.refresh()   // Library: file what changed (a new version, a new part)
     }
 
     // MARK: - Cold-launch remote re-attach (handoff 119)

@@ -110,6 +110,8 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     /// Storage trimmed this version to the result he picked (its other results are gone; Re-run brings
     /// them back). nil = never trimmed.
     public var trimmed: Bool?
+    /// His switch on Storage: true keeps all results, false lets Trim take them; nil follows the rule.
+    public var keepAll: Bool?
 
     public init(folderID: UUID, number: Int, parentNumber: Int? = nil, name: String? = nil,
                 changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,
