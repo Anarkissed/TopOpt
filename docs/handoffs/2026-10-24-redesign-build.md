@@ -183,3 +183,12 @@ CORE (core/src/cli/job.cpp, read only)
   id (job.cpp:2548-2554, `r.face_id`), so a cut or painted piece on a LATTICE stage loses that tie and its receipt. Not worked
   around in the app; waits for core to key them by region as well.
 
+
+## Known failing tests at the push (2855e224; full suite 2,849 tests, 6 failures, none new; reviewer ruling 2026-10-25 00:38)
+Pre-existing, accepted on 5f8954b3, not fixed now:
+- AppModelTests: testReopenedThreeMFProjectReimportsTheStlWorkingCopy, testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance,
+  testThreeMFImportOptimisesOnDeviceEndToEnd. This worktree's macOS core slice has no lib3mf.
+- LatticeCellGradingTests.testGradingChangesTheRenderedLattice: 298 vs 500 (documented since 2026-09-28).
+- OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces and OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology:
+  stale premise. 7012584d (2026-09-10) put the strut width into OrganicSampleCube.Picks and the variant-cache key on
+  purpose (node_merge had collapsed the thin trace, 4,199 struts to 61). Re-pin when the organic work resumes.
