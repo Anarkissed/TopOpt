@@ -853,6 +853,8 @@ if(Eigen3_FOUND)
   add_executable(test_mg_safe_retry tests/unit/test_mg_safe_retry.cpp)
   target_link_libraries(test_mg_safe_retry PRIVATE topopt)
   target_include_directories(test_mg_safe_retry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(test_mg_safe_retry PRIVATE
+    MG_SAFE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mg_safe")
   add_test(NAME fea_mg_safe_retry COMMAND test_mg_safe_retry)
 
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
