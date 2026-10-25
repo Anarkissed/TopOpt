@@ -3,60 +3,14 @@
 // WorkspacePlaceholder: [‹ Topology] [Surface] on the Flexible lattice stage, [‹ Flexible] on
 // Surface, through #354's own `stageNavButton` (identical chrome; an optional title).
 // RED CONTROL: #354's Surface stage reaches the lattice only through Topology.
+// ★ SYNC #354 (89af86dd) A4: B5 (3f293974) deleted the Surface stage, and with it H9's subject (the [Surface] button beside
+// [‹ Topology] and the [‹ Flexible] way back). testTheHookIsInPlace and
+// testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible are RETIRED; the one test whose lines are still
+// there (re-entering the lattice stage never re-pops Settings) stays.
 import XCTest
 @testable import TopOptFlows
 
 final class FlexibleSurfaceNavTests: XCTestCase {
-
-    func testTheHookIsInPlace() throws {
-        let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
-        for pin in ["HStack(spacing: PageChrome.gap) { stageNavButton(to: back, icon: \"chevron.left\"); if let x = FlexibleStageNav.extra(stage, flexible: project.lattice.flexible != nil) { stageNavButton(to: x.dest, icon: x.icon, title: x.title) } }",
-                    "private func stageNavButton(to dest: WorkspaceStage, icon: String, title: String? = nil) -> some View {",
-                    "Text(title ?? dest.title)"] {
-            XCTAssertEqual(ws.components(separatedBy: pin).count - 1, 1, "H9 must appear exactly once: \(pin)")
-        }
-        // the HStack keeps the back button's keep-out and placement
-        let h = try XCTUnwrap(ws.range(of: "HStack(spacing: PageChrome.gap) { stageNavButton(to: back,"))
-        let after = String(ws[h.upperBound...].prefix(600))
-        XCTAssertTrue(after.contains(".latticeBandChipKeepOut()\n                .modifier(StageNavPlacement(stage: stage))"))
-        // ★ BATCH C VERIFICATION: the extra buttons are what they say — [‹ Flexible] is never
-        // gated like the octet's Lattice entry (a Flexible part with no main-page anchor got a
-        // disabled "Flexible — needs …"), VoiceOver reads its title (it read "Lattice"), and the
-        // extra [Surface] has its own id beside #354's forward Surface (two "stage-nav-surface")
-        let fn = try XCTUnwrap(ws.range(of: "private func stageNavButton(to dest: WorkspaceStage, icon: String, title: String? = nil) -> some View {"))
-        let body = String(ws[fn.upperBound...].prefix(3200))
-        XCTAssertTrue(body.contains("let enabled = dest != .lattice || title != nil || entry.enabled"))
-        XCTAssertTrue(body.contains(".accessibilityIdentifier(\"stage-nav-\\(dest.rawValue)\\(title == nil ? \"\" : \"-flexible\")\")"))
-        XCTAssertTrue(body.contains(".accessibilityLabel(enabled ? (title ?? dest.title)"))
-        // ★ RED CONTROL: #354's own lines, which the edits replaced
-        XCTAssertFalse(body.contains("let enabled = dest != .lattice || entry.enabled\n"), "control: the octet gate alone is gone")
-        XCTAssertFalse(body.contains(".accessibilityLabel(enabled ? dest.title\n"), "control: the destination's title alone is gone")
-    }
-
-    // MARK: H9 — the Surface button on the main Flexible page, and the way back
-
-    func testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible() throws {
-        // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed the Surface stage. It is read by its raw value,
-        // so this test goes RED (not silently green) until P5 retires it with H9.
-        let surface = try XCTUnwrap(WorkspaceStage(rawValue: "surface"), "B5 removed the Surface stage (P5 retires H9 and this test)")
-        let s = FlexibleStageNav.extra(.lattice, flexible: true)
-        XCTAssertEqual(s?.dest, surface)
-        XCTAssertEqual(s?.icon, WorkspacePlaceholder.stageIcon(surface), "identical chrome: the stage's own glyph")
-        XCTAssertEqual(s?.title, "Surface")
-        let back = FlexibleStageNav.extra(surface, flexible: true)
-        XCTAssertEqual(back?.dest, .lattice)
-        XCTAssertEqual(back?.icon, "chevron.left")
-        XCTAssertEqual(back?.title, "Flexible")
-        XCTAssertNil(FlexibleStageNav.extra(.topology, flexible: true))
-        XCTAssertNil(FlexibleStageNav.extra(.lattice, flexible: false), "Structural / Aesthetic keep #354's row")
-        XCTAssertNil(FlexibleStageNav.extra(surface, flexible: false))
-        // #354's enum is untouched (SurfaceStageTests pins it too)
-        XCTAssertEqual(WorkspaceStage.lattice.forward, [surface])
-        XCTAssertEqual(surface.back, .topology)
-        // ★ RED CONTROL: without the extra, Surface has no one-tap way back to Flexible
-        XCTAssertTrue(surface.forward.isEmpty && surface.back != .lattice,
-                      "control: #354's Surface stage reaches the lattice only through Topology")
-    }
 
     /// The return from Surface does not re-pop Settings: re-entering the lattice stage opens
     /// Settings only while nothing was saved this session, and Settings' Exit says it was.
