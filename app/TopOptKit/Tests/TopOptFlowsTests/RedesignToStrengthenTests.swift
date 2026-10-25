@@ -12,7 +12,12 @@
 //       [{3.75, 1.21, 3, false}] — no real report carries it yet, README "Not in any real report yet");
 //   (4) on device the strengthen choice is disabled with ONE line, "Runs on your Mac";
 //   (5) the report reaches the results screen (OptimizeOutcome.reportJSON → ResultsModel);
-//   (6) every H56 hook in a shared file, pinned once with its gate, and a red control.
+//   (6) every H56 hook in a shared file, pinned once with its gate, and a red control;
+//   (7) H56k: a "merged" version (core writes no variants[] line for it) reads BRIDGED from the line of the version
+//       it merged into (its note: "the same design as version N", N = this version − 1);
+//   (8) H56l: the cap's line is built from cap.at_anchor_face / cap.at_load_face, never from cap.note (it names a face);
+//   (9) H56m: "Redesign to strengthen" on the worker with no design box is refused in the app, "Draw a design box first"
+//       (it used to ship no redesign key and run the growth job silently).
 
 import XCTest
 import simd
@@ -169,6 +174,123 @@ final class RedesignToStrengthenTests: XCTestCase {
         }
     }
 
+    // MARK: (7) H56k: a "merged" version reads BRIDGED from the previous version's line
+
+    /// strengthen_pass's real report, edited: `edit` changes its parsed JSON before it is decoded.
+    static func edited(_ name: String, _ edit: (inout [String: Any]) -> Void) throws -> RunReportBlocks {
+        var r = try XCTUnwrap(try JSONSerialization.jsonObject(with: try reportData(name)) as? [String: Any])
+        edit(&r)
+        return RunReportBlocks.decode(report: r)
+    }
+
+    /// Core writes NO variants[] line for a "merged" version (run_job.cpp strengthen_versions: `continue` before
+    /// append_rung; its note "the same design as version N", N = this version − 1; its own volume_fraction is within
+    /// 1 % of that line's, never equal). strengthen_pass edited: v2 merged at v1's fraction × 1.004, v3 merged after it
+    /// ("the same design as version 2"); v1's line carries `bodies.bridges` = `bridges`.
+    static func mergedReport(bridges: Int) throws -> RunReportBlocks {
+        try edited("strengthen_pass") { r in
+            var s = r["strengthen"] as! [String: Any]
+            var vs = s["versions"] as! [[String: Any]]
+            let vf1 = (vs[0]["volume_fraction"] as! NSNumber).doubleValue
+            for (i, k) in [(1, 1.004), (2, 1.006)] {
+                vs[i]["status"] = "merged"; vs[i]["volume_fraction"] = vf1 * k
+                vs[i]["verified_margin"] = 11.8; vs[i]["mass_grams"] = 8.3; vs[i]["mass_fraction_of_original"] = 1.67
+                vs[i]["note"] = "the same design as version \(i)"
+            }
+            s["versions"] = vs; r["strengthen"] = s
+            var variants = r["variants"] as! [[String: Any]]
+            variants[0]["bodies"] = ["exported": 1, "anchored_pieces_lost": 0, "lost_anchor_face_ids": [Int](),
+                                     "bridges": bridges, "bridge_voxels": 12 * bridges, "bridge_holds": [[String: Any]]()]
+            r["variants"] = variants
+        }
+    }
+
+    func testAMergedVersionReadsBridgedFromThePreviousVersionsLine() throws {
+        let b = try Self.mergedReport(bridges: 1)
+        XCTAssertEqual(b.rows.count, 1, "core wrote one line: version 1's")
+        XCTAssertEqual(b.strengthen?.versions.map(\.status), ["verified", "merged", "merged"])
+        let cards = StrengthenText.cards(b)
+        XCTAssertEqual(cards.map(\.bridged), [true, true, true], "a merged version is version N's design, so its badge")
+        XCTAssertEqual(cards[1].status, "Merged")
+        XCTAssertEqual(cards[1].lines.last, "the same design as version 1")
+        // the control: the same report with no bridge reads no badge anywhere
+        XCTAssertEqual(StrengthenText.cards(try Self.mergedReport(bridges: 0)).map(\.bridged), [false, false, false])
+    }
+
+    func testAMergedVersionReadsTheVersionJustBeforeItNotTheFirst() throws {
+        // v1 verified (no line edited in: its own fraction moves away), v2 verified and bridged, v3 merged into v2.
+        let b = try Self.edited("strengthen_pass") { r in
+            var s = r["strengthen"] as! [String: Any]
+            var vs = s["versions"] as! [[String: Any]]
+            vs[0]["volume_fraction"] = 0.40
+            vs[1] = vs[2]; vs[1]["version"] = 2; vs[1]["stress_cut"] = 0.5
+            vs[1]["status"] = "verified"; vs[1]["volume_fraction"] = 0.60; vs[1]["note"] = ""
+            vs[2]["status"] = "merged"; vs[2]["volume_fraction"] = 0.603; vs[2]["note"] = "the same design as version 2"
+            s["versions"] = vs; r["strengthen"] = s
+            var row = (r["variants"] as! [[String: Any]])[0]
+            var rows: [[String: Any]] = []
+            row["volume_fraction"] = 0.40; row["printed_fraction"] = 0.40; row["bodies"] = nil; rows.append(row)
+            row["volume_fraction"] = 0.60; row["printed_fraction"] = 0.60
+            row["bodies"] = ["exported": 1, "bridges": 2, "bridge_voxels": 30, "bridge_holds": [[String: Any]]()]
+            rows.append(row)
+            r["variants"] = rows
+        }
+        XCTAssertEqual(StrengthenText.cards(b).map(\.bridged), [false, true, true], "v3 is v2's design, not v1's")
+    }
+
+    // MARK: (8) H56l: the cap's line, from its flags — never its note
+
+    func testTheCapLineIsBuiltFromItsFlagsNeverItsNote() throws {
+        func capped(anchor: Bool, load: Bool, note: String? = nil) throws -> RunReportBlocks {
+            try Self.edited("strengthen_pass") { r in
+                var s = r["strengthen"] as! [String: Any]
+                var cap = s["cap"] as! [String: Any]
+                cap["at_anchor_face"] = anchor; cap["at_load_face"] = load
+                if let note { cap["note"] = note }
+                s["cap"] = cap; r["strengthen"] = s
+            }
+        }
+        let anchor = "The strongest possible version is limited at an anchor"
+        let load = "The strongest possible version is limited at the load"
+        // TO-core's real reports: both caps sit at the edge of an anchor face (at_anchor_face true)
+        for name in ["strengthen_pass", "strengthen_fail"] {
+            let b = try Self.blocks(name)
+            XCTAssertEqual(StrengthenText.capLine(b), anchor, name)
+            XCTAssertEqual(StrengthenText.lines(b), [anchor], "\(name): the cards view shows it")
+        }
+        XCTAssertEqual(StrengthenText.capLine(try capped(anchor: false, load: true)), load)
+        XCTAssertNil(StrengthenText.capLine(try capped(anchor: false, load: false)), "neither: no line")
+        XCTAssertEqual(StrengthenText.lines(try capped(anchor: false, load: false)), [])
+        // core's own precedence (run_job.cpp: the anchor's words when both are true)
+        XCTAssertEqual(StrengthenText.capLine(try capped(anchor: true, load: true)), anchor)
+        // the note is never read: a note that says "load face 9" with only the anchor flag set is still the anchor
+        XCTAssertEqual(StrengthenText.capLine(try capped(anchor: true, load: false,
+                                                         note: "peaks on face 9, at the edge of a load face")), anchor)
+        XCTAssertEqual(StrengthenText.capLine(try capped(anchor: false, load: false,
+                                                         note: "at the edge of an anchor face")), nil)
+        XCTAssertNil(StrengthenText.capLine(try Self.blocks("bridged_held")), "no strengthen block: no line")
+        // item 47's line still follows it, once
+        let both = try Self.edited("anchored_detached_readme_shape") { r in
+            r["strengthen"] = (try? JSONSerialization.jsonObject(with: Self.reportData("strengthen_pass")) as? [String: Any])?["strengthen"]
+        }
+        XCTAssertEqual(StrengthenText.lines(both), [anchor, "This version let go of an anchored bolt hole"])
+        XCTAssertFalse(StrengthenText.lines(both).joined().lowercased().contains("face"))
+    }
+
+    // MARK: (9) H56m: strengthen with no design box is refused in the app, in one line
+
+    func testStrengthenWithNoDesignBoxIsRefusedOnTheWorker() {
+        XCTAssertEqual(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: nil), workerSelected: true),
+                       "Draw a design box first", "no box: refused, never the growth job in its place")
+        XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: Self.box), workerSelected: true))
+        XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: true, box: nil), workerSelected: true),
+                     "minimize plastic needs no box")
+        XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: nil, jobMode: "lattice_part"),
+                                             workerSelected: true), "the lattice run is not the strengthen redesign")
+        XCTAssertNil(StrengthenRoute.refusal(for: Self.request(minimizePlastic: false, box: nil), workerSelected: false),
+                     "on device the strengthen redesign is not offered (Runs on your Mac); the device run is unchanged")
+    }
+
     // MARK: (4) on device: ONE line
 
     func testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine() {
@@ -219,6 +341,7 @@ final class RedesignToStrengthenTests: XCTestCase {
     static let rs = src + "TopOptFlows/ResultsScreen.swift"
     static let run = src + "TopOptFlows/RunScreen.swift"
     static let ws = src + "TopOptFlows/WorkspacePlaceholder.swift"
+    static let r2s = src + "TopOptFlows/RedesignToStrengthen.swift"
     static let tag = "// Flexible (PR #362) H56"
     static let why = "redesign to strengthen (overnight plan 2026-10-25)"
 
@@ -248,6 +371,12 @@ final class RedesignToStrengthenTests: XCTestCase {
         Hook(id: "H56h-cards", file: run, pin: "                        if let blocks { RunReportCardsView(blocks: blocks) }   // Flexible (PR #362) H56h: \(why) — the versions' cards + item 47's line\n", gate: "RunReportCardsView(blocks: blocks)"),
         Hook(id: "H56i", file: ws, pin: "        run.start(isRemote ? request.forWorker() : request, remote: isRemote, workerName: compute.selectedWorkerName)   // Flexible (PR #362) H56i: \(why) — loads.redesign on the Mac worker only\n", gate: "isRemote ? request.forWorker() : request"),
         Hook(id: "H56j-line", file: ws, pin: "        let macOnly = StrengthenRoute.line(workerSelected: compute.activeRemote != nil)   // Flexible (PR #362) H56j: \(why) — on device: Runs on your Mac\n", gate: "StrengthenRoute.line(workerSelected: compute.activeRemote != nil)"),
+        Hook(id: "H56k-own", file: r2s, pin: "            let own = lineVersion(of: v, in: s)   // Flexible (PR #362) H56k: \(why) — a merged version reads the line of the version it merged into\n", gate: "lineVersion(of: v, in: s)"),
+        Hook(id: "H56k-walk", file: r2s, pin: "        return s.versions.last { $0.version < v.version && $0.status != \"merged\" && $0.status != \"unreachable\" } ?? v   // Flexible (PR #362) H56k: \(why) — the previous version's line (N = this version − 1, merged ones walked back)\n", gate: "$0.status != \"merged\""),
+        Hook(id: "H56l-line", file: r2s, pin: "        return cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil   // Flexible (PR #362) H56l: \(why) — the cap's line from its flags, never its note\n", gate: "cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil"),
+        Hook(id: "H56l-view", file: r2s, pin: "        lines = StrengthenText.lines(blocks)   // Flexible (PR #362) H56l: \(why) — the cap's line, then item 47's\n", gate: "StrengthenText.lines(blocks)"),
+        Hook(id: "H56m-rule", file: r2s, pin: "        workerSelected && request.jobMode == \"minimize_plastic\" && !request.minimizePlastic && request.designBox == nil ? noBoxLine : nil   // Flexible (PR #362) H56m: \(why) — no design box: refused, never the growth job in its place\n", gate: "request.designBox == nil ? noBoxLine"),
+        Hook(id: "H56m-start", file: ws, pin: "        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // Flexible (PR #362) H56m: \(why) — no design box: one line, nothing sent\n", gate: "StrengthenRoute.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }"),
         Hook(id: "H56j-tap", file: ws, pin: "        return Button { if project.minimizePlastic, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }; project.minimizePlastic.toggle() } label: {   // Flexible (PR #362) H56j: \(why) — the strengthen choice, disabled on device\n", gate: "model.toast = StrengthenRoute.onDeviceToast; return"),
     ]
 
@@ -279,7 +408,7 @@ final class RedesignToStrengthenTests: XCTestCase {
 
     func testEveryH56HookIsPinnedOnceWithItsGate() throws {
         XCTAssertEqual(Self.failures(try files()), [])
-        XCTAssertEqual(Set(Self.hooks.map { String($0.id.prefix(4)) }), Set(["H56a", "H56b", "H56c", "H56d", "H56e", "H56f", "H56g", "H56h", "H56i", "H56j"]))
+        XCTAssertEqual(Set(Self.hooks.map { String($0.id.prefix(4)) }), Set(["H56a", "H56b", "H56c", "H56d", "H56e", "H56f", "H56g", "H56h", "H56i", "H56j", "H56k", "H56l", "H56m"]))
     }
 
     func testAGateRemovedCopyGoesRed() throws {

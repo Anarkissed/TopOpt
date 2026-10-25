@@ -45,6 +45,17 @@ public enum StrengthenRoute {
     /// in the strengthen mode (Minimize plastic off) that carries a design box (core rebuilds
     /// the part inside it and refuses the key without one); "" otherwise, so the job is
     /// byte-identical to one written before this key existed.
+    /// THE ONE LINE the app shows when "Redesign to strengthen" would go to the worker with no design box.
+    public static let noBoxLine = "Draw a design box first"
+
+    /// Why the Mac worker may not start this request, or nil. Core rebuilds the part INSIDE the design box and
+    /// refuses `redesign` without one, so a strengthen run with no box used to ship no key and silently run the
+    /// growth job instead (`redesign(for:)` below). Now it is refused in the app, in one line, before the send. On
+    /// device the strengthen redesign is not offered (`line(workerSelected:)`), so the device run is unchanged.
+    public static func refusal(for request: RunRequest, workerSelected: Bool) -> String? {
+        workerSelected && request.jobMode == "minimize_plastic" && !request.minimizePlastic && request.designBox == nil ? noBoxLine : nil   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: refused, never the growth job in its place
+    }
+
     public static func redesign(for request: RunRequest) -> String {
         request.jobMode == "minimize_plastic" && !request.minimizePlastic && request.designBox != nil
             ? redesignValue : ""
@@ -97,7 +108,8 @@ public struct VariantBodies: Equatable, Sendable {
 
 /// The top-level `strengthen` block (TO-core item 50).
 public struct StrengthenReport: Equatable, Sendable {
-    /// Where the box filled solid peaks (`cap`). Parsed, not printed: its note names a face.
+    /// Where the box filled solid peaks (`cap`). Its note names a face, so it is never parsed or printed: the line
+    /// is built from `atAnchorFace` / `atLoadFace` (`StrengthenText.capLine`).
     public struct Cap: Equatable, Sendable {
         public let faceID: Int
         public let point: [Double]
@@ -220,6 +232,15 @@ public enum StrengthenText {
 
     static func percent(_ fraction: Double) -> String { String(format: "%.0f", fraction * 100) }
 
+    /// The version whose variants[] line `v` reads. Core writes NO line for a "merged" version (run_job.cpp
+    /// strengthen_versions: `continue` before append_rung; note "the same design as version N", N = this version − 1,
+    /// and its own volume_fraction is only within 1 % of that line's). It is the design of the last earlier version
+    /// that got a line (core's `prev_vf`: verified or repaired), so walk back over merged (and unreachable) versions.
+    static func lineVersion(of v: StrengthenReport.Version, in s: StrengthenReport) -> StrengthenReport.Version {
+        guard v.status == "merged" else { return v }
+        return s.versions.last { $0.version < v.version && $0.status != "merged" && $0.status != "unreachable" } ?? v   // Flexible (PR #362) H56k: redesign to strengthen (overnight plan 2026-10-25) — the previous version's line (N = this version − 1, merged ones walked back)
+    }
+
     /// The cards, one per version, in core's order.
     public static func cards(_ blocks: RunReportBlocks) -> [StrengthenCard] {
         guard let s = blocks.strengthen else { return [] }
@@ -233,12 +254,29 @@ public enum StrengthenText {
                              + percent(v.massFractionOfOriginal) + " % of the original")
                 if !v.note.isEmpty { lines.append(plain(v.note)) }
             }
-            let bridged = v.status != "unreachable" && blocks.rows.contains {
-                abs($0.volumeFraction - v.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
+            let own = lineVersion(of: v, in: s)   // Flexible (PR #362) H56k: redesign to strengthen (overnight plan 2026-10-25) — a merged version reads the line of the version it merged into
+            let bridged = own.status != "unreachable" && blocks.rows.contains {
+                abs($0.volumeFraction - own.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
             }
             return StrengthenCard(title: "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress",
                                   status: statusWord(v.status), lines: lines, bridged: bridged)
         }
+    }
+
+    public static let capAnchorLine = "The strongest possible version is limited at an anchor"
+    public static let capLoadLine = "The strongest possible version is limited at the load"
+
+    /// Where the box filled solid peaks, in plain words — built from `cap.at_anchor_face` / `cap.at_load_face` ONLY.
+    /// `cap.note` is never parsed (it names a face). Both true: the anchor's words, core's own precedence
+    /// (run_job.cpp, the cap note). Neither: no line.
+    public static func capLine(_ blocks: RunReportBlocks) -> String? {
+        guard let cap = blocks.strengthen?.cap else { return nil }
+        return cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil   // Flexible (PR #362) H56l: redesign to strengthen (overnight plan 2026-10-25) — the cap's line from its flags, never its note
+    }
+
+    /// The lines under the cards: the cap's line, then the run's rejection lines.
+    public static func lines(_ blocks: RunReportBlocks) -> [String] {
+        [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks)
     }
 
     /// The run's rejection lines in plain words (item 47), once each.
@@ -265,7 +303,7 @@ public struct RunReportCardsView: View {
 
     public init(blocks: RunReportBlocks) {
         cards = StrengthenText.cards(blocks)
-        lines = StrengthenText.rejectionLines(blocks)
+        lines = StrengthenText.lines(blocks)   // Flexible (PR #362) H56l: redesign to strengthen (overnight plan 2026-10-25) — the cap's line, then item 47's
     }
 
     public var body: some View {

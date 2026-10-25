@@ -1795,6 +1795,7 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
+        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
         lastRunRequest = request   // Optimize greys out until the inputs change
         // Pick the runner for THIS run from the compute-location choice. A remote
         // config (a worker was selected + resolved) offloads to the LAN worker;
