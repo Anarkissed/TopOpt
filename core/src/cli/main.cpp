@@ -18,6 +18,7 @@
 #include <string>
 
 #include "topopt/job.hpp"
+#include "topopt/flexible/run.hpp"  // `flexible` subcommand
 #include "topopt/materials.hpp"
 #include "topopt/part.hpp"
 #include "topopt/settings.hpp"
@@ -88,6 +89,13 @@ int usage(const char* argv0) {
                "  snapshots/*.f16    float16 density snapshots (opt-in "
                "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
                argv0, argv0, argv0, argv0, argv0);
+  std::fprintf(stderr,
+               "       %s flexible <job.json> [--out DIR] [--flexible-materials PATH]\n"
+               "         the FLEXIBLE stage's squish maths (a job with a \"flexible\"\n"
+               "         block): per loaded face, SVG heat maps + a CSV of columns, and\n"
+               "         run_info.json with the `flexible` receipt. Exit 0 = ran,\n"
+               "         3 = the stage REFUSED (reason printed and in the receipt).\n",
+               argv0);
   return 2;
 }
 
@@ -332,6 +340,47 @@ std::string dirname_of(const std::string& path) {
 
 }  // namespace
 
+#ifndef TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS
+#define TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS "flexible_materials.json"
+#endif
+
+// `flexible` subcommand (task 2026-09-28-flexible-squish-maths): run a job's
+// flexible block. Exit 0 = ran, 3 = the stage refused, 1 = error, 2 = usage.
+static int run_flexible(int argc, char** argv) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  std::string flex_path = TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out")
+      out_dir = argv[++i];
+    else if (arg == "--flexible-materials")
+      flex_path = argv[++i];
+    else
+      return usage(argv[0]);
+  }
+  try {
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    const topopt::FlexibleProvenance prov{topopt::version(), TOPOPT_BUILD_FINGERPRINT,
+                                          __DATE__ " " __TIME__};
+    const topopt::FlexibleRunResult r =
+        topopt::run_flexible_job(job, dirname_of(job_path), out_dir, flex_path, prov);
+    for (const std::string& f : r.files) std::printf("wrote %s\n", f.c_str());
+    if (r.refused) {
+      std::printf("flexible: REFUSED (%s): %s\n", r.refusal_code.c_str(),
+                  r.refusal_reason.c_str());
+      return 3;
+    }
+    std::printf("flexible: ran; receipt in %s/run_info.json\n", out_dir.c_str());
+    return 0;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
+}
+
 int main(int argc, char** argv) {
   // ── ★★ SAY WHICH BINARY THIS IS, ON EVERY SUBCOMMAND ──────────────────────
   // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time: it answers "which
@@ -343,6 +392,13 @@ int main(int argc, char** argv) {
   // so a stale binary announces itself before it does any work.
   std::fprintf(stderr, "topopt-cli: core %s, built %s %s\n",
                TOPOPT_BUILD_FINGERPRINT, __DATE__, __TIME__);
+  // ★ AND STATE IT TO THE LIBRARY, BEFORE ANY DISPATCH. `analyze` (below),
+  // `preflight` and `lattice-variant` all return before the RunObservability further
+  // down is built, and both `analyze_job` and `lattice_variant_job` used to construct
+  // a DEFAULT one for their receipt -- so their run_info.json said
+  // fingerprint "unknown" on every run. Stated here, once, so no receipt path has to
+  // remember it and there is no second copy of these two macros anywhere.
+  topopt::set_build_identity(TOPOPT_BUILD_FINGERPRINT, __DATE__ " " __TIME__);
   // Version / build fingerprint, one parseable line, for the worker /health probe.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
@@ -362,6 +418,8 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "lattice-variant")
     return run_lattice_variant(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
                                TOPOPT_CLI_DEFAULT_RULES);
+  // `flexible` — the Flexible stage's squish maths (flexible/run.hpp).
+  if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
@@ -383,8 +441,14 @@ int main(int argc, char** argv) {
   // the question "which core did that run use" is answered by the run itself rather
   // than by `strings` after the fact.
   topopt::RunObservability obs;
-  obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
-  obs.build_time = __DATE__ " " __TIME__;
+  // ★ ONE SOURCE (reviewer, 2026-10-02). These two lines used to restate
+  // TOPOPT_BUILD_FINGERPRINT and __DATE__/__TIME__ -- a SECOND route to the same two
+  // values, so `run` stamped its receipt from here while `analyze` and
+  // `lattice-variant` stamped theirs from `build_identity()`. Two routes to one fact
+  // is how they drift. The macros are now named in exactly one place, the
+  // set_build_identity() call above, and every receipt reads what that stated.
+  obs.fingerprint = topopt::build_identity().fingerprint;
+  obs.build_time = topopt::build_identity().build_time;
   // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
   // leaves the production rule alone — production_matfree_thread_count(), the
   // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a

@@ -103,7 +103,29 @@ struct VoxelGrid {
 // pipeline voxelizes only after the watertight check); an open mesh yields an
 // undefined fill. Throws std::invalid_argument if resolution < 1 or the mesh is
 // empty / degenerate (zero-volume bounding box).
-VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
+// ★ HOW A COLUMN CENTRE ON A TRIANGLE EDGE IS JUDGED (C2 B0, item 1 of the Flexible
+// core list; reviewer's ruling 2026-10-24, option C).
+//   Legacy     — today's rule, every stage's: boundary-inclusive on each triangle's OWN
+//                edge functions. A centre on an edge two triangles share is judged by
+//                two differently rounded expressions of one line and can fall outside
+//                BOTH, emptying the whole column (his pad at Balanced: 6 columns on
+//                x = y). cube_10mm.stl at res 50 comes out 300 voxels short.
+//   Watertight — each edge function from the edge's CANONICAL vertex order (so the two
+//                triangles sharing it compute exactly negated values) and a TOP-LEFT tie
+//                rule: a symbolic perturbation of the centre to (px + ε, py − ε²), so a
+//                centre on a shared edge or vertex is claimed exactly once. The Flexible
+//                stage uses it. Moving every stage to it needs a rule for the Smooth
+//                guard first, which then sees real violations near frozen regions that
+//                the Legacy noise hid (a separate CORE LIST item, routed by the reviewer).
+enum class VoxelTies { Legacy, Watertight };
+
+// The Watertight rule's edge function, (t − s) × (p − s) in the XY projection, compiled
+// with FMA contraction OFF so that it is exactly 0 at p = s and at p = t (the property
+// the tie rule rests on). Exposed for test_voxelize_ties; not an API for callers.
+double voxel_tie_edge_function(const Vec3& s, const Vec3& t, double px, double py);
+
+VoxelGrid voxelize(const TriangleMesh& mesh, int resolution,
+                   VoxelTies ties = VoxelTies::Legacy);
 
 // Voxelize `mesh` onto the SAME grid geometry as `reference` (origin, cubic
 // spacing and nx*ny*nz dimensions) rather than a bbox-derived grid. Marks a voxel
@@ -118,7 +140,8 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
 // ~half a voxel — the quantization gap the "smoothed / re-analyzed" provenance
 // discloses. Throws std::invalid_argument if the mesh is empty or `reference` is
 // degenerate (non-positive spacing or a zero dimension).
-VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference);
+VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference,
+                             VoxelTies ties = VoxelTies::Legacy);
 
 // An all-Active design mask sized to `grid` (size grid.voxel_count()): every
 // voxel is a free design variable, so the mask-aware SIMP path reproduces the

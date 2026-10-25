@@ -605,6 +605,10 @@ struct MinimizePlasticOptions {
   // `minimize_plastic` REFUSES a frozen-lattice run that does not state it.
   // Printability cannot be assumed and it cannot be skipped.
   double frozen_lattice_min_extrudable_width_mm = 0.0;
+  // ★ D1: the job's density cap, for the frozen-lattice floors. Without it the lightest
+  // printable density and the cell bounds were computed against the BAND's top, which can
+  // be a density the job forbids. 0 = not sent.
+  double frozen_lattice_max_relative_density = 0.0;
 
   // Refuse any region whose median cells-per-member is below
   // `lattice_cells_per_member_min` (5 for octet). true is the shipped posture and

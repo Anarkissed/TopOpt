@@ -1,0 +1,7 @@
+  flat_cut: 180 columns, worst |target - (h - height)| = 2.22e-16 mm
+  group split: face 101 150.000000 N, face 103 150.000000 N
+  17 control (top alone): max |achieved - design| 8.88e-15 mm
+  17 two groups: group 1 max |achieved - design| 1.8422 mm, 13050 voxels on its runs owned by another group
+  26 group grams: 22.538 + 31.426 of 53.965
+test_flexible_b2: 13 checks, 0 failures
+exit 0

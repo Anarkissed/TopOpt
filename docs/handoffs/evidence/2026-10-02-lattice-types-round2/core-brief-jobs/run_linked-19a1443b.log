@@ -1,0 +1,16 @@
+== R2_min_corner_depth exit 1
+topopt-cli: lattice "stepped_cells": stepped cell 0 in region 1 (3 mm at 18, 0, 8) lies from 12 to 15 mm along the region normal, outside its 12 mm prism. Core validates the plan and does not repack it -- the run lays down the arrangement the preview showed, or it stops here.
+== R2_control_shallower exit 0
+[stepped] doubled (halves) plan: 1 cell(s) over 1 region(s) in 1 pass(es) | 3.00=1
+  verdict: ACCEPTED
+== R3_no_region_in_key exit 1
+topopt-cli: lattice "stepped_cells": stepped cell 1 in region 2 (3 mm at 54, 0, 18) OVERLAPS cell 0. Core validates the plan and does not repack it -- the run lays down the arrangement the preview showed, or it stops here.
+== R3_control_shifted exit 0
+[stepped] doubled (halves) plan: 2 cell(s) over 2 region(s) in 2 pass(es) | 3.00=2
+  verdict: ACCEPTED
+== R5_global_finest_overlap exit 1
+topopt-cli: lattice "stepped_cells": stepped cell 3 in region 2 (1.625 mm at 57.25, 0, 18) OVERLAPS cell 2. Core validates the plan and does not repack it -- the run lays down the arrangement the preview showed, or it stops here.
+== R5_control_one_region exit 0
+[stepped] doubled (halves) plan: 3 cell(s) over 2 region(s) in 2 pass(es) | 3.25=1 1.62=2
+  verdict: ACCEPTED
+topopt-cli: core 1d1bde5e2714, built Oct  2 2026 19:01:09

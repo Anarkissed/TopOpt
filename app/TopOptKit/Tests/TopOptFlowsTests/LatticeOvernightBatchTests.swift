@@ -26,15 +26,24 @@ final class PageLeftModalPlacementTests: XCTestCase {
     /// geometry the modifier now derives — and the file's own body applies the
     /// paddings before the expanding frame.
     func testMinimizedLiftsAboveTheCornerInPortraitOnly() {
-        // PORTRAIT — the action row now carries BOTH Lattice and Optimize, so the
-        // corner is occupied and the panel rests above it.
+        // ★★ THIS ASSERTION IS REPLACED, NOT WEAKENED (maintainer, 2026-08-19:
+        // "The selections does not drop all the way to the bottom of the screen").
+        //
+        // ★ IT PINNED A LIFT THAT EXISTED FOR A REASON THAT NO LONGER HOLDS. The
+        // 76 pt portrait lift was added because a MINIMIZED panel still carried
+        // the EXPANDED panel's 348 pt width, so it reached across the bottom of
+        // the screen and collided with the action row (Lattice + Optimize). The
+        // collapsed panel now sizes to its own content — a chevron, a word and a
+        // count — and sits in the left corner, well clear of a centred action
+        // row. The premise is gone, so the rule it justified goes with it.
+        //
+        // Portrait and landscape now agree: the corner itself, both ways.
         let portrait = PageLeftModal(canvasHeight: 1300, minimized: true,
                                      canvasWidth: 1000)
         XCTAssertFalse(portrait.isLandscape)
-        XCTAssertEqual(portrait.minimizedBottomInset,
-                       PageChrome.edge + PageLeftModal.minimizedPortraitLift,
+        XCTAssertEqual(portrait.minimizedBottomInset, PageChrome.edge,
                        accuracy: 0.001,
-                       "★ portrait: just above the corner, with clearance")
+                       "★ portrait: the corner itself — the pill is narrow now")
 
         // LANDSCAPE — "there should be more than enough room for it to be at the
         // bottom-left corner".

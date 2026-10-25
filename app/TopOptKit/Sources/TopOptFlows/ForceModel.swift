@@ -563,6 +563,25 @@ public struct ForceModel: Equatable, Sendable, Codable {
         clearanceBoreOverrides = pruned.isEmpty ? nil : pruned
     }
 
+    /// ★★ PUT BACK THE ENTRIES `sync` PRUNED for `ids`, from `captured` (the Surface stage's revert,
+    /// 2026-10-08: a group the session swept comes back with its role, load, protection, keep-clear,
+    /// clearance and primitives). EXACTLY `sync`'s list — `ForceModelRestoreEntriesTests` pins the
+    /// two to the same fields, so one cannot gain a store the other misses.
+    public mutating func restoreEntries(for ids: Set<UUID>, from captured: ForceModel) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            if let k = captured.kinds[id] { kinds[id] = k }
+            if let v = captured.clearanceOverrides?[id] { var m = clearanceOverrides ?? [:]; m[id] = v; clearanceOverrides = m }
+            if let v = captured.keepClear?[id] { var m = keepClear ?? [:]; m[id] = v; keepClear = m }
+            if let v = captured.faceProtect?[id] { var m = faceProtect ?? [:]; m[id] = v; faceProtect = m }
+            if captured.syncExcluded?.contains(id) == true { syncExcluded = (syncExcluded ?? []).union([id]) }
+            if let v = captured.manualPrimitives?[id] { var m = manualPrimitives ?? [:]; m[id] = v; manualPrimitives = m }
+            if let bores = captured.clearanceBoreOverrides?.filter({ $0.key.hasPrefix(id.uuidString) }), !bores.isEmpty {
+                clearanceBoreOverrides = (clearanceBoreOverrides ?? [:]).merging(bores) { _, new in new }
+            }
+        }
+    }
+
     /// Drop role entries for groups that no longer exist (call after the selection
     /// changes so removed groups don't linger as stale anchors/loads).
     public mutating func sync(groups: [SelectionGroup]) {

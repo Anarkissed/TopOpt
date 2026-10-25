@@ -1307,9 +1307,50 @@ std::string run_info_json(const RunInfo& info) {
             fmt(info.grading_lattice_solid_volume_mm3);
     }
     // ── ★ STEPPED's report. Absent entirely unless the stepped algorithm ran.
-    if (info.stepped_present) {
+    // ── ★ THE SEAM CENSUS, FOR EVERY ALGORITHM THAT SOLVES A BEAM NETWORK ──────
+    // Written outside the stepped block on purpose. It went in for any-step Stepped,
+    // whose seams are the point; instrumenting it MEASURED the same defect on ORGANIC.
+    // The weld is endpoint-based and this branch's run-collapse pass merges collinear
+    // spans into long straight members, so the certificate was receiving members up to
+    // 28.94 mm long against a weld reach of 0.817 mm. With the input cut to that reach
+    // the weld finds 14,202 junctions where it had found 4,270 -- the network being
+    // solved was missing two thirds of its joints, and nothing said so, because a
+    // lattice in pieces certifies clean.
+    if (info.stepped_seam_spans_before > 0) {
+      gr += ", \"seam_spans_before_subdivision\": " + fmt_ll(info.stepped_seam_spans_before);
+      gr += ", \"seam_spans_after_subdivision\": " + fmt_ll(info.stepped_seam_spans_after);
+      gr += ", \"seam_subdivision_piece_mm\": " + fmt(info.stepped_seam_piece_mm);
+      gr += ", \"seam_longest_member_before_mm\": " +
+            fmt(info.stepped_seam_longest_before_mm);
+      gr += ", \"seam_welded_nodes\": " + fmt_ll(info.stepped_seam_welded_nodes);
+      gr += ", \"seam_t_junction_ends\": " + fmt_ll(info.stepped_seam_t_junction_ends);
+      gr += ", \"seam_floating_ends\": " + fmt_ll(info.stepped_seam_floating_ends);
+      gr += ", \"seam_weld_note\": \"the weld joins ENDPOINTS, so a member crossing "
+            "another at mid-span is fused only if the input arrives cut to the weld's "
+            "reach. Uncut, the lattice reads as disconnected -- and a disconnected "
+            "lattice certifies CLEAN. floating_ends must be 0 for a certified any-step "
+            "job; organic legitimately has free tips.\"";
+    }
+    // ── ★ ONE PATH FOR THE PLAN, BOTH SIDES (reviewer's ruling 6, 2026-10-11) ───
+    // #354's readers look for `grading.stepped.plan_by_region`, and on a plan run they
+    // say "the run didn't report the plan" when it is absent -- they never fall back to
+    // the law's figures, which is right. So the `stepped` OBJECT opens whenever a plan
+    // was sent, whichever algorithm laid it, and the stepped ALGORITHM's own fields stay
+    // gated on `stepped_present` inside it. A run with neither emits nothing, so a
+    // legacy receipt is byte-identical.
+    //
+    // This is the second half of the defect found on his own run_info: moving the plan
+    // keys out of `if (stepped_present)` got them emitted, but it put them at
+    // `grading.plan_by_region` where nobody reads them. Emitted and unread is not much
+    // better than dropped.
+    const bool stepped_obj = info.stepped_present || info.stepped_anystep_cells > 0;
+    if (stepped_obj) {
       gr += ", \"stepped\": {";
-      gr += "\"regions\": " + fmt_ll(info.stepped_regions);
+      gr += "\"plan_present\": " + bool_json(info.stepped_anystep_cells > 0);
+      gr += ", \"algorithm_ran\": " + bool_json(info.stepped_present);
+    }
+    if (info.stepped_present) {
+      gr += ", \"regions\": " + fmt_ll(info.stepped_regions);
       gr += ", \"min_cell_mm\": " + fmt(info.stepped_min_cell_mm);
       gr += ", \"max_cell_mm\": " + fmt(info.stepped_max_cell_mm);
       gr += ", \"regions_out_of_regime\": " +
@@ -1338,8 +1379,127 @@ std::string run_info_json(const RunInfo& info) {
             "do not line up; an adjacent pair that is not joined is a mechanical "
             "disconnection at that seam. DOUBLED's dyadic ladder exists to prevent "
             "exactly this.\"";
-      gr += "}";
     }
+
+    // ── ★ THE PLAN'S RECEIPTS ARE NOT THE STEPPED ALGORITHM'S ────────────────
+    // This block used to sit INSIDE `if (info.stepped_present)`, which is the STEPPED
+    // algorithm's own receipt. A plan can be sent on a DOUBLED job -- four of #354's six
+    // arms are, 570B38E2 among them -- and `stepped_present` is false there, so every
+    // one of these keys was dropped: the run printed the plan on stderr and the receipt
+    // carried nothing. Found by reading HIS run_info, not by reading the code; my own
+    // fixtures are all `algorithm: stepped`, where the keys were there all along.
+    //
+    // `anystep_cells > 0` is the right guard: a plan was validated and laid, whichever
+    // algorithm laid it. A run with no plan emits none of this, so a legacy receipt is
+    // byte-identical.
+    // ★ AND THE OUTLINE BEAM, for the same reason: its four numbers were inside the
+    // stepped-only block too, so a DOUBLED run's receipt said nothing about a beam that
+    // had turned 804 of its voxels solid. The beam is not the stepped algorithm's.
+    if (info.lattice_outline_beam_mm > 0.0) {
+      gr += ", \"outline_beam_mm\": " + fmt(info.lattice_outline_beam_mm);
+      gr += ", \"outline_bleed_mm\": " + fmt(info.lattice_outline_bleed_mm);
+      gr += ", \"outline_inward_mm\": " + fmt(info.lattice_outline_inward_mm);
+      gr += ", \"outline_voxels\": " + fmt_ll(info.lattice_outline_voxels);
+    }
+    if (info.stepped_anystep_cells > 0) {
+      std::string gr2;
+      {
+        gr2 += ", \"anystep_cells\": " + fmt_ll(info.stepped_anystep_cells);
+        gr2 += ", \"anystep_regions\": " + fmt_ll(info.stepped_anystep_regions);
+        gr2 += ", \"anystep_passes\": " + fmt_ll(info.stepped_anystep_passes);
+        gr2 += ", \"anystep_size_histogram\": \"" + info.stepped_anystep_histogram + "\"";
+        // ★ §3: the density and radius actually used, per size, so the app can diff a
+        // size at a time against its own DIAG rather than comparing pictures.
+        if (!info.stepped_anystep_rho_by_size.empty())
+          gr2 += ", \"anystep_rho_radius_by_size\": \"" +
+                info.stepped_anystep_rho_by_size + "\"";
+        // ★ K3 (3): the solid remainder per region, and what the plan latticed.
+        if (!info.stepped_plan_solid_remainder_mm3.empty()) {
+          gr2 += ", \"plan_solid_remainder_mm3\": \"" +
+                info.stepped_plan_solid_remainder_mm3 + "\"";
+          gr2 += ", \"plan_latticed_mm3\": " + fmt(info.stepped_plan_latticed_mm3);
+          gr2 += ", \"plan_rho_fallback_by_region\": \"" +
+                info.stepped_plan_rho_fallback_by_region + "\"";
+          gr2 += ", \"clip_outside_region_mm3\": \"" +
+                info.stepped_clip_outside_region_mm3 + "\"";
+          if (!info.stepped_clip_outside_by_cause_mm3.empty())
+            gr2 += ", \"clip_outside_by_cause_mm3\": \"" +
+                  info.stepped_clip_outside_by_cause_mm3 + "\"";
+          // ★ K5: the plan's density reach over the generator's own radius queries.
+          gr2 += ", \"plan_rho_queries_plan\": " +
+                fmt_ll(info.stepped_plan_rho_queries_plan);
+          gr2 += ", \"plan_rho_queries_posture\": " +
+                fmt_ll(info.stepped_plan_rho_queries_posture);
+          gr2 += ", \"plan_rho_queries_floor\": " +
+                fmt_ll(info.stepped_plan_rho_queries_floor);
+        // ★ K4: the plan as laid, per region and per group. The summary above is the
+        // count; this is which.
+        if (!info.stepped_plan_by_region.empty()) {
+          gr2 += ", \"plan_laid_measured\": " +
+                bool_json(info.stepped_plan_laid_measured);
+          if (info.stepped_plan_laid_measured)
+            gr2 += ", \"plan_laid_unattributed\": " +
+                fmt_ll(info.stepped_plan_laid_unattributed);
+          gr2 += ", \"plan_by_region\": [";
+          for (std::size_t i = 0; i < info.stepped_plan_by_region.size(); ++i) {
+            const RunInfo::PlanRegion& PR = info.stepped_plan_by_region[i];
+            if (i) gr2 += ", ";
+            gr2 += "{\"region\": " + std::to_string(PR.region_id);
+            gr2 += ", \"base_cell_mm\": " + fmt(PR.base_cell_mm);
+            gr2 += ", \"slot_origin_mm\": [" + fmt(PR.slot_origin_mm[0]) + ", " +
+                  fmt(PR.slot_origin_mm[1]) + ", " + fmt(PR.slot_origin_mm[2]) + "]";
+            gr2 += ", \"slot_origin_stated\": " + bool_json(PR.slot_origin_stated);
+            gr2 += ", \"plane_origin_mm\": [" + fmt(PR.plane_origin_mm[0]) + ", " +
+                  fmt(PR.plane_origin_mm[1]) + ", " + fmt(PR.plane_origin_mm[2]) + "]";
+            gr2 += ", \"normal\": [" + fmt(PR.normal[0]) + ", " + fmt(PR.normal[1]) +
+                  ", " + fmt(PR.normal[2]) + "]";
+            gr2 += ", \"depth_mm\": " + fmt(PR.depth_mm);
+            gr2 += ", \"cells\": " + fmt_ll(PR.cells);
+            gr2 += ", \"sizes\": \"" + PR.sizes + "\"";
+            gr2 += ", \"groups\": [";
+            for (std::size_t j = 0; j < PR.groups.size(); ++j) {
+              const RunInfo::PlanGroup& G = PR.groups[j];
+              if (j) gr2 += ", ";
+              gr2 += "{\"size_mm\": " + fmt(G.size_mm);
+              gr2 += ", \"origin_mm\": [" + fmt(G.origin_mm[0]) + ", " +
+                    fmt(G.origin_mm[1]) + ", " + fmt(G.origin_mm[2]) + "]";
+              gr2 += ", \"phase_mm\": [" + fmt(G.phase_mm[0]) + ", " +
+                    fmt(G.phase_mm[1]) + ", " + fmt(G.phase_mm[2]) + "]";
+              gr2 += ", \"nx\": " + std::to_string(G.nx);
+              gr2 += ", \"ny\": " + std::to_string(G.ny);
+              gr2 += ", \"nz\": " + std::to_string(G.nz);
+              gr2 += ", \"cells\": " + fmt_ll(G.cells);
+              // ★ Only when the ledger tap ran. 0 struts because nobody counted is not
+              // the same claim as 0 struts because none were laid, and a receipt that
+              // cannot tell them apart is worse than one that stays quiet.
+              if (info.stepped_plan_laid_measured) {
+                gr2 += ", \"struts_laid\": " + fmt_ll(G.struts_laid);
+                gr2 += ", \"nodes_laid\": " + fmt_ll(G.nodes_laid);
+                gr2 += ", \"cells_with_no_strut\": " + fmt_ll(G.cells_with_no_strut);
+                if (G.cells_with_no_strut > 0) {
+                  gr2 += ", \"no_strut_by_cause\": {";
+                  gr2 += "\"outside_rect\": " + fmt_ll(G.no_strut_outside_rect);
+                  gr2 += ", \"beyond_depth\": " + fmt_ll(G.no_strut_beyond_depth);
+                  gr2 += ", \"outside_outline\": " + fmt_ll(G.no_strut_outside_outline);
+                  gr2 += ", \"owned_elsewhere\": " + fmt_ll(G.no_strut_owned_elsewhere);
+                  gr2 += ", \"no_material\": " + fmt_ll(G.no_strut_no_material);
+                  gr2 += ", \"cell_overlap_dropped\": " +
+                        fmt_ll(G.no_strut_cell_overlap_dropped);
+                  gr2 += ", \"never_generated\": " + fmt_ll(G.no_strut_never_generated);
+                  gr2 += "}";
+                }
+              }
+              gr2 += "}";
+            }
+            gr2 += "]}";
+          }
+          gr2 += "]";
+        }
+        }
+      }
+      gr += gr2;
+    }
+    if (stepped_obj) gr += "}";       // ★ the one object both sides read
     // ── ★ ORGANIC's report. Absent entirely unless the organic algorithm ran.
     if (info.organic_present) {
       gr += ", \"organic\": {";
@@ -1447,7 +1607,8 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"synthetic_stress_fully\": " + std::to_string(info.organic_synthetic_fully);
         gr += ", \"synthetic_stress_blended\": " + std::to_string(info.organic_synthetic_blended);
         gr += ", \"synthetic_stress_dead_threshold\": " + fmt(info.organic_synthetic_dead_threshold);
-        gr += ", \"synthetic_stress_dead_floor_bound\": " + std::string(info.organic_synthetic_dead_floor_bound ? "true" : "false");
+        gr += std::string(", \"synthetic_stress_dead_floor_bound\": ") +
+              (info.organic_synthetic_dead_floor_bound ? "true" : "false");
         gr += ", \"synthetic_stress_by_region\": [";
         for (std::size_t q = 0; q < info.organic_synthetic_by_region.size(); ++q) {
           const OrganicSyntheticRegionInfo& ri = info.organic_synthetic_by_region[q];
@@ -1457,13 +1618,24 @@ std::string run_info_json(const RunInfo& info) {
                 ", \"soft_mm\": " + fmt(ri.soft_mm) +
                 ", \"voxels\": " + std::to_string(ri.voxels) +
                 ", \"fully\": " + std::to_string(ri.fully) +
-                ", \"blended\": " + std::to_string(ri.blended) + "}";
+                ", \"blended\": " + std::to_string(ri.blended) +
+                // ★ the wall's OWN verdict and the measurement behind it, so the
+                // run's dead set is readable beside the size probe's.
+                ", \"stress_p99\": " + fmt(ri.p99_von_mises) +
+                std::string(", \"synthesised_whole\": ") +
+                (ri.whole_region ? "true" : "false") + "}";
         }
         gr += "]";
         gr += ", \"solid_rim_mm\": " + fmt(info.organic_solid_rim_mm);
         gr += ", \"solid_rim_voxels\": " + std::to_string(info.organic_solid_rim_voxels);
-        gr += ", \"overhang_fillet_on\": " + std::string(info.organic_overhang_fillet_on ? "true" : "false");
-        gr += ", \"fillet_skipped_spans\": " + std::to_string(info.organic_fillet_skipped_spans);
+        gr += ", \"unsupported_spans\": " + std::to_string(info.organic_unsupported_spans);
+        // ★ §3: the SHIPPED span census, for the app's trace banner to be diffed
+        // against. These are the spans the file is carved from, not the ones traced.
+        gr += ", \"span_count\": " + fmt_ll(info.organic_span_count);
+        gr += ", \"span_length_mm\": " + fmt(info.organic_span_length_mm);
+        gr += ", \"span_radius_min_mm\": " + fmt(info.organic_span_radius_min_mm);
+        gr += ", \"span_radius_p50_mm\": " + fmt(info.organic_span_radius_p50_mm);
+        gr += ", \"span_radius_max_mm\": " + fmt(info.organic_span_radius_max_mm);
         gr += ", \"transfer_ties_on\": " + std::string(info.organic_transfer_ties_on ? "true" : "false");
         gr += ", \"ties_seeded\": " + std::to_string(info.organic_ties_seeded);
         gr += ", \"ties_landed\": " + std::to_string(info.organic_ties_landed);
@@ -1471,6 +1643,15 @@ std::string run_info_json(const RunInfo& info) {
         gr += ", \"ties_refused_reach\": " + std::to_string(info.organic_ties_refused_reach);
         gr += ", \"transfer_tie_length_mm\": " + fmt(info.organic_xfer_tie_length_mm);
         gr += ", \"tie_swirl\": " + fmt(info.organic_tie_swirl);
+        // ── ★ SAY IT, DO NOT LEAVE IT TO BE INFERRED (2026-09-29) ─────────────
+        // The block below is emitted only when a certificate ran, so "no
+        // certificate" was signalled by the ABSENCE of every key in it. That is
+        // fine for a consumer using optionals and ambiguous for anything that
+        // defaults a missing key -- which is exactly how organic_unsupported_spans
+        // read 0 on every run while the true count was 1728. This flag is ALWAYS
+        // written, so a consumer never has to interpret silence.
+        gr += ", \"structural_certified\": " +
+              std::string(info.organic_structural_verdict == "certified" ? "true" : "false");
         if (!info.organic_structural_verdict.empty()) {
           gr += ", \"structural_verdict\": \"" + info.organic_structural_verdict + "\"";
           gr += ", \"structural_statistic\": \"" + info.organic_structural_statistic + "\"";
@@ -1646,9 +1827,6 @@ std::string run_info_json(const RunInfo& info) {
       }
       gr += ", \"arched_spans\": " + fmt_ll(info.organic_arched_spans);
       gr += ", \"arch_max_rise_mm\": " + fmt(info.organic_arch_rise);
-      gr += ", \"filleted_spans\": " + fmt_ll(info.organic_filleted);
-      gr += ", \"fillet_unresolved\": " + fmt_ll(info.organic_fillet_unresolved);
-      gr += ", \"fillet_max_radius_mm\": " + fmt(info.organic_fillet_radius);
       gr += ", \"base_mat_length_mm\": " + fmt(info.organic_base_mat_length_mm);
       gr += ", \"base_mat_z_mm\": " + fmt(info.organic_base_mat_z_mm);
       gr += ", \"fill_mat_cells\": " + fmt_ll(info.organic_fill_mat_cells);

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    html, body { margin:0; padding:0; background:#05060c; overflow:hidden; -webkit-font-smoothing:antialiased; }
+    * { box-sizing:border-box; }
+    input, button { font-family:inherit; }
+    input:focus { outline:none; }
+    a { color:#0A84FF; text-decoration:none; }
+    a:hover { color:#409CFF; }
+    @keyframes cardIn { from { opacity:0; transform:translateY(10px) scale(0.985); } to { opacity:1; transform:none; } }
+    @keyframes railIn { from { opacity:0; transform:translateX(14px); } to { opacity:1; transform:none; } }
+    @keyframes pulse { 0%,100% { opacity:0.55; } 50% { opacity:1; } }
+  </style>
+</helmet>
+
+<div data-screen-label="Lattice settings" style="position:fixed; inset:0; background:radial-gradient(1200px 700px at 60% 10%, #0b1020 0%, #05060c 60%); color:#f2f2f5; font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; overflow:hidden;">
+
+  <!-- floor grid -->
+  <svg viewBox="0 0 1024 1366" preserveAspectRatio="none" style="position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.55; left: -13px; top: 2px">
+    <g stroke="#1e3a6e" stroke-opacity="0.55" stroke-width="1" fill="none">
+      <path d="M-300 1366 L420 560 M-60 1366 L470 560 M180 1366 L520 560 M420 1366 L570 560 M660 1366 L620 560 M900 1366 L670 560 M1140 1366 L720 560 M1380 1366 L770 560"></path>
+      <path d="M0 600 H1024 M0 660 H1024 M0 740 H1024 M0 840 H1024 M0 970 H1024 M0 1130 H1024 M0 1320 H1024"></path>
+    </g>
+  </svg>
+
+  <!-- status bar -->
+  <div style="position:absolute; left:32px; right:32px; top:14px; display:flex; justify-content:space-between; font-size:15px; font-weight:600; color:rgba(242,242,245,0.9);">
+    <span>11:12 PM &nbsp;Sun Sep 20</span><span>100%</span>
+  </div>
+
+  <!-- Save & Exit -->
+  <button data-ctl="1" style="position:absolute; left:32px; top:64px; min-height:52px; padding:0 28px; border-radius:26px; border:none; background:#0A84FF; color:#fff; font-size:17px; font-weight:600; cursor:pointer; box-shadow:0 10px 30px rgba(10,132,255,0.35);">Save &amp; Exit</button>
+
+  <!-- stage caption -->
+  <div style="position:absolute; left:50%; top:70px; transform:translateX(-50%); max-width:calc(100% - 520px); min-height:40px; padding:0 18px; border-radius:20px; background:rgba(28,30,38,0.72); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(30px) saturate(170%); -webkit-backdrop-filter:blur(30px) saturate(170%); display:flex; align-items:center; gap:10px; font-size:14px; color:rgba(242,242,245,0.72); white-space:nowrap; padding-top:8px; padding-bottom:8px;">
+    <span style="width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(242,242,245,0.5); display:grid; place-items:center; font-size:10px; font-weight:700;">i</span>
+    <span style="white-space:normal; line-height:1.3;">{{ caption }}</span>
+  </div>
+
+  <!-- orbit cube -->
+  <div style="position:absolute; right:32px; top:64px; width:120px; height:120px; border-radius:28px; background:rgba(20,22,30,0.72); border:1px solid rgba(255,255,255,0.09); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px);">
+    <svg viewBox="0 0 120 120" style="position:absolute; inset:0; width:100%; height:100%;">
+      <path d="M22 40 Q30 22 46 20 M46 20 L38 15 M46 20 L40 28" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3.2" stroke-linecap="round"></path>
+      <path d="M98 40 Q90 22 74 20 M74 20 L82 15 M74 20 L76 28" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="3.2" stroke-linecap="round"></path>
+      <path d="M60 34 L90 50 L90 84 L60 100 L30 84 L30 50 Z" fill="rgba(40,50,70,0.9)" stroke="rgba(140,180,240,0.55)" stroke-width="1.4"></path>
+      <path d="M60 34 L60 66 M60 66 L90 50 M60 66 L30 50" fill="none" stroke="rgba(140,180,240,0.35)" stroke-width="1.2"></path>
+    </svg>
+  </div>
+
+  <!-- ============ SETTINGS PANEL ============ -->
+  <div style="position:absolute; left:32px; top:140px; bottom:32px; width:312px; border-radius:26px; background:rgba(18,20,28,0.82); border:1px solid rgba(255,255,255,0.09); backdrop-filter:blur(44px) saturate(170%); -webkit-backdrop-filter:blur(44px) saturate(170%); box-shadow:0 24px 70px rgba(0,0,0,0.55); display:flex; flex-direction:column; overflow:hidden;">
+    <div style="flex:none; padding:18px 18px 12px;">
+      <div style="font-size:11px; letter-spacing:0.7px; text-transform:uppercase; color:rgba(242,242,245,0.38);">Lattice</div>
+      <div style="font-size:20px; font-weight:700; letter-spacing:-0.3px;">Wall &amp; density</div>
+    </div>
+
+    <div style="flex:1; min-height:0; overflow:auto; padding:0 18px 18px; display:flex; flex-direction:column; gap:20px;">
+
+      <!-- ---- Lattice wall thickness ---- -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="font-size:12px; font-weight:700; color:rgba(242,242,245,0.55);">Lattice wall thickness</div>
+        <div data-ctl="1" onClick="{{ toggleSimDepth }}" style="min-height:56px; padding:0 14px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.09); display:flex; align-items:center; gap:12px; cursor:pointer;">
+          <span style="flex:1;"><span style="display:block; font-size:15px; font-weight:600;">Depth defined by sim?</span><span style="display:block; font-size:12px; color:rgba(242,242,245,0.45);">{{ simDepthSub }}</span></span>
+          <span style="width:51px; height:31px; border-radius:999px; background:{{ simDepthBg }}; padding:2px; display:flex; justify-content:{{ simDepthJustify }}; transition:all 0.18s;"><span style="width:27px; height:27px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.4);"></span></span>
+        </div>
+        <sc-if value="{{ manualDepth }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div style="padding:6px 4px 2px; font-size:13px; line-height:1.4; color:rgba(242,242,245,0.72);">How much of the wall's thickness <em style="font-style:italic; color:#f2f2f5;">could</em> be used for the lattice — what <em style="font-style:italic; color:#f2f2f5;">will</em> be used follows below.</div>
+            <sc-for list="{{ faces }}" as="f" hint-placeholder-count="2">
+              <div style="min-height:50px; padding:0 14px; border-radius:14px; background:rgba(255,255,255,0.04); border:1px solid {{ f.rowBorder }}; display:flex; align-items:center; gap:10px;">
+                <span style="width:10px; height:10px; border-radius:3px; background:{{ f.tint }};"></span>
+                <span style="flex:1; font-size:14px; font-weight:600; white-space:nowrap;">{{ f.name }}</span>
+                <input type="number" step="0.1" min="0" value="{{ f.startMmVal }}" onChange="{{ f.setStartMm }}" data-ctl="1" style="width:58px; min-height:36px; padding:0 6px; border-radius:9px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); color:#30D158; font-size:13px; font-weight:600; text-align:right;">
+                <span style="font-size:12px; color:rgba(242,242,245,0.4);">–</span>
+                <input type="number" step="0.1" min="0" value="{{ f.endMmVal }}" onChange="{{ f.setEndMm }}" data-ctl="1" style="width:58px; min-height:36px; padding:0 6px; border-radius:9px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); color:#FF453A; font-size:13px; font-weight:600; text-align:right;">
+                <span style="font-size:12px; color:rgba(242,242,245,0.4);">mm</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- ---- Density ---- -->
+      <sc-if value="{{ manualDepth }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="font-size:12px; font-weight:700; color:rgba(242,242,245,0.55);">Density through the wall</div>
+        <div style="border-radius:16px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.09); overflow:hidden;">
+          <sc-for list="{{ densityOpts }}" as="o" hint-placeholder-count="4">
+            <div>
+              <button data-ctl="1" onClick="{{ o.pick }}" style="width:100%; min-height:52px; padding:0 14px; border:none; border-top:1px solid rgba(255,255,255,0.06); background:{{ o.bg }}; color:#f2f2f5; text-align:left; cursor:pointer; display:flex; align-items:center; gap:12px;">
+                <span style="width:22px; height:22px; border-radius:50%; border:2px solid {{ o.ringColor }}; display:grid; place-items:center;"><span style="width:11px; height:11px; border-radius:50%; background:{{ o.dot }};"></span></span>
+                <span style="flex:1;"><span style="display:block; font-size:14.5px; font-weight:600;">{{ o.name }}</span><span style="display:block; font-size:11.5px; color:rgba(242,242,245,0.45);">{{ o.sub }}</span></span>
+              </button>
+              <sc-if value="{{ o.showPct }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:2px 14px 12px 48px; display:flex; align-items:center; gap:10px;">
+                  <input type="number" min="5" max="95" value="{{ pct }}" onChange="{{ setPct }}" data-ctl="1" style="width:110px; min-height:46px; padding:0 14px; border-radius:12px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14); color:#f2f2f5; font-size:18px; font-weight:600;">
+                  <span style="font-size:15px; color:rgba(242,242,245,0.6);">% density</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ o.showGrade }}" hint-placeholder-val="{{ true }}">
+                <div style="padding:2px 14px 12px 48px; display:flex; flex-direction:column; gap:6px;">
+                  <sc-for list="{{ faces }}" as="f" hint-placeholder-count="2">
+                    <div style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:rgba(242,242,245,0.6);"><span style="width:8px; height:8px; border-radius:2px; background:{{ f.tint }};"></span><span style="flex:1;">{{ f.name }}</span><span>{{ f.profileText }}</span></div>
+                  </sc-for>
+                  <button data-ctl="1" onClick="{{ openGrade }}" style="min-height:44px; border-radius:12px; border:1px solid {{ gradeBtnBorder }}; background:{{ gradeBtnBg }}; color:{{ gradeBtnColor }}; font-size:13.5px; font-weight:650; cursor:pointer;">{{ gradeBtnLabel }}</button>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- ============ STAGE: SAMPLE CUBE ============ -->
+  <sc-if value="{{ isCube }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; left:380px; right:32px; top:200px; bottom:120px; display:grid; place-items:center; animation:cardIn 0.25s ease;">
+      <svg viewBox="0 0 400 400" style="width:min(100%, 520px);">
+        <g fill="none" stroke="#b9b6e8" stroke-width="10" stroke-linecap="round" opacity="0.9">
+          <path d="M120 300 V150 M160 320 V170 M200 340 V190 M240 320 V170 M280 300 V150 M320 280 V130"></path>
+          <path d="M120 150 L200 110 L320 130 M120 300 L200 340 L320 280 M120 225 L200 265 L320 205"></path>
+          <path d="M160 170 L240 130 M200 190 L280 150 M160 245 L240 205 M200 265 L280 225"></path>
+        </g>
+      </svg>
+    </div>
+    <button data-ctl="1" style="position:absolute; right:60px; bottom:44px; min-height:52px; padding:0 22px; border-radius:26px; border:1px solid rgba(255,255,255,0.1); background:rgba(40,42,52,0.85); color:#f2f2f5; font-size:16px; font-weight:600; cursor:pointer;">↻ &nbsp;Refresh cube</button>
+  </sc-if>
+
+  <!-- ============ STAGE: EDITOR (thickness / grade) ============ -->
+  <sc-if value="{{ isEditor }}" hint-placeholder-val="{{ true }}">
+    <div style="position: absolute; left: 366px; top: 202px; border-radius: 30px; background: rgba(14,16,24,0.62); border: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(30px) saturate(150%); -webkit-backdrop-filter: blur(30px) saturate(150%); box-shadow: 0 24px 70px rgba(0,0,0,0.45); animation: cardIn 0.28s ease; width: 666px; height: 593px"></div>
+    <sc-if value="{{ isGrade }}" hint-placeholder-val="{{ true }}">
+      <button data-ctl="1" onClick="{{ toggleWings }}" title="Show tangent handles for the selected point" style="position:absolute; left:384px; top:216px; min-height:44px; padding:0 14px 0 10px; border-radius:14px; border:1px solid {{ wingsBorder }}; background:{{ wingsBg }}; color:{{ wingsColor }}; font-size:12.5px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:8px; box-shadow:{{ wingsShadow }}; animation:cardIn 0.28s ease;">
+        <svg width="18" height="14" viewBox="0 0 18 14"><line x1="2" y1="11" x2="16" y2="3" stroke="currentColor" stroke-width="1.4" stroke-opacity="0.6"></line><circle cx="9" cy="7" r="3" fill="currentColor"></circle><rect x="0.5" y="9.5" width="3.5" height="3.5" transform="rotate(45 2.25 11.25)" fill="none" stroke="currentColor" stroke-width="1.3"></rect><rect x="14" y="1.2" width="3.5" height="3.5" transform="rotate(45 15.75 2.95)" fill="none" stroke="currentColor" stroke-width="1.3"></rect></svg>
+        Handles
+      </button>
+    </sc-if>
+    <div style="position:absolute; left:380px; right:{{ stageRight }}; top:200px; bottom:40px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:34px; animation:cardIn 0.28s ease;">
+      <sc-for list="{{ faces }}" as="f" hint-placeholder-count="2">
+        <div onClick="{{ f.activate }}" style="position:relative; display:flex; flex-direction:column; gap:8px; align-items:flex-start;">
+          <div style="display:flex; align-items:center; gap:10px; padding-left:70px;">
+            <span style="width:10px; height:10px; border-radius:3px; background:{{ f.tint }};"></span>
+            <span style="font-size:15px; font-weight:700;">{{ f.name }}</span>
+            <span style="font-size:13px; color:rgba(242,242,245,0.5);">{{ f.dimText }}</span>
+            <span style="font-size:12px; font-weight:700; color:#7FBFFF; display:{{ f.activeDisplay }};">● editing</span>
+          </div>
+          <svg width="{{ f.svgW }}" height="{{ f.svgH }}" viewBox="{{ f.viewBox }}" onPointerMove="{{ f.onMove }}" onPointerUp="{{ f.onUp }}" onPointerLeave="{{ f.onUp }}" onPointerDown="{{ f.onCanvasDown }}" style="touch-action:none; overflow:visible; cursor:{{ f.cursor }};">
+            <defs>
+              <linearGradient id="{{ f.gradId }}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#30D158" stop-opacity="0.45"></stop><stop offset="1" stop-color="#FF453A" stop-opacity="0.45"></stop></linearGradient>
+            </defs>
+            <!-- wall box -->
+            <rect x="{{ f.bx }}" y="{{ f.by }}" width="{{ f.bw }}" height="{{ f.bh }}" rx="6" fill="rgba(255,255,255,0.05)" stroke="{{ f.boxStroke }}" stroke-width="1.5"></rect>
+            <line x1="{{ f.bx }}" y1="{{ f.midY }}" x2="{{ f.rightX }}" y2="{{ f.midY }}" stroke="rgba(242,242,245,0.45)" stroke-width="1.2" stroke-dasharray="5 5"></line>
+            <text x="{{ f.bx }}" y="{{ f.labelTopY }}" fill="rgba(242,242,245,0.45)" font-size="11" font-weight="600" font-family="-apple-system, system-ui, sans-serif">OUTER SURFACE</text>
+            <text x="{{ f.bx }}" y="{{ f.labelBotY }}" fill="rgba(242,242,245,0.45)" font-size="11" font-weight="600" font-family="-apple-system, system-ui, sans-serif">INNER SURFACE</text>
+            <!-- allowed region -->
+            <path d="{{ f.regionPath }}" fill="{{ f.regionFill }}" stroke="none"></path>
+            <!-- start line (green) -->
+            <path d="{{ f.startPath }}" fill="none" stroke="#30D158" stroke-width="{{ f.startW }}" stroke-linecap="round" stroke-linejoin="round"></path>
+            <!-- end line (red) -->
+            <path d="{{ f.endPath }}" fill="none" stroke="#FF453A" stroke-width="{{ f.endW }}" stroke-linecap="round" stroke-linejoin="round"></path>
+            <!-- thickness-mode drag handles (full-width bars) -->
+            <sc-if value="{{ f.thickMode }}" hint-placeholder-val="{{ false }}">
+              <g>
+                <rect x="{{ f.bx }}" y="{{ f.startBarY }}" width="{{ f.bw }}" height="44" fill="transparent" onPointerDown="{{ f.downStart }}" style="cursor:ns-resize;"></rect>
+                <rect x="{{ f.bx }}" y="{{ f.endBarY }}" width="{{ f.bw }}" height="44" fill="transparent" onPointerDown="{{ f.downEnd }}" style="cursor:ns-resize;"></rect>
+                <circle cx="{{ f.midX }}" cy="{{ f.startPxY }}" r="12" fill="#30D158" stroke="#05060c" stroke-width="3" onPointerDown="{{ f.downStart }}" style="cursor:ns-resize;"></circle>
+                <circle cx="{{ f.midX }}" cy="{{ f.endPxY }}" r="12" fill="#FF453A" stroke="#05060c" stroke-width="3" onPointerDown="{{ f.downEnd }}" style="cursor:ns-resize;"></circle>
+              </g>
+            </sc-if>
+            <!-- tangent wings -->
+            <sc-for list="{{ f.wings }}" as="w" hint-placeholder-count="4">
+              <g onPointerDown="{{ w.down }}" style="cursor:grab;">
+                <line x1="{{ w.x1 }}" y1="{{ w.y1 }}" x2="{{ w.x2 }}" y2="{{ w.y2 }}" stroke="{{ w.col }}" stroke-opacity="0.55" stroke-width="1.2"></line>
+                <circle cx="{{ w.x2 }}" cy="{{ w.y2 }}" r="16" fill="transparent"></circle>
+                <rect x="{{ w.x2 }}" y="{{ w.y2 }}" width="8" height="8" transform="translate(-4 -4) rotate(45 {{ w.x2 }} {{ w.y2 }})" fill="#05060c" stroke="{{ w.col }}" stroke-width="1.6"></rect>
+              </g>
+            </sc-for>
+            <!-- grade-mode points -->
+            <sc-for list="{{ f.handles }}" as="h" hint-placeholder-count="4">
+              <g onPointerDown="{{ h.down }}" style="cursor:grab;">
+                <circle cx="{{ h.cx }}" cy="{{ h.cy }}" r="22" fill="transparent"></circle>
+                <circle cx="{{ h.cx }}" cy="{{ h.cy }}" r="{{ h.r }}" fill="{{ h.fill }}" stroke="{{ h.stroke }}" stroke-width="{{ h.sw }}"></circle>
+              </g>
+            </sc-for>
+            <!-- mm readouts -->
+            <text x="{{ f.readX }}" y="{{ f.startPxY }}" dy="4" fill="#30D158" font-size="12.5" font-weight="700" font-family="-apple-system, system-ui, sans-serif">{{ f.startMm }}</text>
+            <text x="{{ f.readX }}" y="{{ f.endPxY }}" dy="4" fill="#FF453A" font-size="12.5" font-weight="700" font-family="-apple-system, system-ui, sans-serif">{{ f.endMm }}</text>
+            <text x="{{ f.readX }}" y="{{ f.by }}" dy="-6" fill="rgba(242,242,245,0.35)" font-size="11" font-family="-apple-system, system-ui, sans-serif">0 mm</text>
+            <text x="{{ f.readX }}" y="{{ f.bottomY }}" dy="14" fill="rgba(242,242,245,0.35)" font-size="11" font-family="-apple-system, system-ui, sans-serif">{{ f.thickMm }}</text>
+          </svg>
+        </div>
+      </sc-for>
+
+      <div style="display:flex; align-items:center; gap:12px; margin-top:6px;">
+        <button data-ctl="1" onClick="{{ cancelEditor }}" style="min-height:50px; padding:0 22px; border-radius:25px; border:1px solid rgba(255,255,255,0.12); background:rgba(28,30,38,0.7); color:#f2f2f5; font-size:15px; font-weight:600; cursor:pointer;">Cancel</button>
+        <button data-ctl="1" onClick="{{ saveEditor }}" style="min-height:50px; padding:0 30px; border-radius:25px; border:none; background:#0A84FF; color:#fff; font-size:16px; font-weight:700; cursor:pointer; box-shadow:0 10px 30px rgba(10,132,255,0.4);">{{ saveLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ TOOL RAIL (grade mode) ============ -->
+  <sc-if value="{{ isGrade }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; right:44px; top:212px; width:104px; padding:10px; border-radius:22px; background:rgba(22,24,34,0.85); border:1px solid rgba(255,255,255,0.09); display:flex; flex-direction:column; gap:6px; animation:railIn 0.28s ease;">
+      <sc-for list="{{ modeTools }}" as="t" hint-placeholder-count="2">
+        <button data-ctl="1" onClick="{{ t.pick }}" style="min-height:48px; border-radius:14px; border:1px solid {{ t.border }}; background:{{ t.bg }}; color:{{ t.color }}; font-size:12px; font-weight:700; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;">
+            <span style="font-size:18px; line-height:1;">{{ t.glyph }}</span><span>{{ t.name }}</span>
+        </button>
+      </sc-for>
+      <div style="height:1px; background:rgba(255,255,255,0.08); margin:2px 0;"></div>
+      <div style="display:flex; align-items:center; justify-content:center; gap:6px; font-size:10.5px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:{{ sideTint }};"><span style="width:8px; height:8px; border-radius:50%; background:{{ sideTint }};"></span>{{ sideName }} line</div>
+      <button data-ctl="1" onPointerDown="{{ curveDown }}" onPointerUp="{{ curveUp }}" onPointerLeave="{{ curveCancel }}" onPointerCancel="{{ curveCancel }}" style="min-height:52px; border-radius:14px; border:1px solid {{ curveBorder }}; background:rgba(255,255,255,0.05); color:#f2f2f5; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; box-shadow:{{ curveShadow }}; transition:box-shadow 0.15s ease, border-color 0.15s ease; touch-action:none; user-select:none; -webkit-user-select:none;">
+        <span style="display:flex; align-items:center; gap:7px; font-size:12px; font-weight:650;"><span style="font-size:15px; color:{{ sideTint }};">{{ curveGlyph }}</span>{{ curveLabel }}</span>
+        <span style="font-size:9.5px; font-weight:600; letter-spacing:0.3px; color:rgba(242,242,245,0.42);">{{ curveHint }}</span>
+      </button>
+      <button data-ctl="1" onPointerDown="{{ mirrorDown }}" onPointerUp="{{ mirrorUp }}" onPointerLeave="{{ mirrorCancel }}" onPointerCancel="{{ mirrorCancel }}" style="min-height:52px; border-radius:14px; border:1px solid {{ mirrorBorder }}; background:rgba(255,255,255,0.05); color:#f2f2f5; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; box-shadow:{{ mirrorShadow }}; transition:box-shadow 0.15s ease, border-color 0.15s ease; touch-action:none; user-select:none; -webkit-user-select:none;">
+        <span style="display:flex; align-items:center; gap:7px; font-size:12px; font-weight:650;"><span style="font-size:15px; color:{{ sideTint }};">{{ mirrorGlyph }}</span>{{ mirrorLabel }}</span>
+        <span style="font-size:9.5px; font-weight:600; letter-spacing:0.3px; color:rgba(242,242,245,0.42);">{{ mirrorHint }}</span>
+      </button>
+      <sc-for list="{{ sideTools }}" as="t" hint-placeholder-count="4">
+        <button data-ctl="1" onClick="{{ t.act }}" style="min-height:44px; border-radius:14px; border:1px solid rgba(255,255,255,0.09); background:rgba(255,255,255,0.05); color:#f2f2f5; font-size:12px; font-weight:650; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px;" style-hover="background:rgba(255,255,255,0.11);">
+          <span style="font-size:15px; color:{{ sideTint }};">{{ t.glyph }}</span><span>{{ t.name }}</span>
+        </button>
+      </sc-for>
+      <div style="height:1px; background:rgba(255,255,255,0.08); margin:2px 0;"></div>
+      <button data-ctl="1" onClick="{{ deletePoint }}" style="min-height:42px; border-radius:14px; border:1px solid rgba(255,69,58,0.3); background:rgba(255,69,58,0.1); color:#FF6961; font-size:12px; font-weight:650; cursor:pointer; opacity:{{ deleteOpacity }};">Delete pt</button>
+      <button data-ctl="1" onClick="{{ resetFace }}" style="min-height:42px; border-radius:14px; border:1px solid rgba(255,255,255,0.09); background:transparent; color:rgba(242,242,245,0.6); font-size:12px; font-weight:650; cursor:pointer;">Reset face</button>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1024,&quot;height&quot;:1366}}">
+class Component extends DCLogic {
+  state = { vw: 1024, vh: 1366,
+    simDepth: false, stage: 'cube', density: 'grade', pct: 35,
+    activeFace: 2, tool: 'pen', side: 'start', selPt: { face: 2, side: 'start', idx: 1 }, drag: null, showWings: true, holdAll: false, holdMirror: false,
+    faces: [
+      { id: 2, name: 'Face 2', tint: '#4FA8FF', width: 96, thick: 24, start: 0, end: 1,
+        curve: { start: true, end: true },
+        prof: { start: [{x:0,y:0.18},{x:0.35,y:0.08},{x:0.7,y:0.3,smooth:false},{x:1,y:0.18}], end: [{x:0,y:0.82},{x:0.5,y:0.5},{x:1,y:0.86}] } },
+      { id: 15, name: 'Face 15', tint: '#BF5AF2', width: 64, thick: 18, start: 0, end: 1,
+        curve: { start: true, end: true },
+        prof: { start: [{x:0,y:0.2},{x:0.5,y:0.35},{x:1,y:0.2}], end: [{x:0,y:0.8},{x:1,y:0.8}] } }
+    ]
+  };
+
+  componentDidMount() {
+    this.onResize = () => this.setState({ vw: window.innerWidth, vh: window.innerHeight });
+    this.onResize(); window.addEventListener('resize', this.onResize);
+  }
+  componentWillUnmount() { window.removeEventListener('resize', this.onResize); }
+  upd(id, fn) { this.setState(st => ({ faces: st.faces.map(f => f.id === id ? fn(Object.assign({}, f)) : f) })); }
+  clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // tangent (in normalized units) at point i: custom p.t if set, else Catmull-Rom
+  tangent(pts, i) {
+    const p = pts[i]; if (p.t) return p.t;
+    const a = pts[i - 1] || p, b = pts[i + 1] || p;
+    return { x: (b.x - a.x) / 6, y: (b.y - a.y) / 6 };
+  }
+  isSmooth(p) { return p.smooth !== false; }
+  // side: 'start' clamps y<=0.5, 'end' clamps y>=0.5 — curve is flattened along the mid-plane where it would cross
+  pathD(pts, curve, bx, by, bw, bh, side) {
+    const P = pts.map(p => [bx + p.x * bw, by + p.y * bh]);
+    if (P.length < 2) return '';
+    const midY = by + bh / 2;
+    const clampY = y => !side ? y : side === 'start' ? Math.min(y, midY) : Math.max(y, midY);
+    const out = [[P[0][0], clampY(P[0][1])]];
+    for (let i = 0; i < P.length - 1; i++) {
+      if (!curve || !this.isSmooth(pts[i]) || !this.isSmooth(pts[i + 1])) { out.push([P[i + 1][0], clampY(P[i + 1][1])]); continue; }
+      const t1 = this.tangent(pts, i), t2 = this.tangent(pts, i + 1);
+      const c1 = [P[i][0] + t1.x * bw, P[i][1] + t1.y * bh];
+      const c2 = [P[i + 1][0] - t2.x * bw, P[i + 1][1] - t2.y * bh];
+      const N = 24;
+      for (let k = 1; k <= N; k++) {
+        const u = k / N, v = 1 - u;
+        const x = v*v*v*P[i][0] + 3*v*v*u*c1[0] + 3*v*u*u*c2[0] + u*u*u*P[i+1][0];
+        const y = v*v*v*P[i][1] + 3*v*v*u*c1[1] + 3*v*u*u*c2[1] + u*u*u*P[i+1][1];
+        out.push([x, clampY(y)]);
+      }
+    }
+    return 'M' + out.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' L');
+  }
+
+  svgPt(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    return { px: e.clientX - r.left, py: e.clientY - r.top };
+  }
+
+  renderVals() {
+    const s = this.state, grade = s.stage === 'grade', thick = s.stage === 'thickness';
+    const isEditor = grade || thick;
+    const BX = 70, BY = 34, PADR = 70, PADB = 34;
+    const stageW = s.vw - 380 - (grade ? 172 : 44), stageH = s.vh - 200 - 40 - 120;
+    const maxWmm = Math.max.apply(null, s.faces.map(f => f.width)), sumTmm = s.faces.reduce((a, f) => a + f.thick, 0);
+    this.S = Math.max(1.5, Math.min(5, (stageW - BX - PADR) / maxWmm, (stageH - s.faces.length * (BY + PADB + 40)) / sumTmm));
+    const sideTint = s.side === 'start' ? '#30D158' : '#FF453A';
+    const af = s.faces.find(f => f.id === s.activeFace) || s.faces[0];
+
+    const faces = s.faces.map(f => {
+      const bw = f.width * this.S, bh = f.thick * this.S, svgW = BX + bw + PADR, svgH = BY + bh + PADB;
+      const isActive = f.id === s.activeFace;
+      const startPts = grade ? f.prof.start : [{x:0,y:f.start},{x:1,y:f.start}];
+      const endPts = grade ? f.prof.end : [{x:0,y:f.end},{x:1,y:f.end}];
+      const cs = grade && f.curve.start, ce = grade && f.curve.end;
+      const startPath = this.pathD(startPts, cs, BX, BY, bw, bh, grade ? 'start' : null);
+      const endRev = endPts.slice().reverse();
+      const endPathRev = this.pathD(endRev, ce, BX, BY, bw, bh, grade ? 'end' : null);
+      const regionPath = startPath + ' ' + endPathRev.replace(/^M/, 'L') + ' Z';
+      const toMm = y => (y * f.thick).toFixed(1) + ' mm';
+      const move = e => {
+        if (!s.drag || s.drag.face !== f.id) return;
+        const { px, py } = this.svgPt(e);
+        const nx = this.clamp((px - BX) / bw, 0, 1), ny = this.clamp((py - BY) / bh, 0, 1);
+        if (s.drag.kind === 'wing') {
+          this.upd(f.id, ff => {
+            const arr = ff.prof[s.drag.side].slice(); const i = s.drag.idx; const p = Object.assign({}, arr[i]);
+            const dir = s.drag.dir; // +1 = outgoing wing, -1 = incoming wing
+            // work in px so angles are true on screen, then snap to 0/45/90 detents
+            let dx = (px - (BX + p.x * bw)) * dir, dy = (py - (BY + p.y * bh)) * dir;
+            const len = Math.hypot(dx, dy), ang = Math.atan2(dy, dx), step = Math.PI / 4;
+            const snapped = Math.round(ang / step) * step;
+            if (Math.abs(ang - snapped) < 0.14) { dx = Math.cos(snapped) * len; dy = Math.sin(snapped) * len; }
+            p.t = { x: dx / bw, y: dy / bh };
+            arr[i] = p; ff.prof = Object.assign({}, ff.prof, { [s.drag.side]: arr }); return ff;
+          });
+        } else if (s.drag.kind === 'thick') {
+          this.upd(f.id, ff => { if (s.drag.side === 'start') ff.start = Math.min(ny, ff.end - 0.02); else ff.end = Math.max(ny, ff.start + 0.02); return ff; });
+        } else {
+          this.upd(f.id, ff => {
+            const arr = ff.prof[s.drag.side].slice(); const i = s.drag.idx; const p = Object.assign({}, arr[i]);
+            p.y = s.drag.side === 'start' ? Math.min(ny, 0.5) : Math.max(ny, 0.5); if (i !== 0 && i !== arr.length - 1) p.x = this.clamp(nx, (arr[i-1].x + 0.02), (arr[i+1].x - 0.02));
+            arr[i] = p; ff.prof = Object.assign({}, ff.prof, { [s.drag.side]: arr }); return ff;
+          });
+        }
+      };
+      const handles = grade ? ['start', 'end'].flatMap(side => f.prof[side].map((p, i) => {
+        const sel = s.selPt && s.selPt.face === f.id && s.selPt.side === side && s.selPt.idx === i;
+        return {
+          cx: BX + p.x * bw, cy: BY + p.y * bh, r: sel ? 10 : 7,
+          fill: sel ? '#fff' : (this.isSmooth(p) ? (side === 'start' ? '#30D158' : '#FF453A') : '#05060c'), stroke: side === 'start' ? '#30D158' : '#FF453A', sw: sel ? 3 : (this.isSmooth(p) ? 0 : 2.2),
+          down: e => { e.stopPropagation(); this.setState({ activeFace: f.id, side, selPt: { face: f.id, side, idx: i }, drag: { face: f.id, kind: 'pt', side, idx: i } }); }
+        };
+      })) : [];
+      const wings = grade && s.showWings ? ['start', 'end'].flatMap(side => f.curve[side] ? f.prof[side].flatMap((p, i) => {
+        if (!this.isSmooth(p)) return [];
+        if (!(s.selPt && s.selPt.face === f.id && s.selPt.side === side && s.selPt.idx === i)) return [];
+        const t = this.tangent(f.prof[side], i), px = BX + p.x * bw, py = BY + p.y * bh;
+        const col = side === 'start' ? '#30D158' : '#FF453A';
+        return [1, -1].filter(dir => (dir === 1 && i < f.prof[side].length - 1) || (dir === -1 && i > 0)).map(dir => ({
+          x1: px, y1: py, x2: px + t.x * bw * dir, y2: py + t.y * bh * dir, col,
+          down: e => { e.stopPropagation(); this.setState({ activeFace: f.id, side, drag: { face: f.id, kind: 'wing', side, idx: i, dir } }); }
+        }));
+      }) : []) : [];
+      return {
+        wings,
+        id: f.id, name: f.name, tint: f.tint, svgW, svgH, viewBox: '0 0 ' + svgW + ' ' + svgH,
+        bx: BX, by: BY, bw, bh, midX: BX + bw / 2, midY: BY + bh / 2, rightX: BX + bw, readX: BX + bw + 14, bottomY: BY + bh,
+        labelTopY: BY - 10, labelBotY: BY + bh + 20, gradId: 'grad' + f.id,
+        dimText: f.width + ' × ' + f.thick + ' mm wall', activeDisplay: grade && isActive ? 'inline' : 'none',
+        boxStroke: grade && isActive ? 'rgba(127,191,255,0.8)' : 'rgba(255,255,255,0.22)',
+        rowBorder: 'rgba(255,255,255,0.08)',
+        rangeText: toMm(f.start) + ' – ' + toMm(f.end),
+        startMmVal: +(f.start * f.thick).toFixed(1), endMmVal: +(f.end * f.thick).toFixed(1),
+        setStartMm: e => this.upd(f.id, ff => { ff.start = this.clamp((parseFloat(e.target.value) || 0) / ff.thick, 0, ff.end - 0.02); return ff; }),
+        setEndMm: e => this.upd(f.id, ff => { ff.end = this.clamp((parseFloat(e.target.value) || 0) / ff.thick, ff.start + 0.02, 1); return ff; }),
+        profileText: f.prof.start.length + f.prof.end.length + ' pts · ' + (f.curve.start || f.curve.end ? 'curved' : 'straight'),
+        regionPath, regionFill: grade ? 'url(#grad' + f.id + ')' : 'rgba(79,168,255,0.16)',
+        startPath, endPath: endPathRev, startW: grade ? 3 : 2.5, endW: grade ? 3 : 2.5,
+        thickMode: thick, handles, cursor: grade && s.tool === 'pen' ? 'crosshair' : 'default',
+        startPxY: BY + f.start * bh, endPxY: BY + f.end * bh, startBarY: BY + f.start * bh - 22, endBarY: BY + f.end * bh - 22,
+        startMm: grade ? 'start' : toMm(f.start), endMm: grade ? 'end' : toMm(f.end), thickMm: f.thick + ' mm',
+        downStart: e => { e.stopPropagation(); this.setState({ drag: { face: f.id, kind: 'thick', side: 'start' } }); },
+        downEnd: e => { e.stopPropagation(); this.setState({ drag: { face: f.id, kind: 'thick', side: 'end' } }); },
+        onMove: move, onUp: () => s.drag && this.setState({ drag: null }),
+        activate: () => s.activeFace !== f.id && this.setState({ activeFace: f.id }),
+        onCanvasDown: e => {
+          if (!grade || s.tool !== 'pen') return;
+          const { px, py } = this.svgPt(e);
+          const nx = (px - BX) / bw, ny = (py - BY) / bh;
+          if (nx <= 0.02 || nx >= 0.98 || ny < -0.1 || ny > 1.1) return;
+          const tapSide = ny < 0.5 ? 'start' : 'end';
+          this.setState({ side: tapSide });
+          this.upd(f.id, ff => {
+            const arr = ff.prof[tapSide].slice(); let i = arr.findIndex(p => p.x > nx); if (i < 0) i = arr.length - 1;
+            arr.splice(i, 0, { x: nx, y: tapSide === 'start' ? this.clamp(ny, 0, 0.5) : this.clamp(ny, 0.5, 1) }); ff.prof = Object.assign({}, ff.prof, { [tapSide]: arr }); return ff;
+          });
+          this.setState({ activeFace: f.id });
+        }
+      };
+    });
+
+    const selPtObj = s.selPt ? ((s.faces.find(f => f.id === s.selPt.face) || {}).prof || {})[s.selPt.side] : null;
+    const selSmooth = selPtObj && selPtObj[s.selPt.idx] ? this.isSmooth(selPtObj[s.selPt.idx]) : true;
+    const selLeft = selPtObj && selPtObj[s.selPt.idx] ? selPtObj[s.selPt.idx].x <= 0.5 : true;
+    const sideOp = fn => this.upd(af.id, ff => { ff.prof = Object.assign({}, ff.prof, { [s.side]: fn(ff.prof[s.side].slice(), ff) }); return ff; });
+    const shift = dir => sideOp(arr => arr.map((p, i) => (i === 0 || i === arr.length - 1) ? p : { x: this.clamp(p.x + dir * 0.06, arr[0].x + 0.02, arr[arr.length-1].x - 0.02), y: p.y }));
+
+    return {
+      caption: grade ? 'Tap above the dotted line to shape the start, below for the end'
+        : thick ? 'Drag the lines: how much of each wall may become lattice'
+        : 'A 20 mm test cube, re-traced with your settings. Your part will differ.',
+      isCube: !isEditor, isEditor, isGrade: grade, stageRight: grade ? '172px' : '44px',
+      saveLabel: grade ? 'Save profile' : 'Save thickness',
+      cancelEditor: () => this.setState({ stage: 'cube', drag: null, selPt: null }),
+      saveEditor: () => this.setState({ stage: 'cube', drag: null, selPt: null }),
+
+      toggleSimDepth: () => this.setState({ simDepth: !s.simDepth, stage: !s.simDepth && grade ? 'cube' : s.stage }),
+      simDepthBg: s.simDepth ? '#0A84FF' : 'rgba(255,255,255,0.18)', simDepthJustify: s.simDepth ? 'flex-end' : 'flex-start',
+      simDepthSub: s.simDepth ? 'FEA decides how deep the lattice goes' : 'You set the allowed range per wall',
+      manualDepth: !s.simDepth, faces,
+
+      densityOpts: [
+        { k: 'sim', name: 'Graded by sim', sub: 'FEA stress field drives density' },
+        { k: 'auto', name: 'Auto single density', sub: 'One value chosen for the part' },
+        { k: 'manual', name: 'Manual single density', sub: 'One value you set' },
+        { k: 'grade', name: 'Manual grade', sub: 'Draw the density profile per wall' }
+      ].map(o => ({
+        name: o.name, sub: o.sub, bg: s.density === o.k ? 'rgba(10,132,255,0.10)' : 'transparent',
+        ringColor: s.density === o.k ? '#0A84FF' : 'rgba(255,255,255,0.3)', dot: s.density === o.k ? '#0A84FF' : 'transparent',
+        showPct: o.k === 'manual' && s.density === 'manual', showGrade: o.k === 'grade' && s.density === 'grade',
+        pick: () => this.setState({ density: o.k, stage: o.k === 'grade' ? 'grade' : (s.stage === 'grade' ? 'cube' : s.stage) })
+      })),
+      pct: s.pct, setPct: e => this.setState({ pct: this.clamp(parseInt(e.target.value) || 0, 5, 95) }),
+      openGrade: () => this.setState({ stage: grade ? 'cube' : 'grade' }),
+      gradeBtnLabel: grade ? 'Editing in viewer…' : 'Open grading tool', gradeBtnBg: grade ? 'rgba(10,132,255,0.22)' : 'rgba(255,255,255,0.07)',
+      gradeBtnBorder: grade ? 'rgba(10,132,255,0.55)' : 'rgba(255,255,255,0.12)', gradeBtnColor: grade ? '#7FBFFF' : '#f2f2f5',
+
+      modeTools: [{ k: 'pen', name: 'Pen', glyph: '✎' }, { k: 'move', name: 'Move', glyph: '✥' }].map(t => ({
+        name: t.name, glyph: t.glyph, pick: () => this.setState({ tool: t.k }),
+        bg: s.tool === t.k ? 'rgba(10,132,255,0.24)' : 'rgba(255,255,255,0.05)', border: s.tool === t.k ? 'rgba(10,132,255,0.6)' : 'rgba(255,255,255,0.09)', color: s.tool === t.k ? '#fff' : 'rgba(242,242,245,0.7)'
+      })),
+      sideTint, sideName: s.side === 'start' ? 'Start' : 'End',
+      toggleWings: () => this.setState({ showWings: !s.showWings }),
+      wingsBg: s.showWings ? '#0A84FF' : 'rgba(22,24,34,0.85)', wingsBorder: s.showWings ? '#0A84FF' : 'rgba(255,255,255,0.1)', wingsColor: s.showWings ? '#fff' : 'rgba(242,242,245,0.7)',
+      wingsShadow: s.showWings ? '0 8px 24px rgba(10,132,255,0.35)' : 'none',
+      selSmooth, curveLabel: selSmooth ? 'Curved' : 'Straight', curveGlyph: selSmooth ? '∿' : '⟋',
+      curveHint: s.holdAll ? 'all points' : (s.selPt ? 'this point' : 'select a point'),
+      curveBorder: s.holdAll ? '#7FBFFF' : 'rgba(255,255,255,0.09)',
+      curveShadow: s.holdAll ? '0 0 0 3px rgba(10,132,255,0.35), 0 0 18px rgba(10,132,255,0.55)' : 'none',
+      curveDown: () => { this.holdTimer = setTimeout(() => this.setState({ holdAll: true }), 500); },
+      curveUp: () => {
+        clearTimeout(this.holdTimer);
+        if (this.state.holdAll) {
+          const target = !selSmooth;
+          sideOp(arr => arr.map(p => Object.assign({}, p, { smooth: target })));
+          this.setState({ holdAll: false });
+        } else if (s.selPt) {
+          this.upd(s.selPt.face, ff => { const arr = ff.prof[s.selPt.side].slice(); arr[s.selPt.idx] = Object.assign({}, arr[s.selPt.idx], { smooth: !this.isSmooth(arr[s.selPt.idx]) }); ff.prof = Object.assign({}, ff.prof, { [s.selPt.side]: arr }); return ff; });
+        }
+      },
+      curveCancel: () => { clearTimeout(this.holdTimer); if (this.state.holdAll) this.setState({ holdAll: false }); },
+      mirrorLabel: s.holdMirror ? (selLeft ? 'Mirror →' : '← Mirror') : (s.side === 'start' ? 'Mirror → End' : 'Mirror → Start'),
+      mirrorGlyph: s.holdMirror ? '⇋' : '⇅',
+      mirrorHint: s.holdMirror ? (selLeft ? 'left half → right' : 'right half → left') : (s.side === 'start' ? 'start → end' : 'end → start'),
+      mirrorBorder: s.holdMirror ? '#7FBFFF' : 'rgba(255,255,255,0.09)',
+      mirrorShadow: s.holdMirror ? '0 0 0 3px rgba(10,132,255,0.35), 0 0 18px rgba(10,132,255,0.55)' : 'none',
+      mirrorDown: () => { this.mirrorTimer = setTimeout(() => this.setState({ holdMirror: true }), 500); },
+      mirrorCancel: () => { clearTimeout(this.mirrorTimer); if (this.state.holdMirror) this.setState({ holdMirror: false }); },
+      mirrorUp: () => {
+        clearTimeout(this.mirrorTimer);
+        if (this.state.holdMirror) {
+          // horizontal: reflect the half holding the selected point onto the other half
+          sideOp(arr => {
+            const src = arr.filter(p => selLeft ? p.x <= 0.5 : p.x >= 0.5);
+            const refl = src.filter(p => Math.abs(p.x - 0.5) > 0.001).map(p => Object.assign({ x: 1 - p.x, y: p.y }, p.t ? { t: { x: p.t.x, y: -p.t.y } } : {}));
+            return src.concat(refl).sort((a, b) => a.x - b.x);
+          });
+          this.setState({ holdMirror: false });
+        } else {
+          this.upd(af.id, ff => {
+            const other = s.side === 'start' ? 'end' : 'start';
+            ff.prof = Object.assign({}, ff.prof, { [other]: ff.prof[s.side].map(p => Object.assign({ x: p.x, y: other === 'start' ? this.clamp(1 - p.y, 0, 0.5) : this.clamp(1 - p.y, 0.5, 1) }, p.t ? { t: { x: p.t.x, y: -p.t.y } } : {})) });
+            ff.curve = Object.assign({}, ff.curve, { [other]: ff.curve[s.side] }); return ff;
+          });
+        }
+      },
+      sideTools: [
+        { name: 'Shift ◁', glyph: '←', act: () => shift(-1) },
+        { name: 'Shift ▷', glyph: '→', act: () => shift(1) },
+        { name: 'Flatten', glyph: '—', act: () => sideOp(arr => { let y = arr.reduce((a, p) => a + p.y, 0) / arr.length; y = s.side === 'start' ? Math.min(y, 0.5) : Math.max(y, 0.5); return [{ x: 0, y }, { x: 1, y }]; }) }
+      ],
+      deleteOpacity: s.selPt && s.selPt.idx !== 0 && s.selPt.idx !== (af.prof[s.selPt.side] || []).length - 1 ? 1 : 0.35,
+      deletePoint: () => { const sp = s.selPt; if (!sp) return; this.upd(sp.face, ff => { const arr = ff.prof[sp.side]; if (sp.idx === 0 || sp.idx === arr.length - 1) return ff; ff.prof = Object.assign({}, ff.prof, { [sp.side]: arr.filter((_, i) => i !== sp.idx) }); return ff; }); this.setState({ selPt: null }); },
+      resetFace: () => this.upd(af.id, ff => { const a = Math.min(ff.start, 0.5), b = Math.max(ff.end, 0.5); ff.prof = { start: [{x:0,y:a},{x:1,y:a}], end: [{x:0,y:b},{x:1,y:b}] }; return ff; })
+    };
+  }
+}
+
+</script>
+</body>
+</html>

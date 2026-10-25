@@ -232,9 +232,9 @@ struct Crossing {
 // the mesh bbox) and voxelize_onto_grid (grid supplied) delegate here, so the two
 // paths mark IDENTICAL occupancy for identical geometry.
 static VoxelGrid voxelize_fill(const TriangleMesh& mesh, const Vec3& lo, double h,
-                               int nx, int ny, int nz);
+                               int nx, int ny, int nz, VoxelTies ties);
 
-VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
+VoxelGrid voxelize(const TriangleMesh& mesh, int resolution, VoxelTies ties) {
   if (resolution < 1) {
     throw std::invalid_argument("voxelize: resolution must be >= 1");
   }
@@ -263,7 +263,7 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
   };
 
   return voxelize_fill(mesh, lo, h, axis_count(ext_x), axis_count(ext_y),
-                       axis_count(ext_z));
+                       axis_count(ext_z), ties);
 }
 
 // Voxelize `mesh` onto the SAME grid geometry as `reference` (origin, spacing and
@@ -274,18 +274,55 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
 // (handoff 2026-07-26-constrained-smooth). The quantization gap it introduces (the
 // mesh surface vs its voxelization at this resolution) is the footnote the
 // re-analysis provenance discloses. Throws if the mesh is empty.
-VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference) {
+VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference,
+                             VoxelTies ties) {
   if (mesh.empty() || mesh.vertices.empty())
     throw std::invalid_argument("voxelize_onto_grid: mesh is empty");
   if (!(reference.spacing > 0.0) || reference.nx < 1 || reference.ny < 1 ||
       reference.nz < 1)
     throw std::invalid_argument("voxelize_onto_grid: reference grid is degenerate");
   return voxelize_fill(mesh, reference.origin, reference.spacing, reference.nx,
-                       reference.ny, reference.nz);
+                       reference.ny, reference.nz, ties);
+}
+
+// Does the directed edge p -> q of a triangle whose projected signed area has sign
+// `sign` claim the column centre (px, py)? (VoxelTies::Watertight.) The edge function
+// is computed from the edge's canonical order (the lexicographically smaller vertex
+// first), so the two triangles sharing an edge get exactly negated values; it is then
+// oriented so the triangle's interior is > 0. On the edge itself (exactly 0) the
+// TOP-LEFT rule decides: the oriented direction (dx, dy) claims when dy < 0, or dy == 0
+// and dx < 0, i.e. the centre is perturbed to (px + ε, py − ε²). The neighbour's
+// reversed edge gets the complement, and a silhouette fold the same answer twice, so
+// every crossing is counted exactly as a perturbed centre's would be.
+//
+// ★ NO FMA CONTRACTION HERE. At a centre equal to the edge's far vertex t the value is
+// a·b − b·a, which is exactly 0 only when both products are rounded. A fused
+// multiply-add gives fma(a, b, −b·a) = the rounding error of b·a ≠ 0. Clang contracts
+// within an expression by default on arm64, and GCC does across statements in gnu++
+// mode. test_voxelize_ties checks this exact-zero property, with a contracted copy as
+// its positive control.
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("fp-contract=off")))
+#endif
+double voxel_tie_edge_function(const Vec3& s, const Vec3& t, double px, double py) {
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+  return (t.x - s.x) * (py - s.y) - (t.y - s.y) * (px - s.x);
+}
+
+static bool edge_owns(const Vec3& p, const Vec3& q, int sign, double px, double py) {
+  const bool forward = p.x < q.x || (p.x == q.x && p.y < q.y);
+  double e = forward ? voxel_tie_edge_function(p, q, px, py) : -voxel_tie_edge_function(q, p, px, py);
+  if (sign < 0) e = -e;  // interior > 0
+  if (e > 0.0) return true;
+  if (e < 0.0) return false;
+  const double dx = sign * (q.x - p.x), dy = sign * (q.y - p.y);
+  return dy < 0.0 || (dy == 0.0 && dx < 0.0);
 }
 
 static VoxelGrid voxelize_fill(const TriangleMesh& mesh, const Vec3& lo, double h,
-                               int nx, int ny, int nz) {
+                               int nx, int ny, int nz, VoxelTies ties) {
   VoxelGrid grid;
   grid.nx = nx;
   grid.ny = ny;
@@ -344,9 +381,15 @@ static VoxelGrid voxelize_fill(const TriangleMesh& mesh, const Vec3& lo, double 
             (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
         const double e2 =
             (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);
-        const bool inside = (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) ||
-                            (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0);
-        if (!inside) continue;
+        if (ties == VoxelTies::Watertight) {
+          if (!(edge_owns(a, b, sign, px, py) && edge_owns(b, c, sign, px, py) &&
+                edge_owns(c, a, sign, px, py)))
+            continue;
+        } else {
+          const bool inside = (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0) ||
+                              (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0);
+          if (!inside) continue;
+        }
 
         // z of the triangle plane at (px,py) via barycentric interpolation.
         // Weights: c<-e0, a<-e1, b<-e2, normalized by area2 = e0+e1+e2.
