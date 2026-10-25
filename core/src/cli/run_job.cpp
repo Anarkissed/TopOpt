@@ -60,6 +60,9 @@
 #include "topopt/threemf_stream.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
+#ifdef TOPOPT_HAVE_MANIFOLD
+#include "manifold/manifold.h"
+#endif
 #ifdef TOPOPT_HAVE_3MF
 #include "topopt/threemf.hpp"
 #endif
@@ -556,13 +559,102 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // ROTATED so the certified build direction is +Z in the file. Rotated vertices,
 // not a build transform — a 3MF transform is advice that "place on bed" resets,
 // and then the certificate would describe an object the slicer never produces.
-std::string export_variant_mesh(const MinimizePlasticVariant& variant,
-                                const std::string& out_dir, const JobOutput& out,
-                                const VoxelGrid& sg, double printed_iso = 0.5,
-                                const StepModel* cad = nullptr) {
-  const std::string path = join_path(
-      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
-                              out.mesh_format));
+// The variant's exported solid in MODEL coordinates (before any build-frame bake):
+// the shell the file carries, so a caller can certify exactly what is exported
+// (CORE LIST item 50 verifies it). export_variant_mesh writes it.
+// CORE LIST item KEEP — inside each keep region the export carries the PART's own
+// geometry, exactly: (export - K) + (part ^ K), one merged shell, by Manifold. The
+// optimizer froze the part there, so the two meet. Without Manifold in this build, or
+// on a mesh Manifold cannot take as a closed manifold, the voxel surface stays and a
+// WARNING says so (the kept material is still frozen, only not exact).
+TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
+                                const std::vector<KeepRegion>& keeps) {
+  if (keeps.empty()) return exported;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  auto to_manifold = [](const TriangleMesh& m) {
+    manifold::MeshGL g;
+    g.numProp = 3;
+    g.vertProperties.reserve(3 * m.vertices.size());
+    for (const Vec3& v : m.vertices) {
+      g.vertProperties.push_back(static_cast<float>(v.x));
+      g.vertProperties.push_back(static_cast<float>(v.y));
+      g.vertProperties.push_back(static_cast<float>(v.z));
+    }
+    for (const auto& t : m.triangles)
+      for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<uint32_t>(t[k]));
+    return manifold::Manifold(g);
+  };
+  // The part side is taken with each region GROWN by kFuse, so the two pieces
+  // overlap by that much and fuse across a volume: cut exactly at K, they touched
+  // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
+  constexpr double kFuse = 0.05;  // mm, below any print resolution
+  auto region = [](const KeepRegion& k, double grow) {
+    const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
+    const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
+                             k.max.z - k.min.z + 2 * grow};
+    manifold::Manifold prim;
+    if (!k.cylinder) {
+      prim = manifold::Manifold::Cube(ext).Translate(lo);
+    } else {
+      const double len = k.axis == 0 ? ext.x : k.axis == 1 ? ext.y : ext.z;
+      const double r = 0.5 * (k.axis == 0 ? ext.y : ext.x);
+      prim = manifold::Manifold::Cylinder(len, r, r, 128);  // along +Z from 0
+      if (k.axis == 0) prim = prim.Rotate(0.0, 90.0, 0.0);   // +Z -> +X
+      if (k.axis == 1) prim = prim.Rotate(-90.0, 0.0, 0.0);  // +Z -> +Y
+      const manifold::vec3 c{lo.x + 0.5 * ext.x, lo.y + 0.5 * ext.y, lo.z + 0.5 * ext.z};
+      prim = prim.Translate({k.axis == 0 ? lo.x : c.x, k.axis == 1 ? lo.y : c.y,
+                             k.axis == 2 ? lo.z : c.z});
+    }
+    return prim;
+  };
+  manifold::Manifold K, K_part;
+  for (const KeepRegion& k : keeps) {
+    K = K + region(k, 0.0);
+    K_part = K_part + region(k, kFuse);
+  }
+  const manifold::Manifold E = to_manifold(exported), P = to_manifold(part);
+  if (E.Status() != manifold::Manifold::Error::NoError ||
+      P.Status() != manifold::Manifold::Error::NoError) {
+    std::fprintf(stderr,
+                 "WARNING: KEEP regions: the %s mesh is not a closed manifold "
+                 "(Manifold status %d), so the kept regions are exported from the "
+                 "voxels, not exactly.\n",
+                 E.Status() != manifold::Manifold::Error::NoError ? "exported" : "part",
+                 static_cast<int>(E.Status() != manifold::Manifold::Error::NoError
+                                      ? E.Status()
+                                      : P.Status()));
+    return exported;
+  }
+  const manifold::MeshGL g = ((E - K) + (P ^ K_part)).GetMeshGL();
+  TriangleMesh out;
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
+                            g.vertProperties[v * g.numProp + 2]});
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                             static_cast<int>(g.triVerts[3 * t + 1]),
+                             static_cast<int>(g.triVerts[3 * t + 2])});
+  return out;
+#else
+  (void)part;
+  std::fprintf(stderr,
+               "WARNING: KEEP regions: this build has no Manifold, so the kept "
+               "regions are exported from the voxels, not exactly (they are still "
+               "frozen).\n");
+  return exported;
+#endif
+}
+
+TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
+                                       const JobOutput& out, const VoxelGrid& sg,
+                                       double printed_iso = 0.5,
+                                       const StepModel* cad = nullptr,
+                                       const std::vector<KeepRegion>& keeps = {}) {
+  if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
+    return keep_regions_exact(
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
+        keeps);
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
@@ -570,7 +662,19 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
         sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
         variant.optimization.physical_density, printed_iso, sf,
         ResampleInterp::Tricubic);
-    smooth = keep_largest_component(raw);
+    // CORE LIST item 41 — every body holding an anchor or a load, mapped from the
+    // solve grid's bodies (keep_largest_component's shell on a one-body part).
+    BodyShells shells = carrying_body_shells(
+        raw, sg,
+        printed_bodies(sg, variant.optimization.physical_density, printed_iso));
+    if (shells.bodies_without_shell > 0)
+      std::fprintf(stderr,
+                   "WARNING: variant vf %.2f: %d carrying body(ies) left no shell "
+                   "in the smooth_factor %d resample, so the exported file does "
+                   "not carry them.\n",
+                   variant.requested_volume_fraction, shells.bodies_without_shell,
+                   sf);
+    smooth = std::move(shells.mesh);
   }
   // CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection), DEFAULT OFF.
   //
@@ -610,15 +714,26 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   TriangleMesh projected;
   if (out.project_cad_faces && cad != nullptr && !cad->faces.empty() &&
       !cad->faces_are_fitted) {
-    const TriangleMesh& src = (sf > 1) ? smooth : variant.v3.mesh;
+    const TriangleMesh& src = (sf > 1) ? smooth : variant.exported_mesh();
     CadProjectOptions po = cad_project_options_for_grid(sg.spacing);
     po.enabled = true;
     const CadAttribution att = attribute_to_cad_faces(src, *cad, po);
     projected = project_onto_cad_faces(src, *cad, po, att);
   }
-  const TriangleMesh& model_mesh =
-      !projected.vertices.empty() ? projected
-                                  : ((sf > 1) ? smooth : variant.v3.mesh);
+  if (!projected.vertices.empty()) return projected;
+  return (sf > 1) ? smooth : variant.exported_mesh();
+}
+
+std::string export_variant_mesh(const MinimizePlasticVariant& variant,
+                                const std::string& out_dir, const JobOutput& out,
+                                const VoxelGrid& sg, double printed_iso = 0.5,
+                                const StepModel* cad = nullptr,
+                                const std::vector<KeepRegion>& keeps = {}) {
+  const std::string path = join_path(
+      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
+                              out.mesh_format));
+  const TriangleMesh model_mesh =
+      variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
   if (R) baked = rotate_mesh(model_mesh, *R);
@@ -4309,6 +4424,10 @@ struct LatticeVariantOutcome {
   // ★ whether the ledger tap ran at all (lattice.emit_plan_laid): without it the laid
   // counts are not measured and must not be reported as zeros.
   bool plan_laid_measured = false;
+  // ★ the law graded nothing and the run carried on anyway, because the plan is the
+  // design and carries its own density (ruling of 2026-10-11). Reported, never silent.
+  bool law_ungradeable_reported = false;
+  std::string law_ungradeable_note;
   double outline_inward_mm = 0.0;
   long long seam_spans_before = 0, seam_spans_after = 0;
   double seam_piece_mm = 0.0, seam_longest_before_mm = 0.0;
@@ -6409,6 +6528,59 @@ LatticeVariantOutcome lattice_one_variant(
     // carries the predicate, the per-reason counts and the two measured widths,
     // because the whole remedy is the relation between them.
     if (gf.region_ungradeable) {
+      // ── ★ ON A PLAN JOB THIS IS A REPORT, NOT A REFUSAL (ruling, 2026-10-11) ──
+      // The law could grade nothing. On a job that sent no plan that is the end of it:
+      // there is no lattice to emit and the refusal below stands, unchanged.
+      //
+      // On a PLAN job it is not core's decision to make. The plan IS the design: it says
+      // which cells, and with ruling C it says at what density, so core needs the law's
+      // grade for neither the geometry nor the certificate. Measured on 102117B9's
+      // Default Grade plan -- 12,112 cells over 177 regions, every one carrying a rho --
+      // the plan validated and then this line refused the job over 66,710 candidate
+      // voxels the LAW could not grade. That is core's own law gating a design it was
+      // not asked to produce.
+      //
+      // So: reported, and the run carries on. The plan's posture certifies as usual and
+      // can still refuse on its own grounds (the octet band, the strut-strength margin,
+      // the void rule) -- this removes one gate, not the certificate.
+      //
+      // ★ THE CONDITION IS THE PLAN'S OWN DENSITY, not the mere presence of a plan. Every
+      // planned cell must carry a rho; D5 has already proved each of those prints at its
+      // own size. A cell with no rho would have to be sized from the law's field, and the
+      // law has nothing here -- K3's refusal covers exactly that case and is unchanged.
+      bool plan_rho_everywhere = !job.lattice.stepped_cells.empty();
+      std::size_t cells_without_rho = 0;
+      for (const SteppedCell& c : job.lattice.stepped_cells)
+        if (!(c.rho > 0.0)) ++cells_without_rho;
+      if (cells_without_rho > 0) plan_rho_everywhere = false;
+      if (plan_rho_everywhere) {
+        R.law_ungradeable_reported = true;
+        R.law_ungradeable_note =
+            "the grading law could lattice NONE of this variant's " +
+            std::to_string(gf.region_voxels) +
+            " candidate voxels, and the run carried on because the PLAN is the design: " +
+            std::to_string(job.lattice.stepped_cells.size()) +
+            " cell(s), every one carrying its own relative density, so core needs the "
+            "law's grade for neither the geometry nor the certificate. The law's own "
+            "fallbacks over the voxels it rejected: member_too_thin_for_cell=" +
+            std::to_string(gf.fallback_member_too_thin) +
+            ", strut_unprintable_at_every_cell=" +
+            std::to_string(gf.fallback_strut_unprintable) +
+            ", irrecoverable_by_any_cell_size=" +
+            std::to_string(gf.fallback_irrecoverable_by_cell) +
+            ". The plan's posture still certifies, and can still refuse.";
+        std::fprintf(stderr, "[stepped] law ungradeable, REPORTED not refused: %s\n",
+                     R.law_ungradeable_note.c_str());
+        // ★ AND THE WINDOW NEEDS A CELL. `cell` below feeds the boundary's voxel-base
+        // window (2 x cell) and the certification mask's own cell. The law may leave it
+        // at 0 when it graded nothing, so it falls back to the PLAN's coarsest cell --
+        // the plan's own number, never one core invents.
+        double plan_coarsest = 0.0;
+        for (const SteppedCell& c : job.lattice.stepped_cells)
+          if (c.size_mm > plan_coarsest) plan_coarsest = c.size_mm;
+        if (!(gf.cell_size_mm > 0.0) && plan_coarsest > 0.0)
+          gf.cell_size_mm = plan_coarsest;
+      } else {
       R.ungradeable = true;
       R.ungradeable_reason =
           "the grading law could lattice NONE of this variant's " +
@@ -6434,6 +6606,7 @@ LatticeVariantOutcome lattice_one_variant(
           " mm) — run the pre-flight forecast for the evaluated remedies.";
       R.gf = gf;
       return R;
+      }
     }
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
@@ -8906,7 +9079,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -8999,6 +9172,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_region_ids = j_face_protection_region_ids;
   lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
+  lc.strengthen = j_redesign == "strengthen";  // item 50
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -9011,6 +9185,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // 0.42 / 0.45 job computed — and truthfully reported — an outer width of 0.45.
   // (Device runs never used this path: bridge.cpp writes the field directly.)
   lc.wall_line_width_outer_mm = j_wall_line_width_outer_mm;
+  lc.keep_regions = job.keep_regions;  // item KEEP
   lc.has_design_box = job.has_design_box;
   if (job.has_design_box) {
     lc.design_box = to_design_box(job.design_box);
@@ -11315,6 +11490,8 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.stepped_plan_by_region = R.plan_by_region;
       gi.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
       gi.stepped_plan_laid_measured = R.plan_laid_measured;
+      gi.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      gi.stepped_law_ungradeable_note = R.law_ungradeable_note;
       gi.stepped_seam_spans_before = R.seam_spans_before;
       gi.stepped_seam_spans_after = R.seam_spans_after;
       gi.stepped_seam_piece_mm = R.seam_piece_mm;
@@ -12028,6 +12205,405 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
     options.plsm.threads = production_matfree_thread_count();
   }
   return S;
+}
+
+// ── "REDESIGN TO STRENGTHEN" (CORE LIST item 50) ─────────────────────────────
+// The reviewer's brief of 2026-10-24 22:59, approved 01:52 (arm B dropped), with
+// the search changed after the sample (02:16): the margin can sit on a plateau
+// set by frozen features, so the fraction is BRACKETED (halved while the aim
+// holds, doubled while it fails, then bisected) instead of moved +-5 % a step.
+//
+// Every optimize is an ordinary one-rung minimize_plastic call on the run's own
+// (domain_box_only, volume_basis_domain) options, fresh from uniform; no solver
+// file is involved. Each version's fraction is searched on a res/2 grid, the
+// version is then run once at the job's resolution and VERIFIED: its exported
+// solid (variant_export_model_mesh, the shell the file carries) re-voxelized and
+// certified by analyze_job, the same certification `topopt-cli analyze` runs.
+constexpr double kStrengthenStressCut[3] = {0.25, 0.50, 0.75};
+constexpr double kStrengthenDelta = 0.10;     // aim above the target (da Silva 2021)
+constexpr double kStrengthenGamma = 0.75;     // the repair's exponent
+constexpr double kStrengthenCeilingUse = 0.95;
+constexpr double kStrengthenStepOver = 1.05;  // each version >= 1.05 x the previous
+constexpr int kStrengthenCoarseRuns = 6;
+constexpr int kStrengthenRepairs = 2;
+
+// Move a one-rung result's rung onto `into`, keeping every per-rung vector aligned
+// with `evaluated` (run_info reads them by rung index).
+void append_rung(MinimizePlasticResult& into, MinimizePlasticResult&& from) {
+  auto take = [](auto& a, auto& b) {
+    for (auto& x : b) a.push_back(std::move(x));
+  };
+  take(into.evaluated, from.evaluated);
+  take(into.rung_grayscale_mnd, from.rung_grayscale_mnd);
+  take(into.conditional_projection_fired, from.conditional_projection_fired);
+  take(into.rung_infeasible, from.rung_infeasible);
+  take(into.rung_non_convergent, from.rung_non_convergent);
+  take(into.rung_non_convergent_iteration, from.rung_non_convergent_iteration);
+  take(into.rung_non_convergent_residual, from.rung_non_convergent_residual);
+  take(into.rung_diverged, from.rung_diverged);
+  take(into.rung_diverged_iteration, from.rung_diverged_iteration);
+  take(into.rung_diverged_c_ratio, from.rung_diverged_c_ratio);
+  take(into.rung_diverged_cg_ratio, from.rung_diverged_cg_ratio);
+  take(into.rung_diverged_wall_ratio, from.rung_diverged_wall_ratio);
+  take(into.rung_time_budget, from.rung_time_budget);
+  take(into.rung_time_budget_iteration, from.rung_time_budget_iteration);
+  take(into.rung_time_budget_ms, from.rung_time_budget_ms);
+  take(into.rung_time_budget_elapsed_ms, from.rung_time_budget_elapsed_ms);
+  take(into.rung_time_budget_baseline_ms, from.rung_time_budget_baseline_ms);
+  take(into.rung_time_budget_phase, from.rung_time_budget_phase);
+  take(into.rung_time_budget_phase_ms, from.rung_time_budget_phase_ms);
+  take(into.draft_rung_tail_k, from.draft_rung_tail_k);
+  take(into.draft_rung_c_gap, from.draft_rung_c_gap);
+  take(into.draft_rung_escalated, from.draft_rung_escalated);
+  take(into.draft_rung_probe_flip, from.draft_rung_probe_flip);
+  take(into.draft_rung_probe_cg, from.draft_rung_probe_cg);
+  take(into.draft_rung_probe_tightmove, from.draft_rung_probe_tightmove);
+  take(into.report.variants, from.report.variants);
+  take(into.report.rejected, from.report.rejected);
+}
+
+// Squared distance from p to triangle abc (closest point, Ericson's regions).
+double point_triangle_d2(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+  auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+  auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+  auto d2 = [&](const Vec3& q) { const Vec3 e = sub(p, q); return dot(e, e); };
+  const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+  const double d1 = dot(ab, ap), d2v = dot(ac, ap);
+  if (d1 <= 0 && d2v <= 0) return d2(a);
+  const Vec3 bp = sub(p, b);
+  const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return d2(b);
+  const double vc = d1 * d4 - d3 * d2v;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const double t = d1 / (d1 - d3);
+    return d2(Vec3{a.x + t * ab.x, a.y + t * ab.y, a.z + t * ab.z});
+  }
+  const Vec3 cp = sub(p, c);
+  const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return d2(c);
+  const double vb = d5 * d2v - d1 * d6;
+  if (vb <= 0 && d2v >= 0 && d6 <= 0) {
+    const double t = d2v / (d2v - d6);
+    return d2(Vec3{a.x + t * ac.x, a.y + t * ac.y, a.z + t * ac.z});
+  }
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return d2(Vec3{b.x + t * (c.x - b.x), b.y + t * (c.y - b.y), b.z + t * (c.z - b.z)});
+  }
+  const double den = 1.0 / (va + vb + vc);
+  const double v = vb * den, w = vc * den;
+  return d2(Vec3{a.x + ab.x * v + ac.x * w, a.y + ab.y * v + ac.y * w,
+                 a.z + ab.z * v + ac.z * w});
+}
+
+// The ceiling's worst-stress site (the reviewer's ruling of 2026-10-25 03:58).
+void strengthen_cap_site(StrengthenReport& sr, const VoxelGrid& G,
+                         const std::vector<double>& von_mises, const StepModel& model) {
+  if (von_mises.size() != G.voxel_count()) return;
+  std::size_t at = 0;
+  for (std::size_t i = 1; i < von_mises.size(); ++i)
+    if (von_mises[i] > von_mises[at]) at = i;
+  const int x = static_cast<int>(at % static_cast<std::size_t>(G.nx));
+  const int y = static_cast<int>((at / static_cast<std::size_t>(G.nx)) %
+                                 static_cast<std::size_t>(G.ny));
+  const int z = static_cast<int>(at / (static_cast<std::size_t>(G.nx) *
+                                       static_cast<std::size_t>(G.ny)));
+  sr.cap_point = G.voxel_center(x, y, z);
+  double best = std::numeric_limits<double>::infinity();
+  for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t) {
+    const auto& tri = model.mesh.triangles[t];
+    const double d = point_triangle_d2(sr.cap_point, model.mesh.vertices[tri[0]],
+                                       model.mesh.vertices[tri[1]],
+                                       model.mesh.vertices[tri[2]]);
+    if (d < best) {
+      best = d;
+      sr.cap_face_id = model.triangle_face[t];
+    }
+  }
+  for (int dk = -1; dk <= 1; ++dk)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int di = -1; di <= 1; ++di) {
+        const int i = x + di, j = y + dj, k = z + dk;
+        if (i < 0 || j < 0 || k < 0 || i >= G.nx || j >= G.ny || k >= G.nz) continue;
+        const VoxelTag t = G.tag(i, j, k);
+        if (t == VoxelTag::Fixture) sr.cap_at_anchor_face = true;
+        if (t == VoxelTag::Load) sr.cap_at_load_face = true;
+      }
+  char line[400];
+  std::snprintf(line, sizeof(line),
+                "the box filled solid peaks at (%.1f, %.1f, %.1f) mm, on face %d%s",
+                sr.cap_point.x, sr.cap_point.y, sr.cap_point.z, sr.cap_face_id,
+                sr.cap_at_anchor_face || sr.cap_at_load_face
+                    ? (sr.cap_at_anchor_face
+                           ? ", at the edge of an anchor face: a fixed-support "
+                             "corner, where voxel stress grows with resolution, so "
+                             "this cap may not be real"
+                           : ", at the edge of a load face: where voxel stress "
+                             "grows with resolution, so this cap may not be real")
+                    : "");
+  sr.cap_note = line;
+}
+
+MinimizePlasticResult strengthen_versions(
+    const JobDescription& job, const std::string& job_dir,
+    const std::string& out_dir, const MaterialLibrary& materials,
+    const SettingsRules& rules, const StepModel& model, bool model_is_mesh,
+    const Material& material, const VoxelGrid& grid,
+    const std::vector<DirichletBC>& bcs, const MinimizePlasticOptions& options,
+    const SolvedDesignDomain& domain) {
+  const std::string work = join_path(out_dir, "strengthen");
+  std::filesystem::create_directories(work);
+  StrengthenReport sr;
+  sr.evaluated = true;
+  sr.delta = kStrengthenDelta;
+  sr.gamma = kStrengthenGamma;
+  sr.vf_step = 0.0;  // bracketing search, no per-step cap (see above)
+  sr.margin_required = options.margin_stop;
+  const double iso = run_printed_iso(options);
+
+  // The reference: the part as drawn, certified.
+  const AnalyzeJobResult drawn =
+      analyze_job(job, job_dir, join_path(work, "as_drawn"), materials, rules, "", {});
+  sr.as_drawn_margin = drawn.analysis.margin_effective;
+  sr.reference_margin = std::max(sr.as_drawn_margin, sr.margin_required);
+  sr.original_mass_grams = drawn.voxel_mass_grams;
+
+  // The ceiling: the domain (box, minus keep-outs and Keep Clears, plus everything
+  // frozen) filled solid, certified the same way.
+  const VoxelGrid& G = domain.grid;
+  const DesignMask mask = design_domain_mask(domain, options);
+  const std::vector<char> drawn_part = original_part_voxels(grid, domain);
+  std::vector<double> filled(G.voxel_count(), 0.0);
+  for (std::size_t i = 0; i < filled.size(); ++i)
+    if (G.tags[i] != VoxelTag::Empty && mask[i] != MaskValue::FrozenVoid)
+      filled[i] = 1.0;
+  if (options.design_box.has_value()) {
+    const DesignBox& b = *options.design_box;
+    for (std::size_t i = 0; i < filled.size(); ++i) {
+      if (mask[i] != MaskValue::FrozenSolid && G.tags[i] != VoxelTag::Load &&
+          G.tags[i] != VoxelTag::Fixture)
+        continue;
+      const int x = static_cast<int>(i % static_cast<std::size_t>(G.nx));
+      const int y = static_cast<int>((i / static_cast<std::size_t>(G.nx)) %
+                                     static_cast<std::size_t>(G.ny));
+      const int z = static_cast<int>(i / (static_cast<std::size_t>(G.nx) *
+                                          static_cast<std::size_t>(G.ny)));
+      const Vec3 c = G.voxel_center(x, y, z);
+      if (c.x < b.min.x || c.x > b.max.x || c.y < b.min.y || c.y > b.max.y ||
+          c.z < b.min.z || c.z > b.max.z)
+        ++sr.frozen_outside_box_voxels;
+    }
+  }
+  const std::string ceiling_stl = join_path(work, "ceiling.stl");
+  write_stl_file(ceiling_stl, keep_largest_component(marching_cubes(G, filled, 0.5)));
+  {
+    const AnalyzeJobResult ceil =
+        analyze_job(job, job_dir, join_path(work, "ceiling"), materials, rules,
+                    ceiling_stl, {});
+    sr.ceiling_margin = ceil.analysis.margin_effective;
+    strengthen_cap_site(sr, G, ceil.analysis.von_mises_field, model);
+  }
+
+  // The coarse problem: the same job at half the resolution.
+  JobDescription coarse_job = job;
+  // Half the resolution, but never below 48 (or the job's own when it is finer
+  // than that): at res 32 his Carriage Arms' 3-voxel pads are a third of the part,
+  // and the coarse margin read 5.8 where the job's resolution gave 4.85.
+  coarse_job.resolution =
+      std::min(job.resolution, std::max(job.resolution / 2, 48));
+  sr.coarse_resolution = coarse_job.resolution;
+  JobSetup coarse = build_job_setup(coarse_job, model, model_is_mesh, materials);
+  auto quiet = [](MinimizePlasticOptions o) {
+    o.on_variant = nullptr;  // the caller streams the final versions itself
+    o.on_density_snapshot = nullptr;
+    o.on_iteration = nullptr;
+    return o;
+  };
+  const MinimizePlasticOptions coarse_opts = quiet(coarse.options);
+  const MinimizePlasticOptions fine_opts = quiet(options);
+  auto run_one = [&](const JobSetup* s, double vf,
+                     const std::vector<double>& seed) {
+    MinimizePlasticOptions o = s ? coarse_opts : fine_opts;
+    o.volume_fraction_ladder = {vf};
+    o.initial_design = seed;
+    return minimize_plastic(s ? s->grid : grid, material, job.material,
+                            s ? s->bcs : bcs, rules, o);
+  };
+  auto margin_of = [](const MinimizePlasticResult& r) {
+    const MinimizePlasticVariant& v = r.evaluated.front();
+    return v.accepted ? v.report.margin_effective : -1.0;
+  };
+
+  // Load nodes of the solve grid, for the deflection read on the verified solve.
+  std::vector<int> load_nodes;
+  for (int k = 0; k < G.nz; ++k)
+    for (int j = 0; j < G.ny; ++j)
+      for (int i = 0; i < G.nx; ++i) {
+        if (G.tag(i, j, k) != VoxelTag::Load) continue;
+        for (int c = 0; c < 8; ++c)
+          load_nodes.push_back(fea_node_index(G, i + (c & 1), j + ((c >> 1) & 1),
+                                              k + ((c >> 2) & 1)));
+      }
+
+  MinimizePlasticResult out;
+  double prev_vf = 0.0, prev_verified = 0.0;
+  for (int k = 0; k < 3; ++k) {
+    const auto t0 = std::chrono::steady_clock::now();
+    StrengthenVersionReport vr;
+    vr.version = k + 1;
+    vr.stress_cut = kStrengthenStressCut[k];
+    const double target = std::max(sr.reference_margin / (1.0 - vr.stress_cut),
+                                   kStrengthenStepOver * prev_verified);
+    vr.target_margin = target;
+    if (target > kStrengthenCeilingUse * sr.ceiling_margin) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "above %.2f x the box filled solid (margin %.4g): unreachable "
+                    "in this design space",
+                    kStrengthenCeilingUse, sr.ceiling_margin);
+      vr.note = note;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 1. Bracket the fraction on the coarse grid.
+    const double aim = target * (1.0 + kStrengthenDelta);
+    const double floor_vf = std::max(prev_vf, 0.02);
+    double vf = std::clamp(std::pow(target / sr.ceiling_margin, 1.0 / 1.5),
+                           floor_vf, 1.0);
+    double pass_vf = -1.0, fail_vf = -1.0, best_m = -1.0;
+    while (vr.coarse_runs < kStrengthenCoarseRuns) {
+      const double m = margin_of(run_one(&coarse, vf, {}));
+      ++vr.coarse_runs;
+      best_m = std::max(best_m, m);
+      if (m >= aim) {
+        pass_vf = vf;
+        if (vf <= floor_vf + 1e-9) break;
+        vf = fail_vf > 0.0 ? 0.5 * (vf + fail_vf) : std::max(floor_vf, 0.5 * vf);
+      } else {
+        fail_vf = vf;
+        if (vf >= 1.0 - 1e-9) break;
+        vf = pass_vf > 0.0 ? 0.5 * (vf + pass_vf) : std::min(1.0, 2.0 * vf);
+      }
+      if (pass_vf > 0.0 && fail_vf > 0.0 && pass_vf / fail_vf < 1.08) break;
+    }
+    if (pass_vf < 0.0) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "no fraction of the box reached it on the coarse grid (best "
+                    "margin %.4g)",
+                    best_m);
+      vr.note = note;
+      vr.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+                       .count();
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 2. Fine run, verify the export, repair at most twice.
+    vf = pass_vf;
+    std::vector<double> seed;
+    MinimizePlasticResult best;
+    double best_verified = -1.0;
+    bool ok = false;
+    for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
+      MinimizePlasticResult r = run_one(nullptr, vf, seed);
+      const MinimizePlasticVariant& v = r.evaluated.front();
+      const std::string stl =
+          join_path(work, "v" + std::to_string(k + 1) + "_" +
+                              std::to_string(attempt) + ".stl");
+      write_stl_file(stl, variant_export_model_mesh(v, job.output, r.solved_grid, iso,
+                                                    &model, job.keep_regions));
+      const AnalyzeJobResult a =
+          analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
+      const double verified = a.analysis.margin_effective;
+      // What the version prints, against the part as drawn and the Keep Clears.
+      const std::vector<double>& rho = v.optimization.physical_density;
+      long long inter = 0, uni = 0, clear = 0;
+      for (std::size_t i = 0; i < rho.size(); ++i) {
+        const bool printed = rho[i] > iso;
+        inter += printed && drawn_part[i];
+        uni += printed || drawn_part[i];
+        clear += printed && !options.clearance_void.empty() &&
+                 options.clearance_void[i] == MaskValue::FrozenVoid &&
+                 mask[i] != MaskValue::FrozenSolid;
+      }
+      double defl = 0.0;
+      if (a.analysis.displacement_field.size() ==
+          static_cast<std::size_t>(3 * fea_node_count(G)))
+        for (const int n : load_nodes) {
+          const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
+          defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
+        }
+      const bool clean = v.accepted && v.v3.specks_dropped == 0 && clear == 0;
+      // A repair warm-starts from this design only if it kept every anchor:
+      // warm-starting from a design that let anchored pieces go kept them loose.
+      std::vector<double> next_seed =
+          v.report.rejection_reason != kAnchorDetachedReason
+              ? v.optimization.physical_density
+              : std::vector<double>();
+      if (verified > best_verified) {
+        best_verified = verified;
+        vr.volume_fraction = vf;
+        vr.in_loop_margin = v.report.margin_effective;
+        vr.verified_margin = verified;
+        vr.mass_grams = v.mass_grams;
+        vr.mass_fraction_of_original =
+            sr.original_mass_grams > 0.0 ? v.mass_grams / sr.original_mass_grams : 0.0;
+        vr.max_deflection_mm = defl;
+        vr.iou_with_original =
+            uni > 0 ? static_cast<double>(inter) / static_cast<double>(uni) : 0.0;
+        vr.essentially_original = vr.iou_with_original > 0.9;
+        vr.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
+        vr.specks = v.v3.specks_dropped;
+        vr.keep_clear_voxels = clear;
+        vr.repairs = attempt;
+        best = std::move(r);
+      }
+      if (clean && verified >= target) {
+        ok = true;
+        break;
+      }
+      // Repair: raise the fraction by the shortfall (at least x1.25, so two repairs
+      // can cover a coarse-to-fine gap), from this design or, if it let an anchor
+      // go, fresh.
+      seed = std::move(next_seed);
+      const double ratio = verified > 0.0 ? target / verified : 2.0;
+      vf = std::min(1.0, vf * std::max(1.25, std::pow(ratio, 1.0 / kStrengthenGamma)));
+    }
+    vr.seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    if (!ok) {
+      vr.status = "unreachable";
+      vr.note = "the verified export missed the target after " +
+                std::to_string(kStrengthenRepairs) + " repairs (best shown)";
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // Two versions at the same design are one.
+    if (!out.evaluated.empty() && std::fabs(vr.volume_fraction - prev_vf) <= 0.01 * prev_vf) {
+      vr.status = "merged";
+      vr.note = "the same design as version " + std::to_string(k);
+      sr.versions.push_back(vr);
+      continue;
+    }
+    vr.status = vr.repairs > 0 ? "repaired" : "verified";
+    if (vr.essentially_original) vr.note = "essentially your original";
+    prev_vf = vr.volume_fraction;
+    prev_verified = vr.verified_margin;
+    sr.versions.push_back(vr);
+    out.solved_grid = best.solved_grid;
+    out.used_multigrid = best.used_multigrid;
+    out.mg_levels = best.mg_levels;
+    out.mg_hierarchy_ever_built = best.mg_hierarchy_ever_built;
+    out.growth_ladder = false;
+    append_rung(out, std::move(best));
+  }
+  if (out.evaluated.empty()) out.solved_grid = domain.grid;
+  out.report.material = job.material;
+  out.report.strengthen = std::move(sr);
+  return out;
 }
 
 }  // namespace
@@ -13535,6 +14111,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_cell_ri.stepped_plan_by_region = R.plan_by_region;
       lat_agg.g_cell_ri.stepped_plan_laid_unattributed = R.plan_laid_unattributed;
       lat_agg.g_cell_ri.stepped_plan_laid_measured = R.plan_laid_measured;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_reported = R.law_ungradeable_reported;
+      lat_agg.g_cell_ri.stepped_law_ungradeable_note = R.law_ungradeable_note;
       lat_agg.g_cell_ri.lattice_outline_beam_mm = R.outline_beam_mm;
       lat_agg.g_cell_ri.lattice_outline_bleed_mm = R.outline_bleed_mm;
       lat_agg.g_cell_ri.lattice_outline_inward_mm = R.outline_inward_mm;
@@ -13854,6 +14432,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           lat_agg.g_cell_ri.stepped_plan_laid_unattributed;
       run_info.stepped_plan_laid_measured =
           lat_agg.g_cell_ri.stepped_plan_laid_measured;
+      run_info.stepped_law_ungradeable_reported =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_reported;
+      run_info.stepped_law_ungradeable_note =
+          lat_agg.g_cell_ri.stepped_law_ungradeable_note;
       run_info.lattice_outline_beam_mm = lat_agg.g_cell_ri.lattice_outline_beam_mm;
       run_info.lattice_outline_bleed_mm = lat_agg.g_cell_ri.lattice_outline_bleed_mm;
       run_info.lattice_outline_inward_mm = lat_agg.g_cell_ri.lattice_outline_inward_mm;
@@ -13979,7 +14561,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid,
-                              run_printed_iso(options), &result.model);
+                              run_printed_iso(options), &result.model,
+                              job.keep_regions);
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
       // ★ AND DELIBERATELY NOT PUSHED INTO THE PATH LIST. `mesh_paths` means
@@ -14041,8 +14624,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // arm reports `mg_algebraic_level1: false` and reads as a null result.
   run_info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
   run_info.mixed_precision = fea_matfree_mixed_precision_enabled();
-  result.pipeline =
-      minimize_plastic(grid, material, job.material, bcs, rules, options);
+  if (job.loads.present && job.loads.redesign == "strengthen") {
+    // CORE LIST item 50 — the versions are searched and verified inside; only the
+    // final ones are streamed, through the same callback a ladder rung uses.
+    result.pipeline =
+        strengthen_versions(job, job_dir, out_dir, materials, rules, result.model,
+                            model_is_mesh, material, grid, bcs, options, domain);
+    if (options.on_variant)
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+        options.on_variant(v, result.pipeline.evaluated);
+  } else {
+    result.pipeline =
+        minimize_plastic(grid, material, job.material, bcs, rules, options);
+  }
 
   // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Record the OBSERVED
   // multigrid outcome now the run is done (the up-front write left it null), and —
@@ -14471,6 +15065,50 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     std::fflush(stderr);
   }
 
+  // CORE LIST item 47 — LOUD DETACHMENT: a rung whose design let go of an
+  // anchored piece is rejected; say which anchors, once per rung.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (v.report.rejection_reason != kAnchorDetachedReason) continue;
+    std::string faces;
+    for (const int f : v.report.lost_anchor_face_ids)
+      faces += (faces.empty() ? "" : ", ") + std::to_string(f);
+    for (const int r : v.report.lost_anchor_region_ids)
+      faces += (faces.empty() ? "region " : ", region ") + std::to_string(r);
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) was REJECTED — %s. %d anchored "
+                 "piece(s) (%lld voxels; anchor face(s): %s) hold no load in this "
+                 "design: the material joining them to the part was removed, so "
+                 "the bolt there would hold nothing. No mesh is exported for it "
+                 "and no later rung inherits its design. See report.json "
+                 "rejected_variants.\n",
+                 i, v.requested_volume_fraction, kAnchorDetachedReason,
+                 v.report.anchored_pieces_lost, v.report.lost_anchor_voxels,
+                 faces.empty() ? "not named" : faces.c_str());
+    std::fflush(stderr);
+  }
+
+  // CORE LIST item 40 — LOUD STARVATION. A rung that asked for less than the frozen
+  // material alone prints got the density floor as its target and printed the
+  // frozen share instead; the worker log says so once, with the numbers.
+  if (result.pipeline.report.frozen_share.evaluated) {
+    const FrozenShareReport& fs = result.pipeline.report.frozen_share;
+    std::size_t protections = 0;
+    for (const FrozenSourceCount& s : fs.sources)
+      if (s.source == "face_protection") ++protections;
+    std::fprintf(stderr,
+                 "WARNING: %.3g of the part (%lld of %lld voxels) is FROZEN — the "
+                 "anchor and load faces, the anchor pad and %zu face "
+                 "protection(s) — so every rung that asked for less clamped to the "
+                 "density floor: it removed every free voxel and printed the frozen "
+                 "material alone. %zu later rung(s) would only repeat that design "
+                 "and were skipped. To reduce further, release protections. See "
+                 "report.json frozen_share.\n",
+                 fs.share, fs.frozen_voxels, fs.part_solid_voxels, protections,
+                 fs.skipped_rungs.size());
+    std::fflush(stderr);
+  }
+
   // Handoff 114 — record how many density snapshots were written (0 unless
   // opt-in snapshots ran). The CSV/run_info paths are already set above.
   if (snaps) result.snapshot_count = snaps->written();
@@ -14519,7 +15157,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!variant.accepted) continue;
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
-          run_printed_iso(options), &result.model));
+          run_printed_iso(options), &result.model, job.keep_regions));
       // The analytic design, written beside the mesh (S1(d)) and NOT added to
       // `mesh_paths` — see the streaming branch above for why.
       (void)export_variant_alpha(variant, out_dir, job.output,

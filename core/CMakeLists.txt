@@ -29,6 +29,7 @@ if(TOPOPT_REQUIRE_DEPS)
   find_package(OpenCASCADE CONFIG REQUIRED)
   find_package(Eigen3 CONFIG REQUIRED)
   find_package(lib3mf CONFIG REQUIRED)
+  find_package(manifold CONFIG REQUIRED)
 else()
   # Optional locally: if OCCT is installed the STEP importer (M1.4) builds and
   # its test runs; if not, the OCCT-free targets (materials, STL) still build so
@@ -44,6 +45,10 @@ else()
   # lib3mf (DEPS=ON), so the 3MF round-trip always runs in the pipeline; the STL
   # export/round-trip is pure C++/std and builds regardless.
   find_package(lib3mf CONFIG QUIET)
+  # Manifold (mesh booleans for KEEP regions' exact export; CORE LIST item KEEP).
+  # From vcpkg through core/vcpkg-ports/manifold (serial, no TBB); locally pass
+  # -Dmanifold_DIR=<.vcpkg/installed-keep/<triplet>/share/manifold>.
+  find_package(manifold CONFIG QUIET)
 endif()
 
 # ★ A SMALLER SUITE THAN CI'S MUST SAY SO, LOUDLY (task
@@ -315,6 +320,12 @@ if(lib3mf_FOUND)
   # Lets the M6.2 job runner (src/cli/run_job.cpp) call the 3MF writer; without
   # lib3mf it rejects mesh_format "3mf" with a diagnostic instead.
   target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_3MF)
+endif()
+# KEEP regions exported exactly (run_job keep_regions_exact); without Manifold the
+# kept material is still frozen and the export says it is not exact.
+if(manifold_FOUND)
+  target_link_libraries(topopt PRIVATE manifold::manifold)
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_MANIFOLD)
 endif()
 
 enable_testing()
@@ -1611,6 +1622,11 @@ if(OpenCASCADE_FOUND)
   add_executable(segment_evidence EXCLUDE_FROM_ALL tests/tools/segment_evidence.cpp)
   target_link_libraries(segment_evidence PRIVATE topopt)
 
+  # CORE LIST item 50 preview: "Redesign to strengthen", version 1 only.
+  #   ./core/build/strengthen_sample <job.json> <out_dir> <materials> <rules> [res]
+  add_executable(strengthen_sample EXCLUDE_FROM_ALL tests/tools/strengthen_sample.cpp)
+  target_link_libraries(strengthen_sample PRIVATE topopt)
+
   # Phase 2 mesh-repair evidence: before/after reports on real broken brackets.
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
@@ -2291,6 +2307,66 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME face_protection_parity COMMAND test_face_protection_parity)
+
+  # CORE LIST item 40 (his Carriage Arms run 13185527): a reduction rung that asks
+  # for less than the part's frozen material alone prints clamps to the density
+  # floor. Pins the flag, the frozen share and what froze it (through the same
+  # build_production_loadcase seam, on the demo l-bracket with protected faces), and
+  # that the rungs below the floor rung (same target, same design) are reported
+  # skipped, not run. Drives OCCT (STEP) + Eigen.
+  add_executable(test_starved_rung tests/validation/test_starved_rung.cpp)
+  target_link_libraries(test_starved_rung PRIVATE topopt)
+  target_compile_definitions(test_starved_rung PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME starved_rung COMMAND test_starved_rung)
+
+  # CORE LIST items 41 + 47: the export keeps every body that holds an anchor or a
+  # load (it kept only the largest, so his split arms saved one arm), and a rung
+  # whose design detaches an anchored piece the part as drawn joined to a load is
+  # rejected naming the faces (his cut holes). Through run_job on two meshes.
+  add_executable(test_export_bodies tests/validation/test_export_bodies.cpp)
+  target_link_libraries(test_export_bodies PRIVATE topopt)
+  target_compile_definitions(test_export_bodies PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME export_bodies COMMAND test_export_bodies)
+
+  # CORE LIST item 50: "Redesign to strengthen" — three versions rebuilt in the box,
+  # each verified on its exported geometry; unreachable targets reported; a failing
+  # part referenced to the requirement; without the key, today's growth ladder.
+  add_executable(test_strengthen tests/validation/test_strengthen.cpp)
+  target_link_libraries(test_strengthen PRIVATE topopt)
+  target_compile_definitions(test_strengthen PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME strengthen COMMAND test_strengthen)
+
+  # CORE LIST item 42, option B: a part that was one piece as drawn stays one piece
+  # (split carrying bodies are bridged before certification, and said so); item 47's
+  # rejection is the fallback; a part drawn as two bodies is left as two.
+  add_executable(test_bridge tests/validation/test_bridge.cpp)
+  target_link_libraries(test_bridge PRIVATE topopt)
+  target_compile_definitions(test_bridge PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME bridge COMMAND test_bridge)
+
+  # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
+  # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).
+  if(manifold_FOUND)
+    add_executable(test_keep tests/validation/test_keep.cpp)
+    target_link_libraries(test_keep PRIVATE topopt)
+    target_compile_definitions(test_keep PRIVATE
+      MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep COMMAND test_keep)
+  endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries

@@ -113,6 +113,9 @@ struct ProductionLoadCase {
   // search, no recommendation, and a safety feature silently dropped by a checkbox
   // that reads as an objective toggle. Mirrors BridgeLoadCase::minimize_plastic.
   bool minimize_plastic = true;
+  // CORE LIST item 50 — "Redesign to strengthen" (job loads.redesign): the run is
+  // rebuilt inside the design box from what is frozen (strengthen_part, run_job).
+  bool strengthen = false;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.
@@ -157,6 +160,7 @@ struct ProductionLoadCase {
   bool has_design_box = false;
   DesignBox design_box;
   std::vector<DesignBox> keep_out_boxes;
+  std::vector<KeepRegion> keep_regions;  // item KEEP: frozen exactly (job keep_regions)
 
   // Handoff 100 — "Keep clear" clearance regions. Each entry is a B-rep face and
   // its (editable) clearance distances; build_production_loadcase derives the

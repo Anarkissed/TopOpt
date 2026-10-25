@@ -166,6 +166,47 @@ struct MinimizePlasticOptions {
   // EMPTY (default) the driver uses make_active_mask(grid) — byte-identical to
   // every existing caller. Must be empty or size grid.voxel_count().
   DesignMask design_mask;
+  // CORE LIST item 40 — WHAT FROZE `design_mask`, as the caller built it. RECEIPT
+  // ONLY: the optimizer never reads it. One entry per source of the mask's
+  // FrozenSolid voxels (build_production_loadcase: the anchor pad, then each face
+  // protection), each counting only the voxels no earlier entry and no Load/Fixture
+  // tag froze, so the entries add up. Copied into report.frozen_share.sources when
+  // a rung's target clamps to the density floor; any frozen voxel the entries do
+  // not cover is reported there as "other". Empty (the default) attributes the
+  // whole mask to "other".
+  std::vector<FrozenSourceCount> frozen_mask_sources;
+  // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
+  // (or region), the part-grid voxels its own tagging made Fixture. Read only to
+  // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);
+  // the verdict itself reads the grid's tags. Empty (the default) names none.
+  struct AnchorVoxels {
+    int face_id = -1;
+    int region_id = -1;
+    std::vector<std::size_t> part_voxels;
+  };
+  std::vector<AnchorVoxels> anchor_voxels;
+
+  // CORE LIST item 50 — "Redesign to strengthen" (run_job's strengthen_part drives
+  // one-rung calls with these). All three default off, so every other run is
+  // untouched.
+  //   domain_box_only    — on the design-box path the part's own voxels OUTSIDE the
+  //                        box are not design space unless something froze them
+  //                        (a protection, a pad, an anchor or load skin): they are
+  //                        emptied, so the run builds from the box and the frozen
+  //                        material only.
+  //   volume_basis_domain — a rung's fraction is of the DOMAIN (the Active
+  //                        envelope), not of the part: no part-relative rescale.
+  //   initial_design     — when non-empty (size of the solved grid), the first
+  //                        rung starts from it instead of uniform (a repair's warm
+  //                        start). Ignored when warm_start_coarse is armed.
+  bool domain_box_only = false;
+  bool volume_basis_domain = false;
+  // CORE LIST item 42, option B — ONE PIECE (voxel.hpp bridge_split_bodies): after a
+  // rung's optimize, carrying bodies the part as drawn held in one body are bridged
+  // back together before the rung is certified, and the line says "bridged". Off by
+  // default; the production load case arms it.
+  bool bridge_pieces = false;
+  std::vector<double> initial_design;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
   // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the
@@ -1009,6 +1050,16 @@ inline constexpr const char* kLoadPathNotConnectedReason =
 inline constexpr const char* kRungNonConvergentReason =
     "linear solve did not converge";
 
+// CORE LIST item 47 — the rung's design left an ANCHORED piece the part as drawn
+// joined to a load holding no load of its own (voxel.hpp lost_anchored_pieces):
+// a bolted hole the design cut away from the part (his Carriage Arms, 13185527:
+// 13 anchored holes, dropped by the export without a word). The rung WAS analysed,
+// so its numbers are measurements, of a part that no longer holds that bolt. Like
+// a severed rung it does not stop the ladder and does not seed the next rung; its
+// line's "bodies" block names the anchored faces. Below the connectivity reason
+// in precedence, above the margin.
+inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
+
 // Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
 // rejection_reason values, from the two DIVERGENCE guards. Both are distinct
 // from kRungInfeasibleReason on purpose: neither claims the load path was lost.
@@ -1303,6 +1354,9 @@ struct MinimizePlasticVariant {
   // without recomputing marching cubes or copying the mesh. Empty for a
   // cancelled rung (its `v3` is default-constructed).
   const TriangleMesh& mesh() const { return v3.mesh; }
+  // CORE LIST item 41 — the solid the export writes: every body holding an anchor
+  // or a load (V3Report::exported_mesh). Equal to mesh() on a one-body part.
+  const TriangleMesh& exported_mesh() const { return v3.exported_mesh(); }
 
   // --- Optimization-history keyframes (app playback) -----------------------
   // Raw marching-cubes isosurfaces of the analysis density at snapshots through

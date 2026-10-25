@@ -29,6 +29,14 @@ namespace topopt {
 // 2026-07-08). All three are dimensionless safety factors (yield / stress);
 // larger is safer, and worst_case is the number the M5.1 settings engine
 // consumes as its `worst_case_stress_margin` input.
+// CORE LIST item 42 B — one bridge's hold-itself receipt (VariantReport::bridge_holds).
+struct BridgeHoldReport {
+  double size_mm = 0.0;      // (2 x radius + 1) x voxel spacing
+  double hold_margin = 0.0;  // the bridge's own effective margin under the hold load
+  int thickenings = 0;       // voxel layers added after the first lay (0..3)
+  bool held = true;
+};
+
 struct StressMargin {
   double in_plane = 0.0;    // yield_strength_mpa / max_von_mises_stress
   double interlayer = 0.0;  // (z_knockdown * yield_strength_mpa) / max_interlayer_tension
@@ -233,6 +241,147 @@ struct VariantReport {
   // verdict), but no reader may be allowed to read the achieved fraction as if the
   // request had been honoured. Always false on a reduction ladder.
   bool growth_target_saturated = false;
+  // CORE LIST item 40 — THE REDUCTION MIRROR: the rung asked for LESS material than
+  // the part's frozen material alone prints, so its target fell under the density
+  // floor and was RAISED to it. The optimizer then removes every free voxel and the
+  // rung prints the frozen share, not its request (his Carriage Arms, 13185527:
+  // 0.68 / 0.52 / 0.38 / 0.26 all printed 0.758). `requested_volume_fraction` is the
+  // rung's ask, beside the achieved `volume_fraction` / `printed_fraction` above.
+  // Both are emitted only when `request_reported`, which the driver sets on EVERY
+  // line of a run where some rung saturated (and on no other run), so every other
+  // report.json keeps its exact bytes. Always false on a growth ladder.
+  bool request_reported = false;
+  double requested_volume_fraction = 0.0;
+  bool target_saturated = false;
+  // CORE LIST items 41 + 47 — the rung's printed material as BODIES (voxel.hpp
+  // printed_bodies): how many the exported file carries, the loose specks dropped,
+  // and the anchored pieces its design let go of (which reject the rung, naming
+  // the anchored faces or regions). Emitted as report.json "bodies" only when
+  // `bodies_reported` (more than one body exported, a speck dropped, or an anchor
+  // lost), so every one-body, speck-free line keeps its exact bytes.
+  bool bodies_reported = false;
+  int bodies_exported = 1;
+  int specks_dropped = 0;
+  long long speck_voxels = 0;
+  double speck_volume_mm3 = 0.0;
+  int anchored_pieces_lost = 0;
+  // CORE LIST item 42, option B — the design was split and BRIDGED back into one
+  // piece before it was certified (its numbers include the bridge).
+  int bridges = 0;
+  long long bridge_voxels = 0;
+  // ...and each bridge HOLDS ITSELF (the reviewer's values of 2026-10-25 07:05): its
+  // nominal thickness, its own margin with the piece it joined hanging from it alone,
+  // how many voxel layers were added to get there (at most 3), and whether it held
+  // (a bridge that did not is lifted again, and items 47 / the belt judge the rung).
+  std::vector<BridgeHoldReport> bridge_holds;
+  long long lost_anchor_voxels = 0;
+  std::vector<int> lost_anchor_face_ids;
+  std::vector<int> lost_anchor_region_ids;
+};
+
+// ── WHAT FROZE THE PART, and the rungs it made redundant (CORE LIST item 40) ──
+//
+// One source of the frozen material a reduction rung's target is taken net of.
+// Each entry counts only the voxels NO EARLIER ENTRY froze, so the entries add up
+// to `FrozenShareReport::frozen_voxels`, each voxel once. Sources, in order:
+//   "anchor_and_load_faces" — the voxels the anchor and load faces themselves tag
+//                             (their boundary-condition skin);
+//   "anchor_pad"            — the structural pad behind them (loadcase.hpp);
+//   "face_protection"       — one per protected face (`face_id`) or region
+//                             (`region_id`), in the order the job declares them;
+//   "other"                 — frozen voxels the caller did not attribute (present
+//                             only when non-zero).
+struct FrozenSourceCount {
+  std::string source;
+  int face_id = -1;    // >= 0 on a face protection declared on a face
+  int region_id = -1;  // >= 0 on a face protection declared on a region
+  long long voxels = 0;
+};
+
+// A rung that was NOT RUN because an earlier rung already made its design: its ask
+// was below the frozen share too, so its target clamps to the same floor the
+// `same_design_as` rung ran with. No variant, no file; this line says why.
+struct SkippedRungReport {
+  double requested_volume_fraction = 0.0;
+  double same_design_as = 0.0;  // the requested fraction of the floor rung
+  std::string reason;
+};
+
+// The frozen share of the part and what froze it. `evaluated == false` (the
+// default) unless some rung's target clamped to the density floor, and then the
+// block is omitted from report.json entirely, so every other document keeps its
+// exact bytes.
+struct FrozenShareReport {
+  bool evaluated = false;
+  long long part_solid_voxels = 0;
+  // Voxels printed whatever the optimizer does: the Load/Fixture skin plus every
+  // FrozenSolid voxel. `frozen_material_voxels` is the same set as the target
+  // counts it, a frozen LATTICE voxel at its relative density; it equals
+  // `frozen_voxels` on every run that declares no frozen lattice.
+  long long frozen_voxels = 0;
+  double frozen_material_voxels = 0.0;
+  long long active_voxels = 0;  // the voxels the volume constraint moves
+  // frozen_material_voxels / part_solid_voxels: what the frozen material alone
+  // prints, as a fraction of the part. A rung asking for less cannot be honoured.
+  double share = 0.0;
+  // The smallest ask the run CAN honour: (frozen + density_min x active) / part.
+  double smallest_honoured_fraction = 0.0;
+  std::vector<FrozenSourceCount> sources;
+  std::vector<SkippedRungReport> skipped_rungs;
+};
+
+// ── "REDESIGN TO STRENGTHEN" (CORE LIST item 50) ─────────────────────────────
+// Three versions rebuilt inside the design box from what is frozen, each the least
+// plastic found that meets its target: 25 / 50 / 75 % less worst stress than the
+// reference (the part's verified margin as drawn, or margin_required if that is
+// higher). Every margin here is the gate's knockdown margin. `verified_margin` is
+// the EXPORTED geometry re-voxelized and certified; `in_loop_margin` is the rung's
+// own certification of its voxel field.
+struct StrengthenVersionReport {
+  int version = 0;
+  double stress_cut = 0.0;      // 0.25 / 0.50 / 0.75
+  double target_margin = 0.0;
+  std::string status;           // "verified" | "repaired" | "unreachable" | "merged"
+  double volume_fraction = 0.0; // of the domain's free (Active) voxels
+  double in_loop_margin = 0.0;
+  double verified_margin = 0.0;
+  double mass_grams = 0.0;
+  double mass_fraction_of_original = 0.0;
+  double max_deflection_mm = 0.0;  // max |u| over the load nodes, verified solve
+  double iou_with_original = 0.0;  // printed voxels vs the part as drawn
+  bool essentially_original = false;  // IoU > 0.9
+  bool anchors_attached = true;       // item 47's check on the version
+  int specks = 0;
+  long long keep_clear_voxels = 0;    // exported voxels inside a Keep Clear
+  int coarse_runs = 0;
+  int repairs = 0;
+  double seconds = 0.0;
+  std::string note;
+};
+struct StrengthenReport {
+  bool evaluated = false;
+  double as_drawn_margin = 0.0;
+  double margin_required = 0.0;
+  double reference_margin = 0.0;
+  double ceiling_margin = 0.0;       // the domain filled solid
+  double original_mass_grams = 0.0;
+  long long frozen_outside_box_voxels = 0;
+  int coarse_resolution = 0;
+  // The adaptive-volume rule used (our proposal, after Lin & Sheu 2009):
+  // vf <- vf * (target (1 + delta) / margin)^gamma, each step capped at +-vf_step,
+  // floored at the previous version's fraction.
+  double delta = 0.0, gamma = 0.0, vf_step = 0.0;
+  // WHERE THE CEILING'S WORST STRESS SITS (the reviewer's ruling of 2026-10-25
+  // 03:58): the voxel of peak von Mises in the box filled solid, the CAD face
+  // nearest it, and whether it touches an anchor or load face. A peak at the edge
+  // of a fixed or loaded face can be a stress singularity that grows with
+  // resolution, so a cap set there may not be real. `cap_note` is the one line.
+  int cap_face_id = -1;
+  Vec3 cap_point{0.0, 0.0, 0.0};
+  bool cap_at_anchor_face = false;
+  bool cap_at_load_face = false;
+  std::string cap_note;
+  std::vector<StrengthenVersionReport> versions;
 };
 
 // The whole run's report: the material used and one entry per requested variant.
@@ -251,6 +400,10 @@ struct JobReport {
   // optimizer ended as INFEASIBLE — which does NOT stop the ladder, so this array
   // can hold more than one entry.
   std::vector<VariantReport> rejected;
+  // CORE LIST item 40 — emitted as report.json "frozen_share" only when evaluated.
+  FrozenShareReport frozen_share;
+  // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
+  StrengthenReport strengthen;
 };
 
 // Serialize a job report to a single JSON document (2-space indented). Numeric

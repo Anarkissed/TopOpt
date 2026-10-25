@@ -965,6 +965,7 @@ struct JobLoadCase {
   double layer_height_mm = 0.0;
 
   bool minimize_plastic = true;             // true = reduction ladder + pad
+  std::string redesign;                     // item 50: "" | "strengthen"
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
   // its INNER / OUTER line widths, so the accept gate can size the solid wall ring
@@ -1184,6 +1185,11 @@ struct JobDescription {
   // absent — every job without one is byte-identical. Run by `topopt-cli flexible`
   // only; every other entry point refuses a job that carries one.
   std::shared_ptr<const JobFlexible> flexible;
+
+  // CORE LIST item KEEP (his ruling of 2026-10-25, approved 03:58): regions of the
+  // part kept EXACTLY. The part's own material inside each is frozen solid, and the
+  // export carries the part's CAD geometry there (pipeline: keep_regions).
+  std::vector<KeepRegion> keep_regions;
 };
 
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,

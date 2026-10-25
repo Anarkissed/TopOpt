@@ -318,6 +318,33 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // same condition tag_step_face would have thrown on, made legible.
   for (int fid : lc.anchor_face_ids)
     validate_face_id(fid, model, "load case anchor");
+  // CORE LIST item 47 — each anchor's OWN Fixture voxels, tagged on a scratch copy
+  // of the untagged grid, so a rung that lets an anchored piece go can name its
+  // faces (MinimizePlasticOptions::anchor_voxels; receipt only — the tags below
+  // are applied exactly as before).
+  std::vector<MinimizePlasticOptions::AnchorVoxels> anchor_voxels;
+  {
+    const VoxelGrid untagged = grid;
+    auto own_voxels = [&](const VoxelGrid& one) {
+      std::vector<std::size_t> v;
+      for (std::size_t idx = 0; idx < one.tags.size(); ++idx)
+        if (one.tags[idx] == VoxelTag::Fixture &&
+            untagged.tags[idx] != VoxelTag::Fixture)
+          v.push_back(idx);
+      return v;
+    };
+    for (int fid : lc.anchor_face_ids) {
+      VoxelGrid one = untagged;
+      tag_step_face(one, model, fid, VoxelTag::Fixture);
+      anchor_voxels.push_back({fid, -1, own_voxels(one)});
+    }
+    for (int rid : lc.anchor_region_ids) {
+      VoxelGrid one = untagged;
+      tag_step_region(one, model, region_or_throw(rid, "load case anchor"),
+                      VoxelTag::Fixture);
+      anchor_voxels.push_back({-1, rid, own_voxels(one)});
+    }
+  }
   for (int fid : lc.anchor_face_ids)
     tag_step_face(grid, model, fid, VoxelTag::Fixture);
   for (int rid : lc.anchor_region_ids)
@@ -440,6 +467,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Shared production solver config (matrix-free multigrid + Galerkin cache +
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
+  opts.anchor_voxels = std::move(anchor_voxels);  // item 47: names, receipt only
   opts.external_loads = external;  // the user's load case; empty => self-weight
 
   // Warm-start production flip — LOAD-CASE MODE ONLY (handoff 114; evidence:
@@ -559,8 +587,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
   const bool want_protect = !lc.face_protection_face_ids.empty() ||
                             !lc.face_protection_region_ids.empty();
-  if (want_pad || want_protect) {
+  if (want_pad || want_protect || !lc.keep_regions.empty()) {
     DesignMask pad = make_active_mask(grid);
+    // CORE LIST item 40 — WHAT FROZE THE PART, each voxel once (pipeline.hpp
+    // frozen_mask_sources). A source is credited only with the voxels that neither
+    // the Load/Fixture skin (the driver's own first source) nor an earlier source
+    // froze, so the sources add up. Receipt only: the mask is unchanged.
+    auto bc_skin = [&](std::size_t idx) {
+      return grid.tags[idx] == VoxelTag::Load || grid.tags[idx] == VoxelTag::Fixture;
+    };
     if (want_pad) {
       for (int fid : lc.anchor_face_ids)
         mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
@@ -579,8 +614,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
       std::size_t pad_voxels = 0;
+      long long pad_beyond_skin = 0;
       for (std::size_t idx = 0; idx < pad.size(); ++idx)
-        if (pad[idx] == MaskValue::FrozenSolid) ++pad_voxels;
+        if (pad[idx] == MaskValue::FrozenSolid) {
+          ++pad_voxels;
+          if (!bc_skin(idx)) ++pad_beyond_skin;
+        }
+      opts.frozen_mask_sources.push_back({"anchor_pad", -1, -1, pad_beyond_skin});
       setup.anchor_pad_report = {
           true, kProductionAnchorPadDepthVoxels,
           lc.anchor_face_ids.size() + lc.anchor_region_ids.size(),
@@ -622,8 +662,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_face(
             grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this face alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", fid, -1, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {fid, -1, frozen, depth_vox, thin, requested_mm, effective_mm});
@@ -650,14 +697,38 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_region(
             grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this region alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", -1, rid, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {-1, rid, frozen, depth_vox, thin, requested_mm, effective_mm});
         log_face_protection(-1, frozen, depth_vox, thin, requested_mm,
                             effective_mm, rid);
       }
+    }
+    // CORE LIST item KEEP: the part's own material inside each keep region is frozen
+    // solid, so the optimizer can neither cut it up nor dig into it; the export then
+    // carries the part's exact geometry there (run_job, Manifold).
+    for (std::size_t ki = 0; ki < lc.keep_regions.size(); ++ki) {
+      long long first_frozen_here = 0;
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          for (int i = 0; i < grid.nx; ++i) {
+            if (!grid.solid(i, j, k)) continue;
+            if (!lc.keep_regions[ki].contains(grid.voxel_center(i, j, k))) continue;
+            const std::size_t idx = grid.index(i, j, k);
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx)) ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+      opts.frozen_mask_sources.push_back(
+          {"keep", -1, static_cast<int>(ki), first_frozen_here});
     }
     opts.design_mask = std::move(pad);
   }
@@ -714,6 +785,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // the driver runs, so the two never disagree. Needed up front to index a
   // progressive-variant stream a front-end registers before minimize_plastic
   // returns.
+  // CORE LIST item 50 — "Redesign to strengthen" rebuilds inside the box from what
+  // is frozen, and its fractions are of that domain (pipeline.hpp).
+  // CORE LIST item 42, option B — production keeps a part that was one piece as
+  // drawn in one piece (bridged, and said so).
+  opts.bridge_pieces = true;
+  if (lc.strengthen) {
+    opts.domain_box_only = true;
+    opts.volume_basis_domain = true;
+  }
   setup.solved_grid = minimize_plastic_solved_grid(grid, opts);
 
   // Handoff 100 — rasterize the declared "Keep clear" clearances onto the SOLVED
