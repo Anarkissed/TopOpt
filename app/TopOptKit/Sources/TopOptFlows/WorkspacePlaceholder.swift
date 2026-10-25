@@ -1829,7 +1829,7 @@ public struct WorkspacePlaceholder: View {
         // LOCAL run arms RunModel's setup-stall watchdog (handoff 129).
         // The worker's own name rides along so the finished run can say WHICH
         // machine solved it (bar AJ5) instead of only "on a Mac".
-        run.start(request, remote: isRemote, workerName: compute.selectedWorkerName)
+        run.start(isRemote ? request.forWorker() : request, remote: isRemote, workerName: compute.selectedWorkerName)   // Flexible (PR #362) H56i: redesign to strengthen (overnight plan 2026-10-25) — loads.redesign on the Mac worker only
     }
 
     // MARK: derived render inputs
@@ -6379,7 +6379,8 @@ public struct WorkspacePlaceholder: View {
     /// is a mode of its own now and not the absence of one.
     private var minimizePlasticChip: some View {
         let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
-        return Button { project.minimizePlastic.toggle() } label: {
+        let macOnly = StrengthenRoute.line(workerSelected: compute.activeRemote != nil)   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — on device: Runs on your Mac
+        return Button { if project.minimizePlastic, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }; project.minimizePlastic.toggle() } label: {   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — the strengthen choice, disabled on device
             HStack(spacing: DS.Space.s) {
                 Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 13, weight: .semibold))

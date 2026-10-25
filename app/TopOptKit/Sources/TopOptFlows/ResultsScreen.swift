@@ -1299,6 +1299,7 @@ public struct ResultsScreen: View {
             Spacer()
             streamingChip   // "optimizing more…" sits right above the variant tabs
             ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
+            if let blocks = model.reportBlocks { RunReportCardsView(blocks: blocks) }   // Flexible (PR #362) H56g: redesign to strengthen (overnight plan 2026-10-25) — the versions' cards + item 47's line
             recommendationCaption  // WHICH OBJECT is recommended, and what it weighs
             addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
@@ -1313,6 +1314,7 @@ public struct ResultsScreen: View {
                                     .font(.system(size: 9, weight: .bold)).tracking(0.6)
                                     .foregroundStyle(DS.Color.okGreen.color)
                             }
+                            if model.isBridged(tab) { Text(StrengthenText.bridgedBadge).font(.system(size: 9, weight: .bold)).tracking(0.6).foregroundStyle(DS.Color.warning.color) }   // Flexible (PR #362) H56g: redesign to strengthen (overnight plan 2026-10-25) — BRIDGED
                             // THE RUNG'S OTHER OBJECT (task 2026-08-07-lattice-
                             // variants-on-screen). Badged rather than merely
                             // differently-worded, because the two tabs for one rung

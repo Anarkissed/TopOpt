@@ -1,0 +1,305 @@
+// RedesignToStrengthen.swift — "Redesign to strengthen" on the Mac worker
+// (Flexible PR #362 H56, overnight plan 2026-10-25).
+//
+// TO-core item 50 (62e909b6): a job carrying `loads.redesign: "strengthen"` with a
+// `design_box` (and `loads.minimize_plastic: false`) rebuilds the part inside the box
+// as three versions, each verified on its exported geometry, and report.json carries a
+// top-level `strengthen` block. Items 41 / 47 / 42-B add a per-variant `bodies` block:
+// bridges that hold themselves (`bridges`, `bridge_holds[]`) and the rung rejected for
+// letting an anchored piece go (`rejection_reason: "anchored piece detached"`).
+//
+// Everything here is a pure value type — the send's rule, the report's blocks, every
+// user-facing line — so it is headlessly assertable. One SwiftUI view renders the cards
+// on the results screen and on the failure sheet alike.
+//
+// ★ NO FACE NUMBERS reach a line (the owner never sees face ids): `lost_anchor_face_ids`
+// and `cap.face_id` are parsed and never printed, and a core note is passed through
+// `StrengthenText.plain`, which replaces any "face N" with "a face".
+
+import Foundation
+import SwiftUI
+import TopOptDesign
+import TopOptKit
+
+// MARK: - the send
+
+/// Where "Redesign to strengthen" may run, and the one rule that puts it on the wire.
+public enum StrengthenRoute {
+    /// The value core reads at `loads.redesign`.
+    public static let redesignValue = "strengthen"
+    /// THE ONE LINE an on-device run shows for the disabled strengthen choice.
+    public static let onDeviceLine = "Runs on your Mac"
+
+    /// The strengthen redesign runs only on the Mac worker (core's search + verify solves).
+    public static func canChoose(workerSelected: Bool) -> Bool { workerSelected }
+
+    /// The line beside the strengthen choice: nil on the worker, the one line on device.
+    public static func line(workerSelected: Bool) -> String? {
+        canChoose(workerSelected: workerSelected) ? nil : onDeviceLine
+    }
+
+    /// The toast when the strengthen choice is tapped on device.
+    public static var onDeviceToast: String { LadderMode.growth.title + ": " + onDeviceLine }
+
+    /// `loads.redesign` for a request the WORKER will run: "strengthen" for an Optimize run
+    /// in the strengthen mode (Minimize plastic off) that carries a design box (core rebuilds
+    /// the part inside it and refuses the key without one); "" otherwise, so the job is
+    /// byte-identical to one written before this key existed.
+    public static func redesign(for request: RunRequest) -> String {
+        request.jobMode == "minimize_plastic" && !request.minimizePlastic && request.designBox != nil
+            ? redesignValue : ""
+    }
+}
+
+extension RunRequest {
+    /// The same request as the Mac worker runs it: `redesign` decided by `StrengthenRoute`.
+    /// A COPY, like `withJobMode`, so a request already handed to a runner never changes.
+    public func forWorker() -> RunRequest {
+        var copy = self
+        copy.redesign = StrengthenRoute.redesign(for: self)
+        return copy
+    }
+}
+
+// MARK: - the report's blocks
+
+/// One bridge's hold-itself receipt (`bodies.bridge_holds[]`, TO-core item 42-B).
+public struct BridgeHold: Equatable, Sendable {
+    public let sizeMM: Double
+    public let holdMargin: Double
+    public let thickenings: Int
+    public let held: Bool
+}
+
+/// A variant's `bodies` block (TO-core items 41 / 47 / 42-B).
+public struct VariantBodies: Equatable, Sendable {
+    public let exported: Int
+    public let anchoredPiecesLost: Int
+    /// Parsed, NEVER printed (the owner never sees face ids).
+    public let lostAnchorFaceIDs: [Int]
+    public let bridges: Int
+    public let bridgeVoxels: Int
+    public let bridgeHolds: [BridgeHold]
+
+    public static func decode(_ b: [String: Any]?) -> VariantBodies? {
+        guard let b else { return nil }
+        let holds = (b["bridge_holds"] as? [[String: Any]] ?? []).map {
+            BridgeHold(sizeMM: num($0["size_mm"]), holdMargin: num($0["hold_margin"]),
+                       thickenings: int($0["thickenings"]), held: $0["held"] as? Bool ?? false)
+        }
+        return VariantBodies(exported: int(b["exported"]),
+                             anchoredPiecesLost: int(b["anchored_pieces_lost"]),
+                             lostAnchorFaceIDs: (b["lost_anchor_face_ids"] as? [Any] ?? []).map(int),
+                             bridges: int(b["bridges"]), bridgeVoxels: int(b["bridge_voxels"]),
+                             bridgeHolds: holds)
+    }
+}
+
+/// The top-level `strengthen` block (TO-core item 50).
+public struct StrengthenReport: Equatable, Sendable {
+    /// Where the box filled solid peaks (`cap`). Parsed, not printed: its note names a face.
+    public struct Cap: Equatable, Sendable {
+        public let faceID: Int
+        public let point: [Double]
+        public let atAnchorFace: Bool
+        public let atLoadFace: Bool
+        public let note: String
+    }
+    /// One of the three versions (`versions[]`).
+    public struct Version: Equatable, Sendable {
+        public let version: Int
+        public let stressCut: Double
+        /// "verified" | "repaired" | "unreachable" | "merged"
+        public let status: String
+        public let volumeFraction: Double
+        public let verifiedMargin: Double
+        public let massGrams: Double
+        public let massFractionOfOriginal: Double
+        public let note: String
+    }
+    public let asDrawnMargin: Double
+    public let marginRequired: Double
+    public let ceilingMargin: Double
+    public let originalMassGrams: Double
+    public let coarseResolution: Int
+    public let cap: Cap?
+    public let versions: [Version]
+
+    public static func decode(_ s: [String: Any]?) -> StrengthenReport? {
+        guard let s else { return nil }
+        let cap = (s["cap"] as? [String: Any]).map {
+            Cap(faceID: int($0["face_id"]), point: ($0["point"] as? [Any] ?? []).map(num),
+                atAnchorFace: $0["at_anchor_face"] as? Bool ?? false,
+                atLoadFace: $0["at_load_face"] as? Bool ?? false,
+                note: $0["note"] as? String ?? "")
+        }
+        let versions = (s["versions"] as? [[String: Any]] ?? []).map {
+            Version(version: int($0["version"]), stressCut: num($0["stress_cut"]),
+                    status: $0["status"] as? String ?? "", volumeFraction: num($0["volume_fraction"]),
+                    verifiedMargin: num($0["verified_margin"]), massGrams: num($0["mass_grams"]),
+                    massFractionOfOriginal: num($0["mass_fraction_of_original"]),
+                    note: $0["note"] as? String ?? "")
+        }
+        return StrengthenReport(asDrawnMargin: num(s["as_drawn_margin"]),
+                                marginRequired: num(s["margin_required"]),
+                                ceilingMargin: num(s["ceiling_margin"]),
+                                originalMassGrams: num(s["original_mass_grams"]),
+                                coarseResolution: int(s["coarse_resolution"]),
+                                cap: cap, versions: versions)
+    }
+}
+
+/// The blocks of a worker's report.json the app reads by key: the strengthen block and
+/// each evaluated variant's verdict + bodies (accepted `variants`, then `rejected_variants`).
+public struct RunReportBlocks: Equatable, Sendable {
+    public struct Row: Equatable, Sendable {
+        public let volumeFraction: Double
+        public let printedFraction: Double
+        public let accepted: Bool
+        public let rejectionReason: String
+        public let bodies: VariantBodies?
+    }
+    public let strengthen: StrengthenReport?
+    public let rows: [Row]
+
+    public static func decode(reportJSON: Data) -> RunReportBlocks? {
+        guard let r = (try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any] else { return nil }
+        return decode(report: r)
+    }
+
+    public static func decode(report r: [String: Any]) -> RunReportBlocks {
+        func rows(_ key: String, accepted: Bool) -> [Row] {
+            (r[key] as? [[String: Any]] ?? []).map {
+                Row(volumeFraction: num($0["volume_fraction"]),
+                    printedFraction: num($0["printed_fraction"] ?? $0["volume_fraction"]),
+                    accepted: $0["accepted"] as? Bool ?? accepted,
+                    rejectionReason: $0["rejection_reason"] as? String ?? "",
+                    bodies: VariantBodies.decode($0["bodies"] as? [String: Any]))
+            }
+        }
+        return RunReportBlocks(strengthen: StrengthenReport.decode(r["strengthen"] as? [String: Any]),
+                               rows: rows("variants", accepted: true) + rows("rejected_variants", accepted: false))
+    }
+}
+
+private func num(_ v: Any?) -> Double { (v as? NSNumber)?.doubleValue ?? 0 }
+private func int(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? 0 }
+
+// MARK: - the words
+
+/// One strengthen version's card.
+public struct StrengthenCard: Equatable, Sendable {
+    public let title: String
+    public let status: String
+    public let lines: [String]
+    public let bridged: Bool
+}
+
+/// Every user-facing line the strengthen results show.
+public enum StrengthenText {
+    public static let bridgedBadge = "BRIDGED"
+    /// TO-core item 47's rejection, in plain words (no face numbers).
+    public static let anchoredLetGoLine = "This version let go of an anchored bolt hole"
+    public static let anchoredDetachedReason = "anchored piece detached"
+
+    public static func statusWord(_ status: String) -> String {
+        switch status {
+        case "verified": return "Verified"
+        case "repaired": return "Repaired"
+        case "unreachable": return "Unreachable"
+        case "merged": return "Merged"
+        default: return status.prefix(1).uppercased() + status.dropFirst()
+        }
+    }
+
+    /// A core note with any face number replaced ("on face 12" → "on a face").
+    public static func plain(_ note: String) -> String {
+        note.replacingOccurrences(of: #"\b[Ff]aces? \d+(\s*(,|and)\s*\d+)*"#, with: "a face",
+                                  options: .regularExpression)
+    }
+
+    static func percent(_ fraction: Double) -> String { String(format: "%.0f", fraction * 100) }
+
+    /// The cards, one per version, in core's order.
+    public static func cards(_ blocks: RunReportBlocks) -> [StrengthenCard] {
+        guard let s = blocks.strengthen else { return [] }
+        return s.versions.map { v in
+            var lines: [String] = []
+            if v.status == "unreachable" {
+                lines.append(v.note.isEmpty ? "Unreachable in this design space" : plain(v.note))
+            } else {
+                lines.append("Margin " + String(format: "%.2f", v.verifiedMargin) + "×")
+                lines.append(String(format: "%.1f", v.massGrams) + " g · "
+                             + percent(v.massFractionOfOriginal) + " % of the original")
+                if !v.note.isEmpty { lines.append(plain(v.note)) }
+            }
+            let bridged = v.status != "unreachable" && blocks.rows.contains {
+                abs($0.volumeFraction - v.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
+            }
+            return StrengthenCard(title: "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress",
+                                  status: statusWord(v.status), lines: lines, bridged: bridged)
+        }
+    }
+
+    /// The run's rejection lines in plain words (item 47), once each.
+    public static func rejectionLines(_ blocks: RunReportBlocks) -> [String] {
+        blocks.rows.contains { !$0.accepted && $0.rejectionReason == anchoredDetachedReason }
+            ? [anchoredLetGoLine] : []
+    }
+
+    /// Whether the accepted variant printed at `printedFraction` was bridged (bodies.bridges > 0).
+    public static func isBridged(printedFraction: Double, in blocks: RunReportBlocks) -> Bool {
+        blocks.rows.contains {
+            $0.accepted && abs($0.printedFraction - printedFraction) < 1e-4 && ($0.bodies?.bridges ?? 0) > 0
+        }
+    }
+}
+
+// MARK: - the view
+
+/// The strengthen cards and the run's rejection lines (results screen + failure sheet).
+/// Renders nothing for a report with neither.
+public struct RunReportCardsView: View {
+    let cards: [StrengthenCard]
+    let lines: [String]
+
+    public init(blocks: RunReportBlocks) {
+        cards = StrengthenText.cards(blocks)
+        lines = StrengthenText.rejectionLines(blocks)
+    }
+
+    public var body: some View {
+        if !cards.isEmpty || !lines.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                ForEach(Array(cards.enumerated()), id: \.offset) { _, c in card(c) }
+                ForEach(lines, id: \.self) { l in
+                    Text(l).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.warning.color)
+                }
+            }
+            .accessibilityIdentifier("strengthen-cards")
+        }
+    }
+
+    private func card(_ c: StrengthenCard) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xxs) {
+            HStack(spacing: DS.Space.s) {
+                Text(c.title).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Text(c.status).font(.system(size: 9, weight: .bold)).tracking(0.6)
+                    .foregroundStyle((c.status == "Unreachable" ? DS.Color.textTertiary : DS.Color.okGreen).color)
+                if c.bridged {
+                    Text(StrengthenText.bridgedBadge).font(.system(size: 9, weight: .bold)).tracking(0.6)
+                        .foregroundStyle(DS.Color.warning.color)
+                }
+            }
+            ForEach(c.lines, id: \.self) { l in
+                Text(l).dsStyle(DS.TypeScale.caption2).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+        .background(RoundedRectangle(cornerRadius: 12).fill(DS.Surface.bar.color)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+    }
+}

@@ -851,6 +851,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             "build_dir": [request.buildDirection.x, request.buildDirection.y,
                           request.buildDirection.z],
         ]
+        if request.redesign == StrengthenRoute.redesignValue { loads["redesign"] = request.redesign }   // Flexible (PR #362) H56b: redesign to strengthen (overnight plan 2026-10-25) — only a worker request carries it (RunRequest.forWorker)
         if !request.anchorFaceIDs.isEmpty {
             loads["anchor_face_ids"] = request.anchorFaceIDs
         }
@@ -1805,6 +1806,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let base = config.baseURL.appendingPathComponent("jobs")
             .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
+        let reportJSON = try? JSONSerialization.data(withJSONObject: report)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — the report rides on the outcome (strengthen, bodies)
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
         // *** THE 0.00x FAULT (handoff 2026-08-02-gate-diagnosis-recommendations). ***
         // report.json carries TWO arrays: `variants` (accepted) and
@@ -1892,7 +1894,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
                                  fields: fields, timing: timing, latticeReport: latticeReport,
-                                 buildOrientationJSON: buildOrientation)
+                                 buildOrientationJSON: buildOrientation, reportJSON: reportJSON)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — accepted variants
         }
 
         // No accepted variant streamed: report-only rows. They carry no mesh, so they
@@ -1906,7 +1908,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             .map { makeVariant(streamed: nil, report: $0, fields: nil) }
         return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields,
                              timing: timing, latticeReport: latticeReport,
-                             buildOrientationJSON: buildOrientation)
+                             buildOrientationJSON: buildOrientation, reportJSON: reportJSON)   // Flexible (PR #362) H56c: redesign to strengthen (overnight plan 2026-10-25) — report-only rows
     }
 
     /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
@@ -1917,7 +1919,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                fields: RemoteFieldsContainer?,
                                timing: RunTiming? = nil,
                                latticeReport: LatticeReport? = nil,
-                               buildOrientationJSON: Data? = nil) -> OptimizeOutcome {
+                               buildOrientationJSON: Data? = nil, reportJSON: Data? = nil) -> OptimizeOutcome {   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25)
         OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
                         acceptedCount: acceptedCount,
                         voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
@@ -1936,7 +1938,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         // the core measures one only on a growth ladder. Derived
                         // from the variants rather than parsed from a separate
                         // field so the mode and the numbers can never disagree.
-                        growthLadder: variants.contains { $0.addedMaterial != nil })
+                        growthLadder: variants.contains { $0.addedMaterial != nil } || reportJSON.flatMap(RunReportBlocks.decode(reportJSON:))?.strengthen != nil,   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25) — a strengthen run is the strengthen mode (its versions carry no added_material)
+                        reportJSON: reportJSON)   // Flexible (PR #362) H56d: redesign to strengthen (overnight plan 2026-10-25)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,

@@ -1,0 +1,21 @@
+{
+  "material": "PLA",
+  "variants": [],
+  "rejected_variants": [],
+  "strengthen": {
+    "as_drawn_margin": 0.0989488384,
+    "margin_required": 1.5,
+    "reference_margin": 1.5,
+    "ceiling_margin": 0.1991835215,
+    "original_mass_grams": 4.96,
+    "frozen_outside_box_voxels": 0,
+    "coarse_resolution": 32,
+    "rule": {"delta": 0.1, "gamma": 0.75, "vf_step": 0},
+    "cap": {"face_id": 1, "point": [0.625, 0.625, 10.625], "at_anchor_face": true, "at_load_face": false, "note": "the box filled solid peaks at (0.6, 0.6, 10.6) mm, on face 1, at the edge of an anchor face: a fixed-support corner, where voxel stress grows with resolution, so this cap may not be real"},
+    "versions": [
+      {"version": 1, "stress_cut": 0.25, "target_margin": 2, "status": "unreachable", "volume_fraction": 0, "in_loop_margin": 0, "verified_margin": 0, "mass_grams": 0, "mass_fraction_of_original": 0, "max_deflection_mm": 0, "iou_with_original": 0, "essentially_original": false, "anchors_attached": true, "specks": 0, "keep_clear_voxels": 0, "coarse_runs": 0, "repairs": 0, "seconds": 0, "note": "above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"},
+      {"version": 2, "stress_cut": 0.5, "target_margin": 3, "status": "unreachable", "volume_fraction": 0, "in_loop_margin": 0, "verified_margin": 0, "mass_grams": 0, "mass_fraction_of_original": 0, "max_deflection_mm": 0, "iou_with_original": 0, "essentially_original": false, "anchors_attached": true, "specks": 0, "keep_clear_voxels": 0, "coarse_runs": 0, "repairs": 0, "seconds": 0, "note": "above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"},
+      {"version": 3, "stress_cut": 0.75, "target_margin": 6, "status": "unreachable", "volume_fraction": 0, "in_loop_margin": 0, "verified_margin": 0, "mass_grams": 0, "mass_fraction_of_original": 0, "max_deflection_mm": 0, "iou_with_original": 0, "essentially_original": false, "anchors_attached": true, "specks": 0, "keep_clear_voxels": 0, "coarse_runs": 0, "repairs": 0, "seconds": 0, "note": "above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"}
+    ]
+  }
+}

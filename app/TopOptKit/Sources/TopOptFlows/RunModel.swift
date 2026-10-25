@@ -182,6 +182,7 @@ public struct RunRequest: Equatable, Sendable {
     /// skeleton). Still part of the synthesized `==`, so switching modes
     /// invalidates a stale result rather than reusing it.
     public var jobMode: String
+    public var redesign: String = ""   // Flexible (PR #362) H56a: redesign to strengthen (overnight plan 2026-10-25) — loads.redesign; "" = no key (StrengthenRoute, RunRequest.forWorker)
 
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,

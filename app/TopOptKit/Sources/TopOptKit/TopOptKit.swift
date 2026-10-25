@@ -749,6 +749,7 @@ public struct OptimizeOutcome {
     /// caller, and every persisted pre-growth outcome, reading as reduction — which
     /// is what they are.
     public let growthLadder: Bool
+    public let reportJSON: Data?   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25) — the worker's report.json, for the blocks the app reads by key (strengthen, bodies); nil on device
 
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
@@ -761,7 +762,7 @@ public struct OptimizeOutcome {
                 latticeReport: LatticeReport? = nil,
                 buildOrientationJSON: Data? = nil,
                 solvedBy: String? = nil,
-                growthLadder: Bool = false) {
+                growthLadder: Bool = false, reportJSON: Data? = nil) {   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25)
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -780,6 +781,7 @@ public struct OptimizeOutcome {
         self.buildOrientationJSON = buildOrientationJSON
         self.solvedBy = solvedBy
         self.growthLadder = growthLadder
+        self.reportJSON = reportJSON   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25)
     }
 
     /// A copy carrying `solvedBy` — how the run flow stamps the machine it
@@ -797,7 +799,7 @@ public struct OptimizeOutcome {
                         timing: timing, latticeReport: latticeReport,
                         buildOrientationJSON: buildOrientationJSON,
                         solvedBy: solvedBy ?? name,
-                        growthLadder: growthLadder)
+                        growthLadder: growthLadder, reportJSON: reportJSON)   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25) — withSolvedBy keeps it
     }
 
     /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
@@ -817,7 +819,7 @@ public struct OptimizeOutcome {
                         latticeReport: latticeReport,
                         buildOrientationJSON: buildOrientationJSON,
                         solvedBy: solvedBy,
-                        growthLadder: growthLadder)
+                        growthLadder: growthLadder, reportJSON: reportJSON)   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25) — withTiming keeps it
     }
 
     /// A copy carrying `latticeReport` — how the run flow stamps the run's lattice onto
@@ -836,7 +838,7 @@ public struct OptimizeOutcome {
                         latticeReport: self.latticeReport ?? report,
                         buildOrientationJSON: buildOrientationJSON,
                         solvedBy: solvedBy,
-                        growthLadder: growthLadder)
+                        growthLadder: growthLadder, reportJSON: reportJSON)   // Flexible (PR #362) H56e: redesign to strengthen (overnight plan 2026-10-25) — withLatticeReport keeps it
     }
 }
 

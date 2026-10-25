@@ -840,6 +840,7 @@ public final class ResultsModel: ObservableObject {
     /// ladders optimize for OPPOSITE things and their tabs look alike, so a screen
     /// that does not say which one ran leaves the user to infer it from a sign.
     public var ladderModeLine: String { ladderMode.resultsLine }
+    public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
     /// how much of the object about to be printed was never in the model. nil on a
@@ -1204,6 +1205,7 @@ public final class ResultsModel: ObservableObject {
         // from the rung), so a live results view never reads a growth rung's
         // numbers as reduction numbers mid-run.
         ladderMode = outcome.growthLadder ? .growth : .reduction
+        if let d = outcome.reportJSON { reportBlocks = RunReportBlocks.decode(reportJSON: d) }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — a streamed partial (no report) never erases it
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
@@ -1275,6 +1277,7 @@ public final class ResultsModel: ObservableObject {
     /// FIELD, not on whichever of its two meshes is on screen — so those entries
     /// mean the same thing from either tab, and neither is disabled by the other.
     public var selectedVariantIndex: Int { selected?.variantIndex ?? 0 }
+    public func isBridged(_ tab: ResultVariantVM) -> Bool { tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) && reportBlocks.map { StrengthenText.isBridged(printedFraction: accepted[tab.variantIndex].printedFraction, in: $0) } == true }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — bodies.bridges > 0
 
     // MARK: - the latticed object's geometry (task 2026-08-07-lattice-variants-on-screen)
 
