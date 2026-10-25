@@ -56,15 +56,23 @@ public enum LatticeFieldProvenance: Equatable, Sendable {
 /// grading consumes, decoupled from where it came from.
 public struct LatticeDemandField: Equatable, Sendable {
     public let vonMises: [Float]
+    /// ★★★ THE FULL CAUCHY TENSOR, 6 per voxel in core's Voigt order — the input the
+    /// ORGANIC tracer eigen-decomposes. The stage's own solve has always returned it;
+    /// this field simply never carried it, which is the whole reason organic was called
+    /// unpreviewable. Empty when the solve did not produce one (a remote run does not
+    /// send it over the wire).
+    public let stressTensor: [Double]
     public let nx: Int, ny: Int, nz: Int
     public let origin: SIMD3<Double>
     public let spacingMM: Double
     public let provenance: LatticeFieldProvenance
 
-    public init(vonMises: [Float], nx: Int, ny: Int, nz: Int,
+    public init(vonMises: [Float], stressTensor: [Double] = [],
+                nx: Int, ny: Int, nz: Int,
                 origin: SIMD3<Double>, spacingMM: Double,
                 provenance: LatticeFieldProvenance) {
         self.vonMises = vonMises
+        self.stressTensor = stressTensor
         self.nx = nx
         self.ny = ny
         self.nz = nz
@@ -82,14 +90,20 @@ public struct LatticeSimFingerprint: Equatable, Sendable {
     public let resolution: Int
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// ★ the region layer, so a region edit re-solves (2026-09-05)
+    public var anchorRegionIDs: [Int] = []
+    public var regionSignature: String = ""
 
     public init(modelPath: String, material: String, resolution: Int,
-                anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec]) {
+                anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
+                anchorRegionIDs: [Int] = [], regionSignature: String = "") {
         self.modelPath = modelPath
         self.material = material
         self.resolution = resolution
         self.anchorFaceIDs = anchorFaceIDs
         self.loadGroups = loadGroups
+        self.anchorRegionIDs = anchorRegionIDs
+        self.regionSignature = regionSignature
     }
 }
 
@@ -112,11 +126,17 @@ public final class LatticeSimModel: ObservableObject {
         public let anchorFaceIDs: [Int]
         public let loadGroups: [TopOptKit.LoadGroupSpec]
         public let buildDirection: SIMD3<Double>
+        /// ★ THE REGION LAYER (2026-09-05) — the same regions the run request sends,
+        /// so a load painted as a region reaches the stage's solve too.
+        public let faceRegions: [TopOptKit.FaceRegionSpec]
+        public let anchorRegionIDs: [Int]
 
         public init(modelPath: String, material: String, materialsPath: String,
                     rulesPath: String, resolution: Int, anchorFaceIDs: [Int],
                     loadGroups: [TopOptKit.LoadGroupSpec],
-                    buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)) {
+                    buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+                    faceRegions: [TopOptKit.FaceRegionSpec] = [],
+                    anchorRegionIDs: [Int] = []) {
             self.modelPath = modelPath
             self.material = material
             self.materialsPath = materialsPath
@@ -125,12 +145,16 @@ public final class LatticeSimModel: ObservableObject {
             self.anchorFaceIDs = anchorFaceIDs
             self.loadGroups = loadGroups
             self.buildDirection = buildDirection
+            self.faceRegions = faceRegions
+            self.anchorRegionIDs = anchorRegionIDs
         }
 
         public var fingerprint: LatticeSimFingerprint {
             LatticeSimFingerprint(modelPath: modelPath, material: material,
                                   resolution: resolution,
-                                  anchorFaceIDs: anchorFaceIDs, loadGroups: loadGroups)
+                                  anchorFaceIDs: anchorFaceIDs, loadGroups: loadGroups,
+                                  anchorRegionIDs: anchorRegionIDs,
+                                  regionSignature: faceRegions.map { "\($0.id):\($0.parentID):\($0.addFaces.count):\($0.removeFaces.count):\($0.cuts.count)" }.joined(separator: "|"))
         }
     }
 
@@ -170,7 +194,8 @@ public final class LatticeSimModel: ObservableObject {
             modelPath: ctx.modelPath, material: ctx.material,
             materialsPath: ctx.materialsPath, rulesPath: ctx.rulesPath,
             resolution: ctx.resolution, anchorFaceIDs: ctx.anchorFaceIDs,
-            loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection)
+            loadGroups: ctx.loadGroups, buildDirection: ctx.buildDirection,
+            faceRegions: ctx.faceRegions, anchorRegionIDs: ctx.anchorRegionIDs)
     }) {
         self.runner = runner
     }
@@ -206,7 +231,8 @@ public final class LatticeSimModel: ObservableObject {
                                           safety: r.marginWorstCase,
                                           date: now, resolution: ctx.resolution)
                     self.field = LatticeDemandField(
-                        vonMises: r.vonMisesField, nx: r.gridNX, ny: r.gridNY,
+                        vonMises: r.vonMisesField, stressTensor: r.stressTensorField,
+                        nx: r.gridNX, ny: r.gridNY,
                         nz: r.gridNZ, origin: r.gridOrigin, spacingMM: r.spacingMM,
                         provenance: .solidSim(date: now, resolution: ctx.resolution))
                     self.fingerprint = ctx.fingerprint

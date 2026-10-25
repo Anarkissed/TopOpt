@@ -47,6 +47,11 @@ public struct WorkspacePlaceholder: View {
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
     @StateObject private var cameraModel = OrbitCameraModel()
+    /// ★ THE WIZARD'S CAMERA, OWNED HERE so the ONE gizmo can follow it (maintainer,
+    /// 2026-09-03, item 4.1: the sample cube and the gizmo were not mirroring each
+    /// other — the gizmo orbited the workspace camera while the wizard drew with its
+    /// own). One gizmo, one placement (L2), bound to whichever camera is on stage.
+    @StateObject private var wizardCamera = OrbitCameraModel()
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -66,8 +71,98 @@ public struct WorkspacePlaceholder: View {
     /// state lives on the project, so closing it never discards a choice.
     @State private var showBuildOrientation = false
     @State private var showStrutPreview = false
+    // ★ LATTICE ONLY (his 2026-09-14 ask: "show *only* the lattice by holding the
+    // lattice preview button … make it very obvious that it has worked: show a large
+    // animation and make the lattice preview button a different colour when it is
+    // set"). Holding the cube toggles it; the body drops to alpha 0 so nothing but
+    // the struts and the solid outline draw; the cube turns orange while it is set,
+    // and a large badge flashes on the viewport either way.
+    @State private var latticeOnly = false
+    /// ★ THE BAND CHIPS (his 2026-09-27) — which chip's card is open, and where the
+    /// stage's own UI is (`LatticeBandChipKeepOutKey`, `.global`), so no chip sits on it.
+    @State private var bandChipOpenKey: String? = nil
+    /// ★ His 2026-09-28 "hide or show all the chips": a view toggle, never saved — it writes
+    /// nothing to the project and keeps every choice already made.
+    @State private var bandChipsHidden = false
+    @State private var bandChipKeepOut: [CGRect] = []
+    @State private var latticeOnlyFlash: String? = nil
+    /// Each flash gets its own token, so a repeat cannot be cleared by the previous
+    /// flash's timer (his 2026-09-18: "after that first time the opacity was super small").
+    @State private var latticeOnlyFlashToken = 0
+    /// ★ THE EDGE LIGHT (his 2026-09-18): a blue glow round the whole screen, twice, when
+    /// Lattice only turns on. 0…1, animated.
+    @State private var latticeEdgePulse: Double = 0
+    /// When a hold last completed: the finger's release then also lands as the
+    /// button's tap, and that tap must not undo what the hold just set.
+    @State private var viewModeHoldFiredAt = Date.distantPast
+    /// When the press now (or last) on a hold-capable view button began — so the release's tap is
+    /// swallowed by the press, not by a clock (`ViewModeHold`, 2026-10-01).
+    @State private var viewModePressBeganAt: Date? = nil
+    @GestureState private var viewModePressDown = false
+    /// ★ WHICH LEVEL THE LATTICE KEY IS ON, and the reading taken by tapping a
+    /// strut (maintainer, 2026-08-19). Drilling in also HIDES the primitives and
+    /// handles — he asked for the part unobstructed while reading the scale, and a
+    /// gizmo sitting over the struts is the thing being read.
+    @State private var latticeLegendMode: LatticeLegendMode = .groups
+    @State private var latticeLegendProbe: LatticeLegendProbe?
+    /// ★ Collapsed to a single column, out of the way ("There should also be a way to
+    /// minimize the legends ... like the lone stress map legend").
+    @State private var latticeLegendMinimized = false
+    /// ★ Whether the lattice settings have been confirmed (Save & Exit) THIS session.
+    /// The gate for popping them open — not `lattice.enabled`, which is true for any
+    /// project configured on a previous run and so never opened them again.
+    @State private var latticeSettingsSavedThisSession = false
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
+    /// ★★ WHETHER A STRUT BAKE IS IN FLIGHT (maintainer, 2026-08-19: "There is
+    /// also a huge delay between the time there is a change and the actual
+    /// modification being shown. As in 10 seconds or so. If this is unavoidable,
+    /// there needs to be some kind of animation showing it's running").
+    ///
+    /// ★ THE EXISTING BANNER COULD NOT SAY THIS. `LatticePreviewBanner` reports
+    /// "Building the strut preview" only when `strutScene` is nil — true on the
+    /// FIRST bake and never again. Every REBAKE (a depth drag, an expand, a cell
+    /// size) keeps the previous scene on screen while the new one is computed, so
+    /// the one case the user actually waits through was the one case that said
+    /// nothing at all.
+    @State private var strutBakeInFlight = false
+    /// ★ Which bake is current: a stage-2 (repairs) picture from an older bake, or a
+    /// bake finishing after a newer one started, is dropped by comparing this.
+    @State private var strutBakeGeneration = 0
+    /// ★★★ A BETTER PICTURE IS COMING, AND THE ONE ON SCREEN IS CURRENT (2026-09-07).
+    /// Distinct from `strutBakeInFlight`, which means "there is NO current picture" and
+    /// hides the layer. Stage one (the traced curves) lands in a second or two and is
+    /// drawn; stage two (core's repairs) can take minutes and only replaces it.
+    @State private var strutRefining = false
+    /// ★★★ ONE BAKE AT A TIME (his walk, 2026-09-07: everything frozen, and a 2–4 mm
+    /// preview that never arrived). Measured: two bakes started 0.9 s apart, each
+    /// tracing 38,099 spans and then running core's emission on them, on every core the
+    /// device has. A change while one runs no longer starts a second — it sets this,
+    /// and the running bake starts one more when it lands.
+    /// ★ the running bake's stop sign: set when a newer bake supersedes it, read by its
+    /// stage loop before core's emission starts (review 2026-09-22 #34)
+    @State private var strutBakeCancel = LatticeBakeFlag()
+    /// The (i) beside the preview caption: the whole banner sentence, on demand.
+    @State private var latticeNoticeInfoShown = false
+    /// ★ The lattice settings the strut preview was last baked FROM, with the
+    /// fields a bake writes stripped (`LatticeSettings.previewBakeInputs`).
+    @State private var latticeInputsLastBaked: LatticeSettings? = nil
+    /// ★★★ WHAT THE LAST ORGANIC BAKE WAS BUILT FROM (his walk, 2026-09-07: "If no
+    /// changes were made in the lattice settings, then do *not* rebake the lattice").
+    /// Sixteen call sites reach `buildStrutScene()`, and most of them are events, not
+    /// changes: leaving a sheet, a selection re-armed, a preview toggled back on. Each
+    /// one paid for a full organic trace. This is the fingerprint of everything the bake
+    /// READS; when it has not moved and a picture is already on screen, the rebake is
+    /// skipped. Organic only — a periodic bake is about a second and its call sites are
+    /// long settled, and nothing about the regular lattice's timing is being changed.
+    @State private var organicBakeFingerprint: OrganicBakeKey? = nil
+    /// ★ THE LAST ORGANIC RUN'S EMITTED SPANS + RECEIPT (2026-09-02) — the preview's
+    /// source when the algorithm is organic. Same lifetime as the bake's other inputs:
+    /// replaced on a run, never touched per frame.
+    @State var latticeOrganicSpans: OrganicSpanIndex? = nil
+    @State var latticeOrganicReceipt: OrganicRunReceipt? = nil
+    /// Measured inner edges of the two top clusters — see `TopClusterEdgeKey`.
+    @State private var topEdges = TopClusterEdges()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -193,6 +288,8 @@ public struct WorkspacePlaceholder: View {
     /// tap. Looked up later it becomes "the deepest region on this face", which
     /// after a cut is one particular half and not necessarily the one you touched.
     @State private var surfacePatternPiece: RegionID?
+    /// ★★ The Region tool's aim (2026-10-08): the region its verbs act on; nil until a region is tapped.
+    @State private var surfaceRegionAim: RegionID?
     /// ★ THE UNION TOOL ACCUMULATES *REGIONS*, NOT FACES.
     ///
     /// ★ THIS IS WHY MULTI-SELECT COULD NOT REACH TWO. The two halves of a cut face
@@ -291,6 +388,8 @@ public struct WorkspacePlaceholder: View {
     /// and carries the ladder, the sim and the receipt, which the wizard
     /// deliberately does not.
     @State private var showLatticeWizard = false
+    /// ★ the wizard's wall editor is covering the stage — no gizmo over it (2026-09-21)
+    @State private var wizardCoversStage = false
 
     /// ★ WHICH STAGE THE WORKSPACE IS SHOWING (task 2026-08-14-lattice-separation
     /// §1/§2/§3). The TO page and the lattice page are the SAME page — same
@@ -519,6 +618,40 @@ public struct WorkspacePlaceholder: View {
     /// gating every site, is what makes a fourth page correct by default.
     private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard }
 
+    /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
+    /// deliberately not a default, so a project made before the modes existed reopens
+    /// the choice rather than inheriting one nobody made.
+    private var latticeStageModeNeeded: Bool {
+        (stage == .lattice || showLatticePage) && project.lattice.stageMode == nil
+    }
+
+    /// ★★★ THROW AWAY EVERYTHING DONE UNDER THIS MODE AND ASK AGAIN (maintainer,
+    /// 2026-08-21: "This should delete whatever was done in the Aesthetic mode and bring
+    /// you back to the mode modal").
+    ///
+    /// ★ IT IS A DELETE, NOT A SWITCH, AND THAT IS THE WHOLE POINT. Flipping the mode in
+    /// place would leave regions, depths and densities that were chosen against one
+    /// claim being read against the other — the precise divergence the un-dismissable
+    /// modal exists to prevent. Resetting to `LatticeSettings()` means `stageMode` is nil
+    /// again, which is what makes the modal reappear: one mechanism, not two.
+    ///
+    /// ★ AND THE SELECTION'S LATTICE ROLES GO WITH IT. Those live on the FACE REGIONS,
+    /// not in `LatticeSettings`, so resetting the settings alone would leave a part still
+    /// marked for lattice with nothing configured — a state no page has words for.
+    private func deleteLatticeForMode() {
+        project.lattice = LatticeSettings()
+        showLatticeModeSheet = false
+        showLatticePage = false
+        showStrutPreview = false
+        strutScene = nil
+        latticeSettingsSavedThisSession = false
+        refreshLatticeFaceCards()
+        // ★ SEALED AS ONE UNDO STEP — the reset touches several fields and a half-undone
+        // lattice is a state nothing downstream has words for.
+        project.sealUndoStep()
+        model.persistCurrentProject()
+    }
+
     /// THE BRUSH GESTURE, AS ONE VALUE (task 2026-08-05, bar D1). The SMOOTHING
     /// PAGE OWNS IT while it is up: its brush is the page's whole point, so it
     /// cannot depend on the TO page's Paint toggle — which L1 hides.
@@ -534,6 +667,60 @@ public struct WorkspacePlaceholder: View {
     private var brushGesture: BrushGesture {
         showSmoothingPage ? .smoothingPage(smoothTools)
                           : .workspacePaint(active: paintActive)
+    }
+
+    /// Whether the mode's limitations sheet is up. Opened by tapping the mode title.
+    @State private var showLatticeModeSheet = false
+
+    /// ★ IS A LATTICE HANDLE UNDER THE FINGER RIGHT NOW? Depth, expand and the
+    /// clearance/design-box knobs all move a region, so all three defer the bake. One
+    /// property, so a fourth handle added later has one place to join.
+    private var latticeHandleIsDown: Bool {
+        draggingDepthPlane != nil || draggingExpandPlane != nil || draggingHandleID != nil
+            // ★★★ A DRAWER SCRUB AND AN OPEN KEYPAD COUNT AS "STILL DOWN" (his
+            // ruling, 2026-08-25: "It should only rebake once the drag is done
+            // (lifted up) or the numeric value has been OK'd").
+            //
+            // The scrub already deferred its OWN rebake — but every `onChanged`
+            // WRITES the value, and the written value is part of
+            // `latticeRegionInputsKey`, so the fingerprint moved and the bake fired
+            // from there instead: a full scene bake per frame of the drag, and one
+            // per keystroke while typing. Both writes are still live (the number on
+            // screen tracks the finger), only the BAKE waits for the release.
+            || latticeRowScrubSeed != nil || depthPadKey != nil
+    }
+
+    /// Width the Settings pill needs at the trailing end of the identity row, so the
+    /// mode title stops short of it rather than running under it.
+    private static let settingsClearance: CGFloat = 150
+
+    /// ★ Is the mode name occupying the top span right now? Every top-centre
+    /// notification has to clear it, so the answer lives in ONE place rather than being
+    /// re-derived at each banner.
+    private var latticeStageModeShown: Bool {
+        stage == .lattice && project.lattice.stageMode != nil && viewerMesh != nil
+    }
+
+    /// ★★★ THE MODE, IN THE TOP-CENTRE SLOT (maintainer, 2026-08-21: "place the mode
+    /// name in the top center position - forcing the notification to pop-up *below* the
+    /// mode type").
+    ///
+    /// ★ WHY THE CENTRE AND NOT BESIDE THE WAY BACK. It was put beside the back button
+    /// to stop the two colliding, and it collided anyway — the row's width depends on
+    /// the destination's name. The centre column is owned by nothing else on this stage,
+    /// so the title cannot be crowded out by a longer label appearing to its left, and
+    /// it reads as a statement about the STAGE rather than a decoration on a button.
+    ///
+    /// It is TAPPABLE: the choice is permanent, and a permanent choice with no way to
+    /// read what it committed to — or to undo it — is a trap. See
+    /// `LatticeStageModeSheet`.
+    @ViewBuilder private var latticeStageModeOverlay: some View {
+        // ★ EMPTY ON PURPOSE. The mode title now lives INSIDE the identity row
+        // (`chrome`), where the layout guarantees it clears Redo. Three overlay
+        // versions of this collided with the buttons — the last one rendered the
+        // title TWICE, once here and once in the row. The fourth stopped being an
+        // overlay; this stays as the record of why there is no overlay.
+        EmptyView()
     }
 
     public var body: some View {
@@ -588,7 +775,7 @@ public struct WorkspacePlaceholder: View {
                               ? SurfaceTint.pickChains(
                                   surfaceUnion.partialPicks(regions: project.faceRegions),
                                   in: project.faceRegions)
-                              : [],
+                              : (visible.surfaceEditing ? surfaceSelectedUnionLighting?.chains ?? [] : []),
                           xray: surfaceXrayOn,
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion,
@@ -604,6 +791,24 @@ public struct WorkspacePlaceholder: View {
                           // ★ §6 — the same tap, with its 3D point. Only the point
                           // distinguishes the two halves of a cut face.
                           onPickPoint: { fid, pt in
+                              // ★★ WHILE THE KEY IS DRILLED INTO A COLOUR, A TAP
+                              // READS THE LATTICE INSTEAD OF SELECTING (maintainer,
+                              // 2026-08-19: "touching any part of the lattice
+                              // *single tap* leads to an arrow pointing to the exact
+                              // hue/density of the area. Single tap elsewhere does
+                              // the same - switching colours if needed").
+                              //
+                              // Returning TRUE consumes it, which is the point: he is
+                              // reading the part, and a tap that silently regrouped a
+                              // face while he read it would be the worst kind of
+                              // side effect.
+                              // ★ The KEY's reading no longer rides this callback —
+                              // it is answered by `onLatticeProbe` from the march's
+                              // own G-buffer, because the face picker reported the
+                              // wall BEHIND a strut and missed entirely where the id
+                              // pass said "background". This only has to make sure a
+                              // tap cannot also change the selection while reading.
+                              if legendDrilledIn { return true }
                               guard let m = viewerMesh else { return false }
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
@@ -614,6 +819,31 @@ public struct WorkspacePlaceholder: View {
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
+                          },
+                          // ★ Only while drilled in — the PRESENCE of this closure is
+                          // what makes a tap read a strut instead of selecting a face.
+                          onLatticeProbe: legendDrilledIn
+                              ? { model, world, cellMM, density in
+                                  setLatticeProbe(at: model, world: world,
+                                                  bakedCellMM: cellMM,
+                                                  bakedDensity: density)
+                              } : nil,
+                          // ★ …and the way back out, from anywhere on the viewport.
+                          onLatticeProbeExit: legendDrilledIn
+                              ? {
+                                  latticeLegendMode = .groups
+                                  latticeLegendProbe = nil
+                              } : nil,
+                          // ★ The bake's plan → the project, for the run (2026-09-18).
+                          onLatticeCellsBaked: { cells, regions in
+                              let wire = LatticeSteppedCellWire.wire(cells, regions: regions)
+                              project.latticePreviewSteppedCells = wire
+                              if case .failure(let why) = LatticeSteppedCellWire.slotOrigins(
+                                  wire, regions: regions, slotOriginWired: TopOptKit.regionSlotOriginWired) {
+                                  project.latticePreviewPlanWithheld = why
+                              } else {
+                                  project.latticePreviewPlanWithheld = nil
+                              }
                           },
                           // ★ §1(b) — DOUBLE TAP = THE ONES LIKE IT.
                           //
@@ -626,6 +856,12 @@ public struct WorkspacePlaceholder: View {
                           // re-checks the tool anyway, because a value that gates
                           // a gesture should not be the only thing that gates its
                           // effect.
+                          // ★ AND A DOUBLE TAP COMES BACK OUT ("A double tap
+                          // brings back out to the main legend view"). Mounted
+                          // whenever the key is drilled in, so the way back does not
+                          // depend on which surface tool happens to be armed.
+                          // ★ The drilled-in exit moved to `onLatticeProbeExit`, which
+                          // does not need a face under the finger.
                           onPickDouble: surfaceDoubleTapSelectsSimilar
                               ? { fid, _ in handleSurfaceDoubleTap(fid) }
                               : nil,
@@ -723,10 +959,12 @@ public struct WorkspacePlaceholder: View {
                           showWireframe: (visible.wireframe && surfaceWireframeOn)
                               || !surfacePreviewLineBuffer.isEmpty,
                           designBox: (showDesignGizmo && !showSmoothingPage
-                                      && visible.designBox)
+                                      && visible.designBox
+                                      && !legendDrilledIn)
                               ? project.designBox.box : nil,
                           keepOutBoxes: (showDesignGizmo && !showSmoothingPage
-                                         && visible.keepOuts)
+                                         && visible.keepOuts
+                                         && !legendDrilledIn)
                               ? project.designBox.keepOuts : [],
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
@@ -757,9 +995,14 @@ public struct WorkspacePlaceholder: View {
                           // stage draws the keep-outs and the group primitives; the
                           // LATTICE stage draws the depth planes and nothing else.
                           // `stageVolumeItems` is the one place that decides.
+                          // ★ …and NONE of them while the key is drilled in: the
+                          // depth planes and keep-out volumes are exactly the
+                          // "primitives" he wants out of the way while reading a
+                          // strut.
                           clearanceVolumes:
                               (showLatticePage
                                || (force.phase == .edit && !fullScreenPageUp))
+                              && !legendDrilledIn
                               ? stageVolumeItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
@@ -835,13 +1078,81 @@ public struct WorkspacePlaceholder: View {
                           // The gate is UNCHANGED — the same `showStrutPreview` and the
                           // same stage conditions the stacked view had, and the same
                           // `bodyAlpha: 0` beside it (bar A3).
-                          latticeLayer: (showStrutPreview
-                                         && (visible.latticeControls || showLatticePage))
+                          latticeLayer: latticeLayerIsDrawn
                               ? strutScene.map {
                                   LatticeLayerInputs(scene: $0,
                                                      params: latticeProxy.params,
                                                      sceneToken: strutSceneToken,
-                                                     faceTints: roleTints)
+                                                     faceTints: roleTints,
+                                                     // ★ BOTH VIEWS UP ⇒ OVERLAY
+                                                     // (maintainer, 2026-08-18:
+                                                     // "when the Stress view is
+                                                     // not the ONLY view on,
+                                                     // project the stress colours
+                                                     // ONTO the lattice instead of
+                                                     // replacing it").
+                                                     stressOverlay: stressViewOn
+                                                        && latticeStressField != nil,
+                                                     // ★ D1 — the Finish setting's
+                                                     // own dressing.
+                                                     dressingLevel: project.lattice
+                                                        .boundary.previewDressingLevel,
+                                                     // ★ AND THE SWEPT CELL WINDOW —
+                                                     // the preview grades the CELL
+                                                     // exactly when the run does.
+                                                     cellSweep: latticePreviewCellSweep,
+                                                     // ★ …and the retention switch,
+                                                     // so the floor stands down in
+                                                     // the preview exactly where the
+                                                     // run stands it down.
+                                                     subfloorRetention:
+                                                        latticePreviewRetention,
+                                                     // ★ …and the bead, so the
+                                                     // preview refuses what the
+                                                     // nozzle cannot lay.
+                                                     lineWidthMM: project.printParams.strutLineWidthMM,
+                                                     // ★ …and the LAYER HEIGHT, so the
+                                                     // material the run leaves solid is
+                                                     // drawn as the layers the printer
+                                                     // will actually lay down there.
+                                                     layerHeightMM: project.printParams.layerHeightMM,
+                                                     // ★ The axis the printed layers
+                                                     // stack along — the part's own,
+                                                     // not an assumed +Y or +Z.
+                                                     buildDirection: SIMD3<Double>(
+                                                         project.buildOrientation
+                                                             .resolved(gravity: force.gravity)),
+                                                     fitCellMM: latticePreviewFitCells,
+                                                     steppedCellMM: latticePreviewSteppedCells,
+                                                     // ★ The grading options
+                                                     // (2026-08-25): No grade /
+                                                     // Fit shape, the step style
+                                                     // and the user-stated cells.
+                                                     steppedShapeFit:
+                                                        project.lattice.gradingMode.fitsShape,
+                                                     steppedDyadicSteps:
+                                                        project.lattice.gradeStepsAreHalves,
+                                                     steppedCellStated:
+                                                        latticePreviewSteppedStated,
+                                                     // ★ Hide the superseded picture
+                                                     // while a NEW scene bakes (his
+                                                     // request, 2026-08-24 evening) —
+                                                     // the "Rebuilding the lattice"
+                                                     // toast is what shows instead.
+                                                     // ★★★ AND HIDDEN WHILE THE
+                                                     // SOLVE RUNS (his 2026-08-25:
+                                                     // "It showed a full-quilted
+                                                     // lattice while still
+                                                     // calculating … This should
+                                                     // *NEVER* happen"). The gate
+                                                     // covered the BAKE only; the
+                                                     // FEA that grades every strut
+                                                     // is a separate job, and the
+                                                     // picture standing while it
+                                                     // runs is graded by whatever
+                                                     // field preceded it.
+                                                     hidden: strutBakeInFlight
+                                                        || latticeSimIsRunning)
                               }
                               : nil)
                 .ignoresSafeArea()
@@ -887,7 +1198,12 @@ public struct WorkspacePlaceholder: View {
                 // affordance: they answer "what is pushing on this part", which is
                 // not a question this stage asks. `visible.groupPrimitives` is the
                 // stage table's own word for "the TO page's in-scene editors".
-                if visible.groupPrimitives {
+                // ★ INCLUDING THE FORCE ARROWS (maintainer, 2026-08-19: "the
+                // primitives and handles are not hidden when we touch into the
+                // legend!"). The first cut gated only the three GIZMO overlays; the
+                // ⬇ load/anchor markers are drawn here and were still sitting over
+                // the struts he was trying to read.
+                if visible.groupPrimitives, !legendDrilledIn {
                     arrowsOverlay.ignoresSafeArea()             // D6: force arrow shafts
                 }
                 // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -897,7 +1213,11 @@ public struct WorkspacePlaceholder: View {
                 // §2a/§2b: the design box is a TO-PAGE primitive. Its handles go
                 // with it — hidden on the lattice stage, and NOT disabled: the box
                 // is still armed and still bounds the run.
-                if showDesignGizmo, visible.designBox {
+                // ★ …AND NOT WHILE THE LATTICE KEY IS DRILLED IN (maintainer,
+                // 2026-08-19: "hide any primitives and handles when someone taps
+                // into the legend"). He is reading struts against a scale; a gizmo
+                // box sitting over them hides the thing being read.
+                if showDesignGizmo, visible.designBox, !legendDrilledIn {
                     designGizmoOverlay.ignoresSafeArea()            // dom-app resize/move handles
                 }
                 // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
@@ -905,24 +1225,36 @@ public struct WorkspacePlaceholder: View {
                 // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
                 // never occlude a value chip (the chip/knob hit areas are small and the rest of that
                 // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
-                if force.phase == .edit, visible.groupPrimitives {
+                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn {
                     primitiveGizmoOverlay.ignoresSafeArea()
                 }
                 // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
                 // axial, face → depth) and the floating glass value pill near the selection — ON TOP
                 // of the gizmo so the values stay readable while transforming.
-                if force.phase == .edit, visible.groupPrimitives {
+                if force.phase == .edit, visible.groupPrimitives, !legendDrilledIn {
                     clearanceHandlesOverlay.ignoresSafeArea()
                 }
                 // ★ §3d — THE 3D DEPTH-PLANE HANDLES, the lattice stage's own tool.
-                if visible.latticeDepthPlanes { latticeDepthHandlesOverlay.ignoresSafeArea() }
+                if visible.latticeDepthPlanes, !legendDrilledIn {
+                    latticeDepthHandlesOverlay.ignoresSafeArea()
+                }
                 // ★ §6(g) — THE HOVERED CUT LINE, the surface stage's own tool.
                 if visible.surfaceEditing { surfaceCutOverlay.ignoresSafeArea() }
             }
             // The lattice region's transform gizmo — only while the lattice panel is open
             // and a region exists, so it never coincides with the force gizmo (U5). It is
             // the LATTICE page's own tool, so it is not gated with the workspace's.
-            if !showSmoothingPage { latticeRegionGizmoOverlay.ignoresSafeArea() }
+            if !showSmoothingPage, !legendDrilledIn {
+                latticeRegionGizmoOverlay.ignoresSafeArea()
+            }
+            // ★★ THE BAND CHIPS — lattice-only view only (his 2026-09-27). BELOW the
+            // chrome in z, so a panel always wins a touch; the layout also keeps every chip
+            // off the chrome's measured frames. Not while the key is drilled in: a tap
+            // there reads a strut.
+            if !fullScreenPageUp, viewerMesh != nil, visible.latticeControls,
+               !legendDrilledIn {
+                latticeBandChipsOverlay.ignoresSafeArea()
+            }
 
             if !fullScreenPageUp { chrome }
             if force.phase == .setup, !fullScreenPageUp {
@@ -957,6 +1289,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
                 if viewerMesh != nil { stageNavigationButtonOverlay }
+                if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil { latticeSettingsButtonOverlay }
                 // ★ SAVE, in the slot the greyed-out "Lattice" button vacated.
                 surfaceSaveButtonOverlay
@@ -976,13 +1309,33 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
+                latticeOnlyBadge
+                latticeEdgeLight
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
                 // chrome.
-                if stressViewOn, latticeStressField != nil { stressLegend }
+                // ★★ ONE KEY, NOT TWO (maintainer, 2026-08-19: "add the stress map
+                // *into* the lattice view. Adding the stress colours into the lattice
+                // legend as well"). With the strut preview up the LATTICE key carries
+                // the stress scale itself, so the standalone plot legend stands down
+                // rather than putting a second colour bar on the same edge.
+                if stressViewOn, latticeStressField != nil,
+                   !(showStrutPreview && strutScene != nil) {
+                    stressLegend
+                }
+                if latticeLegendMounted {
+                    latticeDensityLegend
+                    latticeProbeCallout
+                }
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed { simRunningBanner }
+                // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
+                // both sit top-centre, and two capsules in one place is worse
+                // than the more specific one winning. The solve is the longer
+                // wait and the more surprising, so it takes precedence.
+                if strutBakeInFlight || strutRefining, showStrutPreview,
+                   !(latticeSimIsRunning && !simBannerDismissed) { strutBakingBanner }
             }
             // ★ AND NEITHER ARE THE LOAD PILLS — the weight readout and its
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
@@ -1009,15 +1362,65 @@ public struct WorkspacePlaceholder: View {
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            // ★★★ THE MODE IS ASKED BEFORE THE STAGE IS USABLE (2026-08-21). It covers
+            // everything and blurs it, it has no cancel, and answering it is the only
+            // way out — because the two modes make DIFFERENT CLAIMS about the same
+            // object and a default would pick one silently. See `LatticeStageMode`.
+            if latticeStageModeNeeded {
+                LatticeStageModeModal { mode in
+                    project.lattice.stageMode = mode
+                    // Written straight away: the choice is permanent, so it must not
+                    // depend on some later save to survive a relaunch.
+                    model.persistCurrentProject()
+                }
+                .transition(.opacity)
+                .zIndex(50)
+            }
+            // ★★ THE LIMITATIONS, ON DEMAND — and the only way to unmake the choice
+            // (maintainer, 2026-08-21). Above everything except the modal itself: it
+            // can END with the modal being asked again, so the two must not race.
+            if showLatticeModeSheet, let mode = project.lattice.stageMode {
+                LatticeStageModeSheet(
+                    mode: mode,
+                    topology: project.lattice.topologyID,
+                    onDelete: { deleteLatticeForMode() },
+                    onClose: { showLatticeModeSheet = false })
+                .transition(.opacity)
+                .zIndex(49)
+            }
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
+                    latticeSettingsSavedThisSession = true
+                    // ★ the gizmo hid with the wall editor and stayed hidden when the wizard
+                    // left with the editor still up (his 2026-09-21 22:44); the preference
+                    // dies with the wizard, so it is cleared here
+                    wizardCoversStage = false
+                    // ★ SAVE BAKES (his 2026-09-21): a changed setting starts its bake now,
+                    // superseding whatever is running; an unchanged one starts nothing.
+                    if project.lattice.previewBakeInputs != latticeInputsLastBaked {
+                        latticeInputsLastBaked = project.lattice.previewBakeInputs
+                        buildStrutScene(forceRebuild: true)
+                    }
+                    // ★ "SAVE" SAVES (2026-09-02: a kill before the next navigation
+                    // ran the next job from stale on-disk settings). Kept SHORT: the
+                    // call-site guard reads 700 chars from the wizard call.
+                    model.persistCurrentProject()
                     refreshLatticeFaceCards()
-                    // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17:
-                    // "Once you save and exit, an FEA should run and a Stress
-                    // view should now be accessible below the preview button").
+                    // ★ SAVE & EXIT KICKS OFF THE FEA (maintainer, 2026-08-17).
                     startStressSolveIfNeeded()
+                    // ★ NO SECOND BAKE (review 2026-09-22 #33): the changed-inputs bake
+                    // above is the one; "Exit" with nothing changed starts nothing (his
+                    // 2026-09-21 rule). The plain rebake that stood here started a second
+                    // octet bake behind the forced one on every Save & Exit.
                 }
+                .organicProbeDriver(makeOrganicProbeDriver())
+                // ★ ruling 4 (item 6): its "nothing set to lattice" lines leave by its own exit
+                .wallMarking { goToWallMarking() }
+                // ★ the stage draws with the workspace-owned camera the one gizmo follows
+                .stageCamera(wizardCamera)
+                // ★ the wall editor's cover hides the gizmo (2026-09-21)
+                .onPreferenceChange(WizardStageCoveredKey.self) { wizardCoversStage = $0 }
                 .transition(.opacity)
             }
             // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
@@ -1132,10 +1535,13 @@ public struct WorkspacePlaceholder: View {
             // Returning to the saved variants from the original view. L5: NOT while
             // a page is up — this chip is pinned top-centre, which is exactly where
             // both pages put their own status banner, and the two overlapped.
-            if viewOriginal, !fullScreenPageUp, let outcome = run.outcome,
-               outcome.variants.contains(where: { $0.accepted }) {
-                seeResultsChip
-            }
+            // `seeResultsShown` already refuses a full-screen page; the guard is
+            // spelled out here too because the page-chrome audit reads this line.
+            if !fullScreenPageUp, seeResultsShown { seeResultsChip }
+        }
+        // ★ the stage UI the band chips stay out of — every reporter is a descendant
+        .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
+            if rects != bandChipKeepOut { bandChipKeepOut = rects }
         }
     }
 
@@ -1146,6 +1552,41 @@ public struct WorkspacePlaceholder: View {
     /// every workspace state it appears in (design-overhaul round 2, item 8). Vertically
     /// aligned with the top-left chrome row so it reads as part of the top bar; the chrome is
     /// top-left and the gizmo top-right, so the centre is always clear.
+    /// ★★★ THE SECOND ROW'S SPLIT (his ruling, 2026-08-25: "make it so Aesthetic is
+    /// the top, See results is below that and to the left and whatever else is there
+    /// is below and to the right").
+    ///
+    /// Three things wanted the top-centre slot — the MODE name, See Results, and
+    /// whichever status banner is up — and all three were pinned to the same y with
+    /// the same centring, so they drew on top of each other. The mode keeps the top
+    /// row; the other two drop below it and separate by this much, one either side
+    /// of the centre line.
+    private static let secondRowSplit: CGFloat = 300
+
+    /// ★★ WHO SHARES THE SECOND ROW (his 2026-09-17: "'rebuilding the lattice' should
+    /// be in the centre, below 'aesthetic' or 'structural'. The only time it should be
+    /// to the right … should be when there is another chip meant to be in the middle
+    /// … When the rebuilding lattice chip comes up, [See Results] should move to the
+    /// left and the rebuilding should be on the right. Otherwise, it should be in the
+    /// centre - and same with [See Results]").
+    ///
+    /// Before this the banners were ALWAYS pushed right whenever the mode chip was up,
+    /// See Results or not — so a bake on a project with no accepted variants showed
+    /// its capsule hanging off to the right of nothing. Now each of the two steps
+    /// aside only when the other is actually on screen: See Results goes left by the
+    /// split when a banner is up, a banner goes right by it when See Results is up.
+    /// One condition each, read from the same two facts.
+    private var seeResultsShown: Bool {
+        guard viewOriginal, !fullScreenPageUp, let outcome = run.outcome else { return false }
+        return outcome.variants.contains(where: { $0.accepted })
+    }
+    /// Either top-centre banner is up (the FEA's, or the rebake's when the FEA's is
+    /// not) — the same tests that mount them.
+    private var topBannerShown: Bool {
+        if latticeSimIsRunning, !simBannerDismissed { return true }
+        return (strutBakeInFlight || strutRefining) && showStrutPreview
+    }
+
     private var seeResultsChip: some View {
         VStack {
             Button { viewOriginal = false } label: {
@@ -1159,10 +1600,20 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
-            .padding(.top, DS.Space.xl3)   // align with the top chrome row
+            // ★ BELOW THE MODE NAME, never on its row — see `secondRowSplit`.
+            .padding(.top, DS.Space.xl3 + (latticeStageModeShown
+                                           ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                           : 0))
             Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre
+        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre …
+        // ★ … UNLESS A BANNER SHARES THE ROW: then left by the split, the banner right
+        // by it (his 2026-09-17 rule, see `seeResultsShown`).
+        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
+        .animation(DS.Motion.emphasized, value: topBannerShown)
+        // ★ DIRECTLY BENEATH IT, DEAD CENTRE (his 2026-08-25: "Can you put 'See
+        // Results' directly beneath 'Aesthetic' right in the center of the
+        // screen?"). Only the transient banners step aside now.
     }
 
     /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
@@ -1175,7 +1626,11 @@ public struct WorkspacePlaceholder: View {
         VStack {
             HStack {
                 Spacer()
-                OrientationGizmoView(camera: cameraModel, size: gizmoSize)
+                OrientationGizmoView(camera: showLatticeWizard ? wizardCamera : cameraModel,
+                                     size: gizmoSize)
+                    .latticeBandChipKeepOut()
+                    // ★ leaves with the cube when the wizard's wall editor covers the stage
+                    .modifier(StageDepartureMotion(covered: wizardCoversStage))
             }
             Spacer()
         }
@@ -1366,7 +1821,9 @@ public struct WorkspacePlaceholder: View {
         // Derive the proxy params FRESH from the lattice settings (density range clamped
         // to the core band), so the surface shading always reflects the current controls
         // with no stateful sync.
-        let params = project.lattice.proxyParams(limits: latticeLimits)
+        let params = project.lattice.proxyParams(
+            limits: latticeLimits,
+            lineWidthMM: project.printParams.strutLineWidthMM)
         // Round-2 L11: in AUTO density the overlay grades from the page's own
         // demand field (the variant's field on the variants entry, else the
         // sim's) — the same source the strut preview grades from. Before this,
@@ -1391,6 +1848,244 @@ public struct WorkspacePlaceholder: View {
                                          effectiveFaceIDs: project.effectivePaintFaceIDs())
     }
 
+    /// ★★ THE SWEPT CELL WINDOW THE PREVIEW SHOULD GRADE OVER, or nil for one cell.
+    ///
+    /// ★ IT IS THE PROJECT'S OWN SETTING, NOT A PREVIEW OPTION. A Fixed or Auto job
+    /// builds ONE cell size for the whole part; only a swept job puts each region on
+    /// its own dyadic cell. Turning grading on in the preview regardless would make
+    /// the picture wrong for three of the four modes — the divergence this closes,
+    /// not a new one.
+    ///
+    /// ★ AND IT NEEDS THE BEAD. The cell a swept run picks is bounded BELOW by
+    /// printability — the finest cell whose thinnest strut still reaches one
+    /// extrusion width — so without the user's line width there is no floor and no
+    /// grading. `minExtrudableWidthMM` is that number; absent, there is nothing
+    /// honest to grade against and the preview stays uniform.
+    private var latticePreviewCellSweep: LatticeCellSweep? {
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return nil }
+        // ★★ RESOLVE AUTO THE SAME WAY THE JOB DOES. Auto is swept-without-typing
+        // (LatticeAutoPosture), and the preview must ask the SAME resolver rather
+        // than reading the stored mode — otherwise Auto previews one uniform cell
+        // while the run grades, which is the divergence this whole pass exists to
+        // close.
+        let emitted = project.latticeJobRegions().regions.filter { $0.role == .include }
+        let lat = LatticeAutoPosture.applied(
+            to: project.lattice,
+            includeRegionCount: emitted.count,
+            regionWidthsMM: latticeAutoWidthsMM(includes: emitted),
+            lineWidthMM: bead)
+        // ★ FIT RIDES THE SAME PLANNER PATH. Core's fit planner needs the ladder's
+        // ends too: the finest and coarsest cell any region asked for.
+        if lat.cellSizeMode == .fit {
+            let cells = latticePreviewFitCells.filter { $0 > 0 }
+            guard let lo = cells.min(), let hi = cells.max(), lo > 0 else { return nil }
+            return LatticeCellSweep(minMM: lo, maxMM: hi, minExtrudableWidthMM: bead)
+        }
+        guard lat.cellSizeMode == .swept, lat.cellMinMM > 0,
+              lat.cellMaxMM >= lat.cellMinMM else { return nil }
+        // ★★★ AUTO IS PER-LOCAL-MEMBER; SWEPT IS THE WINDOW HE TYPED (2026-08-20).
+        //
+        // "The difference between Auto and Swept is that Auto defines the cell sizes
+        // that can be swept FOR you. It is meant to make life easy."
+        //
+        // So the two modes part company here, and only here. Under Auto the ladder spans
+        // the whole part — the finest cell that prints at its floor, the coarsest any
+        // member can hold at its ceiling — and `perLocalMember` tells the bake to derive
+        // each voxel's own rung inside it. Under Swept the user typed the ends and gets
+        // them verbatim, because that is what typing them means.
+        if project.lattice.cellSizeMode == .auto,
+           let s = strutScene, !s.memberThicknessMM.isEmpty, s.minCellsPerMember > 0 {
+            let widest = LatticeMeasuredRegionWidth.boundsMM(
+                occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM).first ?? 0
+            if widest > 0 {
+                let ceiling = widest / s.minCellsPerMember
+                // The finest cell that prints at all — the ladder never goes below it.
+                let printable = LatticeAutoPosture.autoWindowMM(
+                    regionWidthsMM: [], lineWidthMM: bead,
+                    topology: lat.topologyID)?.min ?? lat.cellMinMM
+                // ★ AND THE RUNGS LAND ON THE THICKNESS THE PART IS MADE OF. See
+                // `ladderBaseCellMM`: the ladder is dyadic, so where it is anchored
+                // decides whether his 22 mm walls get a 4.60 mm cell or a 2.77 mm one.
+                let base = LatticeMeasuredRegionWidth.ladderBaseCellMM(
+                    occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM,
+                    minCellsPerMember: s.minCellsPerMember,
+                    finestPrintableMM: printable)
+                if base > 0, ceiling >= base {
+                    return LatticeCellSweep(minMM: base, maxMM: ceiling,
+                                            minExtrudableWidthMM: bead,
+                                            perLocalMember: true)
+                }
+            }
+        }
+        return LatticeCellSweep(minMM: lat.cellMinMM, maxMM: lat.cellMaxMM,
+                                minExtrudableWidthMM: bead)
+    }
+
+    /// ★★ SUB-FLOOR RETENTION, STRAIGHT OFF THE PROJECT. Nil when the user has not
+    /// armed it, which is the default and is the shipped behaviour: the floor applies
+    /// everywhere. The ceiling is passed on only when the user MOVED it — otherwise
+    /// the bake reads core's own constant, so the app never becomes the author of a
+    /// number it merely echoed.
+    private var latticePreviewRetention: LatticeSubfloorRetention? {
+        let lat = project.lattice
+        guard lat.retainSubfloorInUnloadedRegions else { return nil }
+        return LatticeSubfloorRetention(armed: true,
+                                        stressFractionMax: lat.subfloorStressFraction)
+    }
+
+    /// ★★ FIT'S CELL PER DECLARED REGION, `W / N*`, from core — the mode that makes a
+    /// thin wall latticeable AT ALL, because the cell is chosen so exactly N* fit
+    /// across the member. Empty unless the resolved cell mode is Fit.
+    /// ★★★ THE MEMBER WIDTH AUTO SIZES ITS CELL FROM — MEASURED, NOT DECLARED
+    /// (maintainer, 2026-08-20: "I made sure the walls here are *exactly* 20mm wide.
+    /// That's 4mm cells 5x wide. Yet … much smaller sized cells than what should be
+    /// expected when I put 'auto' on everything").
+    ///
+    /// This used to be `includes.map { $0.depthMM }` — the region's declared DEPTH, how
+    /// far the lattice reaches in from the face. That is not the member's thickness, and
+    /// the ceiling W / N* is about the material. Declaring a lattice half way into a
+    /// 20 mm wall halved the cell on a wall whose material never changed; the error runs
+    /// one way only (a depth cannot exceed the material it is declared into), so the
+    /// cell was always too FINE. See `LatticeMeasuredRegionWidth` for the numbers.
+    ///
+    /// The widths come from `scene.memberThicknessMM` — core's own
+    /// `local_member_thickness_mm`, the SAME field the cells-per-member floor tests
+    /// against, so the ceiling Auto reaches for is by construction one the floor
+    /// accepts. Before the first bake there is no measurement, and the declared depth is
+    /// the only number available; that fallback is stated rather than silent.
+    private func latticeAutoWidthsMM(includes: [LatticeRegionSpec]) -> [Double] {
+        if let s = strutScene, !s.memberThicknessMM.isEmpty {
+            let measured = LatticeMeasuredRegionWidth.boundsMM(
+                occupancy: s.occupancy, memberThicknessMM: s.memberThicknessMM)
+            if !measured.isEmpty { return measured }
+        }
+        return includes.map { $0.depthMM }
+    }
+
+    /// ★★ CORE'S PER-REGION CELL, ONE ENTRY PER REGION IN THE SCENE'S ORDER.
+    ///
+    /// This is the ONE derivation both Fit and Stepped are built on, which is exactly
+    /// core's own relationship between them: STEPPED is "`Fit` WITHOUT THE DYADIC SNAP"
+    /// (`lattice_algorithm.hpp`). Fit feeds these into the ladder planner, which rounds
+    /// each to a rung; stepped uses them verbatim. Deriving them twice would be the one
+    /// way the two could disagree about what a region asked for.
+    ///
+    /// All roles, not just includes: the bake walks `scene.regions`, so an include-only
+    /// list would mis-index past an exclude.
+    /// - Parameter widthPercentile: which end of the measured width distribution sizes
+    ///   each region's cell. Fit keeps 0.05 (core's fit planner takes the conservative
+    ///   end per base cell itself). Stepped passes 0.5 — its bake now divides each CELL
+    ///   to its own local wall (his per-voxel ruling, 2026-08-24), so the region cell
+    ///   anchors on the wall the region mostly is.
+    private func latticeRegionCellsMM(widthPercentile: Double, quiltStep: Bool = false) -> [Double] {
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return [] }
+        let regions = project.latticeJobRegions().regions
+        let memoKey = "\(strutSceneToken)|\(widthPercentile)|\(quiltStep)|\(project.lattice.allowQuilt)|\(bead)|"
+            + "\(project.lattice.stageMode ?? .structural)|"
+            + "\(project.lattice.topologyID)|\(project.lattice.singleCellMembers)|"
+            + "\(project.lattice.boundary)|"
+            + regions.map { "\($0.role):\($0.depthMM)" }.joined(separator: ",")
+        let tokenPart = "\(strutSceneToken)"
+        if LatticeRegionCellMemo.token != tokenPart {
+            LatticeRegionCellMemo.token = tokenPart
+            LatticeRegionCellMemo.byKey = [:]
+        }
+        if let hit = LatticeRegionCellMemo.byKey[memoKey] { return hit }
+        let out = LatticeRegionCells.cellsMM(project: project, scene: strutScene, regions: regions,
+                                             widthPercentile: widthPercentile, quiltStep: quiltStep)
+        LatticeRegionCellMemo.byKey[memoKey] = out
+        return out
+    }
+
+    private var latticePreviewFitCells: [Double] {
+        let bead = project.printParams.strutLineWidthMM
+        guard bead > 0 else { return [] }
+        let includes = project.latticeJobRegions().regions.filter { $0.role == .include }
+        let lat = LatticeAutoPosture.applied(
+            to: project.lattice, includeRegionCount: includes.count,
+            regionWidthsMM: latticeAutoWidthsMM(includes: includes), lineWidthMM: bead)
+        guard lat.cellSizeMode == .fit else { return [] }
+        return latticeRegionCellsMM(widthPercentile: 0.05)
+    }
+
+    /// ★★★ STEPPED: the same cells, used as they came. Empty unless the user actually
+    /// chose the algorithm, so every other job draws the ladder exactly as before.
+    ///
+    /// ★ ORTHOGONAL TO THE CELL-SIZE MODE, as core says in `lattice_algorithm.hpp`:
+    /// the mode says how a cell is CHOSEN, the algorithm says what is laid down. So
+    /// this is gated on the algorithm alone and not on Fit.
+    private var latticePreviewSteppedCells: [Double] {
+        // The guard, said out loud — "stepped NOT RUN" downstream has already cost
+        // one night to a silently failing precondition here. ONCE PER CHANGE, not
+        // per SwiftUI evaluation: the first cut logged every frame and buried the
+        // real diagnostics under its own spam.
+        // ★★ DEFAULT GRADE TAKES THE SAME ROAD (his 2026-09-17, Default Grade at a
+        // 5 mm shape band: "No gradient whatsoever … Both walls are using 10.31mm
+        // cells - but the front wall should have a 12mm cell … There is no solid
+        // outline"). The app's own log said why: `GUARD algo='doubled' — preview
+        // draws the ladder`. Everything he was missing — the per-region base cell,
+        // the octree's band, the outline beam — lives in the bake these cells feed,
+        // and "doubled" was routed round it to the old periodic ladder. Core's
+        // "doubled" IS the octree with halves only; the bake gets that as
+        // `dyadicSteps`. Only organic (and an unknown name) still draws the ladder.
+        if !Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {
+            if SteppedGuardLog.last != project.lattice.algorithm {
+                SteppedGuardLog.last = project.lattice.algorithm
+                NSLog("DIAG steppedCells GUARD algo='\(project.lattice.algorithm)' "
+                      + "(not stepped/doubled) — preview draws the ladder")
+            }
+            return []
+        }
+        // ★ 0.5, NOT 0.05 — the stepped bake now divides each CELL to its own local
+        // wall, so the region's cell anchors on the wall the region MOSTLY is (his
+        // per-voxel ruling, 2026-08-24). p05 pinned his front wall to its thinnest
+        // sliver and bought a second cell across a single-cell face.
+        // ★ quiltStep: a wall drawn at the octet's non-quilt ceiling takes one more cell across
+        var cells = latticeRegionCellsMM(widthPercentile: 0.5, quiltStep: true)
+        // ★ A USER-STATED CELL WINS over the derivation (2026-08-25, the grading
+        // options' Cell dial). The bake still caps it per voxel at
+        // min(declared depth, local wall) — a typed number is not a licence to
+        // overshoot.
+        let stated = latticeStatedCellByFace
+        if !stated.isEmpty {
+            let regions = project.latticeJobRegions().regions
+            for (i, r) in regions.enumerated() where i < cells.count {
+                if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm }
+            }
+        }
+        return cells
+    }
+
+    /// faceID → the user's own cell (mm), from the per-selectable store. The key
+    /// carries the face id as its last component ("f:<group>:<face>").
+    private var latticeStatedCellByFace: [Int: Double] {
+        var out: [Int: Double] = [:]
+        for (key, mm) in project.lattice.selectableCellMM where mm > 0 {
+            if let last = key.split(separator: ":").last, let f = Int(last) {
+                out[f] = mm
+            }
+        }
+        return out
+    }
+
+    /// Per region, TRUE where the stepped cell is the user's own number — the
+    /// bake honours those as stated (cap-only, no floor division).
+    /// The algorithms whose preview is the per-region octree bake: Stepped (halves
+    /// and thirds) and Default Grade (core's "doubled" — halves only).
+    static let perRegionCellAlgorithms: Set<String> = ["stepped", "doubled"]
+
+    private var latticePreviewSteppedStated: [Bool] {
+        guard Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) else { return [] }
+        let stated = latticeStatedCellByFace
+        guard !stated.isEmpty else { return [] }
+        return project.latticeJobRegions().regions.map {
+            guard let f = $0.faceID else { return false }
+            return stated[f] != nil
+        }
+    }
+
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
     /// controls' single source of truth — nothing bound here is hardcoded in the app).
     private var latticeLimits: TopOptKit.LatticeLimits {
@@ -1406,7 +2101,9 @@ public struct WorkspacePlaceholder: View {
     /// is always current here. The surface tints derive their own params, so this only
     /// keeps the LEGEND in step.
     private func syncLatticeProxy() {
-        latticeProxy.params = project.lattice.proxyParams(limits: latticeLimits)
+        latticeProxy.params = project.lattice.proxyParams(
+            limits: latticeLimits,
+            lineWidthMM: project.printParams.strutLineWidthMM)
         latticeProxy.isActive = project.lattice.enabled
     }
 
@@ -2060,9 +2757,39 @@ public struct WorkspacePlaceholder: View {
                 undoRedoButton("arrow.uturn.forward", label: "Redo",
                                enabled: project.canRedoNow) { project.performRedo() }
             }
+
+            // ★★★ THE MODE TITLE LIVES IN THIS ROW — not in an overlay above it
+            // (maintainer, 2026-08-21: "the title is covering the redo button").
+            //
+            // ★ THREE OVERLAY ATTEMPTS ALL COLLIDED, AND FOR ONE REASON: an overlay
+            // has to be TOLD where the buttons end, and every mechanism for telling it
+            // was conditional. `TopClusterEdgeKey` is only filled in while the rebuild
+            // notification is on screen; a fixed 260 pt centred on the window lands on
+            // Redo at this title length. Putting the pill IN the row makes the
+            // clearance a layout fact instead of a measurement — HStack cannot overlap
+            // its own children, at any title length, on any device.
+            //
+            // It still fills the span he asked for: `maxWidth: .infinity` takes
+            // everything between Redo and the trailing inset kept for Settings + the
+            // orientation cube.
+            if stage == .lattice, let mode = project.lattice.stageMode {
+                LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }
+                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)
+            }
         }
+        // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
+        // The way back sits under it (`StageNavPlacement`) and the lattice MODE takes
+        // the top-CENTRE slot, so nothing competes for this one.
         .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
+        // ★ reports its TRAILING edge, for the banner's gap.
+        .background(GeometryReader { g in
+            Color.clear.preference(key: TopClusterEdgeKey.self,
+                                   value: .init(left: g.frame(in: .global).maxX,
+                                                right: .greatestFiniteMagnitude,
+                                                width: 0))
+        })
+        .latticeBandChipKeepOut()          // ★ the identity row: no band chip under it
         .alert("Rename project", isPresented: $renaming) {
             TextField("Name", text: $nameDraft)
             Button("Save") { model.renameCurrentProject(to: nameDraft) }
@@ -2184,21 +2911,88 @@ public struct WorkspacePlaceholder: View {
                 // so the picture lands once, when the value settles.
                 if draggingExpandPlane == nil, draggingDepthPlane == nil,
                    latticeDepthDragSeed == nil, latticeRowScrubSeed == nil {
-                    buildStrutScene()
+                    // ★ NOT FOR A WRITE THE BAKE ITSELF MADE (2026-09-06). The
+                    // completion records the wall-stress shares it measured; that
+                    // write lands here and, compared whole, re-armed a second
+                    // 12-minute bake on his part. Compare what a bake READS.
+                    let inputs = project.lattice.previewBakeInputs
+                    if inputs != latticeInputsLastBaked {
+                        latticeInputsLastBaked = inputs
+                        buildStrutScene()
+                    }
                 }
             }
         }
+        // ★ THE MEASURED TOP-CLUSTER EDGES LAND HERE — the collector must be a
+        // COMMON ANCESTOR of both reporters (the title/undo/redo cluster and the
+        // Settings button live in different subtrees), which is what this is.
+        .onPreferenceChange(TopClusterEdgeKey.self) { topEdges = $0 }
         // ★ THE SELECTION MOVED ⇒ THE MASK MOVED ⇒ REBAKE. See
         // `latticeRegionInputsKey` for why this is a hash and not the regions.
         .onChange(of: latticeRegionInputsKey) { _ in
+            // ★★★ NOT WHILE A HANDLE IS STILL DOWN (maintainer, 2026-08-21: "When
+            // moving the handles while already in lattice view, the lattice shouldn't
+            // bake until the handle has been let go").
+            //
+            // ★ A DRAG EMITS A NEW KEY EVERY FRAME. Each one started a full scene bake
+            // — an occupancy voxelisation, a member-thickness sweep and core's cell
+            // plan — and on his part that is the better part of a second EACH. The
+            // bakes queue behind the finger, so the picture lags the handle by however
+            // many frames the drag lasted and the last one to land is not necessarily
+            // the last one asked for. Deferring is not a débounce for smoothness: it
+            // is what makes the final picture correspond to the final handle position.
+            if latticeHandleIsDown { return }
+            // ★ The same inputs feed the solve's fingerprint, so a change here can
+            // make the field STALE as well as the bake. Idempotent when it is not.
+            if showStrutPreview, project.lattice.enabled { startStressSolveIfNeeded() }
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
-        .onChange(of: showLatticePage) { open in if open { syncLatticeProxy() } }
+        // ★★ AND THE BAKE HAPPENS ON RELEASE. Watching the flag rather than the key
+        // means the deferred change is not lost — the drag ends, this fires once, and
+        // it bakes the position he actually let go at.
+        .onChange(of: latticeHandleIsDown) { down in
+            guard !down, showStrutPreview, project.lattice.enabled else { return }
+            startStressSolveIfNeeded()
+            buildStrutScene()
+        }
+        .onChange(of: showLatticePage) { open in
+            if open { syncLatticeProxy() }
+            // ★★ NOTHING SAVED ⇒ SETTINGS FIRST (maintainer, 2026-08-19: "Settings
+            // didn't automatically open up when I pressed lattice. Please make it so
+            // if there are no settings saved, it opens the settings up before showing
+            // the preview").
+            //
+            // ★ AND IT LISTENS ON THE RIGHT SIGNAL THIS TIME. The first cut watched
+            // `stage`, but the Lattice button opens the lattice PAGE — `stage` never
+            // moved, so the trigger never fired. Both doors are covered below.
+            if open { openLatticeSettingsIfUnconfigured() }
+        }
+        .onChange(of: stage) { s in
+            if s == .lattice { openLatticeSettingsIfUnconfigured() }
+        }
+        // ★★ THE PREVIEW GOING OFF ENDS THE VIEWS THAT LIVE ON IT (his 2026-10-01). Five paths
+        // turn it off — the cube, the mode sheet's delete, lattice mode off, the page's own
+        // switch — and none cleared lattice only or the key's drill-in, so both outlived it.
+        .onChange(of: showStrutPreview) { on in
+            guard !on else { return }
+            latticeOnly = false
+            latticeLegendMode = .groups
+            latticeLegendProbe = nil
+        }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.
         // Keyed on acceptedCount (cheap, Equatable); no-op while the preview is off.
         .onChange(of: run.outcome?.acceptedCount ?? -1) { _ in
             if showStrutPreview { buildStrutScene() }
+        }
+        // ★★ AND WHEN THE ON-DEVICE FEA LANDS. The sibling above covers a RUN's
+        // variants; this covers `latticeSim` finishing, which is the field a
+        // `densityMode == .sim` preview actually grades by. Without it the preview
+        // keeps a scene baked before the solve existed — uniform struts, every tap
+        // reading the floor, and a stress overlay that can never arm.
+        .onChange(of: latticeStressFieldKey) { _ in
+            refreshLatticeStressPeak()
+            if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
@@ -2216,6 +3010,27 @@ public struct WorkspacePlaceholder: View {
             Button("Keep my results", role: .cancel) { pendingReplacement = nil }
         } message: {
             Text(pendingReplacement?.message ?? "")
+        }
+        // ★ "After running certification, only these spacings are available. Pick one
+        // (you can always change this in the settings)." — maintainer, 2026-09-03.
+        .confirmationDialog(
+            "Certification found \(organicFitChoices.count) spacing\(organicFitChoices.count == 1 ? "" : "s") that work",
+            isPresented: organicFitPromptShown, titleVisibility: .visible
+        ) {
+            ForEach(organicFitChoices, id: \.self) { s in
+                Button(String(format: "%g mm", s)) {
+                    project.lattice.organicPickedSeparationMM = s
+                    project.lattice.cellSizeMode = .fit
+                    model.persistCurrentProject()
+                    organicFitChoices = []
+                }
+            }
+            Button("Decide later", role: .cancel) { organicFitChoices = [] }
+        } message: {
+            Text("After running certification, only "
+                 + organicFitChoices.map { String(format: "%g mm", $0) }.joined(separator: ", ")
+                 + " are available for use. Please select which you'd prefer — you can always "
+                 + "change this in the settings.")
         }
         .onAppear {
             syncLatticeProxy()
@@ -2313,6 +3128,20 @@ public struct WorkspacePlaceholder: View {
         }
         latticeVariantContext = nil
         latticeVariantMesh = nil
+        // ★ THE ORGANIC PREVIEW'S SOURCE FROM A REMOTE RUN (2026-09-02): the chosen
+        // variant's alternative carries the run's emitted spans and receipt when the
+        // job asked for them. Stashed for the bake; cleared when there is none, so a
+        // stale run can never dress a new variant.
+        if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
+           let alt = o.variants[idx].latticeAlternative {
+            latticeOrganicSpans = alt.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
+            latticeOrganicReceipt = OrganicRunReceipt(info: alt.receiptJSON.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] })
+            offerCertifiedSeparations(from: latticeOrganicReceipt)
+        } else {
+            latticeOrganicSpans = nil
+            latticeOrganicReceipt = nil
+        }
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
             var v = o.variants[idx]
@@ -2326,6 +3155,19 @@ public struct WorkspacePlaceholder: View {
             }
             let field = LatticeDemandField(
                 vonMises: v.vonMisesField,
+                // ★★★ AND THE TENSOR (maintainer, 2026-08-22: "the organic lattice
+                // preview looks exactly the same as before. Did you even modify the
+                // preview?"). He was right and the banner was already saying so —
+                // "shown as the doubled ladder; the run builds the organic lattice".
+                //
+                // ★ THE TRACER NEVER GOT ITS INPUT. `latticeStressField` is
+                // `latticePageVariantField ?? latticeSim.field`, so the VARIANT field
+                // outranks the stage's own solve — and this constructor dropped the
+                // tensor, leaving it empty. Organic needs the full Cauchy tensor to
+                // eigen-decompose; with none the bake is skipped and the ladder is
+                // drawn instead. The stage's own path was plumbed and this one was not,
+                // which is why it worked in a test and not on his part.
+                stressTensor: v.stressTensorField.map(Double.init),
                 nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
                 origin: o.gridOrigin, spacingMM: o.spacing,
                 provenance: .variant(runName: project.name, variantIndex: idx,
@@ -2656,49 +3498,115 @@ public struct WorkspacePlaceholder: View {
     /// `startRelatticeRun` submits what this returns, and the forecast is a
     /// forecast OF these bytes (RelatticeRun arms `lattice.forecast_only` inside
     /// the runner, on this same document, so the two differ in one key and no
-    /// other). `noteSkippedFaces` is off for the forecast — it must not post
-    /// transient notes on every settings change.
-    private func relatticeJobJSON(noteSkippedFaces: Bool) -> Data? {
+    /// other). It also returns how many marked faces the variant job left out because they
+    /// have no shape to lattice (the stage's job leaves them out too), so each of the three
+    /// surfaces can say so (ruling V1, 2026-09-29) — the note this used to post was drawn on
+    /// the page the run then closed, so nobody ever saw it.
+    private func relatticeJobJSON(emission given: LatticeRegionEmission.Result? = nil)
+        -> (json: Data, spec: LatticeSpec, facesWithoutShape: Int, regionsWithoutShape: [String], coreRefusal: String?)? {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
-        // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
-        // Z11): on a variant only placed primitives are emitted, because a face
-        // id would resolve against the ORIGINAL part's surface, which this design
-        // no longer has.
-        let emission = project.variantLatticeJobRegions()
-        if noteSkippedFaces, emission.skippedFaces > 0 {
-            latticePageModel.post(
-                note: "\(emission.skippedFaces) face selection(s) were not carried "
-                    + "onto this variant — an optimized surface has no faces to "
-                    + "resolve them against. Place a region instead.")
-        }
-        // The SAME spec builder the optimize request uses — only the regions
-        // differ, and they differ for the Z11 reason above.
-        // The STRUT width, matching AppModel.makeRunRequest (task
-        // 2026-08-06-strut-line-width-field): a re-lattice must use the same
-        // printability reference the optimize run did, or the two jobs derive
-        // different cells from the same project.
-        let spec = project.lattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: emission.regions)
+        // The regions as the stage sends them (bar Z11; ruling a, 2026-09-30): each face wall
+        // as its full prism on the original part, face_id included as provenance, so core's
+        // depth tie checks it against the protection this variant's run froze.
+        let emission = given ?? project.variantLatticeJobRegions()
+        // ★ RULING (c) (2026-09-30): no include wall ⇒ no document — core would lattice the
+        // WHOLE variant. The backstop for all three callers (the forecast, Check sizes, the
+        // run); each says why in the stage's words (`project.variantLatticeJobRefusal()`).
+        guard LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                            regions: emission.regions) == nil else { return nil }
+        // ★★ Structural Stepped (2026-10-08): no document either — the run is blocked, not substituted
+        guard LatticeStructuralSteppedGate.refusal(project.lattice) == nil else { return nil }
+        // ★★ THE STAGE'S OWN SPEC (ruling b, 2026-09-30): the SAME builder the optimize request
+        // uses (`ProjectModel.latticeRunSpec`) — Auto resolved from these walls and the strut
+        // bead exactly as the stage resolves it, the strut width, the preview's placed cells.
         // THE VARIANT'S OWN IDENTITY AND ITS OWN NUMBER (task
         // 2026-08-04-variant-volume-fraction-mismatch). This passed
         // `ctx.requestedVolumeFraction` — the LADDER RUNG — into a job key core
         // validates as a fraction in (0, 1]. On the maintainer's growth run the
         // rung is 1.1 and every attempt died at schema validation. Both values
         // now come from the variant itself.
-        return try? RelatticeJobBuilder.build(
-            original: art.jobJSON, variant: ctx, lattice: spec)
+        guard let spec = project.latticeRunSpec(emission: emission),
+              let json = try? RelatticeJobBuilder.build(
+                original: art.jobJSON, variant: ctx, lattice: spec) else { return nil }
+        // ★ RULING 3 (2026-09-30): core's OWN parser on this very document — the same core the
+        // worker runs (RelatticeRun refuses a worker whose fingerprint differs) — so a job core
+        // refuses (an old run's protection at another depth than the wall today) is said before
+        // any tap, in his words, and never sent.
+        let coreRefusal = TopOptKit.jobSchemaError(json).map {
+            project.variantJobCoreRefusal(coreError: $0, regions: emission.regions)
+        }
+        return (json, spec, emission.skippedFaces, emission.skippedRegionNames, coreRefusal)
     }
 
-    /// The forecast's input and identity: the job above, but only when a forecast
-    /// can actually be produced. No worker, no retained design, no variant ⇒ nil,
-    /// and the drawer says so rather than spinning forever.
-    private var latticeForecastJob: Data? {
-        guard showLatticePage, compute.activeRemote != nil,
-              latticeVariantContext?.artifacts != nil else { return nil }
-        return relatticeJobJSON(noteSkippedFaces: false)
+    /// ★ THE VARIANT JOB FOR ONE PAGE PASS, from ONE emission and one document:
+    /// - what the job leaves out — marked faces that have no shape to lattice, and face regions
+    ///   the run cannot consume, by name (rulings V1 and g);
+    /// - why it may not be written at all (ruling c);
+    /// - and, where the app already asks core about the variant's job (a worker and a retained
+    ///   design: the forecast's own conditions), core's own verdict on the document (ruling 3);
+    /// - the forecast's input and identity: that document — never sent when core refuses it,
+    ///   nil without a worker, a retained design or a variant (the drawer says so).
+    private struct LatticeVariantJobPass {
+        var facesWithoutShape = 0
+        var regionsWithoutShape: [String] = []
+        var refusal: String? = nil
+        var coreRefusal: String? = nil
+        var forecastJob: Data? = nil
+    }
+    private var latticeVariantJobPass: LatticeVariantJobPass {
+        guard latticeVariantContext != nil else { return LatticeVariantJobPass() }
+        let e = project.variantLatticeJobRegions()
+        var pass = LatticeVariantJobPass(
+            facesWithoutShape: e.skippedFaces, regionsWithoutShape: e.skippedRegionNames,
+            refusal: LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled, regions: e.regions)
+                ?? LatticeStructuralSteppedGate.refusal(project.lattice))
+        guard pass.refusal == nil, showLatticePage, compute.activeRemote != nil,
+              latticeVariantContext?.artifacts != nil, let job = relatticeJobJSON(emission: e) else { return pass }
+        pass.coreRefusal = job.coreRefusal
+        if job.coreRefusal == nil { pass.forecastJob = job.json }
+        return pass
+    }
+
+    /// ★ THE ORGANIC CELL-SIZE PROBE (final contract 2026-09-05): the SAME inputs
+    /// the forecast uses, the same worker, the re-lattice job with the candidate
+    /// list; `organic_probe.json` read as soon as core writes it, then the run is
+    /// stopped. nil when there is no worker or no variant to re-lattice — the
+    /// wizard's "Check sizes" says so.
+    private func makeOrganicProbeDriver() -> LatticeSetupWizard.ProbeDriver? {
+        guard compute.activeRemote != nil, latticeVariantContext?.artifacts != nil,
+              let config = compute.activeRemote,
+              let file = project.importedFile,
+              let art = latticeVariantContext?.artifacts,
+              let vf = latticeVariantContext?.requestedVolumeFraction else { return nil }
+        let name = project.name
+        let designBin = art.designBin
+        let path = file.path
+        return { [self] cells, grades, recommend in
+            // ★ ruling (c): never a job with no include wall — said in the stage's words
+            if let why = project.variantLatticeJobRefusal() {
+                throw RelatticeError("Can’t check sizes: \(why).")
+            }
+            guard let job = relatticeJobJSON() else {
+                throw RelatticeError("There is nothing to check yet. Optimize the part first.")
+            }
+            // ★ ruling 3: a job core refuses is never sent — said in his words
+            if let why = job.coreRefusal { throw RelatticeError(why) }
+            let inputs = RelatticeRun.Inputs(
+                config: config, modelPath: path, jobJSON: job.json,
+                designBin: designBin, projectName: name,
+                requestedVolumeFraction: vf)
+            var probe = try await Task.detached(priority: .utility) {
+                try RelatticeRun.probe(inputs, cellsMM: cells, gradesMM: grades, recommend: recommend)
+            }.value
+            // ★ ruling V1: what this check left out travels WITH its answer (the answer is
+            // stored and shown later, when the walls may have changed)
+            probe.facesWithoutShape = job.facesWithoutShape
+            probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape
+            // ★ ruling (d) (2026-09-30): and the job route it was measured on — an answer from
+            // another route is kept but never used, and the wizard asks for a re-check
+            probe.jobRoute = OrganicForecast.currentJobRoute
+            return probe
+        }
     }
 
     /// Runs the forecast on the worker: the same submit + poll as the run, with
@@ -2729,6 +3637,12 @@ public struct WorkspacePlaceholder: View {
             return
         }
         guard run.phase != .running else { return }
+        // ★ RULING (c) (2026-09-30): the button already carries it; this is the second layer, in
+        // the stage's words, before the worker is asked for anything.
+        if let why = project.variantLatticeJobRefusal() {
+            model.toast = "Can’t lattice this variant: \(why)."
+            return
+        }
         guard let config = compute.activeRemote else {
             model.toast = "Latticing a variant runs on a Mac worker — pick one in Compute."
             return
@@ -2739,16 +3653,23 @@ public struct WorkspacePlaceholder: View {
         }
         // THE SAME DOCUMENT THE FORECAST DESCRIBED — one builder, so the prediction
         // and the job cannot drift apart.
-        guard let jobJSON = relatticeJobJSON(noteSkippedFaces: true) else {
+        guard let job = relatticeJobJSON() else {
             model.toast = "Can’t build the re-lattice job from this run’s retained "
                 + "job document."
             return
         }
+        // ★ ruling 3: a job core refuses is never sent — the button already says it; this is
+        // the second layer
+        if let why = job.coreRefusal { model.toast = why; return }
         // BAR Z2, app side: the document about to be submitted must differ from
         // the one that produced this variant ONLY in the lattice question. If any
         // load-case key moved, refuse HERE — before the worker spends solves
         // certifying under a load case the variant was never optimized under.
-        let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, jobJSON)
+        let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, job.json)
+        // ★ ruling V1 / (g): the marked faces and face regions this job leaves out, for the
+        // result's own line
+        let withoutShape = job.facesWithoutShape
+        let regionsWithoutShape = job.regionsWithoutShape
         guard moved.isEmpty else {
             model.toast = "Can’t re-lattice: the load case changed (\(moved.joined(separator: ", "))). "
                 + "This job must certify under the load case the variant was optimized under."
@@ -2756,7 +3677,7 @@ public struct WorkspacePlaceholder: View {
         }
         viewOriginal = false
         let inputs = RelatticeRun.Inputs(
-            config: config, modelPath: file.path, jobJSON: jobJSON,
+            config: config, modelPath: file.path, jobJSON: job.json,
             designBin: art.designBin, projectName: project.name,
             requestedVolumeFraction: ctx.requestedVolumeFraction)
         // THE RECEIPT WAS BEING THROWN AWAY (task
@@ -2766,15 +3687,29 @@ public struct WorkspacePlaceholder: View {
         // the path the Lattice page actually drives, showed no lattice record at
         // all. It now carries the receipt onto the outcome, which is what puts the
         // per-region breakdown on the results screen.
-        // The STRUT width, matching the job this receipt describes.
-        let echo = project.lattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.strutLineWidthMM,
-            regions: project.variantLatticeJobRegions().regions)
+        // ★ The receipt's echo IS the submitted job's spec (ruling b, 2026-09-30): one build, so
+        // the per-region rows the job asked for (`report_region_cells`, set by Auto's posture)
+        // are the rows kept — a second, unresolved build here would have dropped them.
+        let echo = job.spec
         run.runner = { _, _, _ in
             let result = try RelatticeRun.run(inputs)
-            guard let spec = echo else { return result.outcome }
+            // ★ THE ORGANIC PREVIEW'S SOURCE (2026-09-02): the run's emitted spans and
+            // its receipt, kept for the next bake. An unparseable or empty span file is
+            // nil — the preview then falls back to the trace and SAYS so, rather than
+            // drawing nothing. The receipt travels with the spans so the scene can
+            // cross-check count and length (§10).
+            let receiptInfo = result.receiptJSON.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            let spans = result.spanText.flatMap { try? OrganicSpanIndex.parse($0) }
+            DispatchQueue.main.async {
+                self.latticeOrganicSpans = spans
+                self.latticeOrganicReceipt = OrganicRunReceipt(info: receiptInfo)
+                self.offerCertifiedSeparations(from: self.latticeOrganicReceipt)
+                // ★ REBUILD ON RUN CHANGE (Step 4) — the span index has the bake's
+                // lifetime, so a new run is a new bake, never a per-frame one.
+                self.buildStrutScene()
+            }
+            let spec = echo
             return result.outcome.withLatticeReport(LatticeReport(
                 topologyID: spec.topologyID, cellMM: spec.cellMM,
                 generateRelativeDensity: spec.generateRelativeDensity,
@@ -2784,7 +3719,9 @@ public struct WorkspacePlaceholder: View {
                 emittedRegions: spec.regions.count,
                 // The per-region rows only exist when the job asked for them; a
                 // receipt that carries none parses to nil and shows nothing.
-                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil))
+                regionCellsJSON: spec.reportRegionCells ? result.receiptJSON : nil,
+                variantFacesWithoutShape: withoutShape,
+                variantRegionsWithoutShape: regionsWithoutShape))
         }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
@@ -2792,7 +3729,8 @@ public struct WorkspacePlaceholder: View {
     }
 
     private var latticePageOverlay: some View {
-        LatticePage(model: model, project: project, run: run,
+        let pass = latticeVariantJobPass
+        return LatticePage(model: model, project: project, run: run,
                     sim: latticeSim, page: latticePageModel,
                     variantField: latticePageVariantField,
                     variantContext: latticeVariantContext,
@@ -2800,6 +3738,37 @@ public struct WorkspacePlaceholder: View {
                         get: { showStrutPreview },
                         set: { on in
                             showStrutPreview = on
+                            // ★★ THE PREVIEW NEEDS THE FEA, AND NOBODY WAS ASKING FOR
+                            // IT (maintainer, 2026-08-19: "The lattice tapping went
+                            // back to saying 5% everywhere again" / "only works with
+                            // the stress map overlay only").
+                            //
+                            // `startStressSolveIfNeeded()` had exactly ONE caller: the
+                            // wizard's Save & Exit. So a preview turned on without
+                            // going through the wizard graded against `latticeSim.field
+                            // == nil` — no demand, `uniformRho` struts, and every tap
+                            // reading the floor of the band. It looked like it "only
+                            // worked with the stress view" because that is the other
+                            // path that happens to leave a field behind.
+                            //
+                            // The call is idempotent — it returns early unless
+                            // `needsStressSolve` and the existing field is stale — so
+                            // asking here costs nothing when the answer is already in
+                            // hand.
+                            // ★★ THIS IS THE BUTTON HE MEANS (maintainer, 2026-08-19:
+                            // "The setting still has not come up!", third time).
+                            //
+                            // I had it on `stage` and then on `showLatticePage`. But
+                            // he is ALREADY on the lattice stage, and the bottom
+                            // "Lattice" button RUNS a job — neither ever fires. The
+                            // "lattice view" he means is this one: the strut-preview
+                            // toggle. Settings open as it comes on, unless they have
+                            // been confirmed this session.
+                            if on {
+                                openLatticeSettingsIfUnconfigured()
+                                startStressSolveIfNeeded()
+                                refreshLatticeStressPeak()
+                            }
                             if on, strutScene == nil { buildStrutScene() }
                         }),
                     baseCanOptimize: canOptimize,
@@ -2814,15 +3783,23 @@ public struct WorkspacePlaceholder: View {
                     // settings — a fresh strut-scene bake + proxy sync.
                     onRefreshPreview: {
                         syncLatticeProxy()
-                        buildStrutScene()
+                        // ★ A REFRESH IS A REQUEST, NOT A CHANGE — it rebuilds even when
+                        // nothing moved, which is exactly what the button is for.
+                        buildStrutScene(forceRebuild: true)
                     },
                     // BAR F3's CALL SITE, from this side: the model outlives the
                     // page (close and reopen and the answer is still there), the
                     // job document is both the input and the identity, and the
                     // driver is nil exactly when no forecast is possible.
                     forecast: latticeForecast,
-                    forecastJob: latticeForecastJob,
-                    driveForecast: makeForecastDriver())
+                    forecastJob: pass.forecastJob,
+                    driveForecast: makeForecastDriver(),
+                    variantFacesWithoutShape: pass.facesWithoutShape,
+                    variantRegionsWithoutShape: pass.regionsWithoutShape,
+                    variantJobRefusal: pass.refusal,
+                    variantJobCoreRefusal: pass.coreRefusal,
+                    // ★ ruling 4 (item 6): "nothing set to lattice" is one tap from the walls
+                    onMarkWalls: { goToWallMarking() })
             .ignoresSafeArea(.keyboard)
     }
 
@@ -2863,15 +3840,41 @@ public struct WorkspacePlaceholder: View {
     ///     `LatticeSimModel`'s own fingerprint — the model, the material, the
     ///     resolution and the declared load case. Re-solving identical inputs
     ///     produces an identical field
+    /// ★ Open the lattice settings when the project has none — and ONLY then. Once a
+    /// lattice is configured, popping a sheet over the preview every time he arrives
+    /// would be in the way rather than helpful, which is why this is gated on
+    /// `enabled` rather than firing unconditionally.
+    private func openLatticeSettingsIfUnconfigured() {
+        // ★★ ONCE PER SESSION (maintainer, 2026-08-19: "Make it open up as soon as
+        // you click the button if it hasn't already saved this session").
+        //
+        // Gating on `project.lattice.enabled` was wrong twice over: his project was
+        // already enabled from a previous run, so the sheet never opened; and it
+        // asked about the SAVED state when what matters is whether the settings have
+        // been confirmed in front of him now — Save & Exit is what re-fingerprints
+        // the solve.
+        guard !latticeSettingsSavedThisSession, !showLatticeWizard else { return }
+        showLatticeWizard = true
+    }
+
     private func startStressSolveIfNeeded() {
-        guard project.lattice.enabled, project.lattice.needsStressSolve,
-              let ctx = model.makeLatticeSimContext()
-        else { return }
+        // ★ SAID OUT LOUD (2026-09-25): after a relaunch his organic preview sat on the
+        // octet stand-in for minutes — no solve had started and nothing said why.
+        guard project.lattice.enabled, project.lattice.needsStressSolve else {
+            NSLog("DIAG solve: not needed (enabled %d, needsStressSolve %d)", project.lattice.enabled ? 1 : 0, project.lattice.needsStressSolve ? 1 : 0)
+            return
+        }
+        guard let ctx = model.makeLatticeSimContext() else {
+            NSLog("DIAG solve: NOT STARTED — no sim context (loads/anchors not ready)")
+            return
+        }
         // A field we already have, for these exact inputs, is the answer.
         if latticeSim.field != nil, !latticeSim.isStale(against: ctx.fingerprint) {
+            NSLog("DIAG solve: field already current")
             return
         }
         simBannerDismissed = false          // a NEW solve gets a fresh banner
+        NSLog("DIAG solve: started (phase was %@)", String(describing: latticeSim.phase))
         latticeSim.run(ctx)
     }
 
@@ -2897,6 +3900,220 @@ public struct WorkspacePlaceholder: View {
     ///
     /// ★ AND A NEW SOLVE GETS A FRESH BANNER — `startStressSolveIfNeeded` clears
     /// the dismissal, so dismissing one run's banner does not silence the next.
+    /// ★ THE REBAKE'S OWN BANNER, deliberately a sibling of `simRunningBanner`
+    /// rather than a variant of it: they report different work (an FEA vs a
+    /// geometry bake) and can be true at once. It carries no dismiss X — the wait
+    /// is seconds, not minutes, and a dismissed banner would leave the user
+    /// staring at stale struts with no way to tell.
+    private var strutBakingBanner: some View {
+        HStack(spacing: DS.Space.s) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.small)
+                .tint(DS.Color.accent.color)
+            VStack(alignment: .leading, spacing: 1) {
+                // ★ WHICH STAGE (2026-09-07): the traced picture is already on
+                // screen while core's repair passes run, and those can take minutes —
+                // saying "rebuilding" over a drawn lattice reads as a hang.
+                Text(strutRefining ? "Adding the print repairs" : "Rebuilding the lattice")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Text(strutRefining
+                     ? "The traced struts are shown. The arches, legs and merges are still being built."
+                     : "Your change is being applied to the strut preview.")
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, DS.Space.s)
+        .padding(.horizontal, DS.Space.m)
+        .background(Capsule().fill(DS.Surface.panel.color)
+            .overlay(Capsule().strokeBorder(
+                DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        // ★ a chip's rebake puts this banner up — no band chip under it
+        .latticeBandChipKeepOut()
+        // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
+        // covering the redo button and cutting slightly into the 'Settings'
+        // button … Please make it less wide and as tall as it needs to be.
+        // Ensure there is enough padding between it and all other assets").
+        //
+        // ★ IT SAT ON THE SAME ROW AS THE BUTTONS. Centring a capsule across the
+        // full width puts it exactly where the undo/redo cluster ends and the
+        // Settings pill begins, and the capsule grew to whatever its text needed.
+        // Two changes: a width CEILING so it stays a notification rather than a
+        // bar, and a top inset that drops it BELOW the button row entirely — so
+        // the clearance holds for any title length, on any device, rather than
+        // depending on the clusters' measured widths.
+        // ★ IT FITS THE GAP BETWEEN REDO AND SETTINGS (maintainer, 2026-08-19:
+        // "It needs to be less wide and actually move up"). The top row is
+        // back + title + undo + redo on the left and Settings + the orientation
+        // cube on the right; the clear span between them is ~300 pt on a 13"
+        // iPad. `topBannerWidth` sits inside that with room either side, and the
+        // banner stays on the row rather than being pushed below it — an earlier
+        // cut dropped it under the row, which cleared the buttons but was not
+        // what was asked for.
+        //
+        // Height is whatever the text needs: the subtitle WRAPS inside the
+        // ceiling instead of widening the capsule.
+        .frame(maxWidth: Self.topBannerWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(TopBannerGapCentred(edges: topEdges))
+        // ★★ BELOW THE MODE NAME, NOT OVER IT (maintainer, 2026-08-21: "the
+        // notification is covering the mode name - it *NEEDS* to be pushed *BELOW* the
+        // mode name"). Both this and the mode occupy the span between the two top
+        // clusters — that is what makes them collide, and it is also what makes the
+        // remedy exact: drop by the mode row's own height plus the standard gap,
+        // whenever a mode is showing. A measured drop, not a guessed constant.
+        .padding(.top, PageChrome.edge + (latticeStageModeShown
+                                          ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                          : 0))
+        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17:
+        // "'rebuilding the lattice' should be in the centre, below 'aesthetic' … The
+        // only time it should be to the right … should be when there is another chip
+        // meant to be in the middle"). See `seeResultsShown`.
+        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(DS.Motion.emphasized, value: strutBakeInFlight)
+        .animation(DS.Motion.emphasized, value: seeResultsShown)
+        .accessibilityIdentifier("strut-baking-banner")
+    }
+
+    /// ★★ THE TWO TOP CLUSTERS' INNER EDGES (maintainer, 2026-08-19: "Can you
+    /// place an equal padding on both sides of the notification? It looks strange
+    /// with two different paddings").
+    ///
+    /// ★ WHY THIS HAS TO BE MEASURED. The banner was centred on the SCREEN, but
+    /// the clusters either side of it are not symmetric about the screen centre:
+    /// the left is back + PROJECT TITLE + undo + redo and its width follows the
+    /// project's name, while the right is Settings + the orientation gizmo and is
+    /// fixed. On his part that put the banner 16 pt from redo and 30 pt from
+    /// Settings. Any constant nudge that squared one project name would be wrong
+    /// for the next, so the edges are read from the views themselves.
+    ///
+    /// `.global` rather than a named space, deliberately: both clusters and the
+    /// banner are in the same window, so no coordinate space has to be
+    /// introduced (and no container has to be found to hang it on).
+    private struct TopClusterEdges: Equatable {
+        var left: CGFloat = 0
+        var right: CGFloat = .greatestFiniteMagnitude
+        /// The window's own width, reported alongside the edges so the trailing
+        /// inset can be expressed as a PADDING rather than an offset.
+        var width: CGFloat = 0
+        var isMeasured: Bool {
+            left > 0 && right < .greatestFiniteMagnitude && width > left
+        }
+    }
+    private struct TopClusterEdgeKey: PreferenceKey {
+        static var defaultValue = TopClusterEdges()
+        static func reduce(value: inout TopClusterEdges, nextValue: () -> TopClusterEdges) {
+            let n = nextValue()
+            value.left = Swift.max(value.left, n.left)
+            value.right = Swift.min(value.right, n.right)
+            value.width = Swift.max(value.width, n.width)
+        }
+    }
+
+    /// ★ THE CLEAR SPAN between the top-left button cluster (back · title · undo ·
+    /// redo) and the top-right one (Settings · orientation cube), less a margin on
+    /// each side. Both top-centre banners share it so they cannot drift apart.
+    private static let topBannerWidth: CGFloat = 260
+
+    /// ★ Centre the banner on the MIDPOINT OF THE GAP rather than of the screen.
+    /// The offset is the difference between the two, so both visual gaps are
+    /// equal by construction. Before the edges are measured it is a no-op and the
+    /// banner is screen-centred, which is where it used to live — so a frame
+    /// rendered before the preference lands is the old placement, never a broken
+    /// one.
+    /// ★ THE BAND IS STATED, THEN THE BANNER IS CENTRED IN IT.
+    ///
+    /// ★ WHY NOT AN OFFSET. The first cut centred on the screen and then nudged
+    /// by `gapMid - screenMid`. That is arithmetically the same answer, but it
+    /// depends on the offset being applied to a container whose width matches the
+    /// window — and inside a `GeometryReader` in an overlay it did not, so the
+    /// correction came out short and the padding stayed visibly uneven. Padding
+    /// out to each measured edge and centring in the remainder makes the two gaps
+    /// equal STRUCTURALLY: whatever is left over is split in half by the centring
+    /// itself, with no arithmetic to be wrong.
+    /// ★★ THE SAME INSETS, WITHOUT MEASURING ANYTHING — for a SECOND occupant of the
+    /// top span (the lattice mode name).
+    ///
+    /// ★ WHY IT CANNOT JUST REUSE `TopBannerGapCentred`. That modifier both READS the
+    /// two clusters' inner edges and WRITES a `TopClusterEdgeKey` preference of its
+    /// own (`left: 0`). With one occupant that is harmless. With two, the second
+    /// write reduces into the same key and the measurement collapses to left = 0 — the
+    /// mode's capsule stretched from the screen edge to under the Settings pill, which
+    /// is exactly what it did on the first attempt. One writer, many readers.
+    private struct TopBannerGapReadOnly: ViewModifier {
+        let edges: TopClusterEdges
+        func body(content: Content) -> some View {
+            // ★★ THE WIDTH IS READ LOCALLY, NOT TAKEN FROM THE PREFERENCE. `edges.width`
+            // is only ever filled in by `TopBannerGapCentred`'s own GeometryReader, so
+            // `isMeasured` is false whenever that banner is absent — and the mode name
+            // is present far more often than the banner is. Reading it here makes this
+            // modifier independent of whether the OTHER occupant happens to be on
+            // screen, which is what left the capsule spanning the whole width.
+            GeometryReader { g in
+                let ok = edges.left > 0 && edges.right < .greatestFiniteMagnitude
+                        && g.size.width > edges.left
+                content
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.leading, ok ? edges.left + PageChrome.gap : 0)
+                    .padding(.trailing, ok
+                             ? Swift.max(0, g.size.width - edges.right) + PageChrome.gap
+                             : 0)
+                    .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .frame(height: LatticeStageModeChip.rowHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    private struct TopBannerGapCentred: ViewModifier {
+        let edges: TopClusterEdges
+        func body(content: Content) -> some View {
+            content
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.leading, leading)
+                .padding(.trailing, trailing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // ★★★ THE PAGE-WIDE TAP EATER (his walk, 2026-09-07: "it has created
+                // some sort of consistent error that made the entire page untouchable
+                // when [the repairs banner] came up").
+                //
+                // This modifier expands its content to the WHOLE viewport so the
+                // capsule can be centred in the gap between the top clusters, and the
+                // measuring background is a `Color.clear` over that full-screen frame.
+                // `Color.clear` is a SHAPE: it hit-tests. So while any banner using
+                // this modifier was up, an invisible full-screen surface sat over the
+                // model and swallowed every touch — orbit, tap, the Selections panel,
+                // everything. It was invisible for a year because the bake banner was
+                // up for about a second; the repair banner stays up for minutes, and
+                // the defect became the whole page.
+                //
+                // The measurement wants geometry, not touches.
+                .background(GeometryReader { g in
+                    Color.clear.preference(
+                        key: TopClusterEdgeKey.self,
+                        value: .init(left: 0, right: .greatestFiniteMagnitude,
+                                     width: g.frame(in: .global).width))
+                }
+                .allowsHitTesting(false))
+        }
+        /// Out to the left cluster's trailing edge, plus a margin.
+        private var leading: CGFloat {
+            edges.isMeasured ? edges.left + PageChrome.gap : 0
+        }
+        /// The mirror, as a distance from the window's trailing edge.
+        private var trailing: CGFloat {
+            edges.isMeasured
+                ? Swift.max(0, edges.width - edges.right) + PageChrome.gap
+                : 0
+        }
+    }
+
+
     private var simRunningBanner: some View {
         HStack(spacing: DS.Space.s) {
             // The animation: a ring that spins for as long as the solve runs.
@@ -2911,6 +4128,7 @@ public struct WorkspacePlaceholder: View {
                 Text("A finite-element solve is grading your lattice.")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Button { simBannerDismissed = true } label: {
                 Image(systemName: "xmark")
@@ -2929,10 +4147,49 @@ public struct WorkspacePlaceholder: View {
             .overlay(Capsule().strokeBorder(
                 DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, PageChrome.edge)
+        .latticeBandChipKeepOut()          // ★ no band chip under the banner
+        // ★ CLEAR OF THE TOP CHROME (maintainer, 2026-08-19: "Currently it is
+        // covering the redo button and cutting slightly into the 'Settings'
+        // button … Please make it less wide and as tall as it needs to be.
+        // Ensure there is enough padding between it and all other assets").
+        //
+        // ★ IT SAT ON THE SAME ROW AS THE BUTTONS. Centring a capsule across the
+        // full width puts it exactly where the undo/redo cluster ends and the
+        // Settings pill begins, and the capsule grew to whatever its text needed.
+        // Two changes: a width CEILING so it stays a notification rather than a
+        // bar, and a top inset that drops it BELOW the button row entirely — so
+        // the clearance holds for any title length, on any device, rather than
+        // depending on the clusters' measured widths.
+        // ★ IT FITS THE GAP BETWEEN REDO AND SETTINGS (maintainer, 2026-08-19:
+        // "It needs to be less wide and actually move up"). The top row is
+        // back + title + undo + redo on the left and Settings + the orientation
+        // cube on the right; the clear span between them is ~300 pt on a 13"
+        // iPad. `topBannerWidth` sits inside that with room either side, and the
+        // banner stays on the row rather than being pushed below it — an earlier
+        // cut dropped it under the row, which cleared the buttons but was not
+        // what was asked for.
+        //
+        // Height is whatever the text needs: the subtitle WRAPS inside the
+        // ceiling instead of widening the capsule.
+        .frame(maxWidth: Self.topBannerWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(TopBannerGapCentred(edges: topEdges))
+        // ★★ BELOW THE MODE NAME, NOT OVER IT (maintainer, 2026-08-21, of THIS banner:
+        // "Simulation Running notification should be lower, below the Aesthetic mode
+        // name"). The strut-baking banner was dropped for exactly this reason and this
+        // one was left on the old row — the two are alternatives in the same slot, so
+        // they must clear the same obstacle. Same expression, deliberately: a measured
+        // drop by the mode row's own height plus the standard gap, only when a mode is
+        // showing.
+        .padding(.top, PageChrome.edge + (latticeStageModeShown
+                                          ? LatticeStageModeChip.rowHeight + PageChrome.gap
+                                          : 0))
+        // ★ RIGHT OF CENTRE ONLY WHEN SEE RESULTS SHARES THE ROW (his 2026-09-17) —
+        // the same rule as the strut-baking banner, see `seeResultsShown`.
+        .padding(.leading, seeResultsShown ? Self.secondRowSplit : 0)
         .transition(.move(edge: .top).combined(with: .opacity))
         .animation(DS.Motion.emphasized, value: latticeSimIsRunning)
+        .animation(DS.Motion.emphasized, value: seeResultsShown)
         .accessibilityIdentifier("sim-running-banner")
     }
 
@@ -2948,9 +4205,306 @@ public struct WorkspacePlaceholder: View {
     /// lattice is denser here — but it is not a per-strut certification, and a
     /// legend that let someone believe otherwise would be the most expensive
     /// kind of wrong on this page.
+    /// ★★ THE LATTICE'S OWN KEY (maintainer, 2026-08-18: "Create a legend for the
+    /// lattices. The colours mean something, but no one can tell what. Make it
+    /// small on the right hand side - exactly like the legend of the stress map").
+    ///
+    /// ★ SAME TREATMENT AS `stressLegend`, DELIBERATELY — same 168 pt bar, same
+    /// tick column, same panel, same right-edge placement — because he asked for
+    /// "exactly like" it and because two legends that differ in chrome read as two
+    /// different KINDS of thing. What differs is what they key: the stress plot is
+    /// a rainbow over MPa, this is the single-hue indigo ramp over RELATIVE
+    /// DENSITY, and `LatticeDensityProxy.densityColor` says why they must not look
+    /// alike.
+    ///
+    /// ★ AND IT KEYS THE NUMBERS THE PREVIEW IS ACTUALLY DRAWING — the band the
+    /// renderer grades between (`latticeProxy.params.densitySpan`), not the
+    /// settings' typed range, so a floor raised by printability shows up here.
+    /// Both ends are labelled as a density AND as the strut thickness it produces,
+    /// which is the quantity a person can measure on the print.
+    @ViewBuilder private var latticeDensityLegend: some View {
+        let span = latticeProxy.params.densitySpan
+        let cell = latticeProxy.params.cellMM
+        let topo = latticeProxy.params.lattice
+        LatticeLegendPanel(
+            groups: latticeLegendGroups(),
+            span: span,
+            // no strut law for the id (item a): the key shows densities without millimetres
+            mmAt: { rho in topo.map { 2 * $0.strutRadiusMM(relativeDensity: rho, cellMM: cell) } },
+            mode: $latticeLegendMode,
+            minimized: $latticeLegendMinimized,
+            probe: latticeLegendProbe,
+            // ★ ONLY WITH BOTH VIEWS UP — the same condition that arms the overlay on
+            // the struts (`stressOverlay:` on the lattice layer). A scale for colours
+            // the renderer is not painting would be worse than no scale.
+            stress: latticeLegendStress())
+            .latticeBandChipKeepOut()      // ★ the legend: no band chip under it
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            // ★ MINIMISED, IT SITS ON THE EDGE (maintainer: "attach the legend modal
+            // to the very far right side of the screen") — the point of collapsing it
+            // is to give the part the width back, so the inset goes too.
+            .padding(.trailing, latticeLegendMinimized ? 0 : PageChrome.edge)
+            .accessibilityIdentifier("lattice-density-legend")
+    }
+
+    /// ★ THE READING ITSELF. Takes the density from the SAME per-cell field the
+    /// march grades with (`cellField`, then the shader's own
+    /// `rhoMin + (rhoMax-rhoMin) * v^gamma`), so the number on screen is the number
+    /// being drawn rather than a second estimate that can drift from it.
+    private func setLatticeProbe(at point: SIMD3<Float>, world: SIMD3<Float>,
+                                 bakedCellMM: Double,
+                                 // ★ The relative density the shader DRAWS at the
+                                 // owning cell (−1 ⇒ unknown), already mapped over the
+                                 // span the renderer draws with — never re-map it with
+                                 // the stated span here (the grade-to-solid band widens
+                                 // a point span to reach its quilt row, 2026-09-12). See
+                                 // below for why this must come from the RENDERER's
+                                 // field and not a re-bake.
+                                 bakedDensity: Float = -1) {
+        guard let scene = strutScene else { return }
+        // ★★★ THE CELL THE BAKE LAID DOWN HERE, NOT THE ONE IN THE SETTINGS
+        // (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm cells - which
+        // I highly doubt now"). He was right, and the box contradicted itself: it
+        // reported a 2.56 mm strut inside a 2.20 mm cell, which is geometrically
+        // impossible. The strut was being computed at `params.cellMM` (his 8.00 mm,
+        // matching the picture) while the CELL line re-derived width/N* and got 2.20.
+        // Two numbers, two sources, one of them not describing anything on screen.
+        // 2.56 mm is exactly what 46% density makes at 8.00 mm — measured.
+        let cellMM = bakedCellMM > 0 ? bakedCellMM : latticeProxy.params.cellMM
+        // ★★★ THE ACTIVATION COMES FROM THE RENDERER'S BAKED FIELD, NOT A RE-BAKE
+        // (maintainer, 2026-08-24 evening: a tapped 2.00 mm cell read "5% ·
+        // 0.18 mm" — a strut under half a bead — while the bake had LIFTED that
+        // cell to its printability floor of ~25% / 0.45 mm; measured by
+        // LatticeLiftProbe, every graded size lands exactly on rho*).
+        //
+        // ★ THE OLD PATH RE-BAKED a plain uniform `cellField` from `scene.demand`
+        // here — no stepped grading, no printability lift — which is the very
+        // "second estimate that can drift" this function's own header warns
+        // about. The renderer's activation is what the march actually draws; a
+        // −1 (no renderer field yet) falls back to the raw demand read so the
+        // callout still answers, stated at the band floor it really is.
+        let rho: Double
+        if bakedDensity >= 0 {
+            rho = Double(bakedDensity)
+        } else {
+            let grid = LatticePreviewOccupancy.cellField(
+                occupancy: scene.occupancy, demand: scene.demand, cellMM: cellMM)
+            let g = (point - grid.origin) / grid.spacing
+            let i = Swift.min(Swift.max(Int(g.x.rounded()), 0), grid.nx - 1)
+            let j = Swift.min(Swift.max(Int(g.y.rounded()), 0), grid.ny - 1)
+            let k = Swift.min(Swift.max(Int(g.z.rounded()), 0), grid.nz - 1)
+            let raw = grid.values[(k * grid.ny + j) * grid.nx + i]
+            // A negative cell is an INACTIVE one — no lattice there, and reporting
+            // a density for it would invent a strut he cannot see.
+            guard raw >= 0 else { latticeLegendProbe = nil; return }
+            let span = latticeProxy.params.densitySpan
+            let gamma = Swift.max(0.05, latticeProxy.params.gamma)
+            rho = span.lo + (span.hi - span.lo)
+                * pow(Double(Swift.min(Swift.max(raw, 0), 1)), gamma)
+        }
+        // ★★ ORGANIC'S STRUT IS NOT AN OCTET'S. `t = 2·d·√(rho/3π)` against the
+        // octet's measured table — reporting one for the other puts a number on the card
+        // that describes geometry which is not on screen. The separation the tracer
+        // ACHIEVED is what plays the part of the cell here.
+        let mm: Double
+        if project.lattice.algorithm == "organic", cellMM > 0 {
+            mm = TopOptKit.organicStrutDiameterMM(spacingMM: cellMM, relativeDensity: rho)
+        } else {
+            // no strut law for the id (item a): no strut width — never octet's
+            mm = latticeProxy.params.lattice.map { 2 * $0.strutRadiusMM(
+                relativeDensity: rho, cellMM: cellMM) } ?? 0
+        }
+        // ★ ONE CELL, READ ONCE, USED FOR BOTH LINES. It comes out of the baked field
+        // (see above), so the strut millimetres and the cell millimetres are computed
+        // at the same cell and cannot contradict each other again. The old re-derivation
+        // — a second width/N* rule, live in this function — is gone: it is exactly the
+        // "the app re-derives core's law" pattern, and it reported a cell 3.6x off the
+        // one being drawn.
+        let probeCellMM = bakedCellMM
+        // ★★ WHICH CLASS THE TAPPED STRUT IS, by the SAME test the shader makes.
+        // The march classifies BOUNDARY work from the dressing it computes out of
+        // `dPart` and `dRegion`; repeating that here (rather than guessing from
+        // density alone) is what lets the arrow land on the right row — a rim strut
+        // is often dense, so density alone would call it load-carrying.
+        // ★ TWO CLASSES NOW: boundary work, or fill. The density-threshold class was
+        // removed — lightness already carries density, and stress carries the load.
+        var klass: LatticeStructureClass = .interior
+        let level = project.lattice.boundary.previewDressingLevel
+        if level > 0 {
+            let band = Swift.max(0.12 * cellMM, 1e-4)
+            let sdf = scene.partSDF
+            let sg = (point - sdf.origin) / sdf.spacing
+            let si = Swift.min(Swift.max(Int(sg.x.rounded()), 0), sdf.nx - 1)
+            let sj = Swift.min(Swift.max(Int(sg.y.rounded()), 0), sdf.ny - 1)
+            let sk = Swift.min(Swift.max(Int(sg.z.rounded()), 0), sdf.nz - 1)
+            let dPart = Double(sdf.values[(sk * sdf.ny + sj) * sdf.nx + si])
+            let dRegion = scene.regions.isEmpty ? -band
+                : LatticeRegionMask.signedDistance(SIMD3<Double>(point),
+                                                   regions: scene.regions)
+            var dressing = Swift.max(0, 1 - abs(dPart) / band)
+                * Swift.max(0, 1 - abs(dRegion) / band)
+            if level > 1 {
+                let dClip = Swift.max(dPart, dRegion)
+                dressing = Swift.max(dressing, Swift.max(0, 1 - abs(dClip) / band))
+            }
+            if dressing > 0.05 { klass = .rim }
+        }
+        // ★ THE OUTLINE BEAM AND THE GRADE BAND, by the in-plane outline distance the
+        // shader colours by (2026-09-17: "when I tapped a section of green, the legend
+        // shows purple … I need to ensure that what is tapped is correctly attributed").
+        // On the beam ⇒ rim; inside the band ⇒ grade; else as above.
+        if project.lattice.gradingMode.fitsShape, !scene.regions.isEmpty {
+            let dOut = LatticeRegionMask.outlineDistance(SIMD3<Double>(point), regions: scene.regions,
+                                                         slabMarginMM: 2)
+            let occ = scene.occupancy
+            let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
+            let beam = LatticeSDFRenderer.outlineBeamMM(
+                lineWidthMM: project.printParams.strutLineWidthMM, voxelMM: voxel)
+            if dOut < beam { klass = .rim }
+            else if project.lattice.shapeFitBandMM > 0, dOut < project.lattice.shapeFitBandMM { klass = .grade }
+        }
+        // ★★ THE SECOND READING, AT THE SAME POINT (maintainer: "I want to be able to
+        // click on any place and find both the lattice type and stress level.
+        // Simultaneously"). Sampled from the FEA field the plot is drawn from, in the
+        // MODEL space it is baked in — the same space the density above was read in,
+        // so the two numbers describe one strut and not two places.
+        var mpa: Double?
+        if stressViewOn, let f = latticeStressField {
+            let sp = Float(f.spacingMM)
+            let o = SIMD3<Float>(f.origin)
+            let gi = (point - o) / SIMD3<Float>(repeating: Swift.max(sp, 1e-6))
+            let si = Swift.min(Swift.max(Int(gi.x.rounded()), 0), f.nx - 1)
+            let sj = Swift.min(Swift.max(Int(gi.y.rounded()), 0), f.ny - 1)
+            let sk = Swift.min(Swift.max(Int(gi.z.rounded()), 0), f.nz - 1)
+            let n = (sk * f.ny + sj) * f.nx + si
+            if n >= 0, n < f.vonMises.count { mpa = Double(f.vonMises[n]) }
+        }
+        latticeLegendProbe = LatticeLegendProbe(
+            groupID: klass.id, density: rho, mm: mm, worldPoint: world, stressMPa: mpa,
+            cellMM: probeCellMM)
+        // "switching colours if needed" — tapping a strut of another KIND moves the
+        // key to that kind rather than reading it against the wrong scale.
+        if latticeLegendMode.groupID != klass.id {
+            latticeLegendMode = .colour(klass.id)
+        }
+    }
+
+    /// ★ THE CALLOUT AT THE TAP, the other half of "Both": an arrow at the point he
+    /// touched, labelled with the same two numbers the key's arrow is pointing at.
+    @ViewBuilder private var latticeProbeCallout: some View {
+        // ★ RE-PROJECTED EVERY RENDER, so the callout rides the geometry through an
+        // orbit instead of sitting where the finger used to be. `projection` is
+        // republished by the coordinator on every camera change, so this recomputes
+        // exactly when the part moves.
+        if legendDrilledIn, let p = latticeLegendProbe,
+           let screen = projection?.project(p.worldPoint) {
+            let klass = LatticeStructureClass.allCases.first { $0.id == p.groupID }
+            HStack(spacing: 5) {
+                Image(systemName: "arrowtriangle.left.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text(p.stressMPa.map {
+                        "\(Int((p.density * 100).rounded()))% · "
+                        + "\(String(format: "%.2f", p.mm)) mm · \(String(format: "%.3f", $0)) MPa"
+                     } ?? "\(Int((p.density * 100).rounded()))% · \(String(format: "%.2f", p.mm)) mm")
+                    .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                if let k = klass {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color(.sRGB, red: k.colour.r, green: k.colour.g,
+                                    blue: k.colour.b, opacity: 1))
+                        .frame(width: 12, height: 12)
+                    Text(k.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                }
+            }
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95))
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            // ★★ ANCHORED TO THE TAP, IN THE TAP'S OWN COORDINATE SPACE
+            // (maintainer, 2026-08-19: "the arrows pointing to the place I tapped
+            // is completely off"). It was, for two reasons, and both are here:
+            //
+            //  1. `.position(x: p.point.x + 74, …)` shoved it 74 pt sideways for no
+            //     reason but to make room for the pill — so it never pointed AT
+            //     anything. The pill now hangs off the arrow instead, and the
+            //     arrow's tip sits on the point.
+            //  2. `projection` measures the MTKView, which takes
+            //     `.ignoresSafeArea()`. This overlay did not, so every reading was
+            //     additionally offset by the safe-area inset — a constant error
+            //     that looks like "completely off" rather than "slightly out".
+            .fixedSize()
+            .offset(x: screen.x + 8, y: screen.y - 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    /// ★ THE STRESS SCALE THE KEY SHOWS, or nil when the plot is not on the struts.
+    /// Built from `LatticeStressTint` — the same ramp and the same MPa ticks the
+    /// standalone plot legend uses — so the two can never disagree about what a
+    /// colour is worth.
+    private func latticeLegendStress() -> LatticeLegendStress? {
+        guard stressViewOn, latticeStressField != nil else { return nil }
+        let peak = latticeStressPeakMPa
+        guard peak > 0 else { return nil }
+        return LatticeLegendStress(
+            ticks: LatticeStressTint.legendTicks(peakMPa: peak),
+            colours: LatticeStressTint.legendColours().map {
+                RGBAColor(r: Double($0.x), g: Double($0.y), b: Double($0.z))
+            },
+            peakMPa: peak)
+    }
+
+    /// ★★ ONE ROW PER STRUCTURE CLASS, NOT PER GROUP (maintainer, 2026-08-19:
+    /// "I definitely prefer more information than just 'Group A'"). The hue now says
+    /// what a strut IS — boundary work, ordinary fill, or a cell the stress asked
+    /// for — so the key lists those three and each carries its own sentence.
+    ///
+    /// ★ ROWS ARE OMITTED WHEN THE PART CANNOT CONTAIN THEM: with no boundary
+    /// finish there is no rim to explain, and a key listing a colour that is not on
+    /// screen is the same lie as a colour on screen with no key.
+    private func latticeLegendGroups() -> [LatticeLegendGroup] {
+        let hasDressing = project.lattice.boundary.previewDressingLevel > 0
+        // The rim row whenever there is boundary work on screen: a finish, or the
+        // solid outline beam the shape grade draws (2026-09-17: "Where is the rim and
+        // skin? You removed an entire piece of the legend").
+        // ★ Organic's Fit to shape is its shape grade (2026-09-18).
+        let hasOutline = project.lattice.algorithm == "organic"
+            ? (project.lattice.organicShapeFit || project.lattice.organicSolidRimMM != 0)
+            : project.lattice.gradingMode.fitsShape
+        // The grade row only when the shape grade is on above 0 mm (his 2026-09-16 ask).
+        let hasGrade = (project.lattice.algorithm == "organic" ? project.lattice.organicShapeFit
+                                                                : project.lattice.gradingMode.fitsShape)
+            && project.lattice.shapeFitBandMM > 0
+        return LatticeStructureClass.allCases.compactMap { c in
+            if c == .rim, !hasDressing, !hasOutline { return nil }
+            if c == .grade, !hasGrade { return nil }
+            return LatticeLegendGroup(id: c.id, name: c.title, colour: c.colour,
+                                      detail: c.detail, latticed: true,
+                                      gradientFrom: c.gradientFrom, brief: c.brief)
+        }
+    }
+
+    /// Five ticks, dense end first, each "NN% · X.XX mm" — the density and the strut
+    /// thickness it produces at the current cell, because a percentage alone is not
+    /// something anyone can hold against a nozzle.
+    private func latticeLegendTicks(span: (lo: Double, hi: Double),
+                                    cell: Double, topo: LatticeType) -> [String] {
+        (0..<5).map { i in
+            let f = 1.0 - Double(i) / 4.0
+            let rho = span.lo + (span.hi - span.lo) * f
+            let mm = 2 * topo.strutRadiusMM(relativeDensity: rho, cellMM: cell)
+            return String(format: "%.0f%% · %.2f", rho * 100, mm)
+        }
+    }
+
     @ViewBuilder private var stressLegend: some View {
-        if let f = latticeStressField {
-            let peak = LatticeStressTint.peakMPa(f)
+        if latticeStressField != nil {
+            let peak = latticeStressPeakMPa
             let ticks = LatticeStressTint.legendTicks(peakMPa: peak)
             HStack(alignment: .center, spacing: DS.Space.xs) {
                 VStack(alignment: .trailing, spacing: 0) {
@@ -3047,6 +4601,59 @@ public struct WorkspacePlaceholder: View {
         latticePageVariantField ?? latticeSim.field
     }
 
+    /// ★★ THE FIELD'S OWN IDENTITY — AND THE REBAKE NOBODY WAS FIRING
+    /// (maintainer, 2026-08-19: "I still see 5% no matter where I click" and "The
+    /// stress map is still not on the actual lattice").
+    ///
+    /// Those are ONE defect. The strut scene rebakes when the selection moves
+    /// (`latticeRegionInputsKey`) and when an optimize run's variants land
+    /// (`acceptedCount`) — but NOT when the on-device FEA finishes. The solve is
+    /// async, so the ordinary sequence is: turn the preview on, bake a scene while
+    /// `latticeStressField` is still nil, the sim lands a moment later… and nothing
+    /// asks for a new bake. The preview then keeps a scene whose `demand` is nil,
+    /// and everything downstream follows from that one nil:
+    ///
+    ///   * `cellField(demand: nil)` gives every active cell 0, so a tap reads
+    ///     `rhoMin` — the FLOOR — wherever he touches. That is the "always 5%".
+    ///   * `stressRGB` is only baked `if let d = self.demand`, so it is nil, so
+    ///     `stressTex` is nil, so `stressOverlay && stressTex != nil` is FALSE and
+    ///     the plot never reaches a strut however loudly the toggle is on.
+    ///
+    /// Hashing the field's shape and peak is enough to notice it arriving or being
+    /// replaced, and costs one pass over the values rather than a copy.
+    private var latticeStressFieldKey: Int {
+        guard let f = latticeStressField else { return 0 }
+        var h = Hasher()
+        h.combine(f.nx); h.combine(f.ny); h.combine(f.nz)
+        h.combine(f.vonMises.count)
+        h.combine(f.spacingMM)
+        // ★★ NO FULL-FIELD SCAN HERE (maintainer, 2026-08-19: "Lattice is taking
+        // forever - something is delaying it"). This key is read by `.onChange`, so
+        // SwiftUI evaluates it on EVERY body pass — every orbit tick, every frame of
+        // a drag. The first cut folded in `peakMPa`, which walks the whole von Mises
+        // array: a 64³ field is 262,144 floats, scanned per frame, for a value that
+        // only changes when the solve does.
+        //
+        // 32 strided samples identify a re-solve just as well for this purpose (the
+        // dims and count already catch a different mesh) and cost a fixed 32 reads.
+        let n = f.vonMises.count
+        if n > 0 {
+            let step = Swift.max(1, n / 32)
+            var i = 0
+            while i < n { h.combine(f.vonMises[i]); i += step }
+        }
+        return h.finalize()
+    }
+
+    /// ★ THE PEAK, COMPUTED ONCE PER FIELD — not once per frame. Both legends and the
+    /// tick labels need it; walking the array for each of them, on every body pass,
+    /// was the other half of the stall.
+    @State private var latticeStressPeakMPa: Double = 0
+
+    private func refreshLatticeStressPeak() {
+        latticeStressPeakMPa = latticeStressField.map { LatticeStressTint.peakMPa($0) } ?? 0
+    }
+
     /// ★★ WHAT `latticeJobRegions()` READS BESIDES `project.lattice` — AND THE
     /// REASON THE PREVIEW COULD GO STALE WITHOUT IT.
     ///
@@ -3078,20 +4685,267 @@ public struct WorkspacePlaceholder: View {
     /// discard. That is a shader change and it is deliberately NOT bundled here —
     /// this value is the cheap, reversible half, and it is worth seeing on the
     /// device before writing the expensive half.
-    private var latticePreviewBodyAlpha: Float { 1 }
+    private var latticePreviewBodyAlpha: Float {
+        // ★ lattice only: the body goes — once the lattice is on screen (2026-10-01)
+        if latticeOnlyViewOn { return LatticePreviewBodyAlpha.latticeOnly(showing: latticeOnlyShowing) }
+        // ★★★ THE BODY MAY ONLY BE HIDDEN WHERE A LATTICE IS ACTUALLY DRAWN
+        // (maintainer, 2026-08-20: his new `M2 verticalStand THICK` opened to a shadow
+        // on the stage floor and NOTHING drawn — "rotating doesn't help, so it isn't
+        // framing").
+        //
+        // ★ IT WAS NEVER ABOUT THAT FILE. The import is clean on macOS AND on the iPad
+        // simulator — 3,324 triangles, watertight, wound outward, 978,349 mm³, MORE
+        // pixels than the fixture that renders correctly (9,590 vs 7,989 at 256²). The
+        // renderer draws it. What blanked it was this property, on a condition his file
+        // met only by being NEW: he had declared an anchor and a load and no lattice
+        // role, so `latticeJobRegions()` emitted ZERO include regions and this returned
+        // 0. Measured at the renderer: bodyAlpha 1 -> 9,590 lit pixels, bodyAlpha 0 -> 0.
+        // The contact shadow survives because the shadow pass does not read this value,
+        // which is exactly the "shadow but no body" he photographed.
+        //
+        // ★ WHY IT ONLY BIT NOW. This value is handed to the mesh view unconditionally,
+        // but until PR 341's confetti fix (dc0cb620, "The preview was drawing struts
+        // behind an opaque part") the coordinator only ever DELIVERED a body alpha
+        // inside the load-flow block, so the 0 was silently dropped on every stage that
+        // has no load flow. Making the delivery honest made this reachable — the fix was
+        // right, and it uncovered a caller that was wrong.
+        //
+        // ★ THE RULE, STATED. Hiding the shell is a concession to ONE picture: the
+        // lattice layer standing alone with nothing to cut it against. If that layer is
+        // not being drawn, there is nothing to concede to and the body must be opaque.
+        // So the gate here is the SAME expression that gates `latticeLayer` at the call
+        // site — not a second rule that can drift from it.
+        // ★★ AND 0 WHEN THERE IS NOTHING TO CUT. With declared regions the shell is
+        // cut to them and the two surfaces are complementary — that is the whole
+        // point. With NO regions the lattice legitimately fills the interior, the
+        // clip has nothing to remove, and an opaque body would hide the preview
+        // completely. That is the settings-page sample, and main's
+        // `testTheStrutPreviewSurvivesTheSharedDepthBuffer` is what caught it: it
+        // asserts the lattice reaches the G-buffer AT ALL, and with a whole shell
+        // in front of it, it does not.
+        //
+        // The rule itself lives in `LatticePreviewBodyAlpha` so it can be tested; this
+        // property is now only the two inputs it is asked for.
+        return LatticePreviewBodyAlpha.value(
+            latticeLayerDrawn: latticeLayerIsDrawn,
+            hasIncludeRegion: LatticeJobIncludeGate.hasIncludeWall(project.latticeJobRegions().regions),
+            nothingToLattice: latticePreviewHasNothingToDraw)
+    }
+
+    /// ★ THE SAME FINDING THE BANNER REPORTS AS `.empty` (his 2026-09-20, image 3: a
+    /// bare stage under "Nothing to lattice — the faces you marked do not reach any
+    /// material"). No scene yet, a part with no inside, or regions that reached no
+    /// material: the lattice layer will paint nothing, so the body stays opaque.
+    private var latticePreviewHasNothingToDraw: Bool {
+        guard let s = strutScene else { return true }
+        return s.partInteriorVoxelCount == 0 || s.interiorVoxelCount == 0
+    }
+
+    /// ★ THE ONE EXPRESSION that decides whether the raymarched lattice layer is drawn.
+    /// Read BOTH by the `latticeLayer:` input and by `latticePreviewBodyAlpha`, because
+    /// "hide the shell" and "draw the lattice" must never be able to disagree — the
+    /// frame where they did is the one that drew neither.
+    private var latticeLayerIsDrawn: Bool {
+        // ★★★ AND NOT WHILE THE BAKE IS IN FLIGHT (maintainer, 2026-08-23: "half-way
+        // through calculating, the quilt comes up ... can you make it so the quilt
+        // *never* comes up?").
+        //
+        // ★ THE MID-BAKE PICTURE IS THE **PREVIOUS** LATTICE, and it is drawn against
+        // whatever the settings now say — a different cell, a different region, a
+        // different depth. That mismatch is what reads as the quilt, and my first two
+        // attempts missed it because they gated inside the RENDERER: during the CPU
+        // bake the renderer's own scene and cell field are still consistent with each
+        // other, so nothing there looks stale. The staleness is only visible up here,
+        // where `strutBakeInFlight` already says a bake is running for the banner.
+        //
+        // Hiding the layer shows the plain body for the ~1.4 s of the bake, which is
+        // honest: there IS no current lattice to show.
+        showStrutPreview && !strutBakeInFlight
+            && (visible.latticeControls || showLatticePage)
+    }
+
+    /// ★★ EVERY INPUT THE BAKE READS — AND IT USED TO BE ONLY THE SELECTION
+    /// (maintainer, 2026-08-19: "I just tested and I don't see any difference in
+    /// the preview when the lattice settings have had the finish changed", and
+    /// before that "please ensure the lattice preview is actually modified by the
+    /// settings").
+    ///
+    /// ★ THIS KEY IS THE ONLY THING THAT REBAKES THE STRUT SCENE, and it hashed
+    /// the groups, their faces and the face-region ids. NOTHING ELSE. So Finish,
+    /// density mode, cell mode, the per-face depths, the per-face expands, the
+    /// per-region densities and the PRINT PARAMETERS could all change and the
+    /// preview would keep drawing the previous bake — indistinguishable from a
+    /// setting that does not reach the preview at all. Several rounds of "the
+    /// preview ignores X" were this one key.
+    ///
+    /// ★ WHAT BELONGS HERE, AND WHAT DOES NOT. Only inputs the BAKE consumes.
+    /// Cell size and the density band reach the renderer per-frame through
+    /// `latticeProxy.params` and need no rebake, but they are cheap to hash and
+    /// including them keeps the rule "if it changes the picture, it is in the
+    /// key" — which is the property that failed here.
+    /// ★★ WHY SAVE & EXIT REBAKES EXPLICITLY (maintainer, 2026-08-19: "I have
+    /// done 3 separate finish settings in these screenshots. Can you tell which is
+    /// which? I don't think it's working").
+    ///
+    /// `latticeRegionInputsKey` below now carries every setting the bake reads,
+    /// but the `.onChange` watching it hangs off the workspace chrome — which is
+    /// UNMOUNTED while the full-screen wizard is up. SwiftUI does not fire an
+    /// onChange for a value that changed while its view was absent; the view
+    /// re-initialises with the new value and sees no transition. So every setting
+    /// changed INSIDE the wizard was invisible to it by construction.
+    ///
+    /// ★ AND IT EXPLAINS THE SHAPE OF THE REPORT — "when the Sim checkbox is
+    /// turned off all of the settings are input into the preview - everything but
+    /// the finish". Cell size, density and topology reach the renderer PER FRAME
+    /// through `latticeProxy.params` and never needed a rebake. Finish reaches it
+    /// only through the BAKE. Same write, different delivery.
+    ///
+    /// (The call sits AFTER `startStressSolveIfNeeded()` and this note lives here
+    /// rather than at the call site because `testSaveAndExitIsWhatCallsIt` reads
+    /// the first 700 characters after the wizard's construction — a comment there
+    /// pushes the solve call out of its window. A source-text guard counts
+    /// comments, as `selectionsLibraryCard` also records.)
+    private var latticeWizardRebakeNote: Void { () }
 
     private var latticeRegionInputsKey: Int {
         var h = Hasher()
         for g in selection.groups {
             h.combine(g.id)
             for f in g.faces { h.combine(f) }
+            for r in g.regionIDs { h.combine(r) }      // ★ a group has TWO memberships
         }
         for r in project.faceRegions.regions { h.combine(r.id) }
+        let l = project.lattice
+        h.combine(l.enabled)
+        // ★ the slab and the per-wall cells are inputs the bake reads (review #37)
+        h.combine(l.wallThickness)
+        for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableSyntheticFoci.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        // ★★★ THE STAGE MODE. It changes the cells-per-member FLOOR the bake applies,
+        // so a scene baked before the modal was answered describes the wrong law. It is
+        // answered once, on entering the stage — which is exactly when a stale scene
+        // would otherwise survive.
+        h.combine(l.stageMode)
+        // ★ AND THE ALGORITHM — it changes the banner the bake carries.
+        h.combine(l.algorithm)
+        h.combine(l.topologyID)
+        h.combine(l.boundary)                 // ★ Finish — the reported one
+        // ★ It decides the cells-per-member FLOOR (1 vs 2), so a scene baked before it
+        // moved describes a different law.
+        h.combine(l.singleCellMembers)
+        h.combine(l.densityMode)
+        h.combine(l.cellSizeMode)
+        h.combine(l.cellMM)
+        h.combine(l.minRelativeDensity)
+        h.combine(l.maxRelativeDensity)
+        h.combine(l.paintDepthMM)
+        // The per-selectable overrides: role, depth, density and the in-plane
+        // expand all change the REGIONS the bake is masked by.
+        for (k, v) in l.selectableRoles.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableDepthMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableDensity.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.selectableExpandMM.sorted(by: { $0.key < $1.key }) { h.combine(k); h.combine(v) }
+        for (k, v) in l.groupDensities.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+            h.combine(k); h.combine(v)
+        }
+        // ★ AND THE PRINT PARAMETERS, because the SKIN is the wall the printer
+        // lays down (`PrintParams.wallRingMM`) — change the nozzle or the loop
+        // count and the preview's skin must move with it.
+        h.combine(project.printParams.wallRingMM)
+        h.combine(project.printParams.strutLineWidthMM)
+        // ★★★ AND THE TWO INPUTS THE GRADING DENOMINATOR IS MADE OF, both of which were
+        // missing — so the scene that reads them could never be rebuilt when they moved.
+        //
+        //   minimizePlastic — now caps the aesthetic demand by the true utilisation, so
+        //     ticking the box has to re-bake or the picture keeps the uncapped densities.
+        //   material        — the ALLOWABLE is `yieldStrengthMPa(for:)`, and it IS the
+        //     structural denominator. Changing ABS for something twice as strong halves
+        //     every utilisation, and without this the preview kept the old one.
+        //
+        // Both feed `LatticeSDFScene.demand`, which is baked once per scene; a value
+        // read by the bake and absent from the bake's fingerprint is a stale picture by
+        // construction.
+        // minimizePlastic is no longer a lattice input (2026-09-12) — flipping the chip
+        // must not rebake
+        h.combine(project.material)
+        // ★ THE ORGANIC RUN'S SPANS ARE A BAKE INPUT (2026-09-02): a new run with the
+        // same settings is a different picture. Count + length identify the file.
+        h.combine(latticeOrganicSpans?.count ?? -1)
+        h.combine(latticeOrganicSpans?.totalLengthMM ?? -1)
+        // ★ The grading options (2026-08-25): all three feed the stepped bake.
+        h.combine(l.gradingMode)
+        h.combine(l.gradeStepStyle)
+        for (k, v) in l.selectableCellMM.sorted(by: { $0.key < $1.key }) {
+            h.combine(k); h.combine(v)
+        }
         return h.finalize()
     }
 
-    private func buildStrutScene() {
+    private func buildStrutScene(forceRebuild: Bool = false) {
+        // ★ WHAT THIS BAKE READS IS RECORDED HERE, at the one place every bake passes
+        // (2026-09-23): it was recorded at 2 of the 16 call sites, so the wizard's
+        // Exit — no change — compared against a stale record and force-baked.
+        latticeInputsLastBaked = project.lattice.previewBakeInputs
+        // ★ AN ORGANIC BAKE WITH NO TENSOR IS A STAND-IN, AND A STAND-IN ASKS FOR THE
+        // SOLVE (2026-09-25, his 17:34 screenshot: octet drawn under "Organic" after a
+        // relaunch, until he saved the settings). Idempotent: nothing happens when the
+        // field is current or a solve is running; the field's key rebakes when it lands.
+        if project.lattice.enabled, project.lattice.isOrganic, latticeStressField == nil {
+            startStressSolveIfNeeded()
+        }
+        // ★★★ A NEW SETTING NEVER WAITS (his 2026-09-21 22:40: "if I save and exit from
+        // the settings with an updated value, the previous action is cancelled and the
+        // new bake starts IMMEDIATELY"). The one-at-a-time guard that stood here queued
+        // every rebake behind a running one — and behind the repairs refine, which is
+        // core's emission and can run for an hour on a fine trace, so his ×2 seeding and
+        // his drawn depth never baked at all. Now the generation moves and the new bake
+        // starts; the running one cannot be interrupted inside core, but its picture is
+        // dropped when it lands (`bakeGeneration == strutBakeGeneration`).
+        if strutBakeInFlight || strutRefining {
+            NSLog("DIAG organic bake: superseding the running bake (in flight %d, refining %d) — generation %d",
+                  strutBakeInFlight ? 1 : 0, strutRefining ? 1 : 0, strutBakeGeneration + 1)
+        }
         guard let mesh = viewerMesh else { return }
+        // ★★★ NOTHING MOVED ⇒ NOTHING IS REBUILT (see `organicBakeFingerprint`). The
+        // comparison is the WHOLE of what a bake reads — `previewBakeInputs`, which is
+        // every lattice setting with the two fields a bake WRITES stripped out, plus the
+        // region key — rather than a hand-listed subset. A subset is a stale picture
+        // waiting to happen: the one setting nobody remembered to add is the one that
+        // stops taking effect. `forceRebuild` is the Refresh button, a request rather
+        // than a change.
+        //
+        // ★★★ AND THE SOLVE IS AN INPUT (his walk, 2026-09-07, 22:29: "Grown lattice was
+        // set — the preview returned octet truss. What?!"). It was MY guard. The first
+        // bake on entering the stage runs before the stage's solve has landed, so
+        // `organicForBake` is nil, the scene falls back to the ladder, and the
+        // fingerprint is recorded. The solve then arrives — and it is not a lattice
+        // SETTING, so nothing in `previewBakeInputs` moves and the rebake that would
+        // have drawn the organic lattice was skipped. He was left on the octet stand-in
+        // until he tapped Refresh. The field's own key and whether the tracer had its
+        // inputs at all are part of what a bake reads, so both belong here.
+        // ★ EVERY ALGORITHM (review 2026-09-22 #33): the octet path had no fingerprint,
+        // so the wizard's forced bake plus the region-key change it caused started TWO
+        // bakes on every Save & Exit. The mesh and the stepped cells are in the key —
+        // they are inputs a bake reads that no setting carries.
+        do {
+            var extra = Hasher()
+            extra.combine(mesh.signature.contentHash); extra.combine(mesh.signature.topologyHash)
+            for c in latticePreviewSteppedCells { extra.combine(c) }
+            // the run's field is an input too (a landed run must rebake the octet)
+            extra.combine(run.outcome?.variants.count ?? -1)
+            extra.combine(run.outcome?.variants.last(where: { $0.accepted })?.vonMisesField.count ?? -1)
+            let now = OrganicBakeKey(region: latticeRegionInputsKey ^ extra.finalize(),
+                                     stress: latticeStressFieldKey,
+                                     tensor: latticeStressField?.stressTensor.count ?? -1,
+                                     inputs: project.lattice.previewBakeInputs)
+            if !forceRebuild, strutScene != nil, organicBakeFingerprint == now {
+                NSLog("DIAG lattice bake: skipped — no input changed since the last one")
+                return
+            }
+            // Recorded on EVERY bake, forced or not: a forced rebuild that did not
+            // record one would let the very next event through as "changed".
+            organicBakeFingerprint = now
+        }
         let latticeID = latticeProxy.params.latticeID
         // Auto density on the lattice page grades the preview from the page's OWN
         // demand field (the variant's field on the variants entry, else the sim's) —
@@ -3110,7 +4964,13 @@ public struct WorkspacePlaceholder: View {
         // the picture disagreed with the job the Lattice button would send.
         // The mode is what decides now, not which page is up.
         let field: StressField?
-        if project.lattice.densityMode.needsSimulation,
+        if !project.lattice.gradingMode.followsStress {
+            // ★ THE GRADING OPTIONS (2026-08-25): "No grade" and "Grade to fit
+            // Shape" both mean the DENSITY is one number everywhere — the dial,
+            // or Auto — so no stress field reaches the grading. Stepped only;
+            // Default's dyadic path keeps its own law untouched.
+            field = nil
+        } else if project.lattice.densityMode.needsSimulation,
            let f = latticeStressField {
             field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
                                 origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
@@ -3118,24 +4978,353 @@ public struct WorkspacePlaceholder: View {
         } else {
             field = LatticeSDFScene.demandField(from: run.outcome)
         }
+        // ★ the wall-depth rule's field (review #31): the measured lattice sim if there is
+        // one, else the run's — independent of the density grading mode
+        let wallStressField: StressField? = {
+            if let f = latticeStressField {
+                return StressField(nx: f.nx, ny: f.ny, nz: f.nz,
+                                   origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
+                                   values: f.vonMises)
+            }
+            return LatticeSDFScene.demandField(from: run.outcome)
+        }()
+        // ★ the printer's bead, captured on the main thread for the skin under unselected faces
+        let beadForBake = project.printParams.strutLineWidthMM
         // ★ THE REGIONS THE RUN WILL ACTUALLY LATTICE (maintainer, 2026-08-17).
         // Read on the main actor and captured, because `latticeJobRegions()`
         // walks the selection and the settings. Empty on the settings page's
         // sample block, which is exactly when clipping must NOT happen.
         let emission = project.latticeJobRegions()
-        let regions = emission.regions
+        // ★ THE SLAB IS A PREVIEW REQUEST (2026-09-21): attached to the preview's copy of
+        // the regions only; `emission.regions` — the job's — stays as declared until the
+        // slab is agreed to work (his rule: preview first, core only then).
+        var regions = emission.regions
+        let wallThicknessAsk = project.lattice.wallThickness
+        if !wallThicknessAsk.isThrough {
+            for i in regions.indices where regions[i].role == .include && regions[i].kind == .face {
+                regions[i].thickness = wallThicknessAsk
+            }
+        }
         // ★ AND HOW MANY MARKED FACES PRODUCED NO REGION. Carried into the bake so
         // the banner can say the preview is drawing LESS than was marked, rather
         // than under-drawing in silence.
         let skippedFaces = emission.skippedFaces
+        // ★ ruling (g): and the face regions the run cannot consume, by name
+        let skippedRegionNames = emission.skippedRegionNames
         // The SAME band and gamma the raymarcher grades with, so a stated
         // per-region density can be inverted into the demand value that comes
         // back out as exactly that density.
         let span = latticeProxy.params.densitySpan
         let gamma = max(0.05, latticeProxy.params.gamma)
+        // ★ THE FINISH SETTING, WHICH THE PREVIEW HAS NEVER READ. Read on the main
+        // actor with the rest, and from the SAME print parameters the run is
+        // costed with, so the skin drawn is the wall the printer would lay down.
+        let skinMM = project.lattice.boundary.faceSkinMM(
+            wallRingMM: project.printParams.wallRingMM)
+        // ★ THE MEASURED FIELD, CAPTURED ON THE MAIN ACTOR with the rest. It rides
+        // beside `field` rather than replacing it: `field` is what the preview GRADES
+        // from (the density mode may withhold it), this is what the preview MEASURES
+        // with, and sub-floor retention reads only this one.
+        let stressFieldForRetention = latticeStressField.map {
+            StressField(nx: $0.nx, ny: $0.ny, nz: $0.nz,
+                        origin: SIMD3<Float>($0.origin), spacing: Float($0.spacingMM),
+                        values: $0.vonMises)
+        }
+        let gradesFromSim = project.lattice.densityMode.needsSimulation
+        // ★★★ THE MODE HE CHOSE ON ENTERING THE STAGE, and the allowable it needs to be
+        // applied. Read on the main actor with everything else. An UNANSWERED mode falls
+        // back to structural: the modal makes that unreachable in the app, but a bake
+        // must never quietly relax a floor because a field was missing.
+        let stageMode = project.lattice.stageMode ?? .structural
+        let allowableMPa = model.yieldStrengthMPa(for: project.material)
+        // ★ THE RAW STATED NAME, not `resolvedAlgorithm`: an unstated algorithm must
+        // reach the banner as "" so it adds no sentence, and only a name the user
+        // actually chose can differ from the picture.
+        let algorithmForBake = project.lattice.algorithm
+        // ★★★ ORGANIC's INPUTS. Only assembled when he actually chose the algorithm, and
+        // only when the solve produced a TENSOR — organic is traced from the principal
+        // directions and there is no honest way to guess them from a scalar. nil here
+        // means the banner says the algorithm is not being drawn, which is the truth.
+        let organicForBake: LatticeOrganicInput? = {
+            guard project.lattice.algorithm == "organic",
+                  let f = latticeStressField, !f.stressTensor.isEmpty,
+                  f.stressTensor.count == 6 * f.nx * f.ny * f.nz,
+                  project.printParams.strutLineWidthMM > 0 else { return nil }
+            let lat = project.lattice
+            // The cell window is read as the SPACING window — organic derives its cell
+            // from the achieved separation, never the other way round.
+            // ★ THE JOB'S NUMBERS, not the octet window (2026-09-06): the wizard's
+            // typed grade/size is what the run grades at, so it is what is traced.
+            let (lo, hi) = lat.organicPreviewSeparationWindowMM
+            // The same band the preview grades between — read from the proxy so the
+            // tracer clamps into exactly what the legend shows.
+            let band = latticeProxy.params.densitySpan
+            // ★★★ THE TRACER'S GRID IS THE PREVIEW'S, NOT THE COARSE SOLVE'S (2026-09-21,
+            // see `OrganicTraceGrid`). The stage solve is the fast tier (3.41 mm on his
+            // stand); core floors every spacing at one voxel, so on that grid nothing
+            // could be laid closer than 3.41 mm — to another curve or to the rim — and
+            // the 12 mm wall was 3.5 voxels deep. The run traces at the Fine chip's grid
+            // (128 across, 1.71 mm), so the trace is resampled there before it runs.
+            // (the resample to the preview's grid happens on the bake thread)
+            return LatticeOrganicInput(
+                tensor: f.stressTensor,
+                dims: (f.nx, f.ny, f.nz),
+                originMM: SIMD3<Double>(f.origin),
+                spacingMM: f.spacingMM,
+                minExtrudableWidthMM: project.printParams.strutLineWidthMM,
+                buildDirection: SIMD3<Double>(
+                    project.buildOrientation.resolved(gravity: force.gravity)),
+                separationMinMM: lo, separationMaxMM: hi,
+                rhoMin: band.lo, rhoMax: band.hi,
+                strutDiameterMM: lat.organicStrutWidthMM, grow: lat.organicGrowth,
+                layerHeightMM: project.printParams.layerHeightMM,
+                overhangAngleDeg: lat.organicGrowth ? 0 : lat.organicOverhangDeg,
+                // ★★★ THE TIES THE RUN WRITES (his walk, 2026-09-07: "There are no
+                // horizontal struts whatsoever … none of these vertical struts are
+                // connected"). `organic_transfer_ties` goes into the job and the run
+                // sets it on the tracer; the preview never did, and core's own struct
+                // default is FALSE — so the picture was pillars and the print was a
+                // lattice. Grown-path only, so the traced picture is untouched.
+                transferTies: lat.organicTransferTies, tieSwirl: lat.organicTieSwirl,
+                shapeFit: lat.organicShapeFit, shapeFitOnly: lat.organicShapeFitOnly,
+                // ★ the run's anchoring rule: a shell only under Covered
+                anchorAtBoundary: lat.boundary == .covered,
+                // ★★★ THE REPAIRS SWITCH REACHES THE PART PREVIEW (his walk, 2026-09-07:
+                // "Why is the 'adding print repairs' showing up when I have not set it
+                // to???"). It never did: this initialiser left `showRepairs` at its
+                // default of true, so the part ALWAYS ran core's emission — the long
+                // pass — and always showed the second-stage banner, whatever the switch
+                // said. Only the wizard's sample honoured it.
+                showRepairs: lat.organicShowRepairs)
+        }()
+        // ★ NOTHING PICKED ⇒ the window above is the octet window standing in; the
+        // bake replaces it below with core's own band (or the probe's Auto answer).
+        let organicAutoWindow = project.lattice.organicPreviewWindowIsFallback
+        let organicForecastAuto: (lo: Double, hi: Double)? = {
+            guard let a = project.lattice.currentOrganicForecast?.recommendation?.auto, a.found,
+                  a.cellMinMM > 0, a.cellMaxMM >= a.cellMinMM else { return nil }
+            return (a.cellMinMM, a.cellMaxMM)
+        }()
+        let organicLook = project.lattice.organicLookCellsAcross
+        let organicLookPercent = project.lattice.organicLookPercent
+        // ★ THE RIM THE RUN WILL APPLY — see `organicRunSolidRimMM`. The job states the
+        // rim itself whenever a bead is known, so the run never falls back to a cell's
+        // worth; under Auto it carries no `cell_min_mm` and that fallback would be 0.
+        // ★ THE PRINTABILITY FLOOR, not the bead — `max(1.535 × bead, one design voxel)`,
+        // the probe's own number once it has run (his ruling, 2026-09-08).
+        let organicRimSetting = project.lattice.organicRunSolidRimMM(
+            floorMM: project.organicFloor.mm)
+        // ★ read on main, with the rest of the bake's inputs: the window the job carries
+        let organicJobWindow = project.organicJobWindowMM
+        let organicDepthStagger = project.lattice.organicDepthStagger
+        let organicIsStructural = stageMode == .structural
+        let spansForBake = latticeOrganicSpans
+        let receiptForBake = latticeOrganicReceipt
+        // ★ SYNTHETIC STRESSES ON UNLOADED WALLS (maintainer, 2026-09-05; Aesthetic
+        // only): decided on the main actor, injected off it, reported back.
+        // ★ ruling 2 (2026-09-29): and only with the simulation on — a hidden setting
+        // must not act (`organicSyntheticStressesActive` carries organic + Aesthetic too).
+        let synthOn = project.lattice.organicSyntheticStressesActive && organicForBake != nil
+        let synthDefaultFoci = project.lattice.organicSyntheticFoci
+        let synthStatedFoci = project.lattice.selectableSyntheticFoci
+        // ★ THE SUPERSEDED BAKE'S FLAGS DIE WITH IT (review #34): `strutRefining` stayed
+        // true from the old bake's stage one until its stage two landed and was dropped —
+        // "Adding the print repairs" never went away. The new bake owns both flags now,
+        // and the old stage loop is told to stop before it starts core's emission.
+        strutRefining = false
+        strutBakeCancel.value = true
+        let cancel = LatticeBakeFlag()
+        strutBakeCancel = cancel
+        strutBakeInFlight = true
+        strutBakeGeneration += 1
+        let bakeGeneration = strutBakeGeneration
+        // ★ READ ON MAIN, USED OFF IT (review #35): the bake thread read `project.lattice`,
+        // `project.printParams` and the stepped cells while main kept editing them.
+        let lat = project.lattice
+        let printParams = project.printParams
+        let steppedCells = latticePreviewSteppedCells
+        let previewVoxelMM = Double((mesh.bounds.max - mesh.bounds.min).max()) / 128
         DispatchQueue.global(qos: .userInitiated).async {
+            var organicIn = organicForBake
+            // ★★★ THE TRACER'S GRID IS THE PREVIEW'S, NOT THE COARSE SOLVE'S (2026-09-21,
+            // see `OrganicTraceGrid`) — resampled HERE, off the main thread (review #36:
+            // the 128³ × 6 resample froze the UI for seconds on every bake).
+            if var o = organicIn,
+               let fine = OrganicTraceGrid.resample(tensor: o.tensor, dims: o.dims,
+                                                    originMM: o.originMM, spacingMM: o.spacingMM,
+                                                    toVoxelMM: previewVoxelMM) {
+                NSLog("DIAG organic trace grid: solve %.2f mm (%d×%d×%d) → trace %.2f mm (%d×%d×%d), ×%d per axis",
+                      o.spacingMM, o.dims.0, o.dims.1, o.dims.2, fine.spacingMM, fine.dims.0, fine.dims.1, fine.dims.2, fine.factor)
+                o.tensor = fine.tensor; o.dims = fine.dims; o.originMM = fine.originMM; o.spacingMM = fine.spacingMM
+                organicIn = o
+            } else if let o = organicIn {
+                NSLog("DIAG organic trace grid: the solve's own %.2f mm (%d×%d×%d); preview voxel %.2f mm",
+                      o.spacingMM, o.dims.0, o.dims.1, o.dims.2, previewVoxelMM)
+            }
+            organicIn?.seedBoost = lat.wallThickness.seedBoost
+            // ★ THE DEPTHS EACH WALL CAN BE PACKED TO (his D1, 2026-09-21) — the same rule
+            // the wizard's editor draws on: `LatticeWallDepthSteps.forWalls`.
+            let wallDepthSteps = LatticeWallDepthSteps.forWalls(lat, regions: regions,
+                                                                 beadMM: printParams.strutLineWidthMM)
+            // Set on main when a newer bake takes over, read by the stage loop.
+            let cancelledStages = LatticeBakeFlag()
+            // ★★ THE WINDOW UNDER AUTO (2026-09-06): the probe's Auto answer when it has
+            // one, else core's own band from the walls, the bead, the voxel and the
+            // look — `organic_recommend_band`, the function the run calls — never the
+            // octet window. In Aesthetic the run takes the look pair; in Structural the
+            // band. Collapsed ⇒ the run leaves the region solid; the preview keeps the
+            // window it had and says so.
+            // ★★★ ONE PLAN PER BAKE (2026-09-07). It tags every voxel by point-in-polygon
+            // against each face's outline; two callers wanted it and each built its own.
+            var synthPlan = OrganicSyntheticStress.Plan(regionIDs: [], regions: [], keyByID: [:])
+            if let o = organicIn {
+                synthPlan = OrganicSyntheticStress.plan(
+                    regions: regions, dims: o.dims, originMM: o.originMM, spacingMM: o.spacingMM,
+                    defaultFoci: synthDefaultFoci, statedFoci: synthStatedFoci)
+            }
+            var organicWindowNote = ""
+            if organicAutoWindow, var o = organicIn {
+                if let f = organicForecastAuto {
+                    o.separationMinMM = f.lo; o.separationMaxMM = f.hi
+                    organicWindowNote = String(format: "auto window %.2f–%.2f mm from the probe", f.lo, f.hi)
+                } else if let band = OrganicAutoWindow.band(regions: regions, input: o,
+                                                            plan: synthPlan,
+                                                            lookCellsAcross: Double(organicLook)) {
+                    // ★ THE LOOK SLIDER PICKS IT (2026-09-07): 1 % the largest cell the
+                    // wall holds, 100 % the smallest core will print. Structural keeps
+                    // core's own pick — the look is the Aesthetic lever.
+                    let picked = organicIsStructural
+                        ? OrganicAutoWindow.window(from: band, structural: true)
+                        : OrganicAutoWindow.window(percent: organicLookPercent, band: band)
+                    if let w = picked {
+                        o.separationMinMM = w.lo; o.separationMaxMM = w.hi
+                        organicWindowNote = String(format: "auto window %.2f–%.2f mm · look %.0f%% · %@",
+                                                   w.lo, w.hi, organicLookPercent, band.summary)
+                    } else {
+                        organicWindowNote = "auto window kept the stand-in · " + band.summary
+                    }
+                }
+                organicIn = o
+            }
+            // ★ THE SOLID RIM: the job's number. −1 means "one base cell", and the base
+            // cell is `cell_min_mm` — which under Auto the job carries only once the Look
+            // slider has written the window it picked. When the bake derived that window
+            // itself (Auto, nothing picked yet) the rim is that window's low end, which
+            // is exactly what the job will carry once it is saved.
+            if var o = organicIn {
+                // ★★★ AND THE AUTO FALLBACK IS GONE (2026-09-07). It handed the rim
+                // the WINDOW'S LOW END — a whole cell — which is the huge hard-edged
+                // band he photographed. `organicRunSolidRimMM(beadMM:)` answers for
+                // every mode now, and the job carries the same number.
+                o.solidRimMM = Swift.max(0, organicRimSetting)
+                // ★ the job's own window, so the shape fit floors where core's does (item 2)
+                o.jobWindowMM = organicJobWindow
+                // ★ the grade-to-shape band reaches organic (2026-09-18): its own Fit to
+                // shape switch arms it, the same millimetres the octet uses
+                o.shapeBandMM = lat.organicShapeFit ? lat.shapeFitBandMM : 0
+                o.shapeBandStrength = lat.shapeFitGradeStrength
+                // ★ THE DEPTH-STAGGER EXPERIMENT (2026-09-08), scaled to the window the
+                // lattice is graded to. Preview only; never written to the job.
+                o.depthStaggerCellMM = organicDepthStagger
+                    ? Swift.max(o.separationMinMM, o.separationMaxMM) : 0
+                organicIn = o
+            }
+            if let o = organicIn {
+                NSLog("DIAG organic window: %.2f–%.2f mm · rim %.2f mm%@", o.separationMinMM, o.separationMaxMM,
+                      o.solidRimMM, organicWindowNote.isEmpty ? "" : " · " + organicWindowNote)
+            }
+            // ★★★ THE EXACT REGION MEMBERSHIP, ALWAYS (2026-09-07). The scene used to
+            // decide which voxels are candidates by NEAREST-NEIGHBOUR sampling the
+            // occupancy grid — a different grid, a different origin — so a voxel whose
+            // centre rounded just outside was dropped even when most of it was inside.
+            // That loses up to half a voxel at EVERY boundary of every face, and the run
+            // has no such loss: it reads the region ids on its own grid. The plan above
+            // is exactly those ids, so hand them over whether or not synthesis is on.
+            organicIn?.regionIDs = synthPlan.regionIDs
+            if synthOn, organicIn != nil {
+                // ★ CORE'S OWN SYNTHESIS (2026-09-06): the bridge calls
+                // synthesize_focal_stress with the plan built above — the same function
+                // and the same per-region config the run gets. The app injects nothing.
+                organicIn?.syntheticRegions = synthPlan.regions
+                // ★★ THE TENSOR GOES TO CORE UNTOUCHED (maintainer, 2026-09-29, ruling C).
+                // A dead wall is dead as a whole (his 2026-09-18 night), and since #358 core
+                // decides that itself: the wall's p99 against the threshold, the focal field
+                // over every voxel of a dead wall. The app used to zero the walls it judged
+                // dead first, by its own p99, so at the threshold the preview and the run
+                // could disagree. The scene now asks core for the verdict before it traces
+                // (`TopOptKit.organicSyntheticReport`) and grades core's dead walls.
+            }
+            // ★★★ TWO STAGES (his timings, 2026-09-06: trace 0.2 s, core's emission
+            // 186–191 s). The traced picture first — the bridge skips the emission when
+            // repairs are hidden — then, when repairs are wanted, the emitted set
+            // replaces it when core is done. A newer bake retires both.
+            let stages: [Bool] = (organicIn?.showRepairs == true) ? [false, true] : [organicIn?.showRepairs ?? true]
+            for (stageIndex, stageRepairs) in stages.enumerated() {
+            // ★ NEVER `DispatchQueue.main.sync` FROM HERE. The first cut did, to read
+            // the generation; a bake thread that blocks on main while main is waiting
+            // on anything this thread holds is a deadlock, and reading @State off the
+            // main actor is undefined besides. The generation is checked on main, in
+            // the completion, where it is safe to read.
+            if stageIndex > 0, cancelledStages.value || cancel.value { break }
+            var stageIn = organicIn
+            stageIn?.showRepairs = stageRepairs
+            let isLastStage = stageIndex == stages.count - 1
+            if stageIndex > 0 {
+                NSLog("DIAG organic repairs stage: core emission starting (generation %d)", bakeGeneration)
+            }
             let scene = LatticeSDFScene(mesh: mesh, field: field,
-                                        latticeID: latticeID, regions: regions,
+                                        latticeID: latticeID,
+                                        organicSpans: spansForBake,
+                                        organicReceipt: receiptForBake,
+                                        // ★ The stage's OWN solve, present whether or
+                                        // not the density mode grades from it — the
+                                        // load question is not the density question.
+                                        stressField: stressFieldForRetention,
+                                        // ★ In Sim mode the solve governs the grading;
+                                        // a DERIVED per-region density must not stand
+                                        // in for it ("I never typed it").
+                                        // ★ …except a density the USER stated on a
+                                        // face (the aesthetic per-face control,
+                                        // 2026-08-24): `selectableDensity` is written
+                                        // ONLY by that control, so in aesthetic mode a
+                                        // present entry is his choice and outranks the
+                                        // sim field on that face. The 17%/25% incident
+                                        // was DERIVED values in this channel; nothing
+                                        // derives into it any more.
+                                        statedDensityGoverns: !gradesFromSim
+                                            || stageMode == .aesthetic,
+                                        allowQuilt: lat.allowQuilt,
+                                        // ★ Structural or aesthetic — it decides the
+                                        // cells-per-member floor the preview draws to,
+                                        // so the picture and the run agree about which
+                                        // question was asked.
+                                        // ★ `keepWallMM` IS GONE, and the sentence that
+                                        // stood here is now implemented rather than
+                                        // merely written down: the chamfer survives
+                                        // because the SHELL is not cut there
+                                        // (`shellClipMSL`), not because the region was
+                                        // eroded away from it.
+                                        stageMode: stageMode,
+                                        // ★ Carried so the BANNER can say which
+                                        // algorithm the run will build — the marcher
+                                        // draws only the doubled ladder.
+                                        algorithm: algorithmForBake,
+                                        allowableMPa: allowableMPa,
+                                        // ★ The checkbox reaches the lattice at last —
+                                        // (Minimize plastic no longer steers the lattice — 2026-09-12.)
+                                        // ★ A finish is what lets core's aesthetic
+                                        // floor reach ONE cell across a member — it is
+                                        // what re-ties the struts a one-cell member
+                                        // severs. `none` is the only value that is not
+                                        // a finish.
+                                        // ★ THE SWITCH, NOT THE FINISH. A finish is
+                                        // REQUIRED for core's one-cell floor but is not
+                                        // the request for it — see
+                                        // `LatticeSettings.singleCellMembers`.
+                                        boundaryFinishWritten:
+                                            lat.singleCellMembers,
+                                        organic: stageIn,
+                                        regions: regions,
                                         rhoMin: span.lo, rhoMax: span.hi,
                                         gamma: gamma,
                                         // ★ ONLY WHAT HE SET TO LATTICE. On the
@@ -3143,11 +5332,133 @@ public struct WorkspacePlaceholder: View {
                                         // declared", and the honest picture of
                                         // that is a solid part.
                                         whenEmpty: .latticeNothing,
-                                        skippedFaces: skippedFaces)
+                                        skinMM: skinMM,
+                                        skippedFaces: skippedFaces,
+                                        skippedRegionNames: skippedRegionNames,
+                                        // ★ one cell: the smallest per-region base for
+                                        // the octet, the window's low end for organic
+                                        wallThicknessFloorMM: algorithmForBake == "organic"
+                                            ? (organicIn?.separationMinMM ?? 0)
+                                            : (steppedCells.filter { $0 > 0 }.min()
+                                               ?? lat.cellMM),
+                                        wallDepthSteps: wallDepthSteps,
+                                        wallStressField: wallStressField,
+                                        // ★ the band chips' choices (his 2026-09-27) — read
+                                        // with the rest of `lat` on main; a change is a
+                                        // `previewBakeInputs` change, so it rebakes
+                                        bandOverrides: lat.bandTreatments,
+                                        // ★ the octet on the continuous band (2026-09-28)
+                                        octetBand: algorithmForBake != "organic",
+                                        // (gated like organic's: the band only when grade-to-shape is on)
+                                        bandGradeMM: lat.gradingMode.fitsShape ? lat.shapeFitBandMM : 0,
+                                        beadMM: beadForBake)
             DispatchQueue.main.async {
+                // ★ a newer bake has started: this picture is stale, drop it
+                guard bakeGeneration == strutBakeGeneration else {
+                    cancelledStages.value = true
+                    return
+                }
                 strutScene = scene
                 strutSceneToken += 1
+                // ★ item 5 (2026-10-05): the drawer's cell is the bake's, at the wall the bake
+                // measured — re-derive the cards once the final picture has landed
+                if isLastStage, Self.perRegionCellAlgorithms.contains(project.lattice.algorithm) {
+                    refreshLatticeFaceCards()
+                }
+                // ★★★ THE TRACED PICTURE IS A PICTURE (2026-09-07). This read
+                // `strutBakeInFlight = !isLastStage`, and `latticeLayerIsDrawn` hides
+                // the layer while that is true — so stage one baked a lattice and then
+                // hid it, and he watched an empty part for a quarter of an hour while
+                // core's emission ran. In flight now means "nothing to show"; refining
+                // means "this is current, a better one is coming".
+                strutBakeInFlight = false
+                strutRefining = !isLastStage
+                // ★ THE PHASE CLOCK, IN THE LOG (2026-09-06): where a long bake went.
+                if let ph = scene.organicPhaseSeconds {
+                    NSLog("DIAG organic phases: trace %.1f s · repairs (core emission) %.1f s · bake %.1f s · %d spans emitted",
+                          ph.trace, ph.emit, ph.bake, scene.organicEmittedSpans?.count ?? -1)
+                }
+                // ★ PER-WALL RIM COVERAGE (his 2026-09-20, images 2–3: face2's wall latticed
+                // to the edge, face15's with "a lot of space at the edge of the rim").
+                // Each span's midpoint is attributed to its region and measured in-plane
+                // from the face outline; the log prints, per wall, the spans, the nearest
+                // 5 % / quartile / median distance and the share within one window
+                // (6 mm) of the outline — a number, before anyone says why.
+                if let o = organicIn, let out = scene.outlineSDF, !o.regionIDs.isEmpty,
+                   !scene.organicCapsules.isEmpty {
+                    var byRegion: [Int32: [Float]] = [:]
+                    // ★ AND THE DEPTH (his 2026-09-20, image 6: "how little lattice there
+                    // actually is … the USER sets the depth expected of the lattice"):
+                    // each span's midpoint along the face normal, INTO the part, as a share
+                    // of the declared depth — p05 / p50 / p95 per wall.
+                    let includes = scene.regions.filter { $0.role == .include }
+                    var depthByRegion: [Int32: [Float]] = [:]
+                    for c in scene.organicCapsules {
+                        let m = 0.5 * (c.a + c.b)
+                        let gx = Int(((Double(m.x) - o.originMM.x) / o.spacingMM).rounded(.down))
+                        let gy = Int(((Double(m.y) - o.originMM.y) / o.spacingMM).rounded(.down))
+                        let gz = Int(((Double(m.z) - o.originMM.z) / o.spacingMM).rounded(.down))
+                        guard gx >= 0, gy >= 0, gz >= 0, gx < o.dims.0, gy < o.dims.1, gz < o.dims.2 else { continue }
+                        let id = o.regionIDs[(gz * o.dims.1 + gy) * o.dims.0 + gx]
+                        guard id >= 1 else { continue }
+                        let g = (m - out.origin) / out.spacing
+                        let i = min(max(Int(g.x.rounded()), 0), out.nx - 1)
+                        let j = min(max(Int(g.y.rounded()), 0), out.ny - 1)
+                        let k = min(max(Int(g.z.rounded()), 0), out.nz - 1)
+                        let d = out.values[(k * out.ny + j) * out.nx + i]
+                        guard d.isFinite, abs(d) < 500 else { continue }
+                        byRegion[id, default: []].append(d)
+                        let ri = Int(id) - 1
+                        if ri >= 0, ri < includes.count, includes[ri].depthMM > 0 {
+                            let r = includes[ri]
+                            // the prism runs from the face ALONG its normal (LatticeRegionMask: s ∈ [0, depth])
+                            let into = simd_dot(SIMD3<Double>(m) - r.origin, LatticeRegionMask.unit(r.normal))
+                            depthByRegion[id, default: []].append(Float(into / r.depthMM))
+                        }
+                    }
+                    let lines = byRegion.sorted { $0.key < $1.key }.map { id, ds -> String in
+                        let s = ds.sorted()
+                        func q(_ f: Double) -> Float { s[min(s.count - 1, Int(Double(s.count - 1) * f))] }
+                        let near = s.filter { $0 <= 6 }.count
+                        let dz = (depthByRegion[id] ?? []).sorted()
+                        func dq(_ f: Double) -> Float { dz.isEmpty ? .nan : dz[min(dz.count - 1, Int(Double(dz.count - 1) * f))] }
+                        return String(format: "%@: spans %d · outline-distance p05 %.2f p25 %.2f p50 %.2f mm · within 6 mm %.0f%% · depth share p05 %.2f p50 %.2f p95 %.2f",
+                                      synthPlan.keyByID[Int(id)] ?? "r\(id)", s.count, q(0.05), q(0.25), q(0.5),
+                                      100 * Double(near) / Double(max(1, s.count)), dq(0.05), dq(0.5), dq(0.95))
+                    }
+                    NSLog("DIAG organic rim coverage: %@", lines.joined(separator: " | "))
+                }
+                if synthOn, let rep = scene.organicSyntheticReport {
+                    // ★ CORE'S VERDICT PER WALL (ruling C): its own p99 against its own
+                    // threshold — the decision the run makes on the same call.
+                    NSLog("DIAG synthetic(core verdict): thr=%.4g%@ · %@",
+                          rep.deadThreshold, rep.deadFloorBound ? " (the 0.005 MPa floor)" : " (2 % of the peak)",
+                          rep.regions.map {
+                              String(format: "%@ core p99 %.4g → %@",
+                                     synthPlan.keyByID[$0.regionID] ?? "r\($0.regionID)", $0.p99VonMises,
+                                     $0.fullySynthetic > 0 ? "DEAD, synthesised whole" : "left alone")
+                          }.joined(separator: " | "))
+                    NSLog("DIAG synthetic(core): regions=%d voxels=%d fully=%d blended=%d thr=%.4g partPeak=%.4g",
+                          rep.regions.count, rep.voxelsInRegions, rep.fullySynthetic, rep.blended,
+                          rep.deadThreshold, rep.peakVonMises)
+                }
+                // ★★ CORE'S VERDICT OUTLIVES THE BAKE (maintainer, 2026-09-29, ruling 1): the
+                // Selections row's word and the foci offer both read it from the project, so
+                // they agree and survive a relaunch. It is core's answer from the same call
+                // the preview graded by — a wall core synthesised (any of its regions) is
+                // barely loaded; one core left alone carries load. No Swift threshold: the
+                // app's 15 % rule is retired. The whole map is replaced, so a wall this bake
+                // did not report reads unmeasured; a bake without a report records nothing.
+                // (The job no longer reads this: every include wall is flagged, ruling 2.)
+                if synthOn, let rep = scene.organicSyntheticReport {
+                    project.recordLatticeWallVerdicts(
+                        OrganicSyntheticStress.wallReports(from: rep, plan: synthPlan)
+                            .filter { $0.value.voxels > 0 }.mapValues(\.dead))
+                }
+                // ★ the change that arrived while this bake ran
+                if isLastStage { strutRefining = false }
             }
+            }   // stages
         }
     }
 
@@ -3195,6 +5506,7 @@ public struct WorkspacePlaceholder: View {
         // and carries none.
         if let back = stage.back {
             stageNavButton(to: back, icon: "chevron.left")
+                .latticeBandChipKeepOut()
                 .modifier(StageNavPlacement(stage: stage))
         }
         // ★ THE WAY FORWARD — the top-right column, LEFT of the gizmo.
@@ -3206,6 +5518,7 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .trailing, spacing: PageChrome.gap) {
             ForEach(stage.forward, id: \.rawValue) { dest in
                 stageNavButton(to: dest, icon: Self.stageIcon(dest))
+                    .latticeBandChipKeepOut()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -3258,6 +5571,21 @@ public struct WorkspacePlaceholder: View {
         if dest == .lattice { refreshLatticeFaceCards() }
     }
 
+    /// ★★ RULING 4 (item 6, maintainer 2026-09-30): THE ONE TAP wherever "nothing set to lattice"
+    /// shows — to where walls are marked: the Lattice stage, its Selections open. NAVIGATION
+    /// ONLY: it creates no wall and sets no role (pinned by `LatticeIncludeGateTests`). From a
+    /// variant's page, the page closes as its own Close closes it (the variant is left).
+    private func goToWallMarking() {
+        if showLatticePage { closeLatticePage() }
+        if stage != .lattice { goToStage(.lattice) }
+        selectionsCollapsed = false
+    }
+    /// Whether that tap would take him anywhere. On the Lattice stage with Selections open he is
+    /// already where walls are marked, so the line stays a plain line — never a dead tap.
+    private var wallMarkingTapGoesSomewhere: Bool {
+        showLatticePage || stage != .lattice || selectionsCollapsed
+    }
+
     /// Whether anything has been committed since entering the stage (or since the
     /// last save). DERIVED, never a flag: a flag has to be set at every commit site
     /// and one missed site makes Save quietly do nothing.
@@ -3286,6 +5614,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         surfaceCarried = []
         surfaceRefusal = nil
@@ -3414,6 +5743,14 @@ public struct WorkspacePlaceholder: View {
                     // `PageChrome.gizmoAlignedTop`.
                     .padding(.top, PageChrome.gizmoAlignedTop)
             case .lattice, .surface:
+                // ★★ THE WAY BACK SITS UNDER THE IDENTITY ROW — restored (maintainer,
+                // 2026-08-21: "First, I was wrong about the placement … Please put the
+                // button back *Below* the project name and undo/redo button").
+                //
+                // ★ AND THE MODE NO LONGER RIDES WITH IT. It was put beside this button
+                // to keep the two from colliding; it now has the TOP-CENTRE slot of its
+                // own (`latticeStageModeOverlay`), which is both more prominent and
+                // collision-free by construction.
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, DS.Space.xl4)
@@ -3515,6 +5852,14 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("lattice-settings")
+            // ★ …and this one its LEADING edge.
+            .background(GeometryReader { g in
+                Color.clear.preference(key: TopClusterEdgeKey.self,
+                                       value: .init(left: 0,
+                                                    right: g.frame(in: .global).minX,
+                                                    width: 0))
+            })
+            .latticeBandChipKeepOut()
             // ★ THE TOP-RIGHT SLOT, exactly where the TO page's "Lattice" button
             // sits: LEFT of the gizmo by `gizmoClearance`, top edge on the gizmo's
             // own inset. It moved UP into the space "Topology" vacated.
@@ -3555,6 +5900,7 @@ public struct WorkspacePlaceholder: View {
             Spacer()
             ForEach(BottomChipOrder.sorted(visibleSettingsChips, widths: settingsChipWidths), id: \.self) { id in
                 settingsChipRow(id)
+                    .latticeBandChipKeepOut()   // ★ no band chip under a settings chip
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -3593,6 +5939,7 @@ public struct WorkspacePlaceholder: View {
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
         case .cadFaces: cadFacesChip.background(chipWidthReader(id))
+        case .bandChips: bandChipsToggleChip.background(chipWidthReader(id))
         case .faceProtectDepth: faceProtectDepthChip.background(chipWidthReader(id))
         case .designBox:
             VStack(alignment: .trailing, spacing: DS.Space.s) {
@@ -3637,6 +5984,8 @@ public struct WorkspacePlaceholder: View {
             // behind it, so core attributes nothing and the switch would be a
             // control over an operation that cannot run.
             case .cadFaces: return isStepPart
+            // ★ Hide/Show the band chips: only while there are band chips to hide.
+            case .bandChips: return bandChipsAvailable
             default: return true
             }
         }
@@ -3892,10 +6241,18 @@ public struct WorkspacePlaceholder: View {
                 Text("Restore CAD surfaces")
                     .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
                 Spacer(minLength: DS.Space.s)
-                Toggle("", isOn: $project.projectCADFaces)
-                    .labelsHidden()
-                    .tint(DS.Color.accent.color)
-                    .accessibilityIdentifier("cad-faces-toggle")
+                // ★ THE SAME DARK LIQUID-GLASS SWITCH THE WIZARD USES (maintainer,
+                // 2026-08-19: "Can you also fix the 'CAD surfaces' selection
+                // button into the same dark-mode apple liquid glass?"). It was a
+                // stock `Toggle` in system blue — a different control, a different
+                // surface and a different accent from every other switch in the
+                // app, which is exactly the divergence `GlassToggle` exists to
+                // stop.
+                GlassToggle(isOn: project.projectCADFaces) {
+                    project.projectCADFaces.toggle()
+                }
+                .accessibilityLabel("Restore CAD surfaces")
+                .accessibilityIdentifier("cad-faces-toggle")
             }
             // ★ WHAT IT DOES — the same sentence either way, because the
             // mechanism does not change with the switch.
@@ -4007,6 +6364,38 @@ public struct WorkspacePlaceholder: View {
             .foregroundStyle(DS.Color.textPrimary.color)
         }
         .buttonStyle(.plain)
+    }
+
+    /// ★ HIDE / SHOW THE BAND CHIPS (his 2026-09-28: "add a button at the bottom right corner
+    /// (ordered in length of the button words) to hide or show all the chips"). It sorts into
+    /// the column by its measured width like every chip there. The label names the ACTION, and
+    /// both labels are laid out (the idle one hidden) so the chip is always as wide as the
+    /// longer one — tapping it never moves it to another row under his finger.
+    private var bandChipsToggleChip: some View {
+        func word(_ s: String) -> Text {
+            Text(s).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+        }
+        return Button {
+            withAnimation(DS.Motion.emphasized) { bandChipsHidden.toggle() }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: bandChipsHidden ? "eye" : "eye.slash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle((bandChipsHidden ? DS.Color.textTertiary : DS.Color.accent).color)
+                ZStack(alignment: .leading) {
+                    word("Show chips").hidden()
+                    word("Hide chips").hidden()
+                    word(bandChipsHidden ? "Show chips" : "Hide chips")
+                }
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(bandChipsHidden ? "Show chips" : "Hide chips")
+        .accessibilityIdentifier("band-chips-toggle")
     }
 
     // MARK: design box tool (M7.dom-app) — define grow room + keep-outs
@@ -4491,6 +6880,13 @@ public struct WorkspacePlaceholder: View {
     /// map cannot tell them apart no matter what colour it holds.
     private var surfaceVertexTints: [Float] {
         guard let mesh = viewerMesh else { return [] }
+        // ★★ a selected union of pieces lights piece by piece (2026-10-08) — `SurfaceTint.unionLighting`
+        if surfaceTool != .union, let ul = surfaceSelectedUnionLighting {
+            return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
+                                      regions: project.faceRegions, selected: nil,
+                                      picked: ul.picked, fragmentTested: ul.fragmentTested,
+                                      groupColours: surfaceGroupHues)
+        }
         return SurfaceTint.buffer(mesh: mesh, groupedFaces: surfaceGroupedFaces,
                                   regions: project.faceRegions,
                                   selected: surfaceSelected,
@@ -4579,6 +6975,12 @@ public struct WorkspacePlaceholder: View {
 
     /// The faces the single-plane cut test applies to: the selected region's own,
     /// and only when it IS a cut (a whole region has no plane to test).
+    /// The selected union's piece-by-piece lighting, when it has cut pieces (`SurfaceTint.unionLighting`).
+    private var surfaceSelectedUnionLighting: SurfaceTint.UnionLighting? {
+        guard let mesh = viewerMesh else { return nil }
+        return SurfaceTint.unionLighting(surfaceSelected, regions: project.faceRegions, mesh: mesh)
+    }
+
     private var surfaceSelectedTestedFaces: Set<FaceID> {
         guard let id = surfaceSelected,
               project.faceRegions.region(id)?.isCut == true else { return [] }
@@ -4814,6 +7216,22 @@ public struct WorkspacePlaceholder: View {
         case .pattern:
             surfacePatternFace = faceID
             surfacePatternPiece = surfaceSelected
+
+        case .region:
+            // ★★ THE REGION TOOL (2026-10-08). The first tap aims at the region under the finger (up
+            // through any union, as a selection does); once aimed, a tap adds the face to it or drops
+            // it — the Topology page's add/drop rule (§2c) — or says why it cannot. ✕ releases the aim.
+            // It never makes a region: a face with none says so.
+            if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                surfaceRefusal = project.surfaceRegionToggleFace(aim, face: faceID)
+            } else if let hit = surfaceSelected {
+                surfaceRegionAim = hit
+            } else {
+                surfaceRefusal = "No region here yet — Cut, Union or Pattern make one."
+            }
+            // the aim is what lights
+            surfaceSelected = surfaceRegionAim
+            surfaceSelectedFace = nil
         }
     }
 
@@ -4882,6 +7300,7 @@ public struct WorkspacePlaceholder: View {
         surfaceUnion.clear()
         surfacePatternFace = nil
         surfacePatternPiece = nil
+        surfaceRegionAim = nil
         similar.clear()
         guard let mesh = viewerMesh else { return }
 
@@ -4903,7 +7322,8 @@ public struct WorkspacePlaceholder: View {
                 // Aimed at the first, COMMITTED across all — see the confirms,
                 // which read `surfaceCarried`.
                 if let f = carried.first { surfaceEngage(tool, face: f, mesh: mesh) }
-            case .similar:
+            case .similar, .region:
+                // the region tool aims at regions one tap at a time; a similar set is not one
                 break
             }
             return
@@ -4975,14 +7395,35 @@ public struct WorkspacePlaceholder: View {
             // ★ LATTICE STAGE ONLY, and only once a lattice is configured —
             // `visible.latticeControls` is the stage column, and there is
             // nothing to preview with lattice mode off.
-            if visible.latticeControls, project.lattice.enabled {
+            // ★★ AND FROM THE FIRST FRAME OF THE STAGE (his 2026-09-20, image 1: "when
+            // starting Structural mode the lattice preview button is not visible at
+            // the start"). Lattice mode turns on when a lattice role is declared or
+            // the wizard is saved; the button must not wait for either — a tap with
+            // the lattice off opens the settings, which is where it turns on.
+            if visible.latticeControls {
                 viewModeButton("cube.transparent", label: "Lattice preview",
-                               on: showStrutPreview) {
-                    if showStrutPreview {
+                               on: showStrutPreview,
+                               tint: latticeOnlyViewOn ? DS.Color.warning : nil,
+                               // ★ HOLD 3 s = lattice only; let go and it stays. A tap
+                               // then goes back to the plain preview (his 2026-09-14).
+                               // ★★ Both read the VIEW (`latticeOnlyViewOn`), not the flag:
+                               // a flag left over with the preview off made the hold a
+                               // silent no-op and the next tap look dead (his 2026-10-01).
+                               // And the hold arms the preview exactly as the tap does —
+                               // the lattice switch, settings first, the stage's FEA.
+                               onLongPress: {
+                                   guard !latticeOnlyViewOn else { return }
+                                   latticeOnly = true
+                                   if !showStrutPreview { armLatticePreview() }
+                                   flashLatticeOnly("LATTICE ONLY")
+                               }) {
+                    if latticeOnlyViewOn {
+                        latticeOnly = false            // back to the lattice preview
+                    } else if showStrutPreview {
                         showStrutPreview = false
                     } else {
-                        showStrutPreview = true
-                        if strutScene == nil { buildStrutScene() }
+                        latticeOnly = false
+                        armLatticePreview()
                     }
                 }
                 // ★★ THE STRESS VIEW, BELOW THE PREVIEW BUTTON (maintainer,
@@ -5003,6 +7444,7 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         }
+        .latticeBandChipKeepOut()          // ★ the tool column: no band chip under it
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         // ★ BELOW THE GIZMO, in the slot `gizmoClearance` defines — the same one
         // the Surface tray uses, so the two stages put the control in one place.
@@ -5015,8 +7457,16 @@ public struct WorkspacePlaceholder: View {
 
     private func viewModeButton(_ icon: String, label: String, on: Bool,
                                 enabled: Bool = true,
+                                tint: RGBA? = nil,
+                                onLongPress: (() -> Void)? = nil,
                                 action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: {
+            // ★ The release that ends a 3 s hold is also delivered as a tap; swallow it —
+            // by the press it ends, not by a clock (`ViewModeHold`, 2026-10-01).
+            if ViewModeHold.swallowsTap(holdFiredAt: viewModeHoldFiredAt,
+                                        pressBeganAt: viewModePressBeganAt, now: Date()) { return }
+            action()
+        }) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle((on ? DS.Color.textPrimary
@@ -5025,17 +7475,233 @@ public struct WorkspacePlaceholder: View {
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
-                        .fill(on ? DS.Color.accentDeep.opacity(0.55).color
-                                 : DS.Surface.bar.color)
+                        .fill(tint != nil ? tint!.opacity(0.85).color
+                              : (on ? DS.Color.accentDeep.opacity(0.55).color
+                                    : DS.Surface.bar.color))
                         .overlay(RoundedRectangle(cornerRadius: DS.Radius.pill,
                                                   style: .continuous)
-                            .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                            .strokeBorder((tint ?? DS.Color.strokePanel).color,
+                                          lineWidth: tint != nil ? 2 : 1))
                 )
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        // ★ A HOLD is a second action on the same button (lattice only). The long
+        // press runs alongside the tap so a plain tap still toggles the preview.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 3.0)
+                .onEnded { _ in viewModeHoldFiredAt = Date(); onLongPress?() },
+            including: onLongPress == nil ? .none : .all)
+        // ★ …and the PRESS it belongs to: down at touch-down, reset by SwiftUI on release or
+        // cancel (a `@GestureState` cannot stick), stamped below.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($viewModePressDown) { _, down, _ in down = true },
+            including: onLongPress == nil ? .none : .all)
+        .onChange(of: viewModePressDown) { down in
+            if down { viewModePressBeganAt = Date() }
+        }
         .accessibilityLabel(label)
         .accessibilityIdentifier("view-mode-\(label.lowercased())")
+    }
+
+    /// ★ ARM THE LATTICE PREVIEW — the cube's tap, and its hold when the preview is off (one
+    /// path, so the hold can no longer skip the lattice switch, settings-first or the FEA).
+    private func armLatticePreview() {
+        // ★★ THE ACTUAL LATTICE-VIEW BUTTON (maintainer, 2026-08-19:
+        // "lattice View button still didn't open up settings", after
+        // three misses). There are TWO places `showStrutPreview` is
+        // turned on — the `previewOn` binding in the lattice overlay,
+        // which I kept editing, and THIS `viewModeButton`, which is
+        // the cube in the round cluster he actually presses.
+        //
+        // ★ AND SETTINGS COME FIRST, BEFORE ANY BAKE ("It should do
+        // so *immediately* without giving a chance for the lattice to
+        // load if the setting hasn't been saved yet"). The preview is
+        // armed but NOT built here; the wizard's Save & Exit is what
+        // bakes it, so nothing expensive starts behind the sheet.
+        showStrutPreview = true
+        // ★ lattice mode off ⇒ the settings, every time: Save & Exit
+        // is what turns it on, and nothing bakes until it is on.
+        if !project.lattice.enabled {
+            showLatticeWizard = true
+            return
+        }
+        if !latticeSettingsSavedThisSession {
+            openLatticeSettingsIfUnconfigured()
+            return
+        }
+        startStressSolveIfNeeded()
+        refreshLatticeStressPeak()
+        if strutScene == nil { buildStrutScene() }
+    }
+
+    /// Flash a large badge over the viewport for a moment (lattice only on/off).
+    private func flashLatticeOnly(_ text: String) {
+        latticeOnlyFlashToken += 1
+        let token = latticeOnlyFlashToken
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.65)) {
+            latticeOnlyFlash = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            guard latticeOnlyFlashToken == token else { return }   // a newer flash owns it
+            withAnimation(.easeOut(duration: 0.3)) { latticeOnlyFlash = nil }
+        }
+        // the edge light: twice
+        for (delay, value) in [(0.0, 1.0), (0.35, 0.0), (0.7, 1.0), (1.05, 0.0)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                withAnimation(.easeInOut(duration: 0.3)) { latticeEdgePulse = value }
+            }
+        }
+    }
+
+    // MARK: ★★ THE BAND CHIPS (his 2026-09-27: "a system where when the user is in
+    // Lattice Only view, there are little chips tracked to the faces that, when clicked,
+    // asks whether it should grade to solid or not")
+
+    /// ★ LATTICE ONLY IS ON — the orange cube, the body at alpha 0. The same pair
+    /// `latticePreviewBodyAlpha` drops the body for, so the chips can never show over a
+    /// part that is still drawn.
+    private var latticeOnlyViewOn: Bool { latticeOnly && showStrutPreview }
+
+    /// ★★ LATTICE ONLY HIDES THE PART ONLY ONCE THE LATTICE IS ON SCREEN (his 2026-10-01: "I am
+    /// also not able to go to 'Lattice Only' view", in Structural). The layer is hidden while a
+    /// BAKE runs (every settings change) and while the stage's FEA runs (a Sim project's first
+    /// solve, or after a load-case change) — `hidden: strutBakeInFlight || latticeSimIsRunning` —
+    /// and the body was dropped to 0 regardless, so lattice only showed an EMPTY STAGE until the
+    /// lattice came back. The part now stays until the lattice is drawn — the body alpha and the
+    /// band chips read this one value.
+    private var latticeOnlyShowing: Bool {
+        LatticePreviewBodyAlpha.latticeOnlyShowing(viewOn: latticeOnlyViewOn,
+                                                   layerDrawn: latticeLayerIsDrawn,
+                                                   simRunning: latticeSimIsRunning,
+                                                   nothingToDraw: latticePreviewHasNothingToDraw)
+    }
+
+    /// ★★ THE KEY'S DRILL-IN ONLY COUNTS WHILE THE KEY IS ON SCREEN (his 2026-10-01: "in
+    /// Structural, the face-prism isn't showing up whatsoever"). Tapping the key hides the
+    /// prisms, handles and gizmos so he can read a strut (2026-08-19) — but the mode outlived
+    /// the key: turning the preview off, or the mode sheet's delete (the only way from Aesthetic
+    /// to Structural), unmounted the legend and left `.colour` set, so the prism, the depth knobs
+    /// and the band chips stayed hidden and face taps were swallowed, with the only way out
+    /// ("Double-tap anywhere to go back") written on the legend that was gone. Every read goes
+    /// through this; the mode is also reset when the preview goes off. A MINIMIZED key is not
+    /// drilled in either: its column carries no "Double-tap anywhere to go back", so the hides
+    /// would again have no visible way out.
+    private var latticeLegendMounted: Bool { showStrutPreview && strutScene != nil }
+    private var legendDrilledIn: Bool {
+        latticeLegendMounted && !latticeLegendMinimized && latticeLegendMode.drilledIn
+    }
+
+    /// ★ The band chips COULD be drawn now: the overlay's own gates (its placement in the body
+    /// and its `if`), except the hide switch. The Hide/Show chip exists only then — a toggle
+    /// over nothing is a dead control (§2b).
+    private var bandChipsAvailable: Bool {
+        latticeOnlyShowing && visible.latticeControls && viewerMesh != nil
+            && !legendDrilledIn
+            && !(strutScene?.bandDecisions.isEmpty ?? true)
+    }
+
+    /// ★ THE TRANSFORM THE PART IS DRAWN WITH, for the chips: the camera the viewer
+    /// published (`projection`, world → clip) composed with the settle
+    /// (`ViewerModelFrame.matrix` — the renderer's own `modelMatrix()`), about the DRAWN
+    /// mesh's centre (`stageMesh`: what the renderer's `setMesh` rotates about) and
+    /// through the settle handed to the view (`settleQuat`). A decision's anchor is in
+    /// MODEL space, so `projection` alone would pin every chip to the un-settled part.
+    private var latticeBandChipFrame: LatticeBandChipFrame? {
+        guard let proj = projection, let mesh = stageMesh else { return nil }
+        return LatticeBandChipFrame(projection: proj, modelCentre: mesh.bounds.center,
+                                    modelRotation: settleQuat)
+    }
+
+    /// The chips themselves. Re-laid out on every render — `projection` is republished on
+    /// every orbit, so each chip rides its face; placement is `LatticeBandChipLayout`.
+    @ViewBuilder private var latticeBandChipsOverlay: some View {
+        if latticeOnlyShowing, !bandChipsHidden, let scene = strutScene, !scene.bandDecisions.isEmpty {
+            GeometryReader { geo in
+                // the keep-out frames are `.global`; this layer ignores the safe area like
+                // the MTKView, so the difference is the layer's own origin (0 full-screen)
+                let origin = geo.frame(in: .global).origin
+                let chips = LatticeBandChipLayout.layout(
+                    scene: scene, treatments: project.lattice.bandTreatments,
+                    frame: latticeBandChipFrame, latticeOnly: latticeOnlyShowing,
+                    keepOut: bandChipKeepOut.map { $0.offsetBy(dx: -origin.x, dy: -origin.y) })
+                ZStack(alignment: .topLeading) {
+                    ForEach(chips) { c in
+                        LatticeBandChipView(
+                            placement: c,
+                            isOpen: Binding(
+                                get: { bandChipOpenKey == c.decision.key },
+                                set: { open in
+                                    if open { bandChipOpenKey = c.decision.key }
+                                    else if bandChipOpenKey == c.decision.key { bandChipOpenKey = nil }
+                                }),
+                            onChoose: { chooseBandTreatment(c.decision, solid: $0) },
+                            onDefault: { chooseBandTreatment(c.decision, solid: nil) })
+                        .position(c.point)
+                    }
+                }
+            }
+            .onDisappear { bandChipOpenKey = nil }
+            .transition(.opacity)
+        }
+    }
+
+    /// ★ A CHIP'S CHOICE → `project.lattice.bandTreatments` → the rebake. One undo step
+    /// (sealed either side, like every discrete stage action), saved at once like the
+    /// wizard's Save. The write moves `previewBakeInputs`, so `.onChange(of:
+    /// project.lattice)` supersedes any running bake and starts this one (his R10).
+    /// `solid` nil = "Use default".
+    private func chooseBandTreatment(_ d: LatticeBandDecision, solid: Bool?) {
+        let value = solid.flatMap { LatticeBandChipLayout.treatment(choosing: $0, for: d) }
+        // ★ every member of the place (the floor, its ramp and the fillet; each prism's depth end)
+        // takes the choice, so the band and the chip read the same answer whichever member decides
+        guard d.memberKeys.contains(where: { project.lattice.bandTreatments[$0] != value }) else { return }
+        project.sealUndoStep()
+        for k in d.memberKeys { project.writeLatticeBandTreatment(k, solid: value) }
+        project.sealUndoStep()
+        model.persistCurrentProject()
+    }
+
+    /// The blue glow round the screen's edge — see `latticeEdgePulse`.
+    private var latticeEdgeLight: some View {
+        RoundedRectangle(cornerRadius: 36, style: .continuous)
+            .strokeBorder(DS.Color.accent.color, lineWidth: 22)
+            .blur(radius: 14)
+            .opacity(latticeEdgePulse)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var latticeOnlyBadge: some View {
+        if let text = latticeOnlyFlash {
+            // ★ IN THE APP'S OWN LANGUAGE (his 2026-09-18: "The 'Lattice Only' notification
+            // looks completely different from the rest of the app"): the same panel
+            // surface, accent stroke and type the top banners use — not an orange card.
+            // ★ THE MODE CHIP'S OWN SIZE (his 2026-09-18: "needs to be MUCH bigger … closer
+            // to the look of the 'Aesthetic' mode title"): 22 pt semibold in a capsule of
+            // the accent at the chip's tint, the icon beside it.
+            HStack(spacing: DS.Space.sm) {
+                Image(systemName: latticeOnly ? "cube.transparent.fill" : "cube.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text(text.capitalized)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .padding(.vertical, DS.Space.s)
+            .padding(.horizontal, DS.Space.xl2)
+            .frame(height: LatticeStageModeChip.rowHeight)
+            .background(Capsule().fill(DS.Color.accent.opacity(0.14).color)
+                .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+            .dsShadow(DS.Shadow.panel)
+            .opacity(1)                                   // ★ always fully opaque
+            .transition(.scale(scale: 0.85))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("lattice-only-badge")
+        }
     }
 
     // MARK: ★ §6 — THE SURFACE STAGE'S TOOL PANEL
@@ -5471,6 +8137,11 @@ public struct WorkspacePlaceholder: View {
                             surfacePatternPiece = nil
                         }
                     }
+
+                case .region:
+                    if let aim = surfaceRegionAim, project.faceRegions.region(aim) != nil {
+                        surfaceRegionCluster(aim)
+                    }
                 }
             }
             // ★ KEPT ON SCREEN. Anchored to a point on the model, the cluster can
@@ -5577,10 +8248,75 @@ public struct WorkspacePlaceholder: View {
         case .pattern: model = surfacePatternFace.map {
             FaceRegionGeometry.frame(members: [$0], in: mesh).origin
         }
+        // the Region tool floats over the region it is aimed at
+        case .region:  model = surfaceRegionAim.flatMap { aim in
+            let faces = project.surfaceResolvedFaces(aim)
+            return faces.isEmpty ? nil : FaceRegionGeometry.frame(members: faces, in: mesh).origin
+        }
         }
         guard let m = model else { return nil }
         if surfaceDocksCluster { return .zero }   // docked: the slot is fixed
         return proj.project(settledWorld(SIMD3<Float>(m)))
+    }
+
+    /// ★★ THE REGION TOOL'S CLUSTER (2026-10-08): ✕ releases the aim; the aim in words; ↖ steps up
+    /// to the region it was cut from; Undo split takes its pieces back (a union keeps its parts);
+    /// Dissolve hands its faces back to the group they came from (a union gives its parts back).
+    /// Each verb shows only where it applies, so nothing on it can be refused.
+    @ViewBuilder private func surfaceRegionCluster(_ aim: RegionID) -> some View {
+        let regions = project.faceRegions
+        surfaceClusterButton("xmark", tint: DS.Color.textSecondary) {
+            surfaceRegionAim = nil
+            surfaceSelected = nil
+            surfaceRefusal = nil
+        }
+        .accessibilityLabel("Release the region")
+        surfaceClusterLabel(SurfaceRegionTool.label(aim, regions: regions,
+                                                    resolvedFaces: project.surfaceResolvedFaces(aim).count))
+        if let up = SurfaceRegionTool.parent(of: aim, regions: regions) {
+            surfaceClusterButton("arrow.up.left", tint: DS.Color.textSecondary) {
+                surfaceRegionAim = up
+                surfaceSelected = up
+                surfaceRefusal = nil
+            }
+            .accessibilityLabel("The region it was cut from")
+        }
+        if SurfaceRegionTool.canUndoSplit(aim, regions: regions) {
+            surfaceClusterTextButton("Undo split") {
+                project.surfaceUndoSplit(aim)
+                surfaceSelected = aim
+                surfaceRefusal = nil
+            }
+        }
+        if SurfaceDissolve.refusal(aim, regions: regions) == nil {
+            surfaceClusterTextButton("Dissolve") {
+                if let r = project.surfaceDissolve(aim) {
+                    let name = r.group.flatMap { g in project.selection.groups.first { $0.id == g }?.name }
+                    model.toast = r.faces.isEmpty
+                        ? "Dissolved — its parts are back."
+                        : "Dissolved — its faces are back in \(name ?? "no group")."
+                }
+                surfaceRegionAim = nil
+                surfaceSelected = nil
+                surfaceRefusal = nil
+            }
+        }
+    }
+
+    /// A word in the cluster, for a verb no icon says plainly (Undo split, Dissolve).
+    private func surfaceClusterTextButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.horizontal, DS.Space.m)
+                .frame(height: 44)
+                .background(Capsule().fill(DS.Color.chipSolid.color)
+                    .overlay(Capsule().strokeBorder(
+                        DS.Color.textPrimary.opacity(0.22).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("surface-region-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
     }
 
     private func surfaceClusterButton(_ icon: String, tint: RGBA,
@@ -6837,7 +9573,16 @@ public struct WorkspacePlaceholder: View {
             selectionsLibraryCard
             if !selectionsCollapsed { latticePreviewNotice }
         }
+        .latticeBandChipKeepOut()          // ★ the Selections panel, for the band chips
         .modifier(WorkspacePanelPlacement(minimized: selectionsCollapsed))
+    }
+
+    /// The banner the notice draws: production's switch and probe, the plan's own verdict.
+    private var latticePreviewBanner: LatticePreviewBanner? {
+        LatticePreviewBanner.make(previewOn: showStrutPreview,
+                                  hasModel: viewerMesh != nil,
+                                  scene: strutScene,
+                                  planWithheld: project.latticePreviewPlanWithheld)
     }
 
     /// The honesty banner for the strut layer — one row, shown only while that
@@ -6848,19 +9593,45 @@ public struct WorkspacePlaceholder: View {
         // there was no scene — and a preview that is on, empty and silent is
         // indistinguishable from a broken one.
         VStack(alignment: .leading, spacing: 0) {
-            if let banner = LatticePreviewBanner.make(previewOn: showStrutPreview,
-                                                      hasModel: viewerMesh != nil,
-                                                      scene: strutScene) {
-                Text(banner.text)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle((banner.isEmpty ? DS.Color.textPrimary
-                                                     : DS.Color.textSecondary).color)
-                    .padding(.vertical, DS.Space.xs)
-                    .padding(.horizontal, DS.Space.s)
-                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
-                        .overlay(Capsule().strokeBorder(
-                            DS.Color.strokePanel.color, lineWidth: 1)))
-                    .accessibilityIdentifier("lattice-preview-notice")
+            if let banner = latticePreviewBanner {
+                // ★ A CAPTION, AND THE SENTENCE BEHIND (i) (maintainer, 2026-09-06:
+                // the full sentence ran across the iPad and Print Parameters chips).
+                // Capped to the Selections column; an `.empty` reason wraps inside it.
+                HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                    Text(banner.caption)
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle((banner.isEmpty ? DS.Color.textPrimary
+                                                         : DS.Color.textSecondary).color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !banner.isEmpty {
+                        Button { latticeNoticeInfoShown = true } label: {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("About the lattice preview")
+                        .accessibilityIdentifier("lattice-preview-notice-info")
+                        .popover(isPresented: $latticeNoticeInfoShown) {
+                            ScrollView {
+                                Text(banner.text)
+                                    .dsStyle(DS.TypeScale.footnote)
+                                    .foregroundStyle(DS.Color.textPrimary.color)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                                    .padding(16)
+                            }
+                            .frame(maxWidth: 360, maxHeight: 420)
+                        }
+                    }
+                }
+                .padding(.vertical, DS.Space.xs)
+                .padding(.horizontal, DS.Space.s)
+                .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9))
+                    .overlay(Capsule().strokeBorder(
+                        DS.Color.strokePanel.color, lineWidth: 1)))
+                .frame(maxWidth: CGFloat(LatticePreviewBanner.noticeMaxWidthPT), alignment: .leading)
+                .accessibilityIdentifier("lattice-preview-notice")
             }
         }
     }
@@ -6893,7 +9664,10 @@ public struct WorkspacePlaceholder: View {
                     }
                 }
                 .buttonStyle(.plain)
-                Spacer()
+                // ★ NO SPACER WHEN COLLAPSED. With the width relaxed above, an
+                // expanding Spacer is the one thing left that would still stretch
+                // the pill — it pushes to fill whatever it is offered.
+                if !selectionsCollapsed { Spacer() }
                 if !selectionsCollapsed {
                     // ★ REGIONS (task 2026-08-14-face-regions). Combine faces
                     // into one selection, and split one into pieces.
@@ -6941,7 +9715,10 @@ public struct WorkspacePlaceholder: View {
         }
         // §6/§3a: the ONE panel width every page uses, so the lattice stage and the
         // TO stage are not "similar" — they are the same panel.
-        .frame(width: PageChrome.panelWidth, alignment: .leading)
+        // ★ AND THE CARD ITSELF — see `PageLeftModal`. Both stated the width, so
+        // relaxing only one of them would have changed nothing.
+        .frame(width: selectionsCollapsed ? nil : PageChrome.panelWidth,
+               alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
@@ -7344,7 +10121,14 @@ public struct WorkspacePlaceholder: View {
     /// EVERY failure with its number, its target and the fix with its value
     /// (§3b/§3c).
     @ViewBuilder private func latticeDiagnosisBadge(_ g: SelectionGroup) -> some View {
-        let d = latticeDiagnosis(g)
+        // ★ NEVER IN AESTHETIC (his ruling, 2026-08-25: "'Won't certify — tap
+        // for the fix' must not show in aesthetic" — categorical). The floor fix
+        // of 2026-08-24 silenced ONE trigger; the nozzle and strut checks in
+        // `LatticeFaceDiagnosis.of` could still hang a certificate warning on a
+        // stage that makes no certificate claim. So the badge itself is gated:
+        // whatever the diagnosis finds, aesthetic renders nothing.
+        let d = (project.lattice.stageMode ?? .structural) == .aesthetic
+            ? LatticeFaceDiagnosis.merged([]) : latticeDiagnosis(g)
         if let badge = d.badge {
             let tint = latticeVerdictTint(d.severity)
             HStack(spacing: DS.Space.xs) {
@@ -7413,11 +10197,26 @@ public struct WorkspacePlaceholder: View {
     /// the diagnoses of the selectables that are ACTUALLY latticed, so the badge
     /// describes things that exist and that a handle can move.
     private func latticeDiagnosis(_ g: SelectionGroup) -> LatticeFaceDiagnosis {
-        let limits = TopOptKit.latticeLimits(topology: project.lattice.lattice.id)
+        // ★ the RAW id to core (item a, his misroute): `.lattice.id` was octet for any id the
+        // Swift table lacks, so a Kelvin project read octet's limits
+        let limits = TopOptKit.latticeLimits(topology: project.lattice.topologyID)
         let nozzle = project.printParams.strutLineWidthMM
+        // ★ THE STAGE'S FLOOR, NOT THE ACCURACY FLOOR (his fix 3, 2026-08-24
+        // late): the badge judged every face against core's floor of 5 whatever
+        // the stage, so a single-cell aesthetic face — floor 1, baking exactly as
+        // asked — wore "Won't certify" the moment its density was dialled. The
+        // aesthetic stage makes no strength claim; its badge judges what it DOES
+        // claim: the stage's own floor and the nozzle. Structural is unchanged.
+        // ★ the per-REGION floor the bake and the run use (2026-10-02): the card and the
+        // badge had stayed on the stage floor when the region floor moved (4fdcdc59).
+        let floor = (project.lattice.stageMode ?? .structural)
+            .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
+                                       boundaryFinishWritten: project.lattice.singleCellMembers,
+                                       algorithm: project.lattice.resolvedAlgorithm)
         let each = latticedSelectableCards(g).map {
             LatticeFaceDiagnosis.of(card: $0,
-                                    cellsPerMemberFloor: limits.minCellsPerMember,
+                                    cellsPerMemberFloor: floor > 0
+                                        ? floor : limits.minCellsPerMember,
                                     nozzleWidthMM: nozzle)
         }
         return LatticeFaceDiagnosis.merged(each)
@@ -7466,7 +10265,11 @@ public struct WorkspacePlaceholder: View {
         writeDensity: ((Double) -> Void)? = nil,
         // ★ THE IN-PLANE EXPAND'S SETTER (maintainer, 2026-08-17), in mm like
         // the depth — and separate from it, because they grow different axes.
-        writeExpand: ((Double) -> Void)? = nil) -> some View {
+        writeExpand: ((Double) -> Void)? = nil,
+        // ★ THE PER-FACE CELL'S SETTER (2026-08-25, the grading options), in mm.
+        // 0 clears back to the derived cell — same escape the density has.
+        writeCell: ((Double) -> Void)? = nil,
+        writeFoci: ((Int) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let head = drawer.headline {
                 let tint = latticeVerdictTint(head.verdict)
@@ -7487,9 +10290,16 @@ public struct WorkspacePlaceholder: View {
             }
             ForEach(Array(drawer.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: DS.Space.s) {
+                    // ★ EVERY CONTROL'S LABEL READS AS A CONTROL (his ruling,
+                    // 2026-08-24, after one round-trip both ways: "making ALL
+                    // modifiable rows white and bold is a really smart move").
+                    // A modifiable row's label is white and heavier; a fact row
+                    // stays quiet.
                     Text(row.label)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .font(.system(size: row.modifiable ? 11 : 10,
+                                      weight: row.modifiable ? .bold : .semibold))
+                        .foregroundStyle(row.modifiable
+                            ? Color.white : DS.Color.textQuaternary.color)
                     Spacer(minLength: 0)
                     // ★ §4b — a DERIVED row gets no gesture and no control
                     // chrome: it is a fact, not a picker.
@@ -7502,7 +10312,32 @@ public struct WorkspacePlaceholder: View {
                     // would have inherited the DEPTH's drag and a duplicate id —
                     // a control that silently edits the wrong number. Each row
                     // gets its own slug, and only the depth gets the depth drag.
-                    if row.modifiable {
+                    if row.kind == .foci {
+                        // ★ THE FOCI ROW (2026-09-05): Auto + 1…5 as pills, no
+                        // keypad. The value string leads with the stated count
+                        // (or "Auto"), then the wall's measured status.
+                        // ★ GREYED ON A LOADED WALL (his rule, 2026-09-05): the pills
+                        // show, nothing lights, taps do nothing.
+                        HStack(spacing: 4) {
+                            ForEach(0...OrganicSyntheticStress.fociRange.upperBound, id: \.self) { n in
+                                let on = !row.disabled && (n == 0 ? row.value.hasPrefix("Auto")
+                                                                  : row.value.hasPrefix("\(n)"))
+                                Button { if !row.disabled { writeFoci?(n) } } label: {
+                                    Text(n == 0 ? "Auto" : "\(n)")
+                                        .font(.system(size: 10, weight: .bold)).monospacedDigit()
+                                        .foregroundStyle(on ? Color.white : DS.Color.textSecondary.color)
+                                        .padding(.vertical, 3).padding(.horizontal, 6)
+                                        .background(Capsule().fill(on
+                                            ? DS.Color.accent.opacity(0.55).color
+                                            : DS.Color.fillSelected.color))
+                                }
+                                .buttonStyle(.plain)
+                                .opacity(row.disabled ? 0.35 : 1)
+                                .accessibilityIdentifier("\(identifier)-foci-\(n)")
+                            }
+                        }
+                        .accessibilityLabel(row.disabled ? "Foci — carries load, not offered" : "Foci")
+                    } else if row.modifiable {
                         let slug = row.label.lowercased()
                         let padKey = "\(identifier)-\(slug)"
                         // ★ THE SETTER IS THE ROW'S OWN (maintainer, 2026-08-17).
@@ -7512,10 +10347,17 @@ public struct WorkspacePlaceholder: View {
                         let write: ((Double) -> Void)? =
                             row.kind == .density ? writeDensity
                             : row.kind == .expand ? writeExpand
+                            : row.kind == .cell ? writeCell
                             : writeDepth
                         Text(row.value)
-                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(DS.Color.textPrimary.color)
+                            // ★ 5.4 — the DENSITY control pops: white, heavier,
+                            // larger than its sibling rows (his fix, 2026-08-24
+                            // night: "make it white and a bit bold").
+                            .font(.system(size: row.kind == .density ? 13 : 11,
+                                          weight: row.kind == .density
+                                              ? .heavy : .bold)).monospacedDigit()
+                            .foregroundStyle(row.kind == .density
+                                ? Color.white : DS.Color.textPrimary.color)
                             .padding(.vertical, 3).padding(.horizontal, DS.Space.sm)
                             .background(Capsule().fill(DS.Color.fillSelected.color))
                             .contentShape(Rectangle())
@@ -7538,7 +10380,18 @@ public struct WorkspacePlaceholder: View {
                             // adjustment and writes through the same setter.
                             .onTapGesture { if write != nil { depthPadKey = padKey } }
                             .numberPad(Binding(get: { depthPadKey == padKey },
-                                               set: { if !$0 { depthPadKey = nil } }),
+                                               set: {
+                                                   // ★ THE PAD CLOSING IS THE
+                                                   // COMMIT: one bake, on OK.
+                                                   if !$0 {
+                                                       depthPadKey = nil
+                                                       refreshLatticeFaceCards()
+                                                       if showStrutPreview,
+                                                          project.lattice.enabled {
+                                                           buildStrutScene()
+                                                       }
+                                                   }
+                                               }),
                                        // ★ THE ROW'S OWN UNIT. "DENSITY 35 mm"
                                        // is what the shared-setter bug looked
                                        // like on screen.
@@ -7559,9 +10412,17 @@ public struct WorkspacePlaceholder: View {
                             }
                             .accessibilityIdentifier(padKey)
                     } else {
-                        Text(row.value)
-                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(DS.Color.textSecondary.color)
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(row.value)
+                                .font(.system(size: 11, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(DS.Color.textSecondary.color)
+                            // ★ ruling A: whose number it is, in a few words under it
+                            if let note = row.note {
+                                Text(note)
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(DS.Color.textTertiary.color)
+                            }
+                        }
                     }
                 }
             }
@@ -7616,7 +10477,9 @@ public struct WorkspacePlaceholder: View {
         case .density: return 0.5      // percent per point
         case .expand:  return 0.05     // mm per point
         case .depth:   return 0.05     // mm per point (its own drag uses this)
+        case .cell:    return 0.05     // mm per point — a cell is a length too
         case .fact:    return 0        // a fact does not move
+        case .foci:    return 0        // pills, not a scrub
         }
     }
 
@@ -7720,15 +10583,23 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("lattice-row-disclose-\(ref.key)")
+            // ★ 5.1 (2026-08-24 night): "Make clicking the face name open up the
+            // face details." The chevron is a 9 pt target; the NAME is what a
+            // finger actually lands on, so it drives the same disclosure. Only
+            // the name — the role chips to its right keep their own taps.
             Text(latticePrimitiveName(ref))
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(DS.Color.textTertiary.color)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    latticeDisclosure.toggle(ref, regions: &project.faceRegions)
+                }
             // ★ THE ONE HONEST DIFFERENCE (the interrupt's §3). The choice is
             // CAPTURED, and the row says the run will freeze this region without
             // latticing it — core's `lattice.regions` are geometry predicates and
             // a region is a voxel set (PR 331 §6). Three words, not silence.
-            if !ref.latticeReachesTheRun, role != nil {
-                Text(Self.latticeRegionNotConsumed)
+            if !project.latticeReachesTheRun(ref), role != nil {
+                Text(LatticeSectorOutline.notLatticedWords(protected: force.isProtected(g.id)))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DS.Color.warning.color)
                     .padding(.vertical, 2).padding(.horizontal, 5)
@@ -7771,7 +10642,7 @@ public struct WorkspacePlaceholder: View {
     /// ★ Three words (R7). The region's depth IS consumed — it is PR 331's
     /// per-sector protection depth; what the run cannot consume yet is the
     /// lattice half.
-    static let latticeRegionNotConsumed = "Frozen, not latticed"
+    static let latticeRegionNotConsumed = LatticeSectorOutline.notLatticedWords(protected: true)   // ★ batch E: never "Frozen"
 
     /// PR 331 §5c's small-face policy, applied to this list: a selectable holding
     /// fewer voxels than the sliver floor is dimmed. Faces and regions alike, from
@@ -7793,12 +10664,7 @@ public struct WorkspacePlaceholder: View {
 
     /// A selectable's short name on its row. Two words at most (R7).
     private func latticePrimitiveName(_ ref: LatticeSelectableRef) -> String {
-        switch ref {
-        case let .face(_, f): return "Face \(project.runFaceID(f))"
-        case .primitive: return "Primitive"
-        case let .region(_, rid):
-            return project.faceRegions.region(rid)?.name ?? "Region \(rid)"
-        }
+        project.latticeSelectableName(ref)   // one definition (ruling 3 names walls with it)
     }
 
     /// ★ One primitive's own answer: Lattice / Solid / Off (§3c). Three, not two —
@@ -7919,7 +10785,19 @@ public struct WorkspacePlaceholder: View {
     /// ★ It survived the removal of the group drawer (2026-08-17) — it belongs to
     /// the SELECTABLE drawer and was only sitting next to the group's copy.
     private var perRegionDensity: Bool {
-        project.lattice.densityMode == .perRegion
+        // ★ THE DENSITY ROW IS A CONTROL IN AESTHETIC TOO (his spec, 2026-08-24
+        // evening: a per-face density control, aesthetic mode only — scrub is the
+        // slider, the keypad types it). Structural keeps the per-region gate:
+        // there the density is the certificate's business.
+        // ★★★ NOT UNDER SIM (his ruling, 2026-08-25: "Remove the manual density
+        // since the Density is set to 'Sim' … Make it grey and make sure it cannot
+        // be adjusted when in Sim. Let Sim do its thing"). A finite-element solve
+        // decides every strut there; a keypad beside it edits a number the picture
+        // does not read, which is the decorative-control defect this page keeps
+        // paying down.
+        if project.lattice.densityMode == .sim { return false }
+        return project.lattice.densityMode == .perRegion
+            || (project.lattice.stageMode ?? .structural) == .aesthetic
     }
 
     /// ★ THE DRAWER BENEATH ONE SELECTABLE (the interrupt's §2b) — the SAME
@@ -7933,13 +10811,64 @@ public struct WorkspacePlaceholder: View {
         // (task 2026-08-17-lattice-stage-repair §2). It was the GROUP's card
         // under a per-selectable depth label until this task, which is why
         // dragging a face's handle moved the number and nothing under it.
+        // ★ THE AESTHETIC DENSITY IS A RELATIVE DIAL (his ruling, 2026-08-24
+        // night): 0% = the thinnest printable lattice at this face's cell, 100% =
+        // the QUILT (struts fused). The stored value stays an absolute fraction;
+        // only the READING and the KEYPAD speak the relative scale.
+        let aesthetic = (project.lattice.stageMode ?? .structural) == .aesthetic
+        let card = latticeSelectableCards[ref.key]
+        let band = project.latticeAestheticDensityBand(cellMM: card?.cellMM ?? 0)
+        let userStated = project.lattice.selectableDensity[ref.key] != nil
+        // ★★★ THE DIAL IS LINEAR IN STRUT WIDTH (his 2026-08-25 ruling and the
+        // saturation measured on his own cell — see `latticeDensityPercent`).
+        let cardCell = card?.cellMM ?? 0
+        let autoRho = project.latticeDensityForPercent(
+            ProjectModel.latticeAutoDensityPercent, cellMM: cardCell)
+        let storedRho = project.latticeSelectableDensity(ref, in: g.id)
+            ?? (cardCell > 0 ? (autoRho ?? card?.relativeDensity ?? 0) : (card?.relativeDensity ?? 0))
+        let relativePct = project.latticeDensityPercent(rho: storedRho,
+                                                        cellMM: cardCell)
+        // ★ THE CELL ROW IS A CONTROL ONLY UNDER THE NEW GRADING OPTIONS (his
+        // 2026-08-25 instruction: "Only make the cell size visible with the new
+        // grading options") — under Full it stays the fact row it always was.
+        let cellControl = aesthetic
+            && project.lattice.gradingMode != .full
+        let statedCell = project.latticeSelectableCellMM(ref)
         let drawer = LatticeRegionDrawer.make(
-            card: latticeSelectableCards[ref.key],
+            card: card,
             depthMM: project.latticeSlabDepthMM(ref, in: g.id),
             held: force.isProtected(g.id),
-            latticeReachesTheRun: ref.latticeReachesTheRun,
+            latticeReachesTheRun: project.latticeReachesTheRun(ref),
             perRegionDensity: perRegionDensity,
-            expandMM: project.latticeExpandMM(ref))
+            densityFirst: aesthetic && project.lattice.singleCellMembers,
+            // ★ AUTO IS SAID OUT LOUD (his fix 7): a face nobody dialled shows
+            // "Auto · N%" — so a stored override (like the stale clamped 20%
+            // that painted his 'default' quilt) is distinguishable from the
+            // derived default at a glance. Typing 0 clears back to Auto.
+            // no strut law for the id (item a): no percent to show
+            densityDisplay: aesthetic
+                ? relativePct.map { userStated ? String(format: "%.0f%%", $0)
+                                               : String(format: "Auto · %.0f%%", $0) }
+                : nil,
+            cellControl: cellControl,
+            // ★ "Auto · N mm" when nobody typed one — same escape hatch the
+            // density row has; typing 0 clears back to Auto.
+            cellDisplay: cellControl
+                ? (statedCell.map { String(format: "%.2f mm", $0) }
+                    ?? String(format: "Auto · %.2f mm", card?.cellMM ?? 0))
+                : nil,
+            expandMM: project.latticeExpandMM(ref),
+            syntheticFoci: latticeSyntheticFociRow(ref),
+            fociDisabled: project.latticeWallLoaded(ref) == true,
+            // ★★ THE WORD AND THE OFFER READ ONE VALUE — core's verdict (ruling 1,
+            // 2026-09-29): "Carries load" (no foci) or "Barely loaded — a made-up load
+            // can be added". Unmeasured ⇒ no word. This retires Receipt C's precedence
+            // in this row (the run's "carried load, untouched" line): the ruling names
+            // the preview's core call, and the offer beside it reads that same verdict.
+            wallStress: latticeSyntheticFociRow(ref) == nil ? nil
+                : project.latticeWallLoaded(ref).map(OrganicSyntheticStress.wallWord(loaded:)),
+            // ★ Q2: a saved type core does not call live — its words lead the drawer
+            typeRefusal: latticeTypeRefusal)
         latticeDrawerBody(drawer, depthDrag: latticePrimitiveDepthDrag(g, ref),
                           identifier: "lattice-drawer-\(ref.key)",
                           writeDepth: { mm in
@@ -7950,14 +10879,54 @@ public struct WorkspacePlaceholder: View {
                           // speak fraction, as core's band does. ONE conversion,
                           // here — the same shape `sectorDensityRow` uses.
                           writeDensity: { pct in
-                              project.writeLatticeDensity(ref, fraction: pct / 100)
+                              // ★ Aesthetic keypads speak the RELATIVE scale
+                              // (printable→quilt); the store stays absolute.
+                              // 0 (or less) clears back to AUTO — the one way
+                              // out of a stored override.
+                              let f: Double? = pct <= 0 ? nil
+                                  : aesthetic
+                                  ? project.latticeDensityForPercent(
+                                        Swift.min(pct, 100), cellMM: cardCell)
+                                  : pct / 100
+                              project.writeLatticeDensity(
+                                  ref, fraction: f, cellMM: card?.cellMM ?? 0)
                               refreshLatticeFaceCards()
                           },
                           writeExpand: { mm in
                               project.writeLatticeExpandMM(ref, mm: mm)
                               refreshLatticeFaceCards()
+                          },
+                          // ★ The per-face CELL (2026-08-25). 0 clears to Auto;
+                          // the write clamps to the declared depth and the bake
+                          // caps per voxel at the local wall — never-overshoot
+                          // survives a typed number.
+                          writeCell: { mm in
+                              project.writeLatticeCellMM(
+                                  ref, mm: mm > 0 ? mm : nil,
+                                  declaredDepthMM:
+                                      project.latticeSlabDepthMM(ref, in: g.id))
+                              refreshLatticeFaceCards()
+                          },
+                          // ★ The wall's synthetic foci (2026-09-05): 0 clears to
+                          // Auto; the bake re-injects on the new count.
+                          writeFoci: { n in
+                              guard project.latticeWallLoaded(ref) != true else { return }
+                              project.writeLatticeSyntheticFoci(ref, foci: n > 0 ? n : nil)
+                              if showStrutPreview, project.lattice.enabled { buildStrutScene() }
                           })
             .padding(.leading, DS.Space.m)
+    }
+
+    /// ★ THE FOCI ROW'S TEXT, or nil when the row must not exist: only an organic
+    /// lattice, under an Aesthetic stage, with synthetic stresses on. "Auto · 2"
+    /// when the wall states nothing, its own count otherwise; "—" on a wall core found
+    /// to carry load. The verdict's words are the row beneath it.
+    private func latticeSyntheticFociRow(_ ref: LatticeSelectableRef) -> String? {
+        let lat = project.lattice
+        guard lat.organicSyntheticStressesActive else { return nil }   // ruling 2
+        if project.latticeWallLoaded(ref) == true { return "—" }
+        return project.latticeSelectableSyntheticFoci(ref).map { "\($0)" }
+            ?? "Auto · \(lat.organicSyntheticFoci)"
     }
 
     private func latticeVerdictTint(_ v: LatticeFaceCard.Verdict) -> RGBA {
@@ -8019,21 +10988,45 @@ public struct WorkspacePlaceholder: View {
         latticeCardsToken += 1
         let token = latticeCardsToken
         let resolution = Self.latticeCardPreviewResolution
-        let topology = project.lattice.lattice
+        // ★ the RAW id (item a, his misroute): the card asks core by id; a resolved LatticeType
+        // was octet for any id the Swift table lacks
+        let topologyID = project.lattice.topologyID
         let widthMM = project.printParams.strutLineWidthMM
+        // ★ THE STAGE'S FLOOR, derived once for the batch — the same expression
+        // the bake uses, so the cards and the picture obey one law.
+        // ★ the per-REGION floor the bake and the run use (2026-10-02): the card and the
+        // badge had stayed on the stage floor when the region floor moved (4fdcdc59).
+        let stageFloor = (project.lattice.stageMode ?? .structural)
+            .regionCellsPerMemberFloor(topology: project.lattice.topologyID,
+                                       boundaryFinishWritten: project.lattice.singleCellMembers,
+                                       algorithm: project.lattice.resolvedAlgorithm)
         let densityGCM3 = model.densityGCm3(for: project.material)
         let depthsCopy = depths
         let rhosCopy = rhos
+        // ★★ ONE NUMBER, ONE SOURCE (maintainer, 2026-10-03, item 5): the wall the bake measured
+        // and the cell it lays there, per drawer — nil (declared depth, core's derivation) with no
+        // bake yet or under an algorithm whose bake does not derive region cells.
+        let baked = LatticeRegionCells.selectableCells(project: project, scene: strutScene)
+        let bakedCopy = keys.map { baked[$0] }
+        // ★ batch E (#362, ported 2026-10-08): a cut piece holds only its SHARE of its face — the
+        // card's held voxels (and so its grams) are the face's, scaled by that share; nil = whole
+        let sharesCopy = project.latticeCardHeldShares()
+        let organicCards = project.lattice.algorithm == "organic"
+        // ★ the job's cap (#358 E1/D1): the card's floors are the run's
+        let capCopy = LatticeSettings.jobDensityCap(topologyID: project.lattice.topologyID,
+                                                    allowQuilt: project.lattice.allowQuilt,
+                                                    algorithm: project.lattice.algorithm)
         Task.detached(priority: .userInitiated) {
             guard let preview = try? TopOptKit.faceSlabPreview(
                 stepPath: path, faceIDs: ids, depthsMM: depthsCopy,
                 resolution: resolution) else { return }
             var byKey: [String: LatticeFaceCard] = [:]
             for (i, fid) in ids.enumerated() where i < preview.voxels.count {
-                byKey[keysCopy[i]] = LatticeFaceCardDerivation.card(
+                var card = LatticeFaceCardDerivation.card(
                     faceID: fid, depthMM: depthsCopy[i],
-                    heldVoxels: preview.voxels[i], spacingMM: preview.spacingMM,
-                    densityGCM3: densityGCM3, topology: topology,
+                    heldVoxels: LatticeSectorOutline.heldVoxels(preview.voxels[i], share: sharesCopy[keysCopy[i]]),
+                    spacingMM: preview.spacingMM,
+                    densityGCM3: densityGCM3, topologyID: topologyID,
                     // ★ THE MODE'S OWN DENSITY, WHICH NO CALL SITE PASSED UNTIL
                     // NOW (task 2026-08-17-lattice-stage-repair §1d). nil is
                     // AUTO and means core derives; a number is what the user
@@ -8051,7 +11044,15 @@ public struct WorkspacePlaceholder: View {
                     // against cannot disagree about the nozzle. A card built
                     // without it would fall back to "cannot tell", never to a
                     // silent pass.
-                    minExtrudableWidthMM: widthMM)
+                    minExtrudableWidthMM: widthMM,
+                    cellsPerMemberFloor: stageFloor,
+                    memberWidthMM: bakedCopy[i]?.measuredWidthMM,
+                    cellMM: bakedCopy[i]?.cellMM,
+                    maxRelativeDensity: capCopy)
+                card.cellRangeMM = bakedCopy[i]?.cellRangeMM
+                // ★★ ruling A (2026-10-08): whose number the drawer's "Cells across" is
+                card.cellsAcrossSource = organicCards ? .none : (bakedCopy[i] != nil ? .estimate : .core)
+                byKey[keysCopy[i]] = card
             }
             // The group cards keep their UUID key (the group row reads them by
             // group id); everything else is keyed by `LatticeSelectableRef.key`.
@@ -8750,6 +11751,7 @@ public struct WorkspacePlaceholder: View {
             Color.clear.preference(key: BottomBarHeightKey.self,
                                    value: g.size.height)
         })
+        .latticeBandChipKeepOut()          // ★ the bar's own frame, for the band chips
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.horizontal, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4)
@@ -8787,6 +11789,11 @@ public struct WorkspacePlaceholder: View {
         // "any lattice" to "graded" by the device-failure task, because PR 285
         // taught core to run the uniform case).
         guard latticeDesignBoxConflict == nil else { return false }
+        // ★★ RULING 4 (item 5, 2026-09-30): lattice on and no include wall ⇒ refused on the
+        // button, before the run starts, in the stage's words — core would lattice every variant
+        // WHOLE. The page's Optimize reads this same value (`baseCanOptimize`), and every start
+        // (`requestRun`, `startRun`, the page's "Optimize again") is gated on it.
+        guard latticeOptimizeRefusal == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -8807,9 +11814,47 @@ public struct WorkspacePlaceholder: View {
                                            graded: project.lattice.densityMode == .sim)
     }
 
+    /// ★ ruling 4 (item 5): why Optimize may not start with this lattice — the ONE definition
+    /// of "has an include wall" (`LatticeJobIncludeGate`), on the emission the run would send.
+    private var latticeOptimizeRefusal: String? {
+        LatticeJobIncludeGate.optimizeRefusal(latticeEnabled: project.lattice.enabled,
+                                              regions: project.latticeJobRegions().regions)
+            ?? latticeSettingsRefusal
+    }
+
+    /// ★ REVIEW 2026-10-01: a saved type core can't run (written by the variant page's old,
+    /// unguarded pane) gives the run NO lattice block — Optimize ran the part bare and said
+    /// nothing; "Lattice" failed on core's generic message. Both refuse on the button, in the
+    /// picker's own sentence (`LatticeTypeCatalog.selectionRefusal`), and the tap opens Settings,
+    /// where the offered chip is the fix. A different condition from "nothing set to lattice",
+    /// so its own words. Lattice off asks nothing.
+    private var latticeTypeRefusal: String? {
+        project.lattice.enabled ? LatticeTypeCatalog.selectionRefusal(project.lattice.topologyID) : nil
+    }
+    /// ★★ A SETTING CORE CAN'T RUN: the saved type (above), then Structural Stepped (reviewer,
+    /// 2026-10-08: "BLOCK the run (no fallback), saying it waits on core's strength check for mixed
+    /// cell sizes" — `LatticeStructuralSteppedGate`). Both grey Lattice and Optimize, and both taps
+    /// open Settings, where the line says why and the fix is one tap.
+    private var latticeSettingsRefusal: String? {
+        latticeTypeRefusal ?? LatticeStructuralSteppedGate.refusal(project.lattice)
+    }
+    /// The tap on a button greyed by `latticeSettingsRefusal`: the Lattice stage's Settings, where the
+    /// Type row says why and the offered chip fixes it. Navigation only — never a type picked.
+    private func goToLatticeType() {
+        if showLatticePage { closeLatticePage() }
+        if stage != .lattice { goToStage(.lattice) }
+        showLatticeWizard = true
+    }
+    private static let latticeTypeTapHint = "Opens the lattice settings"
+    /// Whether a greyed Lattice or Optimize is greyed by that saved type — then its tap opens Settings.
+    private func opensLatticeType(_ ok: Bool, _ summary: String) -> Bool {
+        !ok && summary == latticeSettingsRefusal
+    }
+
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
+        if let why = latticeOptimizeRefusal { return why }
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -8859,26 +11904,21 @@ public struct WorkspacePlaceholder: View {
     ///
     /// Same stature as Optimize, deliberately: it is the other thing you can ask
     /// this screen to DO, not a modifier on the first.
+    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked.
     private var latticeThisButton: some View {
         let ok = canLatticeThis
+        let summary = latticeThisSummary
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        let opensType = opensLatticeType(ok, summary)
         return Button {
-            guard ok else { return }
-            requestLatticeRun()
+            if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Lattice").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(latticeThisSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl3)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Lattice", summary: summary, ok: ok, marks: marks || opensType,
+                                    horizontalPadding: DS.Space.xl3)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks && !opensType)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
         .accessibilityIdentifier("lattice-this-button")
     }
 
@@ -8896,38 +11936,78 @@ public struct WorkspacePlaceholder: View {
     /// `RunModel.latticeBridgeRunner` now writes the SAME document to a temp
     /// directory and hands it to core's own parser, so both routes run the same
     /// job. The only requirement left is a lattice to build.
+    /// ★ D1 EMISSION GATE (maintainer, 2026-09-03): organic is selectable under
+    /// Structural, but core refuses the job at runtime until its structural
+    /// certification for organic is wired. The UI never writes a job core refuses,
+    /// so the run button is the gate — disabled, carrying core's own words — while
+    /// every control above it stays enabled. Lifts when
+    /// `TopOptKit.organicStructuralCertificationWired` does.
+    /// ★ THE SEPARATIONS CERTIFICATION FOUND (maintainer, 2026-09-03): when a run's
+    /// receipt carries `fitting_separations_mm` (D2), store them on the project so
+    /// Settings shows the factored choices, and — under a Structural stage — ask which
+    /// the user prefers ("you can always change this in the settings"). Core's numbers,
+    /// offered, never computed here; nothing fires until core writes the key.
+    @State private var organicFitChoices: [Double] = []
+    private func offerCertifiedSeparations(from receipt: OrganicRunReceipt?) {
+        guard let found = receipt?.fittingSeparationsMM, !found.isEmpty else { return }
+        let sizes = found.filter { $0 > 0 }.sorted()
+        guard !sizes.isEmpty else { return }
+        project.lattice.organicFittingSeparationsMM = sizes
+        model.persistCurrentProject()
+        if project.lattice.isOrganic, (project.lattice.stageMode ?? .structural) == .structural {
+            organicFitChoices = sizes
+        }
+    }
+    private var organicFitPromptShown: Binding<Bool> {
+        Binding(get: { !organicFitChoices.isEmpty }, set: { if !$0 { organicFitChoices = [] } })
+    }
+
+    private var organicStructuralGateOpen: Bool {
+        !(project.lattice.isOrganic
+          && (project.lattice.stageMode ?? .structural) == .structural
+          && !TopOptKit.organicStructuralCertificationWired)
+    }
+
+    /// ★★ RULING 4 (maintainer, 2026-09-30): the stage asks the ONE question a variant and
+    /// Optimize ask (`LatticeJobIncludeGate`) — an exclude-only project lattices nothing, so
+    /// "Lattice" greys with the reason it already showed. It used to ask only whether ANY region
+    /// was emitted, and an exclude-only list would have latticed the whole part but those walls.
+    /// (An organic Fit with no include wall — "OFFER, NEVER SUBSTITUTE", ruling Aug 5 — is the
+    /// same refusal and was already said in these words first; its own branch was unreachable.)
+    private var latticeStageRefusal: String? {
+        LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
+                                      regions: project.latticeJobRegions().regions)
+            ?? latticeSettingsRefusal
+    }
+
     var canLatticeThis: Bool {
-        project.lattice.enabled && !project.latticeJobRegions().regions.isEmpty
+        latticeStageRefusal == nil && organicStructuralGateOpen
     }
 
     private var latticeThisSummary: String {
-        guard project.lattice.enabled else { return "lattice mode is off" }
-        let n = project.latticeJobRegions().regions
-            .filter { $0.role == .include }.count
-        if n == 0 { return "nothing set to lattice" }
+        // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
+        // construction — ruling c, 2026-09-30.)
+        if let why = latticeStageRefusal { return why }
+        if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
+        let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
+    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked.
     private var optimizeButton: some View {
         let ok = canOptimize
+        let summary = optimizeSummary
+        let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
+        let opensType = opensLatticeType(ok, summary)
         return Button {
-            guard ok else { return }
-            requestRun()
+            if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            VStack(spacing: 1) {
-                Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(optimizeSummary)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.75)
-            }
-            .foregroundStyle((ok ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.xl5)
-            .background(Capsule().fill(ok ? DS.Color.accent.color : DS.Color.fillDisabled.color)
-                .overlay(Capsule().strokeBorder(ok ? .clear : DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(ok ? DS.Shadow.accentGlow : DS.Shadow.panel)
+            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks || opensType,
+                                    horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
-        .disabled(!ok)
+        .disabled(!ok && !marks && !opensType)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
     }
 }
 
@@ -8935,4 +12015,22 @@ public struct WorkspacePlaceholder: View {
     let m = AppModel(materialsPath: nil)
     m.open(RecentProject(name: "Shelf Bracket v2", materialName: "PLA", process: .fdm))
     return WorkspacePlaceholder(model: m, project: m.project!)
+}
+
+/// One-line memory for the stepped-guard diagnostic, so it logs on CHANGE rather
+/// than on every SwiftUI evaluation (the first cut flooded the console at 5 Hz).
+enum SteppedGuardLog { @MainActor static var last: String? }
+
+/// ★★★ THE WALL WALK IS MEASURED ONCE PER SCENE, NOT ONCE PER BODY EVALUATION.
+/// `wallWidthAlongNormalMM` walks a 128³ occupancy per region, and SwiftUI
+/// evaluates the workspace body on every drawer keystroke — the re-measurement
+/// was the wait he watched the 2-cell ladder flash through. The scene token
+/// (bumped exactly when a new strut scene lands) plus the derivation's actual
+/// inputs form the key; everything else returns the remembered cells.
+enum LatticeRegionCellMemo {
+    // Keyed by the full input fingerprint, cleared when the scene token moves —
+    // Fit (p05) and Stepped (p50) can both evaluate in one frame, so one slot
+    // would thrash between the two and memoise nothing.
+    @MainActor static var token = ""
+    @MainActor static var byKey: [String: [Double]] = [:]
 }
