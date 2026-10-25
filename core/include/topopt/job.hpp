@@ -1267,8 +1267,8 @@ struct RunObservability {
   int matfree_mixed_precision = -1;
   int mg_rearm_period = 0;
   // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own TU).
-  // `fingerprint` is the core commit at BUILD time ("<sha12>", or
-  // "<sha12>-dirty-<diff8>" from uncommitted core changes; item 44) and says
+  // `fingerprint` is the core's tree hash at BUILD time ("<tree12>", or
+  // "<tree12>-dirty-<diff8>" from uncommitted core changes; item 44) and says
   // which SOURCE; this says whether the binary is CURRENT. A targeted build that reports success
   // without relinking leaves the SHA right and the binary stale — measured, that
   // cost 21 minutes and three runs reading as "the code path is never reached".

@@ -285,7 +285,7 @@ struct OrganicSyntheticRegionInfo {
 
 struct RunInfo {
   std::string cli_version;   // topopt::version()
-  std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
+  std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core tree hash or "dev")
   // ★ WHEN THIS BINARY WAS COMPILED (__DATE__ " " __TIME__ of the CLI's own
   // translation unit). The SHA says which SOURCE ERA; this says whether the binary
   // is actually current. A targeted build that reports success without relinking

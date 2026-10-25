@@ -24,9 +24,10 @@
 #include "topopt/settings.hpp"
 #include "topopt/version.hpp"
 
-// A build fingerprint: the core git commit at BUILD time, "<sha12>" when the
-// core tree is clean and "<sha12>-dirty-<diff8>" when tracked files under core/
-// differ from HEAD (item 44; core/cmake/TopoptFingerprint.cmake, restamped on
+// A build fingerprint: the core's TREE hash at BUILD time (HEAD's core/ tree and
+// app/scripts/build_core.sh), "<tree12>" when both are clean and
+// "<tree12>-dirty-<diff8>" when tracked files under either differ from HEAD
+// (item 44; core/cmake/TopoptFingerprint.cmake, restamped on
 // every build by the topopt_fingerprint target). A LAN worker exposes it via
 // /health so the iPad app can REFUSE a worker whose core differs from its own —
 // the version-skew guard (handoff 093 STEP 3d): two cores that differ silently
@@ -393,8 +394,9 @@ static int run_flexible(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   // ── ★★ SAY WHICH BINARY THIS IS, ON EVERY SUBCOMMAND ──────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the core commit at BUILD time (+ a dirty marker;
-  // it was the SHA at CONFIGURE time until item 44). It answers "which source"
+  // TOPOPT_BUILD_FINGERPRINT is the core's tree hash at BUILD time (+ a dirty
+  // marker; it was the SHA at CONFIGURE time until item 44, then the HEAD commit
+  // until its follow-up). It answers "which source"
   // and still NOT "is this binary current", which is the failure that cost
   // time here. `cmake --build --target topopt topopt-cli` reported success without
   // relinking the CLI, so libtopopt.a carried a change topopt-cli did not — for 21
@@ -443,8 +445,8 @@ int main(int argc, char** argv) {
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
   // (announce moved to the top of main -- every subcommand, not just `run`)
   // ── ★★ SAY WHICH BINARY THIS IS, EVERY RUN ────────────────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the core commit at BUILD time (+ dirty marker;
-  // configure time before item 44). It answers "which source" and it does NOT
+  // TOPOPT_BUILD_FINGERPRINT is the core's tree hash at BUILD time (+ dirty
+  // marker; configure time before item 44). It answers "which source" and it does NOT
   // answer "is this binary current", which is the
   // failure that actually cost time: `cmake --build --target topopt topopt-cli`
   // reported success and did not relink the CLI, so libtopopt.a carried a change

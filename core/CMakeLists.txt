@@ -8,15 +8,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ★ THE CORE BUILD FINGERPRINT IS TAKEN AT BUILD TIME (item 44). An always-run
 # target restamps <build>/generated/fingerprint/topopt_build_fingerprint.h on
-# every build (rewritten only when it changes): the core's git HEAD, plus
-# "-dirty-<diff8>" when tracked files under core/ differ from it. It used to be
-# an execute_process here at CONFIGURE time, so a rebuild after a new commit
-# kept the old SHA until cmake was re-run, and a binary built from uncommitted
-# changes claimed a clean commit. topopt-cli (--version, run_info.json) and
+# every build (rewritten only when it changes): a TREE hash of everything that
+# changes the built core — HEAD's core/ tree and app/scripts/build_core.sh —
+# plus "-dirty-<diff8>" when tracked files under either differ from HEAD. A
+# docs-only or app-only commit leaves it unchanged. It used to be an
+# execute_process here at CONFIGURE time, so a rebuild after a new commit kept
+# the old SHA until cmake was re-run, and a binary built from uncommitted
+# changes claimed a clean commit; then it was the HEAD commit, which every
+# docs commit moved. topopt-cli (--version, run_info.json) and
 # app/scripts/build_core.sh (the app's CoreFingerprint) both read this target.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/TopoptFingerprintTarget.cmake")
 topopt_add_fingerprint_target(topopt_fingerprint "${CMAKE_CURRENT_SOURCE_DIR}"
-                              "${CMAKE_CURRENT_BINARY_DIR}/generated/fingerprint")
+                              "${CMAKE_CURRENT_BINARY_DIR}/generated/fingerprint"
+                              "../app/scripts/build_core.sh")
 
 # CI configures with -DTOPOPT_REQUIRE_DEPS=ON so the pipeline proves the
 # locked dependencies (ARCHITECTURE.md §4) are installed and findable.
@@ -315,10 +319,11 @@ endif()
 
 enable_testing()
 
-# ★ Item 44: the fingerprint is BUILD-time. A throwaway git repo + a toy project
-# wired through the SAME cmake/TopoptFingerprintTarget.cmake: configure once,
-# build, commit, build again (no configure) -> the new commit; edit a tracked
-# file -> "-dirty-<diff8>"; restore -> clean again; configure ran exactly once.
+# ★ Item 44: the fingerprint is BUILD-time and a TREE hash. A throwaway git repo
+# + a toy project wired through the SAME cmake/TopoptFingerprintTarget.cmake:
+# configure once, build, commit to core/ or build_core.sh, build again (no
+# configure) -> a new fingerprint; a docs-only commit -> the same one; edit a
+# tracked file -> "-dirty-<diff8>"; restore -> clean again; configure ran once.
 add_test(NAME build_fingerprint_rebuild
   COMMAND "${CMAKE_COMMAND}"
           "-DCORE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -2093,7 +2098,7 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
   target_link_libraries(topopt_cli PRIVATE topopt)
   # Build fingerprint for `topopt-cli --version` (handoff 093, worker /health +
-  # the app's version-skew refusal): the core git commit at BUILD time, with a
+  # the app's version-skew refusal): the core's tree hash at BUILD time, with a
   # dirty marker (see topopt_fingerprint at the top of this file), else "dev".
   # Two cores that differ silently produce different parts, so the app refuses
   # a worker whose fingerprint != its own.

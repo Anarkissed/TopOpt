@@ -178,9 +178,11 @@ BUILD_TIME="$(LC_ALL=C date '+%b %e %Y %H:%M:%S')"
 # Write the fingerprint of the core we just built into a generated Swift file the
 # app reads. It is the value each slice's build STAMPED (the topopt_fingerprint
 # target, core/cmake/TopoptFingerprint.cmake) — the SAME target and script that
-# bake `topopt-cli --version` — taken at build time: "<sha12>" for a clean core
-# tree, "<sha12>-dirty-<diff8>" when tracked files under core/ differ from HEAD,
-# "dev" without git (never equals a real worker fingerprint, so skew fails safe).
+# bake `topopt-cli --version` — taken at build time: "<tree12>", a hash of HEAD's
+# core/ tree and THIS script (everything that changes the built core; a docs-only
+# commit leaves it unchanged), "<tree12>-dirty-<diff8>" when tracked files under
+# core/ or this script differ from HEAD, "dev" without git (never equals a real
+# worker fingerprint, so skew fails safe).
 # All three slices must agree; if the core tree changed while they built, the
 # xcframework mixes sources and is refused. RemoteRunner compares this to a
 # worker's /health + Bonjour-TXT fingerprint so a version-skewed worker is
@@ -202,8 +204,9 @@ cat > "$FP_FILE" <<EOF
 //
 // The core the vendored libraries were built from, stamped AT BUILD TIME by the
 // SAME CMake target that bakes \`topopt-cli --version\` (topopt_fingerprint,
-// core/cmake/TopoptFingerprint.cmake): "<sha12>", or "<sha12>-dirty-<diff8>"
-// when the core tree had uncommitted changes.
+// core/cmake/TopoptFingerprint.cmake): "<tree12>" (a hash of core/ and
+// app/scripts/build_core.sh at HEAD), or "<tree12>-dirty-<diff8>" when either
+// had uncommitted changes.
 // RemoteRunner reads this and refuses a LAN worker whose core fingerprint differs
 // (worker /health + Bonjour TXT), so a silent core mismatch — which would produce
 // a different part — can never run. The user never sees or types a fingerprint.
