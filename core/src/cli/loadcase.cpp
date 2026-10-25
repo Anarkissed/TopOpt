@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -435,16 +436,160 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     }
   };
   bool any_fixture = false;
-  for (int k = 0; k < grid.nz; ++k)
-    for (int j = 0; j < grid.ny; ++j)
-      for (int i = 0; i < grid.nx; ++i)
-        if (grid.tag(i, j, k) == VoxelTag::Fixture) {
-          any_fixture = true;
-          for (int dk = 0; dk <= 1; ++dk)
-            for (int dj = 0; dj <= 1; ++dj)
-              for (int di = 0; di <= 1; ++di)
-                clamp_node(fea_node_index(grid, i + di, j + dj, k + dk));
+  if (lc.anchor_bearing) {
+    // REAL BOLTS (job loads.anchor_model "bearing"; the reviewer's brief of 2026-10-25
+    // 20:10). Each anchor holds only where the part presses on it: one spring per node
+    // of the anchor's voxel surface, along the CAD normal turned out of the part. A
+    // Winkler support of steel, E 200 GPa acting through 1 mm: (E / L) per mm^2 of the
+    // face's true area (the per-node area is below). Fixed in mm, so it
+    // does not stiffen toward a clamp as the grid refines. Across the normal, a pressing
+    // node has 1e-4 of that per-area stiffness: nearly frictionless, it holds only the
+    // sliding and spinning a frictionless support leaves free. A released node has
+    // nothing: any stiffness on the half pulling away acts as glue (the steel barely
+    // compresses, so that half moves ~50x further than the contact closes; measured on
+    // the plate, it put the peak there and grew it with resolution). A STICK spring
+    // (friction with no slip limit) makes the stuck / released boundary a new singular
+    // edge, from the element diagonal or per mm^2 alike (the plate, 2026-10-25): it
+    // waits for a ruling (frictionless / weak stick / Coulomb stick-slip).
+    constexpr double kBearingSteelMpa = 200000.0;
+    constexpr double kBearingLengthMm = 1.0;
+    constexpr double kBearingTangentFraction = 1e-4;
+    const double h = grid.spacing;
+    const auto& V = model.mesh.vertices;
+    auto closest = [](const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+      // Ericson, Real-Time Collision Detection 5.1.5.
+      auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+      auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+      auto at = [&](double v, double w) {
+        return Vec3{a.x + v * (b.x - a.x) + w * (c.x - a.x), a.y + v * (b.y - a.y) + w * (c.y - a.y),
+                    a.z + v * (b.z - a.z) + w * (c.z - a.z)};
+      };
+      const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+      const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+      if (d1 <= 0.0 && d2 <= 0.0) return a;
+      const Vec3 bp = sub(p, b);
+      const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+      if (d3 >= 0.0 && d4 <= d3) return b;
+      const double vc = d1 * d4 - d3 * d2;
+      if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) return at(d1 / (d1 - d3), 0.0);
+      const Vec3 cp = sub(p, c);
+      const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+      if (d6 >= 0.0 && d5 <= d6) return c;
+      const double vb = d5 * d2 - d1 * d6;
+      if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) return at(0.0, d2 / (d2 - d6));
+      const double va = d3 * d6 - d5 * d4;
+      if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        const double w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return at(1.0 - w, w);
+      }
+      const double den = 1.0 / (va + vb + vc);
+      return at(vb * den, vc * den);
+    };
+    std::size_t n_springs = 0;
+    for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
+      const std::vector<int> faces =
+          a.face_id >= 0 ? std::vector<int>{a.face_id}
+                         : region_or_throw(a.region_id, "load case anchor").member_faces;
+      std::vector<std::size_t> tris;
+      for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t)
+        if (std::find(faces.begin(), faces.end(), model.triangle_face[t]) != faces.end())
+          tris.push_back(t);
+      if (tris.empty()) continue;
+      // Each EXPOSED voxel face of the anchor's own Fixture voxels that lies on the
+      // anchor (its centre within 0.75 h of the CAD triangles, facing along their
+      // normal) gives h^2 / 4 to each of its four corners. A node's spring is that area
+      // over the staircase factor |n|_1 (a surface of normal n is voxelised into
+      // |n_x| + |n_y| + |n_z| times its true area) times (E / L): the face's true area,
+      // spread as the voxel surface actually spreads it (an edge row gets half).
+      struct NodeArea { double area = 0.0; Vec3 n{0.0, 0.0, 0.0}; };
+      std::map<int, NodeArea> nodes;
+      static constexpr int kDir[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
+                                         {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+      for (const std::size_t v : a.part_voxels) {
+        if (grid.tags[v] != VoxelTag::Fixture) continue;  // a load over it wins
+        any_fixture = true;
+        const int i = static_cast<int>(v % static_cast<std::size_t>(grid.nx));
+        const int j = static_cast<int>((v / static_cast<std::size_t>(grid.nx)) %
+                                       static_cast<std::size_t>(grid.ny));
+        const int k = static_cast<int>(v / (static_cast<std::size_t>(grid.nx) *
+                                            static_cast<std::size_t>(grid.ny)));
+        const Vec3 centre = grid.voxel_center(i, j, k);
+        for (const auto& e : kDir) {
+          const int ni = i + e[0], nj = j + e[1], nk = k + e[2];
+          if (ni >= 0 && nj >= 0 && nk >= 0 && ni < grid.nx && nj < grid.ny && nk < grid.nz &&
+              grid.solid(ni, nj, nk))
+            continue;  // not on the part's surface
+          const Vec3 p{centre.x + 0.5 * h * e[0], centre.y + 0.5 * h * e[1],
+                       centre.z + 0.5 * h * e[2]};
+          double best = std::numeric_limits<double>::infinity();
+          Vec3 q{0.0, 0.0, 0.0};
+          std::size_t bt = 0;
+          for (const std::size_t t : tris) {
+            const auto& tri = model.mesh.triangles[t];
+            const Vec3 x = closest(p, V[static_cast<std::size_t>(tri[0])],
+                                   V[static_cast<std::size_t>(tri[1])],
+                                   V[static_cast<std::size_t>(tri[2])]);
+            const double d2 = (x.x - p.x) * (x.x - p.x) + (x.y - p.y) * (x.y - p.y) +
+                              (x.z - p.z) * (x.z - p.z);
+            if (d2 < best) { best = d2; q = x; bt = t; }
+          }
+          if (std::sqrt(best) > 0.75 * h) continue;  // another face's surface
+          const auto& tri = model.mesh.triangles[bt];
+          const Vec3& p0 = V[static_cast<std::size_t>(tri[0])];
+          const Vec3& p1 = V[static_cast<std::size_t>(tri[1])];
+          const Vec3& p2 = V[static_cast<std::size_t>(tri[2])];
+          const Vec3 u{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z}, w{p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+          Vec3 nrm{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+          const double len = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+          if (!(len > 0.0)) continue;
+          nrm = Vec3{nrm.x / len, nrm.y / len, nrm.z / len};
+          // Out of the part: the voxel's centre (part material) is behind it.
+          if ((centre.x - q.x) * nrm.x + (centre.y - q.y) * nrm.y + (centre.z - q.z) * nrm.z > 0.0)
+            nrm = Vec3{-nrm.x, -nrm.y, -nrm.z};
+          if (nrm.x * e[0] + nrm.y * e[1] + nrm.z * e[2] < 0.3) continue;  // e.g. the top face
+          // The face's four corners: the two axes across `e`.
+          const int ax = e[0] != 0 ? 0 : e[1] != 0 ? 1 : 2;
+          const int base[3] = {i + (e[0] > 0), j + (e[1] > 0), k + (e[2] > 0)};
+          for (int c = 0; c < 4; ++c) {
+            int at[3] = {base[0], base[1], base[2]};
+            at[(ax + 1) % 3] += c & 1;
+            at[(ax + 2) % 3] += (c >> 1) & 1;
+            NodeArea& na = nodes[fea_node_index(grid, at[0], at[1], at[2])];
+            na.area += 0.25 * h * h;
+            na.n = Vec3{na.n.x + nrm.x, na.n.y + nrm.y, na.n.z + nrm.z};
+          }
         }
+      }
+      for (const auto& [n, na] : nodes) {
+        const double len = std::sqrt(na.n.x * na.n.x + na.n.y * na.n.y + na.n.z * na.n.z);
+        if (!(len > 0.0)) continue;
+        const Vec3 nrm{na.n.x / len, na.n.y / len, na.n.z / len};
+        const double l1 = std::fabs(nrm.x) + std::fabs(nrm.y) + std::fabs(nrm.z);
+        const double k_node = kBearingSteelMpa / kBearingLengthMm * na.area / l1;
+        DirichletBC b;
+        b.node = n;
+        b.spring = k_node;
+        b.spring_tangent = kBearingTangentFraction * k_node;
+        b.normal = nrm;
+        bcs.push_back(b);
+        ++n_springs;
+      }
+    }
+    std::printf("[loadcase] anchors: bearing, %zu springs on %zu anchors (steel 200 GPa "
+                "through 1 mm, compression-only, frictionless)\n",
+                n_springs, anchor_voxels.size());
+  } else {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.tag(i, j, k) == VoxelTag::Fixture) {
+            any_fixture = true;
+            for (int dk = 0; dk <= 1; ++dk)
+              for (int dj = 0; dj <= 1; ++dj)
+                for (int di = 0; di <= 1; ++di)
+                  clamp_node(fea_node_index(grid, i + di, j + dj, k + dk));
+          }
+  }
   if (!any_fixture) {
     // No anchors declared: fall back to clamping the min-x boundary so the
     // system is well-posed (mirrors the self-weight path).

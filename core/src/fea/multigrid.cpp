@@ -2057,6 +2057,27 @@ SpMat galerkin_a1_from_prolong(
       }
     }
   }
+  // REAL BOLTS — the bearing springs' own P^T S P. A spring couples only its node's
+  // DOFs, and every element holding that node already couples all the coarse DOFs
+  // they prolong to, so each (i, j) is in A1's pattern (coeffRef finds it).
+  for (const fea_detail::MfSpring& sp : m.springs) {
+    double S[9];
+    fea_detail::mf_spring_block(sp, S);
+    const std::size_t d = 3 * static_cast<std::size_t>(sp.node);
+    for (int a = 0; a < 3; ++a) {
+      const int ka = active[d + static_cast<std::size_t>(a)];
+      if (ka < 0) continue;
+      for (int b = 0; b < 3; ++b) {
+        const int kb = active[d + static_cast<std::size_t>(b)];
+        const double sab = S[3 * a + b];
+        if (kb < 0 || sab == 0.0) continue;
+        for (const auto& pi : prolong[static_cast<std::size_t>(ka)])
+          for (const auto& pj : prolong[static_cast<std::size_t>(kb)])
+            A1.coeffRef(pi.first, pj.first) += pi.second * sab * pj.second;
+      }
+    }
+  }
+  if (!m.springs.empty()) A1.makeCompressed();
   return A1;
 }
 
@@ -2254,6 +2275,12 @@ void mf_build_point_block_fine(const MatfreeReduced& m,
                     static_cast<std::size_t>(c % 3)] +=
               el.a * m.KA(r, c) + el.b * m.KB(r, c) + el.c * m.KC(r, c);
         }
+    for (const fea_detail::MfSpring& sp : m.springs) {  // REAL BOLTS: the spring's own block
+      double S[9];
+      fea_detail::mf_spring_block(sp, S);
+      for (int k = 0; k < 9; ++k)
+        blockfull[static_cast<std::size_t>(sp.node) * 9 + static_cast<std::size_t>(k)] += S[k];
+    }
     // Compress to one entry per node that owns at least one KEPT DOF, using the
     // same active map the prolongation was built from.
     for (std::size_t nd = 0; nd < nnodes_full; ++nd) {
@@ -2327,6 +2354,15 @@ void build_l1_smoother(MfHierarchy& H) {
         a += std::fabs(el.a * m.KA(r, c) + el.b * m.KB(r, c) + el.c * m.KC(r, c));
       full[static_cast<std::size_t>(el.edof[r])] += a;
     }
+  // REAL BOLTS: each spring's absolute row sums, so lambda_max(D^-1 A) <= 1 still
+  // holds by construction (A = sum A_e + sum S_s <= sum D_e + sum D_s = D).
+  for (const fea_detail::MfSpring& sp : m.springs) {
+    double S[9];
+    fea_detail::mf_spring_block(sp, S);
+    for (int a = 0; a < 3; ++a)
+      full[3 * static_cast<std::size_t>(sp.node) + static_cast<std::size_t>(a)] +=
+          std::fabs(S[3 * a]) + std::fabs(S[3 * a + 1]) + std::fabs(S[3 * a + 2]);
+  }
   H.fine_dl1inv.resize(m.ng);
   for (int k = 0; k < m.ng; ++k) {
     const double d =
@@ -2385,6 +2421,7 @@ struct UncountedFineApply {
     if (m.has_cubic)
       fea_detail::mf_apply_cubic_add(m.cub_elems, m.cub_color_offsets, m.KA, m.KB,
                                      m.KC, xf, yf);
+    if (!m.springs.empty()) fea_detail::mf_apply_springs(m.springs, xf.data(), yf.data());
     y.resize(m.ng);
     for (int k = 0; k < m.ng; ++k)
       y[k] = yf[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])];
@@ -2510,8 +2547,9 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
 
   const int nnodes = fea_node_count(grid);
   std::vector<char> anchor(static_cast<std::size_t>(nnodes), 0);
-  for (const DirichletBC& b : bcs)
-    if (b.node >= 0 && b.node < nnodes) anchor[static_cast<std::size_t>(b.node)] = 1;
+  for (const DirichletBC& b : bcs)  // a RELEASED bearing spring holds nothing (REAL BOLTS)
+    if (!b.released && b.node >= 0 && b.node < nnodes)
+      anchor[static_cast<std::size_t>(b.node)] = 1;
   for (const NodalLoad& l : loads)
     if (l.value != 0.0 && l.node >= 0 && l.node < nnodes)
       anchor[static_cast<std::size_t>(l.node)] = 1;
@@ -3320,6 +3358,8 @@ void mg_safe_test_max_cycles(int cycles) {
 // starts fresh; the getter is for tests/diagnostics. Thread-local: valid on the
 // thread that issues the run's solves. Off the matrix-free multigrid path these
 // are inert (nothing reads the latch).
+void fea_matfree_reset_mg_safe_failures() { g_mg_safe_consecutive_failures = 0; }
+
 void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_consecutive_stagnations = 0;
   g_mg_latched = false;

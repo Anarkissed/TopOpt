@@ -116,6 +116,9 @@ struct ProductionLoadCase {
   // CORE LIST item 50 — "Redesign to strengthen" (job loads.redesign): the run is
   // rebuilt inside the design box from what is frozen (strengthen_part, run_job).
   bool strengthen = false;
+  // REAL BOLTS (job loads.anchor_model "bearing"): every anchor is a compression-only,
+  // frictionless normal spring (DirichletBC::spring), not a clamp. False = clamped.
+  bool anchor_bearing = false;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.

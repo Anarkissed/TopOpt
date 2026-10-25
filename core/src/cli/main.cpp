@@ -637,6 +637,15 @@ int main(int argc, char** argv) {
                            std::to_string(v.report.bridge_voxels) + " voxels)")
                               .c_str()
                         : "");
+      // REAL BOLTS: the bearing anchors' contact loop, and loudly when it did not settle.
+      if (v.report.contact_rounds > 0)
+        std::printf("        bearing anchors: %d contact solve(s), %d pressing / %d let go, "
+                    "the springs carry %.0f %% of the load%s%s\n",
+                    v.report.contact_rounds, v.report.contact_engaged,
+                    v.report.contact_released, 100.0 * v.report.contact_load_share,
+                    v.report.contact_settled ? "" : "; the contact set DID NOT SETTLE",
+                    v.report.contact_kept_last ? "; every anchor pulled away (last set kept)"
+                                               : "");
       // ...and how each bridge holds itself (item 42 B, 07:05).
       for (const topopt::BridgeHoldReport& h : v.report.bridge_holds)
         std::printf("        bridge %.1f mm: hold margin %.2f, %d thickening(s)%s\n",

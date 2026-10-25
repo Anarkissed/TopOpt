@@ -136,6 +136,18 @@ struct FixedDesignAnalysis {
   // converged). The certification solve is NOT softened or retried — the tolerance
   // is unchanged; this flag only records that it missed.
   bool non_convergent = false;
+  // REAL BOLTS (bearing anchors): the certification's contact loop. 0 rounds = glued
+  // anchors. `contact_settled` false = the set still changed after the last allowed
+  // solve; `contact_kept_last` = a release would have left no spring engaged, so the
+  // last set was kept; `contact_load_share` = |the engaged springs' total force| /
+  // |the applied load| (near 1 when the supports carry the load, not the
+  // stabilisation).
+  int contact_rounds = 0;
+  bool contact_settled = true;
+  bool contact_kept_last = false;
+  int contact_engaged = 0;
+  int contact_released = 0;
+  double contact_load_share = 0.0;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
 

@@ -966,6 +966,9 @@ struct JobLoadCase {
 
   bool minimize_plastic = true;             // true = reduction ladder + pad
   std::string redesign;                     // item 50: "" | "strengthen"
+  // REAL BOLTS (the reviewer's brief of 2026-10-25 20:10): "" or "glued" = anchors
+  // clamped (today); "bearing" = compression-only frictionless springs.
+  std::string anchor_model;
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
   // its INNER / OUTER line widths, so the accept gate can size the solid wall ring

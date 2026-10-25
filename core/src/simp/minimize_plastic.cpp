@@ -399,9 +399,11 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
         }
   }
   out.bcs.reserve(bcs.size());
-  for (const DirichletBC& bc : bcs)
-    out.bcs.push_back({remap_node_to_domain(part_grid, domain, bc.node),
-                       bc.component, bc.value});
+  for (const DirichletBC& bc : bcs) {
+    DirichletBC remapped = bc;  // every field, bearing springs included (REAL BOLTS)
+    remapped.node = remap_node_to_domain(part_grid, domain, bc.node);
+    out.bcs.push_back(remapped);
+  }
   if (!options.external_loads.empty()) {
     out.external_loads.reserve(options.external_loads.size());
     for (const NodalLoad& nl : options.external_loads)
@@ -2826,6 +2828,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // basis that savings% and mass share (handoff 104).
     vr.volume_fraction = variant.optimization.volume_fraction;
     vr.printed_fraction = printed_fraction;
+    vr.contact_rounds = fda.contact_rounds;  // REAL BOLTS
+    vr.contact_settled = fda.contact_settled;
+    vr.contact_kept_last = fda.contact_kept_last;
+    vr.contact_engaged = fda.contact_engaged;
+    vr.contact_released = fda.contact_released;
+    vr.contact_load_share = fda.contact_load_share;
     // Task 2026-08-03-growth-ladder — the HEADLINE on a growth run: how much
     // plastic this rung prints, how much of it is outside the imported part, and
     // whether the box could hold what the rung asked for. No-op on a reduction

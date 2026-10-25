@@ -249,6 +249,8 @@ if(Eigen3_FOUND)
   # assembled operator (fea_assembled_apply in assembly.cpp), so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/fea/matfree.cpp)
+  # REAL BOLTS: the bearing-anchor contact set (calls the matrix-free cache resets).
+  target_sources(topopt PRIVATE src/fea/contact.cpp)
   # Krylov subspace recycling / deflation (handoff 133): the opt-in SPD additive
   # coarse-space correction that wraps BOTH matrix-free CG loops (matfree.cpp's
   # Jacobi-CG and multigrid.cpp's MG-CG) from outside their preconditioners. Like
@@ -2356,6 +2358,18 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_compile_definitions(test_bridge PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME bridge COMMAND test_bridge)
+
+  # REAL BOLTS (reviewer 2026-10-25 20:10): bearing anchors, compression-only normal
+  # springs released in tension until the contact set settles; three solvers agree;
+  # the plate's margin converges across resolutions.
+  add_executable(test_bearing tests/validation/test_bearing.cpp)
+  target_link_libraries(test_bearing PRIVATE topopt)
+  target_compile_definitions(test_bearing PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME bearing COMMAND test_bearing)
 
   # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
   # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).

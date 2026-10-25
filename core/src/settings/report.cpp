@@ -184,6 +184,14 @@ void emit_variant(std::string& out, const VariantReport& v,
     }
     out += "}";
   }
+  if (v.contact_rounds > 0)  // REAL BOLTS: the bearing anchors' contact loop
+    out += ",\n" + in2 + "\"bearing\": {\"contact_rounds\": " +
+           std::to_string(v.contact_rounds) +
+           ", \"settled\": " + (v.contact_settled ? "true" : "false") +
+           ", \"engaged\": " + std::to_string(v.contact_engaged) +
+           ", \"released\": " + std::to_string(v.contact_released) +
+           ", \"load_share\": " + num_json(v.contact_load_share) +
+           ", \"kept_last\": " + (v.contact_kept_last ? "true" : "false") + "}";
   // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
   // of a growth run, and the licence for the [0,1] fraction bounds to be read on
   // the growth scale (validate_variant_object below). Emitted ONLY when the run

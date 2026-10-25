@@ -227,6 +227,13 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   const std::size_t n = grid.voxel_count();
   if (mask.size() != n)
     throw std::invalid_argument("plsm_optimize: mask size != voxel_count");
+  // REAL BOLTS (bearing anchors): the contact set this run solves with, re-read from
+  // the field every kPlsmContactEvery iterations, as simp_optimize does.
+  constexpr int kPlsmContactEvery = 10;
+  std::vector<DirichletBC> contact_bcs;
+  const bool bearing = has_contact_springs(bcs);
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   if (!(options.volume_fraction > 0.0))
     throw std::invalid_argument("plsm_optimize: volume_fraction must be > 0");
   if (!(plsm.support >= 1.0))
@@ -682,7 +689,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // certification solve stay TIGHT and COLD.
     SimpCompliance sc;
     try {
-      sc = simp_compliance(grid, params, rho, bcs, loads, tol_loose,
+      sc = simp_compliance(grid, params, rho, live_bcs, loads, tol_loose,
                            options.cg_max_iterations,
                            (plsm.warm_start && have_warm) ? &warm : nullptr,
                            nullptr, options.solver);
@@ -693,6 +700,8 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
       break;
     }
     if (plsm.warm_start) { warm = sc.solution; have_warm = true; }
+    if (bearing && it % kPlsmContactEvery == 0)
+      (void)contact_update(contact_bcs, sc.solution.u);
     out.total_solve_wall_s += sc.t_solve_ms / 1000.0;
 
     double active_sum = 0.0;
@@ -1142,7 +1151,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // solver's floating-speck drop (multigrid safe retry, arm G) is forbidden.
     FeaIslandDropForbid no_island_drop;
     const SimpCompliance fc =
-        simp_compliance(grid, params, r.physical_density, bcs, loads, tol_tight,
+        simp_compliance(grid, params, r.physical_density, live_bcs, loads, tol_tight,
                         options.cg_max_iterations, nullptr, nullptr,
                         options.solver);
     r.compliance = fc.compliance;
