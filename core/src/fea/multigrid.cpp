@@ -277,6 +277,16 @@ constexpr int kIslandMaxVoxels = 27;              // a 3x3x3 block
 constexpr int kSafeWindow = 600;
 constexpr double kSafeMinGain = 0.9;
 constexpr int kSafeMaxCycles = 6000;
+// A COLD-START retry (cold_start: the caller's warm guess was worse than zero
+// in both norms and was dropped) gets a longer FIRST window. From zero the l1
+// MG-PCG residual 2-norm RISES before it falls on a high-contrast field: on
+// the demo L-bracket (self-weight on a PLSM field) the first cold retry stood
+// at rel res 7.26 after 600 cycles, so the 600-cycle first window stopped it
+// and the solve fell to ~6,700 Jacobi-CG iterations, although the same retry
+// converges in 1,332 cycles given a longer first window. Later windows keep kSafeWindow /
+// kSafeMinGain, and kSafeMaxCycles stays the total cap. Warm-start retries
+// keep the first window at kSafeWindow (bit-identical).
+constexpr int kSafeColdFirstWindow = 2500;
 constexpr double kIslandMaxElementFraction = 0.05;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
@@ -1358,7 +1368,8 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
               int max_it, Vec& x, int& iters, double& resid, bool mixed,
               fea_detail::RecycleReport* rec = nullptr,
               const Vec* x0 = nullptr, const MgOpts* opts_in = nullptr,
-              int progress_window = 0, double progress_gain = 0.0) {
+              int progress_window = 0, double progress_gain = 0.0,
+              int first_window = 0) {
   // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
   // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
@@ -1434,9 +1445,12 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   // `progress_window` cycles the window's best relative residual must be at
   // most `progress_gain` x the previous checkpoint's (the start's for the first
   // window), else the attempt ends as not converged. Cycle-count driven, so
-  // deterministic.
+  // deterministic. `first_window` > 0 lengthens the FIRST window only (the
+  // cold-start safe retry; see kSafeColdFirstWindow); 0 keeps every window at
+  // `progress_window`, i.e. checkpoints at exactly the multiples of it.
   double prog_prev = resid;
   double prog_min = std::numeric_limits<double>::infinity();
+  int prog_next = first_window > 0 ? first_window : progress_window;
 
   const auto deadline = mg_attempt_deadline(kMgAttemptWallGuardSec);
   for (int k = 1; k <= max_it; ++k) {
@@ -1473,10 +1487,11 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     }
     if (progress_window > 0) {
       prog_min = std::min(prog_min, resid);
-      if (k % progress_window == 0) {
+      if (k == prog_next) {
         if (!(prog_min <= progress_gain * prog_prev)) return false;
         prog_prev = prog_min;
         prog_min = std::numeric_limits<double>::infinity();
+        prog_next += progress_window;
       }
     }
     precondition(r, S.zc);               // znew = M^{-1} r (reused buffer)
@@ -2924,7 +2939,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
                       xg, it, res, /*mixed=*/false, &rec,
                       warm && !cold_start ? &x0 : nullptr, &o, kSafeWindow,
-                      kSafeMinGain);
+                      kSafeMinGain, cold_start ? kSafeColdFirstWindow : 0);
         diag.mg_cycles_attempted = shipped_it + it;
         if (ok) {
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];

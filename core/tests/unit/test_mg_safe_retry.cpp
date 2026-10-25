@@ -28,6 +28,9 @@
 //   W    the l1 retry itself starts from the better of the warm guess and
 //        zero (same exact-system test), so a warm start far worse than zero
 //        no longer stops the retry short of a convergence it reaches cold.
+//   F    such a COLD-START retry gets a longer first progress window: from
+//        zero its residual rises before it falls (the demo L-bracket's first
+//        safe solve, a committed fixture).
 //   L    the [mg-safe] stderr lines are bounded per run (first N, then one
 //        summary per M attempts) and the bound changes no number.
 //   D    the certified final compliance solves (simp_optimize, its masked /
@@ -43,11 +46,15 @@
 
 #include "fea/fea_matfree.hpp"
 
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <numeric>
+#include <sstream>
+#include <string>
 #include <vector>
 
 using topopt::CgInfo;
@@ -728,6 +735,126 @@ int main() {
               wg.R.cycles < n_l1 && wg.R.r0_exact < 1.0,
           "W POSITIVE CONTROL: a warm start better than zero is still the retry's "
           "start (fewer cycles than cold)");
+  }
+
+  // ---------------------------------------------------------------------------
+  // F (cold-start FIRST window, demo L-bracket 2026-10-25): from zero the l1
+  // MG-PCG residual 2-norm RISES before it falls on the demo's self-weighted
+  // PLSM field, so the 600-cycle first progress window (best rel res <= 0.9 x
+  // the start's) stopped a cold-start retry at rel res 7.26 that converges in
+  // ~1,330 cycles; on the demo three such stops latched the safe path off. A
+  // cold-start retry's first window is kSafeColdFirstWindow (2500) cycles;
+  // later windows and the 6000-cycle cap are unchanged, and a warm-start
+  // retry keeps 600 (its checkpoints are the multiples of 600, as before).
+  // Fixture: tests/fixtures/mg_safe/demo_lbracket_selfweight_solve1.txt (the
+  // demo's first safe solve, moduli quantized to 1/8 decade). Warm guess: the
+  // whole part lifted 1e3 (far worse than zero in both norms -> cold start).
+  //   F: the cold-start retry CONVERGES, in more than 600 and fewer than 2500
+  //      cycles. RED before the fix: it stopped at 600 cycles (rel res ~7.4)
+  //      and the solve fell to ~6,500 Jacobi-CG iterations.
+  // ---------------------------------------------------------------------------
+  {
+    VoxelGrid g;
+    std::vector<double> ey;
+    std::vector<DirichletBC> bcs;
+    std::vector<NodalLoad> loads;
+    double poisson = 0.0, ftol = 0.0;
+    bool parsed = false;
+    {
+      std::ifstream in(std::string(MG_SAFE_FIXTURE_DIR) +
+                       "/demo_lbracket_selfweight_solve1.txt");
+      std::string line, key;
+      double spacing = 0.0, emax = 0.0, node_w = 0.0;
+      int lpd = 0, nbc = -1;
+      std::vector<int> bcijk;
+      std::vector<double> nodal;
+      while (in && std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream ls(line);
+        if (nbc >= 0 && static_cast<int>(bcijk.size()) < 3 * nbc) {
+          int v;
+          while (ls >> v) bcijk.push_back(v);
+          continue;
+        }
+        if (!std::isdigit(static_cast<unsigned char>(line[0]))) {
+          ls >> key;
+          if (key == "grid") {
+            ls >> g.nx >> g.ny >> g.nz;
+            g.origin = Vec3{0, 0, 0};
+            g.tags.assign(static_cast<std::size_t>(g.nx) * g.ny * g.nz, VoxelTag::Empty);
+            ey.assign(g.tags.size(), 0.0);
+          } else if (key == "spacing") ls >> spacing;
+          else if (key == "poisson") ls >> poisson;
+          else if (key == "tolerance") ls >> ftol;
+          else if (key == "emax") ls >> emax;
+          else if (key == "levels_per_decade") ls >> lpd;
+          else if (key == "node_weight") ls >> node_w;
+          else if (key == "bc") ls >> nbc;
+          continue;
+        }
+        int k = 0, j = 0, x0 = 0;
+        std::string cells;
+        ls >> k >> j >> x0 >> cells;
+        for (std::size_t c = 0; c < cells.size(); ++c) {
+          if (cells[c] == '.') continue;
+          const std::size_t e = g.index(x0 + static_cast<int>(c), j, k);
+          g.tags[e] = VoxelTag::Interior;
+          ey[e] = emax * std::pow(10.0, -static_cast<double>(cells[c] - '0') / lpd);
+        }
+      }
+      g.spacing = spacing;
+      nodal.assign(static_cast<std::size_t>(topopt::fea_node_count(g)), 0.0);
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i)
+            if (g.solid(i, j, k))
+              for (int c = 0; c < 2; ++c)
+                for (int b = 0; b < 2; ++b)
+                  for (int a = 0; a < 2; ++a)
+                    nodal[static_cast<std::size_t>(
+                        topopt::fea_node_index(g, i + a, j + b, k + c))] += node_w;
+      for (std::size_t n = 0; n < nodal.size(); ++n)
+        if (nodal[n] != 0.0) loads.push_back({static_cast<int>(n), 2, nodal[n]});
+      for (std::size_t q = 0; q + 2 < bcijk.size(); q += 3)
+        for (int c = 0; c < 3; ++c)
+          bcs.push_back(
+              {topopt::fea_node_index(g, bcijk[q], bcijk[q + 1], bcijk[q + 2]), c, 0.0});
+      parsed = g.nx == 48 && nbc == 196 && static_cast<int>(bcs.size()) == 3 * nbc &&
+               lpd > 0 && emax > 0.0 && !loads.empty();
+    }
+    std::size_t part = 0;
+    for (double v : ey) part += v > 0.0 ? 1 : 0;
+    std::printf("      fixture: %dx%dx%d, %zu part voxels, %zu loads, %zu bcs, nu %.2f, "
+                "tol %.0e\n", g.nx, g.ny, g.nz, part, loads.size(), bcs.size(), poisson,
+                ftol);
+    check(parsed && part == 17112, "F setup: the demo fixture parses (17,112 part voxels)");
+    if (parsed) {
+      FeaSolution w;
+      w.u.assign(static_cast<std::size_t>(3 * topopt::fea_node_count(g)), 0.0);
+      for (std::size_t n = 0; n < w.u.size() / 3; ++n) w.u[3 * n + 2] = 1e3;
+      topopt::fea_matfree_reset_mg_stagnation_latch();
+      CgInfo fi;
+      bool threw = false;
+      try {
+        topopt::FeaIslandDropPermit permit;
+        topopt::fea_solve_mgcg_matfree(g, ey, poisson, bcs, loads, ftol, 0, &fi,
+                                       nullptr, &w);
+      } catch (const topopt::SolverNonConvergence&) {
+        threw = true;
+      }
+      const topopt::fea_detail::MgSafeAttemptReport R =
+          topopt::fea_detail::mg_last_safe_attempt();
+      std::printf("      cold-start retry: %s in %d cycles, rel res %.3e | used_mg=%d "
+                  "its=%d threw=%d\n",
+                  R.converged ? "CONVERGED" : "stopped", R.cycles, R.res,
+                  fi.used_multigrid ? 1 : 0, fi.iterations, threw ? 1 : 0);
+      check(R.seq == 1 && R.cold_start,
+            "F setup: the lifted warm guess is worse than zero -> the retry starts cold");
+      check(!threw && R.converged && fi.used_multigrid && R.cycles > 600 &&
+                R.cycles < 2500,
+            "F: the cold-start retry runs past the 600-cycle first window and "
+            "converges (600 < cycles < 2500)");
+    }
   }
 
   // ---------------------------------------------------------------------------
