@@ -13,15 +13,21 @@
 //        hierarchy has omega * lambda_max > 2.
 //   S5   a solve the shipped path converges is BIT-IDENTICAL with the retry on
 //        and off, and the retry never engages on it.
-//   G    on a field of floating specks in 1e-9 filler, the census finds exactly
-//        the planted specks (keeping anchored, loaded, full-modulus and big
-//        islands), the cap refuses a checkerboard, and — RED CONTROL — the gated
-//        l1 solve WITHOUT the drop does not converge while WITH it it does, to
-//        the same compliance as the exact Jacobi fallback.
+//   G    THE CONNECTION RULE (ruling 2026-10-25): on a field of floating specks
+//        in 1e-9 filler the census finds exactly the planted specks (26-connected
+//        pieces touching no support or load: a frozen speck and a 32-voxel blob
+//        are loose, a loaded speck and one hinged to the beam are not), there is
+//        no cap (a stride-2 checkerboard is cleaned, with the majority warning),
+//        and EVERY solve — no permit needed, a forbid changes nothing — solves the
+//        specks at the floor: it converges on multigrid to the exact system's
+//        compliance, where — RED CONTROL — the exact field needs >= 5x the MG
+//        cycles. (The stall-dependent sections below run on the EXACT speck field
+//        through the test-only switch, RuleOff.)
 //   latch a latched run goes straight to the safe path.
 //   B    a safe attempt that breaks down before its first update reports its
 //        starting residual: not productive, seeds nothing, advances the latch.
-//   A    the fallback is seeded only by an iterate better on the EXACT system.
+//   A    the fallback's start is judged on the system it solves — one system
+//        now: a capped retry's residual is the same number on both.
 //   C    ... and better than a COLD start (in the fallback's own 2-norm and in
 //        energy); a warm start worse than zero in both is not used either, so
 //        a stopped retry can never leave the fallback worse off than cold.
@@ -34,8 +40,9 @@
 //   L    the [mg-safe] stderr lines are bounded per run (first N, then one
 //        summary per M attempts) and the bound changes no number.
 //   D    the certified final compliance solves (simp_optimize, its masked /
-//        SEMDOT overload, plsm_optimize) never run with the island drop
-//        permitted, while the trajectory solves do.
+//        SEMDOT overload, plsm_optimize) run under a forbid scope, the
+//        trajectory solves under a permit — and since the connection rule every
+//        one of them runs the loose-piece census all the same.
 //
 // Same self-contained CHECK harness as the other unit tests.
 
@@ -108,6 +115,18 @@ bool bit_identical(const FeaSolution& a, const FeaSolution& b) {
   return a.u.size() == b.u.size() &&
          std::memcmp(a.u.data(), b.u.data(), a.u.size() * sizeof(double)) == 0;
 }
+
+// THE CONNECTION RULE takes every speck of the speck field out of the system, so
+// that field no longer stalls the shipped MG (it converges in ~96 cycles). The
+// safe-retry / fallback machinery below (B, C, W, L, latch) is exercised on the
+// EXACT speck field — the specks at their true modulus, the system every solve
+// of it saw before the rule — through the test-only switch, scoped.
+struct RuleOff {
+  RuleOff() { topopt::fea_detail::mg_test_loose_rule(false); }
+  ~RuleOff() { topopt::fea_detail::mg_test_loose_rule(true); }
+  RuleOff(const RuleOff&) = delete;
+  RuleOff& operator=(const RuleOff&) = delete;
+};
 
 // The arm-G fixture: a 4x4 solid beam (E = 1) along x through the middle of a
 // 1e-9 filler box, clamped at x = 0 and loaded at its tip, with single-voxel
@@ -254,65 +273,80 @@ int main() {
   }
 
   // ---------------------------------------------------------------------------
-  // G: the island census and its keep rules.
+  // G: the census — THE CONNECTION RULE (ruling 2026-10-25). A piece is a
+  // 26-connected component of the solid voxels; it is LOOSE iff it touches no
+  // Dirichlet / loaded node, whatever its size, frozen or not. (Before the rule:
+  // 6-connected, <= 27 voxels, isolated, unfrozen, <= 5 % of the elements.)
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
     auto C = topopt::fea_detail::mg_island_census(F.g, F.ey, F.bcs, F.loads);
-    std::printf("      census: pieces=%d unanchored=%d droppable=%d (%lld vox) "
-                "kept_frozen=%d kept_big=%d capped=%d specks planted=%d\n",
-                C.pieces, C.unanchored, C.droppable, C.droppable_voxels,
-                C.kept_frozen, C.kept_big, C.capped ? 1 : 0, F.specks);
-    check(C.droppable == F.specks && C.droppable_voxels == F.specks && !C.capped,
+    std::printf("      census: pieces=%d loose=%d (%lld vox) frozen_loose=%d "
+                "majority=%d specks planted=%d\n",
+                C.pieces, C.unanchored, C.unanchored_voxels, C.frozen_loose,
+                C.majority_loose ? 1 : 0, F.specks);
+    check(C.droppable == F.specks && C.droppable_voxels == F.specks &&
+              static_cast<int>(C.drop.size()) == F.specks,
           "G: the census finds exactly the planted specks");
     check(C.pieces == F.specks + 1, "G: the beam is the one anchored piece");
 
-    // Keep rules: a speck at full modulus (frozen proxy) is kept; a speck on a
-    // loaded node is anchored; a 4x4x2 = 32-voxel blob is kept as too big.
+    // Connection rules: a speck at full modulus (frozen proxy) is LOOSE (and
+    // counted frozen); a speck on a loaded node is anchored; a 4x4x2 = 32-voxel
+    // blob is LOOSE (no size rule); a speck that only EDGE-touches the beam (a
+    // hinge) is part of the beam, so anchored.
     SpeckField K = F;
     const std::size_t e_frozen = K.g.index(2, 1, 1);
     K.ey[e_frozen] = 1000.0;
     const std::size_t e_loaded = K.g.index(6, 1, 1);
     K.loads.push_back({topopt::fea_node_index(K.g, 6, 1, 1), 0, 1e-3});
+    std::vector<std::size_t> blob;
     for (int k = 12; k < 14; ++k)
       for (int j = 12; j < 16; ++j)
-        for (int i = 20; i < 24; ++i) K.ey[K.g.index(i, j, k)] = 500.0;
-    // A speck that only EDGE-touches the beam (a hinge) is part of that body.
+        for (int i = 20; i < 24; ++i) {
+          K.ey[K.g.index(i, j, k)] = 500.0;
+          blob.push_back(K.g.index(i, j, k));
+        }
     const std::size_t e_hinge = K.g.index(20, 5, 5);
     K.ey[e_hinge] = 500.0;
     auto CK = topopt::fea_detail::mg_island_census(K.g, K.ey, K.bcs, K.loads);
-    bool none_kept_dropped = true;
-    for (int e : CK.drop)
-      if (static_cast<std::size_t>(e) == e_frozen ||
-          static_cast<std::size_t>(e) == e_loaded ||
-          static_cast<std::size_t>(e) == e_hinge ||
-          K.ey[static_cast<std::size_t>(e)] >= 1000.0)
-        none_kept_dropped = false;
-    check(CK.kept_frozen >= 1 && CK.kept_big >= 1 && CK.kept_hinged >= 1 &&
-              none_kept_dropped,
-          "G: frozen (full-modulus), loaded, hinged and big islands are never dropped");
+    bool frozen_dropped = false, loaded_kept = true, hinge_kept = true,
+         beam_kept = true;
+    std::size_t blob_dropped = 0;
+    for (int e : CK.drop) {
+      const std::size_t u = static_cast<std::size_t>(e);
+      if (u == e_frozen) frozen_dropped = true;
+      if (u == e_loaded) loaded_kept = false;
+      if (u == e_hinge) hinge_kept = false;
+      for (std::size_t b : blob) blob_dropped += (u == b) ? 1 : 0;
+      const int j = (e / K.g.nx) % K.g.ny, k = e / (K.g.nx * K.g.ny);
+      if (in_beam(j, k)) beam_kept = false;
+    }
+    check(frozen_dropped && CK.frozen_loose >= 1 && blob_dropped == blob.size() &&
+              loaded_kept && hinge_kept && beam_kept,
+          "G: a frozen speck and a 32-voxel blob are LOOSE (no size / frozen keep); "
+          "a loaded speck and a speck hinged to the beam are anchored");
 
-    // With the run's frozen mask registered, the mask decides (not the modulus):
-    // a full-modulus DESIGN speck is droppable, a masked grey speck is kept.
+    // A registered frozen mask only decides the frozen COUNT: the masked grey
+    // speck is loose like the rest and counted; the full-modulus design speck is
+    // loose and NOT counted (the mask, not the modulus, says what is frozen).
     {
       std::vector<char> keep(K.g.voxel_count(), 0);
       const std::size_t e_masked = K.g.index(10, 1, 1);
       keep[e_masked] = 1;
       topopt::FeaIslandKeepMask scope(&keep);
       auto CM = topopt::fea_detail::mg_island_census(K.g, K.ey, K.bcs, K.loads);
-      bool masked_kept = true, full_dropped = false;
+      bool masked_dropped = false, full_dropped = false;
       for (int e : CM.drop) {
-        if (static_cast<std::size_t>(e) == e_masked) masked_kept = false;
+        if (static_cast<std::size_t>(e) == e_masked) masked_dropped = true;
         if (static_cast<std::size_t>(e) == e_frozen) full_dropped = true;
       }
-      check(masked_kept && full_dropped && CM.kept_frozen == 1,
-            "G: a registered frozen mask keeps exactly its islands");
+      check(masked_dropped && full_dropped && CM.frozen_loose == 1,
+            "G: with a frozen mask registered, the masked speck is loose and is the "
+            "one counted frozen");
     }
-    // REVIEWER RULING 2026-10-24: there is NO clearance / keep-out adjacency
-    // rule. A speck whose 26-neighbourhood holds a clearance voxel (FrozenVoid:
-    // Empty in the analysis grid, no element) is still droppable — even with
-    // that voxel set in a registered keep mask (PLSM registers FrozenSolid only;
-    // an Empty voxel is never a hinge). Pinned against 2597c39b, which kept it.
+    // REVIEWER RULING 2026-10-24: no clearance / keep-out adjacency rule. A speck
+    // next to a clearance voxel (FrozenVoid: Empty in the analysis grid, no
+    // element) is loose like any other.
     {
       SpeckField C2 = F;
       std::vector<char> keep(C2.g.voxel_count(), 0);
@@ -325,13 +359,15 @@ int main() {
       bool dropped = false;
       for (int e : CC2.drop)
         if (static_cast<std::size_t>(e) == e_speck) dropped = true;
-      check(dropped && CC2.kept_hinged == 0 && CC2.droppable == F.specks,
-            "G: a speck next to a clearance (FrozenVoid / Empty) voxel is droppable "
+      check(dropped && CC2.droppable == F.specks,
+            "G: a speck next to a clearance (FrozenVoid / Empty) voxel is loose "
             "(no clearance-adjacency rule)");
     }
 
-    // Cap: isolated single-voxel specks on a stride-2 lattice (no shared node
-    // between any two) are 1/8 of the elements -> the cap refuses them all.
+    // No cap: isolated single-voxel specks on a stride-2 lattice (no shared node
+    // between any two) are 1/8 of the elements and almost all of the solid —
+    // every one that touches no clamped node is loose, and the run says that
+    // more than half its solid is loose (a warning, never a refusal to clean).
     VoxelGrid cg = make_grid(16, 16, 16);
     std::vector<double> cey(cg.voxel_count());
     for (int k = 0; k < 16; ++k)
@@ -339,112 +375,104 @@ int main() {
         for (int i = 0; i < 16; ++i)
           cey[cg.index(i, j, k)] =
               ((i % 2 == 0 && j % 2 == 0 && k % 2 == 0) ? 0.5 : 1e-9) * 1000.0;
-    cey[cg.index(0, 0, 0)] = 1000.0;  // Emax sits on an anchored voxel, so the
-                                      // specks are not full-modulus (not frozen)
+    cey[cg.index(0, 0, 0)] = 1000.0;
     std::vector<DirichletBC> cb;
     clamp_x0(cg, cb);
     auto CC = topopt::fea_detail::mg_island_census(cg, cey, cb, {});
-    std::printf("      stride-2 specks: droppable=%d (%lld vox of %lld elements) capped=%d\n",
-                CC.droppable, CC.droppable_voxels, CC.elements, CC.capped ? 1 : 0);
-    check(CC.capped && CC.drop.empty() && CC.droppable > 0,
-          "G: the cap refuses a field whose islands exceed 5 % of the elements");
+    std::printf("      stride-2 specks: loose=%d (%lld vox of %lld elements, %lld "
+                "solid) majority=%d\n",
+                CC.unanchored, CC.unanchored_voxels, CC.elements, CC.solid,
+                CC.majority_loose ? 1 : 0);
+    // 512 specks; the 64 in the i = 0 layer touch the clamped x = 0 nodes.
+    check(CC.unanchored == 512 - 64 && static_cast<int>(CC.drop.size()) == 448 &&
+              CC.majority_loose,
+          "G: no cap — every loose speck goes, and 'more than half the solid is "
+          "loose' is reported");
   }
 
   // ---------------------------------------------------------------------------
-  // G: the gated solve, with and without the drop (RED CONTROL), vs the exact
-  // Jacobi fallback.
+  // G: the solve with the loose specks out (THE CONNECTION RULE, every solve, no
+  // permit needed) vs the EXACT system (RED CONTROL: the rule switched off by the
+  // test-only switch, i.e. the specks at their true modulus).
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
     const double tol = 1e-8;
 
-    // Reference: shipped path with the retry OFF -> Jacobi fallback (exact).
+    // Reference: the EXACT system, retry OFF -> Jacobi fallback.
+    topopt::fea_detail::mg_test_loose_rule(false);
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_set_mg_safe_retry(false);
     CgInfo ref_info;
     const FeaSolution ref =
         topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ref_info);
     topopt::fea_matfree_set_mg_safe_retry(true);
-    std::printf("      shipped: used_mg=%d hier=%d cycles=%d (Jacobi its=%d res=%.3e)\n",
+    std::printf("      exact, shipped only: used_mg=%d hier=%d cycles=%d (Jacobi its=%d "
+                "res=%.3e)\n",
                 ref_info.used_multigrid ? 1 : 0, ref_info.hier_built ? 1 : 0,
                 ref_info.mg_cycles_attempted, ref_info.iterations, ref_info.residual);
     check(ref_info.hier_built && !ref_info.used_multigrid && ref_info.converged,
-          "G: the shipped MG stalls on the speck field (Jacobi fallback converges)");
+          "G: the shipped MG stalls on the EXACT speck field (Jacobi fallback converges)");
 
-    // RED CONTROL: gated l1 retry WITHOUT the drop (no permit).
+    // RED CONTROL: the exact system with the l1 retry.
     topopt::fea_matfree_reset_mg_stagnation_latch();
     CgInfo nod;
     const FeaSolution u_nod =
         topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &nod);
     const long long eng_nod = topopt::fea_matfree_mg_safe_engagements();
     const long long car_nod = topopt::fea_matfree_mg_safe_carries();
-    std::printf("      l1 retry, no drop: used_mg=%d safe cycles=%d engaged=%lld carried=%lld\n",
-                nod.used_multigrid ? 1 : 0, nod.iterations, eng_nod, car_nod);
-    check(eng_nod == 1 && nod.converged, "G: the gated l1 retry engages without the drop");
+    std::printf("      exact, l1 retry: used_mg=%d cycles=%d engaged=%lld carried=%lld\n",
+                nod.used_multigrid ? 1 : 0, nod.mg_cycles_attempted, eng_nod, car_nod);
+    check(eng_nod == 1 && nod.converged, "G: on the exact field the l1 retry engages");
     check(topopt::fea_matfree_last_dropped_islands().empty(),
-          "G: nothing is dropped without a permit");
+          "G: with the rule off (test switch) nothing is taken out");
+    topopt::fea_detail::mg_test_loose_rule(true);
 
-    // With the drop.
+    // THE RULE: no permit held.
     topopt::fea_matfree_reset_mg_stagnation_latch();
     CgInfo dr;
-    FeaSolution u_dr;
-    {
-      topopt::FeaIslandDropPermit permit;
-      u_dr = topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &dr);
-    }
-    const auto& dropped = topopt::fea_matfree_last_dropped_islands();
+    const FeaSolution u_dr =
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &dr);
+    const std::vector<int> dropped = topopt::fea_matfree_last_dropped_islands();
     const double c_ref = dot_load(ref, F.loads), c_dr = dot_load(u_dr, F.loads);
-    std::printf("      l1 retry + drop: used_mg=%d safe cycles=%d dropped=%zu "
-                "compliance %.10g vs Jacobi %.10g (rel %.2e)\n",
-                dr.used_multigrid ? 1 : 0, dr.iterations, dropped.size(), c_dr, c_ref,
+    std::printf("      rule: used_mg=%d cycles=%d (shipped+safe) its=%d engaged=%lld "
+                "dropped=%zu compliance %.10g vs exact %.10g (rel %.2e)\n",
+                dr.used_multigrid ? 1 : 0, dr.mg_cycles_attempted, dr.iterations,
+                topopt::fea_matfree_mg_safe_engagements(), dropped.size(), c_dr, c_ref,
                 std::fabs(c_dr - c_ref) / std::fabs(c_ref));
-    check(dr.used_multigrid && dr.converged &&
-              topopt::fea_matfree_mg_safe_carries() == 1,
-          "G: with the specks dropped the gated l1 MG-PCG converges");
-    // RED CONTROL: the specks' near-rigid modes are what the l1 cycle grinds on.
-    // Without the drop it either never carries or needs >= 5x the cycles.
-    check(!nod.used_multigrid || nod.iterations >= 5 * dr.iterations,
-          "G RED CONTROL: without the drop the gated l1 MG needs >= 5x the cycles "
-          "(speck tail)");
+    check(dr.used_multigrid && dr.converged,
+          "G: with the loose specks out the solve converges on multigrid");
+    check(!nod.used_multigrid || nod.mg_cycles_attempted >= 5 * dr.mg_cycles_attempted,
+          "G RED CONTROL: with the specks in, MG needs >= 5x the cycles or never "
+          "carries (speck tail)");
     check(static_cast<int>(dropped.size()) == F.specks &&
               topopt::fea_matfree_last_dropped_floor_youngs() == 1e-9 * 1000.0,
           "G: exactly the specks were solved at the floor modulus");
     check(std::fabs(c_dr - c_ref) <= 1e-6 * std::fabs(c_ref),
-          "G: the dropped solve's compliance matches the exact solve (<= 1e-6)");
+          "G: the solve's compliance matches the exact solve (<= 1e-6)");
 
-    // A forbid overrides any permit.
+    // Neither scope changes what is solved any more: a forbid (the certified
+    // solves') does not keep the specks in, and no permit is needed.
     topopt::fea_matfree_reset_mg_stagnation_latch();
     {
       topopt::FeaIslandDropPermit permit;
       topopt::FeaIslandDropForbid forbid;
       CgInfo fi;
-      topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &fi);
-      check(topopt::fea_matfree_last_dropped_islands().empty(),
-            "G: a FeaIslandDropForbid overrides a permit (certification)");
+      const FeaSolution uf =
+          topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &fi);
+      check(static_cast<int>(topopt::fea_matfree_last_dropped_islands().size()) ==
+                    F.specks &&
+                bit_identical(uf, u_dr),
+            "G: under a FeaIslandDropForbid the loose specks are out all the same "
+            "(the rule holds in every solve, certified ones included)");
     }
 
-    // LATCH: three shipped stalls latch the shipped attempt off; the fourth
-    // solve goes straight to the safe path (no shipped cycles burned).
+    // Determinism: the solve is bit-reproducible.
     topopt::fea_matfree_reset_mg_stagnation_latch();
-    CgInfo last;
-    {
-      topopt::FeaIslandDropPermit permit;
-      for (int s = 0; s < 4; ++s)
-        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &last);
-    }
-    check(topopt::fea_matfree_mg_stagnation_latched() && last.used_multigrid &&
-              last.mg_cycles_attempted == last.iterations &&
-              topopt::fea_matfree_mg_safe_carries() == 4,
-          "latch: a latched run skips the shipped attempt and carries on the safe path");
-    // Determinism: the latched safe solve reproduces the first safe solve.
-    FeaSolution again;
-    topopt::fea_matfree_reset_mg_stagnation_latch();
-    {
-      topopt::FeaIslandDropPermit permit;
-      CgInfo ai;
-      again = topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ai);
-    }
-    check(bit_identical(again, u_dr), "determinism: the safe solve is bit-reproducible");
+    CgInfo ai;
+    const FeaSolution again =
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ai);
+    check(bit_identical(again, u_dr), "determinism: the solve is bit-reproducible");
   }
 
   // ---------------------------------------------------------------------------
@@ -458,6 +486,7 @@ int main() {
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
+    RuleOff exact;  // the EXACT speck field: the stall this machinery is for
     const double tol = 1e-8;
     topopt::fea_matfree_reset_mg_stagnation_latch();
     const int modes[3] = {1, 2, 2};
@@ -491,56 +520,75 @@ int main() {
   }
 
   // ---------------------------------------------------------------------------
-  // A (exact-system seeding): the Jacobi-CG fallback solves the EXACT system,
-  // so a safe attempt's iterate may seed it only if it is better than the start
-  // ON THAT SYSTEM. An island-DROPPED retry stopped short (cycle cap 10, via
-  // max_iterations; the capped fallback then throws, which is expected here)
-  // has its own residual below its start, yet on the exact system — the specks
-  // back at 0.5 E0 — the same iterate is far WORSE than the start. It must not
-  // seed (nor count as productive). RED before the fix: the test compared the
-  // dropped system's residuals and seeded. POSITIVE CONTROL: with no drop, an
-  // improving capped iterate still seeds.
+  // LATCH: three shipped stalls latch the shipped attempt off; the fourth solve
+  // goes straight to the safe path (no shipped cycles burned). On the EXACT
+  // speck field (see RuleOff).
+  // ---------------------------------------------------------------------------
+  {
+    SpeckField F = make_speck_field(true);
+    RuleOff exact;
+    const double tol = 1e-8;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    CgInfo last;
+    for (int s = 0; s < 4; ++s)
+      topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &last);
+    check(topopt::fea_matfree_mg_stagnation_latched() && last.used_multigrid &&
+              last.mg_cycles_attempted == last.iterations &&
+              topopt::fea_matfree_mg_safe_carries() == 4,
+          "latch: a latched run skips the shipped attempt and carries on the safe path");
+  }
+
+  // ---------------------------------------------------------------------------
+  // A (one system): the Jacobi-CG fallback's start is judged on the system it
+  // solves. Before the connection rule the safe retry could solve an
+  // island-DROPPED system while the fallback solved the exact one, so a capped
+  // retry's iterate had to be re-judged there (it could be far worse). Now every
+  // path solves the system with the loose pieces out: a capped retry's residual
+  // is the SAME number on the fallback's system, and an iterate that improved on
+  // its start seeds the fallback. (Cycle cap 10 via max_iterations: the shipped
+  // attempt stops at 10 cycles too, so the retry engages even with the specks
+  // out; the capped fallback then throws, which is expected here.) POSITIVE
+  // CONTROL on the exact field (RuleOff): an improving capped iterate seeds.
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
     const double tol = 1e-8;
     const int cap = 10;
-    auto capped_solve = [&](bool permit_drop) {
+    auto capped_solve = [&](bool rule) {
+      topopt::fea_detail::mg_test_loose_rule(rule);
       topopt::fea_matfree_reset_mg_stagnation_latch();
       CgInfo ci;
       bool threw = false;
       try {
-        if (permit_drop) {
-          topopt::FeaIslandDropPermit permit;
-          topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap, &ci);
-        } else {
-          topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap, &ci);
-        }
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap, &ci);
       } catch (const topopt::SolverNonConvergence&) {
         threw = true;
       }
+      topopt::fea_detail::mg_test_loose_rule(true);
       const topopt::fea_detail::MgSafeAttemptReport R =
           topopt::fea_detail::mg_last_safe_attempt();
-      std::printf("      capped (%d) %s: cycles=%d res=%.3e r0=%.3e | exact res=%.3e "
-                  "r0=%.3e | seeded=%d productive=%d (fallback threw=%d)\n",
-                  cap, permit_drop ? "drop" : "no drop", R.cycles, R.res, R.r0,
-                  R.res_exact, R.r0_exact, R.seeded_fallback ? 1 : 0,
+      std::printf("      capped (%d) %s: cycles=%d res=%.9e r0=%.3e | fallback's system "
+                  "res=%.9e r0=%.3e | dropped=%d seeded=%d productive=%d (fallback "
+                  "threw=%d)\n",
+                  cap, rule ? "rule" : "exact", R.cycles, R.res, R.r0, R.res_exact,
+                  R.r0_exact, R.dropped ? 1 : 0, R.seeded_fallback ? 1 : 0,
                   R.productive ? 1 : 0, threw ? 1 : 0);
       return R;
     };
     const auto D = capped_solve(true);
-    check(D.seq == 1 && D.dropped && !D.converged && D.cycles == cap && D.res < D.r0,
-          "A setup: the island-dropped retry stops at its cap with its OWN residual "
-          "below its start");
-    check(D.res_exact > D.r0_exact && D.r0_exact == 1.0,
-          "A setup: on the EXACT system that iterate is WORSE than the (cold) start");
-    check(!D.seeded_fallback && !D.productive,
-          "A: an iterate worse on the exact system never seeds the fallback and is "
-          "not productive");
+    check(D.seq == 1 && D.dropped && !D.converged && D.cycles == cap &&
+              D.res < D.r0 && std::fabs(D.res_exact - D.res) <= 1e-6 * D.res &&
+              D.r0_exact == D.r0,
+          "A: with the loose specks out, a capped retry's residual is the same "
+          "number on the fallback's system (one system; the recurrence's vs a "
+          "fresh apply's, to 1e-6)");
+    check(D.seeded_fallback,
+          "A: ... so an iterate that improved on its start seeds the fallback");
     const auto N = capped_solve(false);
     check(!N.dropped && !N.converged && N.res_exact >= 0.0 &&
               N.res_exact < N.r0_exact && N.seeded_fallback,
-          "A POSITIVE CONTROL: an iterate better on the exact system still seeds");
+          "A POSITIVE CONTROL (exact field): an iterate better on the fallback's "
+          "system still seeds");
   }
 
   // ---------------------------------------------------------------------------
@@ -572,6 +620,7 @@ int main() {
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
+    RuleOff exact;  // the EXACT speck field: the stall this machinery is for
     const double tol = 1e-8;
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_set_mg_safe_retry(false);
@@ -664,6 +713,7 @@ int main() {
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
+    RuleOff exact;  // the EXACT speck field: the stall this machinery is for
     const double tol = 1e-8;
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_set_mg_safe_retry(false);
@@ -887,22 +937,22 @@ int main() {
       for (std::size_t b : body)
         if (static_cast<std::size_t>(e) == b) body_kept = false;
     check(body_kept && C.droppable == F.specks && C.pieces == F.specks + 2,
-          "G: a second anchored + loaded 6-voxel body is NOT an island (never dropped)");
+          "G: a second anchored + loaded 6-voxel body is NOT loose (never dropped)");
 
     const double tol = 1e-8;
     topopt::fea_matfree_reset_mg_stagnation_latch();
     topopt::fea_matfree_set_mg_safe_retry(false);
     CgInfo ri;
-    const FeaSolution ref =
-        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ri);
+    FeaSolution ref;
+    {
+      RuleOff exact;  // the reference is the EXACT system (specks in)
+      ref = topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &ri);
+    }
     topopt::fea_matfree_set_mg_safe_retry(true);
     topopt::fea_matfree_reset_mg_stagnation_latch();
     CgInfo di;
-    FeaSolution u;
-    {
-      topopt::FeaIslandDropPermit permit;
-      u = topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &di);
-    }
+    const FeaSolution u =
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &di);
     // The second body's own load work, solved vs exact.
     double w_ref = 0.0, w_u = 0.0;
     for (std::size_t q = nload0; q < F.loads.size(); ++q) {
@@ -931,6 +981,7 @@ int main() {
   // ---------------------------------------------------------------------------
   {
     SpeckField F = make_speck_field(true);
+    RuleOff exact;  // the EXACT speck field: the stall this machinery is for
     const double tol = 1e-8;
     auto six = [&](int first, int every, std::vector<FeaSolution>& us,
                    std::vector<int>& its) {
@@ -968,13 +1019,13 @@ int main() {
 
   // ---------------------------------------------------------------------------
   // D (certified solves): the FINAL compliance of simp_optimize, of its masked
-  // overload (here with SEMDOT on) and of plsm_optimize is the certified number
-  // a run reports for the field it ships, so it must never be solved with
-  // islands dropped (arm G): each is wrapped in a FeaIslandDropForbid. Observed
-  // per solve (mg_island_permit_stats): the trajectory solves of each run DO
-  // hold the permit (positive control), and its LAST matrix-free solve — the
-  // final compliance — does NOT. RED before the fix: every solve, the final one
-  // included, ran permitted.
+  // overload (here with SEMDOT on) and of plsm_optimize is wrapped in a
+  // FeaIslandDropForbid and the trajectory solves in a permit; the scopes are
+  // still observed per solve (mg_island_permit_stats: trajectory permitted, the
+  // LAST — the final compliance — not). Since THE CONNECTION RULE the scopes no
+  // longer change what is solved: EVERY solve, the certified one included, runs
+  // the loose-piece census (mg_loose_stats().scanned == all solves), because a
+  // loose piece carries no load in a certified solve either.
   // ---------------------------------------------------------------------------
   {
     const VoxelGrid g = make_grid(12, 6, 6);
@@ -993,7 +1044,13 @@ int main() {
       std::printf("      %s: solves permitted=%lld not permitted=%lld, last "
                   "(final compliance) permitted=%d\n",
                   what, S.permitted, S.not_permitted, S.last_permitted ? 1 : 0);
-      return S.permitted >= 1 && S.not_permitted >= 1 && !S.last_permitted;
+      // THE CONNECTION RULE holds in every one of them, the certified final
+      // solve included: each ran the loose-piece census.
+      const topopt::fea_detail::MgLooseStats& L = topopt::fea_detail::mg_loose_stats();
+      std::printf("      %s: solves that ran the loose-piece census=%lld of %lld\n", what,
+                  L.scanned, S.permitted + S.not_permitted);
+      return S.permitted >= 1 && S.not_permitted >= 1 && !S.last_permitted &&
+             L.scanned == S.permitted + S.not_permitted;
     };
 
     topopt::SimpOptions o;
