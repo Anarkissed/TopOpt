@@ -107,6 +107,9 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     public var pickedResult: Int?
     /// A few numbers per result, so a card never decodes the 20 MB results file. nil until known.
     public var summary: [ResultSummary]?
+    /// Storage trimmed this version to the result he picked (its other results are gone; Re-run brings
+    /// them back). nil = never trimmed.
+    public var trimmed: Bool?
 
     public init(folderID: UUID, number: Int, parentNumber: Int? = nil, name: String? = nil,
                 changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,
