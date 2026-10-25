@@ -579,8 +579,26 @@ report prints-open as blocking the 3.5 mm cells.
 core's forward law, and core's own two call sites ask it rather than repeating the comparison.
 The app replaces its two call sites with it through the bridge; its independent 0.20 crossing
 (2.370917 mm at a 0.45 mm bead) had agreed with core's to **9 nm** before the function existed.
-The smallest open cell is **5.268704 × bead**, which is exactly
-`lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)` — not a second formula.
+**CORRECTED 2026-10-11** (#354's measurement, verified against core's own functions by
+bisecting `lattice_prints_open` to 1e-12 mm):
+
+| | at a 0.45 mm bead | × bead |
+|---|---|---|
+| `lattice_prints_open`'s own crossing | **2.370908016 mm** | 5.268684 |
+| `lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)` | 2.370916754 mm | 5.268704 |
+
+So the sentence this replaces — "the smallest open cell is 5.268704 × bead, which is
+**exactly** `lattice_min_printable_cell_mm(…)`" — was wrong, by **8.74e-06 mm (8.74 nm)**.
+#354's 2.370908016 is the crossing; my 2.370917 was the floor function's answer at the
+same cap, and they are not the same number.
+
+★ **And the gap is structural, not a rounding slip.** The two paths ask the same question
+through core's **two measured tables, which are not exact inverses**:
+`lattice_min_printable_cell_mm` inverts the diameter table at exactly ρ = 0.20, while
+`lattice_prints_open` tests the density the strut implies through the preimage table. That
+is the same cause as the 2.1e-05 mm disagreement `kBeadSlackMm` exists for (D5), and the
+same cause as the 0.211733 / 0.218871 pair documented above. Quoting either number is fine;
+calling them equal is not.
 
 **PARKED, DO NOT BUILD:** the per-cell variant. It offers more sizes, so both sides would have
 to change together and only with the maintainer's agreement. The implementation is ~40 lines

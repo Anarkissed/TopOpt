@@ -1302,6 +1302,10 @@ struct RunInfo {
   // carried struts AND were certified SOLID by the mask, which is the disagreement bar
   // B7 exists to stop. "r1=5097.656" in mm3; 0 on a region whose cells all sit inside it.
   std::string stepped_clip_outside_region_mm3;
+  // ★ ruling 3b (2026-10-11): the same volume split by what put it out of the region's
+  // reach -- "r1: outline=2062.908 depth=0.000 rect=0.000 owned=0.000 other=0.000" --
+  // on the same voxel basis, so the five add back to the figure above.
+  std::string stepped_clip_outside_by_cause_mm3;
   // ── ★ K5 (2026-10-10): WHERE EVERY STRUT AND NODE GOT ITS DENSITY ───────────
   // The generator samples the radius at a strut's MIDPOINT and at a node's own position,
   // and for the octet both sit ON cell planes -- a corner node is shared by eight cells,
@@ -1334,6 +1338,17 @@ struct RunInfo {
     long long struts_laid = 0;     // what the GENERATOR emitted in these cells
     long long nodes_laid = 0;
     long long cells_with_no_strut = 0;
+    // ★ ruling 3 (2026-10-11): and WHY, so the count is a diagnosis. Tested in this
+    // order, each cell filed under the FIRST thing that would have stopped it; only
+    // `never_generated` is unexplained, every other row is a reason the app can see.
+    long long no_strut_outside_rect = 0;
+    long long no_strut_beyond_depth = 0;
+    long long no_strut_outside_outline = 0;
+    long long no_strut_owned_elsewhere = 0;
+    long long no_strut_no_material = 0;
+    // core's own activation proof dropped the cell whole (cell_may_overlap)
+    long long no_strut_cell_overlap_dropped = 0;
+    long long no_strut_never_generated = 0;
   };
   struct PlanRegion {
     int region_id = 0;
@@ -1348,6 +1363,11 @@ struct RunInfo {
     std::vector<PlanGroup> groups;
   };
   std::vector<PlanRegion> stepped_plan_by_region;
+  // ★ Whether the LEDGER TAP ran (lattice.emit_plan_laid). Without it the per-cell
+  // counts are not measured, and reporting `struts_laid: 0` /
+  // `cells_with_no_strut: <every cell>` would say the generator laid nothing where the
+  // truth is that nobody counted. They are omitted instead, and this says why.
+  bool stepped_plan_laid_measured = false;
   // Elements the generator emitted that no plan cell shares. 0 is the expected value;
   // a non-zero count means geometry was written outside every cell of the plan.
   long long stepped_plan_laid_unattributed = 0;

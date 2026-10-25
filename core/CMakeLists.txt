@@ -2190,6 +2190,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
   add_test(NAME cli_plan_is_the_design COMMAND test_plan_is_the_design)
 
+  # ★ THE OUTLINE INDEX (2026-10-24): its ring walk was unbounded in the FAR field, which
+  # cost eleven hours on 102117B9 before it was caught. A visit CAP rather than a
+  # stopwatch, plus bit-exactness against the unindexed scan on near AND far samples --
+  # the far field being what the original 4.264 us/query measurement missed.
+  add_executable(test_outline_index tests/unit/test_outline_index.cpp)
+  target_link_libraries(test_outline_index PRIVATE topopt)
+  add_test(NAME outline_index COMMAND test_outline_index)
+
   # ★ K6 PART 2 (2026-10-10): the ownership clip and stepped_region_owner must agree at
   # every point of a shared volume. The reviewer's "10,000 random points per shared
   # volume" bar, as a unit test: the agreement is a property of two pure functions, and
