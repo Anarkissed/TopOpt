@@ -586,7 +586,11 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
 //                    `dropped`); an attempt that breaks down before its first
 //                    update reports res == its starting residual.
 //   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback
-//                    (only when res_exact < r0_exact).
+//                    (only when, on the exact system, it beats the fallback's
+//                    base start — the warm guess, or cold when that guess is
+//                    worse than zero — in BOTH rel res and energy).
+//   cold_fallback    the fallback started from zero instead of a warm guess
+//                    worse than zero in both norms.
 //   productive       counted as productive by the safe-path latch.
 //   consecutive_failures  the safe-path latch counter AFTER this attempt.
 struct MgSafeAttemptReport {
@@ -594,6 +598,9 @@ struct MgSafeAttemptReport {
   bool dropped = false;
   bool converged = false;
   bool seeded_fallback = false;
+  // The fallback started COLD: the caller's warm guess was worse than zero in
+  // both the stopping norm and energy, and the iterate did not seed.
+  bool cold_fallback = false;
   bool productive = false;
   int cycles = 0;
   double res = 0.0, r0 = 0.0;
@@ -637,6 +644,12 @@ void mg_safe_test_log_periods(int first, int every);
 // 0 (the default) = off. Only the safe-retry call reads it; the shipped MG-CG
 // never does.
 void mg_safe_test_force_breakdown(int mode);
+
+// TEST ONLY — never set by production code. Caps the safe retry's l1 MG-PCG at
+// `cycles` (in place of kSafeMaxCycles = 6000), so a test can stop the retry
+// short while the Jacobi-CG fallback keeps the solve's own iteration cap.
+// <= 0 restores the shipped budget.
+void mg_safe_test_max_cycles(int cycles);
 
 }  // namespace fea_detail
 }  // namespace topopt
