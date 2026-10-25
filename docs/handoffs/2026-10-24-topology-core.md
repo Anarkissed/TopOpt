@@ -13,6 +13,14 @@ Syncs one way from that branch, merge only, never force. Pushed to origin/claude
   `exported_shell_for` (reviewer takes it to #358); Q47 reject; Q-KC1/2 yes; Q1B-a no cherry-pick (d475fac8 comes down
   the chain); pushes after each item's full suite. Item 50 REVERSED by him (see "Item 50, as ruled" below).
 - **Item 40: built** (this batch). See "Item 40, as built".
+- 2026-10-25 overnight plan (reviewer 07:11), suite 145/145: KEEP pushed ccdbb4b5 + triplets 4a0d7c9f; Manifold lines for
+  build_core.sh / build_cli_macos.sh posted to #362 on #CoreGroup; the resolution measurement written to
+  `~/dev/TopOpt/reviewer-inbox/2026-10-25-singularity/README.md` (the anchor peak is a singularity, and the margin does
+  not converge even with the anchor layer excluded: box ceiling 7.17 / 8.05 / 5.21 / 3.20 at res 48 / 64 / 96 / 128;
+  at res 128 even version 1 would be unreachable); the bridge hold-itself check built (e9205b34). Evidence reports
+  for #362's app tests: `~/dev/TopOpt/reviewer-inbox/2026-10-25-integration-evidence/`.
+- Open, not tonight: core refuses nothing when one face is both an anchor and a load (the load's tag overwrites the
+  anchor's; the app refuses the pair). CORE LIST candidate.
 
 ## Item 40, as built (2026-10-24)
 
