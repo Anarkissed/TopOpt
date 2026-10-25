@@ -112,11 +112,13 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         // lattice split, B5 3f293974 the Edit faces gate); today's four lines are its last branch. H30's line stays exact at
         // `Spacer()` with that chain inside its else, and `H30 end` closes after the chain's own `}`. Anchor only.
         let h30 = hooks.first { $0.id == "H30" }!.pin
-        let chain354 = "\n            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).\n"
+        // ★ H57 (2026-10-25): the chain sits inside AnyView(Group { … }) and topologyCornerPair is AnyView-wrapped (iPad stack overflow).
+        let chain354 = "\n            AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)"
+            + "\n            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).\n"
             + "            if !editFaces.isEditing, stage == .topology {\n"
             + "                // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print\n"
             + "                // parameters and the chip column, as rows) and the Optimize split button.\n"
-            + "                topologyCornerPair\n"
+            + "                AnyView(topologyCornerPair)   // Flexible (PR #362) H57\n"
             + "            } else if !editFaces.isEditing, stage == .lattice {\n"
             + "                // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)\n"
             + "                ComputeLocationControl(compute: compute)\n"
@@ -129,7 +131,7 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             + "            if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }   // Flexible (PR #362) H10: "
         if let r = ws.range(of: h30), let nl = ws[r.upperBound...].firstIndex(of: "\n") {
             if !ws[nl...].hasPrefix(between) { out.append("H30: the lines after its first line are not today's bar, unindented") }
-            if let o = ws[nl...].range(of: "\n            optimizeButton\n            }\n            }   // Flexible (PR #362) H30 end\n") {
+            if let o = ws[nl...].range(of: "\n            optimizeButton\n            }\n            })   // Flexible (PR #362) H57\n            }   // Flexible (PR #362) H30 end\n") {
                 if ws[nl..<o.lowerBound].contains("            }   // Flexible (PR #362) H30 end") { out.append("H30: its end comes before optimizeButton") }
             } else { out.append("H30: no `}   // Flexible (PR #362) H30 end` right after optimizeButton and the chain's `}`") }
         }

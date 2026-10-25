@@ -11801,11 +11801,12 @@ public struct WorkspacePlaceholder: View {
             }
             Spacer()
             if flexibleMain.owns(project, stage) { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup
+            AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)
             // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
             if !editFaces.isEditing, stage == .topology {
                 // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print
                 // parameters and the chip column, as rows) and the Optimize split button.
-                topologyCornerPair
+                AnyView(topologyCornerPair)   // Flexible (PR #362) H57
             } else if !editFaces.isEditing, stage == .lattice {
                 // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)
                 ComputeLocationControl(compute: compute)
@@ -11819,6 +11820,7 @@ public struct WorkspacePlaceholder: View {
             if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }   // Flexible (PR #362) H10: from any stage the pill lands on the Lattice stage, so Exit shows the lattice (C2 verification: "Building…" there goes to the Lattice stage only, where builds start)
             optimizeButton
             }
+            })   // Flexible (PR #362) H57
             }   // Flexible (PR #362) H30 end
         }
         // ★ THE BAR MEASURES ITSELF. Its height is not a constant: Optimize grows
