@@ -4,6 +4,9 @@
 //   (2) the eye is VIEW-ONLY: the Topology job is identical with a group hidden and shown.
 //   (3) a finished project is never re-run without the card; [Cancel] changes nothing; [Save as new
 //       project] only on Optimize's card, never the Lattice run's; takeRunOnOpen is one-shot.
+//       ★ SYNC #354 (89af86dd) A2, the reviewer's ruling R8 (2026-10-24 08:45): the approved mockup wins over H50d — #354's
+//       B4 gave the Lattice run its OWN card (LatticeRerunChoice) WITH Save as new project, so H50d's Lattice half (the
+//       flag set false in requestLatticeRun) is RETIRED with its pin and its red control. Topology's card keeps H50d.
 //   (4) a copy carries the WHOLE setup and no results; the original's files stay byte-identical; the
 //       copy's thumbnail shows no result (it is the imported part's, never re-rendered after a run).
 //   (5) H53: a switch to a DIFFERENT project gets a fresh workspace; the same project keeps its own.
@@ -45,7 +48,8 @@ final class FlexibleRound9HookTests: XCTestCase {
              gate: "if RerunCard.takeRunOnOpen(for: project.id) "),
         Hook(id: "H50d-state", file: ws, pin: "    @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d", gate: nil),
         Hook(id: "H50d-optimize", file: ws, pin: "            rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d", gate: nil),
-        Hook(id: "H50d-lattice", file: ws, pin: "            rerunOffersCopy = false; pendingReplacement = prompt   // Flexible (PR #362) H50d", gate: nil),
+        // ★ SYNC #354 (89af86dd) A2: H50d-lattice RETIRED (ruling R8): #354's B4 gave the Lattice run its own card, so
+        // requestLatticeRun no longer raises Topology's prompt and the flag line is gone.
         Hook(id: "H51-param", file: home, pin: "    var onDuplicate: () -> Void = {}   // Flexible (PR #362) H51", gate: nil),
         Hook(id: "H51-menu", file: home, pin: "            Button { onDuplicate() } label: { Label(\"Duplicate\", systemImage: \"plus.square.on.square\") }   // Flexible (PR #362) H51", gate: nil),
         Hook(id: "H51-call", file: home, pin: "                                          onDuplicate: { _ = model.duplicateProject(id: proj.id) })   // Flexible (PR #362) H51", gate: nil),
@@ -72,16 +76,16 @@ final class FlexibleRound9HookTests: XCTestCase {
                     "Button(\"Optimize anyway\"", "Button(\"Keep my results\""] where ws.contains(old) {
             out.append("an old ungated line is still there: \(old.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
-        // H50d: Optimize's request sets the flag true, the Lattice run's false — in that order in the file.
+        // H50d: Optimize's request sets the flag true, inside requestRun (before requestLatticeRun begins).
+        // ★ SYNC #354 (89af86dd) A2: the Lattice half ("the Lattice run's sets it false") RETIRED (ruling R8) — B4's own card.
         let optimize = ws.range(of: "    private func requestRun() {")
         let lattice = ws.range(of: "    private func requestLatticeRun() {")
         let setTrue = ws.range(of: "rerunOffersCopy = true; pendingReplacement = prompt")
-        let setFalse = ws.range(of: "rerunOffersCopy = false; pendingReplacement = prompt")
-        if let o = optimize, let l = lattice, let t = setTrue, let f = setFalse {
-            if !(o.upperBound < t.lowerBound && t.lowerBound < l.lowerBound && l.upperBound < f.lowerBound) {
+        if let o = optimize, let l = lattice, let t = setTrue {
+            if !(o.upperBound < t.lowerBound && t.lowerBound < l.lowerBound) {
                 out.append("H50d: the flag is not set inside the right request")
             }
-        } else { out.append("H50d: requestRun / requestLatticeRun / the flag lines not found") }
+        } else { out.append("H50d: requestRun / requestLatticeRun / the flag line not found") }
         // every replacement prompt goes through a flag line (no ungated `pendingReplacement = prompt`)
         let bare = ws.components(separatedBy: "\n").filter {
             $0.trimmingCharacters(in: .whitespaces) == "pendingReplacement = prompt"
@@ -110,10 +114,12 @@ final class FlexibleRound9HookTests: XCTestCase {
             f[h.file] = f[h.file]!.replacingOccurrences(of: h.pin, with: h.pin.replacingOccurrences(of: g, with: ""))
             XCTAssertFalse(Self.failures(f).isEmpty, "\(h.id): removing its gate must go red")
         }
+        // ★ SYNC #354 (89af86dd) A2: the Lattice-prompt control RETIRED with H50d's Lattice half (ruling R8); Optimize's
+        // prompt without the flag still goes red.
         var f = real
-        f[Self.ws] = f[Self.ws]!.replacingOccurrences(of: "rerunOffersCopy = false; pendingReplacement = prompt",
+        f[Self.ws] = f[Self.ws]!.replacingOccurrences(of: "rerunOffersCopy = true; pendingReplacement = prompt",
                                                       with: "pendingReplacement = prompt")
-        XCTAssertFalse(Self.failures(f).isEmpty, "H50d: a Lattice prompt without the flag must go red")
+        XCTAssertFalse(Self.failures(f).isEmpty, "H50d: an Optimize prompt without the flag must go red")
     }
 
     // ── fixtures ────────────────────────────────────────────────────────────
