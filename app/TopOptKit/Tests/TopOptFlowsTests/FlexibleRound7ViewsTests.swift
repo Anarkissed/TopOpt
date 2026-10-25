@@ -340,7 +340,11 @@ final class FlexibleRound7ViewsTests: XCTestCase {
             let t = try XCTUnwrap(FlexibleStagePage.composeTints(model: m, overlay: overlay, views: views).tints)
             return m.settings.loadedFaces.map(\.faceRegionID).filter { r in
                 guard let key = m.key(r), let start = overlay.flatStart[key], let n = m.stacks[key]?.columns.count else { return false }
-                return (start..<(start + 6 * n)).contains { v in v * 8 + 5 < t.count && t[v * 8 + 5] > 0.5 && t[v * 8 + 3] > 0 }
+                return (start..<(start + 6 * n)).contains { (v: Int) -> Bool in   // CI type-check: split into typed parts (no behaviour change)
+                    let o: Int = v * 8
+                    guard o + 5 < t.count else { return false }
+                    return t[o + 5] > 0.5 && t[o + 3] > 0
+                }
             }.sorted()
         }
         XCTAssertEqual(FlexibleStageViews().heatScope, .group, "the page opens with the current group's heat (today's look)")
@@ -407,8 +411,15 @@ final class FlexibleRound7ViewsTests: XCTestCase {
             return (start..<min(start + 6 * n, d.count / 3)).map { v in simd_length(SIMD3(d[3 * v], d[3 * v + 1], d[3 * v + 2])) }.max() ?? 0
         }
         let topZ = (0..<overlay.partFlatVertices).map { mesh.flat.positions[3 * $0 + 2] }.max() ?? 0
-        let side = (0..<overlay.partFlatVertices).filter { abs(mesh.flat.positions[3 * $0 + 2] - topZ) < 1e-3 }
-            .map { v in simd_length(SIMD3(d[3 * v], d[3 * v + 1], d[3 * v + 2])) }.max() ?? 0
+        let topVerts: [Int] = (0..<overlay.partFlatVertices).filter { (v: Int) -> Bool in   // CI type-check: split into typed parts (no behaviour change)
+            let z = mesh.flat.positions[3 * v + 2]
+            return abs(z - topZ) < 1e-3
+        }
+        let topLengths: [Float] = topVerts.map { (v: Int) -> Float in
+            let dv = SIMD3<Float>(d[3 * v], d[3 * v + 1], d[3 * v + 2])
+            return simd_length(dv)
+        }
+        let side: Float = topLengths.max() ?? 0
         let f4 = movedMap(4), f2 = movedMap(2)
         XCTAssertGreaterThan(f4, 1e-4, "★ face 4 of the pinch bends")
         XCTAssertGreaterThan(f2, 1e-4, "★ …and face 2, its opposing side")
@@ -440,7 +451,11 @@ final class FlexibleRound7ViewsTests: XCTestCase {
         let dStill = try XCTUnwrap(FlexibleSettingsSquish.shown(model: m, overlay: o2, channels: c2, feCache: &cacheStill).dents)
         FlexibleSettingsSquish.controlOtherGroupStill = false
         if let key = m.key(1), let start = o2.flatStart[key], let n = m.stacks[key]?.columns.count {
-            let still = (start..<(start + 6 * n)).map { v in simd_length(SIMD3(dStill[3 * v], dStill[3 * v + 1], dStill[3 * v + 2])) }.max() ?? 0
+            let stillLengths: [Float] = (start..<(start + 6 * n)).map { (v: Int) -> Float in   // CI type-check: split into typed parts (no behaviour change)
+                let dv = SIMD3<Float>(dStill[3 * v], dStill[3 * v + 1], dStill[3 * v + 2])
+                return simd_length(dv)
+            }
+            let still: Float = stillLengths.max() ?? 0
             XCTAssertEqual(still, 0, "control (round 5's rule): it stood still")
         }
         XCTAssertEqual(FlexibleStagePage.dentScale(views: [.bend], exaggeration: sq2.exaggeration, amount: 0), Float(sq2.exaggeration), "…at k")

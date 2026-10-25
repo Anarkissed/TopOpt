@@ -185,7 +185,9 @@ final class FlexibleR7E3Tests: XCTestCase {
             for tris in F.faceTris(m, st) {
                 for t in tris where t.count == 3 {
                     for i in 0...24 { for j in 0...(24 - i) {
-                        let q = t[0] + (t[1] - t[0]) * (Double(i) / 24) + (t[2] - t[0]) * (Double(j) / 24)
+                        let a: SIMD3<Double> = (t[1] - t[0]) * (Double(i) / 24)   // CI type-check: split into typed parts (no behaviour change)
+                        let b: SIMD3<Double> = (t[2] - t[0]) * (Double(j) / 24)
+                        let q: SIMD3<Double> = t[0] + a + b
                         if cut.height(q) < 0.5 * cut.depthMM { pts += [Float(q.x), Float(q.y), Float(q.z)] }
                     } }
                 }

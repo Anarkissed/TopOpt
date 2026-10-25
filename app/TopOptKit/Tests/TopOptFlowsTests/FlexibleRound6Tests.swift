@@ -184,7 +184,14 @@ final class FlexibleRound6Tests: XCTestCase {
 
     /// Per pixel: the largest channel difference (0…255).
     static func delta(_ a: [UInt8], _ b: [UInt8]) -> [Int] {
-        (0..<(a.count / 4)).map { i in (0..<3).map { abs(Int(a[4 * i + $0]) - Int(b[4 * i + $0])) }.max()! }
+        (0..<(a.count / 4)).map { (i: Int) -> Int in   // CI type-check: split into typed parts (no behaviour change)
+            var m = 0
+            for c in 0..<3 {
+                let d: Int = Int(a[4 * i + c]) - Int(b[4 * i + c])
+                m = max(m, abs(d))
+            }
+            return m
+        }
     }
 
     /// `mask` grown by `r` pixels.

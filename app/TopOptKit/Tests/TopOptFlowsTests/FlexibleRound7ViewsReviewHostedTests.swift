@@ -36,8 +36,11 @@ extension FlexibleRound7ViewsHostedTests {
     /// Pixels (BGRA8) that READ on the page's dark ground: luma above `minLuma` (of 255) — the X-ray ghost's dark smudge
     /// (≈ 30–45) does not, the shaded part (≈ 100–170) does.
     static func bright(_ px: [UInt8], minLuma: Double = 72) -> Int {
-        stride(from: 0, to: px.count, by: 4).filter { i in
-            0.0722 * Double(px[i]) + 0.7152 * Double(px[i + 1]) + 0.2126 * Double(px[i + 2]) > minLuma
+        stride(from: 0, to: px.count, by: 4).filter { (i: Int) -> Bool in   // CI type-check: split into typed parts (no behaviour change)
+            let b: Double = 0.0722 * Double(px[i])
+            let g: Double = 0.7152 * Double(px[i + 1])
+            let r: Double = 0.2126 * Double(px[i + 2])
+            return b + g + r > minLuma
         }.count
     }
     static func frameDiffering(_ a: [UInt8], _ b: [UInt8], threshold t: Int = 12) -> Int {

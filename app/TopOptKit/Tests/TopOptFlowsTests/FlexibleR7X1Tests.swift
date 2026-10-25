@@ -250,8 +250,12 @@ final class FlexibleR7X1Tests: XCTestCase {
             groupVerts += Array(start..<min(start + 6 * st.columns.count, dents.count / 3))
         }
         XCTAssertFalse(groupVerts.isEmpty, "premise: Group 2's map quads")
-        let expect = groupVerts.map { v in simd_length(SIMD3(dents[3 * v], dents[3 * v + 1], dents[3 * v + 2])) }
-            .max().map { $0 * Float(sq.exaggeration) } ?? 0
+        let dentLengths: [Float] = groupVerts.map { (v: Int) -> Float in   // CI type-check: split into typed parts (no behaviour change)
+            let dv = SIMD3<Float>(dents[3 * v], dents[3 * v + 1], dents[3 * v + 2])
+            return simd_length(dv)
+        }
+        let k = Float(sq.exaggeration)
+        let expect: Float = dentLengths.max().map { $0 * k } ?? 0
         XCTAssertGreaterThan(deepest, 0.5, "★ the prism reaches INTO the model")
         XCTAssertEqual(deepest, expect, accuracy: max(0.05, expect * 0.02), "★ …to the bend's full depth (k × the dent at full load)")
         let tx = FlexibleStagePage.composeTints(model: m, overlay: overlay, views: [.xray]).tints ?? []

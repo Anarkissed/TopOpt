@@ -1003,9 +1003,16 @@ final class FlexibleRound6HostedTests: XCTestCase {
             Dictionary(FlexibleStageViewTags.hidden(model: m, projection: p).map { ($0.region, $0) }) { a, _ in a }
         }
         func length(_ h: FlexibleStageViewTags.Hidden) -> CGFloat {
-            h.paths.reduce(0) { acc, loop in
-                acc + loop.indices.reduce(0) { $0 + hypot(loop[$1].x - loop[($1 + 1) % loop.count].x, loop[$1].y - loop[($1 + 1) % loop.count].y) }
+            var total: CGFloat = 0   // CI type-check: split into typed parts (no behaviour change)
+            for loop in h.paths {
+                for i in loop.indices {
+                    let next: CGPoint = loop[(i + 1) % loop.count]
+                    let dx: CGFloat = loop[i].x - next.x
+                    let dy: CGFloat = loop[i].y - next.y
+                    total += hypot(dx, dy)
+                }
             }
+            return total
         }
         var lines: [String] = []
         m.selectedRegion = nil
