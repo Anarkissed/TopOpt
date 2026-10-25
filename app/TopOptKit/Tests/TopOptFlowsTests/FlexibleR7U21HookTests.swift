@@ -53,7 +53,9 @@ final class FlexibleR7U21HookTests: XCTestCase {
         Hook(id: "H38'", file: "WorkspacePlaceholder.swift",
              pin: "                    project.lattice.flexible = .newSetup()   // Flexible (PR #362) H38': ",
              gate: ".newSetup()",
-             anchor: "                }, onChooseFlexible: {\n", elseText: nil),
+             // ★ RE-PINNED (sync of #354 at 89af86dd: B4 564db991 made the mount `LatticeStageModeModal { mode in` (a trailing closure;
+             // LatticeStageTests pins that text), so our closure follows as the second trailing closure. Anchor only.)
+             anchor: "                } onChooseFlexible: {\n", elseText: nil),
         Hook(id: "H46", file: "HomeView.swift",
              pin: "                        Text(FlexibleHomeCard.meta(project) ?? project.meta)   // Flexible (PR #362) H46: ",
              gate: "FlexibleHomeCard.meta(project) ?? ",

@@ -52,11 +52,15 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
              line: "                              if flexibleMain.owns(project, stage), !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: ",
              gate: "flexibleMain.owns(project, stage), !fullScreenPageUp",
              after: "                              guard visible.surfaceEditing else { return }\n"),
+        // ★ RE-PINNED (sync of #354 at 89af86dd): #354's bare `selectionsLibraryCard` is now a chain (B5 3f293974's Edit faces card
+        // first, then B3 7e37c45f's Topology list, B4 564db991's lattice list, the card last). Our owns-swap goes right after
+        // B5's mode branch, as #354's hook table places it; its gate and its FlexibleSelectionsList call are unchanged, and
+        // its else is #354's chain. Was: `if <gate> { FlexibleSelectionsList(…) } else { selectionsLibraryCard }`.
         Hook(id: "H25",
-             before: "            if selectionsCollapsed { latticePreviewNotice }\n",
-             line: "            if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) } else { selectionsLibraryCard }   // Flexible (PR #362) H25: ",
+             before: "            if editFaces.isEditing { selectionsLibraryCard }\n",
+             line: "            else if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: ",
              gate: "flexibleMain.owns(project, stage), !fullScreenPageUp",
-             after: "            if !selectionsCollapsed { latticePreviewNotice }\n"),
+             after: "            // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.\n"),
         Hook(id: "H32",
              before: "                latticeOnlyBadge\n                latticeEdgeLight\n",
              line: "                if flexibleMain.owns(project, stage) { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: ",

@@ -108,26 +108,41 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             }
         }
         // H30: the four lines between its two added lines stay byte-identical and are not re-indented; H10 once
+        // ★ RE-PINNED (sync of #354 at 89af86dd): #354's bottom bar is now a chain (B3 7e37c45f Topology's corner pair, B4 564db991 the
+        // lattice split, B5 3f293974 the Edit faces gate); today's four lines are its last branch. H30's line stays exact at
+        // `Spacer()` with that chain inside its else, and `H30 end` closes after the chain's own `}`. Anchor only.
         let h30 = hooks.first { $0.id == "H30" }!.pin
-        let between = "\n            ComputeLocationControl(compute: compute)\n            printParamsButton\n"
+        let chain354 = "\n            // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).\n"
+            + "            if !editFaces.isEditing, stage == .topology {\n"
+            + "                // ★ B3 (A1): Topology's bar is the CORNER PAIR — the Setup chip (iPad | Mac, Print\n"
+            + "                // parameters and the chip column, as rows) and the Optimize split button.\n"
+            + "                topologyCornerPair\n"
+            + "            } else if !editFaces.isEditing, stage == .lattice {\n"
+            + "                // ★ B4: the lattice split — Lattice, and ⌃ for its steps (Preview → Core → Export)\n"
+            + "                ComputeLocationControl(compute: compute)\n"
+            + "                printParamsButton\n"
+            + "                latticeSplit\n"
+            + "            } else {"
+        let between = chain354 + "\n            ComputeLocationControl(compute: compute)\n            printParamsButton\n"
             + "            // ★ LATTICE, TO THE LEFT OF OPTIMIZE (maintainer, 2026-08-17: \"Make\n"
             + "            // it exactly like Optimize button, but to the left of it\").\n"
             + "            if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }   // Flexible (PR #362) H10: "
         if let r = ws.range(of: h30), let nl = ws[r.upperBound...].firstIndex(of: "\n") {
             if !ws[nl...].hasPrefix(between) { out.append("H30: the lines after its first line are not today's bar, unindented") }
-            if let o = ws[nl...].range(of: "\n            optimizeButton\n            }   // Flexible (PR #362) H30 end\n") {
+            if let o = ws[nl...].range(of: "\n            optimizeButton\n            }\n            }   // Flexible (PR #362) H30 end\n") {
                 if ws[nl..<o.lowerBound].contains("            }   // Flexible (PR #362) H30 end") { out.append("H30: its end comes before optimizeButton") }
-            } else { out.append("H30: no `}   // Flexible (PR #362) H30 end` right after optimizeButton") }
+            } else { out.append("H30: no `}   // Flexible (PR #362) H30 end` right after optimizeButton and the chain's `}`") }
         }
         if ws.components(separatedBy: "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(").count - 1 != 1 {
             out.append("H10: must appear exactly once")
         }
         // H29: the Flexible branch is gone, #354's mode chip branch is byte-identical (pre-#362 shape)
+        // ★ RE-PINNED (sync of #354 at 89af86dd): B4 564db991 deleted #354's own LatticeStageModeChip branch (the capsule names the
+        // type now); the slot is #354's B4 note, byte for byte, with nothing of ours in it. Was: the chip branch.
         if ws.contains("FlexibleStageChip") { out.append("H29: WorkspacePlaceholder still names FlexibleStageChip") }
-        let chip = "            if stage == .lattice, let mode = project.lattice.stageMode {\n"
-            + "                LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }\n"
-            + "                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n"
-            + "            }\n        }\n"
+        let chip = "            // ★ B4: the type is named by the capsule (● Structural ⌄); its About row opens the mode sheet that\n"
+            + "            // this chip opened, so the chip is gone from the row.\n"
+            + "\n        }\n"
         if ws.components(separatedBy: chip).count - 1 != 1 { out.append("H29: #354's LatticeStageModeChip branch is not byte-identical") }
         // condition (b): H18's line removed with H24
         if ws.contains("FlexibleMainChips") || ws.contains("(PR #362) H18") { out.append("H18: its line is still in WorkspacePlaceholder (H24 supersedes it)") }
@@ -165,8 +180,10 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             XCTAssertFalse(Self.failures(broken).isEmpty, "★ \(h.id): without its gate the pin must go red")
         }
         // and H29 / H18 / H30's else: putting today's lines back is red too
-        let withChip = ws.replacingOccurrences(of: "                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n            }\n        }\n",
-            with: "                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n            } else if stage == .lattice, project.lattice.flexible != nil {\n                FlexibleStageChip { showLatticeModeSheet = true }\n                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n            }\n        }\n")
+        // ★ RE-PINNED (sync of #354 at 89af86dd): the branch goes back into B4 564db991's slot (#354's chip branch is gone)
+        let withChip = ws.replacingOccurrences(of: "            // this chip opened, so the chip is gone from the row.\n\n        }\n",
+            with: "            // this chip opened, so the chip is gone from the row.\n            if stage == .lattice, project.lattice.flexible != nil {\n                FlexibleStageChip { showLatticeModeSheet = true }\n                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n            }\n        }\n")
+        XCTAssertNotEqual(withChip, ws, "the red control must change the source")
         XCTAssertFalse(Self.failures(withChip).isEmpty, "★ H29: the Flexible chip branch back is red")
         let withH18 = ws.replacingOccurrences(of: "SettingsChipID.allCases.filter { id in\n",
             with: "SettingsChipID.allCases.filter { id in\n            if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }   // Flexible (PR #362) H18: x\n")
@@ -194,7 +211,16 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
     func testOffTheFlexibleStageTodaysExportStepAndChipColumn() throws {
         let ws = try FlexibleSource.code("WorkspacePlaceholder.swift")
         let filter = try XCTUnwrap(ws.range(of: "SettingsChipID.allCases.filter { id in\n"))
-        XCTAssertTrue(ws[filter.upperBound...].hasPrefix("            switch id {"), "★ the chips' filter is #354's switch again (H18 gone)")
+        // ★ RE-PINNED (sync of #354 at 89af86dd): #354's own first statements now come before its switch (B3 7e37c45f's Topology
+        // rule, B5 3f293974's Edit faces rule); nothing of ours is in the filter. Was: the switch first.
+        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —\n"
+            + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
+            + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
+            + "            if stage == .topology { return false }\n"
+        // (this test reads FlexibleSource.code: comments cut at `//`, so #354's two comment lines are their indent)
+        let filter354Code = filter354.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { l in l.range(of: "//").map { String(l[..<$0.lowerBound]) } ?? String(l) }.joined(separator: "\n")
+        XCTAssertTrue(ws[filter.upperBound...].hasPrefix(filter354Code + "            switch id {"), "★ the chips' filter is #354's switch again (H18 gone)")
         XCTAssertTrue(ws.contains("case .cadFaces: return isStepPart"), "CAD surfaces: #354's rule, untouched")
     }
 }

@@ -31,11 +31,17 @@ final class FlexibleRound9HookTests: XCTestCase {
              gate: ", project.groupView.drawsPrimitiveKnobs(forActive: gid)"),
         Hook(id: "H50a", file: ws, pin: "        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest() == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a",
              gate: "RerunCard.greysOut("),
-        Hook(id: "H50b", file: ws, pin: "        .alert(RerunCard.title, isPresented: replacementPromptBinding) {   // Flexible (PR #362) H50b", gate: nil),
-        Hook(id: "H50b-copy", file: ws, pin: "            if rerunOffersCopy { Button(RerunCard.saveAsNewLabel) { pendingReplacement = nil; if let copy = model.duplicateProject(id: project.id) { RerunCard.runOnOpen(copy.id); model.open(copy) } else { model.toast = RerunCard.copyFailedToast } } }   // Flexible (PR #362) H50b",
+        // ★ RE-PINNED (sync of #354 at 89af86dd: B3 7e37c45f built the re-run card in WorkspacePlaceholder "as #362's H50b" with its own
+        // names, so the conflict took #354's lines: the alert line is ours without the tag; the copy row's label is
+        // TopologyRerunChoice.saveAsNew.label (= RerunCard.saveAsNewLabel, TopologyStage.swift) and its statements moved,
+        // byte for byte, into saveAsNewProjectAndRun() (pinned below); Cancel's label is TopologyRerunChoice.cancel.label
+        // (= RerunCard.cancelLabel). Same gate, same behaviour. H50c's statement is verbatim inside B3/B4's one .onAppear.)
+        Hook(id: "H50b", file: ws, pin: "        .alert(RerunCard.title, isPresented: replacementPromptBinding) {\n", gate: nil),
+        Hook(id: "H50b-copy", file: ws, pin: "            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }\n",
              gate: "if rerunOffersCopy { "),
-        Hook(id: "H50b-cancel", file: ws, pin: "            Button(RerunCard.cancelLabel, role: .cancel) { pendingReplacement = nil }   // Flexible (PR #362) H50b", gate: nil),
-        Hook(id: "H50c", file: ws, pin: "                .onAppear { if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } } }   // Flexible (PR #362) H50c",
+        Hook(id: "H50b-cancel", file: ws, pin: "            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }\n", gate: nil),
+        Hook(id: "H50b-copy-body", file: ws, pin: "    func saveAsNewProjectAndRun() {\n        if let copy = model.duplicateProject(id: project.id) {\n            RerunCard.runOnOpen(copy.id)\n            model.open(copy)\n        } else {\n            model.toast = RerunCard.copyFailedToast\n        }\n    }\n", gate: nil),
+        Hook(id: "H50c", file: ws, pin: "                    if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }\n",
              gate: "if RerunCard.takeRunOnOpen(for: project.id) "),
         Hook(id: "H50d-state", file: ws, pin: "    @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d", gate: nil),
         Hook(id: "H50d-optimize", file: ws, pin: "            rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d", gate: nil),
@@ -195,7 +201,9 @@ final class FlexibleRound9HookTests: XCTestCase {
 
     func testCancelChangesNothing() throws {
         let ws = try Self.source(Self.ws)
-        XCTAssertTrue(ws.contains("Button(RerunCard.cancelLabel, role: .cancel) { pendingReplacement = nil }"),
+        // ★ RE-PINNED (sync of #354 at 89af86dd: B3 7e37c45f's copy of the card names the label TopologyRerunChoice.cancel.label = RerunCard.cancelLabel)
+        XCTAssertEqual(TopologyRerunChoice.cancel.label, RerunCard.cancelLabel)
+        XCTAssertTrue(ws.contains("Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }"),
                       "Cancel only dismisses the card")
     }
 

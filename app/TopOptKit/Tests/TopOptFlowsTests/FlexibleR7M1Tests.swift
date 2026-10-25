@@ -111,7 +111,12 @@ final class FlexibleR7M1Tests: XCTestCase {
         // ★ RE-PINNED (round 7, R7-D1 — condition (b): H24 supersedes H18, removed in the same commit): the chips' filter is
         // #354's own again (its first statement is #354's switch) and the column is not drawn on the Flexible stage (H24).
         // Was: H18 as the filter's first statement.
-        XCTAssertEqual(ws.components(separatedBy: "SettingsChipID.allCases.filter { id in\n            switch id {").count - 1, 1,
+        // ★ RE-PINNED (sync of #354 at 89af86dd): #354's own first statements now precede its switch (B3 7e37c45f, B5 3f293974)
+        let filter354 = "            // ★ B3: on Topology the chip column's settings are the Setup chip's rows. ★ B5: Paint lives in Edit faces —\n"
+            + "            // there it is the column's one chip (greyed on STEP, `EditFacesPaint`), and on no stage outside it.\n"
+            + "            if editFaces.isEditing { return id == .paint && viewerMesh != nil }\n"
+            + "            if stage == .topology { return false }\n"
+        XCTAssertEqual(ws.components(separatedBy: "SettingsChipID.allCases.filter { id in\n" + filter354 + "            switch id {").count - 1, 1,
                        "★ H18 is gone: the filter's first statement is #354's switch")
         XCTAssertTrue(ws.contains("if force.gravityIsSet, !flexibleMain.owns(project, stage) { bottomRightControls }   // Flexible (PR #362) H24:"),
                       "★ H24: the column is off the Flexible stage")

@@ -77,8 +77,11 @@ final class FlexibleH39HotfixHookTests: XCTestCase {
         // the one toggle is #354's Regions button, and that button is H39-gated
         if !ws.contains(h39Block + h39Pin) { out.append("the Regions toggle is drawn on the Flexible stage (not H39-gated)") }
         // (the red run's first count expected one: the declaration's own `= false` is the other — corrected before the code)
+        // ★ RE-PINNED (sync of #354 at 89af86dd): B5 3f293974 added a third `= false`, a CLOSER (leaveEditFacesTools shuts the panel on
+        // Edit faces' Done); nothing opens it. Was: exactly the declaration and the panel's Done (2).
         let falses = ws.components(separatedBy: "regionsOpen = false").count - 1
-        if falses != 2 || !ws.contains("@State private var regionsOpen = false\n") || !ws.contains("onClose: { regionsOpen = false })") {
+        if falses != 3 || !ws.contains("@State private var regionsOpen = false\n") || !ws.contains("onClose: { regionsOpen = false })")
+            || !ws.contains("        paintActive = false\n        regionsOpen = false\n    }\n") {
             out.append("regionsOpen = false is not only its declaration and the panel's Done")
         }
         // and the panel itself is not drawn on the Flexible stage (H26, unchanged)
