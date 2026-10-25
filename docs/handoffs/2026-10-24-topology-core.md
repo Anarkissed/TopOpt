@@ -163,7 +163,8 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
   Without Manifold, or if a mesh is not manifold, the voxel export is kept and a WARNING says so.
 - Manifold 3.5.1 via a vcpkg overlay port (core/vcpkg-ports/manifold: no TBB, no Clipper2, no C bindings);
   `core/vcpkg-configuration.json` points at it. Optional unless `TOPOPT_REQUIRE_DEPS`. Installed here in
-  `.vcpkg/installed-keep/{arm64-osx,arm64-ios,arm64-ios-simulator}` (ignored).
+  `.vcpkg/installed-keep/{arm64-osx,arm64-ios,arm64-ios-simulator}` (ignored). `core/vcpkg-triplets` pins the app's
+  minimums (Package.swift: macOS 13, iOS 16); without them vcpkg built for the host SDK (minos 27.0).
 - Packaging: the xcframework carries only libtopopt.a, so libmanifold.a must be merged into each slice (libtool -static)
   before create-xcframework. The exact lines went to #362 on #CoreGroup.
 - Test: `test_keep` 7/7 (104/104 CAD vertices inside the region exact with KEEP, 0/104 without; one body, 0 bad edges;
