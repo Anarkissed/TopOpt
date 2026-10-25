@@ -91,11 +91,12 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(try member(ws, "var canLatticeThis").contains("latticeStageRefusal == nil"))
         XCTAssertTrue(try member(ws, "private var latticeThisSummary").contains("if let why = latticeStageRefusal { return why }"))
         // the tap
-        XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 2)
+        XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 3)   // B3: + the split row
         XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeSettingsRefusal"))
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         XCTAssertTrue(ws.contains("if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
-        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 2, "★ greyed, yet tappable")
+        // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there
+        XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 3, "★ greyed, yet tappable")
         let go = try member(ws, "private func goToLatticeType()")
         XCTAssertTrue(go.contains("if stage != .lattice { goToStage(.lattice) }") && go.contains("showLatticeWizard = true"))
         for write in ["topologyID", "setTopology", "lattice.enabled", "persist"] {

@@ -119,7 +119,7 @@ final class LatticeVariantFaceWallsTests: XCTestCase {
                       "the job's own count, with the job's own spec (and core's verdict, ruling 3)")
         XCTAssertTrue(ws.contains("probe.facesWithoutShape = job.facesWithoutShape"), "Check sizes stamps its answer")
         XCTAssertTrue(ws.contains("probe.regionsWithoutShape = job.regionsWithoutShape.isEmpty ? nil : job.regionsWithoutShape"))
-        XCTAssertTrue(ws.contains("variantFacesWithoutShape: withoutShape,\n                variantRegionsWithoutShape: regionsWithoutShape))"),
+        XCTAssertTrue(ws.contains("variantFacesWithoutShape: withoutShape,\n                variantRegionsWithoutShape: regionsWithoutShape,"),
                       "the re-lattice result carries it")
         XCTAssertTrue(ws.contains("variantFacesWithoutShape: pass.facesWithoutShape,\n                    variantRegionsWithoutShape: pass.regionsWithoutShape,"),
                       "the forecast drawer gets it, from ONE emission per pass")

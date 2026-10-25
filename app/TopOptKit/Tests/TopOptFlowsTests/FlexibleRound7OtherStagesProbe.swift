@@ -79,7 +79,6 @@ final class FlexibleRound7OtherStagesProbe: XCTestCase {
         switch stage {
         case .topology: break
         case .lattice: click(h, CGPoint(x: x, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2)); pump(5)
-        case .surface: click(h, CGPoint(x: x, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton * 1.5 + PageChrome.gap)); pump(5)
         }
         write(h, "\(tag)_\(stage.rawValue)")
         if let s = FlexibleMainStage.lastMade, flexible { await_(s) }
@@ -91,7 +90,7 @@ final class FlexibleRound7OtherStagesProbe: XCTestCase {
         if folder == "887AC498-5B5D-4475-B6CB-893DC69B5FD6" { return }
         if !flexible { try shoot(folder, tag: tag, size: size, flexible: flexible, stage: .lattice) }
         if folder == "68BF7B74-3C2A-4ED6-A46D-AC040A9CA649" { return }
-        try shoot(folder, tag: tag, size: size, flexible: flexible, stage: .surface)
+        // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed the Surface stage, so there is no Surface shot.
     }
     func await_(_ s: FlexibleMainStage) { addTeardownBlock { @MainActor in await s.model?.waitForIdle() } }
 

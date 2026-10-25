@@ -50,6 +50,10 @@ final class BridgeGuardTests: XCTestCase {
         out["lattice_aesthetic_cells_per_member_hard_floor"] = Answer(valid: h > 0, reason: TopOptKit.lastCoreRefusal)
         let m = TopOptKit.latticeMinPrintableCellMM(topology: id, minExtrudableWidthMM: 0.45, maxRelativeDensity: 0.2)
         out["lattice_min_printable_cell_mm"] = Answer(valid: m != nil, reason: TopOptKit.lastCoreRefusal)
+        let md = TopOptKit.latticeMinDensityForStrut(topology: id, cellMM: 4, minExtrudableWidthMM: 0.45, maxRelativeDensity: 0.2)
+        out["lattice_min_density_for_strut"] = Answer(valid: md != nil, reason: TopOptKit.lastCoreRefusal)
+        let po = TopOptKit.latticePrintsOpen(topology: id, cellMM: 4, beadMM: 0.45)
+        out["lattice_prints_open"] = Answer(valid: po != nil, reason: TopOptKit.lastCoreRefusal)
         // the plan: a 6×6×6 block of candidates at 1 mm, one 6 mm member
         let n = 216
         let plan = TopOptKit.latticeCellSizePlan(
@@ -65,7 +69,8 @@ final class BridgeGuardTests: XCTestCase {
         "lattice_strut_diameter_mm", "lattice_relative_density", "lattice_aesthetic_density_ceiling",
         "lattice_limits", "lattice_cell_bounds", "lattice_region_derivation",
         "lattice_aesthetic_cells_per_member_floor", "lattice_aesthetic_cells_per_member_hard_floor",
-        "lattice_cell_size_plan", "lattice_min_printable_cell_mm",
+        "lattice_cell_size_plan", "lattice_min_printable_cell_mm", "lattice_min_density_for_strut",
+        "lattice_prints_open",
     ]
 
     /// ★ THE POSITIVE CONTROL: octet, the one live type, answers on every function with no

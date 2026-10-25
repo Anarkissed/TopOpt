@@ -33,10 +33,14 @@ final class LatticeDefaultGradePlanTests: XCTestCase {
 final class LatticeDefaultGradePlanSwitchTests: XCTestCase {
     func testPlansAreOffAndStepppedNeverSendsOne() throws {
         XCTAssertFalse(LatticeSteppedCellWire.defaultGradePlansEnabled, "★ off until every plan is accepted")
+        var face = LatticeRegionSpec(role: .include, kind: .face)
+        face.normal = SIMD3(0, 0, 1); face.depthMM = 12; face.halfUMM = 20; face.halfWMM = 20
         var spec = LatticeSpec(topologyID: "octet", cellMM: 12, strutRadiusMM: 0.5,
-                               generateRelativeDensity: 0.3, minRelativeDensity: 0.1, maxRelativeDensity: 0.5)
+                               generateRelativeDensity: 0.3, minRelativeDensity: 0.1, maxRelativeDensity: 0.5,
+                               regions: [face])
         spec.algorithm = "doubled"
-        spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: .zero, sizeMM: 12)]
+        // K1: a plan states each planned region's ladder base, or it is withheld
+        spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: .zero, sizeMM: 12, planBaseCellMM: 12)]
         let original = try JSONSerialization.data(withJSONObject: ["model": "p.step"])
         func cells(_ s: LatticeSpec, plans: Bool) throws -> Any? {
             let data = try RelatticeJobBuilder.build(original: original, designFingerprint: 1,

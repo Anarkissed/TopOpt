@@ -17,9 +17,10 @@ public struct FlexibleStageNavExtra: Equatable, Sendable {
 public enum FlexibleStageNav {
     public static func extra(_ stage: WorkspaceStage, flexible: Bool) -> FlexibleStageNavExtra? {
         guard flexible else { return nil }
+        // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface and deleted H9's call
+        // site, so there is no [Surface] / [‹ Flexible] button to offer. P5 retires this file (Edit faces' Done is the way back).
         switch stage {
-        case .lattice: return FlexibleStageNavExtra(dest: .surface, icon: WorkspacePlaceholder.stageIcon(.surface), title: WorkspaceStage.surface.title)
-        case .surface: return FlexibleStageNavExtra(dest: .lattice, icon: "chevron.left", title: "Flexible")
+        case .lattice: return nil
         case .topology: return nil
         }
     }

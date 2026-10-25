@@ -114,7 +114,7 @@ final class LatticeStandCoverageProbe: XCTestCase {
                     for i in x0...x1 {
                         guard occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 else { row += "."; continue }
                         let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * h)
-                        let d = LatticeRegionMask.signedDistanceWholePrism(p, regions: regions)
+                        let d = LatticeRegionMask.signedDistance(p, regions: regions)
                         var m = 0
                         for r in regions where LatticeRegionMask.contains(p, region: r) { if r.faceID == 15 { m |= 1 } else if r.faceID == 2 { m |= 2 } else { m |= 4 } }
                         if m == 5 || m == 6 { overlap += 1; if d >= 0 { solidInOverlap += 1 } }

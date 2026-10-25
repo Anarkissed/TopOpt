@@ -896,6 +896,63 @@ public struct LatticeReport: Equatable, Sendable {
     /// job left out. Read from V1's stored key only; never written by a new run.
     public let variantLegacyFaceWallsLeftOut: Int
 
+    /// ★★ THE PLAN AS LAID (K4, #358 39db7c33; the reviewer's ruling, 2026-10-11 03:28, item 3) — present exactly
+    /// when the JOB carried a plan (`lattice.stepped_cells`). On such a run the request's `cellMM`, the export's
+    /// strut radii and the per-region receipt's cell figures describe core's grading LAW, not the plan the file was
+    /// built from (K4: "on a plan run the law's fields describe the law and not the file"), so the results read
+    /// these instead. `regions` is empty when the run_info carried no `grading.stepped.plan_by_region` — a core
+    /// before K4, or (measured 2026-10-11, core 8bed216c) a Default Grade plan run, whose run_info has no
+    /// `grading.stepped` block at all although core laid the plan.
+    public let planLaid: PlanLaid?
+
+    public struct PlanLaid: Equatable, Sendable {
+        public struct Region: Equatable, Sendable {
+            public let region: Int
+            public let baseCellMM: Double
+            public let cells: Int
+            /// Core's own histogram string, e.g. "6.000=32".
+            public let sizes: String
+            public let strutsLaid: Int
+            public let nodesLaid: Int
+            public let cellsWithNoStrut: Int
+        }
+        public let regions: [Region]
+        /// `grading.plan_by_region` verbatim ("[]" when absent), so a stored outcome restores the same figures.
+        public let rawJSON: Data
+        public var cells: Int { regions.reduce(0) { $0 + $1.cells } }
+        public var strutsLaid: Int { regions.reduce(0) { $0 + $1.strutsLaid } }
+        public var nodesLaid: Int { regions.reduce(0) { $0 + $1.nodesLaid } }
+        public var cellsWithNoStrut: Int { regions.reduce(0) { $0 + $1.cellsWithNoStrut } }
+
+        public init(planByRegionJSON raw: Data) {
+            rawJSON = raw
+            let arr = ((try? JSONSerialization.jsonObject(with: raw)) as? [[String: Any]]) ?? []
+            func i(_ o: [String: Any], _ k: String) -> Int { (o[k] as? Int) ?? Int((o[k] as? Double) ?? 0) }
+            regions = arr.map { o in
+                let groups = (o["groups"] as? [[String: Any]]) ?? []
+                return Region(region: i(o, "region"), baseCellMM: (o["base_cell_mm"] as? Double) ?? 0,
+                              cells: i(o, "cells"), sizes: (o["sizes"] as? String) ?? "",
+                              strutsLaid: groups.reduce(0) { $0 + i($1, "struts_laid") },
+                              nodesLaid: groups.reduce(0) { $0 + i($1, "nodes_laid") },
+                              cellsWithNoStrut: groups.reduce(0) { $0 + i($1, "cells_with_no_strut") })
+            }
+        }
+        /// From a run_info document: its `grading.stepped.plan_by_region` (observability.cpp writes it inside the
+        /// `stepped` object), an empty plan when it has none.
+        public init(runInfo: [String: Any]?) {
+            let stepped = (runInfo?["grading"] as? [String: Any])?["stepped"] as? [String: Any]
+            let arr = stepped?["plan_by_region"] as? [Any] ?? []
+            self.init(planByRegionJSON: (try? JSONSerialization.data(withJSONObject: arr, options: [.sortedKeys]))
+                      ?? Data("[]".utf8))
+        }
+        /// Did this job document carry a plan — a non-empty `lattice.stepped_cells`?
+        public static func jobCarriesPlan(_ jobJSON: Data) -> Bool {
+            guard let o = (try? JSONSerialization.jsonObject(with: jobJSON)) as? [String: Any],
+                  let lat = o["lattice"] as? [String: Any], let cells = lat["stepped_cells"] as? [Any] else { return false }
+            return !cells.isEmpty
+        }
+    }
+
     public struct StrutStrength: Equatable, Sendable {
         public let marginInPlane: Double
         public let marginInterlayer: Double
@@ -958,7 +1015,9 @@ public struct LatticeReport: Equatable, Sendable {
                 regionCellsJSON: Data? = nil,
                 variantFacesWithoutShape: Int = 0,
                 variantRegionsWithoutShape: [String] = [],
-                variantLegacyFaceWallsLeftOut: Int = 0) {
+                variantLegacyFaceWallsLeftOut: Int = 0,
+                planLaid: PlanLaid? = nil) {
+        self.planLaid = planLaid
         self.regionCellsJSON = regionCellsJSON
         self.variantFacesWithoutShape = variantFacesWithoutShape
         self.variantRegionsWithoutShape = variantRegionsWithoutShape
@@ -1164,6 +1223,71 @@ public enum TopOptKit {
         notePerTypeCall(#function, topology)
         let v = topoptbridge.lattice_min_printable_cell_mm(std.string(topology), w, cap)
         return v > 0 && v.isFinite ? v : nil
+    }
+
+    /// ★★ CORE'S LIGHTEST PRINTABLE DENSITY AT `cellMM`, UNDER THE JOB'S CAP (the reviewer,
+    /// 2026-10-09 20:51: the ceiling from core, and "a sent rho never exceeds the cap the job
+    /// carries"). Core bisects its diameter table against min(rho_max, cap), so the answer never
+    /// exceeds the cap; `maxRelativeDensity` is the cap the job writes (0 = none).
+    /// `.prints(rho)`; `.noneUnderTheCap` when no density the job allows prints a bead at this cell;
+    /// nil when core refuses (`lastCoreRefusal` says why).
+    public enum MinDensityForStrut: Equatable, Sendable { case prints(Double), noneUnderTheCap }
+    public static func latticeMinDensityForStrut(topology: String, cellMM: Double, minExtrudableWidthMM w: Double,
+                                                 maxRelativeDensity cap: Double) -> MinDensityForStrut? {
+        notePerTypeCall(#function, topology)
+        let v = topoptbridge.lattice_min_density_for_strut(std.string(topology), cellMM, w, cap)
+        guard v.isFinite, v != 0 else { return nil }
+        return v > 0 ? .prints(v) : .noneUnderTheCap
+    }
+
+    /// ★★ CORE'S ONE PRINTS-OPEN RULE (#358 588672f5, `lattice_prints_open`): a bead-wide strut leaves a
+    /// cell this size at or under 0.20 relative density. The rule core's halving ladder and any-step
+    /// menu ask; the app's ladder, Stepped's menu and the quilt step ask it here. nil ⇒ core refused
+    /// (a type it does not call live) — `lastCoreRefusal` keeps its words.
+    ///
+    /// ★ ASKED ONCE PER BEAD. Core's forward law voxelises a unit cell at 48³ on every call — 7 ms an ask,
+    /// against microseconds for the Swift law this replaces, and a bake asks hundreds of times. The law
+    /// reads radius/cell only and is monotone in it, so for one (topology, bead) core's answer is a
+    /// THRESHOLD in the cell: the first ask bisects core's own predicate down to two adjacent doubles,
+    /// and every ask after is that comparison — core's answer for every double (pinned against direct
+    /// asks in `LatticeDefaultGradeBaseRuleTests`).
+    public static func latticePrintsOpen(topology: String, cellMM: Double, beadMM: Double) -> Bool? {
+        notePerTypeCall(#function, topology)
+        guard cellMM.isFinite, cellMM > 0, beadMM.isFinite, beadMM > 0,
+              let crossing = printsOpenCrossingMM(topology: topology, beadMM: beadMM)
+        else { return askCorePrintsOpen(topology: topology, cellMM: cellMM, beadMM: beadMM) }   // core's own words
+        return cellMM >= crossing
+    }
+
+    /// One direct ask of core's `lattice_prints_open` (no cache) — the reference the threshold is pinned to.
+    public static func askCorePrintsOpen(topology: String, cellMM: Double, beadMM: Double) -> Bool? {
+        let v = topoptbridge.lattice_prints_open(std.string(topology), cellMM, beadMM)
+        guard v.isFinite, v != 0 else { return nil }
+        return v > 0
+    }
+
+    private static let printsOpenLock = NSLock()
+    nonisolated(unsafe) private static var printsOpenCrossings: [String: Double?] = [:]
+
+    /// The smallest cell core's predicate calls open at this bead (nil: core refuses the type, or calls
+    /// nothing open even at 1000 beads — then every ask goes to core directly).
+    public static func printsOpenCrossingMM(topology: String, beadMM: Double) -> Double? {
+        let key = "\(topology)|\(beadMM.bitPattern)"
+        printsOpenLock.lock()
+        if let hit = printsOpenCrossings[key] { printsOpenLock.unlock(); return hit }
+        printsOpenLock.unlock()
+        var found: Double?
+        if askCorePrintsOpen(topology: topology, cellMM: 1000 * beadMM, beadMM: beadMM) == true {
+            var lo = beadMM, hi = 1000 * beadMM   // core: a cell no wider than the bead never prints open
+            for _ in 0..<200 {
+                let m = 0.5 * (lo + hi)
+                guard m > lo, m < hi else { break }   // adjacent doubles
+                if askCorePrintsOpen(topology: topology, cellMM: m, beadMM: beadMM) == true { hi = m } else { lo = m }
+            }
+            found = hi
+        }
+        printsOpenLock.lock(); printsOpenCrossings[key] = found; printsOpenLock.unlock()
+        return found
     }
 
     /// ★★ CORE'S AESTHETIC DENSITY CEILING (maintainer, 2026-10-02, ruling 5: R12, one
@@ -2146,6 +2270,71 @@ public enum TopOptKit {
         return CoreRegionOwners(includes: raw[0], owners: Array(raw.dropFirst()))
     }
 
+    /// ★★ ONE OUTLINE AS SIMPLE LOOPS (reviewer, 2026-10-10, ruling P4): a face region's offset rings
+    /// unioned into simple, non-overlapping loops (Clipper2, vendored in the bridge), because core reads
+    /// `outline_uv` even-odd and two overlapping rings would read their overlap as a hole. `isHole[k]`
+    /// marks ring k a hole (subtracted). Coordinates rounded to 1/`scale` mm. An empty result means
+    /// every ring shrank away. nil when the bridge refuses (`lastCoreRefusal` says why).
+    public static func outlineUnion(_ rings: [[SIMD2<Double>]], isHole: [Bool], scale: Double = 1e6) -> [[SIMD2<Double>]]? {
+        var flat: [Double] = [], sizes: [Int32] = [], holes: [Int32] = []
+        for (i, r) in rings.enumerated() {
+            sizes.append(Int32(r.count)); holes.append(i < isHole.count && isHole[i] ? 1 : 0)
+            for q in r { flat += [q.x, q.y] }
+        }
+        let raw: [Double] = flat.withUnsafeBufferPointer { fp in
+            sizes.withUnsafeBufferPointer { sp in
+                holes.withUnsafeBufferPointer { hp in
+                    Array(topoptbridge.outline_union(fp.baseAddress, flat.count / 2, sp.baseAddress, hp.baseAddress,
+                                                     sizes.count, scale)).map { Double($0) }
+                }
+            }
+        }
+        guard let n = raw.first, n >= 0 else { return nil }
+        var out: [[SIMD2<Double>]] = [], k = 1
+        for _ in 0..<Int(n) {
+            guard k < raw.count else { return nil }
+            let m = Int(raw[k]); k += 1
+            guard m >= 0, k + 2 * m <= raw.count else { return nil }
+            out.append((0..<m).map { SIMD2(raw[k + 2 * $0], raw[k + 2 * $0 + 1]) })
+            k += 2 * m
+        }
+        return out
+    }
+
+    /// ★★ THE ONE OUTLINE (reviewer, 2026-10-10, P1/P6): a face region's generated polygon — the raw loops
+    /// even-odd, the seam strips joined, and the round capsule of radius |`expandMM`| about every true edge
+    /// added (grow) or taken away (shrink). Arcs are chords within `arcToleranceMM`, vertices on the arc.
+    /// Simple, non-overlapping loops; empty when nothing is left. nil when the bridge refuses.
+    public static func outlinePolygon(raw: [[SIMD2<Double>]], trueSegments: [(SIMD2<Double>, SIMD2<Double>)],
+                                      strips: [[SIMD2<Double>]], expandMM: Double,
+                                      arcToleranceMM: Double = 0.005, scale: Double = 1e6) -> [[SIMD2<Double>]]? {
+        var flat: [Double] = [], sizes: [Int32] = [], segs: [Double] = [], quads: [Double] = []
+        for r in raw { sizes.append(Int32(r.count)); for q in r { flat += [q.x, q.y] } }
+        for (a, b) in trueSegments { segs += [a.x, a.y, b.x, b.y] }
+        for s in strips where s.count == 4 { for q in s { quads += [q.x, q.y] } }
+        let rawOut: [Double] = flat.withUnsafeBufferPointer { fp in
+            sizes.withUnsafeBufferPointer { sp in
+                segs.withUnsafeBufferPointer { gp in
+                    quads.withUnsafeBufferPointer { qp in
+                        Array(topoptbridge.outline_polygon(fp.baseAddress, flat.count / 2, sp.baseAddress, sizes.count,
+                                                           gp.baseAddress, segs.count / 4, qp.baseAddress, quads.count / 8,
+                                                           expandMM, arcToleranceMM, scale)).map { Double($0) }
+                    }
+                }
+            }
+        }
+        guard let n = rawOut.first, n >= 0 else { return nil }
+        var out: [[SIMD2<Double>]] = [], k = 1
+        for _ in 0..<Int(n) {
+            guard k < rawOut.count else { return nil }
+            let m = Int(rawOut[k]); k += 1
+            guard m >= 0, k + 2 * m <= rawOut.count else { return nil }
+            out.append((0..<m).map { SIMD2(rawOut[k + 2 * $0], rawOut[k + 2 * $0 + 1]) })
+            k += 2 * m
+        }
+        return out
+    }
+
     /// Whether the schema probe proved itself on this build — a key core has always
     /// accepted probes true AND a nonsense key probes false. False ⇒ every
     /// `gradingSchemaAccepts` answer is a conservative false.
@@ -2253,6 +2442,20 @@ public enum TopOptKit {
         guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
         return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 0]"#)) == nil
     }()
+    /// ★ K2 (#358 25c6a551): the slot origin is a grid PHASE — core accepts one standing off the
+    /// face plane and measures depth from the region's own plane. Probed with an off-plane point;
+    /// the CONTROL is the in-plane one, which must pass first. FALSE ⇒ the in-plane test stands.
+    public static let regionSlotOriginIsPhase: Bool = {
+        guard regionSlotOriginWired else { return false }
+        return jobSchemaError(regionSlotOriginProbeJob(#", "slot_origin_mm": [1.5, -0.25, 2.0]"#)) == nil
+    }()
+    /// ★ K1 (#358 664f222c): a face region may carry `plan_base_cell_mm`, the slot size its plan's
+    /// ladder was built on — REQUIRED on every planned region by a core that has it. Whole-job
+    /// probe with its control (the same job without the key).
+    public static let regionPlanBaseWired: Bool = {
+        guard jobSchemaError(regionSlotOriginProbeJob("")) == nil else { return false }   // the control
+        return jobSchemaError(regionSlotOriginProbeJob(#", "plan_base_cell_mm": 6.0"#)) == nil
+    }()
     /// The probe's document: one include face on z = 0, normal +z, with `extra` in its geometry.
     public static func regionSlotOriginProbeJob(_ extra: String) -> Data {
         var text = latticeProbeBaseJob
@@ -2307,6 +2510,16 @@ public enum TopOptKit {
         }
         guard jobSchemaError(job("")) == nil else { return false }   // the control
         return jobSchemaError(job(#", "organic_probe_cells_mm": [3.5, 4.5], "organic_probe_grades_mm": [[3, 5]]"#)) == nil
+    }()
+
+    /// ★★ K3 (#358 f0d8bf27; the reviewer's ruling, 2026-10-11 00:35, item 2): on a PLAN job core prints the
+    /// prism space the plan's cells leave SOLID — the companion is printed minus the plan's cells. K3 added no
+    /// schema key; K4 (39db7c33, on top of it on #358's branch) added `lattice.emit_plan_laid`, so a core whose
+    /// lattice schema takes that key carries K3. Whole-job probe with its control (`emit_stl`, a key every core
+    /// here takes). FALSE ⇒ the preview draws uncovered prism space as it always has (air).
+    public static let corePrintsWhatThePlanLeavesSolid: Bool = {
+        guard latticeSchemaAccepts(key: "emit_stl") else { return false }   // the control
+        return latticeSchemaAccepts(key: "emit_plan_laid")
     }()
 
     public static func latticeSchemaAccepts(key: String) -> Bool {

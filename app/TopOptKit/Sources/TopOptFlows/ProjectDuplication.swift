@@ -1,4 +1,7 @@
-// ProjectDuplication.swift — Flexible (PR #362) round 9: DUPLICATE / SAVE AS NEW PROJECT.
+// ProjectDuplication.swift — DUPLICATE / SAVE AS NEW PROJECT.
+//
+// Lifted from #362 (claude/flexible-screens) at b472880b UNCHANGED below this note (B3, 2026-10-24): the re-run card's
+// "Save as new project" needs it on Topology. #362 drops its copy for this one on its next sync of #354.
 //
 // ★ HIS WORDS (2026-10-24): "… or at the very least be able to copy a project in the library view
 // after tapping and holding the project chip."

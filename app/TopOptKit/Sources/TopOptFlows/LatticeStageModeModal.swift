@@ -52,8 +52,9 @@ public struct LatticeStageModeModal: View {
                     Text("How should this lattice be graded?")
                         .font(.system(size: 27, weight: .semibold))
                         .foregroundStyle(DS.Color.textPrimary.color)
-                    Text("This is set once for the Lattice stage and cannot be changed "
-                         + "afterwards.")
+                    // ★ B4 (L1 amended, 2026-10-24): one type per project, changed only by asking (the ● menu's
+                    // "Change lattice type…": a duplicate, or lose the lattice work) — never switched in place.
+                    Text(LatticeTypeSelector.oneTypeLine)
                         .font(.system(size: 15))
                         .foregroundStyle(DS.Color.textTertiary.color)
                         .multilineTextAlignment(.center)

@@ -374,8 +374,7 @@ final class LatticeOctreeFootprintTests: XCTestCase {
 
     /// The exact level-0 read, as place() computes it.
     static func exactDOut(_ uv: SIMD2<Double>, _ r: LatticeRegionSpec) -> Double {
-        -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: r.outlineLoops, seams: r.outlineSeams,
-                                                       tilts: r.outlineSeamTilt, caps: r.outlineSeamDepthMM) - r.inPlaneOffsetMM)
+        r.inPlaneDistance(uv)   // ★ the bake's one-outline distance (P1/P6)
     }
 
     /// Centres outside the gate window that the exact read nevertheless passes.
@@ -433,7 +432,7 @@ final class LatticeOctreeFootprintTests: XCTestCase {
         XCTAssertEqual(f1.stats.footprintBounded["anchor/outline"], 2)
     }
 
-    /// The anchor raster's read, replicated from `OutlineRaster` (nodes of −(signedDistanceAcrossSeams
+    /// The anchor raster's read, replicated from `OutlineRaster` (nodes of the one-outline distance, once −(signedDistanceAcrossSeams
     /// − offset) at origin + (i, j)·h, blended bilinearly) — on a lattice anchored anywhere, since
     /// the bake's raster origin hangs off the largest region's cell.
     static func rasterRead(_ uv: SIMD2<Double>, _ r: LatticeRegionSpec, origin: SIMD2<Double>, h: Double) -> Double {

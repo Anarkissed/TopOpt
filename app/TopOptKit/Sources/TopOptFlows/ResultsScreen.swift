@@ -1090,18 +1090,17 @@ public struct ResultsScreen: View {
                 // pressure its name truncates (lineLimit 1) while the fixed-size
                 // buttons keep their full width, so nothing overlaps.
 
+                // ★ B3: "Original" is an icon-only view like the others (it shuts the Results page).
                 Button(action: onSeeOriginal) {
-                    HStack(spacing: DS.Space.s) {
-                        Image(systemName: "cube.transparent").font(.system(size: 12, weight: .semibold))
-                        Text("See Original").dsStyle(DS.TypeScale.callout)
-                    }
+                    Image(systemName: "cube.transparent").font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                    .fixedSize()
-                    .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                    .frame(width: 42, height: 42)
                     .background(Capsule().fill(DS.Surface.bar.color)
                         .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Original")
+                .accessibilityIdentifier("results-view-original")
 
                 // Export sits NEXT TO "See Original" (design-overhaul round 2, item 4), not
                 // pushed to the far right — the absolute top-right corner now belongs to the
@@ -1223,18 +1222,18 @@ public struct ResultsScreen: View {
     private func vizChip<Icon: View>(
         label: String, isOn: Bool, action: @escaping () -> Void,
         @ViewBuilder icon: () -> Icon) -> some View {
+        // ★ B3 (2026-10-24, his pick): the views are ICON-ONLY, as on the Setup page; the word stays the
+        // button's accessibility label (and is what VoiceOver reads).
         Button(action: action) {
-            HStack(spacing: DS.Space.s) {
-                icon()
-                Text(label).dsStyle(DS.TypeScale.bodyStrong)
-            }
+            icon()
             .foregroundStyle(DS.Color.textPrimary.color)
-            .padding(.vertical, DS.Space.m)
-            .padding(.horizontal, DS.Space.xl4)
+            .frame(width: 44, height: 44)
             .background(Capsule().fill(isOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(isOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
     private var stressChip: some View {

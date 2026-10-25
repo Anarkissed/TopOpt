@@ -25,20 +25,14 @@ final class UnreadableProjectTests: XCTestCase {
         return String(decoding: try e.encode(v), as: UTF8.self)
     }
 
-    /// The saved shape decodes with the start at 0; ENCODING is unchanged, byte for byte.
-    func testAWallSavedWithoutItsStartDecodesAtZero() throws {
-        let saved = try JSONDecoder().decode(LatticeFaceWallThickness.self, from: Data(#"{"profile":{"ends":[0.5]}}"#.utf8))
-        XCTAssertEqual(saved.startMM, 0, "★ absent ⇒ 0, where every wall started then")
-        XCTAssertNil(saved.endMM)
-        XCTAssertEqual(saved.profile?.ends, [0.5])
-        // a present start is still read
-        XCTAssertEqual(try JSONDecoder().decode(LatticeFaceWallThickness.self, from: Data(#"{"startMM":2.5}"#.utf8)).startMM, 2.5)
-        // encoding stays synthesized: the strings this type wrote before the fix
-        XCTAssertEqual(try sortedJSON(LatticeFaceWallThickness()), #"{"startMM":0}"#)
-        XCTAssertEqual(try sortedJSON(LatticeFaceWallThickness(startMM: 2, endMM: 6)), #"{"endMM":6,"startMM":2}"#)
-        for w in [LatticeFaceWallThickness(), LatticeFaceWallThickness(startMM: 1.5, endMM: 9),
-                  LatticeFaceWallThickness(startMM: 0, endMM: nil, profile: saved.profile)] {
-            XCTAssertEqual(try JSONDecoder().decode(LatticeFaceWallThickness.self, from: try JSONEncoder().encode(w)), w, "round trip")
+    /// ★ The wall setting is WITHDRAWN (his 2026-10-11): a wall saved without its start — the shape that hid
+    /// 102117B9 — and any other shape of the old key are ignored, never a decode failure.
+    func testAWallSavedWithoutItsStartIsIgnored() throws {
+        let untouched = try sortedJSON(LatticeSettings(enabled: true))
+        for wall in [#"{"faces":{"k":{"profile":{"ends":[0.5]}}}}"#, #"{"depthBySim":"not a bool"}"#, #"[1,2]"#] {
+            let doc = String(untouched.dropLast()) + #","wallThickness":"# + wall + "}"
+            let s = try JSONDecoder().decode(LatticeSettings.self, from: Data(doc.utf8))
+            XCTAssertEqual(try sortedJSON(s), untouched, "★ read, ignored, never written again")
         }
     }
 
@@ -52,9 +46,8 @@ final class UnreadableProjectTests: XCTestCase {
         let snap = try JSONDecoder().decode(ProjectSnapshot.self, from: data)
         XCTAssertEqual(snap.id, Self.hisID)
         XCTAssertEqual(snap.name, "M2 verticalStand")
-        let wall = try XCTUnwrap(snap.lattice?.wallThickness.faces[Self.wallKey])
-        XCTAssertEqual(wall.startMM, 0, "★ the start his build never wrote")
-        XCTAssertEqual(wall.profile?.ends.count, 43, "★ his drawn grade, intact")
+        XCTAssertNotNil(snap.lattice, "★ it opens; its withdrawn wall setting is ignored")
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"wallThickness\""), "control: the file carries the old key")
         // the file's own declaration, read straight from the JSON (the oracle)
         let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let groups = try XCTUnwrap((obj["selection"] as? [String: Any])?["groups"] as? [[String: Any]])

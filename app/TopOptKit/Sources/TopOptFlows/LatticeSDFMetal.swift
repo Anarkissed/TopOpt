@@ -274,7 +274,8 @@ public struct LatticeOrganicInput: Sendable {
     /// (0 = none, else the 1-based include region) and the per-region config the job
     /// carries; the bridge calls `synthesize_focal_stress` — the run's own function.
     public var regionIDs: [Int32] = []
-    /// ★ THE SEEDING BOOST (2026-09-21), ×1 = core's own tracer. See `LatticeWallThickness`.
+    /// ★ THE SEEDING BOOST (2026-09-21), ×1 = core's own tracer (no control sets it since the
+    /// "Lattice depth" section was withdrawn, 2026-10-11).
     public var seedBoost: Double = 1
     /// The walls offered to core's synthesis. The dead test takes no numbers from here:
     /// the bridge makes the run's own call (0.02 and `kOrganicSyntheticDeadFloorMPa`).
@@ -379,6 +380,9 @@ public struct LatticeSDFScene {
     /// ★★★ THE MODE HE CHOSE ON ENTERING THE STAGE, and it is not decoration: it picks
     /// the denominator core grades by AND the floor below. See `LatticeStageMode`.
     public var stageMode: LatticeStageMode = .structural
+    /// ★ The Cells page's Along (`LatticeSettings.gradeAlong`): the octree bake DRAWS "Through the depth" / "Across the
+    /// face" (`LatticePreviewOccupancy.alongFraction`); the plan's ρ and the job never read it. nil / `.load` ⇒ today's.
+    public var gradeAlong: LatticeGradeAlong? = nil
     /// ★★ THE ALGORITHM THE RUN WILL USE, in core's own name. "" is "not stated",
     /// which core resolves to doubled — the one the marcher can actually draw.
     public var algorithm: String = ""
@@ -457,10 +461,6 @@ public struct LatticeSDFScene {
     /// The band's rim and solid-backed side rim (mm); 0 on the legacy path.
     public var bandRimMM: Double = 0
     public var bandSideRimMM: Double = 0
-    /// ★ The part's material inside every declared prism, IGNORING the slabs — the grid
-    /// the measurers read (`LatticeRegionMask.clippedWholePrism`). `occupancy` is the
-    /// slab-clipped set where lattice may go.
-    public let prismOccupancy: LatticeVoxelGrid
     /// The organic solid rim's width (mm) when the algorithm is organic and a rim is
     /// on — the outline ribbon's width on that path. 0 otherwise.
     public let organicSolidRimMM: Double
@@ -591,6 +591,8 @@ public struct LatticeSDFScene {
                 // declared face. It is GONE — see the bake below for why it was the
                 // wrong instrument and where the rule actually lives now.
                 stageMode: LatticeStageMode = .structural,
+                /// The Cells page's Along — drawn only (see `gradeAlong`).
+                gradeAlong: LatticeGradeAlong? = nil,
                 // ★ Core's `LatticeAlgorithm` name. Defaults to "" so every existing
                 // call — and every test — still describes a doubled ladder, which is
                 // the picture the marcher draws.
@@ -669,14 +671,6 @@ public struct LatticeSDFScene {
                 skinMM: Double = 0,
                 skippedFaces: Int = 0,
                 skippedRegionNames: [String] = [],
-                // ★ one cell, in mm — the slab's floor (see `LatticeWallThickness`)
-                wallThicknessFloorMM: Double = 0,
-                // ★ per wall (selectable key), the depths its cells can be packed to (D1)
-                wallDepthSteps: [String: [Double]] = [:],
-                // ★ the wall-depth sim rule's OWN field (review #31): the grading's `field`
-                // is nil under "No grade"/"Grade to fit", which silently turned "By sim"
-                // into the whole range. nil ⇒ `field`.
-                wallStressField: StressField? = nil,
                 // ★ the user's per-face / per-cap band choices ([key: solid]; see
                 // `LatticeBandDecision`) — empty ⇒ every choice is the rules' default
                 bandOverrides: [String: Bool] = [:],
@@ -690,24 +684,9 @@ public struct LatticeSDFScene {
                 // organic settings' bead, else 0.45
                 beadMM: Double = 0) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
-        // ★★ THE SLAB, BUILT FIRST (2026-09-21): every reader below — the region field,
-        // the organic candidates, the octree, the cap wall — reads `regions`, so the
-        // thickness maps are attached before any of them run. `field` is the solve's
-        // von Mises, the sim rule's input.
-        let regions = LatticeWallThicknessBuilder.attach(
-            regions, field: wallStressField ?? field,
-            floorMM: wallThicknessFloorMM > 0 ? wallThicknessFloorMM
-                : Double((mesh.bounds.max - mesh.bounds.min).max()) / Double(max(1, maxDim)),
-            depthStepsFor: { r in r.selectableKey.flatMap { wallDepthSteps[$0] } })
-        if regions.contains(where: { $0.thicknessMap != nil }) {
-            NSLog("DIAG wall thickness: %@", regions.enumerated().compactMap { i, r -> String? in
-                guard let m = r.thicknessMap, let spec = r.thickness else { return nil }
-                let q = m.summary
-                let mode = spec.depthBySim ? "depthBySim" : spec.density.rawValue
-                return String(format: "r%d %@ start %.2f mm · thickness p05 %.2f p50 %.2f p95 %.2f of %.2f mm (floor %.2f)",
-                              i, mode, m.startMM, q.p05, q.p50, q.p95, r.depthMM, wallThicknessFloorMM)
-            }.joined(separator: " | "))
-        }
+        // ★ THE ONE OUTLINE (P1/P6): every region carries its generated polygon before any reader runs.
+        // The lattice fills each prism whole, 0 to depthMM (his 2026-10-11) — no slab is built.
+        let regions = regions.map { $0.withGeneratedOutline() }
         // ★★ THE PART'S INTERIOR AND THE LATTICED INTERIOR ARE TWO DIFFERENT
         // NUMBERS, and the banner needs both to tell the truth.
         //
@@ -758,9 +737,6 @@ public struct LatticeSDFScene {
         self.regions = regions
         self.occupancy = LatticeRegionMask.clipped(
             solid, to: regions, whenEmpty: whenEmpty)
-        self.prismOccupancy = regions.contains(where: { $0.thicknessMap != nil })
-            ? LatticeRegionMask.clippedWholePrism(solid, to: regions, whenEmpty: whenEmpty)
-            : occupancy
         // ★★★ THE BAND, REBUILT (2026-09-26): organic with a declared face region takes the
         // continuous, geometrically signed band (`LatticeBandFields`); every other path, and
         // `LATTICE_BAND_OFF=1`, keeps the legacy block below byte for byte.
@@ -930,7 +906,7 @@ public struct LatticeSDFScene {
                         }
                         search: for r in includeFaceRegions
                             where abs(simd_dot(nOut, LatticeRegionMask.unit(r.normal))) > acrossCos {
-                            for pr in probes where LatticeRegionMask.containsWholePrism(pr, region: r) {
+                            for pr in probes where LatticeRegionMask.contains(pr, region: r) {
                                 across = true
                                 break search
                             }
@@ -947,7 +923,7 @@ public struct LatticeSDFScene {
                             for pt in plan {
                                 let q = pt - nOut * simd_dot(pt - p0, nOut)      // onto the triangle's plane
                                 guard insideTriangle(q) else { continue }
-                                if LatticeRegionMask.containsWholePrism(q - nOut * 1.5, region: r) {
+                                if LatticeRegionMask.contains(q - nOut * 1.5, region: r) {
                                     across = true
                                     break search
                                 }
@@ -1064,7 +1040,7 @@ public struct LatticeSDFScene {
                         // the shell and carves the body — the pocket. The slab decides
                         // only where lattice is PLACED (candidates, cells), never where
                         // material is kept; a thin or absent slab is air, not a wall.
-                        let region = LatticeRegionMask.signedDistanceWholePrism(p, regions: wallRegions)
+                        let region = LatticeRegionMask.signedDistance(p, regions: wallRegions)
                         q.values[i] = Float(Swift.max(-1e3, Swift.min(1e3, region)))
                         // ★ TWO VOXELS PAST THE CAPS, or the trilinear sample in the
                         // first voxel under the face blends with 1e3 and the outline's
@@ -1304,10 +1280,10 @@ public struct LatticeSDFScene {
         if let dd = self.drawnDemand {
             let g = Swift.max(0.05, gamma)
             var per = [[Double]](repeating: [], count: regions.count)
-            let po = self.prismOccupancy
+            let po = self.occupancy
             for k in 0..<po.nz { for j in 0..<po.ny { for i in 0..<po.nx where po.values[(k * po.ny + j) * po.nx + i] > 0.5 {
                 let p = SIMD3<Double>(po.origin + SIMD3<Float>(Float(i), Float(j), Float(k)) * po.spacing)
-                guard let r = regions.firstIndex(where: { $0.role == .include && LatticeRegionMask.containsWholePrism(p, region: $0) }) else { continue }
+                guard let r = regions.firstIndex(where: { $0.role == .include && LatticeRegionMask.contains(p, region: $0) }) else { continue }
                 let d = Swift.max(0, Swift.min(1, dd.sampleLinear(p)))
                 per[r].append(rhoMin + (rhoMax - rhoMin) * pow(d, g))
             } } }
@@ -2281,6 +2257,7 @@ public struct LatticeSDFScene {
         // ★ AND IT IS NOT COMPUTED WITHOUT A MEASUREMENT. No field or no allowable
         // leaves the array empty, and every voxel then takes the accuracy floor.
         self.stageMode = stageMode
+        self.gradeAlong = gradeAlong
         self.algorithm = algorithm
         // ★★★ AESTHETIC: THE FLOOR IS FLAT, AND IT DOES NOT WAIT FOR A SOLVE
         // (maintainer, 2026-08-21: "The rule is we lattice *WHEREVER* it is asked of
@@ -2480,12 +2457,28 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     var steppedShapeFit: Bool = true {
         didSet { if steppedShapeFit != oldValue, scene != nil { rebakeCellField() } }
     }
+    /// ★★ K3 IN THE PREVIEW (the reviewer's ruling, 2026-10-11 00:35, item 2): the prism space no plan cell covers
+    /// is drawn SOLID when the job sends the plan and the linked core carries K3
+    /// (`LatticeSteppedCellWire.uncoveredPrintsSolid`). nil ⇒ that production answer; the plan proof sets it to draw
+    /// a forced plan the way core builds it. A uniform only — no rebake.
+    public var uncoveredPrintsSolidOverride: Bool? = nil
+    var uncoveredPrintsSolid: Bool {
+        if let o = uncoveredPrintsSolidOverride { return o }
+        return LatticeSteppedCellWire.uncoveredPrintsSolid(algorithm: steppedDyadicSteps ? "doubled" : "stepped",
+                                                           wired: TopOptKit.steppedCellsWired,
+                                                           k3: TopOptKit.corePrintsWhatThePlanLeavesSolid)
+    }
     var steppedDyadicSteps: Bool = false {
         didSet { if steppedDyadicSteps != oldValue, scene != nil { rebakeCellField() } }
     }
     /// Per region, TRUE where the stepped cell is the USER'S OWN number.
     var steppedCellStated: [Bool] = [] {
         didSet { if steppedCellStated != oldValue, scene != nil { rebakeCellField() } }
+    }
+    /// ★ Per region, the cell before Default Grade's base rule (b) — the bake's "do no harm" guard falls back to it
+    /// (`LatticePreviewOccupancy.octreeCellField(cellMMBeforeBaseRule:)`). Empty ⇒ no guard.
+    var steppedCellBeforeBaseRuleMM: [Double] = [] {
+        didSet { if steppedCellBeforeBaseRuleMM != oldValue, scene != nil { rebakeCellField() } }
     }
     /// ★ Whether the last bake actually laid down the STEPPED field. False when stepped
     /// was asked for but no region derived a cell — the ladder is drawn then, and the
@@ -2907,7 +2900,6 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     /// See `rebakeCellField` — TRUE only when the doubled ladder baked with
     /// declared regions, so the march may render its decided-solid cells as solid.
-    private var doubledSolidCellsArmed = false
 
     private var steppedSolidRimMM: Double {
         // ★ NOT GATED ON `steppedDrawn` — that flag is only set at the END of a bake,
@@ -2940,7 +2932,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     /// nil when the scene carries no thickness field: the caller then seeds the
     /// full outline, which is the pre-rule behaviour, not a guess.
     static func attachedSeed(scene: LatticeSDFScene) -> [Bool]? {
-        let occ = scene.prismOccupancy          // ★ material OUTSIDE THE PRISM seeds the rim, never a slab edge
+        let occ = scene.occupancy          // ★ material OUTSIDE THE PRISM seeds the rim, never a slab edge
         let mm = scene.memberThicknessMM
         guard mm.count == occ.values.count else { return nil }
         var seed = [Bool](repeating: false, count: occ.values.count)
@@ -2997,7 +2989,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // part that is real seconds of "quite some time to load" for nothing.
         // ★ the boundary distance and the widths read the WHOLE prism (review #21): the
         // slab's edges are not boundaries, and a rim at them was the wall he kept seeing
-        let candidate = scene.prismOccupancy.values.map { $0 > 0.5 }
+        let candidate = scene.occupancy.values.map { $0 > 0.5 }
         var steppedBoundary: [[Double]?] = []
         // ★★★ STEPPED IS TRIED FIRST, AND THAT ORDER IS THE WHOLE POINT (maintainer,
         // 2026-08-22: "I attempted a Stepped lattice preview and it didn't work").
@@ -3053,7 +3045,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     widthPerRegion: scene.regions.map { r in
                         r.kind == .face && r.role == .include
                             ? LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(
-                                region: r, occupancy: scene.prismOccupancy,
+                                region: r, occupancy: scene.occupancy,
                                 partSDF: scene.partMaterialSDF)
                             : nil
                     },
@@ -3100,8 +3092,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                 // Only when the shape grade is on: the outline is the grade's frame.
                 let solidBandMM = steppedShapeFit ? Self.outlineBeamMM(lineWidthMM: lineWidthMM, voxelMM: voxelMM) : 0
                 if let o = LatticePreviewOccupancy.octreeCellField(
-                    occupancy: scene.prismOccupancy, demand: scene.drawnDemand ?? scene.demand,
+                    occupancy: scene.occupancy, demand: scene.drawnDemand ?? scene.demand,
                     regions: scene.regions, cellMM: steppedCellMM,
+                    cellMMBeforeBaseRule: steppedCellBeforeBaseRuleMM.count == steppedCellMM.count ? steppedCellBeforeBaseRuleMM : [],
                     lineWidthMM: lineWidthMM,
                     realFloorMM: tileFloorMM,
                     shapeFitBandMM: params.shapeFitBandMM,
@@ -3117,6 +3110,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                     // ★ no quilt in the grade band either unless Allow quilt (his 2026-09-28)
                     bandQuiltCeiling: LatticeType.named(params.latticeID)?.hasAestheticCeiling == true && !scene.allowQuilt
                         ? scene.drawnCeilingRho : 1,
+                    // ★ the cap the job writes: core's floor at it, and no cell denser
+                    densityCap: LatticeSettings.jobDensityCap(topologyID: params.latticeID, allowQuilt: scene.allowQuilt),
+                    // ★ the Cells page's Along, drawn (ruling 2026-10-24 17:46); the plan's ρ is untouched
+                    gradeAlong: scene.gradeAlong,
                     stats: &st) {
                     baked = o
                     octreeCells = o.steppedCells
@@ -3180,17 +3177,8 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         }
         steppedDrawn = baked != nil
         defer { bakedSerial = sceneSerial }
-        // ★ Whether the DOUBLED path's inactive cells should render solid — armed
-        // only when the ladder baked against declared regions, so a whole-part
-        // lattice (and every stepped/organic bake) is byte-identical. See the
-        // march's rimParams.z branch.
-        doubledSolidCellsArmed = false
         if baked == nil, let sweep = cellSweep {
             baked = gradedCellField(scene: scene, sweep: sweep, retains: retains)
-            if baked != nil,
-               LatticeJobIncludeGate.hasIncludeWall(scene.regions) {
-                doubledSolidCellsArmed = true
-            }
         }
         // ★★ CAN ANYTHING PRINT AT THIS CELL AT ALL? The band floor has already
         // risen to the printability floor, so the usual answer is yes and every
@@ -4103,7 +4091,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // the octree's outline strip and stripped the finish dressing beside it. The rim
             // is the region field's now (skin + rim under unselected faces, rim along the
             // solid-backed outline) and the lattice layer draws it.
-            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction), 0, 0),
+            // z: ★ K3 — uncovered prism space is solid (a stepped bake on a plan job, core carrying K3)
+            rimParams: SIMD4(Float(dressingBandMM), Float(solidOutlineFraction),
+                             steppedDrawn && uncoveredPrintsSolid ? 1 : 0, 0),
             organicRadius: {
                 let reach = Float(scene?.organicBandMM ?? 0)
                 // never past 90 % of the reach: beyond it the clamp would lie
@@ -4282,7 +4272,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         // the surface, poked past the top and ran through the lattice. The builder stays
         // for its tests; nothing is drawn.
         if scene.unselectedSkinMM > 0 { return nil }
-        let occ = scene.prismOccupancy          // ★ the beam's depth is the wall's, whole prism
+        let occ = scene.occupancy          // ★ the beam's depth is the wall's, whole prism
         var widths: [Int: [Double]] = [:]
         for (i, r) in scene.regions.enumerated() where r.role == .include && r.kind == .face {
             widths[i] = LatticeMeasuredRegionWidth.wallWidthFieldAlongNormalMM(

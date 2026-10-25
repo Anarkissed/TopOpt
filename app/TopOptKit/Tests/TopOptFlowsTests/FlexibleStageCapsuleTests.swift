@@ -34,7 +34,7 @@ final class FlexibleStageCapsuleTests: XCTestCase {
         XCTAssertEqual(went, [.topology], "Topology → go(.topology) once")
         XCTAssertNil(chrome.open, "a stage change folds every card")
         FlexibleStageCapsule.perform(.surface, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
-        XCTAssertEqual(went, [.topology, .surface])
+        XCTAssertEqual(went.map(\.rawValue), ["topology", "surface"])   // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface; RED until P5 (the row is inert)
         chrome.show(.setup)
         FlexibleStageCapsule.perform(.about, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(abouts, 1, "About → the limits sheet")

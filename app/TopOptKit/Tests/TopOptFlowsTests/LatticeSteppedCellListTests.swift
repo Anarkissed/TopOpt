@@ -36,11 +36,15 @@ final class LatticeSteppedCellListTests: XCTestCase {
     func testTheBlockCarriesTheKeyOnlyForAWiredSteppedRun() throws {
         var spec = LatticeSpec(topologyID: "octet", cellMM: 12, strutRadiusMM: 0.4,
                                generateRelativeDensity: 0.2, minRelativeDensity: 0.1,
-                               maxRelativeDensity: 0.9)
+                               maxRelativeDensity: 0.9, regions: [region(role: .include)])
         spec.algorithm = "doubled"
-        spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9)]
+        spec.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9, planBaseCellMM: 18)]
         // ★ ruling 4 (2026-10-02): only Default Grade, only when the plan switch is on
         XCTAssertEqual(LatticeSteppedCellWire.blockValue(for: spec, wired: true, enabled: true)?.count, 1)
+        // ★ K1: a cell that does not say which ladder it came from is not sent (core refuses it)
+        var unbased = spec
+        unbased.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: SIMD3(0, 0, 0), sizeMM: 9)]
+        XCTAssertNil(LatticeSteppedCellWire.blockValue(for: unbased, wired: true, enabled: true), "★ no base, no plan")
         XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: true), "★ the switch is OFF in production")
         XCTAssertNil(LatticeSteppedCellWire.blockValue(for: spec, wired: false, enabled: true), "an older core: no key")
         var stepped = spec; stepped.algorithm = "stepped"
@@ -65,6 +69,8 @@ final class LatticeSteppedCellListTests: XCTestCase {
         let cells = try XCTUnwrap(lat["stepped_cells"] as? [[String: Any]])
         XCTAssertEqual(cells.count, 1)
         XCTAssertEqual(cells[0]["region_id"] as? Int, 1)
+        let geometry = try XCTUnwrap((lat["regions"] as? [[String: Any]])?.first?["geometry"] as? [String: Any])
+        XCTAssertEqual(geometry["plan_base_cell_mm"] as? Double, 18, "★ K1: the region carries its ladder's base")
         // ★ THE FLOOR'S KEY IS `stepped_min_tile_mm` (core reply 2, 2026-09-18): never
         // `cell_min_mm` (the swept window) nor `min_cell_mm` (never a key). Pinned on
         // the source, since the schema probe cannot tell a wrong name from an old core.

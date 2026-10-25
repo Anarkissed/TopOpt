@@ -111,10 +111,19 @@ final class LatticeOldRetainedRunTests: XCTestCase {
     }
 
     /// ★ ROUND 3 REVIEW (2026-10-01): and none ABOVE the maximum a wall can be set to (50 mm) — a
-    /// 50 mm skin under a wall with a −10 mm expand would need 60, which clamps to 50 and is refused.
+    /// 50 mm skin under a wall with a −2 mm expand would need 52, which clamps to 50 and is refused.
+    /// ★ It was −10 mm (needing 60) until P4 (56eadfd7, 2026-10-10): the fixture's face 1 is 10 × 10 mm, a
+    /// −10 mm round shrink eats its whole outline, and a region the shrink ate is DROPPED from the job by
+    /// name (`dropShrunkAway`) — so core saw no face-1 region, had no depth tie to check, and reported
+    /// nothing. −2 mm leaves a 6 × 6 mm outline, an 18 mm prism, and the premise.
     func testNoDepthIsSuggestedAboveTheMaximum() throws {
         let (p, gid, _) = VariantFacePrismFixture.project()
         p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: -10)
+        XCTAssertFalse(p.variantLatticeJobRegions().regions.contains { $0.kind == .face && $0.faceID == 1 },
+                       "control: −10 mm eats the 10 mm face, P4 drops its region")
+        p.writeLatticeExpandMM(.face(group: gid, face: 1), mm: -2)
+        let wall = try XCTUnwrap(p.variantLatticeJobRegions().regions.first { $0.kind == .face && $0.faceID == 1 })
+        XCTAssertEqual(wall.depthMM, 18, accuracy: 1e-9, "20 mm less the 2 mm shrink")
         let old = try VariantFacePrismFixture.original(bareProtection: [1], depthMM: 50)
         let err = try XCTUnwrap(try coreErrors(p, retained: old).first?.1)
         XCTAssertTrue(sentence(p, err).hasSuffix("Optimize again with this wall."), "★ 60 mm cannot be set: \(sentence(p, err))")

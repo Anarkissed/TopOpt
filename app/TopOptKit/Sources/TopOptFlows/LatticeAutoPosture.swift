@@ -102,10 +102,15 @@ public enum LatticeAutoPosture {
     /// relaxed to (maintainer, 2026-08-22: "The legend is still saying it's 2.2mm
     /// cells"). On his 11 mm wall that ceiling is 2.20 mm — the number on his card,
     /// reached from a SECOND place after the per-region derivation was fixed.
+    /// ★★ AT THE JOB'S CAP (the reviewer, 2026-10-09 19:41, item 3: "all take the job's cap through
+    /// E1 or the capped derivation. One source."). `maxRelativeDensity` is the cap the job writes
+    /// (`LatticeSettings.jobDensityCap`; 0 = none). Uncapped, the finest end was 1.173 mm at a
+    /// 0.45 mm bead where the run's floor is 2.25 — a rung the run never lays.
     public static func autoWindowMM(regionWidthsMM: [Double],
                                     lineWidthMM: Double,
                                     topology: String,
-                                    cellsPerMemberFloor: Double = 0)
+                                    cellsPerMemberFloor: Double = 0,
+                                    maxRelativeDensity: Double)
         -> (min: Double, max: Double)? {
         guard lineWidthMM > 0 else { return nil }
         // ★★ THE FINEST PRINTABLE CELL IS NOT A USABLE FLOOR (maintainer,
@@ -132,13 +137,10 @@ public enum LatticeAutoPosture {
         // one thickness gets a single rung and grades nothing — an honest fact about
         // the part, which `sweptWindowWarning` already states. Widening the ceiling
         // to manufacture a sweep would hand a region a cell it cannot hold.
-        let limits = TopOptKit.latticeLimits(topology: topology)
-        let phiMax = TopOptKit.latticeStrutDiameterMM(topology: topology,
-                                                      relativeDensity: limits.rhoMax,
-                                                      cellMM: 1.0)
-        guard phiMax > 0 else { return nil }
-        let finestThatPrints = lineWidthMM / phiMax
-        guard finestThatPrints > 0, finestThatPrints.isFinite else { return nil }
+        // core's E1: w / phi(min(rho_max, cap)) — the floor grade_lattice applies
+        guard let finestThatPrints = TopOptKit.latticeMinPrintableCellMM(
+                topology: topology, minExtrudableWidthMM: lineWidthMM, maxRelativeDensity: maxRelativeDensity),
+              finestThatPrints > 0, finestThatPrints.isFinite else { return nil }
 
         // ★★ THE CEILING IS THE WIDEST REGION'S CELL; THE FLOOR MUST REACH THE
         // THINNEST'S. Taking both ends from the widest was wrong, and the §4a guard
@@ -152,7 +154,8 @@ public enum LatticeAutoPosture {
             let d = TopOptKit.latticeRegionDerivation(topology: topology,
                                                       memberWidthMM: w,
                                                       minExtrudableWidthMM: lineWidthMM,
-                                                      cellsPerMemberFloor: cellsPerMemberFloor)
+                                                      cellsPerMemberFloor: cellsPerMemberFloor,
+                                                      maxRelativeDensity: maxRelativeDensity)
             guard d.valid, d.cellMM > 0 else { continue }
             hi = Swift.max(hi, d.cellMM)
             loFit = Swift.min(loFit, d.cellMM)
@@ -209,7 +212,10 @@ public enum LatticeAutoPosture {
                                             // member needs (`jobSkinResolved`); the
                                             // finish setting keeps his choice
                                             boundaryFinishWritten:
-                                                s.singleCellMembers)) {
+                                                s.singleCellMembers),
+                                    maxRelativeDensity: LatticeSettings.jobDensityCap(
+                                        topologyID: s.topologyID, allowQuilt: s.allowQuilt,
+                                        algorithm: s.algorithm)) {
                 out.cellMinMM = w.min
                 out.cellMaxMM = w.max
             }

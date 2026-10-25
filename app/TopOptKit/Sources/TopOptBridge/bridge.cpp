@@ -3,6 +3,7 @@
 // the header the Swift importer sees. Core exceptions are caught and converted
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
+#include "clipper2/clipper.h"
 
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/grading.hpp"
@@ -3103,6 +3104,30 @@ double lattice_min_printable_cell_mm(const std::string& topology,
   });
 }
 
+double lattice_min_density_for_strut(const std::string& topology, double cell_mm,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density) {
+  // ★★ THE AESTHETIC CEILING, ONE SOURCE (the reviewer, 2026-10-09 20:51: "Call core's ceiling
+  // through the guarded bridge instead, and pin that a sent rho never exceeds the cap the job
+  // carries"). Core's lightest density whose strut prints a bead at this cell, bisected against
+  // min(rho_max, cap) — so it cannot exceed the cap. The app's own 24-step bisection of the same
+  // table landed 24 ppb over it near 2.25 mm. A negative answer is core's "no density this job
+  // allows prints here"; 0 is a refusal (the guard keeps core's reason).
+  return guarded_empty("lattice_min_density_for_strut", [&]() -> double {
+    return topopt::lattice_min_density_for_strut(live_topology(topology), cell_mm,
+                                                 min_extrudable_width_mm, max_relative_density);
+  });
+}
+
+double lattice_prints_open(const std::string& topology, double cell_size_mm, double bead_mm) {
+  // ★★ ONE RULE, ONE PLACE (#358 588672f5): core's own predicate, the one its halving ladder and
+  // any-step menu ask. The app's three copies (the dyadic ladder, Stepped's menu, the quilt step)
+  // compared its own law to 0.20 with a 1e-9 slack; they ask this instead. 0 is a refusal.
+  return guarded_empty("lattice_prints_open", [&]() -> double {
+    return topopt::lattice_prints_open(live_topology(topology), cell_size_mm, bead_mm) ? 1.0 : -1.0;
+  });
+}
+
 // ★★ THE FORWARD LAW (core reply 5, 2026-09-20: "the aesthetic ceiling is 0.211733,
 // not 0.219 … you invert it, core samples it forward"). `octet_relative_density`
 // depends only on radius/cell, so every cell gives the same number for the same
@@ -3447,6 +3472,117 @@ std::vector<int32_t> stepped_region_owners(const std::string& job_json, const do
     for (std::size_t i = 0; i < point_count; ++i)
       out[i + 1] = static_cast<int32_t>(topopt::stepped_region_owner(
           topopt::Vec3{xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]}, includes));
+    return out;
+  });
+}
+
+std::vector<double> outline_union(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                  const int32_t* loop_is_hole, std::size_t loop_count, double scale) {
+  return guarded_empty("outline_union", [&]() -> std::vector<double> {
+    if (!(std::isfinite(scale) && scale > 0.0))
+      throw std::invalid_argument("outline_union: scale must be finite and > 0");
+    if (loop_count > 0 && (loop_sizes == nullptr || loop_is_hole == nullptr))
+      throw std::invalid_argument("outline_union: no loop arrays were passed");
+    if (point_count > 0 && uv == nullptr)
+      throw std::invalid_argument("outline_union: no points were passed");
+    Clipper2Lib::Paths64 outers, holes;
+    std::size_t k = 0;
+    for (std::size_t l = 0; l < loop_count; ++l) {
+      const int32_t n = loop_sizes[l];
+      if (n < 0 || k + static_cast<std::size_t>(n) > point_count)
+        throw std::invalid_argument("outline_union: the loop sizes run past the points");
+      Clipper2Lib::Path64 p;
+      p.reserve(static_cast<std::size_t>(n));
+      for (int32_t i = 0; i < n; ++i, ++k) {
+        const double u = uv[2 * k], w = uv[2 * k + 1];
+        if (!(std::isfinite(u) && std::isfinite(w)))
+          throw std::invalid_argument("outline_union: a point is not finite");
+        p.emplace_back(static_cast<int64_t>(std::llround(u * scale)),
+                       static_cast<int64_t>(std::llround(w * scale)));
+      }
+      if (p.size() < 3) continue;
+      if (Clipper2Lib::Area(p) < 0.0) std::reverse(p.begin(), p.end());   // each ring positive
+      (loop_is_hole[l] != 0 ? holes : outers).push_back(std::move(p));
+    }
+    Clipper2Lib::Paths64 solid = Clipper2Lib::Union(outers, Clipper2Lib::FillRule::Positive);
+    if (!holes.empty() && !solid.empty())
+      solid = Clipper2Lib::Difference(solid, Clipper2Lib::Union(holes, Clipper2Lib::FillRule::Positive),
+                                      Clipper2Lib::FillRule::Positive);
+    std::vector<double> out;
+    out.push_back(static_cast<double>(solid.size()));
+    for (const Clipper2Lib::Path64& path : solid) {
+      out.push_back(static_cast<double>(path.size()));
+      for (const Clipper2Lib::Point64& pt : path) {
+        out.push_back(static_cast<double>(pt.x) / scale);
+        out.push_back(static_cast<double>(pt.y) / scale);
+      }
+    }
+    return out;
+  });
+}
+
+std::vector<double> outline_polygon(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                    std::size_t loop_count, const double* seg, std::size_t seg_count,
+                                    const double* strip, std::size_t strip_count, double expand_mm,
+                                    double arc_tolerance_mm, double scale) {
+  return guarded_empty("outline_polygon", [&]() -> std::vector<double> {
+    using namespace Clipper2Lib;
+    if (!(std::isfinite(scale) && scale > 0.0))
+      throw std::invalid_argument("outline_polygon: scale must be finite and > 0");
+    if (!(std::isfinite(expand_mm) && std::isfinite(arc_tolerance_mm) && arc_tolerance_mm > 0.0))
+      throw std::invalid_argument("outline_polygon: expand and arc tolerance must be finite, the tolerance > 0");
+    if ((loop_count > 0 && loop_sizes == nullptr) || (point_count > 0 && uv == nullptr) ||
+        (seg_count > 0 && seg == nullptr) || (strip_count > 0 && strip == nullptr))
+      throw std::invalid_argument("outline_polygon: an array was not passed");
+    auto pt = [&](double u, double w) {
+      if (!(std::isfinite(u) && std::isfinite(w)))
+        throw std::invalid_argument("outline_polygon: a point is not finite");
+      return Point64(static_cast<int64_t>(std::llround(u * scale)), static_cast<int64_t>(std::llround(w * scale)));
+    };
+    Paths64 raw;
+    std::size_t k = 0;
+    for (std::size_t l = 0; l < loop_count; ++l) {
+      const int32_t n = loop_sizes[l];
+      if (n < 0 || k + static_cast<std::size_t>(n) > point_count)
+        throw std::invalid_argument("outline_polygon: the loop sizes run past the points");
+      Path64 p;
+      for (int32_t i = 0; i < n; ++i, ++k) p.push_back(pt(uv[2 * k], uv[2 * k + 1]));
+      if (p.size() >= 3) raw.push_back(std::move(p));
+    }
+    // the raw outline, EVEN-ODD — holes, and the preview's own sign
+    Paths64 solid = Union(raw, FillRule::EvenOdd);
+    // the seam strips, each ring positive, joined to it
+    if (strip_count > 0) {
+      Paths64 strips;
+      for (std::size_t s = 0; s < strip_count; ++s) {
+        Path64 q;
+        for (int c = 0; c < 4; ++c) q.push_back(pt(strip[8 * s + 2 * c], strip[8 * s + 2 * c + 1]));
+        if (Area(q) < 0.0) std::reverse(q.begin(), q.end());
+        if (Area(q) != 0.0) strips.push_back(std::move(q));
+      }
+      solid = Union(solid, strips, FillRule::NonZero);
+    }
+    // the expand: the round capsule about every true edge, added (grow) or taken away (shrink)
+    if (seg_count > 0 && std::abs(expand_mm) > 0.0) {
+      Paths64 segs;
+      for (std::size_t s = 0; s < seg_count; ++s) {
+        Path64 q{pt(seg[4 * s], seg[4 * s + 1]), pt(seg[4 * s + 2], seg[4 * s + 3])};
+        if (q[0] != q[1]) segs.push_back(std::move(q));
+      }
+      Paths64 caps = Union(InflatePaths(segs, std::abs(expand_mm) * scale, JoinType::Round, EndType::Round, 2.0,
+                                        arc_tolerance_mm * scale),
+                           FillRule::NonZero);
+      solid = expand_mm > 0.0 ? Union(solid, caps, FillRule::NonZero) : Difference(solid, caps, FillRule::NonZero);
+    }
+    std::vector<double> out;
+    out.push_back(static_cast<double>(solid.size()));
+    for (const Path64& path : solid) {
+      out.push_back(static_cast<double>(path.size()));
+      for (const Point64& q : path) {
+        out.push_back(static_cast<double>(q.x) / scale);
+        out.push_back(static_cast<double>(q.y) / scale);
+      }
+    }
     return out;
   });
 }

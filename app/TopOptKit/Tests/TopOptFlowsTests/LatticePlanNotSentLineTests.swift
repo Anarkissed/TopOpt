@@ -9,10 +9,13 @@ import TopOptKit
 final class LatticePlanNotSentLineTests: XCTestCase {
 
     private func spec(_ algorithm: String) -> LatticeSpec {
+        var face = LatticeRegionSpec(role: .include, kind: .face)
+        face.normal = SIMD3(0, 0, 1); face.depthMM = 12; face.halfUMM = 20; face.halfWMM = 20
         var s = LatticeSpec(topologyID: "octet", cellMM: 12, strutRadiusMM: 0.5,
-                            generateRelativeDensity: 0.3, minRelativeDensity: 0.1, maxRelativeDensity: 0.5)
+                            generateRelativeDensity: 0.3, minRelativeDensity: 0.1, maxRelativeDensity: 0.5,
+                            regions: [face])
         s.algorithm = algorithm
-        s.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: .zero, sizeMM: 12)]
+        s.steppedCells = [LatticeSteppedCellWire(regionID: 1, originMM: .zero, sizeMM: 12, planBaseCellMM: 12)]
         return s
     }
 

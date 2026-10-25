@@ -59,21 +59,6 @@ final class LatticeFaceFacetsTests: XCTestCase {
         XCTAssertEqual(LatticeFaceFacets.facets(face: 7, in: mesh).count, 1)
         XCTAssertTrue(LatticeFaceFacets.facets(face: 99, in: mesh).isEmpty)
     }
-
-    /// The packer's slab test: a cell is laid only where its whole depth is inside the band.
-    func testACellIsLaidOnlyInsideTheDrawnBand() {
-        var r = LatticeRegionSpec(role: .include, kind: .face)
-        r.origin = .zero; r.normal = SIMD3(0, 0, 1); r.depthMM = 12
-        r.outlineLoops = [[SIMD2(-20, -20), SIMD2(20, -20), SIMD2(20, 20), SIMD2(-20, 20)]]
-        r.selectableKey = "f:g:1"
-        XCTAssertTrue(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 12, region: r, axis: 2), "no map: the whole prism")
-        r.thickness = LatticeWallThickness(depthBySim: false, density: .manualSingle, pct: 50, faces: ["f:g:1": .init()])
-        r.thicknessMap = LatticeWallThicknessBuilder.build(region: r, spec: r.thickness!, field: nil, referenceMPa: 0, floorMM: 0)
-        XCTAssertEqual(r.slabRange(uv: .zero).end, 6, accuracy: 1e-9)
-        XCTAssertFalse(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 12, region: r, axis: 2), "a whole-wall cell pokes out of a 6 mm band")
-        XCTAssertTrue(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 0), 6, region: r, axis: 2), "the next rung fits")
-        XCTAssertFalse(LatticePreviewOccupancy.boxInsideSlab(SIMD3(0, 0, 6), 6, region: r, axis: 2), "not behind the band")
-    }
 }
 
 /// ★ SEAMS (his 2026-09-22 01:58): an outline edge shared with another latticed prism is
@@ -162,25 +147,35 @@ final class LatticeCornerPlateTests: XCTestCase {
     }
 }
 
-/// ★ THE FLARE (2026-09-22): adjacent prisms meet at the bisector plane, so a concave wall's
-/// facets leave no wedge of material between them.
+/// ★ THE SEAM STRIP (2026-09-22, made a vertical prism by the reviewer's P1, 2026-10-10): adjacent prisms meet
+/// across a diverging seam by a strip `min(depth, neighbour depth) × tilt` wide, the SAME at every depth — the
+/// vertical prism core builds; the depth-dependent flare it replaced is retired.
 final class LatticeSeamFlareTests: XCTestCase {
-    func testAPointBeyondADivergingSeamIsInsideUpToDepthTimesTilt() {
-        let square: [SIMD2<Double>] = [SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]
-        let seams = [[false, true, false, false]]      // the +x edge is a seam
-        let tilts = [[0.0, 1.0, 0.0, 0.0]]              // 45°: flare = depth
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(11.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 2), "1.5 beyond, depth 2")
-        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(12.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 2), "2.5 beyond")
-        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(11.5, 0), loops: [square], seams: seams, tilts: tilts, depth: 0), "no flare at the surface")
-        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(0, 11.5), loops: [square], seams: seams, tilts: tilts, depth: 2), "a true outline edge does not flare")
-        // ★ converging (overlapping) prisms are NOT cut (his 2026-09-23): the overlap
-        // belongs to both, so no strip along the bisector can fall to neither
-        let conv = [[0.0, -1.0, 0.0, 0.0]]
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(9, 0), loops: [square], seams: seams, tilts: conv, depth: 2), "1 mm inside a converging seam stays inside")
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(7, 0), loops: [square], seams: seams, tilts: conv, depth: 2))
-        // the in-plane reader: beyond a seam reads inside, at the distance to the true outline
-        XCTAssertLessThan(LatticeFaceOutline.signedDistanceAcrossSeams(SIMD2(11, 0), loops: [square], seams: seams), 0)
-        XCTAssertGreaterThan(LatticeFaceOutline.signedDistanceAcrossSeams(SIMD2(0, 11), loops: [square], seams: seams), 0)
+    private func region(depth: Double, tilts: [[Double]], caps: [[Double]] = []) -> LatticeRegionSpec {
+        var r = LatticeRegionSpec(role: .include, kind: .face)
+        r.origin = .zero; r.normal = SIMD3(0, 0, 1); r.depthMM = depth; r.halfUMM = 10; r.halfWMM = 10
+        r.outlineLoops = [[SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]]
+        r.outlineSeams = [[false, true, false, false]]      // the +x edge is a seam
+        r.outlineSeamTilt = tilts; r.outlineSeamDepthMM = caps
+        return r
+    }
+    private func inside(_ r: LatticeRegionSpec, _ u: Double, _ w: Double, depth s: Double) -> Bool {
+        let n = LatticeRegionMask.unit(r.normal), (bu, bv) = LatticeRegionMask.basis(n)
+        return LatticeRegionMask.contains(r.origin + bu * u + bv * w + n * s, region: r)
+    }
+
+    func testAPointBeyondADivergingSeamIsInsideTheStripAtEveryDepth() {
+        let r = region(depth: 2, tilts: [[0.0, 1.0, 0.0, 0.0]])     // 45°: the strip is depth × 1 = 2 mm
+        for s in [0.05, 1.0, 1.95] {
+            XCTAssertTrue(inside(r, 11.5, 0, depth: s), "1.5 beyond, depth \(s) — the same at the surface")
+            XCTAssertFalse(inside(r, 12.5, 0, depth: s), "2.5 beyond, depth \(s)")
+            XCTAssertFalse(inside(r, 0, 11.5, depth: s), "a true outline edge has no strip")
+        }
+        // ★ converging (overlapping) prisms are NOT cut (his 2026-09-23)
+        let conv = region(depth: 2, tilts: [[0.0, -1.0, 0.0, 0.0]])
+        XCTAssertTrue(inside(conv, 9, 0, depth: 1), "1 mm inside a converging seam stays inside")
+        XCTAssertTrue(inside(conv, 7, 0, depth: 1))
+        XCTAssertFalse(inside(conv, 11, 0, depth: 1), "and a converging seam has no strip")
     }
 
     func testTheEmissionGivesFacetSeamsATiltOfOneSignAndTheSizeOfTheirDihedral() {
@@ -276,18 +271,16 @@ final class LatticeSeamFlareTests: XCTestCase {
         XCTAssertTrue(out2[0].outlineSeams.isEmpty && out2[1].outlineSeams.isEmpty, "opposite walls never pair")
     }
 
-    /// The cap on the flare: a DIVERGING flare reaches beyond the seam only as deep as the
-    /// neighbour's prism goes; a converging seam cuts nothing at any depth.
-    func testTheFlareIsCappedAtTheNeighboursDepth() {
-        let square: [SIMD2<Double>] = [SIMD2(-10, -10), SIMD2(10, -10), SIMD2(10, 10), SIMD2(-10, 10)]
-        let seams = [[false, true, false, false]]
-        let div = [[0.0, 1.0, 0.0, 0.0]]
-        // diverging 45° seam, neighbour 6 mm deep: at depth 15 the flare reaches 6 beyond, not 15
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(15, 0), loops: [square], seams: seams, tilts: div, caps: [[0, 6, 0, 0]], depth: 15))
-        XCTAssertFalse(LatticeFaceOutline.insideWithFlare(SIMD2(17, 0), loops: [square], seams: seams, tilts: div, caps: [[0, 6, 0, 0]], depth: 15), "7 mm beyond is past the cap")
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(17, 0), loops: [square], seams: seams, tilts: div, depth: 15), "uncapped, depth 15 flares 15")
-        let conv = [[0.0, -1.0, 0.0, 0.0]]
-        XCTAssertTrue(LatticeFaceOutline.insideWithFlare(SIMD2(9.9, 0), loops: [square], seams: seams, tilts: conv, depth: 15), "converging: nothing is cut")
+    /// The cap on the strip: a DIVERGING strip reaches beyond the seam only as far as the neighbour's prism goes
+    /// deep (× tilt); a converging seam cuts nothing.
+    func testTheStripIsCappedAtTheNeighboursDepth() {
+        let capped = region(depth: 15, tilts: [[0.0, 1.0, 0.0, 0.0]], caps: [[0, 6, 0, 0]])
+        XCTAssertTrue(inside(capped, 15, 0, depth: 7), "5 mm beyond, inside the 6 mm strip")
+        XCTAssertFalse(inside(capped, 17, 0, depth: 7), "7 mm beyond is past the cap")
+        let uncapped = region(depth: 15, tilts: [[0.0, 1.0, 0.0, 0.0]])
+        XCTAssertTrue(inside(uncapped, 17, 0, depth: 1), "uncapped: the strip is the region's own 15 mm, at every depth")
+        let conv = region(depth: 15, tilts: [[0.0, -1.0, 0.0, 0.0]])
+        XCTAssertTrue(inside(conv, 9.9, 0, depth: 10), "converging: nothing is cut")
     }
 
     /// ★ THE WIRE CARRIES THE SELECTION (his 2026-09-22 15:50): a diverging seam edge is

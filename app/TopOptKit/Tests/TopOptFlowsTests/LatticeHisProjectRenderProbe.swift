@@ -25,7 +25,6 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         let mesh = ViewerMesh(vertices: im.vertices, indices: im.indices, faceIDs: im.faceIDs, faceGeometry: im.faceGeometry)
         let lat = pm.lattice
         let regions = pm.latticeJobRegions().regions
-        let steps = LatticeWallDepthSteps.forWalls(lat, regions: regions, beadMM: pm.printParams.strutLineWidthMM)
         let voxel = Double((mesh.bounds.max - mesh.bounds.min).max()) / 128
         let b = mesh.bounds
         let dims = (Int((Double(b.max.x - b.min.x) / voxel).rounded(.up)) + 1,
@@ -54,7 +53,7 @@ final class LatticeHisProjectRenderProbe: XCTestCase {
         }
         let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: lat.topologyID, stageMode: .aesthetic,
                                     algorithm: "organic", organic: o, regions: regions, whenEmpty: .latticeNothing,
-                                    wallDepthSteps: steps, bandOverrides: overrides, beadMM: pm.printParams.strutLineWidthMM)
+                                    bandOverrides: overrides, beadMM: pm.printParams.strutLineWidthMM)
         print("HIS regions \(regions.count) · capsules \(scene.organicCapsules.count) · chips \(scene.bandDecisions.count) · choices \(overrides)")
         for d in scene.bandDecisions {
             print("HIS chip \(d.key) \(d.label) members \(d.memberKeys) default \(d.defaultSolid ? "solid" : "open") now \(d.solid ? "solid" : "open")")

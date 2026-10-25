@@ -443,8 +443,6 @@ final class LatticeSeparationTests: XCTestCase {
         m.setBoundary(.rim)
         XCTAssertEqual(m.stage, LatticeWizardSetting.finish.stage,
                        "R5: changing a setting in the modal MOVES the wizard")
-        XCTAssertEqual(m.playing, .boundarySwap,
-                       "R5: …to that stage's visual OUTPUT, so it is seen live")
 
         // …and back: touching a ONE-CELL setting returns the wizard to that view.
         // ★ UPDATED (maintainer, 2026-08-14): the setting used here was `.size`,
@@ -452,7 +450,6 @@ final class LatticeSeparationTests: XCTestCase {
         // cell' view. Put it below the 'cell size' area in the 'part' view." So
         // the test now uses a setting that is still a one-cell decision, and the
         // COUPLING it asserts is unchanged.
-        m.finishedPlaying()
         m.touched(.thickness)
         XCTAssertEqual(m.stage, .cell)
 
@@ -520,42 +517,13 @@ final class LatticeSeparationTests: XCTestCase {
         var m = LatticeWizardModel()
         m.jump(to: .lattice)
         XCTAssertEqual(m.stage, .lattice)
-        XCTAssertNil(m.playing, "§5b: a jump is not a lesson")
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // MARK: §7 — the sample is VISIBLE on entry
-
-    /// ★ THE SHIPPED BUG. The page opened with `reveal = 0` because the wipe's
-    /// progress was read whenever the density mode was Auto — and §4b had just
-    /// made Auto the default. The shader discarded every fragment of a mesh it had
-    /// just uploaded: an empty viewport reading "1 ms · 544 tris".
-    func testTheSampleIsVisibleOnEntry() {
-        let r = LatticeWizardReveal()
-        XCTAssertEqual(r.value, 1, accuracy: 1e-12,
-                       "§7: on entry the whole sample is drawn — the reveal is "
-                       + "not a density mode, it is a running cinematic")
-        // And it stays visible for the mode that caused the defect.
-        var m = LatticeWizardModel()
-        XCTAssertEqual(m.densityMode, .sim,
-                       "§4b: the field-graded mode is still the default — "
-                       + "renamed Auto ⇒ Sim, unchanged in meaning")
-        m.jump(to: .cell)
-        XCTAssertEqual(LatticeWizardReveal().value, 1, accuracy: 1e-12)
-    }
-
-    func testTheWipeStillWipesAndAlwaysEndsWhole() {
-        var r = LatticeWizardReveal()
-        r.begin()
-        XCTAssertEqual(r.value, 0, accuracy: 1e-12, "the wipe starts at nothing")
-        r.step(to: 0.5)
-        XCTAssertEqual(r.value, 0.5, accuracy: 1e-12)
-        r.end()
-        XCTAssertEqual(r.value, 1, accuracy: 1e-12,
-                       "§7: every exit from a wipe leaves the part whole")
-        r.step(to: 0.2)
-        XCTAssertEqual(r.value, 1, accuracy: 1e-12,
-                       "§7: and a stale step cannot blank it again")
+    // MARK: §7 — the sample's reveal: DELETED with the full-screen page (B8, 2026-10-24); the default density is still
+    // the field-graded one.
+    func testTheDefaultDensityIsStillTheFieldGradedOne() {
+        XCTAssertEqual(LatticeWizardModel().densityMode, .sim,
+                       "§4b: the field-graded mode is still the default — renamed Auto ⇒ Sim, unchanged in meaning")
     }
 
     // ─────────────────────────────────────────────────────────────────────

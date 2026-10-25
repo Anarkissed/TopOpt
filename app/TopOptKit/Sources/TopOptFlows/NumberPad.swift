@@ -130,6 +130,9 @@ struct NumberPad: View {
         /// value is genuinely signed asks for it (today: the in-plane expand, which
         /// shrinks below zero).
         var allowsNegative: Bool = false
+        /// ★ APP LIST 2 (B4): an SF Symbol drawn BEFORE the title — the Expand keypad's "+", matching its box and its
+        /// handle. nil = the title alone (every keypad before B4).
+        var titleSymbol: String? = nil
     }
 
     let config: Config
@@ -166,6 +169,11 @@ struct NumberPad: View {
 
     private var display: some View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+            if let sym = config.titleSymbol {
+                Image(systemName: sym).font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .accessibilityHidden(true)
+            }
             if !config.title.isEmpty {
                 Text(config.title.uppercased())
                     .font(.system(size: 10, weight: .bold)).tracking(0.6)

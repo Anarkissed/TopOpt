@@ -1,4 +1,7 @@
-// RerunCardTests.swift — Flexible (PR #362) round 9: re-run a finished TO, here or in a copy.
+// RerunCardTests.swift — re-run a finished TO, here or in a copy.
+//
+// Lifted from #362 (claude/flexible-screens) at b472880b, app/TopOptKit/Tests/TopOptFlowsTests/RerunCardTests.swift, with
+// RerunCard (reviewer ruling 2026-10-24 07:30). Copied unchanged; every assertion kept.
 //
 // His words (2026-10-24): "I need to be able to re-run a TO after one has completed … a card
 // saying so and asking if they really want to do it in the current project OR an option to Save

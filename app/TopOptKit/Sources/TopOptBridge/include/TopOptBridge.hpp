@@ -1184,6 +1184,19 @@ double lattice_strut_diameter_mm(const std::string& topology, double rho,
 double lattice_min_printable_cell_mm(const std::string& topology,
                                      double min_extrudable_width_mm,
                                      double max_relative_density);
+/// ★ CORE'S LIGHTEST PRINTABLE DENSITY AT A CELL, UNDER THE JOB'S CAP: core's
+/// `lattice_min_density_for_strut` — the band floor when it already prints, the lightest density
+/// whose strut is one bead across otherwise, never above min(rho_max, cap) (0 = cap not sent).
+/// Negative = no density the job allows prints at this cell. 0 and `bridge_last_refusal()` when
+/// core refuses (a type it does not call live, a cap below the band floor, a bad argument).
+double lattice_min_density_for_strut(const std::string& topology, double cell_mm,
+                                     double min_extrudable_width_mm,
+                                     double max_relative_density);
+/// ★ CORE'S ONE PRINTS-OPEN RULE (#358 588672f5; ruling 2026-10-10: "the app replaces its two call
+/// sites with it through the bridge"): does a bead-wide strut leave a cell of this size at or under
+/// core's 0.20 relative density? 1 = open, −1 = not open, 0 = a refusal (a type core does not call
+/// live; `bridge_last_refusal()` keeps core's words).
+double lattice_prints_open(const std::string& topology, double cell_size_mm, double bead_mm);
 /// ★ CORE'S AESTHETIC DENSITY CEILING for a topology (maintainer, 2026-10-02, ruling 5: R12, one
 /// definition). The linked core carries it for OCTET only, as the inline
 /// `octet_aesthetic_density_ceiling()` (the diameter table's preimage of strut/cell 0.20; core's
@@ -1474,6 +1487,33 @@ std::vector<double> core_face_plane_basis(double nx, double ny, double nz,
 // run's grid). Never throws.
 std::vector<int32_t> stepped_region_owners(const std::string& job_json, const double* xyz,
                                            std::size_t point_count);
+
+// ★★ ONE OUTLINE AS SIMPLE LOOPS (reviewer, 2026-10-10, ruling P4, approved by the maintainer): a face
+// region's offset rings, unioned into simple, non-overlapping loops through Clipper2 (vendored, Boost
+// licence), because core reads `outline_uv` even-odd, so two overlapping rings read their overlap as
+// a HOLE. `uv` holds `point_count` [u, w] points; the k-th of `loop_count` rings takes the next
+// `loop_sizes[k]` of them and is a HOLE when `loop_is_hole[k]` is non-zero. Each ring is oriented
+// positive; the solid is the union of the outer rings' POSITIVE-winding area (a swallowtail's reversed
+// lobe drops out) minus the union of the holes'. Coordinates are rounded to 1/`scale` mm. Returns
+// [loop count, then per loop: point count, u0, w0, u1, w1, …]; [0] when nothing is left (every ring
+// shrunk away). Empty, with the reason in `bridge_last_refusal`, on a bad argument. Never throws.
+std::vector<double> outline_union(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                  const int32_t* loop_is_hole, std::size_t loop_count, double scale);
+
+// ★★ THE ONE OUTLINE (reviewer, 2026-10-10, P1/P6, approved by the maintainer): a face region's generated
+// polygon, the ONLY outline every reader uses — the wire, the bake, the shader's prism, the side rims and
+// the owner query. `uv`/`loop_sizes`/`loop_count`: the raw outline loops, read EVEN-ODD (holes and all, as
+// the preview's own sign reads them). `seg`: `seg_count` true-outline edges, 4 doubles each (a.u a.w b.u
+// b.w). `strip`: `strip_count` seam strips, 8 doubles each (four corners). `expand_mm` > 0 adds the
+// capsule of that radius round every true edge (round joins and ends: the Minkowski sum the preview's
+// distance draws); < 0 removes it (a shrink, measured to the true edges only). Arcs are chords within
+// `arc_tolerance_mm`, with their vertices ON the arc (inside chords). Coordinates rounded to 1/`scale` mm.
+// Returns [loop count, then per loop: point count, u0, w0, …] — simple, non-overlapping loops (outers
+// positive, holes negative); [0] when nothing is left. Empty, with `bridge_last_refusal`, on a bad argument.
+std::vector<double> outline_polygon(const double* uv, std::size_t point_count, const int32_t* loop_sizes,
+                                    std::size_t loop_count, const double* seg, std::size_t seg_count,
+                                    const double* strip, std::size_t strip_count, double expand_mm,
+                                    double arc_tolerance_mm, double scale);
 
 // Core's OWN default stress-fraction ceiling for sub-floor retention
 // (topopt::lattice_subfloor_retention_stress_fraction(), the number

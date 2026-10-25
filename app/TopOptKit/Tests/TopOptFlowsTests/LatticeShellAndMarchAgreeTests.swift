@@ -64,7 +64,8 @@ final class LatticeShellAndMarchAgreeTests: XCTestCase {
         let occ = scene.occupancy
         try XCTSkipIf(scene.memberThicknessMM.isEmpty, "core gave no widths")
         let printable = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet")).min
+            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false))).min
         let base = LatticeMeasuredRegionWidth.ladderBaseCellMM(
             occupancy: occ, memberThicknessMM: scene.memberThicknessMM,
             minCellsPerMember: scene.minCellsPerMember, finestPrintableMM: printable)

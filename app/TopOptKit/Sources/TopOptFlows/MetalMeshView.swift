@@ -1734,6 +1734,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// is additionally the app's one "forbidden" signal.
     static let designBoxColor = SIMD4<Float>(0.30, 0.78, 0.55, 0.85)
     static let keepOutColor = SIMD4<Float>(0.95, 0.42, 0.38, 0.9)
+    /// B6: the gap of a design primitive that stops short (amber).
+    static let designGapColor = SIMD4<Float>(1.0, 0.72, 0.10, 1.0)
     static let stateTintDesaturation: Float = 0.50
     static let stateTintBrightnessLift: Float = 0.55
     /// ★ WHY THIS IS IN THE RENDERER AND NOT IN THE COLOUR TOKENS. §4(c): geometry
@@ -2617,10 +2619,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// as translucent faces + bright edges in its colour, in MODEL space (so it
     /// settles with the part). Called on the main thread; the draw reads the buffers.
     func setDesignBoxes(design: DesignBoxBounds?, designColor: SIMD4<Float>,
-                        keepOuts: [DesignBoxBounds], keepOutColor: SIMD4<Float>) {
+                        keepOuts: [DesignBoxBounds], keepOutColor: SIMD4<Float>,
+                        primitives: DesignPrimitiveDrawing = DesignPrimitiveDrawing()) {
         designBoxFaceBuffer = nil; designBoxFaceCount = 0
         designBoxLineBuffer = nil; designBoxLineCount = 0
-        guard design != nil || !keepOuts.isEmpty else { return }
+        guard design != nil || !keepOuts.isEmpty || !primitives.isEmpty else { return }
 
         var faces: [Float] = []
         var lines: [Float] = []
@@ -2707,6 +2710,48 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // volume and keep the red colour language.
         if let d = design { appendGlassBox(d) }
         for k in keepOuts { appendBox(k, keepOutColor, faceAlpha: 0.16) }
+
+        // ★ B6 — every shown design-primitive row in its sign's look: a Positive one is today's design box (the glass
+        // volume), a Negative one today's keep-out (red). A cylinder is the same look on a 32-sided prism. A single Positive
+        // Box row draws exactly today's design box.
+        func appendCylinder(_ p: DesignPrimitive, positive: Bool) {
+            let a = p.axis, (u, v) = p.crossAxes, c = p.bounds.center, r = p.diameter * 0.5
+            let lo = p.bounds.min[a], hi = p.bounds.max[a], n = 32
+            func pt(_ i: Int, _ h: Float) -> SIMD3<Float> {
+                let t = Float(i % n) / Float(n) * 2 * Float.pi
+                var q = c
+                q[u] = c[u] + r * cos(t); q[v] = c[v] + r * sin(t); q[a] = h
+                return q
+            }
+            let faceRGB = positive ? SIMD3<Float>(0.40, 0.58, 1.0) : SIMD3<Float>(keepOutColor.x, keepOutColor.y, keepOutColor.z)
+            let fa: Float = positive ? 0.22 : 0.16
+            let fcol = SIMD4<Float>(faceRGB.x * fa, faceRGB.y * fa, faceRGB.z * fa, fa)
+            let edgeRGB = positive ? SIMD3<Float>(0.72, 0.82, 1.0) : faceRGB
+            let ea: Float = positive ? 0.92 : min(1, keepOutColor.w)
+            let ecol = SIMD4<Float>(edgeRGB.x * ea, edgeRGB.y * ea, edgeRGB.z * ea, ea)
+            var cLo = c, cHi = c
+            cLo[a] = lo; cHi[a] = hi
+            for i in 0..<n {
+                let a0 = pt(i, lo), a1 = pt(i + 1, lo), b0 = pt(i, hi), b1 = pt(i + 1, hi)
+                push(&faces, a0, fcol); push(&faces, a1, fcol); push(&faces, b1, fcol)
+                push(&faces, a0, fcol); push(&faces, b1, fcol); push(&faces, b0, fcol)
+                push(&faces, cLo, fcol); push(&faces, a1, fcol); push(&faces, a0, fcol)
+                push(&faces, cHi, fcol); push(&faces, b0, fcol); push(&faces, b1, fcol)
+                push(&lines, a0, ecol); push(&lines, a1, ecol)
+                push(&lines, b0, ecol); push(&lines, b1, ecol)
+                if i % (n / 4) == 0 { push(&lines, a0, ecol); push(&lines, b0, ecol) }
+            }
+        }
+        for p in primitives.rows {
+            switch (p.shape, p.sign) {
+            case (.box, .positive): appendGlassBox(p.bounds)
+            case (.box, .negative): appendBox(p.bounds, keepOutColor, faceAlpha: 0.16)
+            case (.cylinder, let s): appendCylinder(p, positive: s == .positive)
+            }
+        }
+        // ★ A PRIMITIVE THAT STOPS SHORT IS PLAINLY VISIBLE (his keep-out stopped short of his design box and he did not see
+        // it): the gap itself, as a bright amber slab.
+        for g in primitives.gaps { appendBox(g, MeshRenderer.designGapColor, faceAlpha: 0.45) }
 
         designBoxFaceCount = faces.count / 7
         if designBoxFaceCount > 0 {
@@ -3847,6 +3892,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         var steppedShapeFit = true
         var steppedDyadicSteps = false
         var steppedCellStated: [Bool] = []
+        var steppedCellBeforeBaseRuleMM: [Double] = []
+        var uncoveredPrintsSolidOverride: Bool? = nil
     }
     private var latticeDesired = LatticeDesired()
     /// Forwarded from the view's inputs; the lattice layer calls it after each bake.
@@ -3876,7 +3923,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 fresh.fitCellMM = latticeDesired.fitCellMM
                 fresh.steppedShapeFit = latticeDesired.steppedShapeFit
                 fresh.steppedDyadicSteps = latticeDesired.steppedDyadicSteps
+                fresh.uncoveredPrintsSolidOverride = latticeDesired.uncoveredPrintsSolidOverride
                 fresh.steppedCellStated = latticeDesired.steppedCellStated
+                fresh.steppedCellBeforeBaseRuleMM = latticeDesired.steppedCellBeforeBaseRuleMM
                 // ★ organic draws as capsules whenever this device built the pipeline
                 fresh.drawOrganicCapsules = organicCapsulePipeline != nil
                 fresh.onSteppedCellsBaked = { [weak self] cells, regions in
@@ -4012,9 +4061,19 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         get { latticeLayer?.steppedDyadicSteps ?? latticeDesired.steppedDyadicSteps }
         set { latticeDesired.steppedDyadicSteps = newValue; latticeLayer?.steppedDyadicSteps = newValue }
     }
+    /// ★ K3's preview seam (`LatticeSDFRenderer.uncoveredPrintsSolidOverride`): nil = production's answer.
+    var latticeUncoveredPrintsSolid: Bool? {
+        get { latticeLayer?.uncoveredPrintsSolidOverride ?? latticeDesired.uncoveredPrintsSolidOverride }
+        set { latticeDesired.uncoveredPrintsSolidOverride = newValue; latticeLayer?.uncoveredPrintsSolidOverride = newValue }
+    }
     var latticeSteppedCellStated: [Bool] {
         get { latticeLayer?.steppedCellStated ?? latticeDesired.steppedCellStated }
         set { latticeDesired.steppedCellStated = newValue; latticeLayer?.steppedCellStated = newValue }
+    }
+    /// ★ Default Grade's n₀ per region, for the bake's "do no harm" guard on base rule (b).
+    var latticeSteppedCellBeforeBaseRuleMM: [Double] {
+        get { latticeLayer?.steppedCellBeforeBaseRuleMM ?? latticeDesired.steppedCellBeforeBaseRuleMM }
+        set { latticeDesired.steppedCellBeforeBaseRuleMM = newValue; latticeLayer?.steppedCellBeforeBaseRuleMM = newValue }
     }
 
     /// Fit's per-region cell — see `LatticeSDFRenderer.fitCellMM`.
@@ -4093,7 +4152,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 latticeShadowVersion = lat.regionCapVersion
                 var v: [Float] = [], idx: [Int32] = []
                 for r in scene.regions where r.role == .include && r.kind == .face {
-                    let m = LatticeWallSlabMesh.build(attached: r)
+                    let m = LatticePrismMesh.build(r)
                     let base = Int32(v.count / 3)
                     v += m.positions
                     idx += m.indices.map { Int32($0) + base }
@@ -5590,6 +5649,8 @@ struct MeshViewInputs {
     /// in model space. Rendered as translucent volumes with bright edges.
     var designBox: DesignBoxBounds? = nil
     var keepOutBoxes: [DesignBoxBounds] = []
+    /// B6: the design-primitive rows drawn (shown ones, each by shape and sign) and the gaps of the ones that stop short.
+    var designPrimitives: DesignPrimitiveDrawing = DesignPrimitiveDrawing()
     /// Keep-clear v2 (Part 3): the true clearance volumes to draw (swept cylinders +
     /// bounded slabs), tagged selected. Empty hides them; Equatable so the coordinator
     /// only re-tessellates on change.
@@ -5706,6 +5767,8 @@ public struct LatticeLayerInputs: Equatable {
     public var steppedDyadicSteps: Bool = false
     /// Per region, TRUE where the stepped cell is the USER'S OWN number.
     public var steppedCellStated: [Bool] = []
+    /// ★ Per region, the cell before Default Grade's base rule (b) (empty ⇒ no guard).
+    public var steppedCellBeforeBaseRuleMM: [Double] = []
     /// ★ TRUE while a NEW scene is being baked (his request, 2026-08-24 evening:
     /// "The quilt pops up before the lattice shows. I'd like this to be hidden
     /// while the calculations happen"). The renderer keeps its volumes — tearing
@@ -5727,6 +5790,7 @@ public struct LatticeLayerInputs: Equatable {
                 steppedShapeFit: Bool = true,
                 steppedDyadicSteps: Bool = false,
                 steppedCellStated: [Bool] = [],
+                steppedCellBeforeBaseRuleMM: [Double] = [],
                 hidden: Bool = false) {
         self.scene = scene
         self.params = params
@@ -5745,6 +5809,7 @@ public struct LatticeLayerInputs: Equatable {
         self.steppedShapeFit = steppedShapeFit
         self.steppedDyadicSteps = steppedDyadicSteps
         self.steppedCellStated = steppedCellStated
+        self.steppedCellBeforeBaseRuleMM = steppedCellBeforeBaseRuleMM
         self.hidden = hidden
     }
 
@@ -5761,6 +5826,7 @@ public struct LatticeLayerInputs: Equatable {
             && a.steppedShapeFit == b.steppedShapeFit
             && a.steppedDyadicSteps == b.steppedDyadicSteps
             && a.steppedCellStated == b.steppedCellStated
+            && a.steppedCellBeforeBaseRuleMM == b.steppedCellBeforeBaseRuleMM
             && a.dressingLevel == b.dressingLevel
             && a.organicRadiusMM == b.organicRadiusMM
             && a.hidden == b.hidden
@@ -5822,6 +5888,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                designPrimitives: DesignPrimitiveDrawing = DesignPrimitiveDrawing(),
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
@@ -5849,7 +5916,7 @@ public struct MetalMeshView: UIViewRepresentable {
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, showWireframe: showWireframe,
             loadPathFlow: loadPathFlow,
-            designBox: designBox, keepOutBoxes: keepOutBoxes,
+            designBox: designBox, keepOutBoxes: keepOutBoxes, designPrimitives: designPrimitives,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
@@ -5986,6 +6053,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                designPrimitives: DesignPrimitiveDrawing = DesignPrimitiveDrawing(),
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
@@ -6013,7 +6081,7 @@ public struct MetalMeshView: NSViewRepresentable {
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, showWireframe: showWireframe,
             loadPathFlow: loadPathFlow,
-            designBox: designBox, keepOutBoxes: keepOutBoxes,
+            designBox: designBox, keepOutBoxes: keepOutBoxes, designPrimitives: designPrimitives,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
@@ -6138,6 +6206,7 @@ extension MetalMeshView {
         /// rebuilds only when the boxes actually change (not every camera tick).
         private var appliedDesignBox: DesignBoxBounds?
         private var appliedKeepOuts: [DesignBoxBounds] = []
+        private var appliedPrimitives = DesignPrimitiveDrawing()
         private var appliedDesignBoxSet = false
         private var appliedClearanceVolumes: [ClearanceRenderItem] = []
         /// The unified lattice layer's bake token and tint dictionary as last applied,
@@ -6565,14 +6634,16 @@ extension MetalMeshView {
             // M7.dom-app design-box gizmo: rebuild the box geometry only when the box
             // or keep-outs change (or on a mesh change, which resets the buffers).
             if dirty || !appliedDesignBoxSet || inputs.designBox != appliedDesignBox
-                || inputs.keepOutBoxes != appliedKeepOuts {
+                || inputs.keepOutBoxes != appliedKeepOuts || inputs.designPrimitives != appliedPrimitives {
                 appliedDesignBoxSet = true
                 appliedDesignBox = inputs.designBox
                 appliedKeepOuts = inputs.keepOutBoxes
+                appliedPrimitives = inputs.designPrimitives
                 renderer.setDesignBoxes(design: inputs.designBox,
                                         designColor: MeshRenderer.designBoxColor,
                                         keepOuts: inputs.keepOutBoxes,
-                                        keepOutColor: MeshRenderer.keepOutColor)
+                                        keepOutColor: MeshRenderer.keepOutColor,
+                                        primitives: inputs.designPrimitives)
                 dirty = true
             }
 
@@ -6641,6 +6712,10 @@ extension MetalMeshView {
                 }
                 if renderer.latticeSteppedCellStated != lat.steppedCellStated {
                     renderer.latticeSteppedCellStated = lat.steppedCellStated
+                    dirty = true
+                }
+                if renderer.latticeSteppedCellBeforeBaseRuleMM != lat.steppedCellBeforeBaseRuleMM {
+                    renderer.latticeSteppedCellBeforeBaseRuleMM = lat.steppedCellBeforeBaseRuleMM
                     dirty = true
                 }
                 if renderer.latticeFitCellMM != lat.fitCellMM {
@@ -7120,6 +7195,7 @@ public struct MetalMeshView: View {
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 showWireframe: Bool = false,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                designPrimitives: DesignPrimitiveDrawing = DesignPrimitiveDrawing(),
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,

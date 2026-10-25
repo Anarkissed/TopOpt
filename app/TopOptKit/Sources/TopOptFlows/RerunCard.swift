@@ -1,4 +1,11 @@
-// RerunCard.swift — Flexible (PR #362) round 9: RE-RUN A FINISHED TO, HERE OR IN A COPY.
+// RerunCard.swift — RE-RUN A FINISHED TO, HERE OR IN A COPY.
+//
+// Lifted from #362 (claude/flexible-screens) at b472880b, app/TopOptKit/Sources/TopOptFlows/RerunCard.swift, as a neutral
+// shared component (reviewer ruling 2026-10-24 07:30). #362 swaps its copy for this one on its next sync of #354.
+// Copied unchanged (it was already neutral: no Flexible type). Not wired here: its hooks H50a–d, and `AppModel.duplicateProject`
+// (H52) is not in this tree, so "Save as new project" has nothing to call yet.
+//
+// (The source's own notes, unchanged:)
 //
 // ★ HIS WORDS (2026-10-24): "I need to be able to re-run a TO after one has completed - or at the
 // very least be able to copy a project in the library view … if someone re-runs the TO, that it

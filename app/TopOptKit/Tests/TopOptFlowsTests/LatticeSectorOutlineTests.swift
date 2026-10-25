@@ -241,8 +241,8 @@ final class LatticeSectorOutlineTests: XCTestCase {
             XCTAssertEqual(p.z, 20, accuracy: 1e-6, "the mouth on the top face")
         }
         // core's own containment, at the voxel: a point under top B is NOT in the prism
-        XCTAssertTrue(LatticeRegionMask.containsWholePrism(SIMD3(75, 50, 10), region: r))
-        XCTAssertFalse(LatticeRegionMask.containsWholePrism(SIMD3(25, 50, 10), region: r), "★ top B's side is not latticed")
+        XCTAssertTrue(LatticeRegionMask.contains(SIMD3(75, 50, 10), region: r))
+        XCTAssertFalse(LatticeRegionMask.contains(SIMD3(25, 50, 10), region: r), "★ top B's side is not latticed")
     }
 
     /// ★ The cut edge is a SEAM when the sibling is latticed (no wall between two latticed halves)

@@ -81,7 +81,7 @@ public struct FlexibleStageCapsule: View {
         chrome?.foldAll()
         switch a {
         case .topology: go(.topology)
-        case .surface: go(.surface)
+        case .surface: break   // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface; the row is inert until P5 makes it "Edit faces…"
         case .about: about()
         case .none: break
         }

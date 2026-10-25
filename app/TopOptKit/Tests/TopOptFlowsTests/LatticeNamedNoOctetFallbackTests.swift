@@ -66,11 +66,8 @@ final class LatticeNamedNoOctetFallbackTests: XCTestCase {
         XCTAssertNil(LatticeSDFPreview(latticeID: "kelvin"))
         XCTAssertNotNil(LatticeSDFPreview(latticeID: "octet"))
         XCTAssertNil(LatticeProxyParams(latticeID: "kelvin").lattice)
-        var m = LatticeWizardModel(settings: LatticeSettings(enabled: true, topologyID: "kelvin"))
-        m.stage = .cell
-        XCTAssertNil(m.lattice)
-        XCTAssertEqual(m.stageTriangleCount, 0)
-        XCTAssertEqual(m.stageMesh().indices.count, 0, "★ an empty sample, never an octet cell")
+        let m = LatticeWizardModel(settings: LatticeSettings(enabled: true, topologyID: "kelvin"))
+        XCTAssertNil(m.lattice, "★ no octet cell under another name (B8: the sample that drew it is deleted)")
     }
 
     /// The face card asks core by the RAW id: Kelvin's card is core's answer for "kelvin",

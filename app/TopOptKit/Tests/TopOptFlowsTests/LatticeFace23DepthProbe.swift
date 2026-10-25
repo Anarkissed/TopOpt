@@ -65,9 +65,9 @@ final class LatticeFace23DepthProbe: XCTestCase {
                         var s = 0.5 * h
                         while s < r.depthMM {
                             let p = r.origin + bu * u + bv * v + n * s
-                            if LatticeRegionMask.containsWholePrism(p, region: whole), partAt(p) {
+                            if LatticeRegionMask.contains(p, region: whole), partAt(p) {
                                 inPart += 1
-                                if flats.contains(where: { LatticeRegionMask.containsWholePrism(p, region: $0) }) { alsoFlat += 1 }
+                                if flats.contains(where: { LatticeRegionMask.contains(p, region: $0) }) { alsoFlat += 1 }
                             }
                             s += h
                         }
@@ -106,7 +106,7 @@ final class LatticeFace23DepthProbe: XCTestCase {
                         for (rj, o) in regions.enumerated() where rj != ri && o.faceID != 23 {
                             let s = 0.5 * min(r.depthMM, o.depthMM)
                             let pw = r.origin + bu * uv.x + bv * uv.y + n * s
-                            if LatticeRegionMask.containsWholePrism(pw, region: o) { hit = o.faceID; break }
+                            if LatticeRegionMask.contains(pw, region: o) { hit = o.faceID; break }
                         }
                         if let hit { found = "f\(hit)@\(off)"; break }
                         off += 0.5

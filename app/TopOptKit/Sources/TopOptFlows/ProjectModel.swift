@@ -149,6 +149,10 @@ public final class ProjectModel: ObservableObject {
     @Published public private(set) var undo = UndoHistory(depth: 50)
     /// The debounce that turns bursts of `objectWillChange` into one settled `commit`.
     private var undoAutoCommit: AnyCancellable?
+    /// ★ B5: the post-edit hooks (`onFaceEdit`), in registration order, and the open face edit (`beginFaceEdit`).
+    private var faceEditHooks: [(key: String, run: @MainActor (FaceEditEvent) -> Void)] = []
+    private var faceEditDepth = 0
+    private var faceEditBefore: FaceRegionModel?
     /// How long the edit slice must be quiet before it commits as an undo step. Long enough that a
     /// drag/scrub coalesces into one entry, short enough to feel immediate on a discrete tap.
     private static let undoSettleInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(400)
@@ -389,6 +393,84 @@ public final class ProjectModel: ObservableObject {
     /// lose. Every surface commit seals first, so its predecessor is already a step.
     public func sealUndoStep() { commitUndoSnapshot() }
 
+    // MARK: ★ B5 — every face edit is ONE undo step, with a hook inside it
+
+    /// ★ THE POST-EDIT HOOK. `hook` runs after every edit made in Edit faces (a cut, an isolate, a union, a pattern, a
+    /// region verb, a paint stroke) and INSIDE that edit's undo step: whatever it changes in the undo slice undoes and
+    /// redoes with the edit, atomically. One hook per `key` (a second registration replaces the first).
+    public func onFaceEdit(_ key: String, _ hook: @escaping @MainActor (FaceEditEvent) -> Void) {
+        faceEditHooks.removeAll { $0.key == key }
+        faceEditHooks.append((key, hook))
+    }
+
+    public func removeFaceEditHook(_ key: String) { faceEditHooks.removeAll { $0.key == key } }
+
+    /// Open a face edit: the state before it becomes a step (as every surface action always sealed first). Nested
+    /// edits (a cut across several faces) are one edit.
+    func beginFaceEdit() {
+        if faceEditDepth == 0 {
+            sealUndoStep()
+            faceEditBefore = faceRegions
+        }
+        faceEditDepth += 1
+    }
+
+    /// ★ CLOSE IT — APP LIST 1's undo-merge, for faces: the hooks run, then the step is SEALED, so an edit made right
+    /// after (inside the 400 ms settle) can no longer fold into it and one Undo takes back exactly this edit. An edit
+    /// that changed nothing runs no hook and seals nothing.
+    func endFaceEdit(_ kind: FaceEditKind) {
+        faceEditDepth = max(0, faceEditDepth - 1)
+        guard faceEditDepth == 0, let before = faceEditBefore else { return }
+        faceEditBefore = nil
+        guard before != faceRegions else { return }
+        let was = Set(before.regions.map(\.id)), now = Set(faceRegions.regions.map(\.id))
+        let ev = FaceEditEvent(kind: kind, made: now.subtracting(was).sorted(), removed: was.subtracting(now).sorted(),
+                               paintedFaces: [])
+        for h in faceEditHooks { h.run(ev) }
+        sealUndoStep()
+    }
+
+    // MARK: ★ B8 — Edit faces' DISCARD (his answer 2026-10-24)
+
+    /// The edit slice as it was when Edit faces opened (nil outside the mode).
+    private var faceEditingEntry: EditSnapshot?
+
+    /// In Edit faces (the model's half of the mode: what Discard goes back to).
+    public var isEditingFaces: Bool { faceEditingEntry != nil }
+
+    /// Edit faces opened: seal what is on screen as a step and remember it (a fresh entry each time it opens — a mode left
+    /// without Done, e.g. by closing the project, never leaves a stale one behind).
+    public func openFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = editSnapshot
+    }
+
+    /// Done: every edit stays (each is already its own undo step).
+    public func closeFaceEditing() {
+        sealUndoStep()
+        faceEditingEntry = nil
+    }
+
+    /// Something to discard: the slice moved since Edit faces opened.
+    public var canDiscardFaceEdits: Bool {
+        guard let entry = faceEditingEntry else { return false }
+        return entry != editSnapshot
+    }
+
+    /// ★ DISCARD — the faces go back to how they were when Edit faces opened (regions, painted faces, every group's and
+    /// region's membership — the whole edit slice), as ONE undo step, so one Undo brings the discarded edits back. Leaves
+    /// the mode. False (and nothing changes) outside Edit faces.
+    @discardableResult
+    public func discardFaceEdits() -> Bool {
+        guard let entry = faceEditingEntry else { return false }
+        faceEditingEntry = nil
+        sealUndoStep()                       // the edits are a step of their own: Undo comes back to them
+        guard entry != editSnapshot else { return true }
+        applyEditSnapshot(entry)
+        sealUndoStep()                       // the discard is ONE step
+        return true
+    }
+
     private func commitUndoSnapshot() {
         let snap = editSnapshot
         guard undo.baseline != snap else { return }
@@ -447,9 +529,19 @@ public final class ProjectModel: ObservableObject {
         // router still records onto a `PaintHistory`, so hand it a throwaway we discard — we do not
         // fork a second undo stack.
         var ignoredHistory = PaintHistory()
+        let before = paint?.assignments
         WorkspacePaint.stroke(mode, triangles: triangles, paint: &overlay,
                               selection: &selection, history: &ignoredHistory)
         paint = overlay
+        // ★ B5: the post-edit hook, inside the stroke's step. A stroke is a DRAG — many calls folded into one undo step
+        // by the settle — so it is never sealed here; the hook's own changes ride the same settled step.
+        if before != overlay.assignments {
+            let touched = Set(triangles.compactMap { t -> FaceID? in
+                overlay.assignments[Int32(t)] ?? before?[Int32(t)]
+            }).sorted()
+            let ev = FaceEditEvent(kind: .paint, made: [], removed: [], paintedFaces: touched)
+            for h in faceEditHooks { h.run(ev) }
+        }
     }
 
     /// The per-triangle EFFECTIVE face ids (native ids with painted overrides applied) the viewer
@@ -535,8 +627,12 @@ public final class ProjectModel: ObservableObject {
                 // run's own import, which is the whole reason it survives one.
                 anchorRegions.append(contentsOf: g.regionIDs)
             } else if kind.isLoad {
-                let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
-                if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
+                // ★★ ONE DIRECTION, OR NONE (2026-10-09, #362's find): the same verdict the
+                // pre-flight blocks on. A Push or Pull whose faces face opposite ways has no
+                // direction, and it used to be given +Z here — a push on two opposite faces went
+                // out as (0, 0, −F) while the pre-flight, guessing +Y, said OK. Refused, it carries
+                // no load at all, and Optimize is blocked with the reason (`loadGroupDiagnoses`).
+                if case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f),
                                        regionIDs: g.regionIDs))
@@ -1234,7 +1330,7 @@ public final class ProjectModel: ObservableObject {
     /// Returns the two children, or [] when nothing could be cut.
     @discardableResult
     public func commitSurfaceCut(_ cut: SurfaceCut) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // each surface action is its own undo step (B5: sealed after too)
         guard let mesh = viewerMesh else { return [] }
         let target: RegionID
         if let existing = surfaceCutTarget(face: cut.faceID) {
@@ -1368,8 +1464,8 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceIsolate(faces: [FaceID],
                                      named name: String) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.isolate) }
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
-        sealUndoStep()
 
         // ★ CONNECTED GROUPS OF THE SELECTED FACES. Adjacency is face-level and
         // already derived for the loop walk; here it is restricted to the selection,
@@ -1433,6 +1529,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfaceCut(faces: [FaceID], rotationDegrees: Double = 0,
                                  offsetMM: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.cut) }   // B5: the whole batch is one edit, one Undo
         guard let mesh = viewerMesh, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1449,6 +1546,7 @@ public final class ProjectModel: ObservableObject {
     @discardableResult
     public func commitSurfacePattern(faces: [FaceID], columns: Int, rows: Int,
                                      rotationDegrees: Double = 0) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // B5: the whole batch is one edit, one Undo
         guard viewerMesh != nil, !faces.isEmpty else { return [] }
         var out: [RegionID] = []
         for f in faces.sorted() {
@@ -1538,7 +1636,7 @@ public final class ProjectModel: ObservableObject {
     /// rather than shipping the wrong behaviour quietly.
     @discardableResult
     public func commitSurfaceUnion(_ u: SurfaceUnion) -> RegionID? {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.union) }   // each surface action is its own undo step (B5: sealed after too)
         guard viewerMesh != nil, u.hasEnoughToCombine else { return nil }
         guard let rid = faceRegions.unionOfParts(u.pieces,
                                                  named: "Union of \(u.count)")
@@ -1713,7 +1811,7 @@ public final class ProjectModel: ObservableObject {
     public func commitSurfacePattern(face: FaceID, columns: Int, rows: Int,
                                      rotationDegrees: Double = 0,
                                      piece: RegionID? = nil) -> [RegionID] {
-        sealUndoStep()          // each surface action is its own undo step
+        beginFaceEdit(); defer { endFaceEdit(.pattern) }   // each surface action is its own undo step (B5: sealed after too)
         guard let p = surfacePatternPreview(face: face, columns: columns, rows: rows,
                                             rotationDegrees: rotationDegrees,
                                             piece: piece),
@@ -1844,6 +1942,7 @@ public final class ProjectModel: ObservableObject {
     /// step. Returns the refusal, in words, when the aim is not a whole face region.
     @discardableResult
     public func surfaceRegionToggleFace(_ id: RegionID, face: FaceID) -> String? {
+        beginFaceEdit(); defer { endFaceEdit(.regionFace) }
         guard let mesh = viewerMesh else { return "No model open." }
         switch SurfaceRegionTool.tapEdit(aim: id, face: face, regions: faceRegions, mesh: mesh) {
         case .refused(let why):
@@ -1864,8 +1963,8 @@ public final class ProjectModel: ObservableObject {
     /// its parts — and every id that went leaves every group, so nothing dangles.
     @discardableResult
     public func surfaceUndoSplit(_ id: RegionID) -> [RegionID] {
+        beginFaceEdit(); defer { endFaceEdit(.undoSplit) }
         guard SurfaceRegionTool.canUndoSplit(id, regions: faceRegions) else { return [] }
-        sealUndoStep()
         let before = Set(faceRegions.regions.map(\.id))
         faceRegions.revertSplit(id)
         let dropped = before.subtracting(faceRegions.regions.map(\.id)).sorted()
@@ -1880,8 +1979,8 @@ public final class ProjectModel: ObservableObject {
     /// region cannot be dissolved (`SurfaceDissolve.refusal` says why).
     @discardableResult
     public func surfaceDissolve(_ id: RegionID) -> SurfaceDissolve.Result? {
+        beginFaceEdit(); defer { endFaceEdit(.dissolve) }
         guard let mesh = viewerMesh, SurfaceDissolve.refusal(id, regions: faceRegions) == nil else { return nil }
-        sealUndoStep()
         let r = SurfaceDissolve.apply(id, regions: &faceRegions, selection: &selection, mesh: mesh)
         force.sync(groups: selection.groups)
         objectWillChange.send()
@@ -2758,7 +2857,10 @@ public final class ProjectModel: ObservableObject {
                     resolve: { [weak self] f in self?.resolvedLatticeFace(f) }).regions
             },
             topology: lattice.topologyID,
-            minExtrudableWidthMM: printParams.strutLineWidthMM)
+            minExtrudableWidthMM: printParams.strutLineWidthMM,
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: lattice.topologyID,
+                                                              allowQuilt: lattice.allowQuilt,
+                                                              algorithm: lattice.algorithm))
     }
 
     // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)
@@ -3173,6 +3275,80 @@ public final class ProjectModel: ObservableObject {
     }
 
     /// A group's model-space outward normal (mean of its faces' normals), or nil.
+    /// ★★ A LOAD GROUP'S DIRECTION, OR WHY IT HAS NONE (the reviewer, 2026-10-09, #362's find:
+    /// "refuse or resolve the case in plain words"). ONE verdict for the job (`loadCase`), the
+    /// Optimize pre-flight (`loadGroupDiagnoses`) and the load-path picture.
+    public enum LoadDirectionVerdict: Equatable, Sendable {
+        /// The force vector in the model frame (N).
+        case vector(SIMD3<Float>)
+        /// Why there is none, naming the group.
+        case refused(String)
+    }
+
+    /// How far a Push or Pull group's face normals must agree: the length of their mean, 1 for
+    /// faces that all face one way, 0 for two that face opposite ways. Below this the mean is a
+    /// direction no face has — two opposite faces cancel to nothing, and a bore's faces cancel
+    /// round its axis — so the group is refused rather than pushed somewhere arbitrary. 0.5 is
+    /// the line where the faces agree more than they disagree (a half-cylinder reads 0.64).
+    public static let loadNormalAgreementFloor: Float = 0.5
+
+    /// nil when the group is not a load.
+    public func loadDirection(for id: UUID) -> LoadDirectionVerdict? {
+        guard let g = selection.groups.first(where: { $0.id == id }),
+              case let .load(direction, _) = force.kind(for: id) else { return nil }
+        var n = SIMD3<Float>(0, 0, 1)        // read only by a Push or Pull
+        if direction != .gravity {
+            guard let (mean, agreement) = groupNormalAgreement(g) else {
+                return .refused("“\(g.name)” has no face for \(direction.title) to act on.")
+            }
+            guard agreement >= Self.loadNormalAgreementFloor else {
+                return .refused("“\(g.name)”: its faces face opposite ways, so \(direction.title) has no "
+                                + "single direction. Put them in separate groups, or load it by weight.")
+            }
+            n = mean
+        }
+        guard let f = force.loadForceVectorModel(id, groupNormal: n) else {
+            return .refused("“\(g.name)” has no direction to load.")
+        }
+        return .vector(f)
+    }
+
+    /// ★ The Optimize pre-flight's diagnoses (099 D3), from the SAME verdict the job is built
+    /// from — so the two can no longer disagree. `mayNotRegister` is the view's voxel-footprint test.
+    public func loadGroupDiagnoses(mayNotRegister: (SelectionGroup) -> Bool = { _ in false })
+        -> [LoadGroupDiagnosis] {
+        selection.groups.compactMap { g in
+            guard let verdict = loadDirection(for: g.id) else { return nil }
+            let health: LoadGroupHealth
+            switch verdict {
+            case .refused(let why):
+                health = .noDirection(why)
+            case .vector(let f):
+                health = simd_length(f) < 1e-6 ? .zeroForce : (mayNotRegister(g) ? .mayNotRegister : .ok)
+            }
+            return LoadGroupDiagnosis(label: g.name, health: health)
+        }
+    }
+
+    /// The group's mean face normal and how far its faces agree (|Σ n̂| / count); nil when it
+    /// has no face with a normal.
+    private func groupNormalAgreement(_ g: SelectionGroup) -> (SIMD3<Float>, Float)? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero
+        var count = 0
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 } }
+        for r in g.regionIDs {
+            guard let region = faceRegions.region(r) else { continue }
+            for f in FaceRegionGeometry.members(of: region, in: mesh) {
+                if let nrm = mesh.faceNormal(f) { acc += nrm; count += 1 }
+            }
+        }
+        guard count > 0 else { return nil }
+        let len = simd_length(acc)
+        guard len > 1e-6 else { return (SIMD3<Float>(0, 0, 0), 0) }
+        return (acc / len, len / Float(count))
+    }
+
     private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }
         var acc = SIMD3<Float>.zero

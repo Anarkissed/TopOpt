@@ -175,17 +175,17 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var normal: SIMD3<Double> = .zero
     public var halfUMM: Double = 0
     public var halfWMM: Double = 0
-    public var depthMM: Double = 0
+    public var depthMM: Double = 0 { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★★ THE FACE'S REAL OUTLINE, in the plane's (u, v) mm relative to `origin`
     /// — see `LatticeFaceOutline` for the measurement that made this necessary.
     /// EMPTY means "no outline was available", and then the region is the
     /// rectangle `halfUMM`×`halfWMM` exactly as it always was, which is what a
     /// bolt, a hand-placed primitive and every pre-outline project get.
-    public var outlineLoops: [[SIMD2<Double>]] = []
+    public var outlineLoops: [[SIMD2<Double>]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★ per loop, per edge (loop[i] → loop[i+1]): a SEAM — shared with another latticed
     /// prism (the next facet of a curved wall, a neighbouring latticed face). No rim, no
     /// band, no expand there. Empty ⇒ every edge is a true outline. Preview only.
-    public var outlineSeams: [[Bool]] = []
+    public var outlineSeams: [[Bool]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// per loop, per edge: the run face id across a seam (nil where the edge is a true
     /// outline) — a corner between two latticed faces gets the stability plate
     public var outlineSeamFaces: [[Int?]] = []
@@ -193,10 +193,10 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// positive where the two prisms DIVERGE with depth (a concave wall's facets, an inside
     /// corner), negative where they converge. The prism flares to the bisector plane by
     /// depth × tilt, so adjacent prisms meet with no wedge of material and no overlap.
-    public var outlineSeamTilt: [[Double]] = []
+    public var outlineSeamTilt: [[Double]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// per loop, per edge: the depth of the prism across a seam (0 = none) — the bisector
     /// flare applies only as deep as the neighbour's prism goes
-    public var outlineSeamDepthMM: [[Double]] = []
+    public var outlineSeamDepthMM: [[Double]] = [] { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// the mesh face id this region came from (the wire carries the RUN id in `faceID`)
     public var rawFaceID: FaceID? = nil
     /// ★ THE IN-PLANE REACH, kept as its own number instead of being folded into
@@ -204,7 +204,7 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// ball — `signedDistance <= inPlaneOffsetMM` — which is precisely what
     /// `FaceOffsetShell.dilated` does to the primitive on screen. Folding it into
     /// halfU/halfW could only ever grow a rectangle.
-    public var inPlaneOffsetMM: Double = 0
+    public var inPlaneOffsetMM: Double = 0 { didSet { generatedOutline = nil } }   // ★ the outline is generated from this
     /// ★ The B-rep face this region was spawned from (task 2026-08-12 §0a), or
     /// nil for a hand-placed primitive. Emitted as the job's `face_id` so CORE
     /// can check the depth tie: a face that is both protected and latticed must
@@ -227,17 +227,9 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     public var selectableKey: String? = nil
     /// ★ BATCH E REVIEW: a prism CLIPPED to a split piece (LatticeSectorOutline) — not its face: no `face_id` on the wire, never a face's protection depth.
     public var sectorPiece: Bool = false
-    // ★ THE SLAB (2026-09-21, preview only — see `LatticeWallThickness`): what was asked
-    // for, and the answer the scene built. Neither reaches `wireDictionary`.
-    public var thickness: LatticeWallThickness? = nil
-    public var thicknessMap: LatticeWallThicknessMap? = nil
-
-    /// Where the lattice lives along the normal at `uv`: the whole prism unless a slab
-    /// was built for this face.
-    public func slabRange(uv: SIMD2<Double>) -> (start: Double, end: Double) {
-        guard let m = thicknessMap else { return (0, depthMM) }
-        return m.range(at: uv, depthMM: depthMM)
-    }
+    /// ★ The generated outline polygon (P1/P6), cached by the emission and the scene — `withGeneratedOutline`.
+    /// Not on the wire as such: the wire sends it as `outline_uv`.
+    public var generatedOutline: [[SIMD2<Double>]]? = nil
 
     public init(role: LatticeGroupRole, kind: Kind) {
         self.role = role
@@ -260,38 +252,74 @@ public struct LatticeRegionSpec: Equatable, Sendable {
     /// The job's region, with the face frame axes only when the linked core takes them.
     public var wireDictionary: [String: Any] { wireDictionary(frameAxes: TopOptKit.regionFrameAxesWired) }
 
-    /// ★★★ THE SELECTION CORE CAN READ (his 2026-09-22 15:50: "if all it's doing is
-    /// SELECTING the area to lattice, you literally just counted the voxels to select").
-    /// Core lattices a curved face as flat slabs, one per facet, each straight along its
-    /// own normal; on a diverging seam a wedge of the model between two slabs falls in
-    /// neither and is never selected (core note 7). The preview's facet prisms meet at
-    /// the bisector. So the outline that goes ON THE WIRE is the facet's outline pushed
-    /// OUTWARD across every diverging seam by `min(depth, neighbour depth) × tan(half
-    /// the dihedral)` — the wedge's full width at the bottom — so the flat slabs' union
-    /// covers the bisector pocket. Converging seams overlap already and are left alone.
-    /// The over-selection this causes is a sliver ~d·θ²/2 deep at the seam's far end
-    /// (0.26 mm at 12 mm and 12°), inside the neighbour's slab. Preview-only readers keep
-    /// `outlineLoops` and the flare; this is the job's copy.
+    /// ★★★ THE ONE OUTLINE (the reviewer, 2026-10-10 21:27, P1-P6 as one set, approved by the maintainer): the
+    /// generated polygon is the ONLY outline, for every reader — the wire (`outline_uv`, and so core's
+    /// containment and, by #358's ruling, its strut clip), the owner query, the bake's outline distance, the
+    /// shader's prism and the side rims. It is the raw loops read EVEN-ODD (the preview's own sign), joined by
+    /// each diverging seam's STRIP — `min(depth, neighbour depth) × tilt` straight out from the seam edge, the
+    /// same through the full depth (P1: the depth-dependent flare is retired, because the preview must draw the
+    /// vertical prism core builds), no wedge past a seam's ends (P2) — with the ROUND capsule of radius |expand|
+    /// about every TRUE edge added for a grow and taken away for a shrink (P1: the Minkowski set the preview's
+    /// distance always drew; arcs as chords within 0.005 mm with their vertices on the arc — P3, inside chords),
+    /// unioned into simple, non-overlapping loops (P4; Clipper2 through the guarded bridge). Nothing to generate
+    /// (no expand, no diverging seam) ⇒ the raw loops, byte for byte.
+    /// The emission and the scene cache it (`generatedOutline`); `outlinePolygon` computes it when absent.
     public var wireOutlineLoops: [[SIMD2<Double>]] {
         guard kind == .face, depthMM > 0 else { return outlineLoops }
-        // ★ the in-plane expand goes on the wire as GEOMETRY (2026-09-23): core rejects an
-        // expand key, so the outline itself is offset by it (outward for a grow, inward
-        // for a shrink) on every edge that is not a seam
+        return outlinePolygon
+    }
+
+    /// The generated polygon, cached (`withGeneratedOutline`) or computed now.
+    public var outlinePolygon: [[SIMD2<Double>]] { generatedOutline ?? generatedOutlineLoops() }
+
+    /// A copy carrying its generated polygon, for the hot readers (the scene, the bake).
+    public func withGeneratedOutline() -> LatticeRegionSpec {
+        guard generatedOutline == nil, kind == .face, !outlineLoops.isEmpty else { return self }
+        var r = self
+        r.generatedOutline = generatedOutlineLoops()
+        return r
+    }
+
+    /// The generated polygon — see `wireOutlineLoops`.
+    public func generatedOutlineLoops() -> [[SIMD2<Double>]] {
+        guard kind == .face, !outlineLoops.isEmpty, depthMM > 0 else { return outlineLoops }
         let e = inPlaneOffsetMM
-        return outlineLoops.enumerated().map { (l, loop) in
+        var segs: [(SIMD2<Double>, SIMD2<Double>)] = []
+        var strips: [[SIMD2<Double>]] = []
+        for (l, loop) in outlineLoops.enumerated() {
             let sm = l < outlineSeams.count ? outlineSeams[l] : []
             let tl = l < outlineSeamTilt.count ? outlineSeamTilt[l] : []
             let cl = l < outlineSeamDepthMM.count ? outlineSeamDepthMM[l] : []
-            let grow: [Double] = loop.indices.map { i in
-                let seam = i < sm.count && sm[i]
-                guard seam else { return -e }                     // negative = outward in `offsetRing`
-                guard i < tl.count, tl[i] > 1e-9 else { return 0 }
-                let cap = i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM
-                return -(cap * tl[i])
+            let m = loop.count
+            for i in 0..<m {
+                let a = loop[i], b = loop[(i + 1) % m]
+                guard i < sm.count, sm[i] else { segs.append((a, b)); continue }        // a true edge
+                guard i < tl.count, tl[i] > 1e-9 else { continue }                       // a seam that does not diverge
+                let push = (i < cl.count && cl[i] > 0 ? Swift.min(depthMM, cl[i]) : depthMM) * tl[i]
+                let d = b - a, len = simd_length(d)
+                guard len > 1e-9, push > 0 else { continue }
+                // OUTWARD: the side of the edge outside the raw outline (even-odd), whatever the loop's winding
+                var out = SIMD2<Double>(d.y, -d.x) / len
+                if LatticeFaceOutline.contains(0.5 * (a + b) + out * Swift.min(1e-3, 0.01 * len), loops: outlineLoops) { out = -out }
+                strips.append([a, b, b + out * push, a + out * push])
             }
-            guard grow.contains(where: { abs($0) > 1e-9 }) else { return loop }
-            return LatticeOutlineRibbon.offsetRing(loop, by: 0, seams: [], edgeOffset: grow)
         }
+        if abs(e) < 1e-9, strips.isEmpty { return outlineLoops }
+        guard let g = TopOptKit.outlinePolygon(raw: outlineLoops, trueSegments: abs(e) < 1e-9 ? [] : segs,
+                                               strips: strips, expandMM: e) else {
+            NSLog("DIAG generatedOutlineLoops: the bridge refused (\(TopOptKit.lastCoreRefusal ?? "no reason")) — the raw outline stands")
+            return outlineLoops
+        }
+        return g
+    }
+
+    /// ★ THE IN-PLANE DISTANCE every preview reader uses, positive INSIDE: its sign is the generated polygon's
+    /// (`outlinePolygon`, even-odd), its size the distance to the TRUE outline offset by the expand (a seam is
+    /// no outline: no rim, no band there). With no expand and no diverging seam it is exactly the old
+    /// −(signedDistance − expand).
+    public func inPlaneDistance(_ uv: SIMD2<Double>) -> Double {
+        let mag = abs(LatticeFaceOutline.signedDistance(uv, loops: outlineLoops, seams: outlineSeams) - inPlaneOffsetMM)
+        return LatticeFaceOutline.contains(uv, loops: outlinePolygon) ? mag : -mag
     }
 
     public func wireDictionary(frameAxes: Bool) -> [String: Any] {
@@ -312,7 +340,10 @@ public struct LatticeRegionSpec: Equatable, Sendable {
         // ★ the grown outline (see `wireOutlineLoops`) and a bounding box that holds it —
         // core uses the half-extents as the cheap reject before the polygon test
         let loops = wireOutlineLoops
-        var hu = halfUMM, hw = halfWMM
+        // ★ P5 (the reviewer, 2026-10-10): the bounding box is the generated polygon's OWN extent — core reads
+        // half_u/half_w as dimensions (thinnest extent, Fit cells, cell_may_overlap), so a mitre spike or the
+        // face's own rectangle must not inflate them. No outline ⇒ the region's own half-extents.
+        var hu = loops.isEmpty ? halfUMM : 0, hw = loops.isEmpty ? halfWMM : 0
         for loop in loops { for q in loop { hu = Swift.max(hu, abs(q.x)); hw = Swift.max(hw, abs(q.y)) } }
         var faceGeometry: [String: Any] = [
             "origin": [origin.x, origin.y, origin.z],
@@ -585,12 +616,15 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// The grid the cell was packed on (`LatticeSteppedCell.slotOriginMM`). Not a cell key: it
     /// goes on the cell's REGION as `geometry.slot_origin_mm` (`writePlan`).
     public let slotOriginMM: SIMD3<Double>?
+    /// The slot size the cell's ladder was built on (`LatticeSteppedCell.planBaseCellMM`). Not a
+    /// cell key: it goes on the cell's REGION as `geometry.plan_base_cell_mm` (`writePlan`, K1).
+    public let planBaseCellMM: Double?
     /// Core's reason when it could not name the bake's owners (`LatticeSteppedCell.ownerRefusal`).
     public var ownerRefusal: String? = nil
     public init(regionID: Int, originMM: SIMD3<Double>, sizeMM: Double, rho: Double = 0,
-                slotOriginMM: SIMD3<Double>? = nil) {
+                slotOriginMM: SIMD3<Double>? = nil, planBaseCellMM: Double? = nil) {
         self.regionID = regionID; self.originMM = originMM; self.sizeMM = sizeMM; self.rho = rho
-        self.slotOriginMM = slotOriginMM
+        self.slotOriginMM = slotOriginMM; self.planBaseCellMM = planBaseCellMM
     }
     public var wireDictionary: [String: Any] {
         var d: [String: Any] = ["region_id": regionID,
@@ -611,7 +645,7 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         return cells.compactMap { c in
             guard let id = idOf[c.region] else { return nil }
             var w = LatticeSteppedCellWire(regionID: id, originMM: c.originMM, sizeMM: c.sizeMM, rho: c.rho,
-                                           slotOriginMM: c.slotOriginMM)
+                                           slotOriginMM: c.slotOriginMM, planBaseCellMM: c.planBaseCellMM)
             w.ownerRefusal = c.ownerRefusal
             return w
         }
@@ -634,6 +668,19 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
         case slotOriginNotWired
         /// core could not name the cells' owners (its reason), so the picture is not core's
         case ownerUnchecked(String)
+        /// a planned region's cells do not state the slot size their ladder was built on (K1)
+        case baseNotStated(regionID: Int)
+        /// a region's cells were packed from two ladders with different bases
+        case twoBases(regionID: Int)
+        /// the linked core's schema does not take `plan_base_cell_mm`
+        case planBaseNotWired
+        /// a cell's density is above the cap the job carries (core refuses it, D5)
+        case rhoOverCap(regionID: Int, rho: Double, cap: Double)
+        /// two cells of one region share volume (`count` pairs in that region)
+        case cellsOverlap(regionID: Int, count: Int)
+        /// `count` cells of a region lie wholly outside its outline polygon (the one outline): the preview
+        /// cannot draw them, so they never go on the wire
+        case cellOutsideRegion(regionID: Int, count: Int)
 
         /// The reason, in plain words, after the banner's "this plan can't go: ".
         public var reason: String {
@@ -648,6 +695,18 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 return "this core can't take the grid these cells sit on"
             case .ownerUnchecked(let why):
                 return "core couldn't say which region owns the cells where walls meet (\(why))"
+            case .baseNotStated(let id):
+                return "region \(id)'s cells don't say which cell size they were stepped from"
+            case .twoBases(let id):
+                return "region \(id)'s cells were stepped from two different cell sizes"
+            case .planBaseNotWired:
+                return "this core can't take the cell size each region's cells were stepped from"
+            case .cellsOverlap(let id, let count):
+                return "\(count) pair\(count == 1 ? "" : "s") of cells overlap in region \(id)"
+            case .cellOutsideRegion(let id, let count):
+                return "\(count) cell\(count == 1 ? " lies" : "s lie") wholly outside region \(id)'s outline"
+            case .rhoOverCap(let id, let rho, let cap):
+                return String(format: "a cell in region %d is drawn at %.6f, denser than the job's %.6f ceiling", id, rho, cap)
             }
         }
     }
@@ -657,8 +716,14 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// ★ THE PLAN'S SLOT ORIGINS, checked the way core checks them, against the JOB's regions
     /// (every role, emission order; the k-th include is region id k). A cell without a slot
     /// origin (hand-built) states none; core derives its region's own `origin`.
+    /// ★ K2 (#358 25c6a551, reviewer 2026-10-09): on a core that takes the slot origin as a grid
+    /// PHASE (`slotOriginIsPhase`), depth is measured from the region's own plane and a grid off a
+    /// tilted facet's plane is accepted — so it is no longer withheld. On an older core the in-plane
+    /// test stands, exactly as that core applies it.
     public static func slotOrigins(_ cells: [LatticeSteppedCellWire], regions: [LatticeRegionSpec],
-                                   slotOriginWired: Bool) -> Result<[Int: SIMD3<Double>], PlanWithheld> {
+                                   slotOriginWired: Bool,
+                                   slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase)
+        -> Result<[Int: SIMD3<Double>], PlanWithheld> {
         var includeAt: [Int: LatticeRegionSpec] = [:]
         var next = 1
         for r in regions where r.role == .include { includeAt[next] = r; next += 1 }
@@ -672,42 +737,181 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
                 if had != so { return .failure(.twoGrids(regionID: c.regionID)) }
                 continue
             }
-            let ln = simd_length(r.normal)
-            let dn = ln > 0 ? simd_dot(so - r.origin, r.normal / ln) : .infinity
-            guard abs(dn) < slotOriginPlaneToleranceMM else {
-                return .failure(.offPlane(regionID: c.regionID, offsetMM: dn))
+            if !slotOriginIsPhase {
+                let ln = simd_length(r.normal)
+                let dn = ln > 0 ? simd_dot(so - r.origin, r.normal / ln) : .infinity
+                guard abs(dn) < slotOriginPlaneToleranceMM else {
+                    return .failure(.offPlane(regionID: c.regionID, offsetMM: dn))
+                }
             }
             out[c.regionID] = so
         }
         return .success(out)
     }
 
-    /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells` and each planned
-    /// include face's `geometry.slot_origin_mm`, together or not at all. Call it after
-    /// `block["regions"]` is written. Returns why a plan the switch would send was withheld; nil
-    /// when it was sent or not asked for.
+    /// ★ K1 (#358 664f222c, reviewer 2026-10-09: "Write the slot size each region's ladder was
+    /// built on, for both menus, on every planned region"): each planned region's base, from its
+    /// cells. Core requires it on every region the plan places a cell in (run_job.cpp:7053) and
+    /// cannot infer it, so a planned cell without one withholds the plan, never a guess.
+    public static func planBases(_ cells: [LatticeSteppedCellWire],
+                                 baseWired: Bool) -> Result<[Int: Double], PlanWithheld> {
+        var out: [Int: Double] = [:]
+        for c in cells {
+            guard let b = c.planBaseCellMM, b.isFinite, b > 0 else { return .failure(.baseNotStated(regionID: c.regionID)) }
+            guard baseWired else { return .failure(.planBaseNotWired) }
+            if let had = out[c.regionID] {
+                if had != b { return .failure(.twoBases(regionID: c.regionID)) }
+                continue
+            }
+            out[c.regionID] = b
+        }
+        return .success(out)
+    }
+
+    /// What a planned region carries beside its cells: its grid (absent for a hand-built cell) and
+    /// the base its ladder was built on.
+    public struct PlannedRegion: Equatable, Sendable {
+        public let slotOriginMM: SIMD3<Double>?
+        public let baseCellMM: Double
+    }
+    /// ★ THE ONE CHECK the job writer and the preview's line share: every planned region's grid
+    /// and base, or why the plan cannot go.
+    public static func plannedRegions(_ cells: [LatticeSteppedCellWire], regions: [LatticeRegionSpec],
+                                      slotOriginWired: Bool = TopOptKit.regionSlotOriginWired,
+                                      slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase,
+                                      baseWired: Bool = TopOptKit.regionPlanBaseWired)
+        -> Result<[Int: PlannedRegion], PlanWithheld> {
+        // ★ no two cells of one region overlap (the reviewer, 2026-10-10 20:05)
+        let overlaps = LatticeSteppedCell.boxOverlaps(cells.map { (region: $0.regionID, lo: $0.originMM, size: $0.sizeMM) })
+        if let first = overlaps.first {
+            return .failure(.cellsOverlap(regionID: first.region, count: overlaps.filter { $0.region == first.region }.count))
+        }
+        // ★ every cell intersects its own region's polygon (the one outline): a cell the preview cannot
+        // draw is never on the wire — withheld by name, never trimmed
+        var includeAt: [Int: LatticeRegionSpec] = [:]
+        var nextID = 1
+        for r in regions where r.role == .include { includeAt[nextID] = r; nextID += 1 }
+        var outside: [Int: Int] = [:]
+        for c in cells {
+            guard let r = includeAt[c.regionID], !cellIntersectsOutline(c, region: r) else { continue }
+            outside[c.regionID, default: 0] += 1
+        }
+        if let id = outside.keys.min() { return .failure(.cellOutsideRegion(regionID: id, count: outside[id]!)) }
+        let origins: [Int: SIMD3<Double>]
+        switch slotOrigins(cells, regions: regions, slotOriginWired: slotOriginWired, slotOriginIsPhase: slotOriginIsPhase) {
+        case .failure(let why): return .failure(why)
+        case .success(let o): origins = o
+        }
+        switch planBases(cells, baseWired: baseWired) {
+        case .failure(let why): return .failure(why)
+        case .success(let bases):
+            return .success(bases.reduce(into: [:]) { $0[$1.key] = PlannedRegion(slotOriginMM: origins[$1.key], baseCellMM: $1.value) })
+        }
+    }
+
+    /// Whether a cell's box, projected on its face region's plane, meets the region's outline polygon
+    /// (`outlinePolygon`, even-odd; a manual primitive without an outline: its own half-extent box). Lenient
+    /// on the boundary — touching counts — so only a cell WHOLLY outside fails. A region with no polygon to
+    /// test against (a bolt, a zero normal, an outline-less CAD face) passes.
+    static func cellIntersectsOutline(_ c: LatticeSteppedCellWire, region r: LatticeRegionSpec) -> Bool {
+        guard r.kind == .face, r.depthMM > 0 else { return true }
+        let n = LatticeRegionMask.unit(r.normal)
+        guard simd_length(n) > 0.5 else { return true }
+        let loops: [[SIMD2<Double>]]
+        if !r.outlineLoops.isEmpty { loops = r.outlinePolygon }
+        else if r.faceID == nil {
+            loops = [[SIMD2(-r.halfUMM, -r.halfWMM), SIMD2(r.halfUMM, -r.halfWMM), SIMD2(r.halfUMM, r.halfWMM), SIMD2(-r.halfUMM, r.halfWMM)]]
+        } else { return true }
+        let (bu, bv) = LatticeRegionMask.basis(n)
+        var pts: [SIMD2<Double>] = []
+        for i in 0..<8 {
+            let corner = c.originMM + SIMD3<Double>(i & 1 == 0 ? 0 : 1, i & 2 == 0 ? 0 : 1, i & 4 == 0 ? 0 : 1) * c.sizeMM
+            let d = corner - r.origin
+            pts.append(SIMD2(simd_dot(d, bu), simd_dot(d, bv)))
+        }
+        // the box's shadow on the plane: the convex hull of its eight corners (monotone chain)
+        pts.sort { $0.x != $1.x ? $0.x < $1.x : $0.y < $1.y }
+        func cross(_ o: SIMD2<Double>, _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double {
+            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        }
+        var hull: [SIMD2<Double>] = []
+        for pass in 0..<2 {
+            let start = hull.count
+            for q in (pass == 0 ? pts : pts.reversed()) {
+                while hull.count >= start + 2, cross(hull[hull.count - 2], hull[hull.count - 1], q) <= 0 { hull.removeLast() }
+                hull.append(q)
+            }
+            hull.removeLast()
+        }
+        let centre = pts.reduce(SIMD2<Double>.zero, +) / Double(pts.count)
+        if LatticeFaceOutline.contains(centre, loops: loops) { return true }
+        if hull.contains(where: { LatticeFaceOutline.contains($0, loops: loops) }) { return true }
+        func inHull(_ q: SIMD2<Double>) -> Bool {
+            guard hull.count >= 3 else { return false }
+            for k in hull.indices where cross(hull[k], hull[(k + 1) % hull.count], q) < -1e-9 { return false }
+            return true
+        }
+        func meets(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ p: SIMD2<Double>, _ q: SIMD2<Double>) -> Bool {
+            let d1 = cross(p, q, a), d2 = cross(p, q, b), d3 = cross(a, b, p), d4 = cross(a, b, q)
+            return (d1 * d2 <= 1e-12) && (d3 * d4 <= 1e-12)
+        }
+        for loop in loops where loop.count >= 2 {
+            for k in loop.indices {
+                let p = loop[k], q = loop[(k + 1) % loop.count]
+                if inHull(p) { return true }
+                for h in hull.indices where meets(hull[h], hull[(h + 1) % hull.count], p, q) { return true }
+            }
+        }
+        return false
+    }
+
+    /// ★ THE ONE PLAN WRITER, shared by both job builders: `lattice.stepped_cells`, and on each
+    /// planned include face its `geometry.slot_origin_mm` and `geometry.plan_base_cell_mm`, together
+    /// or not at all. Call it after `block["regions"]` is written. Returns why a plan the switch
+    /// would send was withheld; nil when it was sent or not asked for.
     @discardableResult
     public static func writePlan(into block: inout [String: Any], for lat: LatticeSpec, wired: Bool,
                                  enabled: Bool = defaultGradePlansEnabled,
-                                 slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> PlanWithheld? {
+                                 slotOriginWired: Bool = TopOptKit.regionSlotOriginWired,
+                                 slotOriginIsPhase: Bool = TopOptKit.regionSlotOriginIsPhase,
+                                 baseWired: Bool = TopOptKit.regionPlanBaseWired) -> PlanWithheld? {
         guard sendsPlan(algorithm: lat.algorithm, wired: wired, enabled: enabled),
               !lat.steppedCells.isEmpty else { return nil }
-        switch slotOrigins(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired) {
+        // ★ "a sent rho never exceeds the cap the job carries" (the reviewer, 2026-10-09 20:51): core
+        // refuses a cell denser than the job's cap (D5), so such a plan is withheld, never trimmed
+        let cap = lat.densityCapWritten
+        if cap > 0, let over = lat.steppedCells.first(where: { $0.rho > cap }) {
+            let why = PlanWithheld.rhoOverCap(regionID: over.regionID, rho: over.rho, cap: cap)
+            NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): \(why.reason)")
+            return why
+        }
+        switch plannedRegions(lat.steppedCells, regions: lat.regions, slotOriginWired: slotOriginWired,
+                              slotOriginIsPhase: slotOriginIsPhase, baseWired: baseWired) {
         case .failure(let why):
             NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): \(why.reason)")
             return why
-        case .success(let origins):
-            block["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
-            guard !origins.isEmpty, var regs = block["regions"] as? [[String: Any]],
-                  regs.count == lat.regions.count else { return nil }
+        case .success(let planned):
+            guard var regs = block["regions"] as? [[String: Any]], regs.count == lat.regions.count else {
+                NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): the job's regions are not the plan's")
+                return .noSuchRegion(regionID: planned.keys.min() ?? 1)
+            }
             var id = 0
+            var stamped: Set<Int> = []
             for (i, r) in lat.regions.enumerated() where r.role == .include {
                 id += 1
-                guard let so = origins[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
-                g["slot_origin_mm"] = [so.x, so.y, so.z]
+                guard let p = planned[id], var g = regs[i]["geometry"] as? [String: Any] else { continue }
+                if let so = p.slotOriginMM { g["slot_origin_mm"] = [so.x, so.y, so.z] }
+                g["plan_base_cell_mm"] = p.baseCellMM
                 regs[i]["geometry"] = g
+                stamped.insert(id)
+            }
+            // a cell naming a region the job does not declare gets no base, and core would refuse it
+            if let missing = planned.keys.filter({ !stamped.contains($0) }).min() {
+                NSLog("DIAG stepped plan WITHHELD (\(lat.steppedCells.count) cells): region \(missing) is not in the job")
+                return .noSuchRegion(regionID: missing)
             }
             block["regions"] = regs
+            block["stepped_cells"] = lat.steppedCells.map { $0.wireDictionary }
             return nil
         }
     }
@@ -727,7 +931,8 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     public static func blockValue(for lat: LatticeSpec, wired: Bool,
                                   enabled: Bool = defaultGradePlansEnabled,
                                   slotOriginWired: Bool = TopOptKit.regionSlotOriginWired) -> [[String: Any]]? {
-        var block: [String: Any] = [:]
+        // the regions first, as both job builders write them: the plan stamps its regions
+        var block: [String: Any] = lat.regions.isEmpty ? [:] : ["regions": lat.regions.map { $0.wireDictionary }]
         writePlan(into: &block, for: lat, wired: wired, enabled: enabled, slotOriginWired: slotOriginWired)
         return block["stepped_cells"] as? [[String: Any]]
     }
@@ -746,6 +951,16 @@ public struct LatticeSteppedCellWire: Equatable, Sendable {
     /// ★ ROUND 5's TEST SWITCH (reviewer, 2026-10-08: "The same proof for Aesthetic Stepped (any-step
     /// plans)", production OFF): the proof lets a Stepped plan ride its job. Production never sets it.
     nonisolated(unsafe) public static var anyStepPlansForTests = false
+
+    /// ★★ K3 IN THE PREVIEW (the reviewer's ruling, 2026-10-11 00:35, item 2: "The preview should draw prism
+    /// space that no cell covers as SOLID, behind the K3 probe … because the build prints it solid … so a slit
+    /// can never again look like a hole the print doesn't have"). Core prints that space solid only on a job that
+    /// CARRIES the plan (K3 is "on a plan job the PLAN is the design"); without one core lattices it by its own
+    /// law. So: the job of this algorithm sends the preview's plan, and the linked core carries K3.
+    public static func uncoveredPrintsSolid(algorithm: String, wired: Bool, k3: Bool,
+                                            enabled: Bool = defaultGradePlansEnabled) -> Bool {
+        k3 && sendsPlan(algorithm: algorithm, wired: wired, enabled: enabled)
+    }
 
     /// ★★ RULING 6 (maintainer, 2026-10-03): "Default Grade and Stepped previews carry one
     /// plain line saying the run currently builds core's own (coarser) layout. Show it only
@@ -987,6 +1202,14 @@ public struct LatticeSpec: Equatable, Sendable {
     /// Returns nil for a non-graded spec: core's schema REJECTS a grading block's
     /// keys alongside a uniform cell, and retention lives inside grading, so a
     /// uniform run has nowhere to carry it.
+    /// ★ THE CAP THIS JOB WRITES as `grading.max_relative_density` (0 = none): the spec's cap, except
+    /// under organic, at 1 or above, or on a core whose schema lacks the key. ONE value, read by the
+    /// grading block, the stepped tile floor and the plan writer's cap check.
+    public var densityCapWritten: Double {
+        algorithm != "organic" && densityCapRho > 0 && densityCapRho < 1
+            && TopOptKit.gradingSchemaAccepts(key: "max_relative_density") ? densityCapRho : 0
+    }
+
     func gradingDictionary() -> [String: Any]? {
         guard graded else { return nil }
         var grading: [String: Any] = [
@@ -1052,8 +1275,7 @@ public struct LatticeSpec: Equatable, Sendable {
         // accepts it — never a key that would kill the job.
         // The cap this job writes (see THE DENSITY CAP below), decided once: the stepped tile
         // floor reads the same value, so the two keys cannot disagree.
-        let capWritten: Double = algorithm != "organic" && densityCapRho > 0 && densityCapRho < 1
-            && TopOptKit.gradingSchemaAccepts(key: "max_relative_density") ? densityCapRho : 0
+        let capWritten = densityCapWritten
         if algorithm == "stepped" {
             if let m = stageMode, TopOptKit.gradingSchemaAccepts(key: "intent") {
                 grading["intent"] = m == .structural ? "structural" : "aesthetic"
@@ -1371,6 +1593,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var stageMode: LatticeStageMode?
     /// The Flexible stage (a third choice BESIDE stageMode, never a case of it; nil ⇒ not chosen). FlexibleSettings.swift.
     public var flexible: FlexibleStageSettings? = nil
+    /// ★ B4 (the Cells page's Along, decided 2026-10-24): which way he wants the grade to run. "By stress" is
+    /// `densityMode == .sim` (set through the wizard's own setter); "Through the depth" and "Across the face" are DRAWN
+    /// by the preview's octree bake (ruling 2026-10-24 17:46 — a bake input, so a pick rebakes) and no job key reads
+    /// this (LatticeStageTests pins the job; core's side is on the CORE LIST). nil ⇒ unpicked.
+    public var gradeAlong: LatticeGradeAlong? = nil
 
     /// ★★★ WHICH KIND OF LATTICE IS LAID DOWN — core's `LatticeAlgorithm`, as its own
     /// name string. ORTHOGONAL to `cellSizeMode`: that says how the cell is CHOSEN,
@@ -1640,9 +1867,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// halves it; the band's length is untouched. Octet (quilt raise) and organic
     /// (spacing, and the bead that follows it) alike.
     public var shapeFitGradeStrength: Double = 0
-    /// ★ THE LATTICE'S THICKNESS THROUGH THE WALL (his 2026-09-20/21) — see
-    /// `LatticeWallThickness`. `.through` with start 0 is every existing project.
-    public var wallThickness: LatticeWallThickness = .standard
     /// The grade's amount multiplier for a strength: 2^s — 2 at +1, ½ at −1, 1 at 0.
     public static func gradeAmount(strength s: Double) -> Double {
         pow(2.0, Swift.min(1, Swift.max(-1, s)))
@@ -2154,6 +2378,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
         case stageMode                  // Structural / Aesthetic — chosen once (nil ⇒ unasked)
         case flexible                   // the Flexible stage (nil ⇒ not chosen)
+        case gradeAlong                 // B4: the Cells page's Along (display only; nil ⇒ unpicked)
         case algorithm                  // core's LatticeAlgorithm name ("" ⇒ not stated)
         case manualStrutThicknessMM      // the hand-set thickness (nil ⇒ derived)
         case region                     // legacy single-region snapshots
@@ -2173,7 +2398,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // project keeps the grade it has always had.
         case shapeFitBandMM
         case shapeFitGradeStrength
-        case wallThickness
+        // ★ `wallThickness` (the "Lattice depth" section, 2026-09-21) is WITHDRAWN (his 2026-10-11:
+        // "I want the entire section removed"): a document that carries it opens, the key is ignored
+        // and never written again — the lattice always fills the whole prism.
         // ★ The Sim permission (2026-08-17). Absent from every older
         // snapshot ⇒ decodes to its TRUE default ⇒ an existing project
         // keeps asking for the solve it has always asked for.
@@ -2222,6 +2449,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // than inherit a mode nobody chose — the choice decides what the receipt claims.
         stageMode = try c.decodeIfPresent(LatticeStageMode.self, forKey: .stageMode)
         flexible = try c.decodeIfPresent(FlexibleStageSettings.self, forKey: .flexible)
+        // ★ B4: an unknown raw value decodes as unpicked, never a failed project (a dropped project is silent)
+        gradeAlong = (try? c.decodeIfPresent(LatticeGradeAlong.self, forKey: .gradeAlong)) ?? nil
         // Absent in every project saved before the selector existed, and "" is exactly
         // what those projects mean: not stated, so core takes doubled.
         algorithm = try c.decodeIfPresent(String.self, forKey: .algorithm) ?? ""
@@ -2263,7 +2492,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         shapeFitBandMM = try c.decodeIfPresent(Double.self, forKey: .shapeFitBandMM)
             ?? LatticeSettings.defaultShapeFitBandCells
         shapeFitGradeStrength = try c.decodeIfPresent(Double.self, forKey: .shapeFitGradeStrength) ?? 0
-        wallThickness = try c.decodeIfPresent(LatticeWallThickness.self, forKey: .wallThickness) ?? .standard
         cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
@@ -2402,6 +2630,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         }
         try c.encodeIfPresent(stageMode, forKey: .stageMode)
         try c.encodeIfPresent(flexible, forKey: .flexible)
+        try c.encodeIfPresent(gradeAlong, forKey: .gradeAlong)
         // Written only when stated, so an untouched project's file is byte-identical
         // to one saved before the selector existed (bar U1).
         if !algorithm.isEmpty { try c.encode(algorithm, forKey: .algorithm) }
@@ -2409,7 +2638,6 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(cellMinMM, forKey: .cellMinMM)
         try c.encode(shapeFitBandMM, forKey: .shapeFitBandMM)
         if shapeFitGradeStrength != 0 { try c.encode(shapeFitGradeStrength, forKey: .shapeFitGradeStrength) }
-        if wallThickness != .standard { try c.encode(wallThickness, forKey: .wallThickness) }
         try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)

@@ -126,7 +126,7 @@ public enum LatticeRegionCap {
                     // is lattice, not a wall.
                     let other = regions.enumerated().contains { (oi, o) in
                         oi != ri && o.role == .include && corners.contains { q in
-                            LatticeRegionMask.containsWholePrism(q - n * 0.01, region: o) }
+                            LatticeRegionMask.contains(q - n * 0.01, region: o) }
                     }
                     if other { continue }
                     for p in corners { emit(p, -n) }

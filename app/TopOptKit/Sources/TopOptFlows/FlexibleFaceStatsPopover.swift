@@ -62,7 +62,7 @@ public enum FlexibleFaceStats {
         }
         // the lattice's own voxels in the face's prism (its slab where one was built), else anywhere in the declared prism
         var rhos = sample { p in regions.contains { LatticeRegionMask.contains(p, region: $0) } }
-        if rhos.isEmpty { rhos = sample { p in regions.contains { LatticeRegionMask.containsWholePrism(p, region: $0) } } }
+        if rhos.isEmpty { rhos = sample { p in regions.contains { LatticeRegionMask.contains(p, region: $0) } } }   // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: 2353efb4 folded containsWholePrism into contains (the lattice always fills the whole prism)
         guard !rhos.isEmpty else { return nil }
         rhos.sort()
         let rho = Double(rhos[rhos.count / 2])

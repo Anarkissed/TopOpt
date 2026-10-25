@@ -1197,25 +1197,15 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 if (Fb < Fsolid) { Fsolid = Fb; bleedHit = true; bandRimWon = false; }
             }
         }
-        // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
-        // evening: "I'm not seeing a solid outline meaning the entire chamfers
-        // are held up in thin air"). The ladder's shape fit already DECIDES
-        // which cells go solid — a want trimmed below the base rung deactivates
-        // the cell — but `anyActive` is a neighbourhood property, so a thin
-        // solid ring at the outline still drew its neighbours' struts straight
-        // through the material. The sample's OWN cell being inactive is the
-        // decision, read back; the union with dClip keeps it inside the part
-        // and the declared region. Gated on rimParams.z (armed only when the
-        // doubled path baked with declared regions), so every other bake is
-        // byte-identical.
+        // ★★ K3: THE PRISM SPACE NO PLAN CELL COVERS PRINTS SOLID (#358 f0d8bf27; the reviewer's ruling,
+        // 2026-10-11 00:35, item 2: "so a slit can never again look like a hole the print doesn't have"). On a job
+        // that carries the plan core's companion is printed minus the plan's cells; `rimParams.z` is 1 only then
+        // (`LatticeSteppedCellWire.uncoveredPrintsSolid`, behind core's probe). A stepped texel with no cell reads
+        // size 0, so `LC.stepped` stays 0 there: inside the clip (the part ∩ the pocket) the point is solid, drawn
+        // as the run's solid fill. (This replaces the doubled path's solid-cell branch, whose flag never reached
+        // the uniform — `z` was always 0 — so it drew nothing.)
         if (LC.stepped == 0.0 && U.rimParams.z > 0.5) {
-            float S0d = U.latticeOrigin.w;
-            float3 bid = round((p - U.latticeOrigin.xyz) / S0d);
-            if (all(bid >= -0.5) && all(bid < U.gridDims.xyz - 0.5)) {
-                if (cellTex.read(uint3(bid), 0).r < 0.0) {
-                    Fsolid = min(Fsolid, dClip);
-                }
-            }
+            Fsolid = min(Fsolid, dClip);
         }
         float F = min(Fstrut, Fsolid);
         // ★★★ AND THE LAST SLIVER AT THE OUTLINE IS SOLID, so the lattice meets the

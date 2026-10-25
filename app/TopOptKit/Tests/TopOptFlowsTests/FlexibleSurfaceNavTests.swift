@@ -35,23 +35,26 @@ final class FlexibleSurfaceNavTests: XCTestCase {
 
     // MARK: H9 — the Surface button on the main Flexible page, and the way back
 
-    func testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible() {
+    func testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible() throws {
+        // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed the Surface stage. It is read by its raw value,
+        // so this test goes RED (not silently green) until P5 retires it with H9.
+        let surface = try XCTUnwrap(WorkspaceStage(rawValue: "surface"), "B5 removed the Surface stage (P5 retires H9 and this test)")
         let s = FlexibleStageNav.extra(.lattice, flexible: true)
-        XCTAssertEqual(s?.dest, .surface)
-        XCTAssertEqual(s?.icon, WorkspacePlaceholder.stageIcon(.surface), "identical chrome: the stage's own glyph")
+        XCTAssertEqual(s?.dest, surface)
+        XCTAssertEqual(s?.icon, WorkspacePlaceholder.stageIcon(surface), "identical chrome: the stage's own glyph")
         XCTAssertEqual(s?.title, "Surface")
-        let back = FlexibleStageNav.extra(.surface, flexible: true)
+        let back = FlexibleStageNav.extra(surface, flexible: true)
         XCTAssertEqual(back?.dest, .lattice)
         XCTAssertEqual(back?.icon, "chevron.left")
         XCTAssertEqual(back?.title, "Flexible")
         XCTAssertNil(FlexibleStageNav.extra(.topology, flexible: true))
         XCTAssertNil(FlexibleStageNav.extra(.lattice, flexible: false), "Structural / Aesthetic keep #354's row")
-        XCTAssertNil(FlexibleStageNav.extra(.surface, flexible: false))
+        XCTAssertNil(FlexibleStageNav.extra(surface, flexible: false))
         // #354's enum is untouched (SurfaceStageTests pins it too)
-        XCTAssertEqual(WorkspaceStage.lattice.forward, [.surface])
-        XCTAssertEqual(WorkspaceStage.surface.back, .topology)
+        XCTAssertEqual(WorkspaceStage.lattice.forward, [surface])
+        XCTAssertEqual(surface.back, .topology)
         // ★ RED CONTROL: without the extra, Surface has no one-tap way back to Flexible
-        XCTAssertTrue(WorkspaceStage.surface.forward.isEmpty && WorkspaceStage.surface.back != .lattice,
+        XCTAssertTrue(surface.forward.isEmpty && surface.back != .lattice,
                       "control: #354's Surface stage reaches the lattice only through Topology")
     }
 

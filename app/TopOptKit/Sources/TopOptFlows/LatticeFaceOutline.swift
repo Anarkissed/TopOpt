@@ -337,88 +337,30 @@ public enum LatticeFaceOutline {
         return (bestPt, dir, best, inside)
     }
 
-    /// The loops' own bounding half-extents — so a caller can keep emitting the
-    /// slab's `halfU`/`halfW` (core still reads them) from the SAME outline the
-    /// mask is built from, rather than from a second fit.
-    /// ★ INSIDE, WITH THE SEAMS FLARED (2026-09-22): a point outside the polygon still
-    /// belongs to the prism when it lies beyond a seam edge by no more than depth × tilt
-    /// (the bisector plane with the neighbouring prism); a point inside the polygon leaves
-    /// it when a converging seam's bisector has cut it off. `s` is the depth along the normal.
-    public static func insideWithFlare(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]],
-                                       tilts: [[Double]], caps: [[Double]] = [], depth s: Double) -> Bool {
-        var inside = contains(p, loops: loops)
-        guard s > 0, !tilts.isEmpty else { return inside }
-        for (l, loop) in loops.enumerated() {
-            let sm = l < seams.count ? seams[l] : []
-            let tl = l < tilts.count ? tilts[l] : []
-            let cl = l < caps.count ? caps[l] : []
-            let m = loop.count
-            guard m >= 3 else { continue }
-            // the polygon's winding decides which side of an edge is outside
-            var area = 0.0
-            for i in 0..<m { let a = loop[i], b = loop[(i + 1) % m]; area += a.x * b.y - b.x * a.y }
-            let ccw = area > 0
-            for i in 0..<m where i < sm.count && sm[i] && i < tl.count && abs(tl[i]) > 1e-9 {
-                let a = loop[i], b = loop[(i + 1) % m]
-                let d = b - a, l2 = simd_dot(d, d)
-                guard l2 > 1e-12 else { continue }
-                let t = simd_dot(p - a, d) / l2
-                guard t >= -1e-6, t <= 1 + 1e-6 else { continue }
-                // outward normal of this edge: right of the direction for CCW, left for CW
-                let nOut = ccw ? SIMD2(d.y, -d.x) / sqrt(l2) : SIMD2(-d.y, d.x) / sqrt(l2)
-                let out = simd_dot(p - a, nOut)          // > 0 outside this edge
-                // ★ only as deep as the neighbour's prism (2026-09-22 15:30): a 20 mm prism
-                // cut by a 12 mm neighbour's bisector past 12 mm lost a strip nobody owned
-                let cap = i < cl.count ? cl[i] : 0
-                // (2026-09-23: a review proposed NO flare below the cap; that would leave the
-                // corner block under the neighbour's foot — in neither prism — solid, a wall
-                // between two lattices. The flare holds its cap width to this prism's depth,
-                // as `LatticeSeamFlareTests.testTheFlareIsCappedAtTheNeighboursDepth` pins.)
-                let flare = (cap > 0 ? Swift.min(s, cap) : s) * tl[i]
-                if flare > 0, !inside, out >= 0, out <= flare { inside = true }
-                // ★★★ NO CONVERGING CUT (his 2026-09-23 00:27, the wall "SHAPED the same
-                // shape as the overlap"): where two prisms OVERLAP each used to yield to
-                // its neighbour up to the bisector — but the two seam edges do not meet on
-                // the corner line (a fillet sits between the faces), so each cut started a
-                // couple of millimetres short of the true corner, BOTH prisms yielded along
-                // the diagonal, and a strip belonging to neither ran down every corner as
-                // a solid wall. Overlapping prisms never lose material: the union is the
-                // pocket. Ownership inside an overlap is first-match, as core's is.
-            }
-        }
-        return inside
-    }
 
-    /// ★ THE SIGN ACROSS A SEAM, for in-plane readers with no depth (the octree's outline
-    /// raster): a point outside the polygon whose NEAREST edge is a seam is not outside the
-    /// lattice — the next prism continues there — so it reads as inside, at the distance to
-    /// the nearest true outline edge.
-    /// ★ BOUNDED (2026-09-23): the continuation past a seam reaches only as far as the
-    /// flare can — the neighbour's depth × the seam's tilt — when `tilts`/`caps` are
-    /// given; without them any distance past a seam read as inside.
-    public static func signedDistanceAcrossSeams(_ p: SIMD2<Double>, loops: [Loop], seams: [[Bool]],
-                                                 tilts: [[Double]] = [], caps: [[Double]] = []) -> Double {
-        let sd = signedDistance(p, loops: loops, seams: seams)
-        guard sd > 0, !seams.isEmpty else { return sd }
-        var nearest = Double.greatestFiniteMagnitude, nearestIsSeam = false, bound = Double.greatestFiniteMagnitude
-        for (l, loop) in loops.enumerated() {
-            let sm = l < seams.count ? seams[l] : []
-            let tl = l < tilts.count ? tilts[l] : []
-            let cl = l < caps.count ? caps[l] : []
-            let m = loop.count
-            for i in 0..<m {
-                let a = loop[i], b = loop[(i + 1) % m]
-                let d = b - a, l2 = simd_dot(d, d)
-                let t = l2 > 1e-12 ? max(0, min(1, simd_dot(p - a, d) / l2)) : 0
-                let dist = simd_length(p - (a + d * t))
-                if dist < nearest {
-                    nearest = dist; nearestIsSeam = i < sm.count && sm[i]
-                    bound = .greatestFiniteMagnitude
-                    if nearestIsSeam, i < tl.count, i < cl.count, cl[i] > 0 { bound = Swift.max(0, cl[i] * tl[i]) }
-                }
+
+    /// ★ Which loops are HOLES (P4, 2026-10-10): a loop whose interior point lies inside an odd number of
+    /// the other loops. The interior point is the midpoint of the loop's longest edge, a hair toward its own
+    /// interior, so loops that only touch (fragments sharing an edge or a vertex) stay outers.
+    public static func holeLoops(_ loops: [Loop]) -> [Bool] {
+        loops.indices.map { i in
+            let loop = loops[i]
+            guard loop.count >= 3 else { return false }
+            var area2 = 0.0, best = -1.0, bi = 0
+            for k in loop.indices {
+                let a = loop[k], b = loop[(k + 1) % loop.count]
+                area2 += a.x * b.y - b.x * a.y
+                let l = simd_length(b - a)
+                if l > best { best = l; bi = k }
             }
+            guard abs(area2) > 1e-12, best > 0 else { return false }
+            let a = loop[bi], b = loop[(bi + 1) % loop.count]
+            let left = SIMD2<Double>(-(b - a).y, (b - a).x) / best
+            let p = 0.5 * (a + b) + (area2 > 0 ? left : -left) * Swift.min(1e-3, 0.01 * best)
+            var depth = 0
+            for j in loops.indices where j != i && contains(p, loops: [loops[j]]) { depth += 1 }
+            return depth % 2 == 1
         }
-        return (nearestIsSeam && nearest <= bound) ? -sd : sd
     }
 
     public static func halfExtents(_ loops: [Loop]) -> (halfU: Double, halfW: Double)? {

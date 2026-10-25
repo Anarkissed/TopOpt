@@ -12,6 +12,14 @@ public enum LatticeRegionCells {
     public struct RegionCell: Equatable, Sendable {
         public let measuredWidthMM: Double
         public let cellMM: Double
+        /// ★ The cell BEFORE Default Grade's base rule (b) — the whole-number fit n₀. Equal to `cellMM` wherever (b)
+        /// did not move it. The bake's "do no harm" guard (the reviewer, 2026-10-11 04:31) keeps this one when (b)'s
+        /// candidate would leave more of the region uncovered.
+        public let cellBeforeBaseRuleMM: Double
+        public init(measuredWidthMM: Double, cellMM: Double, cellBeforeBaseRuleMM: Double? = nil) {
+            self.measuredWidthMM = measuredWidthMM; self.cellMM = cellMM
+            self.cellBeforeBaseRuleMM = cellBeforeBaseRuleMM ?? cellMM
+        }
         public static let none = RegionCell(measuredWidthMM: 0, cellMM: 0)
     }
 
@@ -43,7 +51,7 @@ public enum LatticeRegionCells {
                 // buys is the quilt (see `wallWidthAlongNormalMM`). The isotropic measure
                 // stays as the fallback — a bolt has no single direction to walk.
                 let d = LatticeMeasuredRegionWidth.wallWidthAlongNormalMM(
-                    region: r, occupancy: s.prismOccupancy, partSDF: s.partMaterialSDF,
+                    region: r, occupancy: s.occupancy, partSDF: s.partMaterialSDF,
                     percentile: widthPercentile)
                 if d > 0 {
                     w = d
@@ -77,6 +85,9 @@ public enum LatticeRegionCells {
                                                         allowQuilt: project.lattice.allowQuilt,
                                                         algorithm: project.lattice.algorithm))
             guard d.valid, d.cellMM > 0 else { return RegionCell(measuredWidthMM: w, cellMM: 0) }
+            // the job's tile floor: core's E1 at the cap the job writes (2.25 mm at a 0.45 mm bead)
+            let tileFloor = LatticeSettings.tileFloorMM(topologyID: project.lattice.topologyID, beadMM: bead,
+                                                        allowQuilt: project.lattice.allowQuilt) ?? 0
             // ★★★ THE FIT DEPTH IS THE **MATERIAL'S**, NEVER THE DECLARATION'S
             // (his ruling, 2026-08-24 evening: "I'd rather it never overshoot —
             // that a 13mm cell never be on a 12mm wall; instead have a 12mm cell
@@ -127,16 +138,93 @@ public enum LatticeRegionCells {
             // strut (12.03 → 6.015 mm cell, 2.26 → 1.13 mm strut). Only when the smaller cell
             // still prints open with a bead-wide strut, so the printability floor can never
             // push it back over the ceiling.
+            var extra = 0
             if quiltStep, Self.stepsAtTheQuilt(project: project, scene: scene, region: ri,
                                                cellMM: effDepth / (n + 1), bead: bead) {
                 n += 1
+                extra = 1
             }
             if quiltStep, let s = scene, ri < s.regionDrawnDensityP90.count, r.role == .include {
                 NSLog("DIAG quiltStep r\(ri) p90 %.3f ceiling %.3f allowQuilt %@ → n %.0f cell %.3f",
                       s.regionDrawnDensityP90[ri], s.drawnCeilingRho, s.allowQuilt ? "yes" : "no", n, effDepth / n)
             }
-            return RegionCell(measuredWidthMM: w, cellMM: effDepth / n)
+            var cell = Self.wholeCellsAcross(depthMM: effDepth, derivedCellMM: d.cellMM, tileFloorMM: tileFloor, extraCells: extra)
+            let beforeBaseRule = cell
+            // ★★ DEFAULT GRADE: A BASE WHOSE HALVES END AT THE FLOOR (the reviewer's ruling (b), 2026-10-11 00:35,
+            // approved by the maintainer). His 68BF7B74 face 23 middle facet: a one-voxel move of its measured
+            // wall took the cell 10.31 → 9.45, whose half 2.36 is over the floor but does not print open, so
+            // the ladder ended at 4.73 — 342 cells and a see-through slit where 1,524 had been. Under Default
+            // Grade the per-region bake's cell (quiltStep) takes the first whole-number fit whose halving
+            // ladder ends at the floor, not at prints-open. Stepped's any-step menu has no such stop.
+            if quiltStep, project.lattice.gradeStepsAreHalves, cell > 0 {
+                let voxel = scene.map { Double(Swift.max($0.occupancy.spacing.x,
+                                                         Swift.max($0.occupancy.spacing.y, $0.occupancy.spacing.z))) } ?? 0
+                let topology = project.lattice.topologyID
+                let moved = Self.cellWhoseHalvesEndAtTheFloor(
+                    depthMM: effDepth, cellMM: cell, tileFloorMM: tileFloor,
+                    bakeFloorMM: LatticePreviewOccupancy.bakeFloorMM(realFloorMM: tileFloor, voxelMM: voxel), beadMM: bead,
+                    printsOpen: { LatticePreviewOccupancy.printsOpen(cellMM: $0, lineWidthMM: bead, latticeID: topology) })
+                if moved != cell {
+                    NSLog("DIAG regionCell r\(ri) Default Grade: %.4f mm's halves end at prints-open → %.4f mm (%.0f → %.0f across %.3f mm)",
+                          cell, moved, (effDepth / cell).rounded(), (effDepth / moved).rounded(), effDepth)
+                }
+                cell = moved
+            }
+            return RegionCell(measuredWidthMM: w, cellMM: cell, cellBeforeBaseRuleMM: beforeBaseRule)
         }
+    }
+
+    /// ★★ DEFAULT GRADE'S BASE RULE (the reviewer's ruling (b), 2026-10-11): the candidates are the wall's
+    /// whole-number fits `depthMM / n` for n = n₀ + 1, n₀ + 2, … while the fit stays at or above the tile
+    /// floor (n₀ = `cellMM`'s own count), each of which must itself print open. A base REACHES when its
+    /// halving ladder ends because the next half is under the bake's floor (or no wider than the bead),
+    /// and NOT because that half is at or above the floor but fails `printsOpen` (core's
+    /// `lattice_prints_open`; open from 2.370917 mm at a 0.45 mm bead). `cellMM` stands when it reaches;
+    /// otherwise the first candidate that reaches wins — the smallest n, so the coarsest; none ⇒ `cellMM`.
+    /// At a 2.25 mm floor and a 0.45 mm bead a ladder fails to reach exactly when its finest rung is in
+    /// [4.50, 4.74) mm. Over every wall, the finest rung's largest jump on a small change of the wall is
+    /// 1.5× at n₀ = 2 and 3, 1.6× at 4, 1.67× at 5 (today's is 2× at every n₀); a one-cell wall of
+    /// 4.50–4.74 mm keeps today's 2× (its only smaller fit does not print open). It does not make the
+    /// finest rung uniform — ruling (a), its own round.
+    nonisolated public static func cellWhoseHalvesEndAtTheFloor(depthMM: Double, cellMM: Double, tileFloorMM: Double,
+                                                                bakeFloorMM: Double, beadMM: Double,
+                                                                printsOpen: (Double) -> Bool) -> Double {
+        guard depthMM > 0, cellMM > 0 else { return cellMM }
+        func reaches(_ base: Double) -> Bool {
+            var rung = base
+            for _ in 0..<8 {   // core's kSteppedMaxHalvings
+                let half = rung / 2
+                if half < bakeFloorMM - 1e-9 || half <= beadMM { return true }   // ends at the floor
+                if !printsOpen(half) { return false }                            // ends at prints-open
+                rung = half
+            }
+            return true
+        }
+        if reaches(cellMM) { return cellMM }
+        let n0 = Swift.max(1, (depthMM / cellMM).rounded())
+        var n = n0 + 1
+        while n <= n0 + 64, depthMM / n >= tileFloorMM - 1e-9 {
+            let base = depthMM / n
+            if printsOpen(base), reaches(base) { return base }   // never a quilt base for a quilt rung
+            n += 1
+        }
+        return cellMM
+    }
+
+    /// The whole-number fit of a region's cell across its wall: the nearest whole number of the cell core
+    /// derived, plus `extraCells` (the quilt step) — then FEWER while a cell would be under the job's tile
+    /// floor (`tileFloorMM`, core's E1 at the job's cap; 0 = none stated).
+    /// ★★ NEVER UNDER THE FLOOR (proof arm 3, 2026-10-10: on 102117B9 the nearest n put 20,986 of 22,210
+    /// plan cells at 2.06 / 2.00 / 1.72 mm under the 2.25 mm floor — 4.12 mm / 2 = 2.06 — where core's
+    /// derivation had asked for ≥ 2.25). A wall thinner than one printable cell gets none (0): no cell,
+    /// never a quilt cell core refuses (D5).
+    nonisolated public static func wholeCellsAcross(depthMM: Double, derivedCellMM: Double, tileFloorMM: Double,
+                                                    extraCells: Int = 0) -> Double {
+        guard depthMM > 0, derivedCellMM > 0 else { return 0 }
+        var n = Swift.max(1, (depthMM / derivedCellMM).rounded()) + Double(extraCells)
+        guard tileFloorMM > 0 else { return depthMM / n }
+        while n > 1, depthMM / n < tileFloorMM - 1e-9 { n -= 1 }
+        return depthMM / n >= tileFloorMM - 1e-9 ? depthMM / n : 0
     }
 
     /// ★★ THE DRAWER'S CELL IS THE BAKE'S (maintainer, 2026-10-03, item 5: "the drawer's 'Cell
@@ -159,10 +247,19 @@ public enum LatticeRegionCells {
                                   widthPercentile: 0.5, quiltStep: true)
         // the stated cell wins, exactly as `steppedCellsMM` (the bake's cells) does it
         let stated = statedCellByFace(project.lattice)
+        // ★ where Default Grade's base rule (b) moved a region, the bake's "do no harm" guard may have kept n₀ — the
+        // drawer says the bake's own base (its last plan), so drawer and bake still say one number
+        var bakedBase: [Int: Double] = [:]
+        for c in project.latticePreviewSteppedCells { if let b = c.planBaseCellMM, bakedBase[c.regionID] == nil { bakedBase[c.regionID] = b } }
         let cells = regions.indices.map { i -> Double in
             guard i < derived.count else { return 0 }
             if let f = regions[i].faceID, let mm = stated[f], mm > 0 { return mm }
-            return derived[i].cellMM
+            let d = derived[i]
+            if abs(d.cellMM - d.cellBeforeBaseRuleMM) > 1e-9, regions[i].role == .include {
+                let includeID = regions[..<i].filter { $0.role == .include }.count + 1
+                if let b = bakedBase[includeID], abs(b - d.cellBeforeBaseRuleMM) < 1e-9 { return b }
+            }
+            return d.cellMM
         }
         var out: [String: SelectableCell] = [:]
         for (i, r) in regions.enumerated() where r.role == .include && i < derived.count && i < cells.count {
@@ -190,17 +287,18 @@ public enum LatticeRegionCells {
         guard let law = LatticeType.named(project.lattice.topologyID),   // no law: no octet rule (item a)
               law.hasAestheticCeiling, s.drawnCeilingRho < s.drawnBand.hi else { return false }
         return quiltTrips(p90: s.regionDrawnDensityP90[region], lo: s.drawnBand.lo, ceiling: s.drawnCeilingRho,
-                          smallerCellFloor: law.printabilityDensityFloor(lineWidthMM: bead, cellMM: cellMM))
+                          smallerCellPrintsOpen: LatticePreviewOccupancy.printsOpen(
+                            cellMM: cellMM, lineWidthMM: bead, latticeID: project.lattice.topologyID))   // ★ core's one rule
     }
 
     /// ★ THE RULE ITSELF, pure: a wall whose p90 drawn density is in the top fifth of
     /// [floor, ceiling] steps, provided the smaller cell's bead-wide strut still prints open
-    /// (`finestRungMaxDensity`). His face 2: p90 0.219 at a 0.219 ceiling → steps; face 15:
-    /// 0.080 → stays.
-    public nonisolated static func quiltTrips(p90: Double, lo: Double, ceiling: Double, smallerCellFloor: Double) -> Bool {
+    /// (core's `lattice_prints_open`, `LatticePreviewOccupancy.printsOpen`). His face 2: p90 0.219 at a
+    /// 0.219 ceiling → steps; face 15: 0.080 → stays.
+    public nonisolated static func quiltTrips(p90: Double, lo: Double, ceiling: Double, smallerCellPrintsOpen: Bool) -> Bool {
         guard ceiling > lo else { return false }
         let trip = lo + quiltTripFraction * (ceiling - lo)
-        return p90 >= trip && smallerCellFloor <= LatticePreviewOccupancy.finestRungMaxDensity + 1e-9
+        return p90 >= trip && smallerCellPrintsOpen
     }
 
     /// faceID → the user's own cell (mm), from the per-selectable store ("f:<group>:<face>").
@@ -215,12 +313,21 @@ public enum LatticeRegionCells {
     /// The stepped bake's cells as the app hands them to the renderer: the p50 derivation, a
     /// user-stated cell winning (`WorkspacePlaceholder.latticePreviewSteppedCells`).
     public static func steppedCellsMM(project: ProjectModel, scene: LatticeSDFScene?) -> [Double] {
+        steppedCellChoices(project: project, scene: scene).cells
+    }
+
+    /// The bake's cells and, per region, the cell BEFORE Default Grade's base rule (b) — what the bake's "do no harm"
+    /// guard falls back to (`LatticePreviewOccupancy.octreeCellField(cellMMBeforeBaseRule:)`). A stated cell wins in both.
+    public static func steppedCellChoices(project: ProjectModel, scene: LatticeSDFScene?)
+        -> (cells: [Double], beforeBaseRule: [Double]) {
+        guard project.printParams.strutLineWidthMM > 0 else { return ([], []) }
         let regions = project.latticeJobRegions().regions
-        var cells = cellsMM(project: project, scene: scene, regions: regions, widthPercentile: 0.5, quiltStep: true)
+        let derived = regionCells(project: project, scene: scene, regions: regions, widthPercentile: 0.5, quiltStep: true)
+        var cells = derived.map(\.cellMM), before = derived.map(\.cellBeforeBaseRuleMM)
         let stated = statedCellByFace(project.lattice)
         for (i, r) in regions.enumerated() where i < cells.count {
-            if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm }
+            if let f = r.faceID, let mm = stated[f], mm > 0 { cells[i] = mm; before[i] = mm }
         }
-        return cells
+        return (cells, before)
     }
 }

@@ -73,7 +73,8 @@ final class LatticeMeasuredRegionWidthTests: XCTestCase {
                        + "\(bounds.max() ?? 0)")
 
         let win = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet"),
+            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false)),
             "Auto must produce a window from a measured wall")
         XCTAssertEqual(win.max, 4.0, accuracy: 0.25,
                        "★ HIS NUMBER: a 20 mm wall holds a 4 mm cell (W / N* = 20 / 5). "
@@ -96,9 +97,11 @@ final class LatticeMeasuredRegionWidthTests: XCTestCase {
                           + "the wall, or there is no defect to demonstrate")
 
         let fromMeasured = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: measured, lineWidthMM: 0.42, topology: "octet"))
+            regionWidthsMM: measured, lineWidthMM: 0.42, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false)))
         let fromDeclared = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: [declaredDepth], lineWidthMM: 0.42, topology: "octet"))
+            regionWidthsMM: [declaredDepth], lineWidthMM: 0.42, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false)))
         XCTAssertGreaterThan(fromMeasured.max, fromDeclared.max,
                              "★ THE DEFECT: reading the DECLARED depth gave "
                              + "\(fromDeclared.max) mm where the wall holds "
@@ -115,7 +118,8 @@ final class LatticeMeasuredRegionWidthTests: XCTestCase {
         let bounds = LatticeMeasuredRegionWidth.boundsMM(occupancy: occ,
                                                          memberThicknessMM: width)
         let win = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet"))
+            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false)))
         let nStar = TopOptKit.latticeLimits(topology: "octet").minCellsPerMember
         let drawn = LatticePreviewOccupancy.cellField(
             occupancy: occ, demand: nil, cellMM: win.max,
@@ -147,7 +151,8 @@ final class LatticeMeasuredRegionWidthTests: XCTestCase {
                        + "rungs to descend to, and it descends: \(bounds)")
 
         let win = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet"))
+            regionWidthsMM: bounds, lineWidthMM: 0.42, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false)))
         XCTAssertEqual(win.min, win.max, accuracy: 1e-9,
                        "★ a single rung — the coarsest cell the material holds, with "
                        + "nowhere finer for the planner to go. Got \(win.min)–\(win.max)")

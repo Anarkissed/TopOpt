@@ -32,6 +32,9 @@ extension LatticePreviewOccupancy {
     public struct OctreeBakeStats {
         public var slotsKept: [Double: Int] = [:]   // cell size → whole cells kept
         public var slotsCut = 0                    // finest slots the outline cuts (attached to the band)
+        /// ★ Pairs of cells of ONE region sharing volume (`LatticeSteppedCell.sameRegionOverlaps`) — must
+        /// be 0; the plan writer withholds a plan that has any (the reviewer, 2026-10-10 20:05).
+        public var sameRegionOverlaps = 0
         public var texelsPainted = 0
         public var pitchMM: Double = 0
         public var seconds: Double = 0
@@ -40,6 +43,12 @@ extension LatticePreviewOccupancy {
         public var secondaryRegions: [Int] = []
         /// Face regions tilted further than `ladderAxisCos` from every axis — they get no cells.
         public var noLadderRegions: [Int] = []
+        /// Face regions whose base cell is under the tile floor (a stated cell can be) — they get no cells.
+        public var baseUnderFloorRegions: [Int] = []
+        /// ★ Default Grade's base rule (b) under its "do no harm" guard (the reviewer, 2026-10-11 04:31): regions whose
+        /// (b) cell was KEPT (it left less of the region uncovered than n₀) and regions GUARDED back to n₀.
+        public var baseRuleKept: [Int] = []
+        public var baseRuleGuarded: [Int] = []
         /// The in-plane anchor chosen for the base slots (mm, subtracted from the
         /// occupancy origin), so the most base-cell volume fits whole.
         public var anchorShiftMM = SIMD3<Double>(repeating: 0)
@@ -90,6 +99,24 @@ extension LatticePreviewOccupancy {
     /// above it the smallest cell reads as a quilt before any grading — octet, 0.45 mm
     /// bead: 2 mm is 26.5 %, 2.58 mm 17 %, 3 mm 13 %.
     public static let finestRungMaxDensity = 0.20
+
+    /// ★★ ONE RULE, ONE PLACE (#358 588672f5; the reviewer's ruling, 2026-10-10: "the app replaces its two
+    /// call sites with it through the bridge"): does a bead-wide strut print OPEN in a cell this size —
+    /// core's `lattice_prints_open` (≤ `finestRungMaxDensity`, open from 2.370917 mm at a 0.45 mm bead),
+    /// through the guarded bridge. The dyadic ladder, Stepped's menu, the quilt step and Default Grade's
+    /// base rule (`LatticeRegionCells.cellWhoseHalvesEndAtTheFloor`) all ask this. No law in the Swift
+    /// table, no bead, or core refusing the type ⇒ no bound, as before.
+    /// The smallest rung the octree bake lays: the job's tile floor, never under the occupancy voxel or
+    /// 0.5 mm. One definition — the bake and Default Grade's base rule
+    /// (`LatticeRegionCells.cellWhoseHalvesEndAtTheFloor`) read the same floor.
+    nonisolated public static func bakeFloorMM(realFloorMM: Double, voxelMM: Double) -> Double {
+        Swift.max(realFloorMM > 0 ? realFloorMM : voxelMM, voxelMM, 0.5)
+    }
+
+    nonisolated public static func printsOpen(cellMM: Double, lineWidthMM: Double, latticeID: String) -> Bool {
+        guard !latticeID.isEmpty, LatticeType.named(latticeID) != nil, lineWidthMM > 0 else { return true }
+        return TopOptKit.latticePrintsOpen(topology: latticeID, cellMM: cellMM, beadMM: lineWidthMM) ?? true
+    }
 
     /// A face region gets a ladder when its normal is within 30° of an axis (cos 30°).
     public static let ladderAxisCos = 0.866
@@ -237,7 +264,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// ★ WHERE place()'S GATE CAN PASS, in the face's (u, v): a level-0 slot does nothing unless
-    /// its centre reads −(signedDistanceAcrossSeams − offset) ≥ −0.87·S — so the window is
+    /// its centre reads the one-outline distance `inPlaneDistance` (P1/P6; it was −(signedDistanceAcrossSeams − offset)) ≥ −0.87·S — so the window is
     /// `outlineWindow` with an inner reach of 0.87·S. With no outline loops the read is
     /// `contains`, i.e. the rectangle ±halfU/±halfW. nil (and why) when a cell is so large that
     /// −1e3 passes, or wherever `outlineWindow` cannot bound the read. `shrinkMM` is a test's RED.
@@ -254,7 +281,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// ★ WHERE THE ANCHOR SEARCH'S RASTER CAN READ ANYTHING ABOVE 0, in the face's (u, v). The
-    /// raster's nodes hold −(signedDistanceAcrossSeams − offset) and a read is their bilinear
+    /// raster's nodes hold the one-outline distance `inPlaneDistance` (P1/P6; it was −(signedDistanceAcrossSeams − offset)) and a read is their bilinear
     /// blend. A node further than r = max(max(0, offset), the largest seam cap·tilt) outside the
     /// outline's bounding box holds a NEGATIVE value (the reasons are `outlineWindow`'s), and a
     /// blend of non-positive values with non-negative weights is non-positive in IEEE
@@ -271,7 +298,7 @@ extension LatticePreviewOccupancy {
     }
 
     /// The outline's bounding box ± (max(inner + max(0, offset), the largest seam cap·tilt) + pad)
-    /// in (u, v): outside it −(signedDistanceAcrossSeams(uv) − offset) < −inner. There the
+    /// in (u, v): outside it `inPlaneDistance(uv)` < −inner. There the
     /// crossing count is even (so the sign is outside), the distance to every true edge exceeds
     /// the reach, and a seam flip needs the nearest edge within its cap·tilt. nil (and why)
     /// wherever that cannot be bounded: a seam without a positive cap and a tilt (the flip is
@@ -339,10 +366,9 @@ extension LatticePreviewOccupancy {
     public static func steppedSizeMenu(base: Double, floorMM: Double,
                                        lineWidthMM: Double, latticeID: String,
                                        printsOpenBound: Bool = true) -> [Double] {
-        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         func printsOpen(_ r: Double) -> Bool {
-            guard printsOpenBound, let law, lineWidthMM > 0 else { return true }
-            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+            guard printsOpenBound else { return true }
+            return Self.printsOpen(cellMM: r, lineWidthMM: lineWidthMM, latticeID: latticeID)   // ★ core's one rule
         }
         var menu: [Double] = [base]
         // ★★ ONLY THE FAMILIES THE PACKER'S GRID HOLDS (round 5, 2026-10-08; the reviewer's yes to
@@ -366,7 +392,115 @@ extension LatticePreviewOccupancy {
     /// The packer's grid inside a base slot, in steps per base: base/12.
     public static let steppedPackGrid = 2 * steppedMenuMaxDivisor
 
+    /// ★★ THE BAKE, WITH DEFAULT GRADE'S BASE RULE UNDER ITS "DO NO HARM" GUARD (the reviewer's ruling, 2026-10-11 04:31,
+    /// approved by the maintainer: "Take a (b) candidate only if its uncovered share is no larger than n0's. Otherwise
+    /// keep n0. Ties keep n0. (b) exists to restore coverage, so it must never cost coverage."). `cellMM` carries (b)'s
+    /// cells; `cellMMBeforeBaseRule` each region's n₀ (empty ⇒ no guard, `cellMM` as given). Where they differ the bake
+    /// runs with each and every such region keeps (b)'s cell only if its uncovered share — the share of its prism's
+    /// occupancy voxels no plan cell covers, `uncoveredShare` — is STRICTLY smaller; a mixed choice bakes once more.
+    /// Measured on 3418E167 Default Grade r1 (2026-10-11): (b)'s 3.50 left 75.0 % uncovered against n₀'s 4.67 at
+    /// 62.5 % (the preview's wall-thickness slab fits a 4.67 grid better), so it keeps 4.67; 68BF7B74 r4 takes 6.30
+    /// (27.60 → 8.29 %). Every other arm of the seven projects has no region (b) moves, so it bakes once, as before.
     public static func octreeCellField(occupancy occ: LatticeVoxelGrid,
+                                       demand: LatticeVoxelGrid?,
+                                       regions: [LatticeRegionSpec],
+                                       cellMM: [Double],
+                                       cellMMBeforeBaseRule: [Double] = [],
+                                       lineWidthMM: Double,
+                                       realFloorMM: Double,
+                                       shapeFitBandMM: Double,
+                                       shapeFit: Bool,
+                                       solidBandMM: Double = 0,
+                                       densityLo: Double,
+                                       densityHi: Double,
+                                       densityGamma: Double,
+                                       latticeID: String,
+                                       dyadicSteps: Bool = false,
+                                       finestPrintsOpen: Bool = true,
+                                       bandAmount: Double = 1,
+                                       bandQuiltCeiling: Double = 1,
+                                       densityCap: Double = 0,
+                                       gradeAlong: LatticeGradeAlong? = nil,
+                                       stats: inout OctreeBakeStats) -> LatticeCellField? {
+        func bake(_ cells: [Double], _ st: inout OctreeBakeStats) -> LatticeCellField? {
+            octreeCellFieldOnce(occupancy: occ, demand: demand, regions: regions, cellMM: cells, lineWidthMM: lineWidthMM,
+                                realFloorMM: realFloorMM, shapeFitBandMM: shapeFitBandMM, shapeFit: shapeFit,
+                                solidBandMM: solidBandMM, densityLo: densityLo, densityHi: densityHi,
+                                densityGamma: densityGamma, latticeID: latticeID, dyadicSteps: dyadicSteps,
+                                finestPrintsOpen: finestPrintsOpen, bandAmount: bandAmount,
+                                bandQuiltCeiling: bandQuiltCeiling, densityCap: densityCap,
+                                gradeAlong: gradeAlong, stats: &st)
+        }
+        let moved = regions.indices.filter { r in
+            r < cellMM.count && r < cellMMBeforeBaseRule.count && cellMMBeforeBaseRule[r] > 0
+                && abs(cellMMBeforeBaseRule[r] - cellMM[r]) > 1e-9
+        }
+        guard !moved.isEmpty else {
+            let f = bake(cellMM, &stats)
+            if let f { Self.octreeBakeObserver?(f, stats) }
+            return f
+        }
+        let start = stats
+        var stB = start, st0 = start
+        let fB = bake(cellMM, &stB)
+        var n0 = cellMM
+        for r in moved { n0[r] = cellMMBeforeBaseRule[r] }
+        let f0 = bake(n0, &st0)
+        var keep: [Int] = [], guarded: [Int] = []
+        for r in moved {
+            let uB = fB.map { Self.uncoveredShare(region: r, regions: regions, cells: $0.steppedCells, occupancy: occ) } ?? 1
+            let u0 = f0.map { Self.uncoveredShare(region: r, regions: regions, cells: $0.steppedCells, occupancy: occ) } ?? 1
+            if uB < u0 - 1e-12 { keep.append(r) } else { guarded.append(r) }   // ties keep n₀
+            NSLog("DIAG octree base rule (b) r\(r): %.4f mm leaves %.2f%% uncovered, n0's %.4f mm %.2f%% ⇒ %@",
+                  cellMM[r], 100 * uB, cellMMBeforeBaseRule[r], 100 * u0, uB < u0 - 1e-12 ? "(b)" : "n0 (guard)")
+        }
+        var out: LatticeCellField?
+        if guarded.isEmpty { stats = stB; out = fB }
+        else if keep.isEmpty { stats = st0; out = f0 }
+        else {
+            var mixed = n0
+            for r in keep { mixed[r] = cellMM[r] }
+            var stM = start
+            out = bake(mixed, &stM)
+            stats = stM
+        }
+        stats.baseRuleKept = keep
+        stats.baseRuleGuarded = guarded
+        if let out { Self.octreeBakeObserver?(out, stats) }
+        return out
+    }
+
+    /// The share of region `region`'s prism (its occupancy voxels, at their centres, inside the whole prism) that no
+    /// plan cell of ANY region covers — the guard's measure. The plan proof's DG-REGIONS counts the same way, except
+    /// that it gives a voxel inside two prisms to the first region only.
+    static func uncoveredShare(region r: Int, regions: [LatticeRegionSpec], cells: [LatticeSteppedCell],
+                               occupancy occ: LatticeVoxelGrid) -> Double {
+        let bucket = 8.0
+        struct K: Hashable { let x: Int; let y: Int; let z: Int }
+        func key(_ p: SIMD3<Double>) -> K { K(x: Int((p.x / bucket).rounded(.down)), y: Int((p.y / bucket).rounded(.down)),
+                                              z: Int((p.z / bucket).rounded(.down))) }
+        var grid: [K: [Int]] = [:]
+        for (ci, c) in cells.enumerated() {
+            let k0 = key(c.originMM), k1 = key(c.originMM + c.sizeMM)
+            for x in k0.x...k1.x { for y in k0.y...k1.y { for z in k0.z...k1.z { grid[K(x: x, y: y, z: z), default: []].append(ci) } } }
+        }
+        let region = regions[r]
+        var inPrism = 0, bare = 0
+        for k in 0..<occ.nz { for j in 0..<occ.ny { for i in 0..<occ.nx where occ.values[(k * occ.ny + j) * occ.nx + i] > 0.5 {
+            let p = SIMD3<Double>(occ.origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * occ.spacing)
+            guard LatticeRegionMask.contains(p, region: region) else { continue }
+            inPrism += 1
+            let covered = (grid[key(p)] ?? []).contains { ci in
+                let c = cells[ci]
+                return p.x >= c.originMM.x && p.x < c.originMM.x + c.sizeMM && p.y >= c.originMM.y && p.y < c.originMM.y + c.sizeMM
+                    && p.z >= c.originMM.z && p.z < c.originMM.z + c.sizeMM
+            }
+            if !covered { bare += 1 }
+        }}}
+        return inPrism > 0 ? Double(bare) / Double(inPrism) : 0
+    }
+
+    static func octreeCellFieldOnce(occupancy occ: LatticeVoxelGrid,
                                        demand: LatticeVoxelGrid?,
                                        regions: [LatticeRegionSpec],
                                        cellMM: [Double],
@@ -398,10 +532,20 @@ extension LatticePreviewOccupancy {
                                        /// be avoided at all costs … unless 'allow quilting' is
                                        /// selected"); the band then grades by smaller cells only.
                                        bandQuiltCeiling: Double = 1,
+                                       /// ★ THE CAP THE JOB WRITES (`grading.max_relative_density`,
+                                       /// `LatticeSettings.jobDensityCap`; 0 = none). Core's printability
+                                       /// floor is taken at it, and no cell is drawn or sent denser.
+                                       densityCap: Double = 0,
+                                       /// ★ THE CELLS PAGE'S ALONG, DRAWN (ruling 2026-10-24 17:46). `.depth` / `.face`
+                                       /// replace the demand's activation in the DRAWN density only — the band's top at
+                                       /// the face plane (or the outline) to its floor at the prism's far end (or the
+                                       /// face's middle). The plan's per-cell ρ keeps today's value: the job does not
+                                       /// move. nil / `.load` ⇒ today's bake exactly.
+                                       gradeAlong: LatticeGradeAlong? = nil,
                                        stats: inout OctreeBakeStats) -> LatticeCellField? {
         let t0 = Date()
         let voxel = Double(Swift.max(occ.spacing.x, Swift.max(occ.spacing.y, occ.spacing.z)))
-        let floorMM = Swift.max(realFloorMM > 0 ? realFloorMM : voxel, voxel, 0.5)
+        let floorMM = Self.bakeFloorMM(realFloorMM: realFloorMM, voxelMM: voxel)
 
         // Each region's ladder: its cell halved while the half is still printable.
         /// `span`: where the prism lies along `axis`, in mm from the face plane going into the
@@ -445,6 +589,14 @@ extension LatticePreviewOccupancy {
             // own "across a prism" tilt; a face tilted further from every axis keeps none, and
             // the DIAG names it.
             guard a[axis] > Self.ladderAxisCos else { stats.noLadderRegions.append(r); continue }
+            // ★ NO LADDER UNDER THE FLOOR (proof arm 3, 2026-10-10): a base under the job's tile floor (a
+            // stated cell can be one) is a cell core refuses (D5, the base's floor) — no cells, and named
+            // (the job's tile floor alone — `floorMM` also holds the voxel, which bounds the finest rung, not the base)
+            guard !(realFloorMM > 0 && cellMM[r] < realFloorMM - 1e-9) else {
+                stats.baseUnderFloorRegions.append(r)
+                NSLog("DIAG octree region \(r): base %.4f mm is under the %.4f mm tile floor — no cells", cellMM[r], realFloorMM)
+                continue
+            }
             var span = (lo: 0.0, hi: region.depthMM)
             if a[axis] < 0.99, Self.tiltedSpanEnabled {
                 // ★ the prism's real extent along the axis: the outline's corners at the face and
@@ -487,10 +639,8 @@ extension LatticePreviewOccupancy {
         // exceeds `finestRungMaxDensity` is not a rung, so his ladders are 12 → 6 → 3
         // and 10.31 → 5.16 → 2.58 ("if there isn't space, the 2.58 one is ok"), and
         // the grade's quilt band starts from an open cell.
-        let law = latticeID.isEmpty ? nil : LatticeType.named(latticeID)
         func printsOpen(_ r: Double) -> Bool {
-            guard let law, lineWidthMM > 0 else { return true }
-            return law.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: r) <= finestRungMaxDensity + 1e-9
+            Self.printsOpen(cellMM: r, lineWidthMM: lineWidthMM, latticeID: latticeID)   // ★ core's one rule
         }
         func ladderSizes(base: Double) -> [Double] {
             // The finest rung: the smallest base/(2^a·3^b) still at or above the floor
@@ -597,7 +747,7 @@ extension LatticePreviewOccupancy {
             var vals = [Double](repeating: -1e3, count: nu * nv)
             for j in 0..<nv { for i in 0..<nu {
                 let uv = lo + SIMD2(Double(i), Double(j)) * h
-                vals[j * nu + i] = -(LatticeFaceOutline.signedDistanceAcrossSeams(uv, loops: region.outlineLoops, seams: region.outlineSeams, tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
+                vals[j * nu + i] = region.inPlaneDistance(uv)   // ★ the one outline (P1/P6)
             }}
             rasters[ladder.region] = OutlineRaster(origin: lo, h: h, nu: nu, nv: nv, values: vals)
         }
@@ -681,7 +831,6 @@ extension LatticePreviewOccupancy {
                 count[axis] = Swift.max(1, Int((ladder.span.hi / S).rounded(.up)) - axisI0)
                 func fitsBox(_ lo: SIMD3<Double>, _ S: Double) -> Bool {
                     if dOut(lo + SIMD3<Double>(repeating: 0.5 * S)) < -0.87 * S { return false }
-                    if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) { return false }
                     // core's depth rule, as the placement's `fits` applies it (round 5)
                     if Self.coreDepthRuleEnabled, region.depthMM > 0 {
                         let s0 = simd_dot(lo - region.origin, n)
@@ -900,10 +1049,8 @@ extension LatticePreviewOccupancy {
                     return LatticeRegionMask.contains(p, region: region) ? 1e3 : -1e3
                 }
                 let rel = p - region.origin
-                return -(LatticeFaceOutline.signedDistanceAcrossSeams(
-                    SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)),
-                    loops: region.outlineLoops, seams: region.outlineSeams,
-                    tilts: region.outlineSeamTilt, caps: region.outlineSeamDepthMM) - region.inPlaneOffsetMM)
+                // ★★ THE ONE OUTLINE (P1/P6, 2026-10-10): the generated polygon's sign, the true outline's distance
+                return region.inPlaneDistance(SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv)))
             }
             // The slot's box [lo, lo + S) per axis, for slot index (i, j, k) at size S.
             // In-plane slots are anchored at the lattice origin; along the normal at
@@ -922,26 +1069,14 @@ extension LatticePreviewOccupancy {
             }
             var lastFail = ""
             var outlineFailed = false
-            var slabFailed = false
             var depthFailed = false
             func fits(_ lo: SIMD3<Double>, _ S: Double, fast: Bool = false) -> (fits: Bool, nearest: Double, farthest: Double) {
                 var nearest = 1e3, farthest = -1e3
                 var ok = true
                 lastFail = ""
                 outlineFailed = false
-                slabFailed = false
                 depthFailed = false
                 let eps = Swift.min(0.05 * S, 0.2)
-                // ★ THE SLAB IN DEPTH (his 2026-09-22 01:07: "the lattice is jutting out of
-                // the rim … something is making the lattice move rather than thin"): a
-                // cell is laid only where its whole depth lies inside the drawn band, so
-                // a thinner band takes the next rung down instead of a whole cell
-                // poking out of it.
-                if !LatticePreviewOccupancy.boxInsideSlab(lo, S, region: region, axis: axis) {
-                    lastFail = "slab"
-                    slabFailed = true
-                    return (false, nearest, farthest)
-                }
                 // ★★ CORE'S DEPTH RULE, EXACTLY (round 5, 2026-10-08; stepped_plan.cpp:283-324, the
                 // reviewer's ruling 1 of 2026-10-05): the cube projected on the unit normal from the
                 // face plane — its CENTRE inside [0, depth] and its FAR side not past the depth, within
@@ -1149,7 +1284,7 @@ extension LatticePreviewOccupancy {
                 if edge { stats.slotsCut += 1 } else { stats.slotsKept[S, default: 0] += 1 }
                 // The plan: every cell that owns at least one texel, cut or whole.
                 if painted > 0 { cells.append(LatticeSteppedCell(region: ladder.region, originMM: lo, sizeMM: S,
-                                                                 slotOriginMM: slotOrigin)) }
+                                                                 slotOriginMM: slotOrigin, planBaseCellMM: sBase)) }
             }
             func place(_ idx: SIMD3<Int>, level: Int) {
                 let S = ladder.sizes[level]
@@ -1201,11 +1336,7 @@ extension LatticePreviewOccupancy {
                 // that failed only on the part's depth (the plate thinner than the
                 // prism) is a plain cell, painted where there is material and clipped
                 // by the part like any other.
-                // ★ NEVER A CELL OUTSIDE THE SLAB (2026-09-23): a finest cell that failed
-                // the depth slab is air, not a plain cell — his "lattice jutting out of
-                // the rim" was this fall-through painting it.
-                if slabFailed { return }
-                // ★ round 5: nor past the prism's depth by core's rule — the same air as the slab
+                // ★ round 5: never past the prism's depth by core's rule — air
                 if depthFailed { return }
                 if yielded { return }                          // the finest rung: air
                 if outlineFailed {
@@ -1225,28 +1356,17 @@ extension LatticePreviewOccupancy {
             /// cells of different families share no nodes — that is Stepped, and core
             /// counts those ends; Default Grade never comes here.
             ///
-            /// ★ NOTHING IS LEFT UNOWNED: after the packing a fill pass walks the finest
-            /// tile's nested grid and paints only the texels no cell claimed (paint
-            /// skips owned texels), cut by the outline where it is, so a sliver the
-            /// outline leaves between two families is drawn rather than left as a
-            /// hole — the same edge treatment the finest rung always had.
+            /// ★ NOTHING IS LEFT UNOWNED: after the packing a fill pass walks the slot's
+            /// chain's finest tile on its own grid and lays it in every WHOLLY free
+            /// position, cut by the outline where it is — the same edge treatment the
+            /// finest rung always had. (It used to paint a sliver between two families as
+            /// part of a whole finest cell that overlapped its neighbour in the plan; one
+            /// nesting chain per slot leaves no such sliver — see below.)
             func packSlot(_ lo0: SIMD3<Double>, _ S0: Double) {
                 let menu = Array(ladder.sizes.dropFirst())
                 let nG = Self.steppedPackGrid
                 let g = S0 / Double(nG)
-                var taken = [Bool](repeating: false, count: nG * nG * nG)
                 func cellIndex(_ i: SIMD3<Int>) -> Int { (i.z * nG + i.y) * nG + i.x }
-                func isFree(_ i0: SIMD3<Int>, _ span: Int) -> Bool {
-                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
-                        if taken[cellIndex(SIMD3<Int>(x, y, z))] { return false }
-                    }}}
-                    return true
-                }
-                func take(_ i0: SIMD3<Int>, _ span: Int) {
-                    for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
-                        taken[cellIndex(SIMD3<Int>(x, y, z))] = true
-                    }}}
-                }
                 let ax1 = (axis + 1) % 3, ax2 = (axis + 2) % 3
                 /// Candidate starts for a cell of `span` grid steps whose family tile is
                 /// `step` grid steps: multiples of `step`, depth from the face first.
@@ -1281,45 +1401,99 @@ extension LatticePreviewOccupancy {
                     }
                     return 1
                 }
-                for S in menu {
-                    let span = Int((S / g).rounded())
-                    guard span >= 1, span <= nG else { continue }
-                    let isF = abs(S - f) < 1e-9
-                    for i in candidates(span: span, step: familyStep(S)) {
-                        guard isFree(i, span) else { continue }
-                        let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
-                        let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * S))
-                        if dc < -0.87 * S { continue }
-                        let (ok, nearest, _) = fits(lo, S, fast: true)
-                        let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
-                            || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
-                        guard ok && centreOK, !hasYielded(ladder.region, lo, S) else { continue }
-                        paint(lo, S, finest: isF, edge: false, nearest: nearest)
-                        take(i, span)
-                    }
+                // ★★ ONE NESTING CHAIN PER SLOT (the reviewer, 2026-10-10 20:05, from #358 on 3418E167:
+                // "cell 10 (3.5 mm) overlaps cell 3 (4.667 mm) in the SAME region … fix it red-first").
+                // A slot that mixed families whose tiles do not nest on the base/12 grid — halves start
+                // every 6 steps, thirds every 4, quarters every 3 — left slivers no admitted tile fills (a
+                // third at 0–4 leaves 4–6 to quarters that start at 3 or 6), and the fill pass then laid a
+                // WHOLE finest cell over a position only PART free: the preview drew the free sliver, the
+                // plan sent the whole cell over its neighbour (141 pairs on 3418E167, 329 on 68BF7B74,
+                // every one the region's finest tile). So a slot packs from ONE chain: a finest tile and
+                // every menu size that is a whole number of it, each started on a multiple of it — then
+                // every position the fill pass meets is wholly free or wholly taken. Each slot tries every
+                // maximal chain and keeps the one covering most of the slot, then the one with fewest cells
+                // (his rule: fewest cells, the largest that fit, the smallest only where nothing larger
+                // goes). Core accepts any start that is a whole number of a family tile dividing the size
+                // (stepped_plan.cpp, `aligned_on_some_family`), which every chain start is.
+                var tiles: [Int] = []   // the admitted families' tiles, in base/12 steps
+                for nn in 2...steppedMenuMaxDivisor where nG % nn == 0 {
+                    let t = nG / nn
+                    if menu.contains(where: { abs($0 / g - Double(t)) < 1e-6 }) { tiles.append(t) }
                 }
-                // The fill pass: the finest tile on its nested grid, into unowned texels.
-                let span = Int((f / g).rounded())
-                for i in candidates(span: span, step: span) {
-                    if isFree(i, span) == false {
-                        // wholly taken? then nothing to fill here
-                        var anyFree = false
-                        for z in i.z..<(i.z + span) where !anyFree { for y in i.y..<(i.y + span) where !anyFree { for x in i.x..<(i.x + span) {
-                            if !taken[cellIndex(SIMD3<Int>(x, y, z))] { anyFree = true; break }
+                // a chain is maximal when no finer admitted tile divides its finest tile
+                var chainTiles = tiles.filter { tf in !tiles.contains { $0 < tf && tf % $0 == 0 } }
+                if chainTiles.isEmpty { chainTiles = [Swift.max(1, Int((f / g).rounded()))] }
+                struct Placement { let i: SIMD3<Int>; let S: Double; let finest: Bool; let edge: Bool; let nearest: Double }
+                func packChain(_ tf: Int) -> (placements: [Placement], covered: Int) {
+                    var taken = [Bool](repeating: false, count: nG * nG * nG)
+                    func isFree(_ i0: SIMD3<Int>, _ span: Int) -> Bool {
+                        for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                            if taken[cellIndex(SIMD3<Int>(x, y, z))] { return false }
                         }}}
-                        if !anyFree { continue }
+                        return true
                     }
-                    let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
-                    let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * f))
-                    if dc < -0.87 * f { continue }
-                    let (ok, nearest, farthest) = fits(lo, f)
-                    if slabFailed || depthFailed { continue }  // ★ outside the slab, or past the depth: air
-                    if hasYielded(ladder.region, lo, f) { continue }   // R7: the finest rung yielded
-                    if ok || !outlineFailed {
-                        paint(lo, f, finest: true, edge: false, nearest: nearest)
-                    } else if farthest > 0 {
-                        paint(lo, f, finest: true, edge: true, nearest: nearest)
+                    func take(_ i0: SIMD3<Int>, _ span: Int) {
+                        for z in i0.z..<(i0.z + span) { for y in i0.y..<(i0.y + span) { for x in i0.x..<(i0.x + span) {
+                            taken[cellIndex(SIMD3<Int>(x, y, z))] = true
+                        }}}
                     }
+                    var out: [Placement] = []
+                    var covered = 0
+                    for S in menu {
+                        let span = Int((S / g).rounded())
+                        guard span >= 1, span <= nG, span % tf == 0 else { continue }
+                        let isF = abs(S - f) < 1e-9
+                        let fs = familyStep(S)
+                        for i in candidates(span: span, step: fs % tf == 0 ? fs : tf) {
+                            guard isFree(i, span) else { continue }
+                            let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                            let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * S))
+                            if dc < -0.87 * S { continue }
+                            let (ok, nearest, _) = fits(lo, S, fast: true)
+                            let centreOK = isF || !(shapeFit && shapeFitBandMM > 0 && sBase > f + 1e-9)
+                                || dc >= shapeFitBandMM * (S - f) / (sBase - f) - 1e-9
+                            guard ok && centreOK, !hasYielded(ladder.region, lo, S) else { continue }
+                            out.append(Placement(i: i, S: S, finest: isF, edge: false, nearest: nearest))
+                            take(i, span)
+                            covered += span * span * span
+                        }
+                    }
+                    // The fill pass: the chain's finest tile on its own grid, into WHOLLY free positions —
+                    // within one chain no position is part taken, so a sliver can no longer be painted as
+                    // a whole cell. Cut by the outline where it is, as the finest rung always was.
+                    let fillS = Double(tf) * g
+                    let fillIsFinest = abs(fillS - f) < 1e-9
+                    for i in candidates(span: tf, step: tf) {
+                        guard isFree(i, tf) else { continue }
+                        let lo = lo0 + SIMD3<Double>(Double(i.x), Double(i.y), Double(i.z)) * g
+                        let dc = dOutFast(lo + SIMD3<Double>(repeating: 0.5 * fillS))
+                        if dc < -0.87 * fillS { continue }
+                        // a coarser chain's fill keeps the shape band's rule: only the finest rung at the outline
+                        if !fillIsFinest, shapeFit, shapeFitBandMM > 0, sBase > f + 1e-9,
+                           dc < shapeFitBandMM * (fillS - f) / (sBase - f) - 1e-9 { continue }
+                        let (ok, nearest, farthest) = fits(lo, fillS)
+                        if depthFailed { continue }  // ★ past the depth: air
+                        if hasYielded(ladder.region, lo, fillS) { continue }   // R7: the finest rung yielded
+                        if ok || !outlineFailed {
+                            out.append(Placement(i: i, S: fillS, finest: fillIsFinest, edge: false, nearest: nearest))
+                        } else if farthest > 0 {
+                            out.append(Placement(i: i, S: fillS, finest: fillIsFinest, edge: true, nearest: nearest))
+                        } else { continue }
+                        covered += tf * tf * tf
+                    }
+                    return (out, covered)
+                }
+                var best: (placements: [Placement], covered: Int)? = nil
+                for tf in chainTiles {
+                    let p = packChain(tf)
+                    if let b = best, !(p.covered > b.covered || (p.covered == b.covered && p.placements.count < b.placements.count)) {
+                        continue
+                    }
+                    best = p
+                }
+                for p in best?.placements ?? [] {
+                    paint(lo0 + SIMD3<Double>(Double(p.i.x), Double(p.i.y), Double(p.i.z)) * g, p.S,
+                          finest: p.finest, edge: p.edge, nearest: p.nearest)
                 }
             }
             // Level-0 slots covering the region's box.
@@ -1531,10 +1705,34 @@ extension LatticePreviewOccupancy {
             let u = Swift.max(0, Swift.min(1, (r - densityLo) / (drawnHi - densityLo)))
             return Float(pow(u, 1 / g))
         }
-        var solidDepth = [Float](repeating: 0, count: grid.count)
-        for i in 0..<grid.count where size[i] > 0 {
+        // ★★ THE PRINTABILITY FLOOR IS CORE'S, AT THE JOB'S CAP (the reviewer, 2026-10-09 20:51: "Call
+        // core's ceiling through the guarded bridge instead, and pin that a sent rho never exceeds the
+        // cap the job carries"). The app's own 24-step bisection of the diameter table
+        // (`printabilityDensityFloor`) landed 24 ppb over the cap near 2.25 mm; core's
+        // `lattice_min_density_for_strut` bisects against min(rho_max, cap) and cannot. Once per size.
+        var coreFloor: [Float: Double] = [:]
+        func printFloor(_ s: Float, _ lat: LatticeType) -> Double {
+            if let f = coreFloor[s] { return f }
+            let f: Double
+            switch TopOptKit.latticeMinDensityForStrut(topology: latticeID, cellMM: Double(s),
+                                                       minExtrudableWidthMM: lineWidthMM, maxRelativeDensity: densityCap) {
+            case .prints(let rho)?: f = rho
+            // nothing the job allows prints a bead here: the densest it allows, as the run does
+            case .noneUnderTheCap?: f = densityCap > 0 ? densityCap : 1
+            // core refused (a type it does not call live): the drawn law's own floor, capped below
+            case nil: f = lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: Double(s))
+            }
+            coreFloor[s] = f
+            return f
+        }
+        // ★ ALONG: each painted texel's place in its owner's grade, 0 at the face plane (or the outline) … 1 at the
+        // far end (or the face's middle); nil ⇒ none (By stress, unpicked, or not a face region's texel).
+        let alongT: [Float]? = Self.alongFraction(gradeAlong, owner: owner, size: size, regions: regions,
+                                                  nx: gnx, ny: gny, nz: gnz, origin: gorigin, pitch: pitch)
+        // One texel's ρ from a law's ρ: the band's raise toward the quilt, the bead's floor, the job's cap.
+        func shapedRho(_ r0: Double, _ i: Int) -> Double {
             let s = Double(size[i])
-            var r = rho(activation[i] < 0 ? 0 : activation[i])
+            var r = r0
             if let lat {
                 if shapeFit, shapeFitBandMM > 0, bandT[i] < 1 {
                     let q = Swift.min(Swift.min(drawnHi, lat.quiltRowDensity(cellMM: s)), bandQuiltCeiling)
@@ -1554,15 +1752,26 @@ extension LatticePreviewOccupancy {
                     // and overshot the ceiling with Allow quilt off; past the quilt row it drew the
                     // same saturated strut anyway)
                     r = Swift.max(r, Swift.min(q, r + (q - r) * (1 - Double(bandT[i])) * share * (bandAmount > 0 ? bandAmount : 1)))
-                    // the bleed: solid wherever the voxel is within beam + bleed of
-                    // the outline — the march tests the in-plane distance per voxel
-                    if bleed > 0 { solidDepth[i] = Float(band) }
                 }
                 if lineWidthMM > 0 {
-                    r = Swift.max(r, lat.printabilityDensityFloor(lineWidthMM: lineWidthMM, cellMM: s))
+                    r = Swift.max(r, printFloor(size[i], lat))
                 }
             }
-            activation[i] = act(Swift.min(r, drawnHi))
+            // ★ never denser than the job allows — drawn or sent
+            if densityCap > 0 { r = Swift.min(r, densityCap) }
+            return r
+        }
+        var solidDepth = [Float](repeating: 0, count: grid.count)
+        for i in 0..<grid.count where size[i] > 0 {
+            // the bleed: solid wherever the voxel is within beam + bleed of the outline (the band's texels)
+            if lat != nil, shapeFit, shapeFitBandMM > 0, bandT[i] < 1, bleed > 0 { solidDepth[i] = Float(band) }
+            let r = shapedRho(rho(activation[i] < 0 ? 0 : activation[i]), i)
+            // the drawn ρ: Along's when it has one here, the plan's otherwise
+            let drawn: Double
+            if let t = alongT?[i], t >= 0 {
+                drawn = shapedRho(densityLo + (densityHi - densityLo) * (1 - Double(t)), i)
+            } else { drawn = r }
+            activation[i] = act(Swift.min(drawn, drawnHi))
             // ruling C: the cell carries its densest texel's ρ
             let ci = Int(cellOf[i])
             if ci >= 0, ci < cells.count { cells[ci].rho = Swift.max(cells[ci].rho, Swift.min(r, drawnHi)) }
@@ -1573,6 +1782,15 @@ extension LatticePreviewOccupancy {
         out.values = activation
         stats.seconds = Date().timeIntervalSince(t0)
         stats.cellsPlaced = cells.count
+        // ★ THE BAKE'S OWN CHECK: no two cells of one region overlap. Counted and named in the DIAG; the
+        // writer refuses such a plan in words (`PlanWithheld.cellsOverlap`), never sends it.
+        let overlaps = LatticeSteppedCell.sameRegionOverlaps(cells)
+        stats.sameRegionOverlaps = overlaps.count
+        if let o = overlaps.first {
+            NSLog("DIAG octree OVERLAP: \(overlaps.count) same-region cell pair(s); first region \(o.region): "
+                  + "cell \(o.a) (\(cells[o.a].sizeMM) mm) and cell \(o.b) (\(cells[o.b].sizeMM) mm) share "
+                  + String(format: "%.4f x %.4f x %.4f mm", o.extentMM.x, o.extentMM.y, o.extentMM.z))
+        }
         var field = LatticeCellField(field: out, level: outlineMM,
                                 steppedCellMM: size, steppedPhase: phase,
                                 steppedOrigin: origin,
@@ -1589,7 +1807,55 @@ extension LatticePreviewOccupancy {
                                 solidBandMM: beam)
         field.steppedCells = cells
         field.steppedTexelCell = cellOf
-        Self.octreeBakeObserver?(field, stats)
         return field
+    }
+}
+
+// MARK: - the Cells page's Along, drawn (ruling 2026-10-24 17:46)
+
+extension LatticePreviewOccupancy {
+    /// Each painted texel's place in its owning face region's grade, 0…1, for the drawn density:
+    /// - `.depth` ("Through the depth"): the texel middle's distance in from the face plane along the region's inward
+    ///   normal over the prism's depth — 0 at the face, 1 at the far end.
+    /// - `.face` ("Across the face"): the in-plane distance in from the outline (`inPlaneDistance`; the half-extent
+    ///   rectangle when the region has no loops) over that region's largest — 0 at the outline, 1 at the middle.
+    /// −1 for a texel no face region owns. nil for `.load` / nil (By stress: the demand draws, today's bake).
+    static func alongFraction(_ along: LatticeGradeAlong?, owner: [Int32], size: [Float], regions: [LatticeRegionSpec],
+                              nx: Int, ny: Int, nz: Int, origin: SIMD3<Double>, pitch: Double) -> [Float]? {
+        guard let along, along != .load else { return nil }
+        var raw = [Double](repeating: -1, count: owner.count)
+        var most = [Double](repeating: 0, count: regions.count)
+        for idx in owner.indices where owner[idx] >= 0 && size[idx] > 0 {
+            let r = Int(owner[idx])
+            guard r < regions.count, regions[r].kind == .face else { continue }
+            let region = regions[r]
+            let n = LatticeRegionMask.unit(region.normal)
+            guard simd_length(n) > 0.5 else { continue }
+            let i = idx % nx, j = (idx / nx) % ny, k = idx / (nx * ny)
+            let p = origin + (SIMD3<Double>(Double(i), Double(j), Double(k)) + 0.5) * pitch
+            let rel = p - region.origin
+            switch along {
+            case .depth:
+                guard region.depthMM > 0 else { continue }
+                raw[idx] = Swift.max(0, Swift.min(1, simd_dot(rel, n) / region.depthMM))
+            case .face:
+                let (bu, bv) = LatticeRegionMask.basis(n)
+                let uv = SIMD2<Double>(simd_dot(rel, bu), simd_dot(rel, bv))
+                let d = region.outlineLoops.isEmpty
+                    ? Swift.min(region.halfUMM - abs(uv.x), region.halfWMM - abs(uv.y))
+                    : region.inPlaneDistance(uv)
+                raw[idx] = Swift.max(0, d)
+                most[r] = Swift.max(most[r], raw[idx])
+            case .load:
+                return nil
+            }
+        }
+        if along == .face {
+            for idx in raw.indices where raw[idx] >= 0 {
+                let m = most[Int(owner[idx])]
+                raw[idx] = m > 0 ? raw[idx] / m : 0
+            }
+        }
+        return raw.map { Float($0) }
     }
 }

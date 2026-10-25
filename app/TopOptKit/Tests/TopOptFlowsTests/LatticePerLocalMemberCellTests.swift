@@ -71,10 +71,16 @@ final class LatticePerLocalMemberCellTests: XCTestCase {
     }
 
     /// Plan a part the way Auto now does, and report what core made of it.
+    /// ★ UNCAPPED (Allow quilt on): this pins the anchor and core's planner, and the helper forces
+    /// the ceiling up to the anchor. At the job's cap (2.25 mm floor) a uniform 20 mm wall anchors at
+    /// 4.20 mm, over the 4.0 it holds (the bucket MIDPOINT, 21 mm, over-reads it), and production
+    /// then takes Auto's posture window (4–4 mm, the job's) instead of this sweep — the
+    /// `ceiling >= base` guard in `latticePreviewCellSweep`.
     private func planned(_ p: (occ: LatticeVoxelGrid, width: [Double], nStar: Double))
         throws -> (planned: Int, culled: Int, cells: [Double: Int], base: Double) {
         let printable = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet")).min
+            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet",
+            maxRelativeDensity: 0)).min
         let base = LatticeMeasuredRegionWidth.ladderBaseCellMM(
             occupancy: p.occ, memberThicknessMM: p.width,
             minCellsPerMember: p.nStar, finestPrintableMM: printable)
@@ -187,7 +193,8 @@ final class LatticePerLocalMemberCellTests: XCTestCase {
         let p = stepped([23, 23, 23, 45])
         try XCTSkipIf(p.width.isEmpty, "core gave no widths")
         let printable = try XCTUnwrap(LatticeAutoPosture.autoWindowMM(
-            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet")).min
+            regionWidthsMM: [], lineWidthMM: Self.bead, topology: "octet",
+            maxRelativeDensity: LatticeSettings.jobDensityCap(topologyID: "octet", allowQuilt: false))).min
         let base = LatticeMeasuredRegionWidth.ladderBaseCellMM(
             occupancy: p.occ, memberThicknessMM: p.width,
             minCellsPerMember: p.nStar, finestPrintableMM: printable)

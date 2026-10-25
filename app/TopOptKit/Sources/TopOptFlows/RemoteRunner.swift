@@ -820,8 +820,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 block["emit_organic_spans"] = true
             }
             // ★ THE PLAN (2026-09-18): the preview's placed cells, verbatim, with each planned
-            // region's grid (`slot_origin_mm`, 2026-10-08) — the ONE writer, shared with
-            // RelatticeRunner. A plan core would refuse is withheld, never sent.
+            // region's grid (`slot_origin_mm`, 2026-10-08) and ladder base (`plan_base_cell_mm`,
+            // K1) — the ONE writer, shared with RelatticeRunner. A plan core would refuse is
+            // withheld, never sent.
             LatticeSteppedCellWire.writePlan(into: &block, for: lat, wired: TopOptKit.steppedCellsWired,
                                              enabled: steppedPlans)
             job["lattice"] = block
@@ -1364,11 +1365,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
         var strut: LatticeReport.StrutStrength? = nil
+        // ★★ K4 (the reviewer, 2026-10-11 03:28, item 3): the job carried a plan ⇔ the bytes we POSTED carry
+        // `lattice.stepped_cells`; then the plan as laid (run_info `grading.plan_by_region`) is what the results read
+        let carriedPlan = submittedJobJSON.map(LatticeReport.PlanLaid.jobCarriesPlan) ?? false
+        var planLaid: LatticeReport.PlanLaid? = carriedPlan ? LatticeReport.PlanLaid(runInfo: nil) : nil
         if let id = jobID {
             let url = config.baseURL.appendingPathComponent("jobs")
                 .appendingPathComponent(id).appendingPathComponent("files")
                 .appendingPathComponent("run_info.json")
             let info = try? getJSON(url)
+            if carriedPlan { planLaid = LatticeReport.PlanLaid(runInfo: info) }
             if let le = info?["lattice_export"] as? [String: Any] {
                 func d(_ k: String) -> Double { (le[k] as? Double) ?? 0 }
                 func i(_ k: String) -> Int { (le[k] as? Int) ?? Int((le[k] as? Double) ?? 0) }
@@ -1415,7 +1421,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             maxRelativeDensity: lat.maxRelativeDensity,
             regionScoped: lat.regionScoped, emittedRegions: lat.regions.count,
             generated: generated, strut: strut,
-            regionCellsJSON: regionCellsJSON)
+            regionCellsJSON: regionCellsJSON, planLaid: planLaid)
     }
 
     /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff
@@ -1437,6 +1443,41 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return data
     }
 
+    /// One multipart part of the job upload: its field name, its filename (a file part) or nil (a plain field), its
+    /// content type (nil for a plain field) and its bytes.
+    struct UploadPart: Equatable {
+        let name: String
+        let filename: String?
+        let contentType: String?
+        let data: Data
+    }
+
+    /// ★ WHAT THE WORKER RECEIVES for a fresh job, in order: the model, job.json, and the project name.
+    static func uploadParts(modelPath: String, model: Data, jobJSON: Data, projectName: String) -> [UploadPart] {
+        let modelName = (modelPath as NSString).lastPathComponent
+        var parts = [
+            UploadPart(name: "step", filename: modelName, contentType: "application/octet-stream", data: model),
+            UploadPart(name: "job", filename: "job.json", contentType: "application/json", data: jobJSON),
+        ]
+        // The human-facing project name as a dedicated multipart FIELD (handoff 129).
+        // The worker prefers this over any job.json key (topopt_worker._create_job) and
+        // it never reaches the CLI's strict job schema. Omitted when empty.
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            parts.append(UploadPart(name: "project", filename: nil, contentType: nil, data: Data(name.utf8)))
+        }
+        // ★ B5 (reviewer (i)): THE PAINTED FACES REACH THE WORKER. The face-overrides sidecar (`<model>.faces`, the
+        // painted pseudo-faces the groups reference) travels with the model, or the worker's re-import has no painted
+        // face ids and a painted group silently reaches no face. Saved beside the model under the model's own name
+        // (topopt_worker._create_job), where core's import looks for it. Absent ⇒ no part (today's upload, unchanged).
+        let sidecar = modelPath + ".faces"
+        if let faces = FileManager.default.contents(atPath: sidecar) {
+            parts.append(UploadPart(name: "faces", filename: modelName + ".faces",
+                                    contentType: "application/octet-stream", data: faces))
+        }
+        return parts
+    }
+
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
         let boundary = "topopt-\(UUID().uuidString)"
         var body = Data()
@@ -1447,16 +1488,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             body.append(payload)
             body.append("\r\n".data(using: .utf8)!)
         }
-        part("Content-Disposition: form-data; name=\"step\"; filename=\"\(modelName)\"\r\n" +
-             "Content-Type: application/octet-stream", model)
-        part("Content-Disposition: form-data; name=\"job\"; filename=\"job.json\"\r\n" +
-             "Content-Type: application/json", jobJSON)
-        // The human-facing project name as a dedicated multipart FIELD (handoff 129).
-        // The worker prefers this over any job.json key (topopt_worker._create_job) and
-        // it never reaches the CLI's strict job schema. Omitted when empty.
-        let projectName = request.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !projectName.isEmpty {
-            part("Content-Disposition: form-data; name=\"project\"", Data(projectName.utf8))
+        for p in Self.uploadParts(modelPath: request.modelPath, model: model, jobJSON: jobJSON,
+                                  projectName: request.projectName) {
+            var headers = "Content-Disposition: form-data; name=\"\(p.name)\""
+            if let f = p.filename { headers += "; filename=\"\(f)\"" }
+            if let t = p.contentType { headers += "\r\nContent-Type: \(t)" }
+            part(headers, p.data)
         }
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 

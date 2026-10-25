@@ -179,14 +179,14 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         XCTAssertTrue(code.contains("public func owns(_ project: ProjectModel, _ stage: WorkspaceStage) -> Bool {\n        stage == .lattice && project.lattice.flexible != nil\n    }"))
         let main = FlexibleMainStage()
         let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm, importedFile: nil, importedMesh: nil)
-        for s in [WorkspaceStage.topology, .lattice, .surface] { XCTAssertFalse(main.owns(p, s), "a project that is not Flexible: never") }
+        for s in [WorkspaceStage.topology, .lattice] { XCTAssertFalse(main.owns(p, s), "a project that is not Flexible: never") }
         p.lattice.stageMode = .structural
         XCTAssertFalse(main.owns(p, .lattice), "Structural: never")
         p.lattice.stageMode = nil
         p.lattice.flexible = FlexibleStageSettings()
         XCTAssertTrue(main.owns(p, .lattice))
         XCTAssertFalse(main.owns(p, .topology), "a Flexible project on Topology keeps today's screen")
-        XCTAssertFalse(main.owns(p, .surface), "…and on Surface")
+        // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface (its `.surface` checks dropped; P5 owns this test)
     }
 
     /// H31 and H24 together: off the Flexible stage the Export step mounts for a Flexible project, and the chip column is
