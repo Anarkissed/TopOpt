@@ -538,7 +538,8 @@ static void emit_variant_array(std::string& out, const char* key,
 }
 
 // CORE LIST item 40 — the "frozen_share" member (report.hpp FrozenShareReport).
-static void emit_frozen_share(std::string& out, const FrozenShareReport& fs) {
+static void emit_frozen_share(std::string& out, const FrozenShareReport& fs,
+                              bool trailing_comma) {
   out += "  \"frozen_share\": {\n";
   out += "    \"part_solid_voxels\": " + std::to_string(fs.part_solid_voxels) + ",\n";
   out += "    \"frozen_voxels\": " + std::to_string(fs.frozen_voxels) + ",\n";
@@ -571,6 +572,47 @@ static void emit_frozen_share(std::string& out, const FrozenShareReport& fs) {
            ", \"reason\": " + str_json(s.reason) + "}";
   }
   out += fs.skipped_rungs.empty() ? "]\n" : "\n    ]\n";
+  out += trailing_comma ? "  },\n" : "  }\n";
+}
+
+// CORE LIST item 50 — the "strengthen" member (report.hpp StrengthenReport).
+static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
+  out += "  \"strengthen\": {\n";
+  out += "    \"as_drawn_margin\": " + num_json(sr.as_drawn_margin) + ",\n";
+  out += "    \"margin_required\": " + num_json(sr.margin_required) + ",\n";
+  out += "    \"reference_margin\": " + num_json(sr.reference_margin) + ",\n";
+  out += "    \"ceiling_margin\": " + num_json(sr.ceiling_margin) + ",\n";
+  out += "    \"original_mass_grams\": " + num_json(sr.original_mass_grams) + ",\n";
+  out += "    \"frozen_outside_box_voxels\": " +
+         std::to_string(sr.frozen_outside_box_voxels) + ",\n";
+  out += "    \"coarse_resolution\": " + std::to_string(sr.coarse_resolution) + ",\n";
+  out += "    \"rule\": {\"delta\": " + num_json(sr.delta) + ", \"gamma\": " +
+         num_json(sr.gamma) + ", \"vf_step\": " + num_json(sr.vf_step) + "},\n";
+  out += "    \"versions\": [";
+  for (std::size_t i = 0; i < sr.versions.size(); ++i) {
+    const StrengthenVersionReport& v = sr.versions[i];
+    out += (i == 0 ? "\n" : ",\n");
+    out += "      {\"version\": " + std::to_string(v.version) +
+           ", \"stress_cut\": " + num_json(v.stress_cut) +
+           ", \"target_margin\": " + num_json(v.target_margin) +
+           ", \"status\": " + str_json(v.status) +
+           ", \"volume_fraction\": " + num_json(v.volume_fraction) +
+           ", \"in_loop_margin\": " + num_json(v.in_loop_margin) +
+           ", \"verified_margin\": " + num_json(v.verified_margin) +
+           ", \"mass_grams\": " + num_json(v.mass_grams) +
+           ", \"mass_fraction_of_original\": " + num_json(v.mass_fraction_of_original) +
+           ", \"max_deflection_mm\": " + num_json(v.max_deflection_mm) +
+           ", \"iou_with_original\": " + num_json(v.iou_with_original) +
+           ", \"essentially_original\": " + (v.essentially_original ? "true" : "false") +
+           ", \"anchors_attached\": " + (v.anchors_attached ? "true" : "false") +
+           ", \"specks\": " + std::to_string(v.specks) +
+           ", \"keep_clear_voxels\": " + std::to_string(v.keep_clear_voxels) +
+           ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
+           ", \"repairs\": " + std::to_string(v.repairs) +
+           ", \"seconds\": " + num_json(v.seconds) +
+           ", \"note\": " + str_json(v.note) + "}";
+  }
+  out += sr.versions.empty() ? "]\n" : "\n    ]\n";
   out += "  }\n";
 }
 
@@ -581,9 +623,13 @@ std::string job_report_json(const JobReport& report) {
   // Evaluated-but-rejected rungs (the honesty rider): always emitted (as [] when
   // the whole ladder was accepted) so a report reader can trust the field's
   // presence and never mistake omission for "nothing was rejected".
+  const bool more = report.frozen_share.evaluated || report.strengthen.evaluated;
   emit_variant_array(out, "rejected_variants", report.rejected,
-                     /*trailing_comma=*/report.frozen_share.evaluated);
-  if (report.frozen_share.evaluated) emit_frozen_share(out, report.frozen_share);
+                     /*trailing_comma=*/more);
+  if (report.frozen_share.evaluated)
+    emit_frozen_share(out, report.frozen_share,
+                      /*trailing_comma=*/report.strengthen.evaluated);
+  if (report.strengthen.evaluated) emit_strengthen(out, report.strengthen);
   out += "}\n";
   return out;
 }

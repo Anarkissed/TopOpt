@@ -549,7 +549,8 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "wall_loops", "layer_height_mm",
+             "infill_percent", "minimize_plastic", "redesign", "wall_loops",
+             "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
@@ -884,6 +885,14 @@ JobDescription parse_job(const std::string& json_text) {
       if (mp->type != JsonValue::Type::Bool)
         schema_fail("\"loads.minimize_plastic\" must be a boolean");
       job.loads.minimize_plastic = (mp->num != 0.0);
+    }
+    // CORE LIST item 50 — the only value is "strengthen" (validated with the box
+    // at the end of the parse). Absent => the growth ladder, byte for byte.
+    if (const JsonValue* rd = find_key(lv, "redesign")) {
+      job.loads.redesign = require_string(*rd, "loads.redesign");
+      if (job.loads.redesign != "strengthen")
+        schema_fail("\"loads.redesign\" must be \"strengthen\" (got \"" +
+                    job.loads.redesign + "\")");
     }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
     if (const JsonValue* wl = find_key(lv, "wall_loops")) {
@@ -2584,6 +2593,16 @@ JobDescription parse_job(const std::string& json_text) {
           "one of them, or state both the same.");
     job.lattice.topology = tc.id;
     job.grading.topology = tc.id;
+  }
+  // CORE LIST item 50 — "Redesign to strengthen" rebuilds the part inside its design
+  // box, so it needs both: the growth side of the checkbox and a box to build in.
+  if (job.loads.redesign == "strengthen") {
+    if (job.loads.minimize_plastic)
+      schema_fail("\"loads.redesign\": \"strengthen\" needs "
+                  "\"loads.minimize_plastic\": false (it is the strengthen side)");
+    if (!job.has_design_box)
+      schema_fail("\"loads.redesign\": \"strengthen\" needs a \"design_box\": it "
+                  "rebuilds the part inside the box");
   }
   return job;
 }

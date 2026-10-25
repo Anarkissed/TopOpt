@@ -555,13 +555,13 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // ROTATED so the certified build direction is +Z in the file. Rotated vertices,
 // not a build transform — a 3MF transform is advice that "place on bed" resets,
 // and then the certificate would describe an object the slicer never produces.
-std::string export_variant_mesh(const MinimizePlasticVariant& variant,
-                                const std::string& out_dir, const JobOutput& out,
-                                const VoxelGrid& sg, double printed_iso = 0.5,
-                                const StepModel* cad = nullptr) {
-  const std::string path = join_path(
-      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
-                              out.mesh_format));
+// The variant's exported solid in MODEL coordinates (before any build-frame bake):
+// the shell the file carries, so a caller can certify exactly what is exported
+// (CORE LIST item 50 verifies it). export_variant_mesh writes it.
+TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
+                                       const JobOutput& out, const VoxelGrid& sg,
+                                       double printed_iso = 0.5,
+                                       const StepModel* cad = nullptr) {
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
@@ -627,9 +627,19 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
     const CadAttribution att = attribute_to_cad_faces(src, *cad, po);
     projected = project_onto_cad_faces(src, *cad, po, att);
   }
-  const TriangleMesh& model_mesh =
-      !projected.vertices.empty() ? projected
-                                  : ((sf > 1) ? smooth : variant.exported_mesh());
+  if (!projected.vertices.empty()) return projected;
+  return (sf > 1) ? smooth : variant.exported_mesh();
+}
+
+std::string export_variant_mesh(const MinimizePlasticVariant& variant,
+                                const std::string& out_dir, const JobOutput& out,
+                                const VoxelGrid& sg, double printed_iso = 0.5,
+                                const StepModel* cad = nullptr) {
+  const std::string path = join_path(
+      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
+                              out.mesh_format));
+  const TriangleMesh model_mesh =
+      variant_export_model_mesh(variant, out, sg, printed_iso, cad);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
   if (R) baked = rotate_mesh(model_mesh, *R);
@@ -8975,7 +8985,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -9068,6 +9078,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_region_ids = j_face_protection_region_ids;
   lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
+  lc.strengthen = j_redesign == "strengthen";  // item 50
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -12099,6 +12110,306 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
   return S;
 }
 
+// ── "REDESIGN TO STRENGTHEN" (CORE LIST item 50) ─────────────────────────────
+// The reviewer's brief of 2026-10-24 22:59, approved 01:52 (arm B dropped), with
+// the search changed after the sample (02:16): the margin can sit on a plateau
+// set by frozen features, so the fraction is BRACKETED (halved while the aim
+// holds, doubled while it fails, then bisected) instead of moved +-5 % a step.
+//
+// Every optimize is an ordinary one-rung minimize_plastic call on the run's own
+// (domain_box_only, volume_basis_domain) options, fresh from uniform; no solver
+// file is involved. Each version's fraction is searched on a res/2 grid, the
+// version is then run once at the job's resolution and VERIFIED: its exported
+// solid (variant_export_model_mesh, the shell the file carries) re-voxelized and
+// certified by analyze_job, the same certification `topopt-cli analyze` runs.
+constexpr double kStrengthenStressCut[3] = {0.25, 0.50, 0.75};
+constexpr double kStrengthenDelta = 0.10;     // aim above the target (da Silva 2021)
+constexpr double kStrengthenGamma = 0.75;     // the repair's exponent
+constexpr double kStrengthenCeilingUse = 0.95;
+constexpr double kStrengthenStepOver = 1.05;  // each version >= 1.05 x the previous
+constexpr int kStrengthenCoarseRuns = 6;
+constexpr int kStrengthenRepairs = 2;
+
+// Move a one-rung result's rung onto `into`, keeping every per-rung vector aligned
+// with `evaluated` (run_info reads them by rung index).
+void append_rung(MinimizePlasticResult& into, MinimizePlasticResult&& from) {
+  auto take = [](auto& a, auto& b) {
+    for (auto& x : b) a.push_back(std::move(x));
+  };
+  take(into.evaluated, from.evaluated);
+  take(into.rung_grayscale_mnd, from.rung_grayscale_mnd);
+  take(into.conditional_projection_fired, from.conditional_projection_fired);
+  take(into.rung_infeasible, from.rung_infeasible);
+  take(into.rung_non_convergent, from.rung_non_convergent);
+  take(into.rung_non_convergent_iteration, from.rung_non_convergent_iteration);
+  take(into.rung_non_convergent_residual, from.rung_non_convergent_residual);
+  take(into.rung_diverged, from.rung_diverged);
+  take(into.rung_diverged_iteration, from.rung_diverged_iteration);
+  take(into.rung_diverged_c_ratio, from.rung_diverged_c_ratio);
+  take(into.rung_diverged_cg_ratio, from.rung_diverged_cg_ratio);
+  take(into.rung_diverged_wall_ratio, from.rung_diverged_wall_ratio);
+  take(into.rung_time_budget, from.rung_time_budget);
+  take(into.rung_time_budget_iteration, from.rung_time_budget_iteration);
+  take(into.rung_time_budget_ms, from.rung_time_budget_ms);
+  take(into.rung_time_budget_elapsed_ms, from.rung_time_budget_elapsed_ms);
+  take(into.rung_time_budget_baseline_ms, from.rung_time_budget_baseline_ms);
+  take(into.rung_time_budget_phase, from.rung_time_budget_phase);
+  take(into.rung_time_budget_phase_ms, from.rung_time_budget_phase_ms);
+  take(into.draft_rung_tail_k, from.draft_rung_tail_k);
+  take(into.draft_rung_c_gap, from.draft_rung_c_gap);
+  take(into.draft_rung_escalated, from.draft_rung_escalated);
+  take(into.draft_rung_probe_flip, from.draft_rung_probe_flip);
+  take(into.draft_rung_probe_cg, from.draft_rung_probe_cg);
+  take(into.draft_rung_probe_tightmove, from.draft_rung_probe_tightmove);
+  take(into.report.variants, from.report.variants);
+  take(into.report.rejected, from.report.rejected);
+}
+
+MinimizePlasticResult strengthen_versions(
+    const JobDescription& job, const std::string& job_dir,
+    const std::string& out_dir, const MaterialLibrary& materials,
+    const SettingsRules& rules, const StepModel& model, bool model_is_mesh,
+    const Material& material, const VoxelGrid& grid,
+    const std::vector<DirichletBC>& bcs, const MinimizePlasticOptions& options,
+    const SolvedDesignDomain& domain) {
+  const std::string work = join_path(out_dir, "strengthen");
+  std::filesystem::create_directories(work);
+  StrengthenReport sr;
+  sr.evaluated = true;
+  sr.delta = kStrengthenDelta;
+  sr.gamma = kStrengthenGamma;
+  sr.vf_step = 0.0;  // bracketing search, no per-step cap (see above)
+  sr.margin_required = options.margin_stop;
+  const double iso = run_printed_iso(options);
+
+  // The reference: the part as drawn, certified.
+  const AnalyzeJobResult drawn =
+      analyze_job(job, job_dir, join_path(work, "as_drawn"), materials, rules, "", {});
+  sr.as_drawn_margin = drawn.analysis.margin_effective;
+  sr.reference_margin = std::max(sr.as_drawn_margin, sr.margin_required);
+  sr.original_mass_grams = drawn.voxel_mass_grams;
+
+  // The ceiling: the domain (box, minus keep-outs and Keep Clears, plus everything
+  // frozen) filled solid, certified the same way.
+  const VoxelGrid& G = domain.grid;
+  const DesignMask mask = design_domain_mask(domain, options);
+  const std::vector<char> drawn_part = original_part_voxels(grid, domain);
+  std::vector<double> filled(G.voxel_count(), 0.0);
+  for (std::size_t i = 0; i < filled.size(); ++i)
+    if (G.tags[i] != VoxelTag::Empty && mask[i] != MaskValue::FrozenVoid)
+      filled[i] = 1.0;
+  if (options.design_box.has_value()) {
+    const DesignBox& b = *options.design_box;
+    for (std::size_t i = 0; i < filled.size(); ++i) {
+      if (mask[i] != MaskValue::FrozenSolid && G.tags[i] != VoxelTag::Load &&
+          G.tags[i] != VoxelTag::Fixture)
+        continue;
+      const int x = static_cast<int>(i % static_cast<std::size_t>(G.nx));
+      const int y = static_cast<int>((i / static_cast<std::size_t>(G.nx)) %
+                                     static_cast<std::size_t>(G.ny));
+      const int z = static_cast<int>(i / (static_cast<std::size_t>(G.nx) *
+                                          static_cast<std::size_t>(G.ny)));
+      const Vec3 c = G.voxel_center(x, y, z);
+      if (c.x < b.min.x || c.x > b.max.x || c.y < b.min.y || c.y > b.max.y ||
+          c.z < b.min.z || c.z > b.max.z)
+        ++sr.frozen_outside_box_voxels;
+    }
+  }
+  const std::string ceiling_stl = join_path(work, "ceiling.stl");
+  write_stl_file(ceiling_stl, keep_largest_component(marching_cubes(G, filled, 0.5)));
+  sr.ceiling_margin = analyze_job(job, job_dir, join_path(work, "ceiling"), materials,
+                                  rules, ceiling_stl, {})
+                          .analysis.margin_effective;
+
+  // The coarse problem: the same job at half the resolution.
+  JobDescription coarse_job = job;
+  coarse_job.resolution = std::max(8, job.resolution / 2);
+  sr.coarse_resolution = coarse_job.resolution;
+  JobSetup coarse = build_job_setup(coarse_job, model, model_is_mesh, materials);
+  auto quiet = [](MinimizePlasticOptions o) {
+    o.on_variant = nullptr;  // the caller streams the final versions itself
+    o.on_density_snapshot = nullptr;
+    o.on_iteration = nullptr;
+    return o;
+  };
+  const MinimizePlasticOptions coarse_opts = quiet(coarse.options);
+  const MinimizePlasticOptions fine_opts = quiet(options);
+  auto run_one = [&](const JobSetup* s, double vf,
+                     const std::vector<double>& seed) {
+    MinimizePlasticOptions o = s ? coarse_opts : fine_opts;
+    o.volume_fraction_ladder = {vf};
+    o.initial_design = seed;
+    return minimize_plastic(s ? s->grid : grid, material, job.material,
+                            s ? s->bcs : bcs, rules, o);
+  };
+  auto margin_of = [](const MinimizePlasticResult& r) {
+    const MinimizePlasticVariant& v = r.evaluated.front();
+    return v.accepted ? v.report.margin_effective : -1.0;
+  };
+
+  // Load nodes of the solve grid, for the deflection read on the verified solve.
+  std::vector<int> load_nodes;
+  for (int k = 0; k < G.nz; ++k)
+    for (int j = 0; j < G.ny; ++j)
+      for (int i = 0; i < G.nx; ++i) {
+        if (G.tag(i, j, k) != VoxelTag::Load) continue;
+        for (int c = 0; c < 8; ++c)
+          load_nodes.push_back(fea_node_index(G, i + (c & 1), j + ((c >> 1) & 1),
+                                              k + ((c >> 2) & 1)));
+      }
+
+  MinimizePlasticResult out;
+  double prev_vf = 0.0, prev_verified = 0.0;
+  for (int k = 0; k < 3; ++k) {
+    const auto t0 = std::chrono::steady_clock::now();
+    StrengthenVersionReport vr;
+    vr.version = k + 1;
+    vr.stress_cut = kStrengthenStressCut[k];
+    const double target = std::max(sr.reference_margin / (1.0 - vr.stress_cut),
+                                   kStrengthenStepOver * prev_verified);
+    vr.target_margin = target;
+    if (target > kStrengthenCeilingUse * sr.ceiling_margin) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "above %.2f x the box filled solid (margin %.4g): unreachable "
+                    "in this design space",
+                    kStrengthenCeilingUse, sr.ceiling_margin);
+      vr.note = note;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 1. Bracket the fraction on the coarse grid.
+    const double aim = target * (1.0 + kStrengthenDelta);
+    const double floor_vf = std::max(prev_vf, 0.02);
+    double vf = std::clamp(std::pow(target / sr.ceiling_margin, 1.0 / 1.5),
+                           floor_vf, 1.0);
+    double pass_vf = -1.0, fail_vf = -1.0, best_m = -1.0;
+    while (vr.coarse_runs < kStrengthenCoarseRuns) {
+      const double m = margin_of(run_one(&coarse, vf, {}));
+      ++vr.coarse_runs;
+      best_m = std::max(best_m, m);
+      if (m >= aim) {
+        pass_vf = vf;
+        if (vf <= floor_vf + 1e-9) break;
+        vf = fail_vf > 0.0 ? 0.5 * (vf + fail_vf) : std::max(floor_vf, 0.5 * vf);
+      } else {
+        fail_vf = vf;
+        if (vf >= 1.0 - 1e-9) break;
+        vf = pass_vf > 0.0 ? 0.5 * (vf + pass_vf) : std::min(1.0, 2.0 * vf);
+      }
+      if (pass_vf > 0.0 && fail_vf > 0.0 && pass_vf / fail_vf < 1.08) break;
+    }
+    if (pass_vf < 0.0) {
+      vr.status = "unreachable";
+      char note[200];
+      std::snprintf(note, sizeof(note),
+                    "no fraction of the box reached it on the coarse grid (best "
+                    "margin %.4g)",
+                    best_m);
+      vr.note = note;
+      vr.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+                       .count();
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // 2. Fine run, verify the export, repair at most twice.
+    vf = pass_vf;
+    std::vector<double> seed;
+    MinimizePlasticResult best;
+    double best_verified = -1.0;
+    bool ok = false;
+    for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
+      MinimizePlasticResult r = run_one(nullptr, vf, seed);
+      const MinimizePlasticVariant& v = r.evaluated.front();
+      const std::string stl =
+          join_path(work, "v" + std::to_string(k + 1) + "_" +
+                              std::to_string(attempt) + ".stl");
+      write_stl_file(stl, variant_export_model_mesh(v, job.output, r.solved_grid, iso,
+                                                    &model));
+      const AnalyzeJobResult a =
+          analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
+      const double verified = a.analysis.margin_effective;
+      // What the version prints, against the part as drawn and the Keep Clears.
+      const std::vector<double>& rho = v.optimization.physical_density;
+      long long inter = 0, uni = 0, clear = 0;
+      for (std::size_t i = 0; i < rho.size(); ++i) {
+        const bool printed = rho[i] > iso;
+        inter += printed && drawn_part[i];
+        uni += printed || drawn_part[i];
+        clear += printed && !options.clearance_void.empty() &&
+                 options.clearance_void[i] == MaskValue::FrozenVoid &&
+                 mask[i] != MaskValue::FrozenSolid;
+      }
+      double defl = 0.0;
+      if (a.analysis.displacement_field.size() ==
+          static_cast<std::size_t>(3 * fea_node_count(G)))
+        for (const int n : load_nodes) {
+          const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
+          defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
+        }
+      const bool clean = v.accepted && v.v3.specks_dropped == 0 && clear == 0;
+      if (verified > best_verified) {
+        best_verified = verified;
+        vr.volume_fraction = vf;
+        vr.in_loop_margin = v.report.margin_effective;
+        vr.verified_margin = verified;
+        vr.mass_grams = v.mass_grams;
+        vr.mass_fraction_of_original =
+            sr.original_mass_grams > 0.0 ? v.mass_grams / sr.original_mass_grams : 0.0;
+        vr.max_deflection_mm = defl;
+        vr.iou_with_original =
+            uni > 0 ? static_cast<double>(inter) / static_cast<double>(uni) : 0.0;
+        vr.essentially_original = vr.iou_with_original > 0.9;
+        vr.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
+        vr.specks = v.v3.specks_dropped;
+        vr.keep_clear_voxels = clear;
+        vr.repairs = attempt;
+        best = std::move(r);
+      }
+      if (clean && verified >= target) {
+        ok = true;
+        break;
+      }
+      // Repair: raise the fraction by the shortfall, from this version's design.
+      seed = best.evaluated.front().optimization.physical_density;
+      const double ratio = verified > 0.0 ? target / verified : 2.0;
+      vf = std::min(1.0, vf * std::max(1.05, std::pow(ratio, 1.0 / kStrengthenGamma)));
+    }
+    vr.seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    if (!ok) {
+      vr.status = "unreachable";
+      vr.note = "the verified export missed the target after " +
+                std::to_string(kStrengthenRepairs) + " repairs (best shown)";
+      sr.versions.push_back(vr);
+      continue;
+    }
+    // Two versions at the same design are one.
+    if (!out.evaluated.empty() && std::fabs(vr.volume_fraction - prev_vf) <= 0.01 * prev_vf) {
+      vr.status = "merged";
+      vr.note = "the same design as version " + std::to_string(k);
+      sr.versions.push_back(vr);
+      continue;
+    }
+    vr.status = vr.repairs > 0 ? "repaired" : "verified";
+    if (vr.essentially_original) vr.note = "essentially your original";
+    prev_vf = vr.volume_fraction;
+    prev_verified = vr.verified_margin;
+    sr.versions.push_back(vr);
+    out.solved_grid = best.solved_grid;
+    out.used_multigrid = best.used_multigrid;
+    out.mg_levels = best.mg_levels;
+    out.mg_hierarchy_ever_built = best.mg_hierarchy_ever_built;
+    out.growth_ladder = false;
+    append_rung(out, std::move(best));
+  }
+  if (out.evaluated.empty()) out.solved_grid = domain.grid;
+  out.report.material = job.material;
+  out.report.strengthen = std::move(sr);
+  return out;
+}
+
 }  // namespace
 
 PreflightJobResult preflight_job(const JobDescription& job,
@@ -14114,8 +14425,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // arm reports `mg_algebraic_level1: false` and reads as a null result.
   run_info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
   run_info.mixed_precision = fea_matfree_mixed_precision_enabled();
-  result.pipeline =
-      minimize_plastic(grid, material, job.material, bcs, rules, options);
+  if (job.loads.present && job.loads.redesign == "strengthen") {
+    // CORE LIST item 50 — the versions are searched and verified inside; only the
+    // final ones are streamed, through the same callback a ladder rung uses.
+    result.pipeline =
+        strengthen_versions(job, job_dir, out_dir, materials, rules, result.model,
+                            model_is_mesh, material, grid, bcs, options, domain);
+    if (options.on_variant)
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+        options.on_variant(v, result.pipeline.evaluated);
+  } else {
+    result.pipeline =
+        minimize_plastic(grid, material, job.material, bcs, rules, options);
+  }
 
   // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Record the OBSERVED
   // multigrid outcome now the run is done (the up-front write left it null), and —

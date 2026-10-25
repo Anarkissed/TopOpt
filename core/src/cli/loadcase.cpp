@@ -768,6 +768,12 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // the driver runs, so the two never disagree. Needed up front to index a
   // progressive-variant stream a front-end registers before minimize_plastic
   // returns.
+  // CORE LIST item 50 — "Redesign to strengthen" rebuilds inside the box from what
+  // is frozen, and its fractions are of that domain (pipeline.hpp).
+  if (lc.strengthen) {
+    opts.domain_box_only = true;
+    opts.volume_basis_domain = true;
+  }
   setup.solved_grid = minimize_plastic_solved_grid(grid, opts);
 
   // Handoff 100 — rasterize the declared "Keep clear" clearances onto the SOLVED

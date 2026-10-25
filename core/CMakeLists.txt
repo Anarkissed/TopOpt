@@ -1572,6 +1572,11 @@ if(OpenCASCADE_FOUND)
   add_executable(segment_evidence EXCLUDE_FROM_ALL tests/tools/segment_evidence.cpp)
   target_link_libraries(segment_evidence PRIVATE topopt)
 
+  # CORE LIST item 50 preview: "Redesign to strengthen", version 1 only.
+  #   ./core/build/strengthen_sample <job.json> <out_dir> <materials> <rules> [res]
+  add_executable(strengthen_sample EXCLUDE_FROM_ALL tests/tools/strengthen_sample.cpp)
+  target_link_libraries(strengthen_sample PRIVATE topopt)
+
   # Phase 2 mesh-repair evidence: before/after reports on real broken brackets.
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
@@ -2286,6 +2291,17 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME export_bodies COMMAND test_export_bodies)
+
+  # CORE LIST item 50: "Redesign to strengthen" — three versions rebuilt in the box,
+  # each verified on its exported geometry; unreachable targets reported; a failing
+  # part referenced to the requirement; without the key, today's growth ladder.
+  add_executable(test_strengthen tests/validation/test_strengthen.cpp)
+  target_link_libraries(test_strengthen PRIVATE topopt)
+  target_compile_definitions(test_strengthen PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME strengthen COMMAND test_strengthen)
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries

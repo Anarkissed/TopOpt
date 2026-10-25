@@ -313,6 +313,50 @@ struct FrozenShareReport {
   std::vector<SkippedRungReport> skipped_rungs;
 };
 
+// ── "REDESIGN TO STRENGTHEN" (CORE LIST item 50) ─────────────────────────────
+// Three versions rebuilt inside the design box from what is frozen, each the least
+// plastic found that meets its target: 25 / 50 / 75 % less worst stress than the
+// reference (the part's verified margin as drawn, or margin_required if that is
+// higher). Every margin here is the gate's knockdown margin. `verified_margin` is
+// the EXPORTED geometry re-voxelized and certified; `in_loop_margin` is the rung's
+// own certification of its voxel field.
+struct StrengthenVersionReport {
+  int version = 0;
+  double stress_cut = 0.0;      // 0.25 / 0.50 / 0.75
+  double target_margin = 0.0;
+  std::string status;           // "verified" | "repaired" | "unreachable" | "merged"
+  double volume_fraction = 0.0; // of the domain's free (Active) voxels
+  double in_loop_margin = 0.0;
+  double verified_margin = 0.0;
+  double mass_grams = 0.0;
+  double mass_fraction_of_original = 0.0;
+  double max_deflection_mm = 0.0;  // max |u| over the load nodes, verified solve
+  double iou_with_original = 0.0;  // printed voxels vs the part as drawn
+  bool essentially_original = false;  // IoU > 0.9
+  bool anchors_attached = true;       // item 47's check on the version
+  int specks = 0;
+  long long keep_clear_voxels = 0;    // exported voxels inside a Keep Clear
+  int coarse_runs = 0;
+  int repairs = 0;
+  double seconds = 0.0;
+  std::string note;
+};
+struct StrengthenReport {
+  bool evaluated = false;
+  double as_drawn_margin = 0.0;
+  double margin_required = 0.0;
+  double reference_margin = 0.0;
+  double ceiling_margin = 0.0;       // the domain filled solid
+  double original_mass_grams = 0.0;
+  long long frozen_outside_box_voxels = 0;
+  int coarse_resolution = 0;
+  // The adaptive-volume rule used (our proposal, after Lin & Sheu 2009):
+  // vf <- vf * (target (1 + delta) / margin)^gamma, each step capped at +-vf_step,
+  // floored at the previous version's fraction.
+  double delta = 0.0, gamma = 0.0, vf_step = 0.0;
+  std::vector<StrengthenVersionReport> versions;
+};
+
 // The whole run's report: the material used and one entry per requested variant.
 struct JobReport {
   std::string material;  // material name (key into materials.json)
@@ -331,6 +375,8 @@ struct JobReport {
   std::vector<VariantReport> rejected;
   // CORE LIST item 40 — emitted as report.json "frozen_share" only when evaluated.
   FrozenShareReport frozen_share;
+  // CORE LIST item 50 — emitted as report.json "strengthen" only when evaluated.
+  StrengthenReport strengthen;
 };
 
 // Serialize a job report to a single JSON document (2-space indented). Numeric

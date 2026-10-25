@@ -186,6 +186,23 @@ struct MinimizePlasticOptions {
   };
   std::vector<AnchorVoxels> anchor_voxels;
 
+  // CORE LIST item 50 — "Redesign to strengthen" (run_job's strengthen_part drives
+  // one-rung calls with these). All three default off, so every other run is
+  // untouched.
+  //   domain_box_only    — on the design-box path the part's own voxels OUTSIDE the
+  //                        box are not design space unless something froze them
+  //                        (a protection, a pad, an anchor or load skin): they are
+  //                        emptied, so the run builds from the box and the frozen
+  //                        material only.
+  //   volume_basis_domain — a rung's fraction is of the DOMAIN (the Active
+  //                        envelope), not of the part: no part-relative rescale.
+  //   initial_design     — when non-empty (size of the solved grid), the first
+  //                        rung starts from it instead of uniform (a repair's warm
+  //                        start). Ignored when warm_start_coarse is armed.
+  bool domain_box_only = false;
+  bool volume_basis_domain = false;
+  std::vector<double> initial_design;
+
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
   // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the
   // imported part's bounding region. When set, the driver EXPANDS the run onto a

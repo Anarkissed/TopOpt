@@ -111,6 +111,25 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
 - Test on his Carriage Arms (efe18e33 copied to evidence): A = his outputs; B = from scratch at 1.10/1.25/1.55 at res
   64; C = the new mode, 3 versions at res 128 (estimate 1.5-2 h). Per-version table and one render per version.
 
+### Item 50, as built (approved 2026-10-25 01:52, arm B dropped)
+
+- Job key `loads.redesign: "strengthen"` (needs `minimize_plastic: false` and a design box; carried through the
+  JobLoadCase field ledger). The load case sets `domain_box_only` + `volume_basis_domain`; `initial_design` seeds a repair.
+- `strengthen_versions` (run_job.cpp, beside `build_job_setup`): reference = max(as drawn, required) via `analyze_job`;
+  ceiling = the domain filled solid, certified; per version target = ref / (1 - cut), at least 1.05 x the previous
+  verified; above 0.95 x ceiling -> unreachable. The fraction is BRACKETED on the res/2 grid (halve while the aim
+  ref x (1 + 0.10) holds, double while it fails, bisect; at most 6 runs), changed from the +-5 % steps after the sample
+  showed a margin plateau set by frozen features. Then one fine run from uniform, its exported model-frame mesh
+  (`variant_export_model_mesh`) written and certified by `analyze_job`; repair up to 2 (vf x (target/verified)^(1/0.75),
+  warm start). Receipt: report.json `strengthen` (reference, ceiling, rule, per version: target, status, vf, in-loop and
+  verified margin, mass g / fraction, max |u| at the load nodes, IoU with the original, anchors attached, specks, Keep
+  Clear voxels, coarse runs, repairs, seconds). Accepted versions are ordinary variants (files `variant_NNN` by their
+  domain fraction).
+- Tests: `test_strengthen` RED (the growth ladder refused the domain basis) then 16/16; full suite 143/143.
+- Samples for him: `~/dev/TopOpt/reviewer-inbox/2026-10-24-strengthen-sample{,-2}/` (tool `core/tests/tools/strengthen_sample.cpp`).
+- Observed: the coarse grid under-reads the margin, so version 1 lands heavier than needed (test bar: vf 0.82, verified
+  11.94 vs target 7.92). A fine-grid lightening step is the candidate follow-up, not built.
+
 ## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25) — WITHDRAWN by the 22:59 brief
 
 On a part that PASSES as drawn, "Redesign to strengthen" means stiffness: certify as drawn (margin, flex = max |u| over

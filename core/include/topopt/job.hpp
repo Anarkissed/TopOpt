@@ -964,6 +964,7 @@ struct JobLoadCase {
   double layer_height_mm = 0.0;
 
   bool minimize_plastic = true;             // true = reduction ladder + pad
+  std::string redesign;                     // item 50: "" | "strengthen"
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
   // its INNER / OUTER line widths, so the accept gate can size the solid wall ring

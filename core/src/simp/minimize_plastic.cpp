@@ -227,6 +227,28 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
               MaskValue::FrozenSolid;
         }
   }
+  // CORE LIST item 50 — domain_box_only: the part outside the box is not design
+  // space unless something froze it; it is emptied (no element, no variable).
+  if (options.domain_box_only) {
+    const DesignBox& box = *options.design_box;
+    for (int pk = 0; pk < part_grid.nz; ++pk)
+      for (int pj = 0; pj < part_grid.ny; ++pj)
+        for (int pi = 0; pi < part_grid.nx; ++pi) {
+          const VoxelTag t = part_grid.tag(pi, pj, pk);
+          if (t == VoxelTag::Empty || t == VoxelTag::Load || t == VoxelTag::Fixture)
+            continue;
+          const int i = pi + domain.offset_i, j = pj + domain.offset_j,
+                    k = pk + domain.offset_k;
+          const std::size_t idx = out.grid.index(i, j, k);
+          if (out.mask[idx] == MaskValue::FrozenSolid) continue;
+          const Vec3 c = out.grid.voxel_center(i, j, k);
+          if (c.x >= box.min.x && c.x <= box.max.x && c.y >= box.min.y &&
+              c.y <= box.max.y && c.z >= box.min.z && c.z <= box.max.z)
+            continue;
+          out.grid.tags[idx] = VoxelTag::Empty;
+          out.mask[idx] = MaskValue::FrozenVoid;
+        }
+  }
   out.bcs.reserve(bcs.size());
   for (const DirichletBC& bc : bcs)
     out.bcs.push_back({remap_node_to_domain(part_grid, domain, bc.node),
@@ -1015,7 +1037,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // `active_effective` mirrors what effective_mask (simp) actually optimises: Active
   // voxels minus the Empty/Load/Fixture voxels it reclassifies out of the budget.
   // Gated on the box path only, so the no-box run is byte-identical.
-  const bool part_relative = expanded && !options.freeze_imported_part;
+  const bool part_relative = expanded && !options.freeze_imported_part &&
+                             !options.volume_basis_domain;  // item 50
   const double part_solid = static_cast<double>(grid.solid_count());
 
   // ── GROWTH NEEDS SOMEWHERE TO GO (task 2026-08-03-growth-ladder, rule (iii)) ──
@@ -1215,6 +1238,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // no speedup claim can hide it. Peak memory is unchanged: the coarse transient is
   // smaller but the fine rungs still each pay the full iteration-0 build (091).
   std::vector<double> warm_seed;
+  // CORE LIST item 50 — a repair starts from the version it repairs.
+  if (!options.warm_start_coarse && options.initial_design.size() == G.voxel_count())
+    warm_seed = options.initial_design;
   if (options.warm_start_coarse) {
     // The pre-solve's own wall, charged as a separate line (AC3 of handoff
     // 2026-08-02-warm-start-coarse-experiment). The span covers EVERYTHING the
