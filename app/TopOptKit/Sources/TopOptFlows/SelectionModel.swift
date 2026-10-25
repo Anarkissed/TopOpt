@@ -351,6 +351,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     public func group(forFace face: FaceID) -> SelectionGroup? {
         groups.first { $0.faces.contains(face) }
     }
+    public func groups(forFace face: FaceID) -> [SelectionGroup] { groups.filter { $0.faces.contains(face) } }   // Flexible (PR #362) H55a: several roles on one face (owner 2026-10-25) — EVERY group that holds the face
+    public mutating func joinFaces(_ keys: [FaceID], to id: UUID) { if let i = groups.firstIndex(where: { $0.id == id }) { groups[i].addFaces(keys) } }   // Flexible (PR #362) H55b: several roles on one face (owner 2026-10-25) — a join that takes the faces from no other group
 
     /// The colour a face should render with (its group's colour), or nil if the
     /// face is in no group.

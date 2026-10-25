@@ -291,17 +291,21 @@ extension ProjectModel {
     /// ★ THE FACE CHIP'S "Add to <group>": the face(s) he just tapped (a fresh, still-pending group) join an existing group
     /// instead of starting a new one. Today's SelectionModel.addFaces (a face belongs to one group) and today's removal of the
     /// emptied pending group; nothing new reaches the job.
-    public func joinPending(_ pending: UUID, into target: UUID) {
+    /// ★ // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25): the faces JOIN the group and stay in any other; Load + Anchor on one face is refused (the line).
+    @discardableResult   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25) — the Load + Anchor line, or nil
+    public func joinPending(_ pending: UUID, into target: UUID) -> String? {   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25)
         guard pending != target, force.kind(for: pending).isPending, groupView.canEdit(target),
               let faces = selection.groups.first(where: { $0.id == pending })?.faces,
-              selection.groups.contains(where: { $0.id == target }) else { return }
+              selection.groups.contains(where: { $0.id == target }) else { return nil }   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25)
+        if let r = SeveralRoles.role(of: force.kind(for: target)), SeveralRoles.clashes(faces: faces, as: r, in: target, selection: selection, force: force) { return SeveralRoles.anchorAndLoadLine }   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25) — Load + Anchor on one face, refused
         sealUndoStep()
-        selection.addFaces(faces, to: target)
+        selection.joinFaces(faces, to: target)   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25) — the faces keep the other groups they are in (was addFaces, which took them out)
         selection.remove(pending)
         force.clearKind(pending)
         force.sync(groups: selection.groups)
         groupView.forget(pending)
         selection.setActive(target)
+        return nil   // Flexible (PR #362) H55d: several roles on one face (owner 2026-10-25)
     }
 
     /// The group the face chip offers to join: the most recent group that already has a role (never the pending one).

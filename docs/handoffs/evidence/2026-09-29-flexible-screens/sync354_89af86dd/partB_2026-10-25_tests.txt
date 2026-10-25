@@ -1,0 +1,91 @@
+# Part B — several roles on one face (owner 2026-10-25, relayed 03:16), and the final runs; swift test --scratch-path /tmp/r7x20b-build
+## RED (tests + the API surface only: route/joinPending return nil, not wired): SeveralRolesOnOneFaceTests|WorkspaceInteractionTests|LatticeStaleTypeTests
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.182 (2.183) seconds
+	 Executed 9 tests, with 17 failures (0 unexpected) in 14.745 (14.746) seconds
+Swift/ContiguousArrayBuffer.swift:695: Fatal error: Index out of range
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAnotherGroupsFaceReselectsItWithoutStealing]' passerror: Process '/Applications/Xcode.app/Contents/Developer/usr/bin/xctest -XCTest TopOptFlowsTests.LatticeStaleTypeTests/testAStaleTypeLosesTheLatticeAndTheGateNamesIt,TopOptFlowsTests.LatticeStaleTypeTests/testBothBu
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:100: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists] : XCTAssertEqual failed: ("[3]") is not equal to ("[2]") - Keep clear sends it in clearances
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:119: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace] : XCTAssertEqual failed: ("[4]") is not equal to ("[0, 1]")
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:120: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace] : XCTAssertEqual failed: ("[4]") is not equal to ("[1]")
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:132: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testCoreAcceptsAFaceInProtectAndClearances] : XCTAssertEqual failed: ("[2]") is not equal to ("[3]") - premise: the same face in both lists
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:177: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("A face can’t be both held and loaded — pick one.")") - tap: the plain line
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:178: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine] : XCTAssertEqual failed: ("SelectionModel(groups: [TopOptFlows.SelectionGroup(id: 4A0C5B6E-8AC7-4FDE-A04F-6FF69866F81D, name: "Group A", colorIndex:
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:184: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("A face can’t be both held and loaded — pick one.")") - chip: Load on an anchored fa
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:190: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("A face can’t be both held and loaded — pick one.")") - join: the plain line
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:191: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine] : XCTAssertEqual failed: ("SelectionModel(groups: [TopOptFlows.SelectionGroup(id: 4A0C5B6E-8AC7-4FDE-A04F-6FF69866F81D, name: "Group A", colorIndex:
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:214: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup] : XCTAssertNotEqual failed: ("264C6A6E-26DE-4FA8-81CD-A0598DBDF97E") is equal to ("264C6A6E-26DE-4FA8-81CD-A0598DBDF97E") - a hidden group never 
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:215: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup] : XCTAssertEqual failed: ("[264C6A6E-26DE-4FA8-81CD-A0598DBDF97E]") is not equal to ("[264C6A6E-26DE-4FA8-81CD-A0598DBDF97E, 264C6A6E-26DE-4FA8-8
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:223: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup] : XCTAssertEqual failed: ("Optional([4])") is not equal to ("Optional([4, 0])")
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:233: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testTheBadgeShowsEveryRoleAFaceHas] : XCTAssertEqual failed: ("[]") is not equal to ("[TopOptFlows.SeveralRoles.Badge(roles: [TopOptFlows.SeveralRoles.Role.keepClear, TopOptFlows.SeveralRoles.Role.prote
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:253: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInTheActiveGroupStillDeselectsOnlyThere] : XCTAssertEqual failed: ("[]") is not equal to ("[7F0BF6A6-1C8E-469B-99E2-6C304F17BCD4]") - the anchor keeps its face
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:324: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testEveryH55HookIsPinnedOnceWithItsGate] : XCTAssertEqual failed: ("["H55c-doc: the hook appears 0 times (must be exactly once)", "H55c-result: the hook appears 0 times (must be exactly once)", "H55c-fo
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:96: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists] : XCTAssertEqual failed: ("[56D9DDE2-8831-492F-8276-A4A46B2DD56D]") is not equal to ("[56D9DDE2-8831-492F-8276-A4A46B2DD56D, A5FF0A38-A2FA-4E8F-9E1F-B
+app/TopOptKit/Tests/TopOptFlowsTests/SeveralRolesOnOneFaceTests.swift:97: error: -[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists] : XCTAssertEqual failed: ("Optional([3])") is not equal to ("Optional([2])") - the free face left; Keep clear holds only c
+app/TopOptKit/Tests/TopOptFlowsTests/WorkspaceInteractionTests.swift:114: error: -[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups] : XCTAssertEqual failed: ("Optional(07F52F73-81B8-4AFA-970B-D1C3C33851B4)") is not equal to ("Optional(1975777E-87FA-4BD4-A5B9-5A04708754D0)") - B is still the g
+app/TopOptKit/Tests/TopOptFlowsTests/WorkspaceInteractionTests.swift:116: error: -[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups] : XCTAssertEqual failed: ("[6]") is not equal to ("[6, 5]") - the face joined B
+app/TopOptKit/Tests/TopOptFlowsTests/WorkspaceInteractionTests.swift:118: error: -[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups] : XCTAssertEqual failed: ("[6]") is not equal to ("[5]") - A untouched
+  (the Fatal error is the re-pinned WorkspaceInteractionTests test indexing groups[1] under the OLD rule; a guard was added before green)
+
+## GREEN (wired): + TopologyStageTests SelectionModelTests GroupViewStateTests SelectionTaggingTests SelectionsListTests EditFacesStageTests EditFacesModeTests
+Test Suite 'EditFacesModeTests' passed
+Test Suite 'EditFacesStageTests' passed
+Test Suite 'FlexibleSelectionsListTests' passed
+Test Suite 'GroupViewStateTests' passed
+Test Suite 'LatticeStaleTypeTests' passed
+Test Suite 'SelectionModelTests' passed
+Test Suite 'SelectionTaggingTests' passed
+Test Suite 'SelectionsListTests' passed
+Test Suite 'SeveralRolesOnOneFaceTests' passed
+Test Suite 'TopologyStageTests' passed
+Test Suite 'WorkspaceInteractionTests' passed
+	 Executed 81 tests, with 0 failures (0 unexpected) in 14.987 (14.996) seconds
+
+## (2) core accepts it: topopt-cli b21c5d9a8311 preflight (worker-core-61cfce05/core/build-fix), read-only, temp dir — several_roles_cli/
+  several_roles: exit 0 (face 2 in face_protections AND clearances; on the 10 mm cube the outward Keep-clear slab lies outside the grid: clearance SKIP=region-outside-grid, protection frozen)
+  malformed (red control, face_protections ["not a face"]): exit 1, "face_protections entry" must be a number
+
+## (5) goldens + the 16 stage-job hashes
+  FlexibleAngledGoldenTests det: identical 38 DIFFERS 0 PART-SKIP 0; Executed 13 tests, with 0 failures (0 unexpected) in 14.399 (14.402) seconds
+  FlexibleAngledGoldenTests unseeded: identical 32 DIFFERS 0 PART-SKIP 1; Executed 13 tests, with 0 failures (0 unexpected) in 15.422 (15.425) seconds
+  = the post-sync base (det 38 / unseeded 32 + 1 PART-SKIP, 0 DIFFERS)
+  stage_job_hashes.sh (SWIFT_TEST_ARGS=--scratch-path /tmp/r7x20b-build): cmp-IDENTICAL to stage_job_hashes_sync354.txt (16 rows + control, sources lines included)
+
+## FINAL combined run (Part A + Part B + the 19 P1 hook-pin classes + the CI type-check classes + LatticeStaleTypeTests), before commit
+Test Suite 'EditFacesModeTests' passed
+Test Suite 'EditFacesStageTests' passed
+Test Suite 'FlexibleBatchCHookTests' passed
+Test Suite 'FlexibleBatchMXrayTests' passed
+Test Suite 'FlexibleChromeLayoutTests' passed
+Test Suite 'FlexibleH39HotfixHookTests' passed
+Test Suite 'FlexibleMainPageHookTests' passed
+Test Suite 'FlexibleMainPageRound4Tests' passed
+Test Suite 'FlexibleR7E3Tests' passed
+Test Suite 'FlexibleR7M1Tests' passed
+Test Suite 'FlexibleR7U21HookTests' passed
+Test Suite 'FlexibleR7X1Tests' passed
+Test Suite 'FlexibleRound6HostedTests' passed
+Test Suite 'FlexibleRound6Tests' passed
+Test Suite 'FlexibleRound7ScreenHookTests' passed
+Test Suite 'FlexibleRound7SelectionsHookTests' passed
+Test Suite 'FlexibleRound7ViewsTests' passed
+Test Suite 'FlexibleRound9HookTests' passed
+Test Suite 'FlexibleS1VerifyTests' passed
+Test Suite 'FlexibleSelectionsListTests' passed
+Test Suite 'FlexibleSettingsRound4Tests' passed
+Test Suite 'FlexibleSquishPlayerTests' passed
+Test Suite 'FlexibleStageCapsuleTests' passed
+Test Suite 'FlexibleStepRepairHookTests' passed
+Test Suite 'FlexibleSurfaceNavTests' passed
+Test Suite 'FlexibleSync354HookTests' passed
+Test Suite 'GroupViewStateTests' passed
+Test Suite 'LatticeStageTests' passed
+Test Suite 'LatticeStaleTypeTests' passed
+Test Suite 'SelectionModelTests' passed
+Test Suite 'SelectionTaggingTests' passed
+Test Suite 'SelectionsListTests' passed
+Test Suite 'SeveralRolesOnOneFaceTests' passed
+Test Suite 'TopologyStageTests' passed
+Test Suite 'WorkspaceInteractionTests' passed
+	 Executed 216 tests, with 0 failures (0 unexpected) in 1162.495 (1162.523) seconds
+  + FlexibleRound7ViewsHostedTests (holds FlexibleRound7ViewsReviewHostedTests.swift's extension) + LatticeStaleTypeTests:
+	 Executed 18 tests, with 0 failures (0 unexpected) in 322.152 (322.156) seconds

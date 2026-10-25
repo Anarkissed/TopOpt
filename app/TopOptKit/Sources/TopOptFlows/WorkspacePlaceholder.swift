@@ -2412,7 +2412,7 @@ public struct WorkspacePlaceholder: View {
         }
         let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
-        WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force)
+        if let line = WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force, hidden: project.groupView.hidden) { model.toast = line }   // Flexible (PR #362) H55e: several roles on one face (owner 2026-10-25) — a hidden group never claims the tap; Load + Anchor's line
         // Round-2 T2: primitive chips are reachable ONLY by tapping the primitive,
         // one of its faces, or its group row in the library — a tap that merely
         // grew a selection must NOT pop the chip editor open. Reveal only when
@@ -2607,6 +2607,10 @@ public struct WorkspacePlaceholder: View {
         guard let proj = projection, let cm = groupCentroidModel(g) else { return nil }
         return proj.project(settledWorld(cm))
     }
+
+    private func severalRolesBadges(_ proj: CameraProjection) -> [(roles: [SeveralRoles.Role], at: CGPoint)] {   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25) — a badge at the centre of each set of faces several groups hold
+        SeveralRoles.badges(selection: selection, force: force, hidden: project.groupView.hidden, keepClearOn: { project.keepClearIsOn($0) }).compactMap { b in SeveralRoles.centre(of: b.faces, in: viewerMesh).flatMap { proj.project(settledWorld($0)) }.map { (b.roles, $0) } }   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25)
+    }   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25) — (severalRolesBadges)
 
     // MARK: keep-out layout pass (handoff 2026-07-27)
 
@@ -11579,6 +11583,7 @@ public struct WorkspacePlaceholder: View {
             ZStack(alignment: .topLeading) {
                 if force.phase == .edit, let mesh = viewerMesh, let proj = projection {
                     let placed = keepOutResolved(proj)
+                    if stage == .topology { ForEach(Array(severalRolesBadges(proj).enumerated()), id: \.offset) { _, b in SeveralRolesBadge(roles: b.roles).position(b.at).allowsHitTesting(false) } }   // Flexible (PR #362) H55i: several roles on one face (owner 2026-10-25) — every role a face has, drawn
                     if let g = activeGroup, force.kind(for: g.id).isPending {
                         let pt = groupScreen(g)
                         // Keep-out pass owns placement (handoff 2026-07-27): the action bar is
@@ -11591,7 +11596,7 @@ public struct WorkspacePlaceholder: View {
                             if stage == .topology, let target = project.joinTarget(excluding: g.id) {
                                 JoinButton(group: target, note: TopologySelectionsCopy.joinNote, idPrefix: "topology",
                                            label: TopologySelectionsCopy.joinLabel(target.name, role: topologyRoleWord(target.id))) {
-                                    project.joinPending(g.id, into: target.id)
+                                    if let line = project.joinPending(g.id, into: target.id) { model.toast = line }   // Flexible (PR #362) H55h: several roles on one face (owner 2026-10-25) — the join's refusal line
                                 }
                                 .frame(width: 300)
                             }
@@ -11632,13 +11637,14 @@ public struct WorkspacePlaceholder: View {
 
     private func anchorLoadChip(_ g: SelectionGroup) -> some View {
         HStack(spacing: DS.Space.xs) {
-            Button { force.makeAnchor(g.id); selection.clearActive() } label: {
+            Button { if let line = SeveralRoles.refusal(committing: g.id, as: .anchor, selection: selection, force: force) { model.toast = line; return }; force.makeAnchor(g.id); selection.clearActive() } label: {   // Flexible (PR #362) H55f: several roles on one face (owner 2026-10-25) — Anchor on a loaded face, refused
                 chipLabel("lock.fill", "Anchor")
                     .foregroundStyle(DS.Color.accentGreen.color)
                     .background(Capsule().fill(DS.Color.accentGreen.opacity(0.2).color))
             }
             .buttonStyle(.plain)
             Button {
+                if let line = SeveralRoles.refusal(committing: g.id, as: .load, selection: selection, force: force) { model.toast = line; return }   // Flexible (PR #362) H55g: several roles on one face (owner 2026-10-25) — Load on a held face, refused
                 force.makeLoad(g.id)
                 model.toast = "Load added along gravity — scrub the weight, or pick Push / Pull"
             } label: {
