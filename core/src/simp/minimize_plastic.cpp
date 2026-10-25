@@ -2398,6 +2398,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       }
     }
 
+    // CORE LIST item 42, option B — ONE PIECE: bridge what the design split before
+    // anything below measures or certifies it, so every number includes the bridge.
+    BridgeResult bridge;
+    if (options.bridge_pieces) {
+      std::vector<char> allowed(G.voxel_count(), 0);
+      for (std::size_t i = 0; i < allowed.size(); ++i)
+        allowed[i] = mask[i] == MaskValue::Active || mask[i] == MaskValue::FrozenSolid;
+      const int radius = std::max(
+          1, static_cast<int>(std::lround(0.5 * options.min_feature_mm / G.spacing)));
+      bridge = bridge_split_bodies(G, variant.optimization.physical_density, kIso,
+                                   as_drawn_bodies, allowed, radius);
+    }
     const std::vector<double>& rho = variant.optimization.physical_density;
 
     // --- The CONNECTIVITY BELT ------------------------------------------------
@@ -2737,8 +2749,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         if (a.region_id >= 0) vr.lost_anchor_region_ids.push_back(a.region_id);
       }
     }
+    vr.bridges = bridge.bridges;
+    vr.bridge_voxels = bridge.voxels;
     vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
-                         vr.anchored_pieces_lost > 0;
+                         vr.anchored_pieces_lost > 0 || vr.bridges > 0;
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
     // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER

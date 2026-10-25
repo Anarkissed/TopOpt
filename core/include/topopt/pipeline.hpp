@@ -201,6 +201,11 @@ struct MinimizePlasticOptions {
   //                        start). Ignored when warm_start_coarse is armed.
   bool domain_box_only = false;
   bool volume_basis_domain = false;
+  // CORE LIST item 42, option B — ONE PIECE (voxel.hpp bridge_split_bodies): after a
+  // rung's optimize, carrying bodies the part as drawn held in one body are bridged
+  // back together before the rung is certified, and the line says "bridged". Off by
+  // default; the production load case arms it.
+  bool bridge_pieces = false;
   std::vector<double> initial_design;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN

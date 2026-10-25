@@ -770,6 +770,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // returns.
   // CORE LIST item 50 — "Redesign to strengthen" rebuilds inside the box from what
   // is frozen, and its fractions are of that domain (pipeline.hpp).
+  // CORE LIST item 42, option B — production keeps a part that was one piece as
+  // drawn in one piece (bridged, and said so).
+  opts.bridge_pieces = true;
   if (lc.strengthen) {
     opts.domain_box_only = true;
     opts.volume_basis_domain = true;

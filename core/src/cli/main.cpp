@@ -560,9 +560,15 @@ int main(int argc, char** argv) {
       // CORE LIST item 41 — a file carrying more than one body, or dropped specks.
       if (v.report.bodies_reported && v.accepted)
         std::printf("        %d bodies exported, %d loose speck(s) dropped "
-                    "(%lld voxels)\n",
+                    "(%lld voxels)%s\n",
                     v.report.bodies_exported, v.report.specks_dropped,
-                    v.report.speck_voxels);
+                    v.report.speck_voxels,
+                    v.report.bridges > 0
+                        ? ("; BRIDGED back into one piece (" +
+                           std::to_string(v.report.bridges) + " bridge(s), " +
+                           std::to_string(v.report.bridge_voxels) + " voxels)")
+                              .c_str()
+                        : "");
       // Task 2026-08-03-growth-ladder — on a growth run the accounting IS the
       // result: how much plastic this rung adds, and how much of the object you
       // are about to print was never in your model.

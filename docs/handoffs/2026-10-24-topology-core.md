@@ -138,8 +138,22 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
   v2 / v3 unreachable (cap 8.05, peaking beside the anchored holes 50/75: a possible fixed-support singularity). His live
   +10 %: 127.6 g, 6.95 in-loop. test_strengthen 17/17; full suite 143/143.
 
-## Next (ruled 2026-10-25 03:58): item 42 option B (bridge split pieces, re-certify, "bridged"), then KEEP (Manifold,
-pinned via vcpkg, all three slices without TBB, union time measured on his export first).
+## Item 42, option B, as built (ruled 2026-10-25 03:58)
+
+- `bridge_split_bodies` (voxel.hpp / voxelize.cpp): carrying design bodies that the part AS DRAWN held in one body are
+  joined from the largest by the cheapest 26-neighbour path (costs 1 / sqrt 2 / sqrt 3) through allowed voxels (mask
+  Active or FrozenSolid, not Empty: so never through a keep-out or a Keep Clear), thickened by
+  round(min_feature / 2 / h) voxels (at least 1), repeated until each group is one body. A part drawn as separate bodies
+  is left separate; a group no path can join stays split, and the belt / item 47 judge it (the fallback).
+- `MinimizePlasticOptions::bridge_pieces` (default off); the production load case arms it. Runs in the rung loop before
+  the belt, item 47's check, the warm seed and the certification, so every number includes the bridge. The line's
+  `bodies` block carries `bridges` and `bridge_voxels`; the CLI says BRIDGED.
+- Tests: `test_bridge` 8/8 (with the bridge off: two blocks split / the stray anchor rejected by 47; on: one piece,
+  accepted, bridged; a part drawn as two stays two). `test_export_bodies` section B now pins the ruled production
+  behaviour (the plate's floor rung is bridged and accepted, its file one body, the bore attached); 47's rejection is
+  pinned in test_bridge (b) with the bridge off. 30/30. Full suite 144/144.
+
+## Next: KEEP (Manifold, pinned via vcpkg, all three slices without TBB, union time measured on his export first).
 
 ## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25) — WITHDRAWN by the 22:59 brief
 

@@ -18,6 +18,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <queue>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -920,6 +921,125 @@ LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_
     }
   }
   return lost;
+}
+
+BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
+                                 double iso, const PrintedBodies& as_drawn,
+                                 const std::vector<char>& allowed, int radius) {
+  BridgeResult out;
+  if (density.size() != grid.voxel_count() || allowed.size() != grid.voxel_count())
+    throw std::invalid_argument("bridge_split_bodies: size != grid.voxel_count()");
+  if (!as_drawn.decidable) return out;
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto decode = [&](std::size_t idx, int& i, int& j, int& k) {
+    i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+    j = static_cast<int>((idx / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    k = static_cast<int>(idx / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+  };
+  // Per as-drawn body, repeat until its carrying design bodies are one.
+  for (int guard = 0; guard < 64; ++guard) {
+    const PrintedBodies design = printed_bodies(grid, density, iso);
+    // The as-drawn body each carrying design body belongs to (by its BC voxels).
+    std::vector<int> group(design.bodies.size(), -1);
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx) {
+      const VoxelTag t = grid.tags[idx];
+      if (t != VoxelTag::Load && t != VoxelTag::Fixture) continue;
+      const int d = design.body_of_voxel[idx], a = as_drawn.body_of_voxel[idx];
+      if (d >= 0 && a >= 0 && group[static_cast<std::size_t>(d)] < 0)
+        group[static_cast<std::size_t>(d)] = a;
+    }
+    // The first as-drawn group with more than one design body: its largest body
+    // is the source, its other bodies the targets.
+    int g = -1, source = -1;
+    std::vector<char> target(design.bodies.size(), 0);
+    for (std::size_t b = 0; b < design.bodies.size() && g < 0; ++b) {
+      if (group[b] < 0) continue;
+      int members = 0;
+      for (std::size_t c = 0; c < design.bodies.size(); ++c) members += group[c] == group[b];
+      if (members > 1) g = group[b];
+    }
+    if (g < 0) break;
+    for (std::size_t b = 0; b < design.bodies.size(); ++b) {
+      if (group[b] != g) continue;
+      if (source < 0 || design.bodies[b].voxels >
+                            design.bodies[static_cast<std::size_t>(source)].voxels)
+        source = static_cast<int>(b);
+    }
+    for (std::size_t b = 0; b < design.bodies.size(); ++b)
+      target[b] = group[b] == g && static_cast<int>(b) != source;
+    // Dijkstra from the source body through allowed voxels to the nearest target.
+    std::vector<double> dist(grid.voxel_count(), std::numeric_limits<double>::infinity());
+    std::vector<long long> prev(grid.voxel_count(), -1);
+    using Item = std::pair<double, std::size_t>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> pq;
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == source) {
+        dist[idx] = 0.0;
+        pq.push({0.0, idx});
+      }
+    long long hit = -1;
+    while (!pq.empty()) {
+      const auto [d, idx] = pq.top();
+      pq.pop();
+      if (d > dist[idx]) continue;
+      const int b = design.body_of_voxel[idx];
+      if (b >= 0 && target[static_cast<std::size_t>(b)]) {
+        hit = static_cast<long long>(idx);
+        break;
+      }
+      int i, j, k;
+      decode(idx, i, j, k);
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            if (!di && !dj && !dk) continue;
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+            const std::size_t n = grid.index(ni, nj, nk);
+            const int nb = design.body_of_voxel[n];
+            const bool passable = (nb >= 0 && (nb == source || target[static_cast<std::size_t>(nb)])) ||
+                                  (allowed[n] && grid.tags[n] != VoxelTag::Empty);
+            if (!passable) continue;
+            const double step = std::sqrt(static_cast<double>(di * di + dj * dj + dk * dk));
+            const double nd = d + (nb >= 0 ? 0.0 : step);  // bodies are free to cross
+            if (nd < dist[n]) {
+              dist[n] = nd;
+              prev[n] = static_cast<long long>(idx);
+              pq.push({nd, n});
+            }
+          }
+    }
+    if (hit < 0) {
+      // No path inside the allowed space: this group stays split, and a second pass
+      // would find the same group first, so stop (the belt and item 47 judge it).
+      ++out.groups_left_split;
+      break;
+    }
+    // Lay the path, thickened by `radius` voxels within the allowed space.
+    std::vector<std::size_t> path;
+    for (long long v = hit; v >= 0; v = prev[static_cast<std::size_t>(v)]) {
+      if (design.body_of_voxel[static_cast<std::size_t>(v)] < 0)
+        path.push_back(static_cast<std::size_t>(v));
+    }
+    for (const std::size_t p : path) {
+      int i, j, k;
+      decode(p, i, j, k);
+      for (int dk = -radius; dk <= radius; ++dk)
+        for (int dj = -radius; dj <= radius; ++dj)
+          for (int di = -radius; di <= radius; ++di) {
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+            const std::size_t n = grid.index(ni, nj, nk);
+            if (!(n == p || (allowed[n] && grid.tags[n] != VoxelTag::Empty))) continue;
+            if (density[n] < 1.0) {
+              if (!(density[n] > iso)) ++out.voxels;
+              density[n] = 1.0;
+            }
+          }
+    }
+    ++out.bridges;
+  }
+  return out;
 }
 
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,

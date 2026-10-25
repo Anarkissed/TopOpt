@@ -2303,6 +2303,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME strengthen COMMAND test_strengthen)
 
+  # CORE LIST item 42, option B: a part that was one piece as drawn stays one piece
+  # (split carrying bodies are bridged before certification, and said so); item 47's
+  # rejection is the fallback; a part drawn as two bodies is left as two.
+  add_executable(test_bridge tests/validation/test_bridge.cpp)
+  target_link_libraries(test_bridge PRIVATE topopt)
+  target_compile_definitions(test_bridge PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME bridge COMMAND test_bridge)
+
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries
   # ONE depth, and a job stating two is refused with both figures; per-face depths

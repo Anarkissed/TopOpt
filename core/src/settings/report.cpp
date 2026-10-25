@@ -168,7 +168,9 @@ void emit_variant(std::string& out, const VariantReport& v,
            ", \"anchored_pieces_lost\": " + std::to_string(v.anchored_pieces_lost) +
            ", \"lost_anchor_voxels\": " + std::to_string(v.lost_anchor_voxels) +
            ", \"lost_anchor_face_ids\": " + ids(v.lost_anchor_face_ids) +
-           ", \"lost_anchor_region_ids\": " + ids(v.lost_anchor_region_ids) + "}";
+           ", \"lost_anchor_region_ids\": " + ids(v.lost_anchor_region_ids) +
+           ", \"bridges\": " + std::to_string(v.bridges) +
+           ", \"bridge_voxels\": " + std::to_string(v.bridge_voxels) + "}";
   }
   // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
   // of a growth run, and the licence for the [0,1] fraction bounds to be read on

@@ -257,6 +257,10 @@ struct VariantReport {
   long long speck_voxels = 0;
   double speck_volume_mm3 = 0.0;
   int anchored_pieces_lost = 0;
+  // CORE LIST item 42, option B — the design was split and BRIDGED back into one
+  // piece before it was certified (its numbers include the bridge).
+  int bridges = 0;
+  long long bridge_voxels = 0;
   long long lost_anchor_voxels = 0;
   std::vector<int> lost_anchor_face_ids;
   std::vector<int> lost_anchor_region_ids;

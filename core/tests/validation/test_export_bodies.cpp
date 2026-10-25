@@ -35,6 +35,7 @@
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/part.hpp"
+#include "topopt/pipeline.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
@@ -456,37 +457,30 @@ void section_anchored_bore(const MaterialLibrary& materials,
     if (line != nullptr && line->has("target_saturated") &&
         line->at("target_saturated").boolean) {
       floor_vf = v.requested_volume_fraction;
-      CHECK(!accepted,
-            "(47): the floor rung left the bore's pad an island, so it is "
-            "REJECTED, never accepted with the hole silently dropped");
-      CHECK(line->has("rejection_reason") &&
-                line->at("rejection_reason").str == "anchored piece detached",
-            "(47): it says why: an anchored piece detached");
-      bool names_bore = false;
-      if (line->has("bodies") && line->at("bodies").has("lost_anchor_face_ids"))
-        for (const Json& id : line->at("bodies").at("lost_anchor_face_ids").arr)
-          if (static_cast<int>(id.num) == bore) names_bore = true;
-      CHECK(names_bore, "(47): its line names the bore's face");
+      // CORE LIST item 42 B (ruled 2026-10-25 03:58): production now BRIDGES the
+      // bore's island back instead of rejecting the rung. Item 47's rejection is the
+      // fallback when no bridge fits; test_bridge (b) keeps that meaning with the
+      // bridge off.
+      CHECK(accepted, "(47 + 42B): the floor rung is accepted, the bore joined back");
+      CHECK(line->has("bodies") &&
+                static_cast<int>(line->at("bodies").at("bridges").num) >= 1 &&
+                static_cast<int>(line->at("bodies").at("anchored_pieces_lost").num) == 0,
+            "(47 + 42B): its line says it was bridged and lost no anchor");
       break;
     }
   }
   CHECK(floor_vf > 0.0, "precondition: some rung's target clamped to the floor");
-
-  // Every later floor rung would repeat that rejected design: skipped, saying so.
-  for (const Json& s : fs.at("skipped_rungs").arr) {
-    CHECK(std::fabs(s.at("same_design_as").num - floor_vf) < 1e-12,
-          "(47 + 40): a skipped rung names the rejected floor rung");
-    CHECK(s.at("reason").str.find("rejected: anchored piece detached") !=
-              std::string::npos,
-          "(47 + 40): and says that rung was rejected for a detached anchor");
-  }
-  // No file was written for a rung that lost the bore.
+  for (const MinimizePlasticVariant& v : r.pipeline.evaluated)
+    CHECK(v.report.rejection_reason != kAnchorDetachedReason,
+          "(47 + 42B): no rung is lost to a detached anchor once bridged");
+  // The floor rung's file holds the part as ONE body: the bore is attached.
   for (const std::string& p : r.mesh_paths) {
     char name[32];
     std::snprintf(name, sizeof(name), "variant_%03d.stl",
                   static_cast<int>(std::lround(floor_vf * 100.0)));
-    CHECK(p.find(name) == std::string::npos,
-          "(47): the rejected floor rung wrote no variant file");
+    if (p.find(name) == std::string::npos) continue;
+    CHECK(count_components(read_stl_file(p).mesh) == 1,
+          "(47 + 42B): the floor rung's file is one piece, the bore attached");
   }
 }
 

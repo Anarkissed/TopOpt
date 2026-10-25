@@ -305,6 +305,24 @@ struct LostAnchors {
 LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_drawn,
                                  const PrintedBodies& design);
 
+// CORE LIST item 42, option B (the reviewer's ruling of 2026-10-25 03:58): ONE PIECE.
+// The design's carrying bodies that the part AS DRAWN held in one body are joined
+// back into one piece: from the largest such body, the cheapest path (26-neighbour
+// steps costed 1 / sqrt 2 / sqrt 3) through `allowed` voxels to the nearest other
+// body, thickened by `radius` voxels (within `allowed`), repeated until the group is
+// one body. The bridge voxels are set to density 1 in `density`. A part drawn as
+// separate bodies stays separate; a group no path can join is left as it is (the
+// belt and item 47 then judge it). `allowed` is grid-indexed (non-zero = the bridge
+// may pass: design space, not a keep-out or Keep Clear).
+struct BridgeResult {
+  int bridges = 0;                  // paths laid
+  long long voxels = 0;             // voxels the bridges set to density 1
+  int groups_left_split = 0;        // as-drawn groups no path could join
+};
+BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
+                                 double iso, const PrintedBodies& as_drawn,
+                                 const std::vector<char>& allowed, int radius);
+
 // Result of the Gate V3 property suite. `passes` is the conjunction of the four
 // ARCHITECTURE §7 V3 gates; the individual fields expose why.
 struct V3Report {
