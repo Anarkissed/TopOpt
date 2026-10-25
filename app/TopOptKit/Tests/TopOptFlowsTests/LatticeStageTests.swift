@@ -244,7 +244,7 @@ final class LatticeStageTests: XCTestCase {
     func testPickingStructuralOrAestheticClearsAnyOtherType() throws {
         var s = LatticeSettings()
         let withFlex = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(s)) as? [String: Any] ?? [:]
-        var obj = withFlex; obj["flexible"] = ["setup": 1]
+        var obj = withFlex; obj["flexible"] = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(FlexibleStageSettings.newSetup()))   // ★ SYNC #354 (89af86dd) A1: #354's stand-in `["setup": 1]` does not decode as #362's FlexibleStageSettings; a real Flexible claim, encoded
         s = try JSONDecoder().decode(LatticeSettings.self, from: try JSONSerialization.data(withJSONObject: obj))
         s.chooseLatticeType(.aesthetic)
         XCTAssertEqual(s.stageMode, .aesthetic)

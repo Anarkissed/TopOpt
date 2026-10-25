@@ -195,6 +195,7 @@ extension LatticeSettings {
     /// Structural / Aesthetic pick nor a pending copy can leave Flexible's `owns()` claiming the project.
     public mutating func clearLatticeType() {
         stageMode = nil
+        flexible = nil   // Flexible (PR #362) H54: a Structural/Aesthetic pick or a pending copy clears Flexible's claim (reviewer ruling 2026-10-24 08:45, R4)
     }
 
     /// The selector's Structural / Aesthetic pick: any other type cleared first, then this one.
