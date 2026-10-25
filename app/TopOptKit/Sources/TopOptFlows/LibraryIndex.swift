@@ -69,16 +69,21 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     public var modelHash: String?
     /// In number order.
     public var versions: [LibraryVersion]
+    /// The highest number this part ever gave, kept when that version's folder is deleted, so a
+    /// number is never given twice (nil = the highest listed). Audit 2026-10-25.
+    public var lastNumber: Int?
 
-    public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = []) {
+    public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
+                lastNumber: Int? = nil) {
         self.id = id
         self.name = name
         self.modelHash = modelHash
         self.versions = versions
+        self.lastNumber = lastNumber
     }
 
-    /// The number the next version gets.
-    public var nextNumber: Int { (versions.map(\.number).max() ?? 0) + 1 }
+    /// The number the next version gets: never one given before.
+    public var nextNumber: Int { max(lastNumber ?? 0, versions.map(\.number).max() ?? 0) + 1 }
 
     public func version(number: Int) -> LibraryVersion? { versions.first { $0.number == number } }
     public func version(folderID: UUID) -> LibraryVersion? { versions.first { $0.folderID == folderID } }
@@ -177,6 +182,14 @@ public struct ResultSummary: Codable, Equatable, Sendable {
 
 // MARK: - on disk
 
+/// What is at `library.json`. "Missing" and "can't be read" are different: only a missing index may
+/// be created by grouping; an unreadable or newer one holds his marks and is never overwritten.
+public enum LibraryFileState: Equatable, Sendable {
+    case missing
+    case readable(LibraryIndex)
+    case unreadable(String)
+}
+
 extension ProjectStore {
     /// `<projects root>/library.json`. `loadAll` lists only UUID-named folders, so this file is never
     /// mistaken for a project.
@@ -185,11 +198,32 @@ extension ProjectStore {
     /// The index, or nil when there is none (never grouped, or Ungrouped) or it cannot be read.
     /// Reading never writes; an unreadable or newer file is left exactly where it is.
     public func loadLibrary() -> LibraryIndex? {
-        guard let data = try? Data(contentsOf: libraryURL) else { return nil }
+        if case let .readable(index) = libraryState() { return index }
+        return nil
+    }
+
+    /// Missing, readable, or there but unreadable (corrupt, or saved by a newer TopOpt). Never writes.
+    public func libraryState() -> LibraryFileState {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: libraryURL.path) else { return .missing }
+        guard let data = try? Data(contentsOf: libraryURL) else { return .unreadable("library.json can’t be read") }
         struct Peek: Decodable { let schemaVersion: Int? }
         if let v = (try? JSONDecoder().decode(Peek.self, from: data))?.schemaVersion,
-           v > LibraryIndex.currentSchema { return nil }
-        return try? JSONDecoder().decode(LibraryIndex.self, from: data)
+           v > LibraryIndex.currentSchema { return .unreadable(ProjectReadFailure.newerSchema) }
+        do { return .readable(try JSONDecoder().decode(LibraryIndex.self, from: data)) }
+        catch { return .unreadable(ProjectReadFailure.reason(error)) }
+    }
+
+    /// Whether anything named after this project folder is still at the root. A folder that is there
+    /// but unreadable still counts: "Can't open" is not "gone".
+    public func folderExists(_ id: UUID) -> Bool {
+        FileManager.default.fileExists(atPath: rootDir.appendingPathComponent(id.uuidString).path)
+    }
+
+    /// The UUID-named entries at the root, or nil when the root cannot be listed at all.
+    public func folderIDsOnDisk() -> Set<UUID>? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: rootDir.path) else { return nil }
+        return Set(names.compactMap { UUID(uuidString: $0) })
     }
 
     public func saveLibrary(_ index: LibraryIndex) throws {

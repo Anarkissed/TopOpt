@@ -203,7 +203,8 @@ final class LibraryGroupingTests: XCTestCase {
         index.projects = [LibraryProject(name: "Squish Mechanism", partIDs: [index.part(containing: lib.arms[0].id)!.id])]
         let copy = try save("Carriage Arms copy 5", bytes: Data("solid carriage arms".utf8), saved: 60, results: false)
         let lid = try save("Carriage Lid", bytes: Data("solid lid".utf8), saved: 70, results: false)
-        let r = LibraryGrouping.reconcile(index, with: store.loadAll().readable, hash: { self.store.modelHash(of: $0) })
+        let r = LibraryGrouping.reconcile(index, with: store.loadAll().readable, hash: { self.store.modelHash(of: $0) },
+                                         exists: { self.store.folderExists($0) })
         let arms = try XCTUnwrap(r.part(containing: copy.id))
         XCTAssertEqual(arms.id, index.part(containing: lib.arms[0].id)?.id)
         XCTAssertEqual(arms.version(folderID: copy.id)?.number, 6)
@@ -220,7 +221,8 @@ final class LibraryGroupingTests: XCTestCase {
         index.projects = [LibraryProject(name: "Squish Mechanism", partIDs: [padPart])]
         store.delete(id: lib.arms[1].id)
         store.delete(id: lib.pad.id)
-        let r = LibraryGrouping.reconcile(index, with: store.loadAll().readable, hash: { self.store.modelHash(of: $0) })
+        let r = LibraryGrouping.reconcile(index, with: store.loadAll().readable, hash: { self.store.modelHash(of: $0) },
+                                         exists: { self.store.folderExists($0) })
         XCTAssertNil(r.part(containing: lib.arms[1].id))
         XCTAssertEqual(r.part(containing: lib.arms[0].id)?.versions.map(\.number), [1, 3, 4, 5],
                        "numbers are never reused or shifted")
@@ -232,7 +234,8 @@ final class LibraryGroupingTests: XCTestCase {
         _ = try hisLibrary()
         let index = groupedFromDisk()
         XCTAssertEqual(LibraryGrouping.reconcile(index, with: store.loadAll().readable,
-                                                 hash: { self.store.modelHash(of: $0) }), index)
+                                                 hash: { self.store.modelHash(of: $0) },
+                                                 exists: { self.store.folderExists($0) }), index)
     }
 
     // MARK: the index on disk
