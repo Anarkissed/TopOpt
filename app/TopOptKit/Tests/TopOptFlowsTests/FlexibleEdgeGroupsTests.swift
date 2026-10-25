@@ -297,7 +297,13 @@ final class FlexibleEdgeGroupsTests: XCTestCase {
 
     static func length(_ pl: [CGPoint]) -> CGFloat {
         guard pl.count >= 2 else { return 0 }
-        return (1..<pl.count).reduce(0) { $0 + hypot(pl[$1].x - pl[$1 - 1].x, pl[$1].y - pl[$1 - 1].y) }
+        var total: CGFloat = 0
+        for i in 1..<pl.count {
+            let dx: CGFloat = pl[i].x - pl[i - 1].x
+            let dy: CGFloat = pl[i].y - pl[i - 1].y
+            total += hypot(dx, dy)
+        }
+        return total
     }
     static func middle(_ pl: [CGPoint]) -> CGPoint {
         let half = length(pl) / 2
