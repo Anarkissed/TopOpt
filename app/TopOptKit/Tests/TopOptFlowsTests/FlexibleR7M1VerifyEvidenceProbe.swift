@@ -224,8 +224,7 @@ final class FlexibleR7M1VerifyEvidenceProbe: XCTestCase {
         let s = FlexibleMainStage.lastMade
         log.append("[\(tag)] open: groups " + p.selection.groups.map { "\($0.name)=\(p.force.kind(for: $0.id))" }.joined(separator: ", ")
                    + " · finish \(String(describing: p.lattice.flexible?.finish)) · stage \(s != nil)")
-        let toLattice = CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2)
-        click(h, toLattice); pump(4)
+        if (try? FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })) == nil { log.append("[\(tag)] the ● Topology menu's lattice row was not reached") }; pump(4)   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         if h.frames.all["exitRow"] != nil || h.frames.all["panel"] != nil {
             log.append("[\(tag)] the Squish page opened by itself on arrival")
             let e = h.frames.all["exitRow"].map { CGPoint(x: $0.minX + 40, y: $0.midY) } ?? CGPoint(x: 62, y: 45)

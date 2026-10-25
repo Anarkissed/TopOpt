@@ -169,13 +169,16 @@ final class FlexibleRound7D1ReviewHostedTests: XCTestCase {
         let h = host(WorkspacePlaceholder(model: r.app, project: r.project), size: size)
         pump(4)
         let topology = Set(h.frames.chips.keys)
-        // Topology (H24's else: today's column, untouched) — Quality, Plate up, Gravity and Minimize plastic (img1's; "Protect
-        // N mm" joins them once a face is protected — #354's own rule), plus Topology's Design box and Paint
-        XCTAssertTrue(topology.isSuperset(of: [.quality, .minimizePlastic, .buildOrientation, .gravity]),
-                      "★ RED CONTROL, measured: Topology draws today's column on his pad (\(topology.map { "\($0)" }.sorted()))")
-        XCTAssertTrue(topology.contains(.minimizePlastic), "★ …with one of his removals in it (Minimize plastic)")
+        // ★ SYNC #354 (89af86dd) B3: Topology draws NO chip column any more — its settings are the Setup chip's rows
+        // (`visibleSettingsChips` returns none on Topology). The old red control ("Topology draws today's column, measured")
+        // is gone with it; what stays is #354's own claim: none drawn on Topology, and the Setup panel's rows carry Quality,
+        // Plate, Gravity and Minimize plastic (one of his removals on the Flexible stage).
+        XCTAssertTrue(topology.isEmpty, "★ SYNC #354 B3: Topology draws no chip column (\(topology.map { "\($0)" }.sorted()))")
+        let setupRows = TopologySetupRow.visible(protectCount: 0, isStep: false, designBoxDrawn: false)
+        XCTAssertTrue(Set(setupRows).isSuperset(of: [.quality, .plate, .gravity, .minimizePlastic]),
+                      "★ SYNC #354 B3: Topology's Setup rows carry today's column (\(setupRows.map(\.rawValue)))")
         // the Flexible stage (Topology's top-right Lattice button)
-        click(h, CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2))
+        try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         pump(4)
         if let st = FlexibleMainStage.lastMade { addTeardownBlock { @MainActor in await st.model?.waitForIdle() } }
         XCTAssertNotNil(h.frames.all["setupChip"], "premise: the Flexible stage (the corner pair is drawn)")

@@ -87,7 +87,7 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
         let c = try FlexibleR7M1Fixtures.hisLiveLattice(r.project)
         let h = host(WorkspacePlaceholder(model: r.app, project: r.project), size: size)
         pump(4)
-        click(h, CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2))
+        try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         pump(3)
         let s = try XCTUnwrap(FlexibleMainStage.lastMade, "the page's stage")
         addTeardownBlock { @MainActor in await s.model?.waitForIdle() }
@@ -163,6 +163,8 @@ final class FlexibleRound7SelectionsHostedTests: XCTestCase {
             return (t, h.frames.all["deleteCancel"], h.frames.all["deleteConfirm"])
         }
         // RED CONTROL: the old placement — no [Cancel] on the trash
+        // (reset on teardown too: a throw from measure() left it on, and FlexibleU2Tests' Keep placement then failed after it)
+        addTeardownBlock { @MainActor in FlexibleConfirmInPlace.controlOldPlacement = false }
         FlexibleConfirmInPlace.controlOldPlacement = true
         let red = try measure()
         s.faceUI.deleteAsk = nil; pump(0.5)

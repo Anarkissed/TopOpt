@@ -99,7 +99,7 @@ final class FlexibleRound7ScreenHostedTests: XCTestCase {
         let r = try FlexiblePressFixtures.a1Project(3, self)
         let h = host(WorkspacePlaceholder(model: r.app, project: r.project), size: size)
         pump(3)
-        click(h, CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2))
+        try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         pump(3)
         if let s = FlexibleMainStage.lastMade { addTeardownBlock { @MainActor in await s.model?.waitForIdle() } }
         return (h, r)

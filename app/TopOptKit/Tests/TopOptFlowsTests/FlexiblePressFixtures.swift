@@ -294,3 +294,63 @@ enum FlexiblePressFixtures {
         return out
     }
 }
+
+#if canImport(AppKit)
+import AppKit
+
+// MARK: - ★ SYNC #354 (89af86dd) — Topology → Lattice, the way he now gets there (hosted tests)
+//
+// #354's redesign (B3/B4/B5) removed the stage forward buttons: no stage draws them (`drawsForwardButtons` is false
+// everywhere), so the hosted tests' tap where Topology's top-right "Lattice" button sat
+// (`size.width - PageChrome.gizmoClearance - 62`) lands on nothing. The way now is Topology's capsule: tap ● Topology ⌄,
+// then the menu's lattice row (`topology-menu-lattice` — "Lattice…" on a Flexible project, whose stageMode is nil; the type's
+// own name once one is chosen), which calls goToStage(.lattice).
+//
+// WHERE THE ● IS: #354's capsule publishes its frames on ChromeKeepOutKey ("capsuleMenu"), which these harnesses do not
+// record (they read FlexibleKeepOutKey), and an offscreen NSHostingView exposes no SwiftUI accessibility elements (measured:
+// 2 — the hosting view and a scroll view), so the ● is aimed at by #354's own StageCapsuleLayout (the capsule's left/top
+// inset, its inner inset; measured: the menu's control sits at (28, 76) 119×44 on 13" portrait). The hit is PROVED by the
+// menu that opens: it must hold the lattice row, or this throws. The native menu is driven while it tracks, as H39's
+// pickTopologyFromTheCapsule drives the ● Flexible menu.
+extension FlexiblePressFixtures {
+
+    /// The ● of Topology's capsule (its menu's leading end, mid-height), in the hosted view's top-left points.
+    static var topologyCapsuleMenuPoint: CGPoint {
+        CGPoint(x: StageCapsuleLayout.capsuleLeft + StageCapsuleLayout.segmentInset + 20,
+                y: StageCapsuleLayout.capsuleTop + StageCapsuleLayout.capsuleHeight / 2)
+    }
+
+    /// From Topology to the lattice stage (the Flexible stage on a Flexible project): ● Topology ⌄, then its lattice row.
+    /// `click` is the caller's own click (in the hosted view's top-left points). Throws when no menu opens there, the menu has
+    /// no lattice row, or the row is greyed (its gate: gravity, an anchor, a load).
+    static func enterLatticeStage(_ project: ProjectModel, click: (CGPoint) -> Void,
+                                  file: StaticString = #filePath, line: UInt = #line) throws {
+        let rowID = "topology-menu-lattice"
+        let title = TopologyStageMenu.latticeTitle(typeInUse: project.lattice.stageMode)
+        final class Pick { var title: String?; var enabled = false; var rows: [String]? }
+        let pick = Pick()
+        let obs = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { n in
+            guard let m = n.object as? NSMenu else { return }
+            RunLoop.main.perform(inModes: [.eventTracking, .default, .modalPanel]) {
+                guard pick.title == nil else { return }
+                pick.rows = m.items.map(\.title)
+                let i = m.items.firstIndex { $0.identifier?.rawValue == rowID } ?? m.items.firstIndex { $0.title.hasPrefix(title) }
+                m.cancelTracking()
+                guard let i else { return }
+                pick.title = m.items[i].title
+                pick.enabled = m.items[i].isEnabled
+                if pick.enabled { m.performActionForItem(at: i) }
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(obs) }
+        click(topologyCapsuleMenuPoint)
+        let picked = try XCTUnwrap(pick.title, pick.rows == nil
+                                   ? "★ SYNC #354: no menu opened at the ● Topology capsule (\(topologyCapsuleMenuPoint)) — is the page on Topology?"
+                                   : "★ SYNC #354: the ● Topology menu has no lattice row ('\(title)'); rows \(pick.rows ?? [])",
+                                   file: file, line: line)
+        _ = try XCTUnwrap(pick.enabled ? picked : nil,
+                          "★ SYNC #354: the ● Topology menu's lattice row '\(picked)' is greyed (gravity, an anchor, a load)",
+                          file: file, line: line)
+    }
+}
+#endif

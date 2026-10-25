@@ -300,8 +300,7 @@ final class FlexibleR7REvidenceProbe: XCTestCase {
         let h = host(WorkspacePlaceholder(model: r.app, project: p), size: size)
         pump(4)
         let s = FlexibleMainStage.lastMade
-        let toLattice = CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2)
-        click(h, toLattice); pump(4)
+        try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) }); pump(4)   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         let autoOpened = h.frames.all["exitRow"] != nil || h.frames.all["panel"] != nil
         log.append("[\(tag)] arrival on the Flexible stage: the Squish page opened by itself: \(autoOpened)")
         if autoOpened { pressKey(h, "exitRow", dx: 40, what: "Exit (leave the auto-opened Squish page)"); pump(3) }
@@ -327,7 +326,7 @@ final class FlexibleR7REvidenceProbe: XCTestCase {
             log.append(mainState(s, "M02 a tap on Face 4's solid middle"))
         }
         // ── THE SQUISH PAGE, by its own button
-        pressAt(h, toLattice, what: "Settings (the Squish page)")
+        if let sq = frame(h, "capsuleSquish") { _ = pressAt(h, CGPoint(x: sq.midX, y: sq.midY), what: "the capsule's Squish (the Squish page)") }   // ★ SYNC #354 (89af86dd): the top-right button is gone; Squish is the capsule's segment
         pump(4)
         guard frame(h, "exitRow") != nil else { log.append("  (the Squish page did not open)"); return }
         _ = settledSquish(m); pump(2)

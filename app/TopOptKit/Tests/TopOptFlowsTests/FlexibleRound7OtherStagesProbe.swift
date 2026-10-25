@@ -75,10 +75,9 @@ final class FlexibleRound7OtherStagesProbe: XCTestCase {
         addTeardownBlock { r.cleanup() }
         let h = host(WorkspacePlaceholder(model: r.app, project: r.project), size: size)
         pump(5)
-        let x = size.width - PageChrome.gizmoClearance - 62
         switch stage {
         case .topology: break
-        case .lattice: click(h, CGPoint(x: x, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2)); pump(5)
+        case .lattice: try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) }); pump(5)   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         }
         write(h, "\(tag)_\(stage.rawValue)")
         if let s = FlexibleMainStage.lastMade, flexible { await_(s) }

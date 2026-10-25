@@ -222,7 +222,7 @@ final class FlexibleH39HostedTests: XCTestCase {
         log.append("Topology: card top \(topT) · toggle at \(ink) · panel cover open \(opened) / closed \(closed)")
 
         // ── the Flexible stage (Topology's top-right Lattice button)
-        click(h, CGPoint(x: size.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2))
+        try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
         pump(3)
         if let s = FlexibleMainStage.lastMade { addTeardownBlock { @MainActor in await s.model?.waitForIdle() } }
         XCTAssertNotNil(h.frames.all["capsule"], "premise: the Flexible stage (its capsule)")

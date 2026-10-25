@@ -45,7 +45,7 @@ final class FlexibleR7U21CHandlesHostedTests: XCTestCase {
         let h = host(WorkspacePlaceholder(model: r.app, project: p), size: Self.p13)
         pump(4)
         if h.frames.all["capsule"] == nil {
-            click(h, CGPoint(x: Self.p13.width - PageChrome.gizmoClearance - 62, y: PageChrome.gizmoAlignedTop + PageChrome.compactButton / 2))
+            try FlexiblePressFixtures.enterLatticeStage(r.project, click: { click(h, $0) })   // ★ SYNC #354 (89af86dd): no forward buttons since B5 — the ● Topology menu's lattice row
             pump(3)
         }
         let s = try XCTUnwrap(FlexibleMainStage.lastMade, "the page's stage")
