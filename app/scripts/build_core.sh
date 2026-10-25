@@ -69,6 +69,24 @@ else
   echo "==> lib3mf: (none) — macOS slice is 3MF-free; run app/scripts/build_lib3mf_macos.sh to enable"
 fi
 
+# Manifold (mesh booleans for KEEP regions' exact export; TO-core CORE LIST item KEEP,
+# merged from 3fd9f17e). Static, serial (no TBB), provisioned per triplet by vcpkg
+# through core/vcpkg-ports/manifold + core/vcpkg-triplets (minos macOS 13 / iOS 16).
+# DETECTED like lib3mf: a slice whose triplet is provisioned is configured with
+# manifold_DIR (TOPOPT_HAVE_MANIFOLD) and libmanifold.a is merged INTO its
+# libtopopt.a, so the xcframework needs no extra link; otherwise find_package is
+# disabled and KEEP still freezes the kept material but says the export is not exact.
+# MANIFOLD_ROOT (env) overrides the default: a worktree's REPO_ROOT has no .vcpkg, so
+# point it at the main checkout's .vcpkg/installed-manifold there.
+MANIFOLD_ROOT="${MANIFOLD_ROOT:-$REPO_ROOT/.vcpkg/installed-manifold}"
+manifold_args() { if [[ -f "$MANIFOLD_ROOT/$1/share/manifold/manifoldConfig.cmake" ]]; then echo "-Dmanifold_DIR=$MANIFOLD_ROOT/$1/share/manifold"; else echo "-DCMAKE_DISABLE_FIND_PACKAGE_manifold=ON"; fi; }
+merge_manifold() { local m="$MANIFOLD_ROOT/$2/lib/libmanifold.a"; [[ -f "$m" ]] || return 0; libtool -static -o "$1.merged" "$1" "$m" 2>/dev/null && mv "$1.merged" "$1"; }
+if [[ -f "$MANIFOLD_ROOT/arm64-osx/share/manifold/manifoldConfig.cmake" ]]; then
+  echo "==> Manifold: $MANIFOLD_ROOT (KEEP regions exported exactly)"
+else
+  echo "==> Manifold: (none at $MANIFOLD_ROOT) — KEEP export not exact; set MANIFOLD_ROOT"
+fi
+
 # build_slice <name> <archs> <extra-cmake-args...> -> echoes the produced libtopopt.a
 build_slice() {
   local name="$1"; local archs="$2"; shift 2
@@ -103,7 +121,8 @@ MACOS_PREFIX="$OCCT_PREFIX;$EIGEN_PREFIX"
 MACOS_KIND="Eigen + OCCT"
 if [[ -n "$LIB3MF_PREFIX" ]]; then MACOS_PREFIX="$MACOS_PREFIX;$LIB3MF_PREFIX"; MACOS_KIND="$MACOS_KIND + lib3mf"; fi
 echo "==> building macOS slice ($MACOS_KIND, arm64)"
-LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$MACOS_PREFIX")
+LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$MACOS_PREFIX" "$(manifold_args arm64-osx)")
+merge_manifold "$LIB_MACOS" arm64-osx
 
 # --- iOS slices --------------------------------------------------------------
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"   # match Package.swift .iOS(.v16)
@@ -117,12 +136,12 @@ OCCT_IOS_DEV="$APP_DIR/.build-occt-ios/install/occt-iphoneos"
 LIB3MF_IOS_SIM="$APP_DIR/.build-occt-ios/install/lib3mf-iphonesimulator"
 LIB3MF_IOS_DEV="$APP_DIR/.build-occt-ios/install/lib3mf-iphoneos"
 
-# build_ios_slice <name> <sdk> <archs> <occt-install> <lib3mf-install>
+# build_ios_slice <name> <sdk> <archs> <occt-install> <lib3mf-install> <manifold-triplet>
 #   -> echoes the produced libtopopt.a (like build_slice). Composes the CMAKE_
 #      PREFIX_PATH / find-root and the per-dependency disable flags based on what
 #      is actually cross-built. (Written for bash 3.2 — no mapfile/readarray.)
 build_ios_slice() {
-  local name="$1" sdk="$2" archs="$3" occt="$4" l3mf="$5"
+  local name="$1" sdk="$2" archs="$3" occt="$4" l3mf="$5" mtrip="$6"
   local prefix="$EIGEN_PREFIX"
   local extra
   extra=( -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sdk"
@@ -134,6 +153,7 @@ build_ios_slice() {
   if [[ -d "$l3mf" ]]; then prefix="$l3mf;$prefix"
   else extra+=( -DCMAKE_DISABLE_FIND_PACKAGE_lib3mf=ON ); fi
   extra+=( -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_ROOT_PATH="$prefix" )
+  extra+=( "$(manifold_args "$mtrip")" )
   build_slice "$name" "$archs" "${extra[@]}"
 }
 
@@ -152,10 +172,15 @@ if [[ -d "$OCCT_IOS_SIM" || -d "$LIB3MF_IOS_SIM" ]]; then SIM_ARCHS="arm64"; els
 [[ -d "$LIB3MF_IOS_SIM" ]] && SIM_KIND="$SIM_KIND + lib3mf"
 [[ -d "$LIB3MF_IOS_DEV" ]] && DEV_KIND="$DEV_KIND + lib3mf"
 echo "==> building iOS simulator slice ($SIM_KIND, $SIM_ARCHS)"
-LIB_IOSSIM=$(build_ios_slice iossimulator iphonesimulator "$SIM_ARCHS" "$OCCT_IOS_SIM" "$LIB3MF_IOS_SIM")
+# Manifold is provisioned arm64 only, so a universal (arm64+x86_64) sim slice goes
+# without it ("none" is no triplet: find_package disabled, nothing merged).
+[[ "$SIM_ARCHS" == arm64 ]] && SIM_MANIFOLD=arm64-ios-simulator || SIM_MANIFOLD=none
+LIB_IOSSIM=$(build_ios_slice iossimulator iphonesimulator "$SIM_ARCHS" "$OCCT_IOS_SIM" "$LIB3MF_IOS_SIM" "$SIM_MANIFOLD")
+merge_manifold "$LIB_IOSSIM" "$SIM_MANIFOLD"
 
 echo "==> building iOS device slice ($DEV_KIND, arm64)"
-LIB_IOSDEV=$(build_ios_slice iphoneos iphoneos arm64 "$OCCT_IOS_DEV" "$LIB3MF_IOS_DEV")
+LIB_IOSDEV=$(build_ios_slice iphoneos iphoneos arm64 "$OCCT_IOS_DEV" "$LIB3MF_IOS_DEV" arm64-ios)
+merge_manifold "$LIB_IOSDEV" arm64-ios
 
 # --- assemble the xcframework ------------------------------------------------
 mkdir -p "$VENDOR"
