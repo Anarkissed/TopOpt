@@ -59,6 +59,9 @@
 #include "topopt/threemf_stream.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
+#ifdef TOPOPT_HAVE_MANIFOLD
+#include "manifold/manifold.h"
+#endif
 #ifdef TOPOPT_HAVE_3MF
 #include "topopt/threemf.hpp"
 #endif
@@ -558,10 +561,99 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // The variant's exported solid in MODEL coordinates (before any build-frame bake):
 // the shell the file carries, so a caller can certify exactly what is exported
 // (CORE LIST item 50 verifies it). export_variant_mesh writes it.
+// CORE LIST item KEEP — inside each keep region the export carries the PART's own
+// geometry, exactly: (export - K) + (part ^ K), one merged shell, by Manifold. The
+// optimizer froze the part there, so the two meet. Without Manifold in this build, or
+// on a mesh Manifold cannot take as a closed manifold, the voxel surface stays and a
+// WARNING says so (the kept material is still frozen, only not exact).
+TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
+                                const std::vector<KeepRegion>& keeps) {
+  if (keeps.empty()) return exported;
+#ifdef TOPOPT_HAVE_MANIFOLD
+  auto to_manifold = [](const TriangleMesh& m) {
+    manifold::MeshGL g;
+    g.numProp = 3;
+    g.vertProperties.reserve(3 * m.vertices.size());
+    for (const Vec3& v : m.vertices) {
+      g.vertProperties.push_back(static_cast<float>(v.x));
+      g.vertProperties.push_back(static_cast<float>(v.y));
+      g.vertProperties.push_back(static_cast<float>(v.z));
+    }
+    for (const auto& t : m.triangles)
+      for (int k = 0; k < 3; ++k) g.triVerts.push_back(static_cast<uint32_t>(t[k]));
+    return manifold::Manifold(g);
+  };
+  // The part side is taken with each region GROWN by kFuse, so the two pieces
+  // overlap by that much and fuse across a volume: cut exactly at K, they touched
+  // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
+  constexpr double kFuse = 0.05;  // mm, below any print resolution
+  auto region = [](const KeepRegion& k, double grow) {
+    const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
+    const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
+                             k.max.z - k.min.z + 2 * grow};
+    manifold::Manifold prim;
+    if (!k.cylinder) {
+      prim = manifold::Manifold::Cube(ext).Translate(lo);
+    } else {
+      const double len = k.axis == 0 ? ext.x : k.axis == 1 ? ext.y : ext.z;
+      const double r = 0.5 * (k.axis == 0 ? ext.y : ext.x);
+      prim = manifold::Manifold::Cylinder(len, r, r, 128);  // along +Z from 0
+      if (k.axis == 0) prim = prim.Rotate(0.0, 90.0, 0.0);   // +Z -> +X
+      if (k.axis == 1) prim = prim.Rotate(-90.0, 0.0, 0.0);  // +Z -> +Y
+      const manifold::vec3 c{lo.x + 0.5 * ext.x, lo.y + 0.5 * ext.y, lo.z + 0.5 * ext.z};
+      prim = prim.Translate({k.axis == 0 ? lo.x : c.x, k.axis == 1 ? lo.y : c.y,
+                             k.axis == 2 ? lo.z : c.z});
+    }
+    return prim;
+  };
+  manifold::Manifold K, K_part;
+  for (const KeepRegion& k : keeps) {
+    K = K + region(k, 0.0);
+    K_part = K_part + region(k, kFuse);
+  }
+  const manifold::Manifold E = to_manifold(exported), P = to_manifold(part);
+  if (E.Status() != manifold::Manifold::Error::NoError ||
+      P.Status() != manifold::Manifold::Error::NoError) {
+    std::fprintf(stderr,
+                 "WARNING: KEEP regions: the %s mesh is not a closed manifold "
+                 "(Manifold status %d), so the kept regions are exported from the "
+                 "voxels, not exactly.\n",
+                 E.Status() != manifold::Manifold::Error::NoError ? "exported" : "part",
+                 static_cast<int>(E.Status() != manifold::Manifold::Error::NoError
+                                      ? E.Status()
+                                      : P.Status()));
+    return exported;
+  }
+  const manifold::MeshGL g = ((E - K) + (P ^ K_part)).GetMeshGL();
+  TriangleMesh out;
+  out.vertices.reserve(g.NumVert());
+  for (std::size_t v = 0; v < g.NumVert(); ++v)
+    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
+                            g.vertProperties[v * g.numProp + 2]});
+  for (std::size_t t = 0; t < g.NumTri(); ++t)
+    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                             static_cast<int>(g.triVerts[3 * t + 1]),
+                             static_cast<int>(g.triVerts[3 * t + 2])});
+  return out;
+#else
+  (void)part;
+  std::fprintf(stderr,
+               "WARNING: KEEP regions: this build has no Manifold, so the kept "
+               "regions are exported from the voxels, not exactly (they are still "
+               "frozen).\n");
+  return exported;
+#endif
+}
+
 TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        const JobOutput& out, const VoxelGrid& sg,
                                        double printed_iso = 0.5,
-                                       const StepModel* cad = nullptr) {
+                                       const StepModel* cad = nullptr,
+                                       const std::vector<KeepRegion>& keeps = {}) {
+  if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
+    return keep_regions_exact(
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
+        keeps);
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
@@ -634,12 +726,13 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
 std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::string& out_dir, const JobOutput& out,
                                 const VoxelGrid& sg, double printed_iso = 0.5,
-                                const StepModel* cad = nullptr) {
+                                const StepModel* cad = nullptr,
+                                const std::vector<KeepRegion>& keeps = {}) {
   const std::string path = join_path(
       out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
                               out.mesh_format));
   const TriangleMesh model_mesh =
-      variant_export_model_mesh(variant, out, sg, printed_iso, cad);
+      variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
   if (R) baked = rotate_mesh(model_mesh, *R);
@@ -9091,6 +9184,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   // 0.42 / 0.45 job computed — and truthfully reported — an outer width of 0.45.
   // (Device runs never used this path: bridge.cpp writes the field directly.)
   lc.wall_line_width_outer_mm = j_wall_line_width_outer_mm;
+  lc.keep_regions = job.keep_regions;  // item KEEP
   lc.has_design_box = job.has_design_box;
   if (job.has_design_box) {
     lc.design_box = to_design_box(job.design_box);
@@ -12417,7 +12511,7 @@ MinimizePlasticResult strengthen_versions(
           join_path(work, "v" + std::to_string(k + 1) + "_" +
                               std::to_string(attempt) + ".stl");
       write_stl_file(stl, variant_export_model_mesh(v, job.output, r.solved_grid, iso,
-                                                    &model));
+                                                    &model, job.keep_regions));
       const AnalyzeJobResult a =
           analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
       const double verified = a.analysis.margin_effective;
@@ -14462,7 +14556,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid,
-                              run_printed_iso(options), &result.model);
+                              run_printed_iso(options), &result.model,
+                              job.keep_regions);
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
       // ★ AND DELIBERATELY NOT PUSHED INTO THE PATH LIST. `mesh_paths` means
@@ -15057,7 +15152,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (!variant.accepted) continue;
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
-          run_printed_iso(options), &result.model));
+          run_printed_iso(options), &result.model, job.keep_regions));
       // The analytic design, written beside the mesh (S1(d)) and NOT added to
       // `mesh_paths` — see the streaming branch above for why.
       (void)export_variant_alpha(variant, out_dir, job.output,

@@ -160,6 +160,7 @@ struct ProductionLoadCase {
   bool has_design_box = false;
   DesignBox design_box;
   std::vector<DesignBox> keep_out_boxes;
+  std::vector<KeepRegion> keep_regions;  // item KEEP: frozen exactly (job keep_regions)
 
   // Handoff 100 — "Keep clear" clearance regions. Each entry is a B-rep face and
   // its (editable) clearance distances; build_production_loadcase derives the

@@ -465,6 +465,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "resolution", "fixture_faces", "gravity", "ladder",
                        "margin_stop", "simp", "draft", "warm_start", "output",
                        "lattice", "grading", "loads", "design_box", "keep_outs",
+                       "keep_regions",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
                        "plsm"},
@@ -960,6 +961,43 @@ JobDescription parse_job(const std::string& json_text) {
     job.margin_stop = require_number(
         require_key(root, "margin_stop", "the job"), "margin_stop");
     if (job.margin_stop < 0.0) schema_fail("\"margin_stop\" must be >= 0");
+  }
+
+  // keep_regions (CORE LIST item KEEP): [{"shape": "box" | "cylinder", "min", "max",
+  // "axis" (cylinder only: 0 | 1 | 2)}]. A cylinder's cross-section must be square.
+  if (const JsonValue* krs = find_key(root, "keep_regions")) {
+    if (krs->type != JsonValue::Type::Array)
+      schema_fail("\"keep_regions\" must be an array");
+    for (const JsonValue& kv : krs->arr) {
+      require_object(kv, "a keep region");
+      reject_unknown_keys(kv, {"shape", "min", "max", "axis"}, "a keep region");
+      KeepRegion k;
+      const std::string shape =
+          require_string(require_key(kv, "shape", "a keep region"), "keep region shape");
+      if (shape != "box" && shape != "cylinder")
+        schema_fail("a keep region \"shape\" must be \"box\" or \"cylinder\"");
+      k.cylinder = shape == "cylinder";
+      k.min = parse_vec3(require_key(kv, "min", "a keep region"), "keep region min");
+      k.max = parse_vec3(require_key(kv, "max", "a keep region"), "keep region max");
+      if (!(k.max.x > k.min.x && k.max.y > k.min.y && k.max.z > k.min.z))
+        schema_fail("a keep region's \"max\" must exceed its \"min\" on every axis");
+      if (const JsonValue* av = find_key(kv, "axis")) {
+        if (!k.cylinder) schema_fail("a keep region \"axis\" is for a cylinder only");
+        const double a = require_number(*av, "keep region axis");
+        if (a != 0.0 && a != 1.0 && a != 2.0)
+          schema_fail("a keep region \"axis\" must be 0, 1 or 2");
+        k.axis = static_cast<int>(a);
+      } else if (k.cylinder) {
+        schema_fail("a cylinder keep region needs an \"axis\" (0, 1 or 2)");
+      }
+      if (k.cylinder) {
+        const double ext[3] = {k.max.x - k.min.x, k.max.y - k.min.y, k.max.z - k.min.z};
+        const double a = ext[(k.axis + 1) % 3], b = ext[(k.axis + 2) % 3];
+        if (std::fabs(a - b) > 1e-6 * std::max(a, b))
+          schema_fail("a cylinder keep region's cross-section must be square");
+      }
+      job.keep_regions.push_back(k);
+    }
   }
 
   // design_box + keep_outs: optional in BOTH modes (the "add material" feature).

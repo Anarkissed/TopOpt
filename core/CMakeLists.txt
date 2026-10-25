@@ -13,6 +13,7 @@ if(TOPOPT_REQUIRE_DEPS)
   find_package(OpenCASCADE CONFIG REQUIRED)
   find_package(Eigen3 CONFIG REQUIRED)
   find_package(lib3mf CONFIG REQUIRED)
+  find_package(manifold CONFIG REQUIRED)
 else()
   # Optional locally: if OCCT is installed the STEP importer (M1.4) builds and
   # its test runs; if not, the OCCT-free targets (materials, STL) still build so
@@ -28,6 +29,10 @@ else()
   # lib3mf (DEPS=ON), so the 3MF round-trip always runs in the pipeline; the STL
   # export/round-trip is pure C++/std and builds regardless.
   find_package(lib3mf CONFIG QUIET)
+  # Manifold (mesh booleans for KEEP regions' exact export; CORE LIST item KEEP).
+  # From vcpkg through core/vcpkg-ports/manifold (serial, no TBB); locally pass
+  # -Dmanifold_DIR=<.vcpkg/installed-keep/<triplet>/share/manifold>.
+  find_package(manifold CONFIG QUIET)
 endif()
 
 # ★ A SMALLER SUITE THAN CI'S MUST SAY SO, LOUDLY (task
@@ -299,6 +304,12 @@ if(lib3mf_FOUND)
   # Lets the M6.2 job runner (src/cli/run_job.cpp) call the 3MF writer; without
   # lib3mf it rejects mesh_format "3mf" with a diagnostic instead.
   target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_3MF)
+endif()
+# KEEP regions exported exactly (run_job keep_regions_exact); without Manifold the
+# kept material is still frozen and the export says it is not exact.
+if(manifold_FOUND)
+  target_link_libraries(topopt PRIVATE manifold::manifold)
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_MANIFOLD)
 endif()
 
 enable_testing()
@@ -2311,6 +2322,19 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_compile_definitions(test_bridge PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME bridge COMMAND test_bridge)
+
+  # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
+  # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).
+  if(manifold_FOUND)
+    add_executable(test_keep tests/validation/test_keep.cpp)
+    target_link_libraries(test_keep PRIVATE topopt)
+    target_compile_definitions(test_keep PRIVATE
+      MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep COMMAND test_keep)
+  endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries

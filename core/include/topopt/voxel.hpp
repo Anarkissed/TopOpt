@@ -157,6 +157,30 @@ struct DesignBox {
   Vec3 max;
 };
 
+// CORE LIST item KEEP: a region of the part kept EXACTLY (the reviewer's ruling of
+// 2026-10-25 03:58; item 7's primitive form, model space, mm). A box is its min/max;
+// a cylinder is the one inscribed in that box along `axis` (0 = X, 1 = Y, 2 = Z): its
+// cross-section must be square (the app's convention).
+struct KeepRegion {
+  bool cylinder = false;
+  Vec3 min{0.0, 0.0, 0.0};
+  Vec3 max{0.0, 0.0, 0.0};
+  int axis = 2;
+  bool contains(const Vec3& p) const {
+    if (p.x < min.x || p.x > max.x || p.y < min.y || p.y > max.y || p.z < min.z ||
+        p.z > max.z)
+      return false;
+    if (!cylinder) return true;
+    const double c[3] = {0.5 * (min.x + max.x), 0.5 * (min.y + max.y), 0.5 * (min.z + max.z)};
+    const double q[3] = {p.x, p.y, p.z};
+    const double half[3] = {0.5 * (max.x - min.x), 0.5 * (max.y - min.y), 0.5 * (max.z - min.z)};
+    const int u = (axis + 1) % 3, w = (axis + 2) % 3;
+    const double r = half[u];  // square cross-section: half[w] == half[u]
+    const double du = q[u] - c[u], dw = q[w] - c[w];
+    return du * du + dw * dw <= r * r;
+  }
+};
+
 // The expanded design domain built from a part grid and a design box: the larger
 // grid, its effective mask, and the integer voxel offset at which the original
 // part sits inside the expanded grid (part voxel (i,j,k) is expanded voxel

@@ -2,7 +2,7 @@
 
 Agent: TO-core. Reviewer: "reviewer" on agent-comms #TO-core. Coordination with #362 is on #CoreGroup.
 Branch: `claude/topology-core`, made from `origin/claude/raster-receipt-fields` at `e0485f7d` (#358's latest push).
-Syncs one way from that branch, merge only, never force. Not pushed yet.
+Syncs one way from that branch, merge only, never force. Pushed to origin/claude/topology-core.
 
 ## Status
 
@@ -153,7 +153,21 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
   behaviour (the plate's floor rung is bridged and accepted, its file one body, the bore attached); 47's rejection is
   pinned in test_bridge (b) with the bridge off. 30/30. Full suite 144/144.
 
-## Next: KEEP (Manifold, pinned via vcpkg, all three slices without TBB, union time measured on his export first).
+## KEEP, as built (2026-10-25; his answers: volumes only, replaces Protect, one merged shell)
+
+- Schema: top-level `keep_regions: [{shape: box|cylinder, min, max, axis (cylinder only, 0/1/2)}]`. A cylinder is the
+  one inscribed in the box along `axis` (its cross-section must be square, else refused). `KeepRegion` in voxel.hpp.
+- Optimize: the part's voxels inside each region are frozen solid (the pad block in loadcase.cpp; `frozen_share`
+  attributes them to source `keep`). Air inside stays air.
+- Export (run_job.cpp `keep_regions_exact`, Manifold): `(export - K) + (part ^ K grown 0.05 mm)`, one closed shell.
+  Without Manifold, or if a mesh is not manifold, the voxel export is kept and a WARNING says so.
+- Manifold 3.5.1 via a vcpkg overlay port (core/vcpkg-ports/manifold: no TBB, no Clipper2, no C bindings);
+  `core/vcpkg-configuration.json` points at it. Optional unless `TOPOPT_REQUIRE_DEPS`. Installed here in
+  `.vcpkg/installed-keep/{arm64-osx,arm64-ios,arm64-ios-simulator}` (ignored).
+- Packaging: the xcframework carries only libtopopt.a, so libmanifold.a must be merged into each slice (libtool -static)
+  before create-xcframework. The exact lines went to #362 on #CoreGroup.
+- Test: `test_keep` 7/7 (104/104 CAD vertices inside the region exact with KEEP, 0/104 without; one body, 0 bad edges;
+  schema refusals). Full suite 145/145.
 
 ## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25) — WITHDRAWN by the 22:59 brief
 

@@ -587,7 +587,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
   const bool want_protect = !lc.face_protection_face_ids.empty() ||
                             !lc.face_protection_region_ids.empty();
-  if (want_pad || want_protect) {
+  if (want_pad || want_protect || !lc.keep_regions.empty()) {
     DesignMask pad = make_active_mask(grid);
     // CORE LIST item 40 — WHAT FROZE THE PART, each voxel once (pipeline.hpp
     // frozen_mask_sources). A source is credited only with the voxels that neither
@@ -712,6 +712,23 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         log_face_protection(-1, frozen, depth_vox, thin, requested_mm,
                             effective_mm, rid);
       }
+    }
+    // CORE LIST item KEEP: the part's own material inside each keep region is frozen
+    // solid, so the optimizer can neither cut it up nor dig into it; the export then
+    // carries the part's exact geometry there (run_job, Manifold).
+    for (std::size_t ki = 0; ki < lc.keep_regions.size(); ++ki) {
+      long long first_frozen_here = 0;
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          for (int i = 0; i < grid.nx; ++i) {
+            if (!grid.solid(i, j, k)) continue;
+            if (!lc.keep_regions[ki].contains(grid.voxel_center(i, j, k))) continue;
+            const std::size_t idx = grid.index(i, j, k);
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx)) ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+      opts.frozen_mask_sources.push_back(
+          {"keep", -1, static_cast<int>(ki), first_frozen_here});
     }
     opts.design_mask = std::move(pad);
   }

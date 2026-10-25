@@ -1176,6 +1176,10 @@ struct JobDescription {
   bool has_design_box = false;
   JobBox design_box;
   std::vector<JobBox> keep_out_boxes;
+  // CORE LIST item KEEP (his ruling of 2026-10-25, approved 03:58): regions of the
+  // part kept EXACTLY. The part's own material inside each is frozen solid, and the
+  // export carries the part's CAD geometry there (pipeline: keep_regions).
+  std::vector<KeepRegion> keep_regions;
 };
 
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,
