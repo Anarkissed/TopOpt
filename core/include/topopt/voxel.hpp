@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "topopt/mesh.hpp"
@@ -338,14 +339,28 @@ LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_
 // separate bodies stays separate; a group no path can join is left as it is (the
 // belt and item 47 then judge it). `allowed` is grid-indexed (non-zero = the bridge
 // may pass: design space, not a keep-out or Keep Clear).
+// Each laid bridge is kept (its path, thickening, the body it joined and the voxels it
+// set) so the hold-itself check can thicken it or lift it again.
+struct LaidBridge {
+  std::vector<std::size_t> path;    // the path's voxels outside the two bodies
+  int radius = 0;                   // current thickening, voxels
+  std::vector<std::size_t> target;  // the joined (smaller) body's printed voxels
+  std::vector<std::pair<std::size_t, double>> laid;  // voxels it set to 1, prior density
+};
 struct BridgeResult {
   int bridges = 0;                  // paths laid
   long long voxels = 0;             // voxels the bridges set to density 1
   int groups_left_split = 0;        // as-drawn groups no path could join
+  std::vector<LaidBridge> laid;     // one per bridge, in laid order
 };
 BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& density,
                                  double iso, const PrintedBodies& as_drawn,
                                  const std::vector<char>& allowed, int radius);
+// Lays `b.path` thickened by `radius` voxels within `allowed` (the path itself always),
+// sets `b.radius`, appends what it set to `b.laid`; returns how many voxels it newly
+// printed (density from <= iso to 1).
+long long lay_bridge(const VoxelGrid& grid, std::vector<double>& density, double iso,
+                     const std::vector<char>& allowed, LaidBridge& b, int radius);
 
 // Result of the Gate V3 property suite. `passes` is the conjunction of the four
 // ARCHITECTURE §7 V3 gates; the individual fields expose why.

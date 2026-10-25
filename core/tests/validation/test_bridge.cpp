@@ -17,6 +17,16 @@
 //       fallback); with it, the anchor is joined back and the rung is accepted.
 //   (c) A PART DRAWN AS TWO BODIES stays two: the bridge only rejoins what the
 //       drawing joined.
+// THE BRIDGE HOLDS ITSELF (the reviewer's values of 2026-10-25 07:05; his "definitely
+// needs to be able to hold itself"). A bar whose middle the floor rung removes: block
+// A anchored and loaded, block B anchored only, so B must hang from the bridge:
+//   (d) under three times B's weight plus a tenth of the real load across the bridge,
+//       a one-voxel bridge is too thin; it is thickened a layer at a time until its
+//       own margin clears margin_stop, and the receipt says how thick and how often;
+//   (e) a load no three layers can hold: the bridge is lifted, B is let go again and
+//       item 47 rejects the rung, the receipt naming the bridge that did not hold;
+//   (f) the bridge is at least 2 x wall_loops x wall_line_width thick when the job
+//       carries walls (else the min feature).
 // Eigen (minimize_plastic), OCCT-free.
 
 #include "topopt/fea.hpp"
@@ -61,11 +71,15 @@ void clamp_voxel_nodes(const VoxelGrid& g, int i, int j, int k, std::vector<Diri
 
 // One floor rung of a part whose frozen material is `frozen`, in a snug design box.
 MinimizePlasticResult run(const VoxelGrid& part, const std::vector<DirichletBC>& bcs,
-                          const DesignMask& frozen, bool bridge, const SettingsRules& rules) {
+                          const DesignMask& frozen, bool bridge, const SettingsRules& rules,
+                          Vec3 force = Vec3{0.0, 0.0, -2.0}, int wall_loops = 0,
+                          double wall_line_width_mm = 0.45) {
   MinimizePlasticOptions o;
   o.volume_fraction_ladder = {0.26};
   o.margin_stop = 1.5;
-  o.external_loads = traction_loads(part, VoxelTag::Load, Vec3{0.0, 0.0, -2.0});
+  o.external_loads = traction_loads(part, VoxelTag::Load, force);
+  o.wall_loops = wall_loops;
+  o.wall_line_width_mm = wall_line_width_mm;
   o.gravity = 9810.0 * 1e-9;
   o.gravity_direction = Vec3{0.0, 0.0, -1.0};
   o.updater = SimpUpdater::MMA;
@@ -191,6 +205,69 @@ int main() {
                 on.evaluated.front().report.bridges);
     CHECK(carrying_bodies(on) == 2 && on.evaluated.front().report.bridges == 0,
           "(c) a part drawn as two bodies is not bridged");
+  }
+
+  // ── (d)-(f) the bridge holds itself ─────────────────────────────────────────
+  {
+    VoxelGrid g = blank(14, 5, 6);
+    std::vector<DirichletBC> bcs;
+    DesignMask frozen(g.voxel_count(), MaskValue::Active);
+    for (int k = 0; k < 6; ++k)
+      for (int j = 0; j < 5; ++j)
+        for (int i = 0; i < 14; ++i) {
+          const bool a = i < 4, b = i >= 10;
+          g.set_tag(i, j, k, VoxelTag::Interior);
+          if (!a && !b) continue;
+          frozen[g.index(i, j, k)] = MaskValue::FrozenSolid;
+          if (k == 0) {
+            g.set_tag(i, j, k, VoxelTag::Fixture);
+            clamp_voxel_nodes(g, i, j, k, bcs);
+          }
+          if (a && k == 5) g.set_tag(i, j, k, VoxelTag::Load);
+        }
+    auto line = [](const char* what, const MinimizePlasticResult& r) {
+      const VariantReport& v = r.evaluated.front().report;
+      std::printf("[42] %s: %s%s%s, %d bridge(s)", what,
+                  r.evaluated.front().accepted ? "accepted" : "rejected",
+                  v.rejection_reason.empty() ? "" : " - ", v.rejection_reason.c_str(),
+                  v.bridges);
+      for (const BridgeHoldReport& h : v.bridge_holds)
+        std::printf("; %.1f mm, hold margin %.2f, %d thickening(s), %s", h.size_mm,
+                    h.hold_margin, h.thickenings, h.held ? "held" : "LIFTED");
+      std::printf("\n");
+    };
+
+    const MinimizePlasticResult held = run(g, bcs, frozen, true, rules, Vec3{0.0, 0.0, -1500.0});
+    line("hold (d)", held);
+    const VariantReport& hd = held.evaluated.front().report;
+    CHECK(hd.bridges >= 1 && hd.bridge_holds.size() == static_cast<std::size_t>(hd.bridges),
+          "(d) one hold receipt per bridge");
+    bool thick = !hd.bridge_holds.empty();
+    for (const BridgeHoldReport& h : hd.bridge_holds)
+      thick = thick && h.held && h.thickenings >= 1 && h.thickenings <= 3 &&
+              h.hold_margin >= 1.5 && h.size_mm > 3.0 * 2.0;
+    CHECK(thick, "(d) the thin bridge is thickened until its own margin clears margin_stop");
+    CHECK(held.evaluated.front().accepted && carrying_bodies(held) == 1,
+          "(d) one piece, accepted");
+
+    const MinimizePlasticResult lifted =
+        run(g, bcs, frozen, true, rules, Vec3{0.0, 0.0, -40000.0});
+    line("hold (e)", lifted);
+    const VariantReport& lf = lifted.evaluated.front().report;
+    bool gone = !lf.bridge_holds.empty();
+    for (const BridgeHoldReport& h : lf.bridge_holds)
+      gone = gone && !h.held && h.thickenings == 3 && h.hold_margin < 1.5;
+    CHECK(gone, "(e) a bridge three layers cannot make hold is lifted, and said so");
+    CHECK(!lifted.evaluated.front().accepted && lf.rejection_reason == kAnchorDetachedReason,
+          "(e) the piece it held is let go and item 47 rejects the rung");
+
+    const MinimizePlasticResult walls =
+        run(g, bcs, frozen, true, rules, Vec3{0.0, 0.0, -2.0}, 5, 0.8);
+    line("hold (f)", walls);
+    const VariantReport& wl = walls.evaluated.front().report;
+    CHECK(!wl.bridge_holds.empty() && wl.bridge_holds.front().size_mm >= 8.0 &&
+              wl.bridge_holds.front().thickenings == 0 && wl.bridge_holds.front().held,
+          "(f) with walls the bridge starts at 2 x 5 loops x 0.8 mm = 8 mm");
   }
 
   if (g_failures == 0) {

@@ -1016,30 +1016,45 @@ BridgeResult bridge_split_bodies(const VoxelGrid& grid, std::vector<double>& den
       break;
     }
     // Lay the path, thickened by `radius` voxels within the allowed space.
-    std::vector<std::size_t> path;
+    LaidBridge b;
     for (long long v = hit; v >= 0; v = prev[static_cast<std::size_t>(v)]) {
       if (design.body_of_voxel[static_cast<std::size_t>(v)] < 0)
-        path.push_back(static_cast<std::size_t>(v));
+        b.path.push_back(static_cast<std::size_t>(v));
     }
-    for (const std::size_t p : path) {
-      int i, j, k;
-      decode(p, i, j, k);
-      for (int dk = -radius; dk <= radius; ++dk)
-        for (int dj = -radius; dj <= radius; ++dj)
-          for (int di = -radius; di <= radius; ++di) {
-            const int ni = i + di, nj = j + dj, nk = k + dk;
-            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
-            const std::size_t n = grid.index(ni, nj, nk);
-            if (!(n == p || (allowed[n] && grid.tags[n] != VoxelTag::Empty))) continue;
-            if (density[n] < 1.0) {
-              if (!(density[n] > iso)) ++out.voxels;
-              density[n] = 1.0;
-            }
-          }
-    }
+    const int joined = design.body_of_voxel[static_cast<std::size_t>(hit)];
+    for (std::size_t idx = 0; idx < grid.voxel_count(); ++idx)
+      if (design.body_of_voxel[idx] == joined) b.target.push_back(idx);
+    out.voxels += lay_bridge(grid, density, iso, allowed, b, radius);
+    out.laid.push_back(std::move(b));
     ++out.bridges;
   }
   return out;
+}
+
+long long lay_bridge(const VoxelGrid& grid, std::vector<double>& density, double iso,
+                     const std::vector<char>& allowed, LaidBridge& b, int radius) {
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  long long printed = 0;
+  for (const std::size_t p : b.path) {
+    const int i = static_cast<int>(p % static_cast<std::size_t>(nx));
+    const int j = static_cast<int>((p / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+    const int k = static_cast<int>(p / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+    for (int dk = -radius; dk <= radius; ++dk)
+      for (int dj = -radius; dj <= radius; ++dj)
+        for (int di = -radius; di <= radius; ++di) {
+          const int ni = i + di, nj = j + dj, nk = k + dk;
+          if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz) continue;
+          const std::size_t n = grid.index(ni, nj, nk);
+          if (!(n == p || (allowed[n] && grid.tags[n] != VoxelTag::Empty))) continue;
+          if (density[n] < 1.0) {
+            if (!(density[n] > iso)) ++printed;
+            b.laid.push_back({n, density[n]});
+            density[n] = 1.0;
+          }
+        }
+  }
+  b.radius = radius;
+  return printed;
 }
 
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,

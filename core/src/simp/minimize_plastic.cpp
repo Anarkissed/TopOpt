@@ -142,6 +142,155 @@ std::vector<NodalLoad> masked_self_weight_loads(const VoxelGrid& grid,
   return self_weight_loads(weighed, density, gravity, direction);
 }
 
+// CORE LIST item 42 B — THE BRIDGE HOLDS ITSELF (the reviewer's values of 2026-10-25
+// 07:05). Each piece a bridge joined hangs from that bridge ALONE: every other printed
+// voxel is clamped (the rest of the design taken as rigid; the piece's own anchors are
+// not used), and the piece carries three times its own weight plus a tenth of the real
+// load's resultant, across the bridge's axis. The bridge's own margin is read on its
+// voxels with the certification's knockdown. One solve per round; a bridge under
+// margin_stop is thickened one voxel layer, at most three times; one that still fails
+// is LIFTED (its voxels restored), so the belt and item 47 judge the split as before.
+// One receipt per bridge; `bridge.voxels` follows what is printed at the end.
+std::vector<BridgeHoldReport> hold_bridges(
+    const VoxelGrid& G, std::vector<double>& rho, double iso, BridgeResult& bridge,
+    const std::vector<char>& allowed, const std::vector<NodalLoad>& real_loads,
+    double weight_per_voxel, const Vec3& gravity_dir, const SimpParams& params,
+    const Material& material, const Vec3& build_dir, const SimpOptions& opt,
+    double margin_stop, const KnockdownSpec& knockdown, double part_solid) {
+  constexpr int kMaxThickenings = 3;
+  constexpr double kNoStress = 1e6;  // the margin of a bridge the hold load does not stress
+  const std::size_t nb = bridge.laid.size();
+  std::vector<BridgeHoldReport> out(nb);
+  if (nb == 0) return out;
+  Vec3 F{0.0, 0.0, 0.0};
+  for (const NodalLoad& l : real_loads)
+    (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+  const double f_mag = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+  const Vec3 gd = normalized(gravity_dir);
+  const Vec3 bn = normalized(build_dir);
+  std::vector<double> margin(nb, 0.0);
+  for (int round = 0;; ++round) {
+    std::vector<char> hangs(G.voxel_count(), 0);
+    for (const LaidBridge& b : bridge.laid) {
+      for (const auto& nd : b.laid) hangs[nd.first] = 1;
+      for (const std::size_t p : b.path) hangs[p] = 1;
+      for (const std::size_t t : b.target) hangs[t] = 1;
+    }
+    const int num_nodes = fea_node_count(G);
+    std::vector<char> clamped(static_cast<std::size_t>(num_nodes), 0);
+    std::vector<std::array<double, 3>> nodef(static_cast<std::size_t>(num_nodes),
+                                             std::array<double, 3>{0.0, 0.0, 0.0});
+    for (int k = 0; k < G.nz; ++k)
+      for (int j = 0; j < G.ny; ++j)
+        for (int i = 0; i < G.nx; ++i) {
+          const std::size_t idx = G.index(i, j, k);
+          if (hangs[idx] || G.tags[idx] == VoxelTag::Empty || !(rho[idx] > iso)) continue;
+          for (const int n : fea_element_nodes(G, i, j, k))
+            clamped[static_cast<std::size_t>(n)] = 1;
+        }
+    for (const LaidBridge& b : bridge.laid) {
+      auto centre = [&](std::size_t idx) {
+        const int nx = G.nx, ny = G.ny;
+        return G.voxel_center(static_cast<int>(idx % static_cast<std::size_t>(nx)),
+                              static_cast<int>((idx / static_cast<std::size_t>(nx)) %
+                                               static_cast<std::size_t>(ny)),
+                              static_cast<int>(idx / (static_cast<std::size_t>(nx) *
+                                                      static_cast<std::size_t>(ny))));
+      };
+      const Vec3 p0 = b.path.size() > 1 ? centre(b.path.back()) : centre(b.path.front());
+      const Vec3 p1 = b.path.size() > 1 ? centre(b.path.front()) : centre(b.target.front());
+      Vec3 a{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+      if (!(std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z) > 0.0)) a = Vec3{1.0, 0.0, 0.0};
+      a = normalized(a);
+      const double fa = F.x * a.x + F.y * a.y + F.z * a.z;
+      Vec3 perp{F.x - fa * a.x, F.y - fa * a.y, F.z - fa * a.z};
+      if (!(std::sqrt(perp.x * perp.x + perp.y * perp.y + perp.z * perp.z) > 1e-9 * (1.0 + f_mag)))
+        perp = std::fabs(a.x) < 0.9 ? Vec3{0.0, -a.z, a.y} : Vec3{-a.z, 0.0, a.x};
+      perp = normalized(perp);
+      const double per = 1.0 / static_cast<double>(b.target.size());
+      const Vec3 fv{3.0 * weight_per_voxel * gd.x + 0.1 * f_mag * perp.x * per,
+                    3.0 * weight_per_voxel * gd.y + 0.1 * f_mag * perp.y * per,
+                    3.0 * weight_per_voxel * gd.z + 0.1 * f_mag * perp.z * per};
+      for (const std::size_t t : b.target) {
+        const int ti = static_cast<int>(t % static_cast<std::size_t>(G.nx));
+        const int tj = static_cast<int>((t / static_cast<std::size_t>(G.nx)) %
+                                        static_cast<std::size_t>(G.ny));
+        const int tk = static_cast<int>(t / (static_cast<std::size_t>(G.nx) *
+                                             static_cast<std::size_t>(G.ny)));
+        for (const int n : fea_element_nodes(G, ti, tj, tk)) {
+          std::array<double, 3>& f = nodef[static_cast<std::size_t>(n)];
+          f[0] += fv.x / 8.0;
+          f[1] += fv.y / 8.0;
+          f[2] += fv.z / 8.0;
+        }
+      }
+    }
+    std::vector<DirichletBC> bcs;
+    std::vector<NodalLoad> loads;
+    for (int n = 0; n < num_nodes; ++n) {
+      const std::size_t u = static_cast<std::size_t>(n);
+      for (int c = 0; c < 3; ++c) {
+        if (clamped[u]) bcs.push_back({n, c, 0.0});
+        else if (nodef[u][static_cast<std::size_t>(c)] != 0.0)
+          loads.push_back({n, c, nodef[u][static_cast<std::size_t>(c)]});
+      }
+    }
+    const FixedDesignAnalysis fa =
+        analyze_fixed_design(G, params, rho, bcs, loads, material, build_dir,
+                             opt.cg_tolerance, opt.cg_max_iterations, opt.solver,
+                             margin_stop, knockdown, true, part_solid);
+    const double kd = fa.margin.worst_case > 0.0 ? fa.margin_effective / fa.margin.worst_case
+                                                 : 1.0;
+    for (std::size_t bi = 0; bi < nb; ++bi) {
+      const LaidBridge& b = bridge.laid[bi];
+      double vm = 0.0, tn = 0.0;
+      auto read = [&](std::size_t n) {
+        vm = std::max(vm, fa.von_mises_field[n]);
+        if (fa.stress_tensor_field.size() == 6 * G.voxel_count()) {
+          const double* s = &fa.stress_tensor_field[6 * n];
+          tn = std::max(tn, bn.x * bn.x * s[0] + bn.y * bn.y * s[1] + bn.z * bn.z * s[2] +
+                                2.0 * bn.x * bn.y * s[3] + 2.0 * bn.y * bn.z * s[4] +
+                                2.0 * bn.z * bn.x * s[5]);
+        }
+      };
+      for (const auto& nd : b.laid) read(nd.first);
+      for (const std::size_t p : b.path) read(p);
+      const double in_plane = vm > 0.0 && fa.max_von_mises > 0.0
+                                  ? fa.margin.in_plane * fa.max_von_mises / vm : kNoStress;
+      const double inter = tn > 0.0 && fa.max_interlayer_tension > 0.0
+                               ? fa.margin.interlayer * fa.max_interlayer_tension / tn
+                               : kNoStress;
+      margin[bi] = fa.non_convergent ? 0.0 : std::min(kNoStress, kd * std::min(in_plane, inter));
+    }
+    bool again = false;
+    for (std::size_t bi = 0; bi < nb; ++bi) {
+      if (margin[bi] >= margin_stop || out[bi].thickenings >= kMaxThickenings) continue;
+      LaidBridge& b = bridge.laid[bi];
+      bridge.voxels += lay_bridge(G, rho, iso, allowed, b, b.radius + 1);
+      ++out[bi].thickenings;
+      again = true;
+    }
+    if (!again) break;
+  }
+  std::vector<char> kept(G.voxel_count(), 0);
+  for (std::size_t bi = 0; bi < nb; ++bi)
+    if (margin[bi] >= margin_stop)
+      for (const auto& nd : bridge.laid[bi].laid) kept[nd.first] = 1;
+  for (std::size_t bi = nb; bi-- > 0;) {
+    const LaidBridge& b = bridge.laid[bi];
+    out[bi].size_mm = (2.0 * b.radius + 1.0) * G.spacing;
+    out[bi].hold_margin = margin[bi];
+    out[bi].held = margin[bi] >= margin_stop;
+    if (out[bi].held) continue;
+    for (auto it = b.laid.rbegin(); it != b.laid.rend(); ++it) {
+      if (kept[it->first]) continue;
+      if (!(it->second > iso) && rho[it->first] > iso) --bridge.voxels;
+      rho[it->first] = it->second;
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 // --- THE ONE design-domain resolution (pipeline.hpp) -------------------------
@@ -2401,14 +2550,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // CORE LIST item 42, option B — ONE PIECE: bridge what the design split before
     // anything below measures or certifies it, so every number includes the bridge.
     BridgeResult bridge;
+    std::vector<BridgeHoldReport> bridge_holds;
     if (options.bridge_pieces) {
       std::vector<char> allowed(G.voxel_count(), 0);
       for (std::size_t i = 0; i < allowed.size(); ++i)
         allowed[i] = mask[i] == MaskValue::Active || mask[i] == MaskValue::FrozenSolid;
-      const int radius = std::max(
-          1, static_cast<int>(std::lround(0.5 * options.min_feature_mm / G.spacing)));
+      // The bridge's floor (07:05): two walls thick where the job prints walls, else
+      // the min feature.
+      const double floor_mm = options.wall_loops > 0
+                                  ? 2.0 * options.wall_loops * options.wall_line_width_mm
+                                  : options.min_feature_mm;
+      const int radius =
+          std::max(1, static_cast<int>(std::lround(0.5 * floor_mm / G.spacing)));
       bridge = bridge_split_bodies(G, variant.optimization.physical_density, kIso,
                                    as_drawn_bodies, allowed, radius);
+      bridge_holds = hold_bridges(
+          G, variant.optimization.physical_density, kIso, bridge, allowed, loads,
+          options.gravity * material.density_g_cm3 * G.spacing * G.spacing * G.spacing,
+          options.gravity_direction, params, material, build_dir, opt, options.margin_stop,
+          knockdown, part_solid);
     }
     const std::vector<double>& rho = variant.optimization.physical_density;
 
@@ -2751,6 +2911,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
     vr.bridges = bridge.bridges;
     vr.bridge_voxels = bridge.voxels;
+    vr.bridge_holds = bridge_holds;
     vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
                          vr.anchored_pieces_lost > 0 || vr.bridges > 0;
 

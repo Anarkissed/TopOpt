@@ -153,6 +153,23 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
   behaviour (the plate's floor rung is bridged and accepted, its file one body, the bore attached); 47's rejection is
   pinned in test_bridge (b) with the bridge off. 30/30. Full suite 144/144.
 
+### Item 42 B: the bridge holds itself (the reviewer's values of 2026-10-25 07:05; his "definitely needs to hold itself")
+
+- Floor: the bridge starts at 2 x wall_loops x wall_line_width thick when the job prints walls (5.4 mm on his job), else
+  the min feature: radius = max(1, round(0.5 x floor / h)).
+- Load (`hold_bridges`, minimize_plastic.cpp): each joined piece hangs from its bridge ALONE. Every other printed voxel is
+  clamped (the rest of the design taken as rigid; the piece's own anchors are not used), and the piece carries 3 x its
+  weight plus 0.1 x the real load's resultant, across the bridge's axis, spread over its voxels. The bridge's own margin
+  is read on its voxels (von Mises and interlayer, scaled from the solve's margins, with the certification's knockdown)
+  against margin_stop. One extra solve per bridged rung, one more per thickening round.
+- Under margin_stop: thicken one voxel layer (`lay_bridge`, radius + 1), at most 3 times. Still under: the bridge is
+  LIFTED (its voxels restored), the split stands, and the belt / item 47 reject the rung as before.
+- Receipt: `bodies.bridge_holds[]` = {size_mm (nominal (2r+1)h), hold_margin, thickenings, held}; the CLI prints one
+  line per bridge ("DID NOT HOLD (lifted)" when lifted).
+- Test: `test_bridge` 14/14: (d) at 1500 N the 6 mm bridge is thickened once to 10 mm, hold margin 1.54, held, one piece,
+  accepted; (e) at 40 000 N three layers do not hold (0.23), the bridge is lifted and item 47 rejects; (f) with
+  5 loops x 0.8 mm the bridge starts at 10 mm (floor 8 mm), no thickening.
+
 ## KEEP, as built (2026-10-25; his answers: volumes only, replaces Protect, one merged shell)
 
 - Schema: top-level `keep_regions: [{shape: box|cylinder, min, max, axis (cylinder only, 0/1/2)}]`. A cylinder is the

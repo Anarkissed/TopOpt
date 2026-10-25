@@ -29,6 +29,14 @@ namespace topopt {
 // 2026-07-08). All three are dimensionless safety factors (yield / stress);
 // larger is safer, and worst_case is the number the M5.1 settings engine
 // consumes as its `worst_case_stress_margin` input.
+// CORE LIST item 42 B — one bridge's hold-itself receipt (VariantReport::bridge_holds).
+struct BridgeHoldReport {
+  double size_mm = 0.0;      // (2 x radius + 1) x voxel spacing
+  double hold_margin = 0.0;  // the bridge's own effective margin under the hold load
+  int thickenings = 0;       // voxel layers added after the first lay (0..3)
+  bool held = true;
+};
+
 struct StressMargin {
   double in_plane = 0.0;    // yield_strength_mpa / max_von_mises_stress
   double interlayer = 0.0;  // (z_knockdown * yield_strength_mpa) / max_interlayer_tension
@@ -261,6 +269,11 @@ struct VariantReport {
   // piece before it was certified (its numbers include the bridge).
   int bridges = 0;
   long long bridge_voxels = 0;
+  // ...and each bridge HOLDS ITSELF (the reviewer's values of 2026-10-25 07:05): its
+  // nominal thickness, its own margin with the piece it joined hanging from it alone,
+  // how many voxel layers were added to get there (at most 3), and whether it held
+  // (a bridge that did not is lifted again, and items 47 / the belt judge the rung).
+  std::vector<BridgeHoldReport> bridge_holds;
   long long lost_anchor_voxels = 0;
   std::vector<int> lost_anchor_face_ids;
   std::vector<int> lost_anchor_region_ids;

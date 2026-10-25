@@ -170,7 +170,19 @@ void emit_variant(std::string& out, const VariantReport& v,
            ", \"lost_anchor_face_ids\": " + ids(v.lost_anchor_face_ids) +
            ", \"lost_anchor_region_ids\": " + ids(v.lost_anchor_region_ids) +
            ", \"bridges\": " + std::to_string(v.bridges) +
-           ", \"bridge_voxels\": " + std::to_string(v.bridge_voxels) + "}";
+           ", \"bridge_voxels\": " + std::to_string(v.bridge_voxels);
+    if (!v.bridge_holds.empty()) {
+      out += ", \"bridge_holds\": [";
+      for (std::size_t i = 0; i < v.bridge_holds.size(); ++i) {
+        const BridgeHoldReport& h = v.bridge_holds[i];
+        out += std::string(i ? ", " : "") + "{\"size_mm\": " + num_json(h.size_mm) +
+               ", \"hold_margin\": " + num_json(h.hold_margin) +
+               ", \"thickenings\": " + std::to_string(h.thickenings) +
+               ", \"held\": " + (h.held ? "true" : "false") + "}";
+      }
+      out += "]";
+    }
+    out += "}";
   }
   // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
   // of a growth run, and the licence for the [0,1] fraction bounds to be read on

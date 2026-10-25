@@ -569,6 +569,11 @@ int main(int argc, char** argv) {
                            std::to_string(v.report.bridge_voxels) + " voxels)")
                               .c_str()
                         : "");
+      // ...and how each bridge holds itself (item 42 B, 07:05).
+      for (const topopt::BridgeHoldReport& h : v.report.bridge_holds)
+        std::printf("        bridge %.1f mm: hold margin %.2f, %d thickening(s)%s\n",
+                    h.size_mm, h.hold_margin, h.thickenings,
+                    h.held ? "" : ", DID NOT HOLD (lifted)");
       // Task 2026-08-03-growth-ladder — on a growth run the accounting IS the
       // result: how much plastic this rung adds, and how much of the object you
       // are about to print was never in your model.
