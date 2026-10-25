@@ -738,6 +738,7 @@ public struct WorkspacePlaceholder: View {
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             DS.Color.background.color.ignoresSafeArea()
                 // Under Flexible the lattice Settings door opens the Flexible page instead (always-mounted view).
                 .onChange(of: showLatticeWizard) { open in
@@ -1227,6 +1228,8 @@ public struct WorkspacePlaceholder: View {
             // the clearance drag handles are all EDITORS — on the smoothing page they
             // would let a user move the very geometry the freeze mask was computed
             // against, behind a page that could not react to it.
+            })   // Flexible (PR #362) H58
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if !fullScreenPageUp {
                 // ★ §6(a) — NOT ON THE SURFACE STAGE. Force arrows are a TOPOLOGY
                 // affordance: they answer "what is pushing on this part", which is
@@ -1291,6 +1294,8 @@ public struct WorkspacePlaceholder: View {
             }
 
             if !fullScreenPageUp { chrome }
+            })   // Flexible (PR #362) H58
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
@@ -1377,6 +1382,8 @@ public struct WorkspacePlaceholder: View {
             // Gravity/Push/Pull switch. The maintainer found the whole load editor
             // sitting on the Surface stage: "Anything from the TO page like the
             // Load indicator should not be visible on this stage."
+            })   // Flexible (PR #362) H58
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if !fullScreenPageUp, visible.groupPrimitives {
                 loadOverlays.ignoresSafeArea()                  // D3/D4/D5: load pills
             }
@@ -1461,6 +1468,8 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
+            })   // Flexible (PR #362) H58
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
                 LatticeSetupWizard(project: project) {
                     showLatticeWizard = false
@@ -1531,6 +1540,8 @@ public struct WorkspacePlaceholder: View {
             // top rather than to hide it. Each page insets its own top-right column
             // by `PageChrome.gizmoClearance` so nothing lands under it.
             if viewerMesh != nil { orientationGizmo }
+            })   // Flexible (PR #362) H58
+            AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
@@ -1610,6 +1621,7 @@ public struct WorkspacePlaceholder: View {
             // and a landed run says so here — it never opens Results by itself.
             if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp { topologyCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
+            })   // Flexible (PR #362) H58
         }
         // ★ the stage UI the band chips stay out of — every reporter is a descendant
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
