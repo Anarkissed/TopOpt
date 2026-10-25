@@ -22,6 +22,9 @@
 //   B    a safe attempt that breaks down before its first update reports its
 //        starting residual: not productive, seeds nothing, advances the latch.
 //   A    the fallback is seeded only by an iterate better on the EXACT system.
+//   C    ... and better than a COLD start (in the fallback's own 2-norm and in
+//        energy); a warm start worse than zero in both is not used either, so
+//        a stopped retry can never leave the fallback worse off than cold.
 //   L    the [mg-safe] stderr lines are bounded per run (first N, then one
 //        summary per M attempts) and the bound changes no number.
 //   D    the certified final compliance solves (simp_optimize, its masked /
@@ -131,6 +134,28 @@ SpeckField make_speck_field(bool with_specks) {
     for (int b = 6; b <= 10; ++b)
       F.loads.push_back({topopt::fea_node_index(F.g, F.g.nx, b, c), 2, -1.0});
   return F;
+}
+
+// Relative TRUE residual ||f - K u|| / ||f|| over the free DOFs (fresh
+// operator apply; not the CG recurrence's running residual).
+double true_rel(const VoxelGrid& g, const std::vector<double>& ey,
+                const std::vector<DirichletBC>& bcs,
+                const std::vector<NodalLoad>& loads, const FeaSolution& u,
+                double nu) {
+  std::vector<double> ku = topopt::fea_matfree_apply(g, ey, nu, u.u);
+  std::vector<double> f(ku.size(), 0.0);
+  for (const NodalLoad& l : loads)
+    f[static_cast<std::size_t>(3 * l.node + l.component)] += l.value;
+  std::vector<char> fixed(ku.size(), 0);
+  for (const DirichletBC& b : bcs)
+    fixed[static_cast<std::size_t>(3 * b.node + b.component)] = 1;
+  double rn = 0, bn = 0;
+  for (std::size_t i = 0; i < ku.size(); ++i) {
+    if (fixed[i]) continue;
+    rn += (f[i] - ku[i]) * (f[i] - ku[i]);
+    bn += f[i] * f[i];
+  }
+  return std::sqrt(rn / bn);
 }
 
 }  // namespace
@@ -505,6 +530,105 @@ int main() {
     check(!N.dropped && !N.converged && N.res_exact >= 0.0 &&
               N.res_exact < N.r0_exact && N.seeded_fallback,
           "A POSITIVE CONTROL: an iterate better on the exact system still seeds");
+  }
+
+  // ---------------------------------------------------------------------------
+  // C (cold-start guard, CI core-linux cli_demo 2026-10-24): a PLSM warm start
+  // can be FAR worse than zero — the previous design's field moves a region
+  // that has since turned solid, and the demo L-bracket's warm starts measured
+  // exact rel res 1e8-1e10. The safe retry's iterate then beats the warm start
+  // (the old seeding test) while still being thousands of times worse than a
+  // COLD start in the fallback's own stopping norm (demo: 1.7e3-3e4), and the
+  // Jacobi-CG fallback seeded with it needed 33k-92k iterations against ~13k
+  // cold, "converged" with a true residual up to 1.6e-1 at tol 1e-4, and on
+  // Linux ran past its 124,362-iteration cap (rel res 0.0253) — rung 2
+  // rejected. Here: warm = the exact field with the beam's tip half lifted
+  // rigidly (its root face then carries the near-rigid forces), the retry
+  // stopped short at 5 / 2 cycles (test hook), seeds of exact rel res 3.4e4 /
+  // 1.6e7 (below the warm start's, far above a cold start's 1).
+  //   C1: with the solve capped 10 % above the COLD fallback's own count, the
+  //       solve must converge — RED before the fix: the seeded fallback needed
+  //       ~8,000 iterations and threw at the cap — and it must be the cold
+  //       fallback bit-for-bit (the iterate is not handed over and the warm
+  //       start, worse than zero in both norms, is not used either).
+  //   C2: uncapped, the fallback's answer must meet the tolerance on a FRESH
+  //       residual (<= 2 tol) — RED before the fix: the seeded fallback
+  //       stopped on its recurrence at a true residual 77x the tolerance.
+  //   POSITIVE CONTROL: an iterate better than a cold start in both norms
+  //       (exact rel res 0.15) still seeds.
+  // ---------------------------------------------------------------------------
+  {
+    SpeckField F = make_speck_field(true);
+    const double tol = 1e-8;
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    topopt::fea_matfree_set_mg_safe_retry(false);
+    CgInfo ci;
+    const FeaSolution ustar =
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, 1e-10, 0, &ci);
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    CgInfo cc;
+    const FeaSolution ucold =
+        topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, 0, &cc);
+    topopt::fea_matfree_set_mg_safe_retry(true);
+    const int n_cold = cc.iterations;
+    std::printf("      cold reference: used_mg=%d Jacobi its=%d true rel res %.3e\n",
+                cc.used_multigrid ? 1 : 0, n_cold, true_rel(F.g, F.ey, F.bcs, F.loads, ucold, nu));
+    auto lifted = [&](double lift) {
+      FeaSolution w = ustar;
+      for (int c = 6; c <= 10; ++c)
+        for (int b = 6; b <= 10; ++b)
+          for (int i = 16; i <= F.g.nx; ++i)
+            w.u[static_cast<std::size_t>(3 * topopt::fea_node_index(F.g, i, b, c) + 2)] += lift;
+      return w;
+    };
+    struct Out {
+      topopt::fea_detail::MgSafeAttemptReport R;
+      CgInfo info;
+      FeaSolution u;
+      bool threw = false;
+    };
+    auto warm_solve = [&](double lift, int safe_cycles, int cap) {
+      Out o;
+      const FeaSolution w = lifted(lift);
+      topopt::fea_matfree_reset_mg_stagnation_latch();
+      topopt::fea_detail::mg_safe_test_max_cycles(safe_cycles);
+      try {
+        o.u = topopt::fea_solve_mgcg_matfree(F.g, F.ey, nu, F.bcs, F.loads, tol, cap,
+                                             &o.info, nullptr, &w);
+      } catch (const topopt::SolverNonConvergence&) {
+        o.threw = true;
+      }
+      topopt::fea_detail::mg_safe_test_max_cycles(0);
+      o.R = topopt::fea_detail::mg_last_safe_attempt();
+      std::printf("      lift %.0e, retry %d cycles, cap %d: exact rel res %.3e (warm "
+                  "start %.3e) seeded=%d | fallback its=%d res=%.3e threw=%d true "
+                  "rel res %.3e\n",
+                  lift, safe_cycles, cap, o.R.res_exact, o.R.r0_exact,
+                  o.R.seeded_fallback ? 1 : 0, o.info.iterations, o.info.residual,
+                  o.threw ? 1 : 0,
+                  o.threw ? -1.0 : true_rel(F.g, F.ey, F.bcs, F.loads, o.u, nu));
+      return o;
+    };
+    const int cap = n_cold + n_cold / 10;
+    const Out c1 = warm_solve(1e3, 5, cap);
+    check(c1.R.seq == 1 && !c1.R.converged && c1.R.res_exact > 1.0 &&
+              c1.R.res_exact < c1.R.r0_exact,
+          "C setup: the stopped retry's iterate beats the warm start but is worse "
+          "than a cold start (exact rel res > 1)");
+    check(!c1.R.seeded_fallback, "C1: an iterate worse than a cold start never seeds");
+    check(!c1.threw && c1.info.converged && c1.info.iterations == n_cold &&
+              bit_identical(c1.u, ucold),
+          "C1: the fallback converges within 10 % of the cold count — it IS the cold "
+          "fallback, bit-for-bit");
+    const Out c2 = warm_solve(1e5, 2, 0);
+    check(!c2.threw && !c2.R.seeded_fallback &&
+              true_rel(F.g, F.ey, F.bcs, F.loads, c2.u, nu) <= 2.0 * tol,
+          "C2: the fallback's answer meets the tolerance on a FRESH residual (no "
+          "false convergence from a huge start)");
+    const Out cp = warm_solve(1e1, 60, 0);
+    check(!cp.threw && cp.R.seeded_fallback && cp.R.res_exact < 1.0 &&
+              cp.info.converged,
+          "C POSITIVE CONTROL: an iterate better than a cold start still seeds");
   }
 
   // ---------------------------------------------------------------------------

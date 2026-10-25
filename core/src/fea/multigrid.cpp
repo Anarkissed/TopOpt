@@ -207,6 +207,9 @@ thread_local int g_island_drop_forbid = 0;
 // production code sets it; only the safe-retry MG-PCG call reads it).
 thread_local fea_detail::MgSafeAttemptReport g_mg_last_safe;
 thread_local int g_mg_safe_test_breakdown = 0;
+// TEST ONLY (fea_detail::mg_safe_test_max_cycles): overrides kSafeMaxCycles
+// when > 0. No production code sets it.
+thread_local int g_mg_safe_test_max_cycles = 0;
 // [mg-safe] stderr BOUND. A latched run takes the safe path on EVERY solve, so
 // one line per attempt is unbounded (thousands on a long ladder). Per run: the
 // first kSafeLogFirst attempts print their full line; after that attempts are
@@ -2820,6 +2823,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       MfHierarchy& HS = use2 ? H2 : H;
       bool ok = false;
       bool seeded_fallback = false;
+      bool cold_fallback = false;  // fallback starts from 0, not the warm start
       double r0 = 1.0;     // start, on the system the retry solves (HS)
       double r0x = 1.0;    // start, on the EXACT system m
       double resx = -1.0;  // end, on the EXACT system m (-1 = not evaluated)
@@ -2864,17 +2868,39 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         // through the l1 solve), so the retry's peak memory is unchanged.
         const Eigen::Map<const Vec> bx(m.rg.data(), static_cast<Eigen::Index>(m.ng));
         const double bxn = bx.norm();
-        auto rel_res = [](const MatfreeReduced& sys, const Eigen::Ref<const Vec>& b,
+        //
+        // Each evaluation also yields the energy functional
+        // J(x) = x'Ax/2 - b'x, for which J(x) - J(x*) = ||x* - x||_A^2 / 2: the
+        // norm CG minimizes. A COLD start has rel res 1 and J = 0 exactly, so
+        // the fallback's three candidate starts (cold, the caller's warm guess,
+        // the retry's iterate) are compared on the exact system in BOTH the
+        // fallback's stopping norm and its energy norm (see the seeding below).
+        struct StartQuality {
+          double rel = 1.0;  // ||b - Ax|| / ||b||
+          double J = 0.0;    // x'Ax/2 - b'x
+        };
+        auto quality = [](const MatfreeReduced& sys, const Eigen::Ref<const Vec>& b,
                           double bn, const Vec& x) {
           UncountedFineApply A(sys);
           Vec ax;
           A(x, ax);
-          return (b - ax).norm() / bn;
+          StartQuality q;
+          q.rel = (b - ax).norm() / bn;
+          q.J = 0.5 * x.dot(ax) - b.dot(x);
+          return q;
         };
-        if (warm && rgv.norm() > 0.0) r0 = rel_res(*HS.m, rgv, rgv.norm(), x0);
-        if (warm && bxn > 0.0) r0x = use2 ? rel_res(m, bx, bxn, x0) : r0;
+        StartQuality q0x;  // the warm start on the EXACT system (cold: 1, 0)
+        if (warm && rgv.norm() > 0.0) {
+          const StartQuality q0 = quality(*HS.m, rgv, rgv.norm(), x0);
+          r0 = q0.rel;
+          if (!use2) q0x = q0;
+        }
+        if (warm && bxn > 0.0 && use2) q0x = quality(m, bx, bxn, x0);
+        if (warm && bxn > 0.0) r0x = q0x.rel;
         Vec xg;
-        ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, kSafeMaxCycles),
+        const int safe_max =
+            g_mg_safe_test_max_cycles > 0 ? g_mg_safe_test_max_cycles : kSafeMaxCycles;
+        ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
                       xg, it, res, /*mixed=*/false, &rec, warm ? &x0 : nullptr,
                       &o, kSafeWindow, kSafeMinGain);
         diag.mg_cycles_attempted = shipped_it + it;
@@ -2890,33 +2916,58 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
             g_mg_last_dropped = scan.drop;
             g_mg_last_dropped_floor = scan.floor_e;
           }
-        } else if (xg.size() == m.ng && xg.allFinite() && bxn > 0.0) {
-          // Did not reach tolerance: hand the iterate to the exact Jacobi-CG
-          // fallback as its starting guess. PCG never raises the energy-norm
-          // error of its start, so this is at least as good as the guess the
-          // fallback would otherwise use (measured on the Carriage Arms: rel
-          // res ~1e-2 after 300 l1 cycles, which Jacobi-CG needs ~8,000
-          // iterations to reach from zero). Only an iterate whose EXACT-system
-          // residual is below the exact start's is handed over (on a
-          // near-singular system the 2-norm residual can rise while the energy
-          // error falls; the demo L-bracket showed rel res 10-140 after 300 l1
-          // cycles; and an island-dropped iterate is judged on the system the
-          // fallback solves, not on the one it came from), so the fallback
-          // never starts further from its own stopping test, which is still
-          // ||r|| <= tol*||b|| on the EXACT system: its answer is unchanged in
-          // kind.
-          resx = rel_res(m, bx, bxn, xg);
-          if (resx < r0x) {
-            for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
-            seeded_fallback = true;
+        } else if (bxn > 0.0) {
+          // Did not reach tolerance: choose the Jacobi-CG fallback's START.
+          // PCG never raises the energy-norm error of its start, and it stops
+          // on ||r|| <= tol*||b|| on the EXACT system, so a start is judged on
+          // that system in both norms; the answer is unchanged in kind
+          // whichever start wins.
+          //
+          // (1) The BASE start is the caller's warm guess (cold when none),
+          // EXCEPT when that guess is worse than zero in both norms (rel res
+          // > 1 AND J > 0): then the fallback starts cold. A PLSM warm start
+          // can be: the previous design's field moves a region that has since
+          // turned solid (the demo L-bracket measured exact rel res 1e8-1e10,
+          // J up to 1e12), and Jacobi-CG from such a start pays iterations
+          // AND attainable accuracy — its recurrence residual drifts from the
+          // true one in proportion to the start's size (demo: "converged" at
+          // 1e-4 on the recurrence with a true residual of 1.6e-1).
+          //
+          // (2) The retry's iterate SEEDS the fallback only if it beats the
+          // base start in BOTH norms. Beating the warm start is not enough:
+          // the demo's iterates (rel res 1.7e3-3e4) beat warm starts of 1e8+
+          // yet were thousands of times worse than zero in the fallback's own
+          // norm; seeded, the fallback needed 33k-92k iterations against ~13k
+          // cold, and on Linux ran past its 124,362-iteration cap (rel res
+          // 0.0253; rung 2 rejected). An island-DROPPED iterate is judged on
+          // the system the fallback solves, not on the one it came from.
+          // A stopped retry therefore never leaves the fallback with a start
+          // worse than zero or worse than the caller's guess.
+          StartQuality base = q0x;  // warm guess, or cold (1, 0)
+          if (warm && q0x.rel > 1.0 && q0x.J > 0.0) {
+            base = StartQuality{};  // cold: rel 1, J 0
+            cold_fallback = true;
           }
+          if (xg.size() == m.ng && xg.allFinite()) {
+            const StartQuality qx = quality(m, bx, bxn, xg);
+            resx = qx.rel;
+            if (qx.rel < base.rel && qx.J < base.J) {
+              for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
+              seeded_fallback = true;
+              cold_fallback = false;
+            }
+          }
+          if (cold_fallback) std::fill(xkept.begin(), xkept.end(), 0.0);
         }
       }
       // Latch: an attempt that carried, or that cut the EXACT-system residual
-      // >= 10x and seeded the fallback with it, is productive;
-      // kMgLatchThreshold consecutive unproductive attempts latch the safe
-      // path off for the run.
-      const bool productive = ok || (seeded_fallback && resx <= 0.1 * r0x);
+      // >= 10x from its own start, is productive; kMgLatchThreshold
+      // consecutive unproductive attempts latch the safe path off for the run.
+      // (Judged against the attempt's own start, as before the cold-start
+      // guard: the guard decides where the fallback starts, not whether the
+      // retry is worth running.)
+      const bool productive =
+          ok || (resx >= 0.0 && resx < r0x && resx <= 0.1 * r0x);
       if (ok) ++g_mg_safe_carries;
       if (productive) {
         g_mg_safe_consecutive_failures = 0;
@@ -2929,6 +2980,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         rep.dropped = use2;
         rep.converged = ok;
         rep.seeded_fallback = seeded_fallback;
+        rep.cold_fallback = cold_fallback;
         rep.productive = productive;
         rep.cycles = it;
         rep.res = res;
@@ -2938,15 +2990,20 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         rep.consecutive_failures = g_mg_safe_consecutive_failures;
       }
       // The seeding decision, stated on the system it was judged on.
-      char exact_note[128] = "";
+      char exact_note[192] = "";
       if (resx >= 0.0 && seeded_fallback)
         std::snprintf(exact_note, sizeof exact_note,
                       " ; Jacobi-CG fallback starts from the l1 iterate (exact rel "
                       "res %.3e < start %.3e)", resx, r0x);
       else if (resx >= 0.0)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; l1 iterate NOT handed over (exact rel res %.3e >= start "
-                      "%.3e)", resx, r0x);
+                      " ; l1 iterate NOT handed over (exact rel res %.3e, warm start "
+                      "%.3e%s)", resx, r0x,
+                      cold_fallback ? "; Jacobi-CG fallback starts COLD" : "");
+      else if (cold_fallback)
+        std::snprintf(exact_note, sizeof exact_note,
+                      " ; Jacobi-CG fallback starts COLD (warm start exact rel res "
+                      "%.3e)", r0x);
       const double safe_ms = fea_detail::mf_steady_ms() - t_s0;
       // Bounded (see kSafeLogFirst): the full line for the first attempts of a
       // run and for the one that latches the safe path off; a summary per
@@ -3211,6 +3268,9 @@ void mg_safe_test_log_periods(int first, int every) {
 }
 void mg_safe_test_force_breakdown(int mode) {
   g_mg_safe_test_breakdown = (mode == 1 || mode == 2) ? mode : 0;
+}
+void mg_safe_test_max_cycles(int cycles) {
+  g_mg_safe_test_max_cycles = cycles > 0 ? cycles : 0;
 }
 
 }  // namespace fea_detail
