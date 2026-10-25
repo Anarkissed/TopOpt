@@ -256,6 +256,10 @@ int main() {
                   drawn, req, ref, ceil);
       CHECK(drawn >= req && std::fabs(ref - std::max(drawn, req)) < 1e-9 * ref,
             "(a) the reference is max(as drawn, required); this part passes as drawn");
+      CHECK(s.has("cap") && s.at("cap").at("face_id").num >= 0 &&
+                !s.at("cap").at("note").str.empty(),
+            "the ceiling's worst-stress site is named (one line per run)");
+      if (s.has("cap")) std::printf("[50] cap: %s\n", s.at("cap").at("note").str.c_str());
       const Json& vs = s.at("versions");
       CHECK(vs.arr.size() == 3, "three versions are reported");
       double prev = 0.0;

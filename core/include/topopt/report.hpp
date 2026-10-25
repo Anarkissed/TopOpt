@@ -354,6 +354,16 @@ struct StrengthenReport {
   // vf <- vf * (target (1 + delta) / margin)^gamma, each step capped at +-vf_step,
   // floored at the previous version's fraction.
   double delta = 0.0, gamma = 0.0, vf_step = 0.0;
+  // WHERE THE CEILING'S WORST STRESS SITS (the reviewer's ruling of 2026-10-25
+  // 03:58): the voxel of peak von Mises in the box filled solid, the CAD face
+  // nearest it, and whether it touches an anchor or load face. A peak at the edge
+  // of a fixed or loaded face can be a stress singularity that grows with
+  // resolution, so a cap set there may not be real. `cap_note` is the one line.
+  int cap_face_id = -1;
+  Vec3 cap_point{0.0, 0.0, 0.0};
+  bool cap_at_anchor_face = false;
+  bool cap_at_load_face = false;
+  std::string cap_note;
   std::vector<StrengthenVersionReport> versions;
 };
 

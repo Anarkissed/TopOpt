@@ -12165,6 +12165,89 @@ void append_rung(MinimizePlasticResult& into, MinimizePlasticResult&& from) {
   take(into.report.rejected, from.report.rejected);
 }
 
+// Squared distance from p to triangle abc (closest point, Ericson's regions).
+double point_triangle_d2(const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+  auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+  auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+  auto d2 = [&](const Vec3& q) { const Vec3 e = sub(p, q); return dot(e, e); };
+  const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+  const double d1 = dot(ab, ap), d2v = dot(ac, ap);
+  if (d1 <= 0 && d2v <= 0) return d2(a);
+  const Vec3 bp = sub(p, b);
+  const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return d2(b);
+  const double vc = d1 * d4 - d3 * d2v;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const double t = d1 / (d1 - d3);
+    return d2(Vec3{a.x + t * ab.x, a.y + t * ab.y, a.z + t * ab.z});
+  }
+  const Vec3 cp = sub(p, c);
+  const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return d2(c);
+  const double vb = d5 * d2v - d1 * d6;
+  if (vb <= 0 && d2v >= 0 && d6 <= 0) {
+    const double t = d2v / (d2v - d6);
+    return d2(Vec3{a.x + t * ac.x, a.y + t * ac.y, a.z + t * ac.z});
+  }
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return d2(Vec3{b.x + t * (c.x - b.x), b.y + t * (c.y - b.y), b.z + t * (c.z - b.z)});
+  }
+  const double den = 1.0 / (va + vb + vc);
+  const double v = vb * den, w = vc * den;
+  return d2(Vec3{a.x + ab.x * v + ac.x * w, a.y + ab.y * v + ac.y * w,
+                 a.z + ab.z * v + ac.z * w});
+}
+
+// The ceiling's worst-stress site (the reviewer's ruling of 2026-10-25 03:58).
+void strengthen_cap_site(StrengthenReport& sr, const VoxelGrid& G,
+                         const std::vector<double>& von_mises, const StepModel& model) {
+  if (von_mises.size() != G.voxel_count()) return;
+  std::size_t at = 0;
+  for (std::size_t i = 1; i < von_mises.size(); ++i)
+    if (von_mises[i] > von_mises[at]) at = i;
+  const int x = static_cast<int>(at % static_cast<std::size_t>(G.nx));
+  const int y = static_cast<int>((at / static_cast<std::size_t>(G.nx)) %
+                                 static_cast<std::size_t>(G.ny));
+  const int z = static_cast<int>(at / (static_cast<std::size_t>(G.nx) *
+                                       static_cast<std::size_t>(G.ny)));
+  sr.cap_point = G.voxel_center(x, y, z);
+  double best = std::numeric_limits<double>::infinity();
+  for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t) {
+    const auto& tri = model.mesh.triangles[t];
+    const double d = point_triangle_d2(sr.cap_point, model.mesh.vertices[tri[0]],
+                                       model.mesh.vertices[tri[1]],
+                                       model.mesh.vertices[tri[2]]);
+    if (d < best) {
+      best = d;
+      sr.cap_face_id = model.triangle_face[t];
+    }
+  }
+  for (int dk = -1; dk <= 1; ++dk)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int di = -1; di <= 1; ++di) {
+        const int i = x + di, j = y + dj, k = z + dk;
+        if (i < 0 || j < 0 || k < 0 || i >= G.nx || j >= G.ny || k >= G.nz) continue;
+        const VoxelTag t = G.tag(i, j, k);
+        if (t == VoxelTag::Fixture) sr.cap_at_anchor_face = true;
+        if (t == VoxelTag::Load) sr.cap_at_load_face = true;
+      }
+  char line[400];
+  std::snprintf(line, sizeof(line),
+                "the box filled solid peaks at (%.1f, %.1f, %.1f) mm, on face %d%s",
+                sr.cap_point.x, sr.cap_point.y, sr.cap_point.z, sr.cap_face_id,
+                sr.cap_at_anchor_face || sr.cap_at_load_face
+                    ? (sr.cap_at_anchor_face
+                           ? ", at the edge of an anchor face: a fixed-support "
+                             "corner, where voxel stress grows with resolution, so "
+                             "this cap may not be real"
+                           : ", at the edge of a load face: where voxel stress "
+                             "grows with resolution, so this cap may not be real")
+                    : "");
+  sr.cap_note = line;
+}
+
 MinimizePlasticResult strengthen_versions(
     const JobDescription& job, const std::string& job_dir,
     const std::string& out_dir, const MaterialLibrary& materials,
@@ -12217,13 +12300,21 @@ MinimizePlasticResult strengthen_versions(
   }
   const std::string ceiling_stl = join_path(work, "ceiling.stl");
   write_stl_file(ceiling_stl, keep_largest_component(marching_cubes(G, filled, 0.5)));
-  sr.ceiling_margin = analyze_job(job, job_dir, join_path(work, "ceiling"), materials,
-                                  rules, ceiling_stl, {})
-                          .analysis.margin_effective;
+  {
+    const AnalyzeJobResult ceil =
+        analyze_job(job, job_dir, join_path(work, "ceiling"), materials, rules,
+                    ceiling_stl, {});
+    sr.ceiling_margin = ceil.analysis.margin_effective;
+    strengthen_cap_site(sr, G, ceil.analysis.von_mises_field, model);
+  }
 
   // The coarse problem: the same job at half the resolution.
   JobDescription coarse_job = job;
-  coarse_job.resolution = std::max(8, job.resolution / 2);
+  // Half the resolution, but never below 48 (or the job's own when it is finer
+  // than that): at res 32 his Carriage Arms' 3-voxel pads are a third of the part,
+  // and the coarse margin read 5.8 where the job's resolution gave 4.85.
+  coarse_job.resolution =
+      std::min(job.resolution, std::max(job.resolution / 2, 48));
   sr.coarse_resolution = coarse_job.resolution;
   JobSetup coarse = build_job_setup(coarse_job, model, model_is_mesh, materials);
   auto quiet = [](MinimizePlasticOptions o) {
@@ -12349,6 +12440,12 @@ MinimizePlasticResult strengthen_versions(
           defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
         }
       const bool clean = v.accepted && v.v3.specks_dropped == 0 && clear == 0;
+      // A repair warm-starts from this design only if it kept every anchor:
+      // warm-starting from a design that let anchored pieces go kept them loose.
+      std::vector<double> next_seed =
+          v.report.rejection_reason != kAnchorDetachedReason
+              ? v.optimization.physical_density
+              : std::vector<double>();
       if (verified > best_verified) {
         best_verified = verified;
         vr.volume_fraction = vf;
@@ -12371,10 +12468,12 @@ MinimizePlasticResult strengthen_versions(
         ok = true;
         break;
       }
-      // Repair: raise the fraction by the shortfall, from this version's design.
-      seed = best.evaluated.front().optimization.physical_density;
+      // Repair: raise the fraction by the shortfall (at least x1.25, so two repairs
+      // can cover a coarse-to-fine gap), from this design or, if it let an anchor
+      // go, fresh.
+      seed = std::move(next_seed);
       const double ratio = verified > 0.0 ? target / verified : 2.0;
-      vf = std::min(1.0, vf * std::max(1.05, std::pow(ratio, 1.0 / kStrengthenGamma)));
+      vf = std::min(1.0, vf * std::max(1.25, std::pow(ratio, 1.0 / kStrengthenGamma)));
     }
     vr.seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();

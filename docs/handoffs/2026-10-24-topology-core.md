@@ -129,6 +129,17 @@ call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp
 - Samples for him: `~/dev/TopOpt/reviewer-inbox/2026-10-24-strengthen-sample{,-2}/` (tool `core/tests/tools/strengthen_sample.cpp`).
 - Observed: the coarse grid under-reads the margin, so version 1 lands heavier than needed (test bar: vf 0.82, verified
   11.94 vs target 7.92). A fine-grid lightening step is the candidate follow-up, not built.
+- After his Carriage Arms test (run 1 failed): the coarse grid is at least res 48 (res 32 over-read 5.8 vs 4.85), a
+  repair restarts FRESH when the failed design let an anchor go (warm-starting kept the pieces loose), and repair steps
+  are at least x1.25. The ceiling's worst-stress site is named in the receipt (`strengthen.cap`: face, point,
+  anchor/load-adjacent; the reviewer's ruling of 2026-10-25 03:58).
+- His test (copy 4, dda471a2, res 64; evidence in `~/dev/TopOpt/reviewer-inbox/2026-10-25-strengthen-test/`, his STEP
+  kept out of the repo): v1 VERIFIED 6.52 >= 5.25 at 120.0 g (103 %), 1 body, anchors attached, 6 coarse runs, 49 min;
+  v2 / v3 unreachable (cap 8.05, peaking beside the anchored holes 50/75: a possible fixed-support singularity). His live
+  +10 %: 127.6 g, 6.95 in-loop. test_strengthen 17/17; full suite 143/143.
+
+## Next (ruled 2026-10-25 03:58): item 42 option B (bridge split pieces, re-certify, "bridged"), then KEEP (Manifold,
+pinned via vcpkg, all three slices without TBB, union time measured on his export first).
 
 ## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25) — WITHDRAWN by the 22:59 brief
 

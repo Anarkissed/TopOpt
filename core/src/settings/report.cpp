@@ -588,6 +588,12 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
   out += "    \"coarse_resolution\": " + std::to_string(sr.coarse_resolution) + ",\n";
   out += "    \"rule\": {\"delta\": " + num_json(sr.delta) + ", \"gamma\": " +
          num_json(sr.gamma) + ", \"vf_step\": " + num_json(sr.vf_step) + "},\n";
+  out += "    \"cap\": {\"face_id\": " + std::to_string(sr.cap_face_id) +
+         ", \"point\": [" + num_json(sr.cap_point.x) + ", " + num_json(sr.cap_point.y) +
+         ", " + num_json(sr.cap_point.z) + "], \"at_anchor_face\": " +
+         (sr.cap_at_anchor_face ? "true" : "false") + ", \"at_load_face\": " +
+         (sr.cap_at_load_face ? "true" : "false") + ", \"note\": " +
+         str_json(sr.cap_note) + "},\n";
   out += "    \"versions\": [";
   for (std::size_t i = 0; i < sr.versions.size(); ++i) {
     const StrengthenVersionReport& v = sr.versions[i];
