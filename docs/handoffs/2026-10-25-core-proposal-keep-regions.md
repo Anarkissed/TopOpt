@@ -52,18 +52,33 @@ Precedence as today: KEEP over CLEAR over FREE.
   within the tessellation tolerance (today they deviate by up to half a voxel), the kept face is flat to 1e-3 mm, and a
   job without a KEEP is byte-identical.
 
-## Related, not in this proposal
+## Related: "must be a single piece" (his question, 2026-10-25; item 42)
 
-- "Stay one piece": the optimizer has no connectivity constraint. Only the belt (every load reaches an anchor) and item
-  47 (no anchor joined to a load as drawn is let go) are checked. So a part can split, as his arms did. A real rule is
-  item 42 (research, on hold; Li 2016's virtual temperature is the candidate). Today a KEEP between the pieces holds
-  them together.
+The optimizer has no connectivity constraint. Only the belt (every load reaches an anchor) and item 47 (no anchor
+joined to a load as drawn is let go) are checked, so a part can split, as his arms did. Three ways, cheapest first:
 
-## Questions for him
+| Option | What it does | Effort | Touches |
+|---|---|---|---|
+| A. Refuse | reject a rung whose design is more than one carrying body (`printed_bodies` exists) | about half a day | minimize_plastic.cpp |
+| B. Bridge | if the design splits, add the shortest bridge through the box between the pieces, thickened to the min feature, then re-certify | 1 to 2 days | minimize_plastic.cpp |
+| C. Optimize connected | Li 2016's virtual temperature: a scalar heat solve per iteration and a max-temperature constraint, so the optimizer itself keeps one piece | several days, plus tuning on his part | simp.cpp / plsm.cpp (#362's solver files; waits on the cure reaching this base) |
 
-1. KEEP as primitives only, or also "keep this face N mm deep" exported exactly (needs the CAD offset of the face)?
-2. Should CLEAR be allowed to remove the part's own material (a true "empty"), or stay air-only?
-3. Is a file with overlapping bodies fine for his slicer, or must it be one merged shell (that needs a mesh boolean)?
+A alone would refuse every rung of his split arms (no result). B guarantees one piece but the bridge is not optimized. C
+is the real answer. Recommended: B now as the guarantee, C as the research item 42 already is.
+
+## His answers (2026-10-25)
+
+1. **KEEP volumes only, no face keeps, and KEEP replaces Protect** ("as long as the algorithm knows it can't cut it up
+   or dig into it"). Core keeps accepting `face_protections` so older projects still run; the app stops offering
+   Protect and sends KEEP volumes.
+2. **CLEAR only means "don't build here"**: air only, as today.
+3. **The export must be ONE merged shell.** So step 2 above changes. Why the two would overlap: the optimized surface
+   is traced through the whole voxel field, and the kept region is frozen voxels inside that field, so the traced
+   surface already wraps a stepped copy of the kept region. Dropping the exact CAD shell on top therefore overlaps it.
+   A merged shell needs core to cut the traced surface away inside the KEEP volume and fuse the exact shell in its
+   place: a mesh BOOLEAN UNION. Core has none. The candidates: add a mesh-boolean library (Manifold, a vcpkg port,
+   Apache-2.0; a new dependency, so it needs a ruling), or OCCT's B-rep fuse on the meshes (likely far too slow at a
+   million triangles; would be measured first).
 
 ## APP LIST (to #354)
 
