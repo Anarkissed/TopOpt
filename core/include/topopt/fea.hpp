@@ -382,8 +382,10 @@ struct DirichletBC {
 bool has_contact_springs(const std::vector<DirichletBC>& bcs);
 
 // One contact update from a solved displacement field `u` (DOF-ordered, size 3 x
-// node count): a spring whose node moves away from its support (u . normal < 0) is
-// released, one that presses (u . normal >= 0) is engaged. A change that would leave
+// node count): a spring whose node clearly moves away from its support (u . normal <
+// -tol) is released, a released one that clearly presses (u . normal > +tol) is
+// engaged again, and one inside that band keeps its state (tol = 1e-3 of the largest
+// |u . normal|: without the band the edge of the contact chatters). A change that would leave
 // NO spring engaged is not applied (`kept_last`): a support that holds nothing is a
 // singular system, never solved. When the set changes, the caches built on the old
 // operator are dropped (the Krylov recycling space, the GenEO basis, the safe retry's

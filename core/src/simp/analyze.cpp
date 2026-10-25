@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <string>
 #include <vector>
@@ -289,6 +290,9 @@ FixedDesignAnalysis analyze_fixed_design(
     ++out.contact_rounds;
     std::vector<DirichletBC> next = contact_bcs;
     const ContactUpdate cu = contact_update(next, sc.solution.u);
+    std::fprintf(stderr, "[contact] certification solve %d: %d pressing, %d let go, %d changed%s\n",
+                 out.contact_rounds, cu.engaged, cu.released, cu.changed,
+                 cu.kept_last ? " (every anchor pulled away: last set kept)" : "");
     out.contact_kept_last = out.contact_kept_last || cu.kept_last;
     if (cu.changed == 0) break;  // settled: the field below is this set's
     if (out.contact_rounds >= kContactRounds) {

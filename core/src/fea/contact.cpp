@@ -20,20 +20,26 @@ ContactUpdate contact_update(std::vector<DirichletBC>& bcs, const std::vector<do
     const std::size_t d = 3 * static_cast<std::size_t>(b.node);
     return u[d] * b.normal.x + u[d + 1] * b.normal.y + u[d + 2] * b.normal.z;
   };
-  double umax = 0.0;
+  // A HYSTERESIS BAND: a pressing node is released only when it clearly pulls away
+  // (u . n < -tol), a released one engages again only when it clearly presses
+  // (u . n > +tol); a node inside the band keeps its state. Without it, nodes at the
+  // edge of the contact flip back and forth and the set never settles (his Carriage
+  // Arms at res 48: still changing after 6 solves). tol = 1e-3 of the largest |u . n|.
+  double gmax = 0.0;
   for (const DirichletBC& b : bcs)
-    if (b.spring > 0.0)
-      for (int c = 0; c < 3; ++c)
-        umax = std::max(umax, std::fabs(u[3 * static_cast<std::size_t>(b.node) + c]));
-  // Pulling away by more than roundoff releases; a node that does not move stays.
-  const double tol = 1e-12 * umax;
+    if (b.spring > 0.0) gmax = std::max(gmax, std::fabs(gap(b)));
+  const double tol = 1e-3 * gmax;
+  auto next_released = [&](const DirichletBC& b) {
+    const double g = gap(b);
+    return b.released ? !(g > tol) : g < -tol;
+  };
   int engaged_next = 0;
   for (const DirichletBC& b : bcs)
-    if (b.spring > 0.0 && !(gap(b) < -tol)) ++engaged_next;
+    if (b.spring > 0.0 && !next_released(b)) ++engaged_next;
   if (engaged_next == 0) r.kept_last = true;
   for (DirichletBC& b : bcs) {
     if (!(b.spring > 0.0)) continue;
-    const bool next = !r.kept_last && gap(b) < -tol;
+    const bool next = !r.kept_last && next_released(b);
     if (next != b.released) {
       b.released = next;
       ++r.changed;
