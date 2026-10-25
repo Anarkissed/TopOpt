@@ -14,8 +14,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
+#include <memory>
+#include <limits>
 #include <stdexcept>
 
+#include "topopt/clearance.hpp"
 #include "topopt/mesh_distance.hpp"
 
 namespace topopt {
@@ -59,6 +63,168 @@ double keep_out_signed_distance(const ClearanceGeometry& g, const Vec3& p) {
   const double ou = std::max(-du, 0.0);
   const double ow = std::max(-dw, 0.0);
   return -std::sqrt(os * os + ou * ou + ow * ow);
+}
+
+}  // namespace
+
+namespace {
+
+// ── ★ K6 PART 2: THE DISTANCE TO AN INCLUDE'S FACE PLANE ──────────────────────
+// The SAME quantity stepped_region_owner ranks regions by: the absolute distance from the
+// point to the region's face plane. Infinite where the region has no plane, which is how
+// that function says "cannot win a shared point".
+double include_plane_distance(const ClearanceGeometry& g, const Vec3& p) {
+  const double ln = std::sqrt(g.normal.x * g.normal.x + g.normal.y * g.normal.y +
+                              g.normal.z * g.normal.z);
+  if (!(ln > 0.0)) return std::numeric_limits<double>::infinity();
+  return std::fabs(((p.x - g.origin.x) * g.normal.x +
+                    (p.y - g.origin.y) * g.normal.y +
+                    (p.z - g.origin.z) * g.normal.z) / ln);
+}
+
+// The declared id of an include at position `i`, exactly as stepped_region_owner reads
+// it: the declared number where the caller set one, else the position, because the built
+// vector is compacted by the invalid-include skip and a position is then not an id.
+int include_declared_id(const ClearanceGeometry& g, std::size_t i) {
+  return g.declared_region_id > 0 ? g.declared_region_id : static_cast<int>(i) + 1;
+}
+
+}  // namespace
+
+// ── ★ K3 / RULING 2: THE OUTLINE'S EDGE INDEX ─────────────────────────────────
+// The exact distance to a polygon is O(edges), and `clip_segment` evaluates the signed
+// distance tens of times per strut: 102117B9 carries 177 include regions whose outlines
+// run to tens of thousands of vertices, so a linear scan per query is not an option.
+//
+// A uniform grid over the outline's own (a, b) bounding box, each cell listing every
+// edge whose bounding box overlaps it (a superset of the edges that pass through it,
+// which is what correctness needs). A query walks Chebyshev rings outward from its own
+// cell and stops as soon as the best distance found is within `ring * cell` -- every
+// unscanned cell is at least that far away -- so the answer is EXACT, not approximate.
+// ── ★ A TEST SEAM FOR THE WALK'S COST (2026-10-24) ────────────────────────────
+// How many RING STEPS the outline distance queries have taken since the last reset. The
+// ring count is the quantity the old bound left unbounded -- it grew with |qi|, the
+// query's distance from this outline in index cells -- so it is the thing to cap. A count
+// can be asserted where a stopwatch cannot. Thread-local, so a parallel caller cannot
+// make another's figure meaningless.
+static thread_local long long g_outline_ring_steps = 0;
+
+struct LatticeOutlineIndex {
+  std::vector<double> ax, ay, bx, by;   // edge endpoints, flattened over every loop
+  double lo_a = 0.0, lo_b = 0.0, cell = 1.0;
+  int na = 1, nb = 1;
+  std::vector<std::vector<int>> bucket;
+
+  // Exact minimum distance from (a, b) to the nearest edge.
+  double min_distance(double a, double b) const {
+    if (ax.empty()) return std::numeric_limits<double>::infinity();
+    const int qi = static_cast<int>(std::floor((a - lo_a) / cell));
+    const int qj = static_cast<int>(std::floor((b - lo_b) / cell));
+    double best = std::numeric_limits<double>::infinity();
+    // ── ★ THE EMPTY PREFIX IS SKIPPED, AND THE TAIL IS BOUNDED ─────────────────
+    // This walk cost eleven hours on 102117B9 before it was bounded. `best` starts at
+    // infinity, so nothing can break the loop until the first EDGE is found -- and for a
+    // query far outside this outline's own box the walk scanned ring after ring of empty
+    // cells first. The old bound was `max(na, nb) + max(|qi|, |qj|) + 1`, and |qi| is a
+    // count of CELLS from the outline, so on a part whose other regions are hundreds of
+    // millimetres away it ran into the thousands: O(span^2) empty visits per query, per
+    // region, times 177 regions, times every refinement step of every strut's clip.
+    //
+    // Every occupied cell lies in [0, na) x [0, nb). So the first ring that can hold one
+    // is the CHEBYSHEV DISTANCE from the query cell to that index box, and every grid
+    // cell is covered by the time the ring reaches that plus max(na, nb). Both bounds are
+    // exact: the rings skipped and the rings dropped are provably empty, so the answer is
+    // bit-identical to the unbounded walk -- which `test_outline_index` checks on near
+    // AND far samples rather than asserting.
+    const int gap_i = std::max(0, std::max(-qi, qi - (na - 1)));
+    const int gap_j = std::max(0, std::max(-qj, qj - (nb - 1)));
+    const int ring0 = std::max(gap_i, gap_j);
+    const int ring1 = ring0 + std::max(na, nb);
+    for (int ring = ring0; ring <= ring1; ++ring) {
+      // ★ THE COUNTER IS ON THE RING, because the ring count is the quantity that was
+      // unbounded. Two earlier placements measured the wrong thing and I am recording
+      // why rather than leaving a third guess: counting cells INSIDE the grid saw only
+      // the useful work (unbounded and bounded both read "4"), and counting cells the
+      // walk looks at still missed it, because rows outside the grid are skipped before
+      // any cell is examined. The rings are what |qi| multiplies.
+      ++g_outline_ring_steps;
+      // ── ★ THE BOUND WAS OFF BY ONE, AND IT RETURNED WRONG DISTANCES ──────────
+      // At the TOP of iteration `ring` the rings scanned so far are 0 .. ring-1, so an
+      // unscanned cell is at Chebyshev cell-distance >= ring, and the closest point of
+      // such a cell to a query inside its OWN cell is at least (ring - 1) * cell away --
+      // not ring * cell. The old test broke a ring too early and returned the first edge
+      // it had found instead of the nearest one.
+      //
+      // Found by the exactness check this commit adds, not by reading: on a 5.33 mm index
+      // cell it reported 3.359843 mm where the unindexed scan says 2.613614, and 5.000
+      // (the depth term winning) where the scan says 2.002241 -- 122 of 7,990 sampled
+      // points, up to 4.79 mm out. This is a defect in 91abe169 as shipped, not in
+      // today's bounds: the distance came back too LARGE, so the clip kept strut pieces
+      // it should have cut. Conservative in the "the part never shrinks" direction, and
+      // wrong.
+      if (ring > 0 && best <= static_cast<double>(ring - 1) * cell) break;
+      // ★ AND THE RING IS WALKED AS A PERIMETER. The old form swept the whole
+      // (2*ring+1)^2 block and skipped the interior, which is O(ring^2) iterations to
+      // visit 8*ring cells. Same cells, same order within each row, so the visited SET
+      // and the answer are unchanged.
+      const int i0 = qi - ring, i1 = qi + ring;
+      for (int dj = -ring; dj <= ring; ++dj) {
+        const int j = qj + dj;
+        if (j < 0 || j >= nb) continue;
+        const bool edge_row = (dj == -ring || dj == ring);
+        // An edge row is the whole span; any other row is just its two end columns.
+        // Written as an explicit list rather than a swept index, because a hang fix is
+        // the wrong place to be clever with a loop variable.
+        int cols[2] = {i0, i1};
+        const int ncols = (i0 == i1) ? 1 : 2;
+        for (int c = 0; c < (edge_row ? (i1 - i0 + 1) : ncols); ++c) {
+          const int i = edge_row ? (i0 + c) : cols[c];
+          if (i < 0 || i >= na) continue;
+          for (int e : bucket[static_cast<std::size_t>(j) * na + i]) {
+            const double ex = bx[e] - ax[e], ey = by[e] - ay[e];
+            const double len2 = ex * ex + ey * ey;
+            double t = 0.0;
+            if (len2 > 0.0) {
+              t = ((a - ax[e]) * ex + (b - ay[e]) * ey) / len2;
+              t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+            }
+            const double dx = a - (ax[e] + t * ex), dy = b - (ay[e] + t * ey);
+            best = std::min(best, std::sqrt(dx * dx + dy * dy));
+          }
+        }
+      }
+    }
+    return best;
+  }
+};
+
+namespace {
+
+// ── ★ K3: ONE INCLUDE REGION'S OWN SIGNED DISTANCE, OUTLINE AND ALL ───────────
+// `keep_out_signed_distance` above is the region's RECTANGLE in the face frame. Where
+// the app sent `outline_uv`, the rectangle is merely its bounding box and the outline
+// is the boundary the preview drew -- so the in-plane term is the exact distance to the
+// outline (clearance.cpp, the same frame the containment predicate reads). Both terms
+// are exact signed distances, so their min is 1-Lipschitz.
+double include_signed_distance(const ClearanceGeometry& g, const Vec3& p,
+                               const LatticeOutlineIndex* idx) {
+  if (!g.valid) return -1e30;
+  // A mask-backed include has no analytic distance; it must not clip (see the header).
+  if (g.mask) return 1e30;
+  if (g.kind == ClearanceKind::Bolt || g.outline_uv.empty() || idx == nullptr)
+    return keep_out_signed_distance(g, p);
+  const Vec3 d = vsub(p, g.origin);
+  const double s = vdot(d, g.normal);
+  const double ds = std::min(s - 0.0, g.depth - s);
+  const double du = vdot(d, g.u), dw = vdot(d, g.w);
+  double a = du, b = dw;   // the app's pair in core's (u, w): one definition, clearance.cpp
+  clearance_outline_frame_uv(g, du, dw, &a, &b);
+  const double dist = idx->min_distance(a, b);
+  const double din = point_in_clearance_outline(g, du, dw) ? dist : -dist;
+  if (ds >= 0.0 && din >= 0.0) return std::min(ds, din);
+  const double os = std::max(-ds, 0.0);
+  const double oi = std::max(-din, 0.0);
+  return -std::sqrt(os * os + oi * oi);
 }
 
 // The certified midpoint refinement shared by both clip entry points. `f` is a
@@ -177,6 +343,68 @@ void LatticeBoundary::add_keep_out(const ClearanceGeometry& geom, bool collar) {
 void LatticeBoundary::add_include_region(const ClearanceGeometry& geom) {
   if (!geom.valid) return;  // same safe no-op as the rasterizer / add_keep_out
   includes_.push_back(geom);
+  // ── ★ K3 / RULING 2: THE OUTLINE ARMS THE CLIP, AND NOTHING ELSE DOES ────────
+  // Scope (b): the term exists for a job whose include carries `outline_uv`, and a job
+  // with none cannot reach it. That is the byte-identity bar, enforced here rather than
+  // promised somewhere else. A mask-backed include is skipped: no analytic distance.
+  std::shared_ptr<const LatticeOutlineIndex> idx;
+  if (!geom.outline_uv.empty() && !geom.mask &&
+      geom.kind != ClearanceKind::Bolt) {
+    auto built = std::make_shared<LatticeOutlineIndex>();
+    double lo_a = 1e300, hi_a = -1e300, lo_b = 1e300, hi_b = -1e300;
+    for (const auto& loop : geom.outline_uv) {
+      const std::size_t n = loop.size();
+      if (n < 3) continue;
+      for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+        built->ax.push_back(loop[j][0]);
+        built->ay.push_back(loop[j][1]);
+        built->bx.push_back(loop[i][0]);
+        built->by.push_back(loop[i][1]);
+        lo_a = std::min({lo_a, loop[i][0], loop[j][0]});
+        hi_a = std::max({hi_a, loop[i][0], loop[j][0]});
+        lo_b = std::min({lo_b, loop[i][1], loop[j][1]});
+        hi_b = std::max({hi_b, loop[i][1], loop[j][1]});
+      }
+    }
+    if (!built->ax.empty()) {
+      // About sqrt(edges) cells per axis, so a cell holds a handful of edges on average
+      // and the ring walk terminates in one or two rings.
+      const std::size_t ne = built->ax.size();
+      const int side = std::max(
+          1, static_cast<int>(std::ceil(std::sqrt(static_cast<double>(ne)))));
+      const double ea = std::max(hi_a - lo_a, 1e-9);
+      const double eb = std::max(hi_b - lo_b, 1e-9);
+      built->cell = std::max(std::max(ea, eb) / side, 1e-9);
+      built->lo_a = lo_a;
+      built->lo_b = lo_b;
+      built->na = std::max(1, static_cast<int>(std::floor(ea / built->cell)) + 1);
+      built->nb = std::max(1, static_cast<int>(std::floor(eb / built->cell)) + 1);
+      built->bucket.assign(static_cast<std::size_t>(built->na) * built->nb, {});
+      for (std::size_t e = 0; e < ne; ++e) {
+        const int i0 = std::max(0, static_cast<int>(std::floor(
+                                       (std::min(built->ax[e], built->bx[e]) - lo_a) /
+                                       built->cell)));
+        const int i1 = std::min(built->na - 1,
+                                static_cast<int>(std::floor(
+                                    (std::max(built->ax[e], built->bx[e]) - lo_a) /
+                                    built->cell)));
+        const int j0 = std::max(0, static_cast<int>(std::floor(
+                                       (std::min(built->ay[e], built->by[e]) - lo_b) /
+                                       built->cell)));
+        const int j1 = std::min(built->nb - 1,
+                                static_cast<int>(std::floor(
+                                    (std::max(built->ay[e], built->by[e]) - lo_b) /
+                                    built->cell)));
+        for (int j = j0; j <= j1; ++j)
+          for (int i = i0; i <= i1; ++i)
+            built->bucket[static_cast<std::size_t>(j) * built->na + i].push_back(
+                static_cast<int>(e));
+      }
+      idx = built;
+      clip_includes_ = true;
+    }
+  }
+  include_outline_index_.push_back(idx);
 }
 
 void LatticeBoundary::add_exclude_region(const ClearanceGeometry& geom) {
@@ -292,6 +520,106 @@ double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
   for (std::size_t i = 0; i < keep_outs_.size(); ++i) {
     if (excluded(keep_out_face_[i])) continue;
     d = std::min(d, -keep_out_signed_distance(keep_outs_[i], p));
+  }
+  // ★ K3: the include UNION as a clip term, when the run armed it. max over the
+  // includes, each one's own exact signed distance -- see clip_to_include_regions.
+  if (clip_includes_ && !includes_.empty()) {
+    // ── ★ THE RECTANGLE BOUNDS THE OUTLINE, AND THE BOUND IS FREE ────────────────
+    // The polygon is a SUBSET of its rectangle, so the rectangle's signed distance is an
+    // exact UPPER BOUND on the outline's, and it is pure arithmetic. An include whose
+    // bound already fails to beat the running max therefore cannot contribute, and its
+    // polygon is never queried. That prune is EXACT: any include whose outline value
+    // exceeds `best` has a bound that exceeds `best` too, so none is ever skipped.
+    //
+    // ★ WHAT IS NOT SOUND, and was tried: filtering to the includes whose bound is at
+    // the TOP. The region with the highest rectangle bound can be the one the point
+    // falls OUTSIDE the outline of, while a region with a slightly lower bound contains
+    // it; skipping the second returns a value that is too negative, and clips struts
+    // that belong. Every include is bounded, and every include whose bound beats the
+    // best so far is evaluated.
+    //
+    // Evaluating the highest-bounded include FIRST is what makes the prune bite: it is
+    // usually the one that answers, so the rest fall out on arithmetic. Measured on
+    // 102117B9's own job (177 include regions, all outlined, 2586 outline vertices,
+    // largest loop 75), 200k queries over their bounding box:
+    //     every outline evaluated, input order ... 4.147 us
+    //     highest bound first, then the prune ..... see the handoff's table
+    // Scratch is thread_local and reused, so there is no allocation per query after the
+    // first; ties keep declaration order, which byte-identical output needs.
+    static thread_local std::vector<double> ibound;
+    const std::size_t n = includes_.size();
+    ibound.assign(n, -1e30);
+    std::size_t hi_i = n;
+    double hi = -1e30;
+    for (std::size_t i = 0; i < n; ++i) {
+      const ClearanceGeometry& g = includes_[i];
+      if (!g.valid) continue;
+      // A mask-backed include has no analytic distance and takes no clip (see the
+      // header): +inf keeps it out of the max entirely.
+      if (g.mask) { ibound[i] = 1e30; continue; }
+      ibound[i] = keep_out_signed_distance(g, p);
+      if (ibound[i] > hi) { hi = ibound[i]; hi_i = i; }
+    }
+    double best = -1e30;
+    auto eval = [&](std::size_t i) {
+      const LatticeOutlineIndex* idx =
+          i < include_outline_index_.size() ? include_outline_index_[i].get() : nullptr;
+      best = std::max(best, include_signed_distance(includes_[i], p, idx));
+    };
+    if (hi_i < n) eval(hi_i);
+    for (std::size_t i = 0; i < n; ++i) {
+      if (i == hi_i || ibound[i] <= best || ibound[i] > 1e29) continue;
+      eval(i);
+    }
+    // Every include invalid, or every one mask-backed: no term, exactly as before.
+    if (best > -1e29 && best < 1e29) d = std::min(d, best);
+  }
+  // ── ★ K6 PART 2: AND THE SPACE THIS PASS'S REGION OWNS ───────────────────────
+  // See clip_to_owned_region for the term and why each piece of it is 1-Lipschitz. This
+  // is strictly tighter than the union term above -- own_R <= sd_R <= max_S sd_S -- so
+  // where it applies the union term cannot bind, and both are evaluated only because
+  // skipping one would make the arming order observable in the geometry.
+  if (own_region_ != 0 && !includes_.empty()) {
+    constexpr double kIdTieBiasMm = 1e-9;   // the tie-break, four orders under 0.01 mm
+    double own = 1e30;
+    const ClearanceGeometry* R = nullptr;
+    std::size_t ri = 0;
+    for (std::size_t i = 0; i < includes_.size(); ++i)
+      if (includes_[i].valid &&
+          include_declared_id(includes_[i], i) == own_region_) { R = &includes_[i]; ri = i; break; }
+    if (R != nullptr) {
+      const LatticeOutlineIndex* ridx =
+          ri < include_outline_index_.size() ? include_outline_index_[ri].get() : nullptr;
+      // ★ IT DOES NOT ASK WHETHER R CONTAINS THE POINT. That is the UNION term above,
+      // which is gated on the outline, and folding it in here would make this term clip
+      // a job with ONE region -- where nothing contests anything -- for the first time.
+      // Measured: with sd_R folded in, plan_partial_depth and plan_full_depth (single
+      // region, no overlap at all) both changed their emitted bytes, which is exactly
+      // what the no-overlap bar forbids. This term answers one question only: does
+      // another region own this point.
+      //
+      // So the min starts empty. With one include it stays empty, the term is inert, and
+      // the file is byte-identical.
+      (void)ridx;
+      const double dR = include_plane_distance(*R, p);
+      for (std::size_t i = 0; i < includes_.size() && own > -1e29; ++i) {
+        if (i == ri || !includes_[i].valid) continue;
+        const ClearanceGeometry& S = includes_[i];
+        const double dS = include_plane_distance(S, p);
+        // A region with no face plane never wins a shared point, so it never contests.
+        if (!std::isfinite(dS)) continue;
+        const double bias =
+            include_declared_id(S, i) > own_region_ ? kIdTieBiasMm : -kIdTieBiasMm;
+        // R with no plane loses to any S that has one: the halved difference is then
+        // -infinity, so only "S does not contain the point" can save it.
+        const double nearer = std::isfinite(dR) ? 0.5 * (dS - dR) + bias : -1e30;
+        const LatticeOutlineIndex* sidx =
+            i < include_outline_index_.size() ? include_outline_index_[i].get() : nullptr;
+        const double outside_S = -include_signed_distance(S, p, sidx);
+        own = std::min(own, std::max(outside_S, nearer));
+      }
+      if (own > -1e29 && own < 1e29) d = std::min(d, own);
+    }
   }
   return d;
 }
@@ -413,16 +741,22 @@ std::vector<LatticeClipSpan> LatticeBoundary::clip_segment(
       kClipTolMm, uncertified_dropped);
 }
 
-std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
-                                             const VoxelGrid& grid,
-                                             const std::vector<double>& density,
-                                             double iso, const Vec3& region_origin,
-                                             double cell_mm) {
+long long lattice_outline_ring_steps() { return g_outline_ring_steps; }
+void lattice_outline_reset_ring_steps() { g_outline_ring_steps = 0; }
+
+std::vector<char> lattice_certification_mask_per_cell(
+    const LatticeBoundary& boundary, const VoxelGrid& grid,
+    const std::vector<double>& density, double iso,
+    const std::function<bool(const Vec3&, Vec3*, double*)>& owning_cell,
+    long long* dropped_by_overlap) {
   if (density.size() != grid.voxel_count())
-    throw std::invalid_argument("lattice_certification_mask: size mismatch");
-  if (!(cell_mm > 0.0))
-    throw std::invalid_argument("lattice_certification_mask: cell_mm must be > 0");
+    throw std::invalid_argument("lattice_certification_mask_per_cell: size mismatch");
+  if (!owning_cell)
+    throw std::invalid_argument(
+        "lattice_certification_mask_per_cell: no owning-cell provider — the caller must "
+        "say which cell of the design covers each voxel; there is no default");
   std::vector<char> mask(grid.voxel_count(), 0);
+  long long dropped = 0;
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
@@ -439,15 +773,68 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
         if (boundary.has_include_regions() && !boundary.in_include_region(c, 0.0))
           continue;
         // Owning lattice cell — the SAME activation the generator uses.
+        Vec3 cell_min{0, 0, 0};
+        double cell_mm = 0.0;
+        if (!owning_cell(c, &cell_min, &cell_mm)) continue;  // no cell covers it
+        if (!(cell_mm > 0.0))
+          throw std::invalid_argument(
+              "lattice_certification_mask_per_cell: the owning-cell provider claimed a "
+              "cell covers this voxel but gave it a non-positive edge");
+        if (!boundary.cell_may_overlap(cell_min, cell_mm)) {
+          ++dropped;
+          continue;
+        }
+        mask[e] = 1;
+      }
+  if (dropped_by_overlap != nullptr) *dropped_by_overlap = dropped;
+  return mask;
+}
+
+std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
+                                             const VoxelGrid& grid,
+                                             const std::vector<double>& density,
+                                             double iso, const Vec3& region_origin,
+                                             double cell_mm) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument("lattice_certification_mask: size mismatch");
+  if (!(cell_mm > 0.0))
+    throw std::invalid_argument("lattice_certification_mask: cell_mm must be > 0");
+  // ONE cell, one origin: the graded run's own grid, expressed as the per-cell
+  // predicate's degenerate case so the two paths cannot disagree about anything but
+  // the cell.
+  return lattice_certification_mask_per_cell(
+      boundary, grid, density, iso,
+      [&region_origin, cell_mm](const Vec3& c, Vec3* cell_min, double* ce) {
         const int ci = static_cast<int>(std::floor((c.x - region_origin.x) / cell_mm));
         const int cj = static_cast<int>(std::floor((c.y - region_origin.y) / cell_mm));
         const int ck = static_cast<int>(std::floor((c.z - region_origin.z) / cell_mm));
-        const Vec3 cell_min{region_origin.x + ci * cell_mm,
-                            region_origin.y + cj * cell_mm,
-                            region_origin.z + ck * cell_mm};
-        if (!boundary.cell_may_overlap(cell_min, cell_mm)) continue;
-        mask[e] = 1;
-      }
+        *cell_min = Vec3{region_origin.x + ci * cell_mm,
+                         region_origin.y + cj * cell_mm,
+                         region_origin.z + ck * cell_mm};
+        *ce = cell_mm;
+        return true;
+      });
+}
+
+std::vector<char> lattice_synthesis_domain(const LatticeBoundary& boundary,
+                                           const VoxelGrid& grid,
+                                           const std::vector<double>& density,
+                                           double iso, const Vec3& region_origin,
+                                           double cell_mm,
+                                           const std::vector<char>& posture_mask,
+                                           long long* posture_rejected) {
+  std::vector<char> mask = lattice_certification_mask(boundary, grid, density, iso,
+                                                      region_origin, cell_mm);
+  long long rejected = 0;
+  if (!posture_mask.empty()) {
+    if (posture_mask.size() != mask.size())
+      throw std::invalid_argument("lattice_synthesis_domain: posture size mismatch");
+    for (std::size_t e = 0; e < mask.size(); ++e) {
+      if (mask[e] && !posture_mask[e]) mask[e] = 0;   // the law kept it solid
+      else if (!mask[e] && posture_mask[e]) ++rejected;
+    }
+  }
+  if (posture_rejected != nullptr) *posture_rejected = rejected;
   return mask;
 }
 

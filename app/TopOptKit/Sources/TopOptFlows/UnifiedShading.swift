@@ -128,7 +128,44 @@ static float3 to_edge_fade(float3 color, float edge, float edgeStrength,
 /// emission, the secant refinement, the step schedule and the ±h gradient are the
 /// lines that shipped. This task changes PIXELS, NOT GEOMETRY (R4), and the field is
 /// the geometry.
+/// ★★★ THE SURFACE INSET, OVERRIDABLE FOR ONE RUN — instrumentation only.
+///
+/// `lsdf_part_clip` holds the lattice this far inside the part wherever
+/// `shell_is_latticed` is FALSE, so the strut's cut face and the shell's triangles
+/// cannot trade pixels. Fix #17 of 2026-08-28 widened it from 0.25 to 0.75 voxel
+/// (0.43 -> 1.29 mm) to kill a chamfer z-fight, on the argument that it is FREE
+/// because the shell hides whatever is held back.
+///
+/// ★ THAT ARGUMENT HOLDS ONLY WHERE THE SHELL FACES YOU. At a grazing angle — the
+/// silhouette, and every curved outline seen edge-on — the surviving shell covers
+/// only a sliver, and the ray passes its edge straight into the 1.29 mm gap behind
+/// it. So the inset stops being free exactly where he reports the dark band, and it
+/// does so independently of the grade, which is the one property his "the holes
+/// survive Grade off" report demands.
+///
+/// `TOPOPT_LATTICE_SURFACE_INSET=<mm>` pins the inset to a fixed number of
+/// millimetres (0 disables it) so the two behaviours can be compared on the DEVICE,
+/// at one camera, from one binary. Nothing in the product sets it.
+/// ★ RESTORE THE PRE-2026-08-28 GEOMETRIC INSET for an on-device A/B.
+/// `TOPOPT_LATTICE_INSET_GEOMETRIC=1` puts the inset back into `lsdf_part_clip`,
+/// where it MOVED the lattice 1.29 mm inside the part and left the dark band at every
+/// grazing outline. The shipping path applies the same magnitude as a DEPTH bias
+/// instead — see `lsdf_gbuffer`.
+let latticeInsetIsGeometric: Bool =
+    ProcessInfo.processInfo.environment["TOPOPT_LATTICE_INSET_GEOMETRIC"] == "1"
+
+let latticeSurfaceInsetMSL: String = {
+    if let raw = ProcessInfo.processInfo.environment["TOPOPT_LATTICE_SURFACE_INSET"],
+       let v = Double(raw), v >= 0 {
+        return String(format: "%.4f", v)
+    }
+    return "clamp(0.75 * voxel, 0.60, 1.80)"
+}()
+
 let latticeFieldSource = """
+constant bool latticeInsetGeometric = \(latticeInsetIsGeometric ? "true" : "false");
+\(shellClipMSL)
+
 struct LSDFUniforms {
     float4 rayX, rayY, rayDir;   // model-space ray basis (see the Swift struct)
     float4 eye, bboxMin, bboxMax, gridOrigin, gridSpacing, gridDims;
@@ -136,8 +173,28 @@ struct LSDFUniforms {
     float4 latticeOrigin;   // xyz origin, w cell mm
     float4 gradeParams;     // rhoMin, rhoMax, gamma, K
     float4 shadeParams;     // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-    float4 stepParams;      // stepScale, trimErosion(mm), hasTint, segCount
+    float4 stepParams;        // stepScale, trimErosion(mm), hasTint, segCount
     float4 lightDir, sparseColor, denseColor;
+    // ★★ APPENDED LAST, AND THAT IS LOAD-BEARING. A uniform struct is matched to
+    // its Swift twin BY BYTE OFFSET, not by name: the first cut of this field sat
+    // after `stepParams` in the MSL while Swift appended it after `denseColor`, so
+    // the shader read `lightDir` as the overlay flags — the stress overlay never
+    // armed, the dressings never armed, and the key light was being fed a boolean.
+    // It cost nothing to find because `LatticeFinishRendersTests` asserts the
+    // PIXELS move; it would have cost a great deal to find by eye.
+    float4 overlayParams;   // x = stress overlay (>0.5), y = dressing level
+    // ★ THE BOUNDARY HUE (2026-08-19). Appended AFTER `overlayParams` in BOTH this
+    // struct and the Swift one — these match by BYTE OFFSET, never by name, so a
+    // field added to (or removed from) one side alone reads a neighbour's bytes.
+    float4 rimColor;
+    // ★★ CORE'S MEASURED STRUT LAW, SAMPLED (2026-08-20). 32 normalised radii
+    // (diameter at a UNIT cell, halved) across [rhoMin, rhoMax]. The app used to
+    // invert rho = K(r/L)^2 here, which disagrees with core's measured table by
+    // 1.4-1.7x, WIDENING with density — so the preview drew every strut far thinner
+    // than the run builds. The samples come from `octet_strut_diameter_mm` through
+    // the bridge; this shader interpolates them and invents nothing.
+    // All zero => core had no law for the topology, and the closed form is used.
+    float4 strutCurve[8];
     // ── UNIFIED PASS ONLY (zero-filled for the standalone preview, which never
     // reads them). The clip and eye transforms the BODY is drawn with, so a marched
     // hit can be written into the SHARED depth buffer and the SHARED G-buffer in
@@ -145,7 +202,116 @@ struct LSDFUniforms {
     float4x4 clipFromModel;   // P · V · model — the body's own mvp
     float4x4 eyeFromModel;    // V · model
     float4x4 eyeNormalBasis;  // rotation of V · model, for the G-buffer normal
+    // ★★★ THE BUILD DIRECTION, IN MODEL SPACE — xyz unit, w unused. APPENDED LAST on
+    // both sides, which this struct's own history says is the only safe place.
+    //
+    // ★ IT IS NOT +Y AND IT IS NOT A CONSTANT. The printed-layer fill first banded on
+    // `hitPos.z`, was "corrected" to `hitPos.y` on the reasoning that the viewer calls
+    // model Y the height (`mheight = in.position.y`, the stage's `floorY`) — and that
+    // was wrong. Those are the STAGE frame, after the settle rotation the model matrix
+    // carries. The part's own build direction is `BuildOrientation.buildDirection`,
+    // which defaults to +Z ("Plate up +Z") and MOVES when the orientation is baked. So
+    // it is passed rather than assumed, and the layers stack along whatever the user
+    // is actually printing along.
+    float4 buildDir;
+    // ★★★ ORGANIC — the traced struts as a distance field on the DECLARED REGION's own
+    // grid. APPENDED LAST, which this struct's history says is the only safe place.
+    //   organicOrigin  xyz = voxel-(0,0,0) centre, w = enabled (>0.5)
+    //   organicSpacing xyz = voxel mm,             w = the band the field is clamped at
+    //   organicDims    xyz = voxel counts,         w unused
+    float4 organicOrigin;
+    float4 organicSpacing;
+    float4 organicDims;
+    // ★★★ DIAGNOSIS ONLY, APPENDED LAST — see `LSDFUniforms.debugParams` in Swift.
+    // x = 1 paints by the cell LEVEL the hit stands in; 0 is the shipping shade.
+    float4 debugParams;
+    // x = solid rim (mm) inward from the region boundary; see Swift `rimParams`.
+    float4 rimParams;
+    // ★ ORGANIC THICKNESS (2026-09-04): x = live strut radius (mm, 0 = baked), y = the
+    // centreline channel's reach, z = the surface channel's band, w = the WETTED JOIN's
+    // fillet as a multiple of the strut radius (0 = off). Same slot as Swift.
+    float4 organicRadius;
+    // ★ THE SPAN THE COLOUR RAMP READS (xy = the STATED density span, z > 0.5 when
+    // set). The grade's raise toward the quilt is drawn over the WIDER drawn span
+    // (`gradeParams`), but colouring it by that span put every quilted cell at the
+    // ramp's deep end — a 60 % cell with half-millimetre windows rendered as a dark
+    // slab and read as a void (2026-09-16: "there is now no quilting happening …
+    // there is a void between the solid and the lattice"). Colour follows the
+    // stated span; the quilt shows as what it is, dense pale struts.
+    float4 colourSpan;
+    // ★ THE GRADE'S TINT (xyz), w > 0.5 when the shape grade is on above 0 mm. The
+    // raise above the stated span ramps the interior hue toward it, so the tint IS
+    // the gradient — and it is a colour of its own in the key, not the fill's deep
+    // end (his 2026-09-16 ask: "we require a new colour specifically for the
+    // gradient — and it should be a gradient, itself").
+    float4 gradeColor;   // w = the grade band (mm), 0 when the grade is off
+    // ★★★ THE BAND (2026-09-26 redesign) — FOUR float4s APPENDED LAST, in the Swift
+    // struct's order (BYTE OFFSET, never name). All zero ⇒ the legacy band path.
+    float4 bandOrigin;   // xyz = fine rim grid texel-(0,0,0) centre, w > 0.5 ⇒ band drawn
+    float4 bandSpacing;  // x = fine spacing (mm), w = the capsules' extra embed (mm)
+    float4 bandDims;     // xyz = fine texel counts
+    float4 bandParams;   // x = veil, y = smooth rim normals, z = region .a is B_r, w reserved
 };
+
+// ★★★ THE BAND'S READERS (2026-09-26 redesign; the contract is `LatticeBandTypes`). The
+// rim is its own padded half-voxel grid (`rimTex`, rgba16Float, x fastest): r = B_r, the
+// rim zone's inner-boundary SDF; g = K_s, ≥ 0 beyond the skin's inner face; b = dMat, the
+// part's material SDF; a = q, the pocket SDF. The drawn rim is
+//     { max(B_r, dMat, q, dBox) ≤ 0 } ∩ { K_s ≥ 0 }      (the veil drops the K_s term)
+// Texel i is centred at origin + i·spacing — the mapping `LatticeBandFine.sample` uses.
+static inline float3 band_uvw(constant LSDFUniforms& U, float3 p) {
+    return ((p - U.bandOrigin.xyz) / max(U.bandSpacing.x, 1e-6) + 0.5)
+         / max(U.bandDims.xyz, float3(1.0));
+}
+static inline float band_dbox(constant LSDFUniforms& U, float3 p) {
+    float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz), be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
+    float3 qb = abs(p - bc) - be;
+    return length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
+}
+/// The drawn rim's field at `p`: max(B_r, dMat, q, dBox), then with −K_s unless the veil
+/// is on (with the veil the skin is drawn too, grey — see `lsdf_gbuffer`).
+static inline float band_rim_field(constant LSDFUniforms& U, texture3d<float> rimTex,
+                                   sampler samp, float3 p) {
+    float4 v = rimTex.sample(samp, band_uvw(U, p));
+    float f = max(max(v.r, v.b), max(v.a, band_dbox(U, p)));
+    return U.bandParams.x > 0.5 ? f : max(f, -v.g);
+}
+/// The rim's own normal: central differences of the FINE field at half its spacing (the
+/// coarse `lsdf_normal` reads the voxel-stepped region field and facets the arcs).
+static float3 band_rim_gradient(constant LSDFUniforms& U, texture3d<float> rimTex,
+                                sampler samp, float3 p) {
+    float e = max(0.5 * U.bandSpacing.x, 1e-4);
+    float3 g = float3(band_rim_field(U, rimTex, samp, p + float3(e, 0, 0))
+                        - band_rim_field(U, rimTex, samp, p - float3(e, 0, 0)),
+                      band_rim_field(U, rimTex, samp, p + float3(0, e, 0))
+                        - band_rim_field(U, rimTex, samp, p - float3(0, e, 0)),
+                      band_rim_field(U, rimTex, samp, p + float3(0, 0, e))
+                        - band_rim_field(U, rimTex, samp, p - float3(0, 0, e)));
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
+}
+/// …blended with the smooth per-CAD-face normal (`rimNormTex`, rgba on the SDF grid: xyz =
+/// the normal, w = its weight) where the skin term −K_s is the active one and
+/// `bandParams.y` asks for it. The texture has no producer yet: a neutral (0,0,0,0) is
+/// bound and `bandParams.y` is 0, so this returns the gradient.
+static float3 band_rim_normal(constant LSDFUniforms& U, texture3d<float> rimTex,
+                              texture3d<float> rimNormTex, sampler samp, float3 p) {
+    float3 n = band_rim_gradient(U, rimTex, samp, p);
+    if (U.bandParams.y > 0.5 && U.bandParams.x < 0.5) {
+        float4 v = rimTex.sample(samp, band_uvw(U, p));
+        float other = max(max(v.r, v.b), max(v.a, band_dbox(U, p)));
+        if (-v.g >= other) {
+            float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / max(U.sdfDims.xyz, float3(1.0));
+            float4 ns = rimNormTex.sample(samp, stc);
+            float3 m = ns.xyz + (1.0 - ns.w) * n;
+            if (length(m) > 1e-6) { n = normalize(m); }
+        }
+    }
+    return n;
+}
+/// The skin's grey when the veil draws it over the rim in the lattice layer — the body's
+/// own clay (`viewer_fragment`), since the skin IS the body's surface.
+constant float3 bandSkinGrey = float3(0.78, 0.77, 0.75);
 
 struct VOut { float4 pos [[position]]; float2 uv; };
 
@@ -176,23 +342,342 @@ static inline float3 lsdf_ray(constant LSDFUniforms& U, float2 uv) {
     return normalize(U.rayDir.xyz + U.rayX.xyz * uv.x + U.rayY.xyz * uv.y);
 }
 
-struct LSDFHit { bool hit; float3 pos; float rho; };
+struct LSDFHit { bool hit; float3 pos; float rho; float dressing; float solid;
+                 // ★ HOW FAR INTO THE GRADE BAND this hit sits (1 at the outline, 0 at
+                 // the band's inner edge and beyond) — the grade colour's ramp. A
+                 // spatial measure, so the tint can never bleed past the band
+                 // (2026-09-17: "I am seeing the green bleeding too far into the model").
+                 float grade;
+                 // ★ THE CELL THIS HIT STANDS IN (mm), for the level debug shade.
+                 float cellMM;
+                 // ★ THE RAW LEVEL the frame read out of the cell texture, so the
+                 // debug can compare it against the size it derived from it.
+                 float rawLevel; };
+
+/// Core's measured strut radius (in CELL-NORMALISED units) for a relative density,
+/// read from the 32 samples the host uploaded. Falls back to the analytic form when
+/// no curve was supplied — that is the honest answer for a topology core has not
+/// measured, and it is exactly what the app did everywhere before.
+static float lsdf_strut_radius_norm(constant LSDFUniforms& U, float rho) {
+    float lastSample = U.strutCurve[7].w;
+    if (!(lastSample > 0.0)) {                       // no core law — analytic
+        return sqrt(max(rho, 0.0) / max(U.gradeParams.w, 1e-6));
+    }
+    float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
+    float t = clamp((rho - rhoMin) / max(1e-6, rhoMax - rhoMin), 0.0, 1.0) * 31.0;
+    int i0 = int(floor(t));
+    int i1 = min(i0 + 1, 31);
+    float f = t - float(i0);
+    float a = U.strutCurve[i0 >> 2][i0 & 3];
+    float b = U.strutCurve[i1 >> 2][i1 & 3];
+    return mix(a, b, f);
+}
 
 /// Sphere-trace the strut ∩ part field. The march runs in the mesh's own frame,
 /// where every baked grid lives, and lands on screen exactly where the body pass
 /// puts the same point.
+// ★★ WHICH CELL IS THIS POINT IN, AND HOW BIG IS IT (task item 3: grade the cell
+// SIZE, not only the density).
+//
+// The cell field is baked on core's BASE grid (S0) and every base cell carries the
+// dyadic LEVEL of the octree cell covering it, in G. A level-L cell occupies an
+// ALIGNED 2^L block of that grid — that alignment is the entire transition rule, the
+// reason a coarse cell's corners land on fine-cell nodes instead of in the middle of
+// a face — so the block is recovered here by integer division and everything
+// downstream works in the block's own normalised coordinates.
+//
+// ★ THE STRUT RADIUS THEN GRADES FOR FREE. `lsdf_strut_radius_norm` is a fraction of
+// the cell, so the same rho in a 2x cell is a 2x thicker strut in mm — which is
+// precisely why a coarser cell is what keeps a sparse region printable, and the
+// reason core coarsens it in the first place.
+struct LCell {
+    float3 q;      // position within the covering cell, [-0.5, 0.5]
+    float3 blk;    // that cell's index in level-L units
+    float  S;      // its size (mm)
+    float  m;      // 2^L, in BASE cells (STEPPED: S/S0, an arbitrary real)
+    int    L;
+    // ★★★ STEPPED: > 0 when this base cell belongs to a region that stated its own
+    // cell VERBATIM, and then `S` is that size and `L`/`blk` are meaningless. See
+    // `LatticeCellField.steppedCellMM` for why a dyadic level cannot carry it.
+    float  stepped;
+    int    axis;   // STEPPED: the face normal's axis (0/1/2), -1 when unknown
+    // ★★★ THE TILING'S OWN ORIGIN for this cell, in BASE-CELL units, so two regions on
+    // one axis can each put their declared face on a cell boundary. Zero on every other
+    // path, which is the global grid origin exactly.
+    float3 phase;
+    // ★ STEPPED: the block index of the cell the READ TEXEL belongs to (the cell
+    // holding the texel's middle). When `blk` differs from it the point lies in a
+    // texel that straddles two cells, and the frame was re-read from the texel on
+    // the point's side — see `lsdf_cell_frame_at`.
+    float3 home;
+    // ★★★ THE DEMAND AT THE TEXEL `S` WAS READ FROM, and the fix for the holes
+    // (2026-08-26). See `lsdf_march`'s prefetch: the 27-neighbour cache resolves
+    // EVERY entry — self included — by the covering block's CENTRE base cell, while
+    // `S` here came from `bi = round(cb)`, the base cell the point is actually in.
+    // Over most of a block's extent those are different texels, and a per-spot cell
+    // rule gives them different SIZES, so the `sameLattice` test failed for SELF and
+    // every segment self owns was skipped. Measured on his own scene: 53.4% of
+    // painted cells with single-cell OFF, 81.9% with it ON — which is the order he
+    // reported ("it seems to have more holes than with it off").
+    //
+    // Carrying the demand out of the SAME read makes the self entry true by
+    // construction: it can never disagree with the frame it belongs to.
+    float  act;
+};
+
+// ★ THE READ IS PER BASE CELL, NOT PER STEP. The march samples the same base cell
+// many times over; re-reading its level every step cost 6% of the frame budget on the
+// bracket (17.6 ms against a 16.6 ms bound) and bought nothing — the level cannot
+// change without the base cell changing. The march caches this and recomputes only
+// `q`, which is arithmetic.
+static LCell lsdf_cell_frame_at(constant LSDFUniforms& U, texture3d<float> cellTex,
+                                float3 bi, float3 cb) {
+    float S0 = U.latticeOrigin.w;
+    float3 dims = U.gridDims.xyz;
+    float lvl = 0.0;
+    if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
+        // G is the level; it is 0 on the ungraded path, so this reduces EXACTLY to
+        // the uniform cell the preview drew before — m = 1, blk = bi, q = cb - bi.
+        lvl = max(0.0, cellTex.read(uint3(bi), 0).g);
+    }
+    LCell o;
+    o.stepped = 0.0;
+    o.axis = -1;
+    o.act = -1.0;
+    // ★ STEPPED TAKES THE SIZE STRAIGHT OUT OF THE TEXTURE. `b` is the covering cell's
+    // size in mm, 0 on every other algorithm — so the dyadic path below is untouched
+    // and doubled is bit-identical.
+    if (all(bi >= -0.5) && all(bi < dims - 0.5)) {
+        float4 cs = cellTex.read(uint3(bi), 0);
+        float sMM = cs.b;
+        if (sMM > 0.0) {
+            // ★★★ A TEXEL BELONGS TO THE CELL ITS MIDDLE IS IN, AND THE POINT MAY NOT
+            // BE (2026-09-14). The octree lays texels at the finest rung of ALL
+            // regions' ladders; a region whose cells are not multiples of that pitch
+            // (his back wall: 10.31 / 5.16 / 2.58 mm on a 2 mm grid) has cell
+            // boundaries inside texels. The frame is the texel's cell — the tiling's
+            // own origin and size, unpacked from `axis + fraction` — and if `cb` lies
+            // past that cell's boundary the texel on `cb`'s side is read instead: its
+            // middle is beyond the boundary, so its cell holds `cb` (every cell is at
+            // least a texel wide). One extra read, only at straddles.
+            float3 useBI = bi;
+            for (int pass = 0; pass < 2; pass++) {
+                // ★ THE CELL'S ORIGIN, all three axes (2026-09-17, Stepped's any-step
+                // packing): `axis + 4·(qx + 128·(qy + 128·qz))`, q in 1/128ths of the
+                // cell — see `LatticeSDFRenderer.packCellOrigin`, the one encoder.
+                int packed = int(max(0.0, cs.a) + 0.5);
+                int paxis = packed & 3;
+                int pq = packed >> 2;
+                float m = sMM / max(S0, 1e-6);
+                float3 phase = float3(float(pq & 127), float((pq >> 7) & 127), float((pq >> 14) & 127))
+                             * (m / 128.0);
+                float3 home = floor((useBI + 0.5 - phase) / max(m, 1e-6));
+                float3 blkP = floor((cb - phase) / max(m, 1e-6));
+                if (pass == 0 && any(blkP != home)) {
+                    float3 bi2 = useBI + sign(cb - (useBI + 0.5)) * float3(blkP != home);
+                    if (all(bi2 >= -0.5) && all(bi2 < dims - 0.5)) {
+                        float4 cs2 = cellTex.read(uint3(bi2), 0);
+                        if (cs2.b > 0.0) { cs = cs2; sMM = cs2.b; useBI = bi2; continue; }
+                    }
+                }
+                o.stepped = sMM;
+                o.act = cs.r;
+                o.S = sMM;
+                o.m = m;
+                o.L = 0;
+                o.axis = (paxis >= 0 && paxis <= 2) ? paxis : -1;
+                o.phase = phase;
+                o.home = home;
+                // ★★★ THE BLOCK INDEX IS `floor((cb - phase) / m)` — stepped tiles from
+                // the ORIGIN POINT by `sMM`, not from the base-cell grid, and it is
+                // `cb`, not `bi` (maintainer, 2026-08-22: "These are still floating
+                // boxes … there is empty space between them!").
+                o.blk = blkP;
+                o.q = float3(0.0);   // filled by the caller, from its own point
+                return o;
+            }
+        }
+    }
+    o.L = int(lvl + 0.5);
+    o.phase = float3(0.0);
+    o.m = exp2(float(o.L));
+    o.blk = floor(max(bi, float3(0.0)) / o.m);
+    o.home = o.blk;
+    o.q = float3(0.0);          // filled by the caller, from its own point
+    o.S = S0 * o.m;
+    return o;
+}
+
+/// ★ WHERE A POINT SITS INSIDE ITS COVERING CELL, [-0.5, 0.5]. The one place the two
+/// encodings differ, so neither caller has to know which it is holding.
+///
+/// STEPPED tiles the SAME axes from the SAME origin as everything else, with its own
+/// size — so two regions at 5 and 6 mm do not share nodes where they meet. That is the
+/// algorithm, not an approximation of it (core counts the cost as `floating_ends`).
+inline float3 lsdf_cell_q(constant LSDFUniforms& U, LCell c, float3 p) {
+    if (c.stepped > 0.0) {
+        // ★ THE PHASE IS IN BASE CELLS; one stepped cell is `m` of them.
+        float3 rel = (p - U.latticeOrigin.xyz) / c.stepped
+                   - c.phase / max(c.m, 1e-6);
+        return rel - floor(rel) - 0.5;
+    }
+    float3 cb = (p - U.latticeOrigin.xyz) / U.latticeOrigin.w;
+    return (cb - (c.blk * c.m + (c.m - 1.0) * 0.5)) / c.m;
+}
+
+/// The whole frame for a point — used where the cost of a read does not repeat
+/// (the normal's six taps), never inside the march's inner loop.
+static LCell lsdf_cell_frame(constant LSDFUniforms& U, texture3d<float> cellTex,
+                             float3 p) {
+    float S0 = U.latticeOrigin.w;
+    float3 cb = (p - U.latticeOrigin.xyz) / S0;
+    LCell o = lsdf_cell_frame_at(U, cellTex, U.rimParams.y > 0.0 ? floor(cb) : round(cb), cb);
+    o.q = lsdf_cell_q(U, o, p);
+    return o;
+}
+
+/// ★ THE PART'S OUTWARD NORMAL AT `p`, from the part SDF's own gradient. Only ever
+/// called within a voxel or two of the surface, where the narrow band is exact.
+inline float lsdf_sdf_at(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                         sampler samp, float3 p) {
+    float3 c = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
+    return sdfTex.sample(samp, c).r;
+}
+inline float3 lsdf_part_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                               sampler samp, float3 p) {
+    float3 h = U.sdfSpacing.xyz;
+    float3 g = float3(
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(h.x, 0, 0))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(h.x, 0, 0)),
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(0, h.y, 0))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(0, h.y, 0)),
+        lsdf_sdf_at(U, sdfTex, samp, p + float3(0, 0, h.z))
+      - lsdf_sdf_at(U, sdfTex, samp, p - float3(0, 0, h.z)));
+    float l = length(g);
+    return l > 1e-6 ? g / l : float3(0.0, 1.0, 0.0);
+}
+
+/// ★★★ THE PART CLIP, EXCEPT WHERE THE SHELL HAS STOOD DOWN (maintainer, 2026-08-21:
+/// "the lattices are still peaking through the sides and the top … get rid of that
+/// artifacting").
+///
+/// ★ THE SHELL NOW CORRECTLY SURVIVES on the sides, the chamfer and the top — and the
+/// struts still reached those surfaces from behind. `dClip` bottoms out at `dPart`,
+/// which is 0 AT the surface, so the strut's cut face and the shell's triangles land at
+/// the same depth: z-fighting, resolved per pixel, which is the speckle he is seeing.
+///
+/// ★ SO THE MARCH ASKS THE SHELL'S OWN QUESTION. Where `shell_is_latticed` is true the
+/// shell is gone and the struts must reach the surface — that is the mouth, and a strut
+/// stopping short there would leave a visible ledge. Where it is FALSE the shell owns
+/// the boundary and the lattice is pulled one voxel inside it, out of contention. One
+/// rule, one implementation, evaluated on the part's own normal instead of a fragment's
+/// — so the hole and the lattice cannot disagree about which surfaces are open.
+///
+/// Inert unless the clip is armed (`RC.origin.w`), so the standalone sample block and
+/// every pre-existing path are bit-identical.
+inline float lsdf_part_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls,
+                            float3 p, float dPart) {
+    if (RC.origin.w < 0.5) { return dPart; }
+    // ★★★ BOUNDED IN MILLIMETRES, NOT IN VOXELS (maintainer, 2026-08-22: "The lattice
+    // is stuck and not going the full length of the wall").
+    //
+    // ★ THIS WAS ONE SDF VOXEL, AND THE SDF VOXEL IS A PREVIEW SETTING. At Fine 128
+    // on his part that is 1.72 mm; at Fast 64 — which is what he is on — it is 3.45 mm.
+    // So switching the preview to Fast silently ate 3.45 mm of lattice off every
+    // surface the shell still draws, which on a wall this size is most of what he
+    // marked. A margin whose job is to break a DEPTH COINCIDENCE must not scale with a
+    // resolution knob.
+    //
+    // ★ WHAT IT ACTUALLY HAS TO CLEAR is the sampled field's error at the surface, and
+    // core's narrow band is exact on a plane and near-exact on a gentle curve. A
+    // quarter of a voxel covers that; the clamp keeps it a fraction of a millimetre at
+    // any resolution, which is invisible and still wins the depth test.
+    float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+    // ★★★ DEEP ENOUGH TO WIN THE DEPTH TEST AT A GRAZING ANGLE (2026-08-28).
+    //
+    // His report: *"I'm seeing a lot of artifacts on the curved chamfers around the
+    // lattices."* That is the salt-and-pepper z-fight this inset exists to prevent,
+    // and 0.25 voxel — 0.43 mm on his Fine 128 grid — is not enough of it. Depth
+    // separation on screen is the offset TIMES the cosine of the view angle, so on a
+    // chamfer seen edge-on a 0.43 mm gap collapses to a fraction of a depth unit and
+    // the two surfaces trade pixels.
+    //
+    // ★ AND IT IS FREE. This branch is only taken where `shell_is_latticed` is FALSE —
+    // where the shell survives and OWNS the boundary, so everything held back here is
+    // hidden behind it anyway. Where the shell is cut the clip is `dPart` untouched and
+    // the struts still reach the surface, which is the property the mouth needs.
+    //
+    // The floor matters as much as the scale: at Fast 64 the voxel is 3.45 mm, and
+    // scaling alone would push the inset to 2.6 mm — so it is clamped, and the clamp is
+    // what keeps a resolution knob from eating lattice.
+    // ★★★ THE INSET NO LONGER MOVES THE LATTICE (2026-08-28, his marked-up frame of a
+    // dark strip inside the chamfer along every curved outline).
+    //
+    // ★ WHAT WAS WRONG WITH MOVING IT. Holding the struts 1.29 mm inside the part
+    // wherever the shell survives was justified as FREE — "everything held back here
+    // is hidden behind it anyway". That is true only where the shell FACES the eye.
+    // At a grazing angle the surviving shell covers a sliver of screen and the ray
+    // passes its silhouette edge straight into the gap, so the inset stops being
+    // hidden and becomes a visible dark band exactly at the silhouette and on every
+    // curved outline seen edge-on. Proven on the device, one binary, one camera, one
+    // variable: `TOPOPT_LATTICE_SURFACE_INSET=0` and the band is gone.
+    //
+    // ★ AND IT IS GRADE-INDEPENDENT, which is the one property his standing report
+    // "the holes survive Grade off" demands and which no bake-side cause explains.
+    //
+    // ★ THE DEPTH TEST IS THE RIGHT INSTRUMENT, NOT THE GEOMETRY. The struts and the
+    // shell share ONE depth buffer, so "the shell owns this boundary" is a DEPTH
+    // statement. `lsdf_gbuffer` now pushes the lattice's recorded depth back by this
+    // same magnitude along the VIEW RAY where `shell_is_latticed` is false: the shell
+    // still wins every pixel it actually covers, and where it does not cover there is
+    // nothing to lose to, so the struts reach the surface and the band closes. The
+    // shading position and normal are untouched, so nothing moves on screen.
+    if (!latticeInsetGeometric) { return dPart; }
+    float inset = \(latticeSurfaceInsetMSL);
+    if (dPart < -2.0 * inset) { return dPart; }   // deep inside: nothing to fight
+    float3 pn = lsdf_part_normal(U, sdfTex, samp, p);
+    return shell_is_latticed(p, pn, RC, decls, regionTex) ? dPart : dPart + inset;
+}
+
+/// The mm distance to the declared face's OUTLINE at `p`, off the cell field's `g`
+/// channel. Negative return = no answer (outside the grid).
+inline float lsdf_outline_mm(constant LSDFUniforms& U, texture3d<float> cellTex, float3 p) {
+    float S0 = U.latticeOrigin.w;
+    float3 cbo = (p - U.latticeOrigin.xyz) / S0;
+    float3 bi = U.rimParams.y > 0.0 ? floor(cbo) : round(cbo);   // stepped texels span [i, i+1)·S0
+    float3 dims = U.gridDims.xyz;
+    if (any(bi < -0.5) || any(bi >= dims - 0.5)) { return -1.0; }
+    return cellTex.read(uint3(bi), 0).g;
+}
+
 static LSDFHit lsdf_march(constant LSDFUniforms& U,
                           const device float4* segs,
                           texture3d<float> cellTex,
                           texture3d<float> sdfTex,
+                          texture3d<float> regionTex,
+                          texture3d<float> organicTex,
+                          // ★ THE BAND's fine rim grid (texture 6) — read only when
+                          // `bandOrigin.w` > 0.5; a neutral 1×1×1 of air is bound otherwise
+                          texture3d<float> rimTex,
                           sampler samp,
+                          constant ShellClip& RC,
+                          constant float4* decls,
                           float3 ro, float3 rd) {
     LSDFHit out; out.hit = false; out.pos = ro; out.rho = U.shadeParams.x;
+    out.dressing = 0.0;
+    out.solid = 0.0;
+    out.grade = 0.0;
+    out.cellMM = 0.0;
+    out.rawLevel = 0.0;
 
-    float cell = U.latticeOrigin.w;
-    float3 lorigin = U.latticeOrigin.xyz;
+    float S0 = U.latticeOrigin.w;
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
-    // Everything is trimmed flush at the part surface, so a small pad suffices.
+    // Everything is trimmed flush at the part surface, so a small pad suffices —
+    // measured on the COARSEST cell in the plan (gridDims.w = 2^maxLevel), because
+    // that is the one whose struts reach furthest out of their own base cell.
+    float cell = S0 * max(1.0, U.gridDims.w);
     float3 pad = float3(0.15 * cell);
     float2 tb = hitBox(ro, rd, bmin - pad, bmax + pad);
     if (tb.y < max(tb.x, 0.0)) return out;
@@ -203,13 +688,15 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     float uniformRho = U.shadeParams.x;
     bool hasDemand = U.shadeParams.y > 0.5;
     float radiusFloor = U.shadeParams.z;
-    int maxSteps = int(U.shadeParams.w);
+    // ★ a NEGATIVE step count = solid only (the capsules draw the struts): the march
+    // still runs, for the rim band under every unselected face
+    bool solidOnly = U.shadeParams.w < 0.0;
+    int maxSteps = int(abs(U.shadeParams.w));
     // The field is a TRUE distance (min of exact capsule SDFs, radii constant per
     // owning cell), so near-full sphere-trace steps are safe — no Lipschitz-broken
     // squash like the gizmo's ribbons.
     float stepScale = U.stepParams.x;
     float delta = U.stepParams.y;      // trim erosion (mm)
-    float eps = max(0.05, 0.015 * cell);
     float3 ncells = U.gridDims.xyz;
 
     // WHOLE-CELL emission (the worker's canonical-midpoint rule, and the fix for
@@ -219,6 +706,11 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     // and precompute each neighbour's graded strut radius. Consecutive steps in
     // the same cell reuse the cache.
     float3 cachedBase = float3(1e9);
+    float cachedM = -1.0;
+    float3 cachedPhase = float3(1e9);
+    float3 cachedBI = float3(1e9);
+    LCell LC; LC.q = float3(0.0); LC.blk = float3(0.0); LC.S = S0; LC.m = 1.0; LC.L = 0;
+    LC.stepped = 0.0; LC.phase = float3(0.0); LC.home = float3(0.0); LC.act = -1.0; LC.axis = -1;
     float rnCache[27];
     float rhoCache[27];
     bool anyActive = false;
@@ -242,9 +734,30 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
     for (int i = 0; i < maxSteps; i++) {
         if (t > tEnd) break;
         float3 p = ro + rd * t;
-        float3 c = (p - lorigin) / cell;
-        float3 baseCell = round(c);
-        float3 q = c - baseCell;
+        // ★ THE LOCAL CELL, which under a swept plan is not the same size two steps
+        // from here. Everything below is in THIS cell's normalised coordinates —
+        // and the LEVEL is re-read only when the base cell changes, because it
+        // cannot change without it.
+        float3 cb = (p - U.latticeOrigin.xyz) / S0;
+        // ★ STEPPED TEXELS SPAN [i, i+1)·S0 (the octree paints by extent, and the
+        // neighbour prefetch already reads `floor`); the dyadic ladder is centred.
+        float3 bi = U.rimParams.y > 0.0 ? floor(cb) : round(cb);
+        if (any(bi != cachedBI)) {
+            cachedBI = bi;
+            LC = lsdf_cell_frame_at(U, cellTex, bi, cb);
+        } else if (LC.stepped > 0.0
+                   && any(floor((cb - LC.phase) / max(LC.m, 1e-6)) != LC.home)) {
+            // Same texel, other side of a cell boundary inside it: re-read.
+            LC = lsdf_cell_frame_at(U, cellTex, bi, cb);
+        }
+        // ★ THE TEXTURE READ CACHES ON THE BASE CELL; THE STEPPED BLOCK DOES NOT.
+        // A stepped cell is not aligned to the base-cell grid, so `floor(cb/m)` can
+        // change while `round(cb)` has not — caching `blk` alongside the read would
+        // reintroduce the same off-by-one the frame just fixed. It is two flops.
+        if (LC.stepped > 0.0) { LC.blk = floor((cb - LC.phase) / max(LC.m, 1e-6)); }
+        float cellHere = LC.S;
+        float3 baseCell = LC.blk;
+        float3 q = lsdf_cell_q(U, LC, p);
 
         // Flush trim field: part SDF eroded by `delta` (kills the crease-bulge
         // slivers — see stepParams.y) ∨ the exact part bbox (the bbox term stops
@@ -253,27 +766,241 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         float dPart = sdfTex.sample(samp, stc).r + delta;
         float3 qb = abs(p - bc) - be;
         float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-        float dClip = max(dPart, dBox);
+        // ★ AND THE DECLARED REGION, as a third cutting solid. This is what makes
+        // the struts stop exactly where the shell's hole stops, at any cell size
+        // — and what makes a sub-millimetre change to the region MOVE the
+        // lattice instead of being swallowed by the cell grid.
+        // ★★ AND THE DECLARED REGION, SAMPLED — not evaluated. A face region is
+        // the face's real OUTLINE extruded to depth (`LatticeFaceOutline`), which
+        // has no closed form a fragment can afford; it is baked to a distance
+        // field on the CPU and read here. The SAME field the shell's hole is cut
+        // from, so the two cannot describe different volumes.
+        float dRegion = regionTex.sample(samp, stc).r;
+        // ★ THE STRUTS END INSIDE THE OUTLINE RIBBON (a mesh; see the note below):
+        // clipped half a band inside the face outline, so no strut end can show
+        // outside the beam whatever the voxel-sampled region wall does.
+        if (U.rimParams.y > 0.0 && U.rimParams.w > 0.0) {
+            float dOutV = regionTex.sample(samp, stc).g;
+            dRegion = max(dRegion, 0.5 * U.rimParams.w - dOutV);
+        }
+        // ★ See `lsdf_part_clip`: at the declared mouth the struts reach the surface;
+        // everywhere the shell survives they stop one voxel inside it.
+        float dClip = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
+                                             p, dPart), dBox), dRegion);
+        // ★★ THE OCTET'S STRUTS WELD INTO THE FINE RIM (band mode, 2026-09-28): the coarse
+        // carved field ends them on a 1.7 mm voxel grid, which left gaps and pokes along the
+        // rim. The capsules' rule (`cap_clip_field`): inside the pocket, beyond the rim's
+        // inner face, welded `bandSpacing.w` into it deep in the material and never at the
+        // part's surface (the weld fades there, so no strut end shows through the skin).
+        float dClipStrut = dClip;
+        if (U.bandOrigin.w > 0.5) {
+            float4 bw = rimTex.sample(samp, band_uvw(U, p));
+            float weld = U.bandSpacing.w;
+            float fade = clamp(-bw.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+            float dRegionBand = max(regionTex.sample(samp, stc).b, -bw.r + 0.15 * (1.0 - fade)) - weld * fade;
+            dClipStrut = max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart), dBox), dRegionBand);
+        }
 
-        if (any(baseCell != cachedBase)) {
+        // ★★★ ORGANIC IS A DIFFERENT LATTICE, SO IT IS A DIFFERENT FIELD — AND THAT IS
+        // ALL IT IS. Doubled and stepped fill the part with a CELL, so the march walks a
+        // cell grid and tests that cell's unit topology. Organic has no cell: it is
+        // curves traced along the principal stress directions, and its geometry is
+        // already a union of capsules. Baked to a distance field on the CPU
+        // (`organic_preview_field`) it drops straight into the machinery that was
+        // already sphere-tracing `partSDF` and the region — one more `max()` term.
+        //
+        // The alternative was a second renderer: ~100k centreline segments on the GPU
+        // with a uniform-grid index, marched in world space. That is what "organic has
+        // no cells at all, only traced curves" was taken to imply for months. It does
+        // not: the existing renderer can draw it, because a distance field is a distance
+        // field whatever produced it.
+        if (U.organicOrigin.w > 0.5) {
+            float3 og = (p - U.organicOrigin.xyz) / max(U.organicSpacing.xyz, float3(1e-6));
+            // ★ TWO CHANNELS (2026-09-04): r = centreline distance (clamped at the
+            // reach), g = SURFACE distance at the baked thickness (clamped at the band).
+            // Baked: read g. A LIVE radius (Thicker): r − radius, exact because every
+            // strut then has that radius. Outside the field both read their clamps —
+            // lower bounds, never a hit.
+            float2 ov = float2(U.organicSpacing.w, U.organicRadius.z);
+            if (all(og >= float3(-0.5)) && all(og < U.organicDims.xyz - float3(0.5))) {
+                float3 ouv = (og + 0.5) / max(U.organicDims.xyz, float3(1.0));
+                ov = organicTex.sample(samp, ouv).rg;
+            }
+            float dOrg = U.organicRadius.x > 0.0 ? (ov.r - U.organicRadius.x) : ov.g;
+            float epsO = max(0.02, 0.25 * U.organicSpacing.x);
+            float F2 = max(dOrg, dClip);
+            if (F2 < epsO) {
+                float tHit2 = t;
+                if (FPrev < 1e8 && FPrev > F2) {
+                    float dt = t - tPrev;
+                    tHit2 = clamp(t + F2 * dt / (FPrev - F2), t - dt, t + dt);
+                }
+                out.hit = true; out.pos = ro + rd * tHit2;
+                // ★ THE SHAPE IS CORE'S; THE SHADE IS FLAT, AND THAT IS STATED RATHER
+                // THAN INVENTED. The tracer measures a per-voxel relative density and
+                // returns it, but it is not uploaded yet — so rather than paint the
+                // ramp from a density this field does not carry, organic renders at the
+                // stated uniform density. A wrong hue on a right geometry is the kind of
+                // quiet lie this preview exists to stop.
+                out.rho = U.shadeParams.x; out.dressing = 0.0; out.solid = 0.0;
+                out.cellMM = 0.0;
+    out.rawLevel = 0.0;      // organic has no cell
+                return out;
+            }
+            FPrev = F2; tPrev = t;
+            t += clamp(F2 * stepScale, 0.05 * U.organicSpacing.x, 0.7 * cellHere);
+            continue;
+        }
+
+        // ★★ THE BOUNDARY DRESSINGS — RIM AND DIAGRID (task D1; maintainer,
+        // 2026-08-19: "rim is supposed to be around only the outside edges" and
+        // the skin "a covering across all edges/corners").
+        //
+        // ★ THE SAMPLE BLOCK CAN NAME ITS FACES; A PART CANNOT. On the wizard's
+        // cube the twelve edges and six faces are literal, which is how
+        // `LatticeSamplePatch` draws them. A declared region on a real part is an
+        // arbitrary solid, so the dressings have to be defined by the FIELDS that
+        // bound it:
+        //
+        //   the latticed volume's BOUNDARY  is  dClip ≈ 0
+        //   its EDGES are where two of those bounding surfaces MEET — the part's
+        //   own surface and the region's — i.e. |dPart| ≈ 0 AND |dRegion| ≈ 0.
+        //
+        // ★ AND A DRESSING IS A THICKENING, which is what core builds: the
+        // diagrid links neighbouring landings ON the face, the rim rides the
+        // pairs of boundary faces that meet at an edge. Both are heavier struts
+        // where the lattice meets its own boundary, not a separate surface
+        // floating over it — so they are applied as a radius multiplier on the
+        // struts already there, exactly as the sample uses `radius * 1.6`.
+        float eps = max(0.05, 0.015 * cellHere);
+        float dressing = 0.0;
+        if (U.overlayParams.y > 0.5) {
+            // ★★★ A PHYSICAL WIDTH, NOT A FRACTION OF THE LOCAL CELL. See the Swift
+            // `rimParams` for the measurement: a band scaled by the LOCAL CELL made the skin twice as
+            // wide on the wall whose cell happened to be twice as coarse, out of one
+            // bake — which is the asymmetry he photographed and could not be a setting.
+            float band = max(U.rimParams.x, 1e-4);
+            // The EDGE: both bounding surfaces close at once.
+            float edge = max(0.0, 1.0 - abs(dPart) / band)
+                       * max(0.0, 1.0 - abs(dRegion) / band);
+            dressing = edge;
+            // The SKIN adds the whole boundary, not just its edges.
+            if (U.overlayParams.y > 1.5) {
+                dressing = max(dressing, max(0.0, 1.0 - abs(dClip) / band));
+            }
+            // ★ ONLY THE FINEST CELLS ARE DRESSED ON THE STEPPED PATH (2026-09-15:
+            // "Quilting should only be allowed in the smallest printable cells — never
+            // for larger cells"). With the band at 0 the largest cells stand right
+            // against the outline, and the rim's 1.6x on a 12 mm cell's boundary
+            // struts read as a quilted cell. The solid outline is the rim there.
+            // ★ NO DRESSING AT ALL WHERE THE OUTLINE BAND EXISTS (2026-09-15 night:
+            // "there is no smooth, single outline"). The Rim & skin finish fattened
+            // and tinted the finest cells within its reach of the edge, and beside the
+            // 1.2 mm band that read as one ragged blue strip. The band IS the rim.
+            if (U.rimParams.y > 0.0 && LC.stepped > 0.0 && U.rimParams.w > 0.0) { dressing = 0.0; }
+        }
+
+        if (any(baseCell != cachedBase) || LC.m != cachedM || any(LC.phase != cachedPhase)) {
             cachedBase = baseCell;
+            cachedM = LC.m;
+            cachedPhase = LC.phase;
+            // (The per-cell "is it cut by the outline" test that used to live here is
+            // gone: it sampled the voxel outline distance at a KEPT cell's corners and
+            // turned whole 6 and 12 mm cells solid wherever a corner sat a hair inside
+            // the outline — his "quilted" large cells of 2026-09-15. The bake decides
+            // what is solid; the shader only draws it.)
             anyActive = false;
             for (int oz = -1; oz <= 1; oz++) {
                 for (int oy = -1; oy <= 1; oy++) {
                     for (int ox = -1; ox <= 1; ox++) {
                         int idx = (ox + 1) * 9 + (oy + 1) * 3 + (oz + 1);
-                        float3 cc = baseCell + float3(ox, oy, oz);
+                        // A neighbour at THIS level occupies the aligned block one
+                        // step over; its min-corner base cell speaks for all of it,
+                        // because every base cell in a block carries the block's
+                        // level and the block's demand.
+                        // ★ THE NEIGHBOUR'S CENTRE, NOT ITS MIN CORNER. `blk*m` is the
+                        // corner, which for a stepped cell sits ON the seam between two
+                        // base cells (and for a non-integer `m` is not even a base index)
+                        // — a half-voxel of rounding there picks the wrong region's
+                        // activation. The centre is unambiguous at any `m`, and reduces
+                        // to `blk+off` exactly on the dyadic path.
+                        // ★ AND ONLY ON STEPPED. On the dyadic path `blk*m` IS a base
+                        // index and every base cell in the block carries the block's
+                        // level and demand, so the min corner is already exact — leave
+                        // doubled bit-identical.
+                        float3 nb = baseCell + float3(ox, oy, oz);
+                        // A stepped block's centre in BASE-cell coordinates is
+                        // `(nb + 0.5) * m` shifted by the tiling's own phase — the same
+                        // shift `q` is measured from, or the cache would prefetch a cell
+                        // the ray is not standing in.
+                        float3 cc = LC.stepped > 0.0
+                                  ? floor((nb + 0.5) * LC.m + LC.phase)
+                                  : nb * LC.m;
                         float v = -1.0;
                         if (all(cc >= -0.5) && all(cc < ncells - 0.5)) {
-                            v = cellTex.read(uint3(cc), 0).r;
+                            float3 rgb = cellTex.read(uint3(cc), 0).rgb;
+                            // ★ ONLY SAME-LEVEL NEIGHBOURS CONTRIBUTE. A finer or
+                            // coarser neighbour is a different lattice on a different
+                            // grid; its struts are marched when the ray is inside IT.
+                            // The two still meet, because the dyadic ladder puts the
+                            // coarse cell's nodes on fine-cell nodes — what is lost is
+                            // only the cap that would bulge across the seam, so a
+                            // strut crossing a level change is cut flush there, the
+                            // same way every strut is already cut flush at the part
+                            // surface and at the region boundary.
+                            // ★★★ ON STEPPED THE LEVEL IS ALWAYS 0, SO THIS TEST WAS
+                            // VACUOUS. `steppedCellField` writes `level` as all zeros —
+                            // stepped has no dyadic ladder — so `rg.y == LC.L` passed for
+                            // EVERY neighbour whatever its real cell size. At a grade
+                            // transition a 6 mm cell's neighbourhood pulled in 2 mm cells,
+                            // their densities and radii were read, and their struts were
+                            // evaluated in the WRONG cell's normalised frame: overlapping,
+                            // mixed geometry exactly at the boundaries the grade creates.
+                            // It could only get worse as the grading started working.
+                            //
+                            // Stepped's identity is its CELL SIZE, so that is what is
+                            // compared. The dyadic path keeps the level test, unchanged.
+                            bool sameLattice = LC.stepped > 0.0
+                                ? (abs(rgb.b - LC.S) <= 1e-3 * max(LC.S, 1.0))
+                                : (int(max(0.0, rgb.g) + 0.5) == LC.L);
+                            if (sameLattice) { v = rgb.r; }
                         }
+                        // ★★★ A NEIGHBOUR OF ANOTHER SIZE — OR NONE — STILL LEAVES THIS
+                        // CELL ITS OWN FACE (2026-09-14: "a BUNCH of [12 mm cells] are
+                        // split in half … NO CELLS SHOULD BE CUT INTO PARTS"). The
+                        // octet's canonical struts are those with their midpoint in
+                        // [0, S)³, so every +x/+y/+z FACE diagonal is owned by the
+                        // neighbour on that side. Skipping a neighbour that is a
+                        // different lattice skipped this cell's own face with it: a
+                        // 12 mm cell beside 6 mm cells lost three faces, and on the
+                        // wall whose normal runs −y every cell lost the face on the
+                        // plate itself. The face is drawn at THIS cell's density; the
+                        // finer cells on the other side draw theirs, and the rungs nest
+                        // so the two coincide where they share a strut.
+                        if (v < 0.0 && LC.stepped > 0.0 && LC.act >= 0.0) { v = LC.act; }
                         if (v >= 0.0) {
                             anyActive = true;
                             float rho = hasDemand
                                 ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(v, 0.0, 1.0), gamma))
                                 : uniformRho;
                             rhoCache[idx] = rho;
-                            rnCache[idx] = clamp(max(radiusFloor, sqrt(max(rho, 0.0) / K)), 0.0, 0.49);
+                            // ★★ THE PRINTABLE FLOOR IS PER CELL, NOT PER PART
+                            // (maintainer, 2026-08-20: "That lattice preview barely
+                            // shows anything").
+                            //
+                            // ★ THE BAND'S FLOOR IS COMPUTED ONCE, at one cell size.
+                            // With a GRADED cell that is wrong everywhere else: strut
+                            // diameter scales with the cell, so a density that prints
+                            // at 2.6 mm is far under a bead at 1.1 mm. Auto's window
+                            // put the base cell at 1.095 mm and every fine cell drew
+                            // sub-bead struts — the speckle defect, re-entered through
+                            // the grading. The floor has to be asked per cell, and in
+                            // normalised terms that is just (bead/2) / S.
+                            float rnPrint = U.overlayParams.z > 0.0
+                                          ? U.overlayParams.z / max(LC.S, 1e-4) : 0.0;
+                            rnCache[idx] = clamp(max(max(radiusFloor, rnPrint),
+                                                     lsdf_strut_radius_norm(U, rho)),
+                                                 0.0, 0.49);
                         } else {
                             rnCache[idx] = -1.0;
                             rhoCache[idx] = 0.0;
@@ -283,22 +1010,225 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
             }
         }
 
+        // ★★★ SELF IS RESOLVED FROM THE FRAME'S OWN TEXEL — the holes (2026-08-26).
+        //
+        // The prefetch above locates every neighbour, self included, at the covering
+        // block's CENTRE base cell (`floor((nb + 0.5) * m + phase)`). For a true
+        // neighbour that is right. For SELF it is not: `LC.S` was read at
+        // `bi = round(cb)`, and over most of a block's extent those two base cells are
+        // different texels. A per-spot cell rule gives them different SIZES, the
+        // `sameLattice` test fails, `rnCache[13]` goes to −1, and EVERY segment self
+        // owns is skipped by the loop below — most of the strutwork the ray is
+        // standing in. `anyActive` still comes back true off a neighbour, so nothing
+        // is reported, the march carries on, and the result is a thinned, cell-shaped,
+        // grid-aligned patch that returns no hit when tapped.
+        //
+        // Measured on his own scene, replaying this arithmetic on the baked field
+        // (`LatticeSelfNeighbourProbe`): 1,415 of 2,649 painted cells (53.4%) with
+        // single-cell members OFF, 308 of 376 (81.9%) with it ON — which is the order
+        // he reported, "it seems to have more holes than with it off". Zero cells lose
+        // ALL 27, which is why this never showed up as a fully dark cell.
+        //
+        // `LC.act` is the demand carried out of the SAME read that gave `LC.S`, so the
+        // self entry cannot disagree with the frame it belongs to. It is recomputed
+        // every step rather than inside the block-keyed cache above, because `bi` can
+        // change while the block does not — that is the whole defect. No texture read.
+        //
+        // −1 in the field means the run leaves that material SOLID; self stays inactive
+        // there so the solid term below owns it. Dyadic sets `act` to −1 and is
+        // therefore bit-identical.
+        if (LC.stepped > 0.0 && LC.act >= 0.0) {
+            anyActive = true;
+            float rhoSelf = hasDemand
+                ? (rhoMin + (rhoMax - rhoMin) * pow(clamp(LC.act, 0.0, 1.0), gamma))
+                : uniformRho;
+            rhoCache[13] = rhoSelf;
+            float rnPrintSelf = U.overlayParams.z > 0.0
+                              ? U.overlayParams.z / max(LC.S, 1e-4) : 0.0;
+            rnCache[13] = clamp(max(max(radiusFloor, rnPrintSelf),
+                                    lsdf_strut_radius_norm(U, rhoSelf)),
+                                0.0, 0.49);
+        }
+
         float dn = 1e9;
         float rhoNear = uniformRho;
         if (anyActive) {
+            // ★ The dressing fattens the struts HERE — one multiplier on the
+            // radius the cell already grades to, so a dressed strut is the same
+            // strut, heavier, and cannot drift away from the lattice it dresses.
+            // 1.6x at full strength is the sample's own weight.
+            float fat = 1.0 + 0.6 * clamp(dressing, 0.0, 1.0);
             for (int s = 0; s < segCount; s++) {
                 float4 a = segs[2 * s];
                 int oi = int(a.w + 0.5);
                 float rn = rnCache[oi];
                 if (rn < 0.0) continue;
-                float d = sdCap(q, a.xyz, segs[2 * s + 1].xyz, rn);
+                float d = sdCap(q, a.xyz, segs[2 * s + 1].xyz, min(rn * fat, 0.49));
                 if (d < dn) { dn = d; rhoNear = rhoCache[oi]; }
             }
         }
         // CSG intersection: struts ∩ part. max() of 1-Lipschitz SDFs is a valid
         // SDF, so full sphere-trace steps stay safe; struts are cut flush at the
         // part surface, like a machined section — the straight edge.
-        float F = max(dn * cell, dClip);
+        // ★★★ WHERE THE RUN LEAVES IT SOLID, DRAW SOLID — DO NOT DRAW A HOLE
+        // (maintainer, 2026-08-21: "Can we just make it so the empty spots are filled
+        // in with what looks like 3D printed layers? This will cover the holes and also
+        // show what it would actually look like.").
+        //
+        // ★ THE HOLES WERE NEVER MISSING GEOMETRY. A cell whose member cannot hold the
+        // floor is refused, `anyActive` stays false, `dn` stays 1e9 — so F was infinite
+        // and the ray passed straight through. With the body drawn transparent behind
+        // the lattice, that reads as a hole through the wall. It is the opposite: that
+        // material is the DENSEST thing in the part, solid plastic wall to wall.
+        //
+        // ★ SO AN INACTIVE CELL IS CLIPPED BY THE PART AND THE REGION ALONE. `dClip` is
+        // already exactly "inside the part, inside what he declared", which is the solid
+        // the run will build there. It costs no extra field and cannot disagree with the
+        // struts about where the region ends, because it IS the strut's own clip term.
+        // ★★★ AND IT SITS STRICTLY INSIDE THE SURFACE — the fix for the speckle and
+        // the "broken top faces" the first version of this shipped with (maintainer,
+        // 2026-08-21: "Why is it breaking the top faces??? They are just gone").
+        //
+        // ★ THE SHELL ALREADY DRAWS THAT SURFACE. `dClip` reaches 0 exactly AT the part
+        // face, so a solid fill bounded by it renders a second surface at the same
+        // depth as the body's own — z-fighting, which is the salt-and-pepper speckle
+        // across every wall and, where the fill won, the top faces reading as gone.
+        // Pulling the fill in by one SDF voxel gives the shell undisputed ownership of
+        // the boundary: the fill is what you see THROUGH the hole in the shell, never
+        // what you see instead of the shell.
+        // ★ THE FILL TAKES `dClip` UNCHANGED NOW. It used to add its own unconditional
+        // one-voxel inset to keep off the shell's surface; `dClip` already does exactly
+        // that, and only where the shell is actually there — so the fill reads flush
+        // through the mouth instead of recessed behind a ledge, and still cannot
+        // z-fight anywhere the shell survives.
+        // ★★★ THE TWO TERMS ARE KEPT APART SO THE HIT CAN NAME THE ONE THAT WON
+        // (2026-08-27). `out.solid` used to be read off `anyActive`, which was only
+        // ever a PROXY for "this hit came from the solid fill, not from a strut" — it
+        // happened to hold while the only way to get solid was for a cell to be
+        // inactive. It stopped holding the moment the self entry was fixed (see the
+        // prefetch above): every painted cell now reports `anyActive`, so the grade's
+        // solid band AT THE OUTLINE was being shaded as a strut — flat, untextured,
+        // and at a neighbouring strut's density — which is what an edge band with no
+        // printed layers in it looks like. Comparing the two fields is exact and needs
+        // no proxy.
+        float Fstrut = (anyActive && !solidOnly) ? max(dn * cellHere, dClipStrut) : 1e9;
+        // ★★★ THE POCKET IS AIR (his 2026-09-22: "Walls should never take the place of
+        // the empty or too little lattice. Ever."). `dClip` intersects the whole declared
+        // prism, so inside it the "run leaves this solid" branch filled every texel with
+        // no cell as opaque material — the wall across the pocket. Inside a declared
+        // prism nothing is solid but the rim band the dressing paints; the fill applies
+        // only to material OUTSIDE every prism.
+        float Fsolid = (anyActive || solidOnly) ? 1e9 : (dRegion < 0.0 ? 1e9 : dClip);
+        bool bleedHit = false;
+        bool bandRimWon = false;       // the band's rim (not the grade's bleed) owns the solid hit
+        // ★★★ THE RIM UNDER EVERY UNSELECTED FACE (his 2026-09-23 02:30: "the rim is below
+        // the solid — the transition from lattice to solid, connecting the skin"). Inside a
+        // declared prism, where the region field is solid, beyond the model's thin skin
+        // (regionTex.a ≥ 0): that band is the rim, drawn in the rim colour — part of the
+        // lattice, so it stays when the body is hidden.
+        // ★★★ AND IT IS A DISTANCE EVERYWHERE, NOT ONLY INSIDE THE BAND (2026-09-26, his
+        // images 3–5: the rim in scattered chunks, green where it should be solid blue,
+        // and a ledge recessed into every wall at the floor). The term used to exist only
+        // once a sample already stood in the band, so from the air the march stepped
+        // 0.7 cell (5.6 mm at his 8 mm cell) and the dClip leap below took up to
+        // skin + rim more (the region field is POSITIVE across the band) — a 3.4 mm rim
+        // was crossed without a sample in it, or first sampled millimetres deep. The
+        // intersection's max() is a lower bound of the distance to the band from
+        // anywhere, so it bounds the step (`Frim`) and ends it (`FrimHit`, which adds the
+        // "no face near" sentinel test — a gate only, never a distance).
+        float Frim = 1e9;
+        if (U.bandOrigin.w > 0.5) {
+            // ★★★ THE BAND (2026-09-26 redesign): the rim is read off its OWN padded
+            // half-voxel grid — continuous, geometrically signed distances, no sentinel and
+            // no carve — so a trilinear read gives a constant-thickness rim at any grid
+            // phase. The step reads the Lipschitz lower bound WITHOUT the skin term (the skin
+            // is a gate on the hit, not a distance to the rim); the hit adds it unless the
+            // veil draws the skin too.
+            float4 v = rimTex.sample(samp, band_uvw(U, p));
+            float FrimStep = max(max(v.r, v.b), max(v.a, dBox));
+            float FrimHit = U.bandParams.x > 0.5 ? FrimStep : max(FrimStep, -v.g);
+            Frim = FrimStep;
+            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; bandRimWon = true; }
+        } else if (U.bandParams.z < 0.5) {
+            // (bandParams.z = 1: the region's `.a` is the band's B_r, not this block's skin
+            // field — a band scene whose capsules are off — so no legacy rim is drawn from it)
+            float4 rt = regionTex.sample(samp, stc);
+            float dPrismHere = rt.b, dSkinIn = rt.a;
+            // ★ and INSIDE THE PART (R4: the rim "never sticks out of the model"): the
+            // sampled skin field blends across the surface, so without the part's own
+            // surface as a fourth bound the gate passed up to a millimetre into the air
+            // wherever the skin field's far value sat under the surface (measured on his
+            // stand after the edge clip: 392 air samples, the farthest 1.09 mm out). The
+            // part's MATERIAL (sdfTex.g), not the slab-clipped `dPart`: the rim spans the
+            // whole prism whatever depth the wall's slab places lattice at.
+            float dMaterial = sdfTex.sample(samp, stc).g;
+            // ★★ CARVED BY HALF A VOXEL, NOT MERELY AT ZERO (his 2026-09-26 01:46: rim
+            // painted over face 2's open mouth "for no reason"). At a selected face the
+            // prism's front cap, the region field's zero and the part's surface COINCIDE,
+            // so a max() of the four distances is ≈ 0 across the whole mouth and the march
+            // called it a hit wherever an unselected face was within the field's reach. A
+            // real rim is carved skin + rim deep (≈ 3.4 mm); the mouth never is.
+            float rimCarve = 0.5 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
+            Frim = max(max(max(dPrismHere, rimCarve - dRegion), -dSkinIn), dMaterial);
+            float FrimHit = max(Frim, dSkinIn - 900.0);
+            if (FrimHit < Fsolid) { Fsolid = FrimHit; bleedHit = true; }
+        }
+        // ★★★ THE OUTLINE ITSELF IS NOT DRAWN HERE (2026-09-16). It is a MESH —
+        // `LatticeOutlineRibbon`, one thin beam swept round the face outline, drawn by
+        // the view in the same G-buffer pass — because a field sampled from voxels can
+        // only ever be as smooth as its voxels, and he asked for "a singular beam bent
+        // around the entirety of the face-prism outline; something inherently smooth".
+        // The struts are clipped half a band inside the outline (see `dRegion` above),
+        // so they end inside the beam.
+        //
+        // ★ THE BLEED IS: for a large grade the solid grows inward from the beam, and
+        // that part IS drawn here — "the growing solid inwards is SDF — the outline
+        // stays the way it is, clean and thin" (19:22). Solid wherever the voxel's
+        // in-plane outline distance is under the texel's `solidDepth` (beam + bleed,
+        // written by the bake only when there is a bleed), in the rim colour so it
+        // reads as one solid with the beam; clipped by the prism and the raw part.
+        if (LC.stepped > 0.0 && U.rimParams.y > 0.0 && LC.S > 0.0) {
+            float depth = lsdf_outline_mm(U, cellTex, p);
+            if (depth > 0.0) {
+                float dOutV = regionTex.sample(samp, stc).g;
+                float dPartRaw = dPart - delta
+                               - 0.3 * max(U.sdfSpacing.x, max(U.sdfSpacing.y, U.sdfSpacing.z));
+                float Fb = max(max(dOutV - depth, dBox), max(regionTex.sample(samp, stc).b, dPartRaw));
+                if (Fb < Fsolid) { Fsolid = Fb; bleedHit = true; bandRimWon = false; }
+            }
+        }
+        // ★★★ DOUBLED'S SOLID CELLS RENDER **SOLID** (maintainer, 2026-08-24
+        // evening: "I'm not seeing a solid outline meaning the entire chamfers
+        // are held up in thin air"). The ladder's shape fit already DECIDES
+        // which cells go solid — a want trimmed below the base rung deactivates
+        // the cell — but `anyActive` is a neighbourhood property, so a thin
+        // solid ring at the outline still drew its neighbours' struts straight
+        // through the material. The sample's OWN cell being inactive is the
+        // decision, read back; the union with dClip keeps it inside the part
+        // and the declared region. Gated on rimParams.z (armed only when the
+        // doubled path baked with declared regions), so every other bake is
+        // byte-identical.
+        if (LC.stepped == 0.0 && U.rimParams.z > 0.5) {
+            float S0d = U.latticeOrigin.w;
+            float3 bid = round((p - U.latticeOrigin.xyz) / S0d);
+            if (all(bid >= -0.5) && all(bid < U.gridDims.xyz - 0.5)) {
+                if (cellTex.read(uint3(bid), 0).r < 0.0) {
+                    Fsolid = min(Fsolid, dClip);
+                }
+            }
+        }
+        float F = min(Fstrut, Fsolid);
+        // ★★★ AND THE LAST SLIVER AT THE OUTLINE IS SOLID, so the lattice meets the
+        // face exactly instead of stopping half a cell short. `dRegion` is negative
+        // inside the declared region, so {dRegion >= -rim} is the band hugging its
+        // boundary; intersecting with `dClip` keeps it inside the part and inside what
+        // he declared, and the union with the struts means it can only ADD material.
+        // ★ NO RIM TERM HERE ANY MORE. The solid outline is baked into the CELL
+        // FIELD (`steppedCellField`), where it can be driven by the face's IN-PLANE
+        // shape. Every version of it in this shader was driven by `dRegion`, which for
+        // an extruded face region reaches 0 at the DEPTH CAPS as much as at the outline —
+        // so it banded the wall's surfaces instead of tracing the face. An inactive cell
+        // already renders solid two lines above; that is the whole mechanism.
         if (F < eps) {
             // Secant refinement to the F = 0 root (see tPrev above): F is locally
             // near-linear along the ray, so one step lands within O(eps²) of the
@@ -309,6 +1239,28 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
                 tHit = clamp(t + F * dt / (FPrev - F), t - dt, t + dt);
             }
             out.hit = true; out.pos = ro + rd * tHit; out.rho = rhoNear;
+            // ★ WHAT KIND OF STRUT IT IS, carried out with it: the dressing is
+            // already known here (it is what fattened the radius), and the albedo
+            // needs it to tell BOUNDARY work from interior fill.
+            out.dressing = clamp(dressing, 0.0, 1.0);
+            // The grade band's ramp at the hit, from the voxel's in-plane outline
+            // distance: 1 at the outline, 0 at the band's inner edge, never beyond.
+            if (U.gradeColor.w > 0.0) {
+                float dOutH = regionTex.sample(samp, stc).g;
+                out.grade = clamp(1.0 - dOutH / U.gradeColor.w, 0.0, 1.0);
+            }
+            // Carried out so the albedo can draw it as printed layers rather than as
+            // a strut of some invented density.
+            // Which FIELD produced this hit, not which neighbourhood happened to be
+            // active — see the two terms above.
+            // 1 = the run's solid fill (printed layers); 2 = the grade's BLEED, drawn
+            // flat in the rim colour like the outline beam it grows from.
+            out.solid = (Fsolid <= Fstrut) ? (bleedHit ? 2.0 : 1.0) : 0.0;
+            // ★ in band mode a BLEED hit is 2.5 — still the rim colour, but not the band rim, so
+            // it keeps `lsdf_normal` instead of the rim's field normal (2026-09-28 review)
+            if (out.solid > 1.5 && U.bandOrigin.w > 0.5 && !bandRimWon) { out.solid = 2.5; }
+            out.cellMM = cellHere;
+            out.rawLevel = float(LC.L);
             return out;
         }
         FPrev = F; tPrev = t;
@@ -317,9 +1269,30 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
         // 3×3×3 strut neighbourhood is never skipped past). Far from the part:
         // the whole render lies in {dClip ≤ eps}, so dClip is a valid distance
         // bound independent of the neighbourhood — leap by it.
-        float step = anyActive ? clamp(F * stepScale, 0.05 * cell, 0.7 * cell)
-                               : 0.7 * cell;
-        step = max(step, dClip - 3.0 * eps);
+        // ★ THE STEP IS CAPPED BY THE FINEST CELL THAT CAN BE ADJACENT, not by the
+        // one we are standing in. The plan is 2:1 BALANCED — a face neighbour differs
+        // by at most one level — so the smallest thing near a level-L cell is S/2,
+        // and a 0.7·S step from inside a coarse cell would march straight over a fine
+        // neighbour's struts and punch holes in it.
+        // ★ THE FINEST CELL THAT CAN BE ADJACENT. Doubled is a 2:1 BALANCED octree, so
+        // a face neighbour is at worst half this one. STEPPED has no balance rule at
+        // all — the region next door states whatever it derived — so the bound is the
+        // finest cell anywhere in the plan, which is exactly what the base cell `S0` is
+        // set to on the stepped path.
+        float safeCell = LC.stepped > 0.0 ? U.latticeOrigin.w
+                       : (LC.L > 0 ? cellHere * 0.5 : cellHere);
+        // ★ THE FLOOR ON THE STEP IS A FRACTION OF THE CELL, AND THE STRUT IS NOT.
+        // `debugParams.y` overrides it in mm so the two can be told apart; 0 keeps the
+        // shipping arithmetic exactly.
+        float stepLo = U.debugParams.y > 0.0 ? U.debugParams.y : 0.05 * safeCell;
+        // ★ BOUNDED BY THE RIM TOO (2026-09-23): with no cell here the march used to leap
+        // 0.7 cell regardless of F, and a rim band thinner than that (skin + rim ≈ 4.6 mm
+        // under a 6 mm cell) was crossed without a hit — his "blue rim only at one spot".
+        float step = (anyActive || Fsolid < 1e8) ? clamp(min(F, Frim) * stepScale, stepLo, 0.7 * safeCell)
+                                                 : 0.7 * safeCell;
+        // ★ the leap is a bound on the struts only; the rim band lies where dClip is
+        // POSITIVE, so it never leaps past the rim's own bound
+        step = max(step, min(dClip, Frim) - 3.0 * eps);
         t += step;
     }
     return out;
@@ -332,11 +1305,16 @@ static LSDFHit lsdf_march(constant LSDFUniforms& U,
 /// exactly where §3's contact term has to appear.
 static float3 lsdf_normal(constant LSDFUniforms& U,
                           const device float4* segs,
+                          texture3d<float> cellTex,
                           texture3d<float> sdfTex,
+                          texture3d<float> regionTex,
                           sampler samp,
-                          float3 hitPos, float hitRho) {
-    float cell = U.latticeOrigin.w;
-    float3 lorigin = U.latticeOrigin.xyz;
+                          constant ShellClip& RC,
+                          constant float4* decls,
+                          float3 hitPos, float hitRho,
+                          // ★ band mode, a STRUT hit (2026-09-28 review): the gradient takes the
+                          // clip the struts are cut by (`dClipStrut`), not the coarse carved field
+                          texture3d<float> rimTex, bool bandStrut) {
     float3 bmin = U.bboxMin.xyz, bmax = U.bboxMax.xyz;
     float3 bc = (bmin + bmax) * 0.5, be = (bmax - bmin) * 0.5;
     float3 sdfDims = U.sdfDims.xyz;
@@ -345,23 +1323,36 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
     float K = U.gradeParams.w;
     float delta = U.stepParams.y;
 
-    float rnH = max(radiusFloor, sqrt(max(hitRho, 0.0) / K));
+    float rnH = max(radiusFloor, lsdf_strut_radius_norm(U, hitRho));
     rnH = min(rnH, 0.49);
-    float h = 0.002 * cell;
+    float h = 0.002 * lsdf_cell_frame(U, cellTex, hitPos).S;
     float3 ex = float3(h, 0, 0), ey = float3(0, h, 0), ez = float3(0, 0, h);
     float3 base = hitPos;
     float3 pts[6] = { base+ex, base-ex, base+ey, base-ey, base+ez, base-ez };
     float d6[6];
     for (int k = 0; k < 6; k++) {
-        float3 c = (pts[k] - lorigin) / cell;
-        float3 q = c - round(c);
+        LCell LCk = lsdf_cell_frame(U, cellTex, pts[k]);
+        float3 q = LCk.q;
         float dmin = 1e9;
         for (int s = 0; s < segCount; s++) dmin = min(dmin, sdCap(q, segs[2*s].xyz, segs[2*s+1].xyz, rnH));
         float3 stc = ((pts[k] - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
         float dP = sdfTex.sample(samp, stc).r + delta;
         float3 qb = abs(pts[k] - bc) - be;
         float dB = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
-        d6[k] = max(dmin * cell, max(dP, dB));
+        // The region is in this gradient too — a strut cut off at the region
+        // boundary must take that plane's normal, exactly as one cut off at the
+        // part surface takes the part's. Otherwise the cut face is shaded as if
+        // it were still a strut and reads as a tear.
+        float dR = regionTex.sample(samp, stc).r;
+        if (bandStrut) {
+            float4 bw = rimTex.sample(samp, band_uvw(U, pts[k]));
+            float weld = U.bandSpacing.w;
+            float fade = clamp(-bw.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+            dR = max(regionTex.sample(samp, stc).b, -bw.r + 0.15 * (1.0 - fade)) - weld * fade;
+        }
+        d6[k] = max(dmin * LCk.S,
+                    max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls,
+                                           pts[k], dP), dB), dR));
     }
     return normalize(float3(d6[0] - d6[1], d6[2] - d6[3], d6[4] - d6[5]) + 1e-6);
 }
@@ -375,21 +1366,128 @@ static float3 lsdf_normal(constant LSDFUniforms& U,
 /// shaded solid rather than as a flat colour laid over one.
 static float3 lsdf_albedo(constant LSDFUniforms& U,
                           texture3d<float> tintTex,
+                          texture3d<float> stressTex,
                           sampler samp,
-                          float3 hitPos, float hitRho) {
-    float rhoMin = U.gradeParams.x, rhoMax = U.gradeParams.y;
-    float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
-    float3 baseC = mix(U.sparseColor.xyz, U.denseColor.xyz, frac);
+                          float3 hitPos, float hitRho, float hitDressing,
+                          // ★ 1 where the run leaves the material SOLID — see the
+                          // printed-layer branch below. Defaulted at every call site
+                          // rather than inferred, because "no strut here" and "solid
+                          // plastic here" are opposite claims about the same voxel.
+                          float hitSolid, float hitGrade) {
+    // ★★ THE STRESS PLOT, PAINTED ONTO THE STRUTS (maintainer, 2026-08-18:
+    // "Allow the stress map to *overlay* on the lattice if it is turned on
+    // simultaneously. I want to be able to see the stress map and compare the
+    // changes in the lattices themselves").
+    //
+    // ★ IT REPLACES THE COLOUR, NOT THE GEOMETRY — which is the difference
+    // between an overlay and the old behaviour, where turning the stress view on
+    // simply hid the lattice. The struts keep their graded radii; only what they
+    // are painted with changes, so the two readings can be held against each
+    // other. Sampled from a volume baked through `LatticeStressTint.colour`, the
+    // same ramp the shell's plot and the legend use, so a strut and the wall
+    // behind it report one stress in one colour.
+    if (U.overlayParams.x > 0.5) {
+        float3 stc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
+        return stressTex.sample(samp, stc).rgb;
+    }
+    // ★★★ SOLID FILL, DRAWN AS PRINTED LAYERS (maintainer, 2026-08-21). Material the
+    // run leaves solid gets the look of what the printer will actually lay down there:
+    // bands at the REAL layer height, stacked along the build direction.
+    //
+    // ★ THE LAYER HEIGHT IS THE PRINTER'S, NOT A CONSTANT. `overlayParams.w` carries
+    // `PrintParams.layerHeightMM`; at 0 (no printer stated) the banding is skipped
+    // entirely rather than drawn at some default, because a wrong layer count is a
+    // picture that lies about the part rather than one that merely looks plain.
+    //
+    // ★ AND IT IS SHADED, NOT STRIPED. A hard stripe at 0.2 mm aliases into moiré the
+    // moment the camera moves; this is a smooth ridge profile whose contrast FADES as
+    // the bands approach a pixel, so it reads as texture at every zoom instead of
+    // shimmering. `fwidth` gives the on-screen period directly.
+    // ★ THE GRADE'S BLEED: flat, in the rim colour — one solid with the beam.
+    if (hitSolid > 1.5) { return U.rimColor.xyz; }
+    if (hitSolid > 0.5) {
+        // ★★★ SOLID IS THE **DEEP** END, NOT THE PALE ONE (2026-08-27).
+        //
+        // This was `mix(denseColor, white, 0.55)` — 55% of the way to white, which made
+        // fully dense material PALER than the sparsest strut on the part and inverted
+        // the legend the page states in words: *"Thickness follows the density — pale
+        // is thin, deep is thick."* A 100%-dense band drawn paler than a 5% strut reads
+        // as a gap in the lattice, and that is exactly what he has been circling: the
+        // grade's solid ring along the outline (449 cells on his part, measured), drawn
+        // as a smooth featureless strip.
+        //
+        // Proved by a controlled A/B on the device rather than by argument: with the
+        // aesthetic ladder cap lifted so the same 449 cells draw as lattice instead of
+        // solid (`gradedToSolid` 449 -> 49, everything else identical), the band fills
+        // in. The material was always there; only its colour said otherwise.
+        //
+        // ★ AND IT TAKES ITS NEIGHBOURS' CLASS. The same rule the struts use below —
+        // boundary work is the rim hue, interior fill the dense hue — so the solid at a
+        // face's outline is continuous with the struts it terminates, instead of being
+        // a third colour that has to be learned.
+        float3 solidHue = hitDressing > 0.05 ? U.rimColor.xyz : U.denseColor.xyz;
+        float lh = U.overlayParams.w;
+        if (lh > 1e-4) {
+            // ★★★ STACKED ALONG THE BUILD DIRECTION — see `LSDFUniforms.buildDir` for
+            // why neither Z nor Y is right as a constant. Zero (an old caller that does
+            // not set it) skips the banding rather than banding along an invented axis.
+            float3 bd = U.buildDir.xyz;
+            float bl = length(bd);
+            if (bl < 1e-6) { return solidHue; }
+            float z = dot(hitPos, bd / bl) / lh;
+            float period = max(fwidth(z), 1e-4);
+            // Contrast dies once one layer is thinner than ~1.4 px.
+            float legible = clamp(1.0 - period / 1.4, 0.0, 1.0);
+            float ridge = 0.5 + 0.5 * cos(6.2831853 * z);
+            solidHue *= 1.0 - 0.16 * legible * (1.0 - ridge);
+        }
+        return solidHue;
+    }
+    float rhoMin = U.colourSpan.z > 0.5 ? U.colourSpan.x : U.gradeParams.x;
+    float rhoMax = U.colourSpan.z > 0.5 ? U.colourSpan.y : U.gradeParams.y;
+    // A POINT span (manual thickness, lo == hi) is one density: one lightness, not
+    // "anything above lo is the deep end".
+    float span = rhoMax - rhoMin;
+    float frac = span > 1e-4 ? clamp((hitRho - rhoMin) / span, 0.0, 1.0) : 0.0;
+    // ★★ HUE = WHAT THE STRUT IS; LIGHTNESS = HOW MUCH MATERIAL IS IN IT
+    // (maintainer, 2026-08-19: "I thought they were tinted for different *types* of
+    // lattice structures. Something like the Rim was blue, the regular cells were
+    // purple, the weight taking cells were green").
+    //
+    // It used to be the owning GROUP's colour, which said which faces he had
+    // selected and nothing whatever about the lattice — so on a lattice page the
+    // channel was spent on the one thing the page is not about. Three classes now,
+    // in the order they take precedence:
+    //
+    //   BOUNDARY  `dressing > 0`  — rim / diagrid / skin work, the heavier struts
+    //                               where the lattice meets its own edge.
+    //   INTERIOR  everything else — ordinary fill.
+    //
+    // ★ A THIRD "load-carrying" hue was removed (2026-08-19): it thresholded DENSITY,
+    // which lightness already shows continuously, and the stress overlay answers
+    // "where is the load" far better. See `LatticeStructureColour`.
+    //
+    // Lightness still runs pale→saturated with density INSIDE each hue, so the two
+    // readings never collide.
+    float3 hue = U.denseColor.xyz;                       // interior fill
+    if (hitDressing > 0.05) { hue = U.rimColor.xyz; }    // boundary work
+    float3 baseC = mix(U.sparseColor.xyz, hue, clamp(0.25 + 0.75 * frac, 0.0, 1.0));
+    // The grade band, tinted toward the grade colour by WHERE the hit sits in the
+    // band (`hitGrade`: 1 at the outline, 0 at the band's inner edge) — a spatial
+    // ramp, so the colour stops exactly where the band does and the tap reads the
+    // same thing the eye does.
+    if (U.gradeColor.w > 0.0 && hitGrade > 0.0 && hitDressing <= 0.05) {
+        baseC = mix(baseC, U.gradeColor.xyz, hitGrade);
+    }
     // Face-role tint (A4): where the body would have been tinted (anchor / load /
     // keep-clear / protect), the marked face's surface voxels carry that colour in
     // the tint volume — baked from the mesh view's own tint dictionary. The
     // trilinear alpha fades off-face; ×2.2 saturates ON the face so the flush-cut
     // section reads as solidly marked as the body did.
-    if (U.stepParams.z > 0.5) {
-        float3 ttc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / U.sdfDims.xyz;
-        float4 ft = tintTex.sample(samp, ttc);
-        baseC = mix(baseC, ft.rgb, clamp(ft.a * 2.2, 0.0, 1.0));
-    }
+    // ★ THE FACE-ROLE TINT NO LONGER PAINTS THE STRUTS. It is what made every
+    // strut carry its group's colour, which is precisely the confusion above. The
+    // volume is still bound (the shell uses it); the lattice simply stops reading
+    // it, so hue is free to mean structure.
     return baseC;
 }
 """
@@ -447,15 +1545,63 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
                                texture3d<float> cellTex [[texture(0)]],
                                texture3d<float> sdfTex [[texture(1)]],
                                texture3d<float> tintTex [[texture(2)]],
-                               sampler samp [[sampler(0)]]) {
+                               texture3d<float> regionTex [[texture(3)]],
+                               texture3d<float> stressTex [[texture(4)]],
+                               // ★ ORGANIC's traced-strut field. `neutralOrganic()` (a
+                               // 1×1×1 of +1e9, i.e. "no strut anywhere") is bound when
+                               // the algorithm is not organic, and the uniform's enable
+                               // flag means it is never read then.
+                               texture3d<float> organicTex [[texture(5)]],
+                               // ★★★ THE BAND's fine rim grid and its smooth normals
+                               // (2026-09-26). `bindFragment` binds both on EVERY path —
+                               // neutral 1×1×1 stand-ins when the scene has no band.
+                               texture3d<float> rimTex [[texture(6)]],
+                               texture3d<float> rimNormTex [[texture(7)]],
+                               sampler samp [[sampler(0)]],
+                               // ★ THE SAME BUFFER INDEX THE SHELL'S CLIP USES (4).
+                               // `LatticeSDFRenderer.bindFragment` binds it on EVERY
+                               // path — a declared-but-unbound buffer makes Metal drop
+                               // the draw, the trap this file records twice already.
+                               constant ShellClip& RC [[buffer(4)]],
+                               // ★ THE DECLARATIONS THE SHELL IS CUT BY — the march
+                               // reads the SAME list so it can stop short of exactly
+                               // the surfaces the shell still draws. Bound on every
+                               // path by `bindFragment`; Metal drops a draw whose
+                               // declared buffer is unbound.
+                               constant float4* shellDecls [[buffer(5)]]) {
     float3 ro = U.eye.xyz;
     float3 rd = lsdf_ray(U, in.uv);
-    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, samp, ro, rd);
+    LSDFHit h = lsdf_march(U, segs, cellTex, sdfTex, regionTex, organicTex, rimTex, samp, RC,
+                           shellDecls, ro, rd);
     if (!h.hit) { discard_fragment(); }
 
-    float3 n = lsdf_normal(U, segs, sdfTex, samp, h.pos, h.rho);
-    float4 clip = U.clipFromModel * float4(h.pos, 1.0);
-    float3 eyeP = (U.eyeFromModel * float4(h.pos, 1.0)).xyz;
+    // ★★★ A BAND RIM HIT TAKES THE RIM'S OWN NORMAL (2026-09-26): `lsdf_normal` differences
+    // the voxel-stepped region field and facets the arcs. `debugParams.z` is the control:
+    // 1 = the legacy `lsdf_normal`, 2 = the fine gradient only (no smooth blend).
+    bool bandRimHit = U.bandOrigin.w > 0.5 && h.solid > 1.5 && h.solid < 2.25;
+    float3 n;
+    if (bandRimHit && abs(U.debugParams.z - 1.0) > 0.5) {
+        n = U.debugParams.z > 1.5 ? band_rim_gradient(U, rimTex, samp, h.pos)
+                                  : band_rim_normal(U, rimTex, rimNormTex, samp, h.pos);
+    } else {
+        n = lsdf_normal(U, segs, cellTex, sdfTex, regionTex, samp, RC, shellDecls,
+                        h.pos, h.rho, rimTex, U.bandOrigin.w > 0.5 && h.solid < 0.5);
+    }
+    // ★★★ THE DEPTH BIAS — see `lsdf_part_clip` for why this replaced a geometric
+    // inset. Where the shell survives it OWNS the boundary, so the lattice must lose
+    // the depth test there; pushing the position used for DEPTH back along the view
+    // ray does exactly that without moving where the strut is drawn or shaded.
+    // The conservative depth qualifier this pass already declares (see
+    // `testFragmentDepthWritesAreDeclaredConservative`, which counts those
+    // declarations by TEXT — so do not spell the attribute out in a comment) permits
+    // pushing AWAY from the eye, which is exactly the direction needed here.
+    float3 posForDepth = h.pos;
+    if (!shell_is_latticed(h.pos, n, RC, shellDecls, regionTex)) {
+        float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+        posForDepth += rd * (\(latticeSurfaceInsetMSL));
+    }
+    float4 clip = U.clipFromModel * float4(posForDepth, 1.0);
+    float3 eyeP = (U.eyeFromModel * float4(posForDepth, 1.0)).xyz;
     float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);
     // Face the normal toward the eye — the same one-sign-check `depth_fragment`
     // does, and for the same reason: the AO hemisphere must be built on the side of
@@ -466,8 +1612,80 @@ fragment LSDFGBuf lsdf_gbuffer(VOut in [[stage_in]],
     LSDFGBuf o;
     o.eyeZ = -eyeP.z;                     // eye looks down −Z → positive into the screen
     o.enormal = float4(eyeN, 0.0);
-    o.albedo = float4(lsdf_albedo(U, tintTex, samp, h.pos, h.rho), 1.0);
-    o.depth = clip.z / max(clip.w, 1e-6);
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, h.pos, h.rho, h.dressing,
+                                  h.solid, h.grade), 1.0);
+    // ★ THE VEIL (`LATTICE_BAND_VEIL=1`): the skin is drawn too, in the body's grey, so
+    // only a blue line shows at each edge.
+    if (bandRimHit && U.bandParams.x > 0.5 && rimTex.sample(samp, band_uvw(U, h.pos)).g < 0.0) {
+        o.albedo = float4(bandSkinGrey, 1.0);
+    }
+    // ★★★ THE LEVEL DEBUG SHADE (diagnosis only; `debugParams.x` is 0 on every shipping
+    // frame). Each hit is painted by the CELL it stands in, cycling through six
+    // saturated hues per doubling from the base cell, and material the run leaves SOLID
+    // is painted flat grey. One frame then answers "what cells is this patch made of",
+    // which four rounds of this task tried to infer from the texture instead.
+    // ★ MODE 4: the RELATIVE DENSITY the march graded this hit to. The legend states
+    // one number for the region; the shader grades per CELL from the demand field, and
+    // where that lands high the struts fatten until neighbours merge — which is what a
+    // quilt is. Encoded as rho directly (0..1) so the readback is the number.
+    if (U.debugParams.x > 3.5) {
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        float v = h.solid > 0.5 ? 0.0 : clamp(h.rho, 0.0, 1.0);
+        o.albedo = float4(v, v, v, 1.0);
+        return o;
+    }
+    // ★ MODE 3: the drawn cell size, ENCODED. Greyscale = cellMM / 32, written into the
+    // albedo attachment, which `latticeMaskDump` blits out unlit — so the cell the march
+    // actually stood in comes back as a NUMBER instead of a colour to be argued about.
+    if (U.debugParams.x > 2.5) {
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        float v = h.solid > 0.5 ? 0.0 : clamp(h.cellMM / 32.0, 0.0, 1.0);
+        o.albedo = float4(v, v, v, 1.0);
+        return o;
+    }
+    if (U.debugParams.x > 0.5) {
+        // ★★★ AND THE NORMAL IS FLATTENED TO FACE THE EYE. The albedo goes into a
+        // G-BUFFER and is lit afterwards, so a debug colour read off the final pixel is
+        // albedo x light — which is not a diagnosis, it is a picture of the light rig.
+        // Measured: a frame whose levels were all 0 classified as bands 1 and 4 until
+        // this line existed. One constant normal makes the shading term the same at
+        // every pixel, so the hue that comes out is the hue that went in.
+        o.enormal = float4(0.0, 0.0, 1.0, 0.0);
+        if (h.solid > 0.5) {
+            o.albedo = float4(0.35, 0.35, 0.35, 1.0);
+        } else {
+            // x = 1 bands by the cell SIZE the frame drew with; x = 2 bands by the RAW
+            // LEVEL it read out of the texture. If the two disagree, the base cell the
+            // shader is scaling by is not the base cell the bake wrote.
+            float S0 = max(U.latticeOrigin.w, 1e-4);
+            float L = U.debugParams.x > 1.5
+                    ? h.rawLevel
+                    : clamp(log2(max(h.cellMM, 1e-4) / S0), 0.0, 5.0);
+            int band = int(clamp(L, 0.0, 5.0) + 0.5);
+            // ★ PURE CHANNEL COMBINATIONS, not pretty hues. The frame is lit, and
+            // lighting MULTIPLIES: a channel that is exactly 0 stays 0 under any light,
+            // so the on/off pattern of the three channels survives the rig while a
+            // blend of all three does not. A palette of mixed hues read back as the
+            // light's colour, which cost a whole round.
+            const float3 hues[6] = { float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1),
+                                     float3(1, 1, 0), float3(0, 1, 1), float3(1, 0, 1) };
+            o.albedo = float4(hues[band % 6], 1.0);
+        }
+    }
+    // ★ CLAMPED SO THE DEPTH-DIRECTION DECLARATION IS TRUE BY CONSTRUCTION.
+    // (The declaration is named without its brackets on purpose:
+    // `testFragmentDepthWritesAreDeclaredConservative` counts that token across
+    // this whole source string, and a source-text guard counts COMMENTS too —
+    // quoting it here made the count read 3 and failed the guard.)
+    // `lsdf_vertex` emits at NDC z = 0, so the declaration promises "never
+    // negative" — and `clip.z / max(clip.w, 1e-6)` can go negative for a hit
+    // nearer than the near plane, because the max() rescues the denominator's
+    // sign and not the numerator's. Breaking a depth-direction contract is
+    // undefined behaviour. The clamp keeps the early-Z the declaration buys and
+    // removes the way it could lie; it is NOT claimed to change the shell-vs-
+    // lattice instability recorded in the handoff, which was measured and is
+    // still open.
+    o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
     return o;
 }
 
@@ -529,6 +1747,437 @@ fragment LatShadeOut lsdf_shade(VOut in [[stage_in]],
     LatShadeOut o;
     o.color = float4(clamp(color, 0.0, 1.0), 1.0);
     o.depth = clamp(L.depth.x + L.depth.y / max(eyeZ, 1e-6), 0.0, 1.0);
+    return o;
+}
+"""
+
+// ★★★ ORGANIC AS CAPSULES, NOT AS A FIELD (maintainer, 2026-09-06: "leave the SDF for
+// the regular lattice section. Once Organic is selected, switch the previews to GPU
+// capsule impostors").
+//
+// ★ WHY. The organic field was baked at 0.35 mm voxels while the struts it held were
+// 0.21–0.37 mm in radius — one voxel or less across. A trilinear distance field cannot
+// hold a round tube thinner than its own voxel: the sample's struts flattened into
+// grid-aligned ribbons, the part's into threads, and the normals were one-voxel
+// differences. The spans themselves — (a, b, r), the run's own emitted capsules —
+// already cross the bridge and sit in the 3MF variants; drawing THEM is exact at any
+// zoom and needs no bake.
+//
+// ★ HOW. One instanced draw: 36 vertices (a box) per capsule, built in the vertex
+// shader around the segment at the LIVE radius. The fragment shader ray-casts the
+// sphere-swept segment analytically from the model-space eye, applies the SAME clip the
+// march applies (eroded part SDF ∧ exact part bbox ∧ declared region), the same shell
+// depth bias, and writes the same three G-buffer attachments — so `lsdf_shade` lights
+// it, the deferred AO reads it, and the shell's depth buffer occludes it, with no
+// second lighting model anywhere.
+//
+// ★ ITS OWN LIBRARY, by the house rule (one `*ShaderSource`, one `makeLibrary`), so it
+// interpolates the material and the field sources it needs rather than copying them.
+// The depth attribute here is the permissive one on purpose: the box is drawn with
+// culling OFF, a fragment may come from the box's far face, and the true hit is then
+// NEARER than the rasterised depth — a conservative declaration would be a lie for
+// that fragment. Early-Z is not worth a wrong picture; the ray-cast is a few dozen
+// flops. (`testFragmentDepthWritesAreDeclaredConservative` counts the lattice source
+// only; this is a separate string.)
+let organicCapsuleShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+\(unifiedMaterialSource)
+
+\(latticeFieldSource)
+
+struct CapVOut {
+    float4 pos [[position]];
+    float3 mp;                    // model-space position on the bounding box
+    uint   iid [[flat]];
+};
+
+// The box around capsule `iid`: end caps pushed out by R along the axis, ±R across.
+vertex CapVOut capsule_vertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                              const device float4* caps [[buffer(0)]],
+                              constant LSDFUniforms& U [[buffer(1)]]) {
+    float4 A = caps[2 * iid], B = caps[2 * iid + 1];
+    float R = U.organicRadius.x > 0.0 ? U.organicRadius.x : A.w;
+    R = max(R, 1e-4);
+    // ★ THE BOX HAS TO HOLD THE FILLET (2026-09-08). The wetted surface bulges out to
+    // R + fillet near the solid; a box built at R alone would clip the bead away at the
+    // very join it exists to draw.
+    R = R * (1.0 + max(U.organicRadius.w, 0.0));
+    float3 ax = B.xyz - A.xyz;
+    float len = length(ax);
+    float3 u = len > 1e-6 ? ax / len : float3(0.0, 0.0, 1.0);
+    float3 hlp = abs(u.x) < 0.9 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    float3 v = normalize(cross(u, hlp));
+    float3 w = cross(u, v);
+    // 12 triangles over the 8 corners; corner bits: 1 = far end, 2 = +v, 4 = +w
+    const int idx[36] = { 0,1,2, 2,1,3, 4,6,5, 5,6,7, 0,4,1, 1,4,5,
+                          2,3,6, 6,3,7, 0,2,4, 4,2,6, 1,5,3, 3,5,7 };
+    int c = idx[vid % 36];
+    float3 e = (c & 1) ? (B.xyz + u * R) : (A.xyz - u * R);
+    float3 p = e + ((c & 2) ? v * R : -v * R) + ((c & 4) ? w * R : -w * R);
+    CapVOut o;
+    o.pos = U.clipFromModel * float4(p, 1.0);
+    o.mp = p;
+    o.iid = iid;
+    return o;
+}
+
+// Ray vs one end sphere: the near root, which is negative when the ray starts inside.
+static float cap_sphere(float3 ro, float3 rd, float3 c, float r) {
+    float3 oc = ro - c;
+    float b = dot(rd, oc);
+    float cc = dot(oc, oc) - r * r;
+    float h = b * b - cc;
+    if (h < 0.0) { return -1.0; }
+    return -b - sqrt(h);
+}
+
+// Ray vs sphere-swept segment (iq's capIntersect, with the axis-parallel case handled).
+// Returns t ≥ 0, or −1 for a miss or a ray that starts inside.
+static float cap_intersect(float3 ro, float3 rd, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa;
+    float3 oa = ro - pa;
+    float baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa);
+    float rdoa = dot(rd, oa), oaoa = dot(oa, oa);
+    float a = baba - bard * bard;
+    float b = baba * rdoa - baoa * bard;
+    float c = baba * oaoa - baoa * baoa - r * r * baba;
+    float h = b * b - a * c;
+    float t = -1.0;
+    if (a > 1e-7 * max(baba, 1e-9)) {
+        if (h < 0.0) { return -1.0; }
+        t = (-b - sqrt(h)) / a;
+        float y = baoa + t * bard;
+        if (y > 0.0 && y < baba) { return t >= 0.0 ? t : -1.0; }
+        t = cap_sphere(ro, rd, (y <= 0.0) ? pa : pb, r);
+    } else {
+        // parallel to the axis: only the two end spheres can be hit
+        float ta = cap_sphere(ro, rd, pa, r), tb = cap_sphere(ro, rd, pb, r);
+        t = (ta < 0.0) ? tb : ((tb < 0.0) ? ta : min(ta, tb));
+    }
+    return t >= 0.0 ? t : -1.0;
+}
+
+static float3 cap_normal(float3 p, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa;
+    float h = clamp(dot(p - pa, ba) / max(dot(ba, ba), 1e-9), 0.0, 1.0);
+    return normalize(p - pa - h * ba);
+}
+
+// The march's clip, at one point: eroded part SDF ∧ exact part bbox ∧ declared region
+// (which already carries the skin). True where a strut may be drawn.
+// ★★★ THE CLIP FIELD ITSELF, not just the yes/no (2026-09-08). A capsule cut by the
+// part, the region or the shell has to be shaded on the CUT, and a cut needs the
+// clipping surface's own distance and gradient — so the composition lives here and
+// `cap_inside_clip` is a thin test over it.
+static float cap_clip_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls, float3 p,
+                            float embed) {
+    float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+    float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+    // ★★★ NO TRIM EROSION HERE (his walk, 2026-09-07: "There is still a gap between the
+    // rim and the lattice"). `stepParams.y` erodes the part by up to 0.35 mm and exists
+    // for ONE reason: near a crease the trilinear SDF under-estimates the true distance,
+    // so the MARCH bulges slivers through the surface. A capsule is analytic geometry —
+    // it has no sliver to trim — so applying the march's erosion here simply shaved
+    // 0.35 mm off every boundary of every declared face, on top of everything else.
+    // ★★ ERODED AGAIN (his 2026-09-19: "all of these artifacts … due to layers of
+    // models interacting"). A capsule end cut exactly at the sampled surface z-fights
+    // the face it ends on — the wall's own face, the rim ribbon's face at the band, the
+    // base's top — as grey speckle. The 09-07 removal above was right while the rim
+    // was the BODY's shell band and a shortfall read as a gap; the rim is now a beam
+    // the lattice layer draws over that band, so the shortfall is inside it and nothing
+    // shows. `stepParams.y` = clamp(0.35·voxel, 0.10, 0.35) mm, the march's own number.
+    float dPart = sdfTex.sample(samp, stc).r + U.stepParams.y;
+    float3 bc = 0.5 * (U.bboxMin.xyz + U.bboxMax.xyz);
+    float3 be = 0.5 * (U.bboxMax.xyz - U.bboxMin.xyz);
+    float3 qb = abs(p - bc) - be;
+    float dBox = length(max(qb, 0.0)) + min(max(qb.x, max(qb.y, qb.z)), 0.0);
+    // ★ THE REGION, RELAXED BY THE EMBED (2026-09-08). The strut does not stop at the
+    // wall it lands on; it runs `embed` millimetres into the solid, which is where the
+    // run welds it. The PART and its bounding box are never relaxed — material outside
+    // the part is not material.
+    float dRegion = regionTex.sample(samp, stc).r - embed;
+    // ★★★ THE BAND (2026-09-26/27): the struts meet the rim WHERE THE RIM IS DRAWN — its own
+    // fine field (B_r), not the coarse region field — and the weld into it FADES toward the
+    // part's surface (his 2026-09-27: "artifacts on the blue rim … the green and blue are
+    // too close together … as I move the camera around, it changes"). A strut end welded
+    // into the rim was cut flush at an open surface right beside the rim's own cut face —
+    // two coplanar surfaces, z-fighting. Deep inside the weld is full (the joint hidden in
+    // the rim); at the surface the strut stops 0.15 mm short of the rim instead.
+    if (U.bandOrigin.w > 0.5) {
+        float4 bv = rimTex.sample(samp, band_uvw(U, p));
+        float weld = embed + U.bandSpacing.w;
+        float fade = clamp(-bv.b / max(1.5 * weld, 0.2), 0.0, 1.0);
+        dRegion = max(regionTex.sample(samp, stc).b, -bv.r + 0.15 * (1.0 - fade)) - weld * fade;
+    }
+    return max(max(lsdf_part_clip(U, sdfTex, regionTex, samp, RC, decls, p, dPart),
+                   dBox), dRegion);
+}
+
+static bool cap_inside_clip(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                            texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                            constant ShellClip& RC, constant float4* decls, float3 p) {
+    return cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 0.0) < 0.02;
+}
+
+// The outward normal of the clipping surface — the gradient of the field above. This is
+// what a CUT through solid material looks like: it is shaded by the plane that cut it,
+// never by the tube it went through.
+static float3 cap_clip_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                              texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                              constant ShellClip& RC, constant float4* decls, float3 p) {
+    float h = 0.5 * max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+    h = max(h, 1e-4);
+    float3 g;
+    g.x = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(h, 0, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(h, 0, 0), 0.0);
+    g.y = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, h, 0), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, h, 0), 0.0);
+    g.z = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, 0, h), 0.0)
+        - cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, 0, h), 0.0);
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
+}
+
+// ★★★ THE WETTED JOIN (his instruction, 2026-09-08: "making it so the struts continue to
+// the solid part (into it, preferably) and then have fillets on either side of it
+// regardless of what angle they come in at — as long as they are pointing towards the
+// solid, they should go through it and be filleted", with image 8: a plate standing in
+// liquid, the surface climbing it).
+//
+// ★ ONE FIELD, THREE BEHAVIOURS. The drawn surface is
+//
+//     f(p) = max( capsule(p) − fillet(p),  clip(p, embed) )
+//
+// and everything falls out of it: away from the solid `fillet` is 0 and the surface is
+// the capsule exactly as before; approaching the solid the strut FATTENS into a
+// meniscus; past the region boundary the clip is relaxed by `embed` so the strut runs
+// INTO the solid instead of stopping at it; and where the part itself ends the `max`
+// takes over and the surface is the cut, shaded by the part's own gradient. A single
+// gradient shades all three, so there is no seam between them.
+//
+// ★ AND IT DOES NOT CARE ABOUT THE ANGLE. `fillet` is a function of the DISTANCE to the
+// solid, nothing else — so a strut arriving square, at 20° or along the wall gets the
+// same bead where it meets material, which is what a wetting line does.
+
+// Signed distance to the sphere-swept segment.
+static float cap_sd(float3 p, float3 pa, float3 pb, float r) {
+    float3 ba = pb - pa, pa2 = p - pa;
+    float h = clamp(dot(pa2, ba) / max(dot(ba, ba), 1e-9), 0.0, 1.0);
+    return length(pa2 - ba * h) - r;
+}
+
+// How much to fatten the strut at `p`: full at the solid's surface, gone `reach` away
+// from it, and nothing at all where there is no material to wet (outside the part).
+static float cap_wet_flare(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                           texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                           constant ShellClip& RC, constant float4* decls,
+                           float3 p, float reach) {
+    if (reach <= 0.0) { return 0.0; }
+    float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+    float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+    float dPart = sdfTex.sample(samp, stc).r;
+    // A meniscus needs something to climb. Well inside the part this is 1; at the part's
+    // own surface it is 0, so a strut breaking out into AIR gets a clean cut, not a bead.
+    float solid = 1.0 - smoothstep(-reach, 0.0, dPart);
+    if (solid <= 0.0) { return 0.0; }
+    // Distance to the boundary between "lattice may be here" and "solid material":
+    // NEGATIVE where the lattice lives, POSITIVE inside the solid.
+    float s = cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 0.0);
+    // ★★★ EASES IN AND OUT, AND IS TIGHT TO THE JOINT (his corrections, 2026-09-08:
+    // first "the fillet is happening too far *above* the rim … we should not be able to
+    // see the inwards slant", then "These fillets are going the wrong way, They should
+    // also ease in and out, not be hard lines").
+    //
+    // ★ TWO WRONG SHAPES BEFORE THIS ONE. Symmetric `abs(s)` over a long reach put a
+    // trumpet a full bead's width up the strut — the visible neck. Clamping it to
+    // `s > 0` removed the neck and introduced something worse: the weight jumps from 0
+    // to 1 across the surface, and a step in the radius is a HARD EDGE, which is the
+    // flat-rimmed foot in his screenshot.
+    //
+    // ★ THE SHAPE THAT IS NEITHER. Full at the joint and easing away on BOTH sides,
+    // with a short reach above and a longer one below. `smoothstep` has zero slope at
+    // both ends, so the two halves meet at s = 0 with matching derivatives: no edge, no
+    // step, and the bead stays where the strut meets material instead of climbing it.
+    // ★★★ AND ITS WIDEST POINT IS BURIED, NOT ON THE SURFACE (his correction,
+    // 2026-09-08: "the strut fillet ends are poking OUT of the solid. It should be half
+    // inside the solid, where only the outward fillet is seen OUTSIDE of the solid").
+    //
+    // ★ THE PEAK WAS AT s = 0 — EXACTLY THE SURFACE — so the fattest ring of the bead
+    // sat in the plane of the wall and read as a flat pad lying on top of it, which is
+    // the oval foot under every strut in his screenshot. Moving the peak half a fillet
+    // INTO the solid buries the widest part: outside the wall a viewer sees only the
+    // outward-curving flank on its way in, and the disc is gone because the disc is
+    // underground.
+    const float peak = 0.5 * reach;          // how far inside the widest point sits
+    const float aboveReach = peak + 0.35 * reach;   // fades out just above the surface
+    float d = s - peak;
+    if (d < 0.0) { return solid * (1.0 - smoothstep(0.0, aboveReach, -d)); }
+    return solid * (1.0 - smoothstep(0.0, reach, d));
+}
+
+// The surface actually drawn: the fattened strut, intersected with where material may be.
+static float cap_wet_field(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                           texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                           constant ShellClip& RC, constant float4* decls,
+                           float3 p, float3 pa, float3 pb, float r,
+                           float fillet, float embed) {
+    float d = cap_sd(p, pa, pb, r);
+    if (fillet > 0.0) {
+        d -= fillet * cap_wet_flare(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, 2.0 * fillet);
+    }
+    return max(d, cap_clip_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p, embed));
+}
+
+static float3 cap_wet_normal(constant LSDFUniforms& U, texture3d<float> sdfTex,
+                             texture3d<float> regionTex, texture3d<float> rimTex, sampler samp,
+                             constant ShellClip& RC, constant float4* decls,
+                             float3 p, float3 pa, float3 pb, float r,
+                             float fillet, float embed) {
+    float h = max(0.15 * r, 1e-4);
+    float3 g;
+    g.x = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(h, 0, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(h, 0, 0), pa, pb, r, fillet, embed);
+    g.y = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, h, 0), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, h, 0), pa, pb, r, fillet, embed);
+    g.z = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p + float3(0, 0, h), pa, pb, r, fillet, embed)
+        - cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, decls, p - float3(0, 0, h), pa, pb, r, fillet, embed);
+    float L = length(g);
+    return L > 1e-9 ? g / L : float3(0.0, 0.0, 1.0);
+}
+
+struct CapGBuf {
+    float  eyeZ    [[color(0)]];
+    float4 enormal [[color(1)]];
+    float4 albedo  [[color(2)]];
+    float  depth   [[depth(any)]];
+};
+
+fragment CapGBuf capsule_gbuffer(CapVOut in [[stage_in]],
+                                 constant LSDFUniforms& U [[buffer(0)]],
+                                 const device float4* caps [[buffer(2)]],
+                                 texture3d<float> sdfTex [[texture(1)]],
+                                 texture3d<float> tintTex [[texture(2)]],
+                                 texture3d<float> regionTex [[texture(3)]],
+                                 texture3d<float> stressTex [[texture(4)]],
+                                 texture3d<float> rimTex [[texture(6)]],
+                                 sampler samp [[sampler(0)]],
+                                 constant ShellClip& RC [[buffer(4)]],
+                                 constant float4* shellDecls [[buffer(5)]]) {
+    float4 A = caps[2 * in.iid], B = caps[2 * in.iid + 1];
+    float R = U.organicRadius.x > 0.0 ? U.organicRadius.x : A.w;
+    R = max(R, 1e-4);
+    float3 ro = U.eye.xyz;
+    float3 rd = normalize(in.mp - ro);
+    // ★ THE WETTING SCALE, 0 = off. The fillet and the embed are both a multiple of the
+    // strut's own radius, so a thin strut gets a small bead and a fat one a big one —
+    // there is no absolute length here to be wrong at another scale.
+    float wet = max(U.organicRadius.w, 0.0);
+    float fillet = wet * R;
+    float embed = fillet;
+
+    // ★ THE CHEAP GATE. The blended surface never leaves the segment by more than
+    // R + fillet, so a ray that misses that fatter capsule cannot be on it. This is what
+    // keeps the march below off almost every fragment of the impostor box.
+    float tw = cap_intersect(ro, rd, A.xyz, B.xyz, R + fillet);
+    if (tw < 0.0) { discard_fragment(); }
+
+    float3 p;
+    float3 n;
+    if (wet <= 0.0) {
+        // The analytic path, unchanged: an exact ray–capsule hit, and where the near
+        // wall is cut away, the first point along the ray at which material may exist —
+        // the CUT FACE, shaded by the surface that cut it (2026-09-08).
+        float t = cap_intersect(ro, rd, A.xyz, B.xyz, R);
+        if (t < 0.0) { discard_fragment(); }
+        p = ro + rd * t;
+        n = cap_normal(p, A.xyz, B.xyz, R);
+        if (!cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, p)) {
+            float3 mid = 0.5 * (A.xyz + B.xyz);
+            float T = dot(mid - ro, rd) + 0.5 * length(B.xyz - A.xyz) + R + 1.0;
+            float tb = cap_intersect(ro + rd * T, -rd, A.xyz, B.xyz, R);
+            if (tb < 0.0) { discard_fragment(); }
+            float tExit = T - tb;
+            if (tExit <= t + 1e-4) { discard_fragment(); }
+            const int CAP_WALK = 24;
+            float lo = t, hi = -1.0;
+            for (int i = 1; i <= CAP_WALK; ++i) {
+                float ts = mix(t, tExit, float(i) / float(CAP_WALK));
+                if (cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, ro + rd * ts)) {
+                    hi = ts;
+                    break;
+                }
+                lo = ts;
+            }
+            if (hi < 0.0) { discard_fragment(); }
+            for (int i = 0; i < 12; ++i) {
+                float m2 = 0.5 * (lo + hi);
+                if (cap_inside_clip(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, ro + rd * m2)) {
+                    hi = m2;
+                } else {
+                    lo = m2;
+                }
+            }
+            p = ro + rd * hi;
+            n = cap_clip_normal(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls, p);
+            if (dot(n, rd) > 0.0) { n = -n; }
+        }
+    } else {
+        // ★★★ ONE MARCH OVER ONE FIELD. The fattened strut intersected with where
+        // material may be: the fillet, the embed into the solid and the cut are all the
+        // same surface, so one gradient shades all of them and there is no seam.
+        float3 mid = 0.5 * (A.xyz + B.xyz);
+        float span = 0.5 * length(B.xyz - A.xyz) + R + fillet;
+        float tFar = dot(mid - ro, rd) + span;
+        float t = max(tw - fillet, 0.0);
+        float eps = max(0.02 * R, 1e-4);
+        bool hit = false;
+        for (int i = 0; i < 48; ++i) {
+            float3 q = ro + rd * t;
+            float d = cap_wet_field(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls,
+                                    q, A.xyz, B.xyz, R, fillet, embed);
+            if (d < eps) { hit = true; break; }
+            t += max(d, 0.5 * eps);
+            if (t > tFar) { break; }
+        }
+        if (!hit) { discard_fragment(); }
+        p = ro + rd * t;
+        n = cap_wet_normal(U, sdfTex, regionTex, rimTex, samp, RC, shellDecls,
+                           p, A.xyz, B.xyz, R, fillet, embed);
+        if (dot(n, rd) > 0.0) { n = -n; }
+    }
+    // The same depth bias the march applies where the shell still owns the boundary.
+    float3 posForDepth = p;
+    if (!shell_is_latticed(p, n, RC, shellDecls, regionTex)) {
+        float voxel = max(max(U.sdfSpacing.x, U.sdfSpacing.y), U.sdfSpacing.z);
+        posForDepth += rd * (\(latticeSurfaceInsetMSL));
+    }
+    float4 clip = U.clipFromModel * float4(posForDepth, 1.0);
+    float3 eyeP = (U.eyeFromModel * float4(posForDepth, 1.0)).xyz;
+    float3 eyeN = normalize((U.eyeNormalBasis * float4(n, 0.0)).xyz);
+    if (eyeN.z < 0.0) { eyeN = -eyeN; }
+    CapGBuf o;
+    o.eyeZ = -eyeP.z;
+    o.enormal = float4(eyeN, 0.0);
+    // ★ THE GRADE-TO-SHAPE TINT ON A CAPSULE (2026-09-18): by the in-plane outline
+    // distance — the region texture's `g` channel — exactly as the march tints a
+    // strut: full at the outline, gone at the band's inner edge (`gradeColor.w`).
+    float capGrade = 0.0;
+    if (U.gradeColor.w > 0.0) {
+        float3 sdfDims = max(U.sdfDims.xyz, float3(1.0));
+        float3 stc = ((p - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+        float dOut = regionTex.sample(samp, stc).g;
+        // ★ the band's grade field is signed and continuous (no 1e3 sentinel), so band
+        // mode drops the sentinel guard; the legacy field keeps it
+        if (U.bandOrigin.w > 0.5 || dOut < 500.0) {
+            capGrade = clamp(1.0 - dOut / U.gradeColor.w, 0.0, 1.0);
+        }
+    }
+    o.albedo = float4(lsdf_albedo(U, tintTex, stressTex, samp, p, U.shadeParams.x, 0.0, 0.0, capGrade), 1.0);
+    o.depth = clamp(clip.z / max(clip.w, 1e-6), 0.0, 1.0);
     return o;
 }
 """

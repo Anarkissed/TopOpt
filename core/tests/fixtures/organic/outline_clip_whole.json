@@ -1,0 +1,397 @@
+{
+ "_comment": "K3 / ruling 2 CONTROL: the same region and the same 32 cells with NO outline_uv, so the whole 24 x 24 mm rectangle is the pocket. Its lattice is what the clipped run is measured against -- a quarter of the area -- and it is also the byte-identity arm: a job with no outline cannot reach the clip term at all.",
+ "bake_build_orientation": "off",
+ "grading": {
+  "algorithm": "stepped",
+  "cell_max_mm": 3.0,
+  "cell_min_mm": 3.0,
+  "cell_mode": "swept",
+  "intent": "aesthetic",
+  "min_extrudable_width_mm": 0.45,
+  "topology": "octet"
+ },
+ "lattice": {
+  "emit_3mf": false,
+  "emit_stl": true,
+  "min_extrudable_width_mm": 0.45,
+  "regions": [
+   {
+    "geometry": {
+     "depth_mm": 12.0,
+     "half_u_mm": 12.0,
+     "half_w_mm": 12.0,
+     "normal": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "origin": [
+      18.0,
+      0.0,
+      14.0
+     ],
+     "plan_base_cell_mm": 6.0
+    },
+    "kind": "face",
+    "role": "include"
+   }
+  ],
+  "skin": "none",
+  "stepped_cells": [
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     0.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     6.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     12.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     18.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     2.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     8.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     14.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   },
+   {
+    "origin_mm": [
+     24.0,
+     6.0,
+     20.0
+    ],
+    "region_id": 1,
+    "rho": 0.18,
+    "size_mm": 6.0
+   }
+  ],
+  "topology": "octet"
+ },
+ "loads": {
+  "anchor_face_ids": [
+   2
+  ],
+  "build_dir": [
+   0,
+   0,
+   1
+  ],
+  "groups": [
+   {
+    "face_ids": [
+     9
+    ],
+    "force": [
+     0.0,
+     0.0,
+     -400.0
+    ]
+   }
+  ],
+  "layer_height_mm": 0.2,
+  "minimize_plastic": true
+ },
+ "material": "PLA",
+ "mode": "lattice_part",
+ "model": "dead_parity_tab.stl",
+ "output": {
+  "mesh_format": "stl",
+  "mesh_prefix": "oc",
+  "report": "report.json"
+ },
+ "resolution": 48
+}

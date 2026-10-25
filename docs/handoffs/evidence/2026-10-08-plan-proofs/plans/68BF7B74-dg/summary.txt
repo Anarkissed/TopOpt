@@ -1,0 +1,21 @@
+# 68BF7B74 dg (converted to Default Grade)
+
+Frozen CLI core 30982e5284b2 (#358 at 36f5fdde).
+
+converted plan-68B: algorithm 'stepped' -> 'doubled', gradeStepStyle 'dyadic'
+DG-PROJECT M2 verticalStand (converted: Default Grade) algorithm doubled stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves true density sim cells auto
+DG-PLAN doubled: 11120 cell(s) over 5 region(s) | 12.07=5 6.04=121 5.16=852 4.01=2504 3.02=1138 2.58=6500
+DG-PLAN per region: r1=2504 r2=4971 r3=1264 r4=1524 r5=857
+DG-WITHHELD region 3's face is tilted off the grid these cells sit on, and core can't place them there yet | offPlane(regionID: 3, offsetMM: 13.264124775894533)
+DG-K2-JOB job_plan_k2.json: 11120 cells, 5 regions stamped (withheld by the app)
+DG-SLOT-ORIGINS 0 region(s) carry slot_origin_mm
+DG-JOBS /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-stage-frontend-37bee1/scratch/evidence/plans/68BF7B74-3C2A-4ED6-A46D-AC040A9CA649/dg model model.step
+
+## job_noplan: exit 0 verdict: ACCEPTED
+
+## job_plan: exit 0 verdict: ACCEPTED
+
+## job_plan_k2: exit 1
+> topopt-cli: job.json: lattice region 3 (face 23): a face lattice region's "slot_origin_mm" must lie IN the face plane, and this one stands 13.264125 mm along the region normal from "origin". The slot origin carries the in-plane ANCHOR SHIFT of the grid the cells were packed on; a component along the normal would move the plane the prism's depth is measured from, and every cell's containment verdict with it
+
+model model.step sha256 bdf5646481e370ba (not committed)

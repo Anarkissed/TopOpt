@@ -28,7 +28,8 @@ public struct LatticeProxyLegend: View {
         self.memberMM = memberMM
     }
 
-    private var lattice: LatticeType { model.params.lattice }
+    // ★ the name from the id, never a LatticeType that could have been octet in disguise (item a)
+    private var latticeName: String { LatticeType.displayName(forID: model.params.latticeID) }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
@@ -70,7 +71,7 @@ public struct LatticeProxyLegend: View {
                     .foregroundStyle(DS.Color.textSecondary.color)
                 Text("true geometry · \(model.samplePatchTriangles.formatted()) tris")
                     .dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textTertiary.color)
-                Text(lattice.displayName).dsStyle(DS.TypeScale.caption)
+                Text(latticeName).dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
             Spacer(minLength: 0)

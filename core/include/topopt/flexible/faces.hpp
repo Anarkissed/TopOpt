@@ -1,0 +1,297 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "topopt/face_region.hpp"  // ResolvedFaceRegion
+#include "topopt/mesh.hpp"         // TriangleMesh, Vec3
+#include "topopt/step.hpp"         // StepModel
+#include "topopt/voxel.hpp"        // VoxelGrid
+
+namespace topopt {
+namespace flexible {
+
+// ════════════════════════════════════════════════════════════════════════════════
+// F5 — FACE FRAMES AND STACKS (02 §10, M12, M13, R11, R13)
+//
+// A loaded face is a face REGION (loads.face_regions). Its geometry is read from
+// the imported mesh: `StepModel::mesh` + `triangle_face` for a STEP part AND for an
+// STL/3MF part (whose faces are the importer's pseudo-faces), so everything below
+// works on both.
+// ════════════════════════════════════════════════════════════════════════════════
+
+// Tolerances named once. R6/02 §10: a stack is "side" when its load is more than
+// 15° from build Z. R13: a face whose normals spread more than 30° is flagged. Two
+// stacks are "on the same axis" (one profile per stack, M13) when their load lines
+// are within 15° of each other.
+inline constexpr double kSideStackDeg = 15.0;
+inline constexpr double kNormalSpreadFlagDeg = 30.0;
+inline constexpr double kSameAxisDeg = 15.0;
+
+// THE PRESS API's version (A7, reviewer 2026-10-08): the wire keys face_region_ids /
+// press_direction, build_press_stack, refuse_shared_footprints / find_shared_footprints,
+// press_unit, stack_owns_projection, DensityField's owner_weight / runner_up, and how the
+// run reports a shared footprint. Raised when any of them changes meaning, so the app can
+// refuse a core it was not written against.
+//   1  2026-10-08  first
+//   2  2026-10-10  the run REFUSES a shared footprint with code "shared_footprint" (receipt
+//                  and drawn maps written; `shared_footprints` in the receipt) instead of
+//                  throwing JobError; find_shared_footprints added
+//   3  2026-10-24  C2 B1a: a column's lattice_mm is the RUN unbroken from its entry (the
+//                  app's bridge rule); the grid runs edge to edge (partial cells are
+//                  columns with their exact area); a run presses only the columns that
+//                  enter its lattice (restrict_to_lattice); two pieces of one face may be
+//                  one press; pieces are adjacent by their clipped footprints; the run's
+//                  coded refusals no_lattice_region and press_stack_failed
+//   4  2026-10-24  C2 B1b: a press may carry a FLAT PRISM ("flat_prism": {"apex_mm"}): its
+//                  field is clipped at the plane dot(p − A, d) = h (h = deepest_squish_mm), and
+//                  it is designed as a SERIES column (its own segment at the ρ it solves, the
+//                  rest of the run at the other owners' ρ, one stress); the run exports the
+//                  field (flexible_field.json/.bin); grams per face and per include region
+//   5  2026-10-24  C2 B2: mode "flat_cut"; "squeeze_groups" (one force per hand, split by
+//                  area; an entry in a group carries no weight_n); the receipt's per-group
+//                  achieved-vs-target ("groups") and grams per group
+//   6  2026-10-24  C2 B2 part 2: THE PINCH (two entries of one hand, opposite arrows, one axis)
+//                  is accepted: each face designs its pinched columns over half its run; the
+//                  receipt lists "pinches" and per face "pinched_columns"; Auto scores each
+//                  face over its own span (pinched halves, prism segments)
+//   7  2026-10-24  C2 B2b: THE COMBINATION (his ruling on item 17): each squeeze group is its own
+//                  load case; one lattice where every group hits its "hit_band" (default
+//                  max(0.05 mm, 2 %)); groups in different hands may share material (same-axis
+//                  pairs across hands go to the combination); combination_not_reachable
+//   8  2026-10-24  C2 B2c: the hull certificate on same-axis runs (PROVEN impossible, or a
+//                  two-density mixture); the mixing start for crossing components; a flat_cut
+//                  target under one bead is status "rim" (the densest tested lattice)
+inline constexpr int kPressApiVersion = 8;
+
+// THE ONE NORMALISER of a stated press direction (A10): d / |d|. Every consumer
+// (build_press_stack, face_frame, the receipt) takes its result, so the direction is
+// normalised once, the same way, everywhere. Throws FlexibleError ("press_direction ...")
+// for a zero or non-finite vector.
+Vec3 press_unit(const Vec3& d);
+
+// THE FACE FRAME (R13).
+//   load  = into the part, along the face's area-weighted normal
+//   X     = the principal (longest) axis of the face projected onto the plane ⟂ load
+//   Y     = load × X
+//   then rotated about the load by frame_rotation_deg (0 / 90 / 180 / 270).
+// Face coordinates (u, v) are in mm along X and Y, measured from the corner of the
+// projected face's bounding box, so u ∈ [0, u_extent_mm], v ∈ [0, v_extent_mm].
+//
+// Determinism (so the app and core draw the same frame): the principal axis comes
+// from the EXACT area second moment of the projected triangles (no vertex
+// sampling); its sign makes it point along the first of model +X, +Y, +Z it is not
+// perpendicular to; and a face with no longest direction (a square or a disc:
+// principal moments within 1e-6) takes model +X projected into the plane (else +Y).
+struct FaceFrame {
+  bool valid = false;
+  std::string reason;  // why not, when !valid
+  Vec3 load{0, 0, -1};
+  Vec3 x_axis{1, 0, 0};
+  Vec3 y_axis{0, 1, 0};
+  int rotation_deg = 0;
+  Vec3 centroid{0, 0, 0};  // area centroid of the face
+  double u_min = 0.0;      // bounding box of the projected face, relative to the
+  double v_min = 0.0;      //   centroid along X / Y
+  double u_extent_mm = 0.0;
+  double v_extent_mm = 0.0;
+  double area_mm2 = 0.0;            // true surface area
+  double projected_area_mm2 = 0.0;  // area ⟂ load
+  // The angle between the two most different triangle normals (a two-sweep
+  // estimate: the normal farthest from the mean, then the one farthest from that).
+  double normal_spread_deg = 0.0;
+  bool normal_spread_flag = false;  // > kNormalSpreadFlagDeg
+  double build_angle_deg = 0.0;     // angle between the load line and build Z (0..90)
+  bool side = false;                // > kSideStackDeg
+  bool principal_axis_tied = false; // no longest direction: the +X/+Y rule chose X
+
+  // (u, v) of a model point, and the model point at (u, v) on the frame plane
+  // (the plane through the centroid ⟂ load).
+  void to_uv(const Vec3& p, double& u, double& v) const;
+  Vec3 from_uv(double u, double v) const;
+};
+
+// The frame of the given triangles of `mesh` (outward-wound, as every imported
+// part is). Returns valid == false with a reason for an empty or degenerate set.
+// Throws FlexibleError for a rotation that is not a multiple of 90.
+//
+// `press_direction` (optional, model frame, any length > 0): an ANGLED press (C1
+// addendum, 2026-10-07). When given, the load IS that direction (normalised) instead of
+// the inward normal; X/Y follow the same principal-axis rule on the footprint projected
+// perpendicular to it, and build_angle / side are computed from it. Null = the inward
+// normal, byte-identical to before.
+FaceFrame face_frame(const TriangleMesh& mesh, const std::vector<int>& triangles,
+                     int rotation_deg, const Vec3& build_dir,
+                     const Vec3* press_direction = nullptr);
+
+// The frame of the given triangles CLIPPED to the region's cuts (half-spaces), so a
+// sector of a face is framed from its own geometry (B6). Empty cuts = face_frame.
+FaceFrame face_frame_cut(const TriangleMesh& mesh, const std::vector<int>& triangles,
+                         const std::vector<RegionCut>& cuts, int rotation_deg,
+                         const Vec3& build_dir, const Vec3* press_direction = nullptr);
+
+// One column of the stack: a ray along the load through the (u, v) cell centre.
+struct StackColumn {
+  int iu = 0, iv = 0;        // cell in the column grid
+  double u_mm = 0.0, v_mm = 0.0;
+  double area_mm2 = 0.0;     // pitch² (⟂ load)
+  int part = 0;              // which footprint part it enters through (multi-sector presses)
+  double entry_t = 0.0;      // along the load, from the frame plane to the face
+  double exit_t = 0.0;       // ... to where the ray leaves the part
+  double lattice_mm = 0.0;   // latticed length inside [entry, exit]
+  int exit_face = -1;        // the face the ray leaves through; -1 = not found
+};
+
+// A face or region the stack leaves through, with the share of the footprint area
+// that leaves there.
+struct StackLink {
+  int id = -1;
+  double area_fraction = 0.0;
+};
+
+// THE STACK (M13, 02 §10): the material swept from the loaded face along the load
+// until it leaves the part. Its columns are the solve's columns; the faces it
+// leaves through are the LINKED OTHER END.
+struct Stack {
+  int face_region_id = -1;
+  std::vector<RegionCut> cuts;  // the region's cuts (a sector); empty for a whole face
+  // THE PRESS (C1 addendum): the regions whose union is the footprint (one entry for a
+  // single-face press; 2+ adjacent regions for an edge or corner press), and the stated
+  // direction when the press is angled (`press_direction_given`; else the load is the
+  // inward normal).
+  std::vector<int> footprint_region_ids;
+  // A multi-face press of SECTORS: each footprint part's own cuts (index = column.part).
+  // Empty otherwise (a single region uses `cuts`).
+  std::vector<std::vector<RegionCut>> part_cuts;
+  // For stacks with cuts (sectors): the footprint's triangles (vertices + part) binned by
+  // column cell, so ownership can cast each voxel's OWN ray back to the surface (B5).
+  struct FootTri {
+    Vec3 a, b, c;
+    int part = 0;
+    int tri = -1;  // the mesh triangle it is (two pieces of one face list it once per part)
+  };
+  std::vector<FootTri> foot_tris;
+  std::vector<std::vector<int>> cell_tris;  // nu*nv -> indices into foot_tris
+  bool press_direction_given = false;
+  Vec3 press_direction{0, 0, 0};  // unit, when given
+  FaceFrame frame;
+  double pitch_mm = 0.0;
+  int nu = 0, nv = 0;             // the column grid over [0, u_extent] × [0, v_extent]
+  std::vector<int> cell;          // nu*nv (index iv*nu + iu) -> column index, or -1
+  std::vector<StackColumn> columns;
+  std::vector<StackLink> exit_faces;    // by face id, largest share first
+  std::vector<StackLink> exit_regions;  // declared face regions holding an exit face
+  double exit_unresolved_fraction = 0.0;  // columns with no exit found (should be 0)
+  double footprint_area_mm2 = 0.0;        // Σ column areas
+  int latticed_columns = 0;               // columns with lattice_mm > 0
+  double lattice_mm_min = 0.0, lattice_mm_max = 0.0, lattice_mm_mean = 0.0;
+  double stack_mm_max = 0.0;              // longest entry->exit run
+  // C2 B1a, item 24: the span of the columns the curves' map covers, in frame (u, v) mm.
+  // Equal (0, 0) means the frame's whole extent [0, u_extent] x [0, v_extent].
+  double map_u0 = 0.0, map_u1 = 0.0, map_v0 = 0.0, map_v1 = 0.0;
+  int over_solid_columns = 0;  // columns restrict_to_lattice dropped (no lattice at their entry)
+  // C2 B1b, item 5: the press's FLAT PRISM. It owns the field only where
+  // dot(p − flat_apex, frame.load) <= flat_depth_mm (the plane P = {p : dot(p − A, d) = h}).
+  bool has_flat_prism = false;
+  Vec3 flat_apex{0, 0, 0};
+  double flat_depth_mm = 0.0;
+  int outside_flat_prism_columns = 0;  // columns entering past the plane (not pressed)
+
+  int column_at(int iu, int iv) const {
+    if (iu < 0 || iv < 0 || iu >= nu || iv >= nv) return -1;
+    return cell[static_cast<std::size_t>(iv) * static_cast<std::size_t>(nu) +
+                static_cast<std::size_t>(iu)];
+  }
+};
+
+// Build the stack of `face` on `model`. `lattice_mask` (size grid.voxel_count(),
+// 1 = latticed) is sampled along every column for `lattice_mm`; `regions` are the
+// job's resolved face regions, used only to name the linked exit regions.
+//
+// A region with CUTS (a sector of a split face) keeps only the columns whose face
+// point satisfies every cut, and its frame's X axis and extents are then taken from
+// those columns (the whole face's would describe the wrong shape).
+//
+// Throws FlexibleError when the frame is invalid, the face has no column at this
+// pitch, or pitch_mm <= 0.
+Stack build_stack(const StepModel& model, const ResolvedFaceRegion& face,
+                  const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
+                  const std::vector<char>& lattice_mask, int rotation_deg,
+                  const Vec3& build_dir, double pitch_mm);
+
+// C2 B1a, item 24 (a column-mask press): keep only the columns whose lattice run is > 0
+// (they enter the lattice), count the rest in `over_solid_columns`, and set the map's span
+// to the kept columns' cells, so the weight and the curves are over the lattice section only.
+// Throws FlexibleError naming the region when no column enters any lattice.
+void restrict_to_lattice(Stack& s, const std::vector<ResolvedFaceRegion>& regions);
+
+// C2 B1b, item 5: give the press its FLAT PRISM (apex A, depth h along frame.load) and keep
+// only the columns that enter at or before the plane (dot(entry − A, load) <= h); the rest
+// are counted in `outside_flat_prism_columns`, and the map spans the kept cells. Throws
+// FlexibleError naming the region when no column enters the prism.
+void restrict_to_flat_prism(Stack& s, const Vec3& apex, double depth_mm,
+                            const std::vector<ResolvedFaceRegion>& regions);
+
+// Does `p` satisfy every half-space (the voxel-centre rule of face_region.hpp)?
+bool passes_cuts(const std::vector<RegionCut>& cuts, const Vec3& p);
+
+// THE PRESS STACK (C1 addendum, angled presses): one frame, one stack over the UNION of
+// `footprint` (2+ regions = an edge or corner press), pressed along `press_direction`
+// when given (else the inward normal of the union). Refuses, with FlexibleError naming
+// the region(s):
+//   - a direction that does not point INTO the part over every footprint triangle
+//     (any triangle facing along it or edge-on);
+//   - a footprint whose regions are not connected by shared mesh edges (non-adjacent);
+//   - two sectors of the SAME face in one press (give that face one region).
+// A footprint may mix whole regions and cut SECTORS (the corner AREA of each face,
+// ruling 2026-10-07): each part keeps its own cuts.
+// build_stack(face, …) is build_press_stack({&face}, …, nullptr), unchanged.
+Stack build_press_stack(const StepModel& model,
+                        const std::vector<const ResolvedFaceRegion*>& footprint,
+                        const std::vector<ResolvedFaceRegion>& regions, const VoxelGrid& grid,
+                        const std::vector<char>& lattice_mask, int rotation_deg,
+                        const Vec3& build_dir, double pitch_mm, const Vec3* press_direction);
+
+// Does stack `s` own model point `p` under its sector cuts? Casts p back along the load
+// to the footprint surface (the triangles binned at its column cell), and tests the cuts
+// of the part it lands on. True for a stack without cuts. False when the back-ray misses
+// the footprint (p projects outside it) or lands outside its sector (B5).
+bool stack_owns_projection(const Stack& s, const Vec3& p);
+
+// A3 (reviewer 2026-10-08): two presses may not share any SURFACE. A press is named by
+// `press_id` (its first region) and is the union of `regions`. Refuses, with
+// FlexibleError naming both presses and the regions, any two presses with a region pair
+// whose footprints overlap in AREA on a shared face: a face and its own sector, or two
+// overlapping sectors (each region's triangles clipped by its cuts; the shared area
+// must exceed 1e-6 mm2). Sectors that meet only along a line are not refused.
+struct PressFootprint {
+  int press_id = -1;
+  std::vector<const ResolvedFaceRegion*> regions;
+};
+void refuse_shared_footprints(const TriangleMesh& mesh, const std::vector<PressFootprint>& presses);
+
+// The same finding as VALUES (follow-up 2026-10-10), for the run's refusal code
+// "shared_footprint": every (press, press, region, region) pair that shares surface, with
+// the shared area, in press order then region order. Empty = no shared surface.
+// refuse_shared_footprints throws shared_footprint_sentence of the first.
+struct SharedFootprint {
+  int press_a = -1, press_b = -1;
+  int face_region_a = -1, face_region_b = -1;
+  double shared_mm2 = 0.0;
+};
+std::vector<SharedFootprint> find_shared_footprints(const TriangleMesh& mesh,
+                                                    const std::vector<PressFootprint>& presses);
+// "presses A and B share surface (face region a and face region b overlap by N mm2); ..."
+std::string shared_footprint_sentence(const SharedFootprint& s);
+
+// Clip `triangles` of `mesh` by every half-space in `cuts` and append the pieces (fanned) to
+// `clipped`, their indices to `ids`. The winding is kept. (Public since C2 B1b: the run's
+// field export draws a press's footprint boundary from it.)
+void clip_into(const TriangleMesh& mesh, const std::vector<int>& triangles,
+               const std::vector<RegionCut>& cuts, TriangleMesh& clipped, std::vector<int>& ids);
+
+// Angle between two load LINES (0..90°): the sign of a direction does not matter.
+double axis_angle_deg(const Vec3& a, const Vec3& b);
+
+}  // namespace flexible
+}  // namespace topopt

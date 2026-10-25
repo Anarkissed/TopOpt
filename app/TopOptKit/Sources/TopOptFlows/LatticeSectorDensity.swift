@@ -120,9 +120,17 @@ public enum LatticeSectorDensity {
                             regionsFor: (UUID) -> [LatticeRegionSpec],
                             topology: String,
                             minExtrudableWidthMM: Double,
+                            // ★ The seam stays FOUR arguments: this readout is about a
+                            // stated density, not about which floor the cell was
+                            // derived against, so it keeps core's default (accuracy).
+                            // Widening it here would make every test rewrite the
+                            // injection for a parameter none of them vary.
                             derive: (String, Double, Double, Double)
                                 -> TopOptKit.LatticeRegionDerivation
-                                = TopOptKit.latticeRegionDerivation)
+                                = { TopOptKit.latticeRegionDerivation(
+                                        topology: $0, memberWidthMM: $1,
+                                        minExtrudableWidthMM: $2,
+                                        statedRelativeDensity: $3) })
         -> [Row] {
         var out: [Row] = []
         for g in groups {

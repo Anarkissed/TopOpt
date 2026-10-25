@@ -765,7 +765,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       fl_validity = lattice_region_validity(
           G, options.frozen_lattice_region_id, options.frozen_lattice_regions,
           width, options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
-          options.frozen_lattice_min_extrudable_width_mm);
+          options.frozen_lattice_min_extrudable_width_mm,
+          options.frozen_lattice_max_relative_density);  // D1
       // ★ REFUSE ONLY WHAT NO CELL CAN RESCUE. The cells-per-member floor is a
       // property of the region AND the cell, not of the region alone: a 6.8 mm
       // wall misses 5 cells at a 2 mm cell and clears them at a 1.3 mm one. An
@@ -801,7 +802,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     if (options.frozen_lattice_cell_mm > 0.0) {
       const double lightest = lattice_min_density_for_strut(
           options.frozen_lattice_topology, options.frozen_lattice_cell_mm,
-          options.frozen_lattice_min_extrudable_width_mm);
+          options.frozen_lattice_min_extrudable_width_mm,
+          options.frozen_lattice_max_relative_density);
       for (LatticeRegionSpec& s : fl_specs) {
         // ★ A FITTED REGION IS NOT JUDGED AT THE RUN'S CELL. Its density floor
         // is the fitted cell's own, and `resolve_lattice_density_field` RAISES a

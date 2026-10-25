@@ -1,0 +1,1195 @@
+# PR #358: every identifier it removed from a core header, grepped against the app
+
+Prompted by the cross-branch break: `5846c476` removed `OrganicGenStats::filleted_spans`
+(with `fillet_unresolved`, `fillet_max_radius_mm`) and #354's bridge still read the
+first, so #354 + #358 stopped compiling. #354 is fixing its side; the fields are NOT
+restored.
+
+The process asked for, adopted here and from now on: before removing or renaming
+anything in a core header,
+
+    git grep -n <name> origin/claude/topopt-holes-quilting-298212 -- app/
+
+and list every hit. This is that list for all of #358.
+
+## MAINTAINER DECISIONS (2026-09-28) — both app-side, core unchanged
+
+- **Item 1: option (b).** The app stops writing `organic_overhang_fillet` and drops
+  the toggle. **CORE STAYS STRICT — no accept-and-ignore bridge**, so the key remains
+  refused and nothing here is added back.
+- **Item 2:** the app reads `"unsupported_spans"` and drops the three fillet receipt
+  keys.
+- #354 is doing both. No core change follows from this audit.
+
+## THE RULE, AS EXTENDED (2026-09-28)
+
+Before removing or renaming anything a consumer can see:
+
+    # symbols
+    git grep -n <name> origin/claude/topopt-holes-quilting-298212 -- app/
+    # job keys you stop PARSING and receipt keys you stop EMITTING — by QUOTED name
+    git grep -n '"<key>"' origin/claude/topopt-holes-quilting-298212 -- app/
+
+and list every hit in the handoff, plus any MEANING CHANGES (see the last section).
+
+The quoted-key half is not redundant with the symbol half: a JSON key can exist only
+as a string literal on both sides and never as a C++ identifier, so a symbol grep
+would not see it at all. That is precisely how item 1 — a run-time job refusal —
+slipped past a cross-branch build that compiled cleanly.
+
+### Quoted-key audit for #358
+
+Keys this PR stopped parsing (`core/src/cli/job.cpp`) or stopped emitting
+(`core/src/simp/observability.cpp`), each grepped by quoted name against the app:
+
+| quoted key | stopped | app hits |
+|---|---|---|
+| `organic_overhang_fillet` | parsed | **6** — item 1 |
+| `filleted_spans` | emitted | **1** — item 2 |
+| `fillet_skipped_spans` | emitted | **2** — item 2 |
+| `overhang_fillet_on` | emitted | **2** — item 2 |
+| `fillet_max_radius_mm` | emitted | — |
+| `fillet_unresolved` | emitted | — |
+
+Same four as the symbol audit, reached independently. Nothing new, which is the
+result you want from a second instrument on the same question.
+
+## Method
+Identifiers removed from `core/include/` across `origin/main..HEAD` and not re-added:
+14 of them. Each grepped against the app branch. 10 have no app hits and need nothing.
+
+## ★ TWO THAT NEED THE APP'S ATTENTION
+
+### 1. `organic_overhang_fillet` — A JOB KEY THE APP STILL WRITES. A RUN-TIME REFUSAL.
+`LatticeSettings.swift:980`
+
+    // ★ absent ⇒ true in core; write only the OFF state (maintainer, 2026-09-05)
+    if !organicOverhangFillet { put("organic_overhang_fillet", false) }
+
+with NO `gradingSchemaAccepts` guard. Core no longer lists the key, and unknown keys
+are REFUSED, so:
+
+  **a user who turns the overhang flare OFF gets their job refused by core.**
+
+Severity notes:
+  - it is intermittent by design: the ON state writes nothing and runs fine, so this
+    only fires for users who turn the setting off;
+  - A CROSS-BRANCH BUILD CANNOT CATCH IT. It is a JSON key, not a symbol — the two
+    branches compile together perfectly and the job fails at run time. Only the grep
+    above finds it.
+  - 12 app hits in total (bridge.cpp, LatticeSDFMetal.swift, LatticeSettings.swift and
+    the wizard); the rest are comments and the UI toggle behind it.
+
+The fix is a decision, not a cleanup, so core has NOT made it unilaterally:
+  (a) core accepts the key and ignores it, as ruling F did for `organic_scale`
+      ("core may keep parsing the key; it will not arrive"). Every shipped app job
+      keeps running, and the outcome matches the user's intent anyway — they asked for
+      no flare and there is no flare; OR
+  (b) the app stops writing it and drops the toggle, since the repair it controls no
+      longer exists.
+Core prefers (b) as the honest end state, with (a) as a bridge if any shipped build
+writes the key. Note that under EITHER, a user who leaves the toggle ON believes they
+have a flare and does not — which is the app's half and is not fixed by this key.
+
+### 2. Receipt keys the app reads that core no longer emits
+`OrganicRunReceipt.swift:273-274`
+
+    overhangFilletOn = b("overhang_fillet_on"); filletedSpans = i("filleted_spans")
+    filletSkippedSpans = i("fillet_skipped_spans")
+
+None of `overhang_fillet_on`, `filleted_spans`, `fillet_skipped_spans` is emitted by
+core any more. They will read false/0 — a SILENT ZERO, which is the exact defect class
+this PR spent its time removing (see `organic_unsupported_spans`, which reported 0 on
+every run and is 1728 on the stand).
+
+They are not merely stale: the overhang fillet was REMOVED for depositing lumps up to
+nine times the strut, and `unsupported_spans` is the measurement that REPLACED it.
+The app should read `unsupported_spans` and drop the three above. `OrganicMainWiring
+Tests.swift:123` pins `"fillet_skipped_spans": 239` and will need the same change.
+
+## The other twelve — no app hits, nothing to do
+`fillet_max_radius_mm`, `fillet_unresolved`, `organic_fillet_radius`,
+`organic_fillet_skipped_spans`, `organic_fillet_unresolved`, `organic_filleted`,
+`organic_overhang_fillet_on`, `kOrganicFilletAngleDeg`, `kOrganicFilletMaxRadiusRatio`,
+`kOrganicFilletSegments`, `organic_shape_fit_candidates`,
+`organic_shape_fit_voxels_shrunk`, `organic_shape_fit_min_ratio`.
+
+`filleted_spans` and `overhang_fillet` DO have app hits and are covered above;
+`overhang_fillet`'s 23 hits are mostly `bridge.cpp`'s `has_overhang_fillet` SFINAE
+detector, which is written to tolerate the member's absence and therefore needs
+nothing.
+
+## One that looked alarming and is not
+`organic_shape_fit_on` greps to 5 app files. #358 removed only the SHADOWED DUPLICATE
+in `LatticeExportOutcome`; the live `RunInfo::organic_shape_fit_on` survives and still
+emits `"shape_fit_on"`, which is what `OrganicRunReceipt.swift:275` reads. The other
+hits are `organic_shape_fit_only`, a job key untouched by this PR. No action.
+
+## MEANING CHANGES — names that stayed, behaviour that did not
+
+Required in every handoff from 2026-09-28. These compile and grep clean on BOTH
+sides and still move numbers, so no grep of any kind will find them. If the app (or
+a test, or a quoted figure in a doc) pins a number derived from one of these, it
+will move.
+
+| what | was | is | measured effect |
+|---|---|---|---|
+| `voxel_signed_distance_mm` | measured to voxel CENTRES | measures to the SURFACE (minus h/2) | the field's zero moves half a voxel (0.85 mm on the stand) and its gradient near the wall goes 2 -> 1 |
+| `node_merge` | deleted every span shorter than half its radius | keeps member spans; run-collapse resamples | **+11.7 % lattice material** on the stand; spans 16,546 -> 23,998 |
+| beam weld input | members up to 28.94 mm against an 0.8 mm reach | subdivided before welding | welded nodes 4,270 -> 14,202; **margin 146.3 -> 210.1 (+43.6 %)** |
+| bead calibration | solved against a volume that does not exist | solved on the union | **+44 % mass** (29,234 -> 41,959 mm3) |
+| `octet_aesthetic_density_ceiling()` | forward density law, 0.211733 | diameter-table preimage, 0.218871 | 0.2117 sent through the diameter table builds strut/cell 0.196, under the ruled 0.20 |
+| organic synthetic stress | per-voxel ramp between 0.25*thr and thr | whole wall, decided by its p99, threshold inclusive | a straddling wall goes 478/480 -> 480/480 voxels synthetic |
+| the wetted join | not applied | applied, anchored on the latticed set | carved volume **+22.8 %** on the stand |
+| `organic_unsupported_spans` | never written; read 0 on every run | written | **0 -> 1728** on the stand |
+
+The last row is the reverse of a removal and worth the same care: a receipt key whose
+VALUE starts being correct will move an app-side number that has been reading a
+default, and no grep shows that either.
+
+## MEANING CHANGES, addendum (2026-09-29) — #354's audit items
+
+Same rule, later commits. Nothing here removes or renames anything, so the greps
+above all come back clean; these move numbers or fix what a receipt asserts.
+
+| what | was | is | measured effect |
+|---|---|---|---|
+| `organic_probe.json` `recommendation.fit.margin` / `auto.margin` | `0` whether or not a certificate ran | JSON `null` where none ran, with `certified` beside it | #354's Recommended pill read "· 0.00" on every aesthetic run; it must now read the absence |
+| `organic_probe.json` `predicted.reason` under aesthetic intent | "N segments exceed the probe's 600000 cap" (false — a stand run has 39,849) | "aesthetic intent: nothing reads a certificate" | the reason a reader acts on changes; nothing else moves |
+| the probe's dead-wall SPACING | graded from the synthetic field, i.e. the window's coarsest end | the window's MIDDLE, via `synthesised_whole`, as ruling H gives the run | a recommended cell can move on any part with a flagged dead wall. Invisible on a degenerate window (`cell_min == cell_max`) |
+| the probe's dead-wall DOMAIN | `cand` | that candidate's pre-rim posture mask | **no effect, measured.** For organic every candidate voxel is masked (three `params.organic_geometry` branches in grading.cpp), so the two sets are identical on every organic run. Written for the contract, not for a number |
+| `unsupported_spans_seen`'s documented meaning | "could not be held up, so not printed" | "over open air; printed as drawn and counted" | comment only; the count was always of printed spans |
+
+### New receipt keys (additive, report-only)
+
+| file | key | why |
+|---|---|---|
+| `run_info.json` | `grading.organic.synthetic_stress_by_region[].synthesised_whole`, `.stress_p99` | ruling H's verdict per wall and the measurement behind it. It existed only on a `[synthetic]` stderr line, which is why the run's dead set and the probe's could be compared only by parsing two logs |
+| `organic_probe.json` | `candidates[].regions[].synthesised_whole`, `.stress_p99` | the same two for the probe |
+| `organic_probe.json` | `candidates[].dead_threshold` | the threshold those verdicts were measured against, so a disagreement is locatable and not merely visible |
+
+No key changes shape or type, and nothing the app already reads changes meaning. The
+numbers BEHIND `organic_probe.json`'s recommendation can move (row 3 above).
+
+### The gap these did NOT close
+
+The run's synthesis domain is `lattice_certification_mask(boundary, ...) ∩
+gf.posture.mask`, not the posture mask. The probe has no certification mask — it runs
+before the variant's shell boundary is built — so it is still the broader set. Nothing
+the `cli_organic_dead_parity` fixture can be configured into separated the two (cell
+3–10 mm, uniform and swept windows, `min_extrudable_width_mm` 0.45–3 mm, three rho
+bands, a manual clearance keep-out, all three outer finishes: `cand` == posture ==
+the run's mask in every one). So this is UNMEASURED, not closed, and it is the
+remaining way a dead verdict could differ — on a part whose cell-overlap proof or
+shell clip rejects posture voxels. Closing it means building a certification mask per
+candidate, which is a real cost and its own measurement.
+
+## MEANING CHANGES, addendum 2 (2026-09-30) — #354's variant-work items
+
+Neither item removes or renames anything, and neither changes a job or receipt key's
+name, shape or type, so every grep in this handoff still comes back clean. Both change
+which jobs are ACCEPTED — but NOT in the same direction, and the first draft of this
+section blurred that (reviewer, 2026-09-30):
+
+- **Only item 1 can refuse a job that was previously accepted**, and only a
+  hand-authored one (see the app-impact note below).
+- **Item 2 makes wrongly refused jobs RUN.** It could refuse a job only if that job's
+  plan had been packed against the wrong wall to begin with, and the app packs by
+  include order (`LatticeSteppedCellWire.wire`), so there is no such job.
+
+| what | was | is | effect |
+|---|---|---|---|
+| a face lattice region's stated `frame_u` / `frame_w` | the "axes must lie IN the face plane" check ran before `normal` was parsed, so it tested against `Vec3{0,0,0}` and could never fire | parsed after `origin`/`normal`, against the UNIT normal | an out-of-plane frame is now REFUSED AT PARSE TIME instead of being accepted and then refused mid-run by `clearance.cpp`'s `frame_conflict`. A job the app could previously submit and watch fail after a solve now fails on submission, with the reason |
+| the stepped plan's prism per region | `lattice.regions[region_id - 1]` — an index over ALL regions | `job_include_region(regions, region_id)` — a position among INCLUDE regions, which is what the id means | on a job with an exclude declared BEFORE an include, the plan took the exclude's `slot_origin` / `normal` / `depth_mm`. Measured: the identical include and the identical one-cell plan are ACCEPTED with the include alone and REFUSED with an exclude first. Ordering-dependent, so a plan the app packed correctly could be refused for a reason naming the wrong wall |
+
+### The frame check: what a job that was passing may now be refused for
+
+The in-plane test is also now taken against the NORMALISED normal, and the direction
+of that effect is the opposite of what I first wrote here (reviewer, 2026-09-30).
+`u · n = |n| (u · n̂)`, so the raw test `|u · n| < 1e-6` accepts `|u · n̂| < 1e-6/|n|`:
+
+| `\|n\|` | raw admits | so the raw test was |
+|---|---|---|
+| 1000 | 1e-9 rad | 1000x STRICTER — refuses a frame that is in plane |
+| 1 | 1e-6 rad | the intended bound |
+| 1e-3 | 1e-3 rad | 1000x LOOSER — the dangerous case |
+
+A SHORT normal is the loose one, not a long one. Both directions are now pinned by a
+test that goes red with the raw dot product restored (`test_job` cases (g) and (h));
+every other frame case returns the same verdict under both rules.
+
+APP IMPACT: NONE. The app does not state an arbitrary frame — it builds `frame_u` /
+`frame_w` from the UNIT normal by cross products (`LatticeSettings.swift` ~326-333,
+`LatticeRegionMask.basis`), so its axes are in plane to ~1e-16 at any `|normal|`, under
+either rule. The refusal is reachable only by a hand-authored or third-party job.
+
+### The stepped id: the rule, stated once
+
+Every 1-based region id crossing the bridge — the per-voxel `region_ids`,
+`SteppedCell::region_id`, `SteppedRegionCell::region_id`,
+`SyntheticStressRegionReport::region_id` — is a position among the job's **include**
+regions in declaration order, never an index into `lattice.regions`. Swept the file:
+`region_id - 1` appeared at exactly one site, the one fixed here. The doubled path
+beside it (`run_job.cpp`, the `base_of` loop) already walked the regions and counted
+includes in lockstep, which is the correct pattern and is why only the stepped branch
+was wrong.
+
+Resolving that id is now `job_include_region()` in `job.hpp`, so the decision has a
+test (`test_job`'s "a stepped cell names the include, not the nth region") instead of
+sitting inline in `run_job.cpp`.
+
+★ AND A CORRECTION TO THE DIAGNOSIS I gave with the previous two commits (reviewer,
+2026-09-30). I wrote that "nothing links `run_job.cpp`". That is false: it is compiled
+into `libtopopt`, and `test_job_loadcase_copy` calls `production_loadcase_from_job`
+(run_job.cpp:7788) out of it, as do two harness probes. What hides these decisions is
+the three ANONYMOUS NAMESPACES at :67-7774, :7934-8739 and :10673-10933 -- nothing in
+them has external linkage, so no test can name them whatever it links.
+
+The remedy is unchanged: lift a decision into a testable place when you touch it. But
+the cheaper route for a large function that is NOT a job-schema fact is to move it out
+of the anonymous namespace and declare it in an internal header WITHOUT moving the
+body -- the precedent `production_loadcase_from_job` already sets. A job-schema fact
+like `job_include_region` still belongs in `job.hpp`. No inventory or refactor is
+proposed here.
+
+## The probe's certification-mask gap: SPENT, and it measures as a no-op (2026-09-30)
+
+The gap left open on 2026-09-29 is closed by construction: the run's synthesis domain
+is now one function, `lattice_synthesis_domain()` in `lattice_boundary.hpp`
+(`lattice_certification_mask(boundary, …) ∩ posture`), and the run and the organic
+size probe both call it. The probe builds its own boundary per candidate because the
+cell-overlap proof is a function of the cell.
+
+**Cost, measured on the maintainer's stand** (`.m2_organic_aes_synth3`, resolution 128,
+organic aesthetic, one candidate window 4.5–5.5 mm):
+
+| | |
+|---|---|
+| grid | **468,224 voxels** — resolution 128 on the stand's bbox, not a 128³ cube (2.1M) |
+| boundary + domain, per candidate | **0.1455 s** |
+| the probe's own per-candidate total | 3.8 s |
+| **added** | **3.8 %** — under the 10 % bar |
+
+**Effect, on the same run: NONE.** `|posture| = 62,465` and `|domain| = 62,465`. The
+domain is `posture ∩ cert` by construction, so ⊆ posture; equal counts therefore mean
+the sets are EQUAL, and the probe's inputs are unchanged voxel for voxel. Same on the
+`cli_organic_dead_parity` fixture, where a `loads.clearances` keep-out shrinks the
+CANDIDATE set too and so moves both terms together.
+
+**So no meaning-changes row, and that is the finding.** This is the SECOND time this
+gap has measured as a no-op: the `cand` → posture move was the first
+(`params.organic_geometry` masks every candidate). On both parts available, all four
+sets — `cand`, the posture, the certification mask and the run's `mask` — coincide.
+What is bought is the CONTRACT, not a number: the probe can no longer drift from the
+run by using a different set, and there is now one definition to change instead of
+five inline lines plus a call site that forgot them.
+
+What would separate the sets is the shell base rejecting posture voxels at convex
+edges (the isosurface chamfers the voxel-cube union — see `lattice_boundary_for`'s
+note, measured at h/√3 = 0.984 mm on a 1.705 mm voxel). Neither part exercises it.
+`test_lattice_clip_shell`'s "the synthesis domain is cert ∩ posture" builds a synthetic
+grid with a keep-out where the sets DO differ (printed 512, certified 408), and goes
+red on 5 checks when the intersection is dropped — that is where the guarantee lives,
+not in either part's numbers.
+
+### Open item carried forward: a convex-edge fixture
+
+The certification-mask term of `lattice_synthesis_domain()` is guarded by
+`test_lattice_clip_shell`'s synthetic keep-out grid (printed 512, certified 408), and
+that is where the maintainer has decided the guarantee should live for now (reviewer,
+2026-09-30: "No convex-edge fixture now"). What no fixture exercises is the term that
+could separate the sets on a REAL part: the shell base rejecting posture voxels at a
+CONVEX EDGE, where the marching-cubes isosurface chamfers the voxel-cube union
+(measured h/√3 = 0.984 mm on a 1.705 mm voxel — `lattice_boundary_for`'s note, and
+evidence/2026-08-08-strut-clip-matches-shell/s1b_surface_gap.csv).
+
+**Open item:** a real part with a convex edge INSIDE a lattice region, to be built only
+if a probe/run mismatch ever appears. Until then the probe and the run cannot differ,
+because they call the same function — which is the point of that change, since its
+measured effect on every part available was nil.
+
+## MEANING CHANGES, addendum 3 (2026-10-01) — lattice types round 1
+
+Nothing removed or renamed in core's public surface except one rename, listed first.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| `lattice_relative_density(topo, …)` (free function, added and renamed within this round) | that name | `lattice_density_from_strut(topo, …)` | **none** — it never existed outside this round. `SimpParams::lattice_relative_density`, the pre-existing field it collided with, is untouched. Grepped PR 354: no hits for either name as a function |
+| a job stating `lattice.topology` and `grading.topology` as DIFFERENT types | accepted; sizing read one, generation the other | **REFUSED at parse time**, naming both values | **none.** The app writes both from one setting — `RemoteRunner.swift:758`, `RelatticeRunner.swift:107` and `LatticeSettings.swift:850` all send `lat.topologyID`. Confirmed by grep, not taken on trust |
+| the refusal text for an unknown/not-ready topology | `lattice "topology" must be "octet" (got "X")` | names the type AND which half is missing: not a topology at all / certifiable but not generatable / generatable but not certifiable / neither | **none** — grepped PR 354 for the old message text: no matches. The app should now read `lattice_type_readiness_plain()` instead of wording its own |
+| `run_info.json` `fingerprint` / `build_time` on `lattice-variant` and graded `analyze` | `"unknown"` and `""` on every run | the binary's real SHA and build time | **none found** — `git grep` over PR 354's `app/` for `run_info.*fingerprint` / `fingerprint.*run_info` returns nothing; the app checks versions via `--version` and the worker's advertised fingerprint |
+
+## MEANING CHANGES, addendum 4 (2026-10-07) — the plan validator's containment rule
+
+From #354's core brief of 2026-10-02 (R2, R2x, R2b) and the reviewer's ruling of
+2026-10-05. ONE containment rule now applies to every face, axis-aligned or tilted: the
+cell's CENTRE must lie in the region's prism, its FAR side must not pass the depth
+(cube's true projection interval), and its NEAR side MAY stand in front of the face plane.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a cell in the deepest layer of a region whose normal has a NEGATIVE component | REFUSED, "lies from 12 to 15 mm … outside its 12 mm prism" — the check projected the cell's minimum corner, which on such a face is its deepest point, so every layer read one cell too deep | ACCEPTED | **intended, and it unblocks the app.** 1,467 cells on the stand's -y wall alone were refused this way, every one false, and the check runs after SOLVE 1 so each refusal cost a solve |
+| a cell lying wholly in FRONT of the face plane, outside the prism and outside the part | ACCEPTED and LAID — 612 lattice triangles sitting on the part's face, every vertex at y 11.55–12.45 (R2x) | **REFUSED**, naming the interval, the centre and which clause bound | **intended.** This is a false ACCEPTANCE being closed: core was emitting geometry outside the part. A plan that relied on it was already producing a wrong part |
+| a TILTED facet's cell whose near side starts in front of the plane but whose centre is inside | accepted (the one-corner read happened to allow it) | ACCEPTED — explicitly, by rule | **none, and deliberately so.** The app starts a facet's span in front of the plane BY DESIGN so the cube covers the slant (`LatticeOctreeBake.swift:187-202`); a near-side bound would have refused the stand's 90 face-23 facet cells. Guarded by a 45° test that goes RED if a near-side bound is reintroduced |
+| the depth refusal's wording | reported `s0` and `s0 + size` | reports the projection interval, the centre, and that the centre must be inside while the near side may stand in front | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Net: jobs whose regions have positive axis normals and whose cells sit inside the prism
+are unchanged. Jobs with negative-normal walls or tilted facets change verdict — which is
+the point of the brief. `test_stepped_plan.cpp` had never set `normal` or `depth_mm`, so
+this check was wholly untested before this commit.
+
+## MEANING CHANGES, addendum 5 (2026-10-07) — an empty lattice is a refusal
+
+From #354's core brief of 2026-10-06 (D10/E3) and the reviewer's ruling of 2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job whose grade latticed voxels that the outline beam then cleared ENTIRELY, under `doubled` | **ACCEPTED** — "over 0 voxels", `verdict: ACCEPTED`, `interior_volume_mm3` 0, a finished part with no lattice in it | **REFUSED**, naming what the grade latticed, what the beam cleared, the beam's reach and the band that set it | **the app must expect a refusal where it used to get a file.** This is a false ACCEPTANCE being closed: #354 hit it on 3418E167 converted to Doubled. A refusal costs a solve; this was costing a print |
+| the same case under `stepped` | refused, but blamed "0 latticed voxels carrying 0 distinct region ids … 0 region(s) had no measurable member width" and recommended `"algorithm": "doubled"` | refused with the SAME sentence as doubled, naming the beam | **better diagnosis, same verdict.** The old sentence pointed at region ids, which were not the cause, and recommended the path that accepted nothing |
+| any refusal recommending an algorithm | `use "algorithm": "doubled"` | no algorithm is recommended anywhere on this path | **none** — grepped PR 354's `app/` for the old sentence: no matches |
+
+Note on scope: the beam cannot be the cause under `organic`, because `shape_grade` is
+refused at parse time for organic (job.cpp:2115), so organic has no post-BEAM empty mask
+to reach. The check is unconditional regardless, so anything else that empties the mask is
+caught by the same sentence instead of by nothing.
+
+Unchanged: a job whose lattice survives the beam. The control fixture
+(`empty_after_beam_control.json`, a 10 mm band, under the 25 mm bleed threshold) keeps 440
+of its 750 voxels and is still accepted — and the test requires that count to be non-zero,
+so a future change that emptied every lattice could not pass as "it refuses correctly".
+
+## MEANING CHANGES, addendum 6 (2026-10-07) — the in-plane slot origin, as sent
+
+From #354's core brief of 2026-10-02 (R1), the maintainer's ruling (b) and the reviewer's
+ruling of 2026-10-05. A new OPTIONAL key on a face lattice region's geometry:
+`slot_origin_mm`.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a job stating `lattice.regions[].geometry.slot_origin_mm` | **REFUSED** as an unknown key | accepted; that point is the grid alignment, depth, overlap, grouping and laying all measure from | **this is the key R1 asked for.** The app can stop having its anchor search refused: on every project the non-base cells were off core's grid by one constant in-plane vector per region (570B38E2 region 1: x = 1.6647, z = 0.5443 mod 2.578) |
+| a job NOT stating it | the region `origin` is the slot origin | unchanged — the derived origin still stands | **none.** Proved by a control fixture: the identical plan without the key is still refused, so nothing moved for existing jobs |
+| a stated slot origin with a component along the region normal | n/a (the key did not exist) | **REFUSED at parse time**, naming the region, the key and how far out of plane it stands | **intended.** An anchor shift is in-plane by definition; a normal component would move the plane the prism's depth is measured from and change every containment verdict in silence |
+
+Tested against the UNIT normal, for the reason recorded for `frame_u`: the raw test
+`|d·n| < eps` accepts `|d·n̂| < eps/|n|`, so a SHORT normal is the loose and dangerous
+case, not a long one.
+
+### ★ CORRECTED 2026-10-09 (K2): the slot origin is a grid PHASE, not a plane point
+
+The row above requiring `slot_origin_mm` to lie in the face plane is **withdrawn**. The
+reviewer corrected the ruling it implemented (2026-10-05 -> 2026-10-08): the requirement is
+wrong for a **tilted facet**, whose grid in the app is world-aligned, so the point the app
+packed from legitimately stands off the plane. Forcing it on would make the app re-anchor
+tilted ladders, which changes the preview the maintainer approved. #354 measured the cost of
+the old rule: on 102117B9, 22 of the 23 regions with cells are tilted, and on 68BF7B74 face
+23's three facets stand 13.26, 0.58 and 0.10 mm off their planes — all parse refusals.
+
+| what | was (b6e011d5) | is (K2) | app impact |
+|---|---|---|---|
+| a `slot_origin_mm` with a component along the region normal | **REFUSED at parse**, naming the region and the distance | **accepted** — it is the grid phase | **the refusal is gone.** Tilted facets can send the grid they packed on |
+| what DEPTH is measured from | the slot origin, so moving the phase along the normal silently moved the prism | the region's own plane (`SteppedPlanRegion::plane_origin`) | **intended, and it is the property that makes the split safe:** the phase sets alignment, overlap and grouping; it cannot shift the prism |
+
+Measured on the rebuilt fixture: with the slot origin one base cell inward, cells at y 0..3
+and 0..1.5 of a 12 mm prism are inside when measured from the plane, and project to centres
+of **-1.5 and -2.25** when measured from the slot origin — which is why core refused them
+before K2. One fixture distinguishes the two readings.
+
+Note for the R6 work that follows: with the slot origin on the wire, the stricter
+base-cell alignment R6 asks for can land without refusing the app's current plans — which
+is why this key goes in first.
+
+## MEANING CHANGES, addendum 7 (2026-10-07) — who owns shared space, and exact overlap
+
+From #354's core brief of 2026-10-02 (R3, R5, R7's note) and the reviewer's ruling 4 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a voxel inside TWO include prisms | given to the FIRST matching region in DECLARATION ORDER, however far its face | given to the region whose FACE PLANE is nearest; an exact tie to the lower region id | **core now matches the app's own rule.** Where prisms overlap, the cell/density/void id a voxel is graded at changes, and so does the emitted geometry. Jobs with overlapping prisms change |
+| the same job with its regions declared in the opposite order | a DIFFERENT part (measured: STL `7f602f83…` vs `4c5809b0…`, and one run derived a cell for one region where the other derived two) | **byte-identical** (`9c5e8280…`) | **intended.** The order the app writes regions in is not geometry |
+| two cells that merely TOUCH, in regions whose ladders do not nest | REFUSED as overlapping — 1,458 false collisions on 570B38E2, every one false | accepted | **unblocks the app** (R5) |
+| two cells at the same offset in DIFFERENT regions, far apart in space | REFUSED as overlapping (the hash key had no region id) | accepted (R3) | **unblocks the app** |
+| two cells occupying the EXACT SAME BOX in different regions | **ACCEPTED** — offsets were measured from each region's own slot origin, so their hash keys differed | REFUSED, naming both cells, both regions, the overlap extent and which region owns each centre | **a false ACCEPTANCE closed.** R3's key defect ran both ways, and this direction ships a wrong part |
+| two cells half a cell apart where a region's menu holds only its base | **ACCEPTED** — the hash tile equalled the cell, so one-slot-wide cells rounded apart | REFUSED | **a second false ACCEPTANCE closed** |
+| a cross-region overlap at a mitre, each cell's centre owned by its own region | refused (as any cross-region overlap was, when detected at all) | **ACCEPTED** as a straddled seam; only the owner's lattice is laid in the shared space | **intended** — the app keeps such cells whole, and the stand has 1,367 real overlapping pairs that are NOT seams and stay refused |
+
+**Where no prisms overlap, nothing changes — by construction, not merely by test.** A point
+lies in at most one prism, so "first match" and "nearest face plane" name the same region;
+a point in no prism returned 0 before and returns 0 now. The change can only reach a point
+inside two or more prisms. The suite's existing receipt and STL pins are the empirical
+check on top of that (135/135).
+
+Containment itself is NOT a second implementation: `stepped_region_owner` calls
+`point_in_clearance_region`, the predicate core already resolved per-voxel membership
+with, so there is one containment test and only the tie-break is new. The function is
+exported so #354's R7 can call it through the bridge instead of keeping a Swift copy:
+
+    int stepped_region_owner(const Vec3& p, const std::vector<ClearanceGeometry>& includes);
+    // 1-based index into `includes`, or 0 for NO OWNER.
+
+## MEANING CHANGES, addendum 8 (2026-10-07) — R6: what is accepted is what is laid
+
+From #354's core brief of 2026-10-02 (R6, R6b, R6c, R6d) and the reviewer's ruling 3 of
+2026-10-07.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a DOUBLED cell not on its own size's grid from the slot origin | ACCEPTED, then LAID somewhere else — up to half its size away, with no receipt recording the move | **REFUSED**, naming the offset and that a halving octree can place it nowhere else | **intended.** R6 (a base cell 1 mm off) and R6b (an S/2 cell on the S/4 tile) are refused. A halving octree cannot produce such a cell, so a plan containing one did not come from one |
+| a base-size cell, either menu | exempt from the alignment check entirely | checked like any other cell | **intended.** A base cell is a whole slot and belongs on the base grid. This is also what made the moves invisible: the app's base cells sit off core's grid by R1's anchor, which is why `slot_origin_mm` landed first |
+| an ANY-STEP k-tile cell at a whole tile that is not a multiple of k tiles | accepted, then MOVED — measured at 1 mm (R6), 2.41667 mm (R6c, landing ON TOP of its neighbour) and 2.9 mm (R6d) | accepted and laid **where sent** | **intended, and it is why any-step packs were coming out wrong.** R6c's lattice covered x 18–20.42 twice and left x 25.25–27.67 bare |
+| core's own packed-slot fixture, sampled on the cells as LAID | 7,344 covered once, 3,240 uncovered, 3,240 covered twice | 13,824 / 0 / 0 | n/a — a core test. `test_packed_slot_covers_exactly_once` is untouched (it checks the SENT plan, still a valid property); a new test beside it samples the grouped cells |
+
+Controls keep their STLs, checked against the hashes #354 recorded:
+`R6_control_on_grid` 1ccf1bdf90a8…, `R6b_control_half_at_21` e630030f9ccf…,
+`R6d_control_first_slot` 5cae340a5661… — byte-identical. And `R6d_anystep_second_slot`'s
+STL no longer equals `R6d_ref_at_25_4`'s, which is the brief's own after-the-fix test.
+
+**★ WITHDRAWN 2026-10-09: the 2.0x figure below was a proxy, and his real plan is 1.00x.**
+Measured on 570B38E2's actual Default Grade plan (4,198 cells, 2 regions): grouped by
+(region, size) **4 passes**, grouped by (region, size, phase) **4 passes** — ratio **1.00x**,
+and the run itself reported 4 passes, which cross-checks the arithmetic. Each (region, size)
+in his plan has exactly one phase, so phase bucketing costs nothing there. The 37-cell plan
+below was generated by me and is not representative; it stands only as the worst case I could
+construct.
+
+**The cost, measured.** A group is an emission pass, and the phase join multiplies them.
+On a 37-cell any-step plan with three sizes at mixed phases: passes **3 → 6 (2.0×)**, wall
+time **1.6 s → 1.6–1.7 s (flat)**. On R6c and R6d: **unchanged (1.0×)**. The reviewer's gate
+was "stop if either grows more than 2×"; 2.0× does not exceed it and the wall clock did not
+move, because each pass carries proportionally fewer cells. CAVEAT, stated because it
+bounds the result: his three project plans are not available in this worktree, so the
+37-cell plan is a generated proxy for the gate, not the gate itself.
+
+## MEANING CHANGES, addendum 9 (2026-10-08) — one floor for "the smallest cell that prints"
+
+From #354's printability brief of 2026-10-06 (E1, D1, D2, D11).
+
+Core answered one question with three numbers. On octet at a 0.45 mm bead, measured:
+`w/phi(rho_min)` = **4.931378498** mm (the light floor), `w/phi(min(rho_max, cap))` = **2.25**
+mm (what `grade_lattice` applies), `w/phi(rho_max)` = **1.173173434** mm (what four other
+paths computed inline). One run printed two of them under one key name.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| `lattice_min_printable_cell_mm(topo, w, max_relative_density)` | did not exist in core; the app composed it in the bridge (PR #354 1db8bba7) from `lattice_rho_max` + `lattice_strut_diameter_mm` | **exported**, with the app's exact name and signature | **the bridge can delete its copy and read core.** A cap of 0 or non-finite means NOT SENT, matching the app's semantics |
+| the smallest printable cell on the Fit, Fixed, Swept, region-report, pre-flight, frozen-lattice and swept-frontier paths | the UNCAPPED floor (finer than the job can print) | the floor at the job's cap | **a job with a cap gets different numbers, and they are the ones grade_lattice applies.** `fit.min_printable_cell_mm` and the per-region receipt no longer disagree |
+| `lattice_derive_cell_for_member`, `lattice_min_density_for_strut`, `cell_plan_finest_printable_cell_mm`, `lattice_region_validity` | no cap parameter | a TRAILING, DEFAULTED cap parameter | **none until the app passes one.** All four are called from `bridge.cpp`/Swift; grepped before changing |
+| the swept plan's per-cell predicate | asked whether the BAND's densest density prints | asks whether the densest density **the job allows** prints | **intended** — it admitted rungs whose struts the job can never reach |
+| Fit's derived density when nothing in the band prints at that cell | `lattice_rho_max` — a density the job may forbid | the densest the job allows | **intended** (found by sweeping, not from the brief's list) |
+| `fallback_irrecoverable_by_cell` on uniform and swept | counted against the LIGHT floor: at N* = 5 "beyond rescue" below **24.66 mm** | counted against the dense floor, like Fit: below **11.25 mm** at the cap | **the refusal sentence and the forecast's remedies change.** A 16 mm member was called irrecoverable on uniform while Fit could reach it. Measured on a fixture: 8 of 13,500 rejected voxels are irrecoverable where the light floor called all 13,500 |
+
+NOT DONE, and not mistakable for done: nothing in `core/src` assigns
+`frozen_lattice_min_extrudable_width_mm`, so nothing assigns the new
+`frozen_lattice_max_relative_density` either — that options block is filled by the caller.
+The field is threaded through `lattice_region_validity` and `minimize_plastic`, but the
+frozen-lattice floors stay uncapped until the app sets it.
+
+Also recorded, because two of my own assumptions were wrong about it: the diameter law is
+**clamped above rho 0.60**, the measured table's last row, so a cap anywhere from 0.60 to the
+band top 0.899880 is **completely inert**. Monotonicity in the cap is therefore non-strict,
+and the flat top is pinned by its own check so a future row reports itself.
+
+## MEANING CHANGES, addendum 10 (2026-10-09) — D5: the density that came with the cell
+
+From #354's printability brief (D5) and the reviewer's ruling of 2026-10-08.
+
+| what | was | is | app impact |
+|---|---|---|---|
+| a plan cell's own `rho` | checked against NOTHING in the validator — it never read `cell.rho`; the schema admits any (0, 1] | the strut it builds at **its own size** must clear the bead, or the cell is refused by name with the number | **a plan pairing a size with too light a density is refused.** Measured: rho 0.10 at a 3 mm cell builds a 0.4002 mm strut against a 0.45 mm bead |
+| a plan cell's `rho` above the job's `max_relative_density` | accepted, then clamped downstream | **REFUSED**, quoting the cap | **intended.** The density sizes the strut, so clamping silently prints a cell lighter than the plan asked for |
+| the plan's BASE cell | no floor at all — "the base is always on its own menu" | subject to the same tile floor and bead as every other size | **a region whose base is below the floor is refused, and the refusal NAMES the base and the floor** rather than reporting an empty menu and leaving the cause to be inferred |
+| the doubled tile floor | `stepped_min_tile_mm`, or else **the bead** — and a doubled job cannot carry that key at all, so it was just over the bead (0.45 mm) | `max(lattice_min_printable_cell_mm(topo, w, cap), stated)` — **2.25 mm at the job's cap** | **a capped job's plan is held to the real floor.** Uncapped jobs get 1.173 mm, so all eight of the brief's existing jobs are unaffected |
+| a cell that sends no `rho` | unaffected | unaffected — not judged on a density it did not send | **none** (every job before ruling C) |
+
+NOT SHIPPED, and not from indecision: "apply to a doubled plan the same bound the app applies
+to Default Grade". `prints_open` still hangs on `intent == "aesthetic"`, which a doubled job
+never carries. I searched the app for that bound (`printsOpen`, `minTile`, `ladderSizes`,
+`stepped_size_menu`, the 0.20 ratio) and found nothing, so I have asked rather than guess a
+design rule. Under the standing rule the app's design is the source of truth, and this is the
+app's.
+
+One existing fixture's DATA changed, not its assertions: `test_group_keeps_each_cells_own_rho`
+paired 3 mm cells with rho from 0.10, which the new check correctly refuses (0.4002 mm strut,
+0.45 mm bead). Those values were chosen to be DISTINGUISHABLE — each a function of the cell's
+position, so a mispairing cannot look right — and that property is untouched at 0.20..0.21,
+which also print (0.5694 mm). The measurement is recorded at the fixture.
+
+## MEANING CHANGES, addendum 11 (2026-10-09) — K1: the plan's base travels on the wire
+
+From #354's plan map and the reviewer's rulings of 2026-10-08 and 2026-10-09 (the second
+correcting the first).
+
+| what | was | is | app impact |
+|---|---|---|---|
+| an ANY-STEP plan's base per region | core's own FEA-derived cell (`R.stepped.cells`), so every app plan was validated against a number the app never used | the SENT base | **this is what refused every Aesthetic Stepped plan.** #354 predicted "not on that region's menu" on every project, and I reproduced it |
+| `lattice.regions[].geometry.plan_base_cell_mm` | did not exist | **REQUIRED** on every region the plan places cells in; a planned region without it is refused by name, with its cell count | **new key.** Production sends no plans yet, so nothing breaks |
+| a DOUBLED plan's base | the region's largest sent cell | the same sent key | **none in effect for halves** — a halving ladder's inference happened to be benign — but it is no longer a guess |
+
+**Why not infer it.** An intermediate cut of K1 took the region's largest sent cell, which is
+what doubled already did. It is a silent substitute: a region need not contain a base-size
+cell. Measured on 3418E167's real Aesthetic Stepped plan — region 1 sends only 3.5 mm and
+4.6667 mm cells while the app's base is **7 mm**. The inference guessed 4.6667, and:
+- the menu at 4.6667 admits ONE size under prints-open, so the 3.5 mm cells were refused;
+- and three quarters of a rounded 4.6667 is **3.500025**, not the 3.5 the plan sends, so even
+  the right ratio missed by 25 µm.
+
+**The prints-open finding, corrected.** I first reported prints-open as blocking his plan at
+the 3.5 mm cells. That was the wrong-base artefact. With base 7 sent, region 1's menu is
+**{7, 3.5}** and 3.5 passes; what is refused is **4.6667** (683 cells), which needs divisor 3
+— dropped because at base 7 a 2.333 mm tile cannot hold a bead-wide strut and stay open.
+Region 2 at base 12 keeps its thirds and its cells (6 and 3) pass, so the rule is
+base-dependent. The maintainer's decision on which rule is physically right now has its
+evidence.
+
+## PRINTS-OPEN: one rule, one place — and a per-cell variant PARKED, not built
+
+Settled 2026-10-10 after a ruling, a stop, and a corrected input. Recorded because the
+reasoning is worth keeping and the parked idea must not be built by accident.
+
+**What was proposed.** Check prints-open PER CELL SIZE and drop the rule that removes a whole
+divisor family because its single tile would be too small. The argument was sound and still
+is: on 3418E167 a 4.6667 mm cell was refused while a 3.5 mm cell passed — **the larger cell
+refused for the smaller tile it was cut from**, which cannot be right as physics.
+
+**Why I stopped instead of building it.** I built it, and five tests went red — one of them
+`test_menus_match_the_previews_live_histogram`, which holds the DIAG line from the preview's
+own packer on a real part (bases 12 and 10.31) and asserts agreement with core **in both
+directions**, with equal set sizes. Measured with the family rule dropped:
+- the preview kept **16** sizes; core offered **24**;
+- the 8 extra were exactly the dropped families' sizes — 10 = 5×(12/6), 2.062 = 10.31/5,
+  2 = 12/6;
+- nothing the preview kept was missing.
+
+So at those bases the app's packer behaves exactly like core's family rule, and dropping it
+would make core offer sizes the app will never produce.
+
+**The contradiction, and its resolution.** The same app had placed 683 cells of 4.6667 mm at
+what #354 then believed was a **7 mm** base — the thirds family, which the family rule drops.
+One rule could not explain both measurements, so I reported both and built neither. #354 then
+corrected itself: **region 1's base is 14 mm**, from the bake's own `regionCell final=14.0`;
+the "7" had been inferred from the cell sizes. At base 14, 4.6667 = 14/3 and 3.5 = 14/4, and
+both tiles print open under either rule. Verified here: base 14's menu is
+`14 11.2 10.5 9.333 8.4 7 5.6 4.667 3.5 2.8` and carries both of region 1's sizes; base 12's
+carries both of region 2's (6 and 3).
+
+**It was a wrong input, not a wrong rule** — twice over, since the same wrong base also made me
+report prints-open as blocking the 3.5 mm cells.
+
+**What shipped instead.** `lattice_prints_open(topo, cell_size_mm, bead_mm)` is exported on
+core's forward law, and core's own two call sites ask it rather than repeating the comparison.
+The app replaces its two call sites with it through the bridge; its independent 0.20 crossing
+(2.370917 mm at a 0.45 mm bead) had agreed with core's to **9 nm** before the function existed.
+**CORRECTED 2026-10-11** (#354's measurement, verified against core's own functions by
+bisecting `lattice_prints_open` to 1e-12 mm):
+
+| | at a 0.45 mm bead | × bead |
+|---|---|---|
+| `lattice_prints_open`'s own crossing | **2.370908016 mm** | 5.268684 |
+| `lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)` | 2.370916754 mm | 5.268704 |
+
+So the sentence this replaces — "the smallest open cell is 5.268704 × bead, which is
+**exactly** `lattice_min_printable_cell_mm(…)`" — was wrong, by **8.74e-06 mm (8.74 nm)**.
+#354's 2.370908016 is the crossing; my 2.370917 was the floor function's answer at the
+same cap, and they are not the same number.
+
+★ **And the gap is structural, not a rounding slip.** The two paths ask the same question
+through core's **two measured tables, which are not exact inverses**:
+`lattice_min_printable_cell_mm` inverts the diameter table at exactly ρ = 0.20, while
+`lattice_prints_open` tests the density the strut implies through the preimage table. That
+is the same cause as the 2.1e-05 mm disagreement `kBeadSlackMm` exists for (D5), and the
+same cause as the 0.211733 / 0.218871 pair documented above. Quoting either number is fine;
+calling them equal is not.
+
+**PARKED, DO NOT BUILD:** the per-cell variant. It offers more sizes, so both sides would have
+to change together and only with the maintainer's agreement. The implementation is ~40 lines
+plus five menu expectations, and it would require rewriting a test built from the app's live
+output.
+
+**A probe bug worth remembering.** My first measurement of the open minimum reported 50 mm.
+`lattice_density_from_strut` THROWS off the measured table, and my catch mapped every throw to
+"too dense", so the bisection ran to its upper bound. A throw has to be resolved by **which
+side** it falls on; the exported function does that explicitly.
+
+### The fingerprint defect, for the record
+
+Not the worktree (`git -C core rev-parse` resolves fine there), and not only the
+dispatch order. `analyze_job` (run_job.cpp:9341) and `lattice_variant_job` (:10263)
+each built their receipt with `build_run_info(job, options, RunObservability{})` — a
+**default-constructed** observability — so they would have reported "unknown" even if
+`main()` had populated its own `obs` before dispatching. Fixed by having the
+executable state its identity once (`set_build_identity`, called before any dispatch)
+and both receipt paths read it.
+
+★ `analyze` is affected **only when a `grading` block is present**: its write site sits
+inside `if (job.grading.present)` (:9157), and that guard's own comment says no
+run_info is written otherwise. My first version of the test used an ungraded analyze
+job, wrote no run_info, and failed for the wrong reason — mapping a write site to its
+function is not the same as reaching it. `preflight` writes no run_info at all and is
+unaffected.
+
+## Addendum 12 — K3: on a plan job the PLAN is the design (2026-10-10)
+
+Reviewer's ruling of 2026-10-10: the solid companion is printed minus the **plan's** cells,
+the certificate's posture comes from the **plan's** mask, and the receipt states the solid
+remainder per region in mm³. Each proven on a fixture with a partial-depth prism.
+
+### What the app should know changed
+
+**One new exported function**, additive — nothing removed, nothing renamed:
+
+```cpp
+std::vector<char> lattice_certification_mask_per_cell(
+    const LatticeBoundary& boundary, const VoxelGrid& grid,
+    const std::vector<double>& density, double iso,
+    const std::function<bool(const Vec3&, Vec3*, double*)>& owning_cell,
+    long long* dropped_by_overlap = nullptr);
+```
+
+`lattice_certification_mask` is now this function with a single-cell provider, so the
+printed / keep-out / exclude-beats-include precedence has ONE definition and the plan path
+cannot drift from the graded one. Every existing caller and every existing test is
+unchanged: the wrapper keeps its own argument checks and its own message text.
+
+**Two new receipt keys** in `run_info`'s graded block, emitted only on a plan job:
+
+```json
+"plan_solid_remainder_mm3": "r1=124131.531, r2=79302.950",
+"plan_latticed_mm3": 114015.347
+```
+
+### The defect, measured
+
+The shared mask that drives the companion, the graded-cell activation, the certification
+posture, the min-feature pass, the void check and the empty-mask refusal was the **law's**.
+The plan decided only where struts went. The two then disagreed in both directions: a voxel
+the plan latticed but the law kept solid got a strut AND companion solid around it, and a
+voxel the law latticed but the plan left bare got neither.
+
+That second case is the partial-depth strip. On the new `plan_partial_depth` fixture — a
+12 mm deep region carrying ONE layer of 6 mm cells — the law latticed the uncovered 6 mm
+and the companion did not fill it, so the strip printed as **air** with the plan's back
+nodes ending on nothing.
+
+| | partial | full-depth control | difference |
+|---|---|---|---|
+| plan latticed (mm³) | 976.5625 | 1953.125 | −976.5625 |
+| solid remainder r1 (mm³) | 4960.938 | 3984.375 | +976.563 |
+| companion `solid_region_volume_mm3` | 18789.0625 | 17812.5 | **+976.5625** |
+| the same, at 588672f5 | 15292.96875 | 15292.96875 | **0** |
+
+The pre-K3 binary reports the **same** companion volume for a half-covered region and a
+fully covered one. After K3 the companion grows by exactly the stated remainder, and all
+three measurements agree to the last digit on one voxel basis. `interior_volume_mm3` on the
+partial run moves 327.69 → 329.01, so K3 changed what is SOLID and what is CERTIFIED, not
+where the plan puts lattice.
+
+### A mask is half a posture
+
+With the plan's mask alone, 570B38E2's Default Grade plan reached the certificate and
+`analyze_fixed_design` refused: *"lattice relative density 0.000000 is outside the
+certifiable octet band [0.050470, 0.899880]"*. The density still came from the law, which
+had graded none of the voxels the plan latticed, and where the law keeps a voxel solid that
+density is 0 — so the certificate was being asked to credit the plan's struts at a second
+opinion about them.
+
+The posture now takes each voxel's rho from the covering cell (ruling C's per-cell rho,
+the same number the pass radius field sizes the strut from); a cell that sent no rho falls
+back to the law's density for its voxels, exactly as the radius field does; and a latticed
+voxel with neither is **refused by name** rather than reaching the octet-band sentence,
+which says nothing about the plan. This is the substitution the organic path already makes
+("the posture the certification consumes is now the TRACED one").
+
+### The owning-cell question must be asked at the plan's cell
+
+`lattice_certification_mask` asks it at ONE cell size anchored on ONE origin. A plan has a
+different cell per region **and per group**, so asking at the law's number decides which
+voxels are kept and dropped by a cell nothing in the design contains — a silent substitute.
+Hence the per-cell provider above. On 570B38E2 it drops 0 covered voxels.
+
+### Ordering: the plan's refusal comes first
+
+The validate + group work moved from after the law's mask (below `grade_lattice`, the
+certification mask and the D10/E3 empty-mask refusal) to just above `if (graded)`. It can
+move because K1 severed the dependency — the plan's frame now comes from the job alone,
+where it used to come from `R.stepped.cells` and so could not be built until the law had
+run.
+
+`plan_before_law` is `empty_after_beam`'s job (a 31 mm outline beam that clears every voxel
+the law graded) plus a 4 mm cell on a 6 mm halving ladder. Both are refusals:
+
+* at 588672f5: *"no lattice remains to emit … the outline beam turned 750 voxel(s) solid …
+  narrow the band"* — the invalid cell is never mentioned, and the app is sent to fix a band
+  that is not the problem;
+* now: *"stepped cell 0 in region 1 is 4 mm, which is not on that region's menu (base 6 mm
+  at a 0.45 mm bead admits 2 size(s), largest 6, finest 3)"*.
+
+It still costs a solve. The whole function is post-solve, and validating a plan needs nothing
+but the job, so the pre-run check the app can call (item 2 / K7) is where that belongs.
+
+### The remainder is measured where the mask is FINAL
+
+Not where it is built. On 570B38E2 the outline beam turns **804** of the plan's own voxels
+solid and those belong in the remainder: moving the census below the beam raises r1 from
+115086.472 to 124131.531 and r2 from 56452.275 to 79302.950, a rise of 31,895 mm³ =
+804 × 39.68 mm³ (3.411 mm voxels) exactly.
+
+★ The beam overriding the plan is core's own rule winning over the app's design. It is
+reported, not silent — the beam's voxel count is in the receipt and those voxels land in the
+stated remainder — but whether a plan job should get the beam at all is a question for #354,
+not a thing core should decide quietly.
+
+### STILL OPEN — the outline clip
+
+`point_in_clearance_region` **does** honour `outline_uv` (even-odd over the loops, with the
+app's frame swap/negate), so the MASK already clips to the pocket. But
+`keep_out_signed_distance` for a face slab is the **rectangle** — `u_lo..u_hi`,
+`w_lo..w_hi`, no outline — and that is what `cell_may_overlap` uses for activation, while
+`clip_segment` never consults the include region at all. So for a cell the outline cuts: the
+cell stays active, struts are drawn across the whole cell **including outside the pocket**,
+and the mask then certifies those voxels SOLID. Geometry and mask disagree, which is the
+class bar B7 exists to stop.
+
+The fix is to carry the outline as a clip term — the exact in-plane distance to the polygon,
+`min` with the slab's own `s`, `max` across the include union (a max of 1-Lipschitz terms is
+1-Lipschitz and is a valid lower bound on the union's signed distance, so `clip_segment`'s
+certificate stays sound). No new key, the loops exactly as sent. It sits in `LatticeBoundary`,
+which every lattice job uses, so the scope — plan passes only, or every job carrying
+`outline_uv` — is the reviewer's call and is asked on #358.
+
+### A verification trap worth recording
+
+The control for this work is the binary built at 588672f5, and `test_plan_is_the_design`
+takes `TOPOPT_CLI_OVERRIDE=<path>` so it can be re-run against one. **Copying a different
+binary over the build tree's `topopt-cli` does not work**: macOS kills a signed executable
+whose bytes changed under it ("Killed: 9"), every check then fails for the wrong reason, and
+the run looks like a red control when nothing ran at all. The override takes a PATH and the
+old binary runs from where it was built.
+
+Two more, from the same day:
+* **`make` compares mtimes at one-second granularity.** A rebuild whose source copy landed in
+  the same second as the previous object file is a silent no-op: "Built target", exit 0, and
+  the binary is the old code. Caught by `strings <binary> | grep <a new marker>` and an md5
+  that matched the control exactly. `--version` does not catch it — the fingerprint is the
+  core library's and is identical across both binaries.
+* **A 4-decimal truncation of a sent cell size is a refusal.** 570B38E2's base is
+  5.156120181083679; written as 5.1561 its halves land 5e-5 mm off the menu and the run
+  refuses on its own plan. Bases travel at full precision or not at all.
+
+## Addendum 13 — ruling 1's condition and ruling 2's outline clip (2026-10-10)
+
+### Ruling 1's condition: one density, with a tripwire on it
+
+> The posture's rho at a voxel must be the SAME number the pass radius field sized that
+> voxel's strut from, including on the fallback. Make it an assertion with a test.
+
+Satisfied by making them the **same code**, not by making two implementations agree. The
+posture build and the pass radius field both call `plan_cell_rho_at` (the covering plan
+cell's rho, or 0) and `plan_strut_rho_at` (that, or the posture's value at the voxel, or
+the band floor). The per-pass rho grid the radius field used to carry is gone.
+
+Three divergences that construction removes:
+
+1. the radius field looked only in **its own group's** grid, so a strut reaching past its
+   cell into another group's cell was sized from the voxel fallback while the posture
+   credited that other cell's rho — one point, two densities. Groups cannot overlap (the
+   validator proves it), so the shared lookup is strictly more correct;
+2. the old fallback `mask ? posture : band_rho_min` already read the plan's own posture
+   after K3's substitution. Making that explicit removes the coincidence;
+3. the **outline beam** zeroes the posture's density and clears the voxel from the mask,
+   but the radius field's cell lookup runs first, so a strut inside the band is still
+   drawn at the cell's rho — **804 voxels on 570B38E2**. The certificate does not credit
+   them (they leave the mask and become companion solid), so it is not a
+   certificate/geometry mismatch; it IS core's rule overriding the app's design, it is
+   reported rather than silent, and the policy is #354's.
+
+**The tripwire.** Over the FINAL mask, every latticed voxel's drawn density must equal its
+certified density, **bit-exactly** — there is no arithmetic between them to justify a
+tolerance, and a tolerance would hide the drift it exists to catch. Proven to fire:
+perturbing the drawn density by a relative 1e-9 makes the run exit 1 with
+
+    region 1: the strut at (18.1250, 0.6250, 8.1250) is DRAWN at relative density
+    0.18000000018000001 and CERTIFIED at 0.17999999999999999
+
+**The receipt**: `plan_rho_fallback_by_region`, e.g. `"r1=0"`. A plan that sends a rho with
+every cell shows 0 on every region; a non-zero entry says core's own grading is sizing and
+certifying that many of the plan's struts.
+
+### Ruling 2: the outline is a clip, in every job that sends one
+
+**Scope (b)**, and my earlier report of the defect was too narrow. `signed_distance` is
+planes ∩ base ∩ ¬keep-outs: the include regions contribute **no signed-distance term at
+all** (the header said so). So it was never "clipped to the rectangle rather than the
+outline" — struts were **not clipped to the include region in any form**, and one could
+run past the region's own rectangle until it met the shell.
+
+**Measured**, on `outline_clip_whole` / `outline_clip_quadrant` — the same region with the
+same 32 cells filling its whole 24 × 24 mm rectangle, the quadrant arm adding one
+`outline_uv` loop that keeps a 12 × 12 mm quarter:
+
+| | whole | quadrant |
+|---|---|---|
+| mask (plan posture) | 3610 vox | 1000 vox (27.7%) |
+| `interior_volume_mm3`, **pre-clip** (f0d8bf27) | 2498.242 | **2502.643 (100.2%)** |
+| `interior_volume_mm3`, with the clip | — | **427.838** |
+
+Pre-clip the quadrant's lattice was 100.2% of the whole rectangle's while its mask was
+27.7% of it: **2074.8 mm³ of struts, 83% of what was written, in voxels the receipt called
+companion solid.** `test_outline_clip` fails 7 of its 17 checks against f0d8bf27.
+
+**The byte-identity bar is structural.** `clip_includes_` is set only by
+`add_include_region`, and only for a geometry whose `outline_uv` is non-empty, so a job
+with no outline cannot reach the term. Measured too: `plan_partial_depth` emits the same
+STL byte for byte before and after, md5 `6588e1651bd046fdfe8008bc1a58d059`.
+
+**The receipt**: `clip_outside_region_mm3`, per region — the volume a region's own plan
+cells cover that the region does not reach. It balances exactly:
+`plan_latticed_mm3 + clip_outside_region_mm3` on the quadrant (1953.125 + 5097.656) equals
+the control's `plan_latticed_mm3` (7050.781) to the last digit, because the plan covers the
+same volume in both arms and the outline only splits it. This is the **cause**, measured in
+one run; a count of struts removed would need two runs and so could not be a receipt.
+
+**Soundness.** Each term is an exact signed distance, `min` with the slab's own depth terms
+and `max` across the include union; a max of 1-Lipschitz functions is 1-Lipschitz and
+`max_i sd_i <= sd_union`, so `clip_segment`'s certificate holds.
+
+**Speed.** The rectangle is an exact UPPER bound on the outline (the polygon is a subset),
+so an include whose bound cannot beat the running max never has its polygon queried, and
+each outline carries a uniform edge index with an exact ring-expansion search. Measured on
+#354's own job documents, 200k `signed_distance` queries over the include regions' bounding
+box, `-O2`, box base (so the figure is the term's own cost and not a shell query's):
+
+| part | includes | outline vertices | per query, no term | per query, with it |
+|---|---|---|---|---|
+| 68BF7B74-dg | 5, all outlined | 187 (largest loop 75) | 0.009 µs | **0.242 µs** |
+| 102117B9-dg | 177, all outlined | 2586 (largest loop 75) | 0.009 µs | **4.264 µs** |
+
+Index build is 0.5 ms for all 177 regions. The cost scales with the number of include
+regions, not with vertices — 102117B9's loops are small (largest 75 points, not the
+10–33k the ruling expected, which is the model's mesh and not the outline). The floor is
+the 177 rectangle bounds themselves.
+
+★ **What is NOT sound, and was tried:** filtering to the includes whose bound is at the
+top. The region with the highest rectangle bound can be the one the point falls OUTSIDE
+the outline of while a region with a slightly lower bound contains it; skipping the second
+returns a value that is too negative and clips struts that belong. Every include is
+bounded; every include whose bound beats the best so far is evaluated.
+
+★ **A mask-backed include takes no clip** — a voxel set has no analytic distance — so its
+struts are bounded by the shell alone, exactly as before. The run says so on a `[clip]`
+line rather than leaving it to be found in a mesh.
+
+### Still blocked on #354
+
+`plan_base_cell_mm` is in **none** of the nine job documents under
+`evidence/2026-10-08-plan-proofs/plans/`, the three `job_plan_k2.json` files included, so
+rulings 3 and 4 cannot be run on the app's own files. Ruling 4 additionally needs a
+`SPANS.txt`: core writes one only under `lattice.emit_organic_spans`, which is the ORGANIC
+span writer, and a Default Grade plan run emits no spans at all.
+
+## Addendum 14 — K5: the plan's rho reaches every strut AND every node (2026-10-10)
+
+> per-cell rho must reach every strut including legs and nodes at group and pass
+> boundaries; prove strut diameters on 570B38E2.
+
+### Where the radius is sampled, and why that is a boundary question
+
+The generator samples the radius at a strut's **midpoint** and at a **node's own
+position** (`checked_radius(G, mid)` and `checked_radius(G, np)`, lattice_gen.cpp), and
+
+    node_pos(R, gx, gy, gz) = R.origin + g * 0.5 * R.cell_mm
+
+so a node with an **even** index on an axis lies exactly ON a cell plane: a cell corner is
+shared by eight cells, an edge node by four, a face node by two. The octet's
+face-diagonal struts lie IN the cell faces, so their midpoints sit on a shared plane too.
+**Exact-boundary queries are the norm here, not an edge case.**
+
+A half-open `floor` test attributed every one of them to the cell on the **+** side. At
+the plan's outer face — and at every group and pass boundary — that cell is not in the
+plan, so the lookup found nothing and fell through to core's **band floor**, the thinnest
+density the law allows, precisely at the joints where the load leaves the lattice.
+
+### Measured, at 91abe169
+
+| fixture | from the plan | from the posture | **at the band floor** | total |
+|---|---|---|---|---|
+| `plan_partial_depth` | 112 | 24 | **30** | 166 |
+| `plan_full_depth` | 224 | 24 | **55** | 303 |
+| `outline_clip_quadrant` | 504 | 50 | **85** | 639 |
+
+**18% of the queries on `plan_partial_depth` were answered by the band floor**, and a
+third did not come from the plan at all. After the fix all three fixtures read
+`plan / 0 / 0`.
+
+What that cost, measured on the octet at the fixtures' own 6 mm cell:
+
+| | relative density | strut diameter |
+|---|---|---|
+| core's band floor | 0.050470 | **0.547514 mm** |
+| the plan's own rho | 0.180000 | **1.067340 mm** |
+
+**1.949× too thin in diameter, 3.800× in area** — a notch at the joint, which is the one
+place a lattice cannot afford one. The emitted lattice volume rose once the plan's density
+reached them:
+
+| fixture | before | after | |
+|---|---|---|---|
+| `plan_partial_depth` | 329.006 mm³ | **368.093 mm³** | +11.9% |
+| `plan_full_depth` | 619.129 mm³ | **699.275 mm³** | +12.9% |
+| `outline_clip_quadrant` | 427.838 mm³ | 427.838 mm³ | unchanged |
+
+The quadrant arm is unchanged because its 85 fallback queries were all on elements the
+outline clip then removed — which is worth knowing: the two fixes do not stack on the same
+elements. The STL md5 changes on the first two and not on the third, which says the same
+thing.
+
+`plan_full_depth`'s `clipped_struts` moved 72 → 80 and `landings` with it, so struts moved
+too, not only nodes: a thicker strut meets the eroded boundary sooner. The receipt's
+`min_strut_diameter_mm` / `max_strut_diameter_mm` did not move, but those are the run's
+aggregate across variants and `note_diameter` is never called for a node, so they are not
+the instrument for this.
+
+### The rule, and why it is `max` rather than an ownership
+
+The test is the **closed** box, and where several of the plan's cells share the point the
+density is the **largest** of theirs. Deliberately not an ownership rule: a node ball
+thinner than a strut meeting it is a notch at the joint, so the shared geometry has to
+satisfy every incident cell, and `max` is the only answer that does and is independent of
+which cell is asked first. The tolerance is `1e-9 * size`, relative, because the grid is
+built as `origin + k * size`.
+
+### The receipt
+
+`plan_rho_queries_plan` / `_posture` / `_floor` in `run_info`, counted over the
+**generator's** queries only (the census's own tripwire queries are snapshotted out
+first). `_floor` must be 0 on a plan that sends a rho with every cell;
+`test_plan_is_the_design` asserts both `_floor == 0` and `_posture == 0`, and both go red
+at 91abe169 through `TOPOPT_CLI_OVERRIDE`.
+
+### Two receipt gaps this turned up, for K4
+
+* the per-variant report's **`cell_mm` is the LAW's cell** — 14.5 mm on
+  `plan_partial_depth`, whose plan is entirely 6 mm cells. On a plan run that field
+  describes a grid the file does not contain.
+* `min_strut_diameter_mm` / `max_strut_diameter_mm` in `run_info` are the aggregate over
+  the run's variants and **exclude nodes entirely**, so neither bounds what a plan run
+  actually wrote.
+
+Both belong with K4's "report per-region cells and sizes", and neither is changed here.
+
+### Still blocked
+
+"Prove strut diameters on 570B38E2" needs #354's after-run job with `plan_base_cell_mm`.
+A run on a base supplied by hand would prove diameters against a ladder the app may never
+have used, which is the thing the reviewer's ruling 3 rules out.
+
+## Addendum 15 — K4: the plan as laid, per region and per group, and the ledger (2026-10-10)
+
+> report per-region cells and sizes, the grid phase, and the laid group origins in
+> `run_info`.
+
+The summary (`anystep_cells` / `_regions` / `_passes` / `_size_histogram`) says how many.
+This says **which**, and every number in it is either the plan as validated or what the
+generator's own observer counted — nothing is derived a second time.
+
+### What the app gets, in `run_info`'s graded block
+
+```json
+"plan_laid_unattributed": 0,
+"plan_by_region": [{
+  "region": 1, "base_cell_mm": 6,
+  "slot_origin_mm": [18, 0, 14], "slot_origin_stated": true,
+  "plane_origin_mm": [18, 0, 14], "normal": [0, 1, 0], "depth_mm": 12,
+  "cells": 32, "sizes": "6.000=32",
+  "groups": [{
+    "size_mm": 6, "origin_mm": [18, 0, 14], "phase_mm": [0, 0, 0],
+    "nx": 4, "ny": 2, "nz": 4, "cells": 32,
+    "struts_laid": 144, "nodes_laid": 13, "cells_with_no_strut": 24
+  }]
+}]
+```
+
+Three fields are new information rather than a restatement:
+
+* **`phase_mm`** — the group origin's offset modulo its **own** size, per axis, against
+  the region's slot grid. `stepped_group_cells` buckets by (region, size, phase), so two
+  cells of the same size on offset grids are different passes, and nothing in the receipt
+  said so. The app packs on the slot grid, so this is the number it can check its own
+  packer against.
+* **`slot_origin_stated`** — whether the grid came from the wire or core defaulted to the
+  region origin. "The app packed on this grid" and "core assumed the region origin" are
+  different claims and only the first is checkable; `SteppedPlanRegion` gained the flag so
+  the receipt can tell them apart.
+* **`cells_with_no_strut`** — per group, how many of the plan's cells the generator put
+  nothing in. On the `plan_laid_ledger` fixture that is **24 of 32**: the outline keeps a
+  quarter of the rectangle, so three quarters of the cells are clipped to nothing. This is
+  the per-cell answer `classify_unlaid_cells.py` asks for, and no receipt stated it
+  before.
+
+### The ledger file — `lattice.emit_plan_laid`
+
+Off by default, and it writes nothing on a run that sent no plan, so no existing job's
+artifacts change. Armed, it writes `<base>_LAID.txt` beside the meshes, using the same
+`lattice_base_name` the meshes use so the rung is the file's rung and not one recomputed:
+
+```
+# LAID <region> <cx> <cy> <cz> <size_mm> <rho> <struts> <nodes>
+PLAN 4 1 1 0
+LAID 1 21 3 11 6 0.18 32 9
+LAID 1 21 3 17 6 0.18 28 6
+LAID 1 27 3 11 6 0.18 28 6
+LAID 1 27 3 17 6 0.18 24 4
+```
+
+One line per **plan** cell, laid or not, in the plan's own order (region, then size
+descending, then cell index), so the order is deterministic and the file diffs cleanly.
+`PLAN` carries cells, regions, passes and the unattributed count.
+
+It exists because core had no way to answer the question the app's classifier asks:
+`emit_organic_spans` is the **organic** span writer and a Default Grade plan run produces
+no organic spans at all. The reviewer made it conditional on exactly that, and that is how
+it turned out.
+
+### How it is counted, and why that is not the density's rule
+
+The generator already reports every emitted element through `LatticeGenObserver`, and
+`lattice_gen.hpp` states that observing never changes the emitted bytes — but the observer
+is built **inside** `export_latticed_variant`, so a caller wanting to attribute struts to
+the plan's cells could not reach it. A `laid_tap` parameter now chains onto whichever
+observer the run already uses (the welded-body tap, or the protrusion measurement's), and
+the welded push moved inside its own callback gated on its own key, so the welded body
+cannot change because the ledger was asked for.
+
+Attribution takes the **lex-smallest** plan cell sharing the point (group index, then k,
+j, i) — a ball at its own centre, a strut fragment at its **midpoint**, which is where
+the generator sampled its radius, so the ledger and the density agree about which cell a
+strut belongs to. That is deliberately **not** K5's `max` rule: the density has to satisfy
+every cell meeting at a shared node, while the ledger needs each element counted exactly
+once.
+
+**Measured**: arming the ledger leaves the mesh byte-identical —
+`plan_laid_ledger` and `outline_clip_quadrant` both emit md5
+`5827508ce78ad04ef9ef105cdee82217`. The test checks the two streams against each other
+rather than trusting the header's promise.
+
+### The two gaps K5 turned up are reported, not redefined
+
+* the per-variant report's **`cell_mm` is still the LAW's cell** (14.5 mm on a plan made
+  entirely of 6 mm cells);
+* `min_strut_diameter_mm` / `max_strut_diameter_mm` are still the run's cross-variant
+  aggregate and still never count a node.
+
+Neither is changed in place: an app reading `cell_mm` today would silently get a different
+number, which is a wire change for #354 to agree. `plan_by_region` carries the plan's own
+figures under their own keys instead, and on a plan run the law's fields describe the law
+and not the file.
+
+`test_plan_is_the_design` is now 41 checks; 12 go red at the pre-K4/K5 binary through
+`TOPOPT_CLI_OVERRIDE` (the K4 ones partly because the key itself is refused there, which
+is the honest answer for a feature that did not exist).
+
+## Addendum 16 — K6 part 2: a pass lays only where its own region owns the space (2026-10-10)
+
+> clip by the owner function itself — bisect along each strut to ≤ 0.01 mm, keep only
+> pieces R owns, drop pieces shorter than a strut diameter and count them in the receipt.
+
+Where two include prisms overlap, both regions' passes laid a lattice through the shared
+volume and the file carried **two**. `stepped_region_owner` already answered who owns a
+point, but it is a **predicate**, and a strut clip needs a signed distance.
+
+### The term
+
+`LatticeBoundary::clip_to_owned_region(declared_id)`, 0 (the default) adding nothing:
+
+```
+own_R = min over S != R of  max( -sd_S ,  (d_S - d_R)/2 + bias )
+```
+
+with `sd_X` the include's own exact signed distance (outline and all, ruling 2) and `d_X`
+the distance to X's face plane. "S does not contest this point" is "S does not contain
+it" **or** "S's plane is farther", which is the max; "no S contests it" is the min. A max
+or min of 1-Lipschitz functions is 1-Lipschitz, and the **halved** difference is what
+keeps it so — `d_S - d_R` is 2-Lipschitz. Halving cannot change a sign, so the agreement
+with the owner function is exact; only the magnitude is conservative, by at most √2 near
+the boundary (for two perpendicular planes the exact distance to the bisector is
+`|d_S - d_R|/√2`, and `/2` is the universally safe choice). `bias` is ±1e-9 mm, the
+tie-break on the declared id, five orders under the clip's own tolerance.
+
+★ **It does not ask whether R contains the point.** That is ruling 2's union term, which
+is gated on the outline, and folding it in here made the term clip a **single-region** job
+for the first time — `plan_partial_depth` and `plan_full_depth`, no overlap at all, both
+changed their emitted bytes, which is exactly what the no-overlap bar forbids. Caught by
+measuring the md5s rather than by reasoning. With it removed the min starts empty, so with
+one include the term is inert and the file is byte-identical.
+
+★ **A region with no face plane does not contest a face region** — the same rule
+`stepped_region_owner` states by giving it `d = +infinity`. A bolt or mask-backed include
+never wins a shared point, so it never clips one away.
+
+### The bar, measured
+
+| | at 39db7c33 | now |
+|---|---|---|
+| triangles touching the 1.5 × 1.5 × 6 mm shared box | **176** | **42** |
+| total triangles | 16976 | 16568 |
+| `interior_volume_mm3` | 403.179 | 280.876 |
+| `clipped_struts` | 24 | 43 |
+
+The bar was "~38 triangles not 178"; the instrument reads 176 before and 42 after, through
+the same code path, with `TOPOPT_CLI_OVERRIDE` pointed at the old binary. The assertion in
+`test_region_ownership` is a **bound** (`> 0` and `< 100`), not the number, so a change
+that re-tessellates the same lattice does not red it while a change that puts the second
+lattice back does. `> 0` matters as much as `< 100`: a clip that **emptied** the shared box
+would be the opposite defect.
+
+**10,000 random points per shared volume** (`test_owner_clip`, a unit test — the agreement
+is a property of two pure functions, and measuring it through a run would sample it only
+where struts happen to lie):
+
+```
+[k6] 3441 of 10000 points lie in BOTH prisms: 1738 owned by region 1,
+     1703 by region 2, 0 disagreements with the clip
+```
+
+Both directions exercised, zero disagreements. The test also pins the no-face-plane case
+(every shared point kept) and that `clip_to_owned_region(0)` changes the distance at no
+point at all.
+
+**No-overlap jobs byte-identical**: `plan_partial_depth` `9475a816deba69ad260f06ee0fbda0c6`,
+`plan_full_depth` `edb4425d956e8f7fd7ab7957d24cd103`, `outline_clip_quadrant`
+`5827508ce78ad04ef9ef105cdee82217` — all three unchanged from K5. `straddler_collision`
+still refuses, with its own reason.
+
+### The bisection was already there, and tighter than the bar
+
+The bar asked for a bisection to ≤ 0.01 mm. `clip_segment` is already one —
+`certified_clip_spans` refines by midpoint and **proves** each kept span with a Lipschitz
+certificate rather than sampling it — and its tolerance is `kClipTolMm = 1e-4` mm, **100×
+tighter** than asked. So no bisection was written: the ownership answer was made into a
+1-Lipschitz signed distance and handed to the clip that already existed. That is also why
+the term's soundness argument is about Lipschitz constants and not about sample spacing.
+
+### Stubs: dropped by their own diameter, and counted
+
+`LatticeRegion::min_fragment_diameters` (0 = off) raises the sliver guard from the fixed
+1 µm to `diameters × 2r`, using the **piece's own** radius. Set to 1.0 on exactly the
+passes the ownership clip applies to, so a pass that is not owner-clipped keeps the 1 µm
+guard and its file is byte-identical — this could not be a global constant for that
+reason.
+
+A piece left on the far side of an ownership boundary, shorter than it is thick, prints as
+a bump and carries no load into anything. On `straddler_seam`:
+
+```
+"stub_fragments_dropped": 3,
+"stub_fragment_length_mm": 5.746429452
+```
+
+Emitted only when the guard was raised, so a legacy receipt is byte-identical. A guard that
+silently ate geometry is what the receipts exist to prevent.
+
+### What this does NOT do
+
+It does not clip a region's cells to that region's own prism — that is ruling 2's union
+term and is gated on `outline_uv`. A cell the app placed up to its region's prism edge is
+still laid in full. The two terms are separate on purpose: one answers "is this inside the
+pocket", the other "does another region own it".

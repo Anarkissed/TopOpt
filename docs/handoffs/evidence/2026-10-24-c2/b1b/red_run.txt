@@ -1,0 +1,23 @@
+  series consistency: worst |rho_own - rho_single| = 0
+  series formula: 400 columns, worst error 0.338 mm
+FAIL (line 121): 18: the buildable depth is the series sum
+FAIL (line 124): 18: the column reports its own length; its height is the whole run
+  too_soft: strains 0.0213..0.2759, target 1.6997 mm, fixed depth 4.1392 mm; single ok 400, series too_soft 0 of 400
+FAIL (line 147): 18: when the fixed segments alone squish past the target, the column is too_soft (single-rho: ok)
+  flat prism: the press owns 0 voxels, 0 past its plane
+FAIL (line 266): 5/4a: 0 press-field voxels past the flat prism in the exported field
+  CONTROL (none): the press owns 0 voxels, 0 past its plane
+FAIL (line 268): 5/4a: the CONTROL (no flat prism) owns voxels past the plane, so the check can see one
+FAIL (line 277): 5: the press's stack carries its flat prism (apex, depth = deepest_squish_mm)
+FAIL (line 279): 5: the receipt names the flat prism
+FAIL (line 281): 18: the receipt counts the press's series columns
+FAIL (line 295): 4a: the FILLED field has a density on every lattice voxel (the app's flood)
+FAIL (line 305): 4a: the seam share is 1 well inside the press, 0 well past its plane, in [0, 1]
+FAIL (line 308): 4a: the header carries each press's footprint boundary and names the fill rule
+FAIL (line 315): 26: the receipt has a grams block
+  grams: face 211 nan, press 201 nan, total nan
+FAIL (line 320): 26: grams per face are > 0 and sum to the total
+  region grams: region 0 nan of nan total
+FAIL (line 350): 26: the one include region's grams are the lattice's (> 0)
+test_flexible_b1b: 16 checks, 14 failures
+exit 1

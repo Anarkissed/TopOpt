@@ -109,6 +109,18 @@ struct StepModel {
   // this is the copy that travels WITH the faces, so a consumer holding only a
   // StepModel cannot lose it.
   bool faces_are_fitted = false;
+
+  // ★ C2 B0, item 15 (2026-10-24): what the STEP import cleaned up (step.cpp).
+  //   dropped_repeated_corner_triangles — (a, a, b) triangles welded from a pole's
+  //     two coincident nodes (fillet corners), dropped as weld_and_clean drops them;
+  //   remeshed_at_linear_deflection — 0 = meshed once at the requested deflection;
+  //     else the finer deflection the shape was re-meshed at because a face came out
+  //     open;
+  //   open_faces — the face ids still touching an edge not used exactly twice after
+  //     that (sorted). Empty for a closed mesh. Never silent: callers report it.
+  int dropped_repeated_corner_triangles = 0;
+  double remeshed_at_linear_deflection = 0.0;
+  std::vector<int> open_faces;
 };
 
 // Import a STEP file (AP203/AP214/AP242) via OCCT and tessellate it at the given
@@ -118,6 +130,11 @@ struct StepModel {
 // §5: STEP ──OCCT──▶ tessellated surface).
 StepModel import_step_file(const std::string& path,
                            const StepTessellation& tess = {});
+
+// The face ids (sorted, unique) of every triangle touching an edge that is not used
+// exactly twice: the faces on an open rim or a non-manifold edge. Empty for a closed
+// 2-manifold. `triangle_face` is parallel to `mesh.triangles` (-1 where it is short).
+std::vector<int> step_open_faces(const TriangleMesh& mesh, const std::vector<int>& triangle_face);
 
 // Tag every solid voxel of `grid` that lies against B-rep face `face_id` of
 // `model` with `tag` (ROADMAP M1.6). `tag` MUST be VoxelTag::Load or

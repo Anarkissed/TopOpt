@@ -1,0 +1,2 @@
+libc++abi: terminating due to uncaught exception of type topopt::JobError: job.json: flexible: flexible.faces[0].mode: must be "both", "either" or "centre_edge"
+exit 134
