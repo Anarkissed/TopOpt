@@ -40,3 +40,11 @@ rounded_slab.txt                  the two slabs' pseudo-faces and which wrap (co
 #                             core can frame it. A RUN declares only the sections its entries use: his 0004's two sends are unchanged.
 #   frames_his_0004.txt       the same three regions' frames (+3 blocks), the header's region list, and four exitRegions lines
 #                             that now name the section a column leaves through.
+# SYNC #354 at 89af86dd (merge 2949a032, the redesign plan's P1; reviewer ruling R1): ONE golden re-recorded at 2949a032
+# (RECORD=1, SWIFT_DETERMINISTIC_HASHING=1, FLEX_AP_BASE=2949a032, into a scratch copy of this folder; every other golden that run
+# wrote equals the one here byte for byte; MANIFEST.txt and probe_answers.json differ only in their base/core labels and are kept).
+# Before the re-record: det 37 identical + this file DIFFERS (raw and canonical); unseeded 32 identical + this file DIFFERS
+# (canonical) + 1 PART-SKIP. The 9 outline goldens did not move.
+#   lattice_subtree_102117B9.json   the `wallThickness` block is gone, nothing else: 2353efb4 ("Remove the Lattice depth
+#                                   section and the slab") removed LatticeSettings.wallThickness and its CodingKey (an old
+#                                   save's key is read and ignored). No Flexible key changed.
