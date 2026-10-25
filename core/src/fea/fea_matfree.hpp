@@ -529,6 +529,9 @@ bool mg_coarse_space_hook_installed();
 // granularity (a few hundred applies past the deadline) is nothing against a
 // budget measured in minutes.
 inline constexpr int kSolveDeadlinePollIters = 256;
+// THE SAFETY NET's poll cadence (fea.hpp SolverStopped): one steady-clock read
+// every this-many Jacobi-CG iterations.
+inline constexpr int kSafetyNetPollIters = 16;
 
 // The armed deadline for THIS thread, in absolute mf_steady_ms() milliseconds;
 // 0 = disarmed. Thread-local and sticky, like the stagnation latch and the
@@ -550,6 +553,16 @@ inline double& mf_safety_net_ms() {
 // TEST ONLY: set the net's time limit; <= 0 restores kSolverSafetyNetMs.
 inline void mf_test_safety_net_ms(double ms) {
   mf_safety_net_ms() = ms > 0.0 ? ms : kSolverSafetyNetMs;
+}
+// The absolute mf_steady_ms() at which THIS thread's running Jacobi-CG solve's
+// safety net fires; 0 = no such solve running. mf_cg_solve sets it for its own
+// duration, so a long setup it calls — GenEO's basis build (877 s measured on
+// his Carriage Arms at res 96) — stands down at the limit instead of running
+// past it (the net is polled only between CG iterations). Read on the calling
+// thread; a pool worker must be handed the value.
+inline double& mf_safety_net_deadline() {
+  static thread_local double d = 0.0;
+  return d;
 }
 
 // SAFE-RETRY probes (tests / diagnostics only; production never calls these).

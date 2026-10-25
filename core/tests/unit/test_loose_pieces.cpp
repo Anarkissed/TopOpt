@@ -38,12 +38,16 @@
 #include "topopt/voxel.hpp"
 
 #include "fea/fea_matfree.hpp"
+#ifdef TOPOPT_LOOSE_PIECE_RULE
+#include "fea/geneo.hpp"
+#endif
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using topopt::CgInfo;
@@ -410,6 +414,43 @@ int main() {
     check(topopt::fea_detail::mf_safety_net_ms() == topopt::kSolverSafetyNetMs &&
               topopt::kSolverSafetyNetMs == 600000.0,
           "N3: the shipped time limit is 10 minutes per Jacobi-CG solve");
+
+    // N4: the net is polled between CG iterations, so a long setup inside the
+    // solve must stand down at its deadline: GenEO's basis build (877 s on his
+    // Carriage Arms at res 96; run A of this task sat in it past the limit).
+    // With the solve's deadline already passed the build returns no basis;
+    // POSITIVE CONTROL: with no deadline the same build succeeds.
+    {
+      namespace fd = topopt::fea_detail;
+      const bool was = fd::geneo_set_enabled(true);
+      auto engage = [&](double deadline) {
+        fd::geneo_reset();
+        fd::MatfreeReduced m = fd::mf_build_reduced(g, 1.0, kNu, bcs, loads, &ey,
+                                                    "test_loose_pieces", nullptr);
+        fd::MfSolveContext ctx;
+        ctx.grid = &g;
+        ctx.elem_youngs = &ey;
+        ctx.youngs_modulus = 1.0;
+        ctx.poisson = kNu;
+        fd::geneo_solve_begin(m, ctx);
+        const double prev = fd::mf_safety_net_deadline();
+        fd::mf_safety_net_deadline() = deadline;
+        const bool built = fd::geneo_engage_now(m, ctx, 500);
+        fd::mf_safety_net_deadline() = prev;
+        return std::make_pair(built, fd::geneo_basis_builds());
+      };
+      const auto late = engage(fd::mf_steady_ms() - 1.0);
+      const auto free_run = engage(0.0);
+      fd::geneo_reset();
+      fd::geneo_set_enabled(was);
+      std::printf("      GenEO build past the deadline: built=%d (builds %lld) ; with no "
+                  "deadline: built=%d (builds %lld)\n",
+                  late.first ? 1 : 0, late.second, free_run.first ? 1 : 0,
+                  free_run.second);
+      check(!late.first && free_run.first,
+            "N4: GenEO's basis build stands down at the solve's safety-net deadline "
+            "(POSITIVE CONTROL: it builds with none)");
+    }
 #endif
   }
 

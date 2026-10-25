@@ -864,6 +864,15 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   // bit-identical.
   const double net_ms = fea_detail::mf_safety_net_ms();
   const double net_t0 = mf_steady_ms();
+  // ... and its deadline, visible to the setups called below (GenEO), restored
+  // on every exit, throws included.
+  struct NetDeadlineScope {
+    double prev;
+    explicit NetDeadlineScope(double d) : prev(fea_detail::mf_safety_net_deadline()) {
+      fea_detail::mf_safety_net_deadline() = d;
+    }
+    ~NetDeadlineScope() { fea_detail::mf_safety_net_deadline() = prev; }
+  } net_scope(net_ms > 0.0 ? net_t0 + net_ms : 0.0);
 
   // External additive preconditioner (matrix-free GenEO two-level, phase 2). Snapshot
   // the installed hook once for the whole solve; when none is installed (the default)
@@ -1006,7 +1015,10 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
           "requested tolerance (the iteration blew its time budget)",
           i, error_out);
     }
-    if ((i % kSolveDeadlinePollIters) == 0 && i > 0 && net_ms > 0.0) {
+    // Every kSafetyNetPollIters iterations (a clock read is nothing next to
+    // one fine apply), so the net overshoots its limit by a few iterations at
+    // most — and by at most one GenEO setup, which stands down at the deadline.
+    if ((i % kSafetyNetPollIters) == 0 && i > 0 && net_ms > 0.0) {
       const double elapsed = mf_steady_ms() - net_t0;
       if (elapsed >= net_ms) {
         error_out = std::sqrt(residualNorm2 / rhsNorm2);
