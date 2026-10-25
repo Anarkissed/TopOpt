@@ -553,7 +553,16 @@ int main(int argc, char** argv) {
       std::printf(
           "  vf %.2f: margin %.3g, %s\n", v.requested_volume_fraction,
           v.report.margin.worst_case,
-          v.accepted ? "accepted" : "rejected (below margin_stop)");
+          v.accepted ? "accepted"
+          : v.report.rejection_reason == topopt::kAnchorDetachedReason
+              ? "rejected (anchored piece detached: see the WARNING above)"
+              : "rejected (below margin_stop)");
+      // CORE LIST item 41 — a file carrying more than one body, or dropped specks.
+      if (v.report.bodies_reported && v.accepted)
+        std::printf("        %d bodies exported, %d loose speck(s) dropped "
+                    "(%lld voxels)\n",
+                    v.report.bodies_exported, v.report.specks_dropped,
+                    v.report.speck_voxels);
       // Task 2026-08-03-growth-ladder — on a growth run the accounting IS the
       // result: how much plastic this rung adds, and how much of the object you
       // are about to print was never in your model.

@@ -245,6 +245,21 @@ struct VariantReport {
   bool request_reported = false;
   double requested_volume_fraction = 0.0;
   bool target_saturated = false;
+  // CORE LIST items 41 + 47 — the rung's printed material as BODIES (voxel.hpp
+  // printed_bodies): how many the exported file carries, the loose specks dropped,
+  // and the anchored pieces its design let go of (which reject the rung, naming
+  // the anchored faces or regions). Emitted as report.json "bodies" only when
+  // `bodies_reported` (more than one body exported, a speck dropped, or an anchor
+  // lost), so every one-body, speck-free line keeps its exact bytes.
+  bool bodies_reported = false;
+  int bodies_exported = 1;
+  int specks_dropped = 0;
+  long long speck_voxels = 0;
+  double speck_volume_mm3 = 0.0;
+  int anchored_pieces_lost = 0;
+  long long lost_anchor_voxels = 0;
+  std::vector<int> lost_anchor_face_ids;
+  std::vector<int> lost_anchor_region_ids;
 };
 
 // ── WHAT FROZE THE PART, and the rungs it made redundant (CORE LIST item 40) ──

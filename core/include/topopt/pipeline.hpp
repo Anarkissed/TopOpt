@@ -175,6 +175,16 @@ struct MinimizePlasticOptions {
   // not cover is reported there as "other". Empty (the default) attributes the
   // whole mask to "other".
   std::vector<FrozenSourceCount> frozen_mask_sources;
+  // CORE LIST item 47 — WHICH ANCHOR a Fixture voxel came from: per anchor face
+  // (or region), the part-grid voxels its own tagging made Fixture. Read only to
+  // NAME the faces of an anchored piece a rung let go of (kAnchorDetachedReason);
+  // the verdict itself reads the grid's tags. Empty (the default) names none.
+  struct AnchorVoxels {
+    int face_id = -1;
+    int region_id = -1;
+    std::vector<std::size_t> part_voxels;
+  };
+  std::vector<AnchorVoxels> anchor_voxels;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
   // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the
@@ -1018,6 +1028,16 @@ inline constexpr const char* kLoadPathNotConnectedReason =
 inline constexpr const char* kRungNonConvergentReason =
     "linear solve did not converge";
 
+// CORE LIST item 47 — the rung's design left an ANCHORED piece the part as drawn
+// joined to a load holding no load of its own (voxel.hpp lost_anchored_pieces):
+// a bolted hole the design cut away from the part (his Carriage Arms, 13185527:
+// 13 anchored holes, dropped by the export without a word). The rung WAS analysed,
+// so its numbers are measurements, of a part that no longer holds that bolt. Like
+// a severed rung it does not stop the ladder and does not seed the next rung; its
+// line's "bodies" block names the anchored faces. Below the connectivity reason
+// in precedence, above the margin.
+inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
+
 // Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
 // rejection_reason values, from the two DIVERGENCE guards. Both are distinct
 // from kRungInfeasibleReason on purpose: neither claims the load path was lost.
@@ -1312,6 +1332,9 @@ struct MinimizePlasticVariant {
   // without recomputing marching cubes or copying the mesh. Empty for a
   // cancelled rung (its `v3` is default-constructed).
   const TriangleMesh& mesh() const { return v3.mesh; }
+  // CORE LIST item 41 — the solid the export writes: every body holding an anchor
+  // or a load (V3Report::exported_mesh). Equal to mesh() on a one-body part.
+  const TriangleMesh& exported_mesh() const { return v3.exported_mesh(); }
 
   // --- Optimization-history keyframes (app playback) -----------------------
   // Raw marching-cubes isosurfaces of the analysis density at snapshots through

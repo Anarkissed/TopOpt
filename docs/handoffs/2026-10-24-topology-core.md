@@ -39,7 +39,79 @@ APP LIST (to #354 through the reviewer): the rung card shows `target_saturated`,
 (largest sources first), and the skipped rungs (a line, no file). On-device runs need the bridge to carry
 `report.frozen_share` and the two per-line keys; until then an on-device run shows fewer rungs with no reason.
 
-## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25)
+## Items 41 + 47, as built (2026-10-24)
+
+- `voxel.hpp` / `voxelize.cpp`: `printed_bodies` (26-connected printed voxels, the belt's definition; a body CARRIES
+  if it holds a Load or Fixture voxel), `carrying_body_shells` (per carrying body its largest MC shell; a shell goes to
+  the body most of its vertices vote for, nearest printed centre in the 3x3x3 block; byte-identical to
+  `keep_largest_component` whenever the kept set is the single largest shell or the field tags no BC voxel), and
+  `lost_anchored_pieces` (Fixture voxels whose as-drawn body held a load but whose design body holds none).
+- `check_v3` fills `V3Report::export_mesh` (stored only when it differs from `mesh`), `bodies_exported`,
+  `specks_dropped`, `speck_voxels`; `mesh` is unchanged (the §7 gate and the lattice shell, Q41a/Q41b).
+- `minimize_plastic`: the as-drawn bodies once per run; per rung the lost-anchor check guards the warm seed and the
+  verdict (`kAnchorDetachedReason`, below the belt, above the margin); the line's `bodies` block (exported, specks,
+  lost pieces, lost anchor face / region ids from `MinimizePlasticOptions::anchor_voxels`, built in loadcase.cpp).
+- `run_job` export: `exported_mesh()` at smooth_factor 1, `carrying_body_shells` on the resample at > 1; one stderr
+  WARNING per detached rung; the CLI prints the bodies line.
+- "Lost" compares with the part AS DRAWN: an anchored block the drawing never joined to a load is exported, not
+  rejected (it was not lost by the design).
+- Bodies are decided only when the grid tags BOTH Load and Fixture voxels (the belt's condition). A self-weight run
+  keeps the single largest shell, as before. Found by the full suite: cli_demo's self-weight demo has a detached anchored
+  ring in a rung, which the first version exported as a second body (2 of 87 checks red). A self-weight run therefore
+  still drops a detached anchor ring silently; covering it needs a definition of "lost" without a declared load (open).
+- Tests: `test_export_bodies` (ctest `export_bodies`) red-first 20/30 failed after item 40 + the merge (every two-block
+  file 1 body; the plate's floor rung 0.26 accepted with the bore pad dropped); green 28/28. `test_shell_iso_provenance`
+  gains sibling pins on `exported_mesh()` at both sites (the two existing pins keep their meaning).
+- Merged origin/claude/raster-receipt-fields at a5706f41 (includes #358's d228514a outline fix).
+
+## Item 50, NEW BRIEF (reviewer 2026-10-24 22:59; replaces the flex ladder) — PLAN
+
+His latest strengthen run: `~/.topopt-worker/efe18e338ed84ea8` (read-only; res 128, PA12_CF, 13 protections, 37
+clearances, 44 anchors, box + 1 keep-out, PLSM, smooth 2; rungs 1.55/1.25/1.10 at about 17 min each; recommended
++10 %, 3.209 >= 1.5).
+
+Shape: a new job key `loads.redesign: "strengthen"` (only with `minimize_plastic: false` and a design box). Absent, the
+growth ladder runs byte-for-byte as today. A driver `strengthen_part` (new `core/src/simp/strengthen.cpp` +
+`include/topopt/strengthen.hpp`) runs OUTSIDE the optimizers: every optimize is an ordinary one-rung `minimize_plastic`
+call, so `simp.cpp`, `plsm.cpp`, `analyze.cpp` (called only) and `production.cpp` are untouched.
+
+1. DOMAIN: `MinimizePlasticOptions::domain_box_only` in `resolve_design_domain` (minimize_plastic.cpp): part voxels
+   outside the box that nothing froze become Empty / FrozenVoid; clearances and keep-outs as today; every frozen voxel
+   stays. Frozen voxels outside the box are reported. `volume_basis = Domain`: the rung target is vf over the Active
+   envelope (no part-relative rescale). Mass in g and % of the original.
+2. REFERENCE: certify the part as drawn on the part grid (`analyze_fixed_design`, knockdown): `ref = max(verified,
+   margin_required)`; targets `ref x {1.333, 2.0, 4.0}`.
+3. CEILING: certify the domain filled solid -> `margin_max`; a target above 0.95 x margin_max is UNREACHABLE (reported
+   with margin_max), not run.
+4. ADAPTIVE VOLUME, as an OUTER loop (in-loop updates would need simp.cpp/plsm.cpp, which wait on #362's cure):
+   coarse grid (res/2) from uniform at vf0 (version 1: from the ceiling, vf0 = clamp(target / margin_max)^(1/1.5);
+   version k: max(that, vf_(k-1))); run, certify, update `vf <- vf x (target(1+0.10)/m)^0.75`, capped +-5 % per update
+   and floored at vf_(k-1); stop when the certified margin is inside [target, target x 1.25] or after 6 updates. Then
+   one fine run at the found vf (uniform start), as the brief says, and verify.
+5. VERIFY THE EXPORT: re-voxelize the exported (smoothed, all-bodies) mesh onto the run grid and certify it
+   (`analyze_job`'s mesh path); record in-loop vs verified.
+6. ACCEPT if verified >= target and >= 1.05 x the previous version, item 47's lost-anchor check clean, Keep Clears empty,
+   0 specks; else REPAIR (vf x (target/verified)^(1/0.75), warm start from this result) at most 2 times; else UNREACHABLE
+   with the best achieved. Two versions at the same design (vf within 1 % and IoU > 0.98) merge, said so.
+7. IoU vs the original part voxels on the run grid; > 0.9 flagged "essentially your original".
+8. CONNECTIVITY: item 47's check is the guard. If his test shows floating protected pieces, propose ONE of tether load
+   cases or Li 2016's virtual temperature, with the evidence; build neither now.
+- Receipt: report.json `strengthen` block (reference, ceiling, per version: target, verified + in-loop margin, mass g /
+  %, max |u| at the load nodes mm, IoU, repairs, status Verified / Repaired / Unreachable / Merged, time); files
+  `strengthen_1/2/3.stl`; design.bin blocks keyed by the achieved domain vf.
+- Red-first `test_strengthen.cpp` (small part in a box): version 1 passes; strictly stronger versions; an unreachable
+  target reported; a failing part referenced to the requirement; with the key absent the growth and reduction outputs
+  byte-identical.
+- Papers: Lin & Sheu 2009 is step 4's idea (adaptive volume until the stress meets its limit), applied here as an outer
+  loop with our own update rule; Chu 2018's added stress penalty belongs with the later stress-constrained optimizer
+  (it changes the objective, which this item does not); Li 2016's virtual temperature is step 8's candidate; Le 2010's
+  adaptive normalisation matters when an aggregate (p-norm) drives the design, which here it does not: every margin is
+  the certified max voxel stress; da Silva 2021 sets delta = 0.10 (voxel vs body-fitted 5-8 %) and explains why a
+  compliance design is only a first step (99 % higher peak stress than a stress-constrained one at the same vf).
+- Test on his Carriage Arms (efe18e33 copied to evidence): A = his outputs; B = from scratch at 1.10/1.25/1.55 at res
+  64; C = the new mode, 3 versions at res 128 (estimate 1.5-2 h). Per-version table and one render per version.
+
+## Item 50, as ruled (2026-10-24 20:08, 20:13, 20:25) — WITHDRAWN by the 22:59 brief
 
 On a part that PASSES as drawn, "Redesign to strengthen" means stiffness: certify as drawn (margin, flex = max |u| over
 the load faces' nodes in mm, compliance), then an ASCENDING walk 1.00, 1.10, 1.25, 1.55, 2.00, each rung gated on

@@ -2274,6 +2274,19 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME starved_rung COMMAND test_starved_rung)
 
+  # CORE LIST items 41 + 47: the export keeps every body that holds an anchor or a
+  # load (it kept only the largest, so his split arms saved one arm), and a rung
+  # whose design detaches an anchored piece the part as drawn joined to a load is
+  # rejected naming the faces (his cut holes). Through run_job on two meshes.
+  add_executable(test_export_bodies tests/validation/test_export_bodies.cpp)
+  target_link_libraries(test_export_bodies PRIVATE topopt)
+  target_compile_definitions(test_export_bodies PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME export_bodies COMMAND test_export_bodies)
+
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
   # redesign). §0a/R2: a face that is both protected and a lattice region carries
   # ONE depth, and a job stating two is refused with both figures; per-face depths

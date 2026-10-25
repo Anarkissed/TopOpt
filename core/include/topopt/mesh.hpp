@@ -123,6 +123,22 @@ int count_components(const TriangleMesh& mesh);
 // stray 0.5-threshold islands. An empty input returns an empty mesh.
 TriangleMesh keep_largest_component(const TriangleMesh& mesh);
 
+// The cleanup above, split in two for callers that keep MORE than one component
+// (CORE LIST item 41, voxel.hpp carrying_body_shells). `clean_degenerate_triangles`
+// drops the repeated-index triangles exactly as keep_largest_component does;
+// `triangle_component_roots` labels each triangle of the result with its
+// shared-edge component root (out_components = how many); and
+// `rebuild_from_components` keeps the triangles whose root is in `keep`, in
+// order, re-indexing vertices first-seen. With `keep` = {the root holding the most
+// triangles, the smallest such root on a tie} the three reproduce
+// keep_largest_component byte for byte.
+TriangleMesh clean_degenerate_triangles(const TriangleMesh& mesh);
+std::vector<int> triangle_component_roots(const TriangleMesh& clean,
+                                          int& out_components);
+TriangleMesh rebuild_from_components(const TriangleMesh& clean,
+                                     const std::vector<int>& root,
+                                     const std::vector<char>& keep_root);
+
 // ---------------------------------------------------------------------------
 // Surface resampling for smooth tessellation (handoff 086-surface-resample).
 //

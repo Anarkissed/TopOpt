@@ -318,6 +318,33 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // same condition tag_step_face would have thrown on, made legible.
   for (int fid : lc.anchor_face_ids)
     validate_face_id(fid, model, "load case anchor");
+  // CORE LIST item 47 — each anchor's OWN Fixture voxels, tagged on a scratch copy
+  // of the untagged grid, so a rung that lets an anchored piece go can name its
+  // faces (MinimizePlasticOptions::anchor_voxels; receipt only — the tags below
+  // are applied exactly as before).
+  std::vector<MinimizePlasticOptions::AnchorVoxels> anchor_voxels;
+  {
+    const VoxelGrid untagged = grid;
+    auto own_voxels = [&](const VoxelGrid& one) {
+      std::vector<std::size_t> v;
+      for (std::size_t idx = 0; idx < one.tags.size(); ++idx)
+        if (one.tags[idx] == VoxelTag::Fixture &&
+            untagged.tags[idx] != VoxelTag::Fixture)
+          v.push_back(idx);
+      return v;
+    };
+    for (int fid : lc.anchor_face_ids) {
+      VoxelGrid one = untagged;
+      tag_step_face(one, model, fid, VoxelTag::Fixture);
+      anchor_voxels.push_back({fid, -1, own_voxels(one)});
+    }
+    for (int rid : lc.anchor_region_ids) {
+      VoxelGrid one = untagged;
+      tag_step_region(one, model, region_or_throw(rid, "load case anchor"),
+                      VoxelTag::Fixture);
+      anchor_voxels.push_back({-1, rid, own_voxels(one)});
+    }
+  }
   for (int fid : lc.anchor_face_ids)
     tag_step_face(grid, model, fid, VoxelTag::Fixture);
   for (int rid : lc.anchor_region_ids)
@@ -440,6 +467,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Shared production solver config (matrix-free multigrid + Galerkin cache +
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
+  opts.anchor_voxels = std::move(anchor_voxels);  // item 47: names, receipt only
   opts.external_loads = external;  // the user's load case; empty => self-weight
 
   // Warm-start production flip — LOAD-CASE MODE ONLY (handoff 114; evidence:

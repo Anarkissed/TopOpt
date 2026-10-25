@@ -1153,6 +1153,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // cannot disagree about what counts as added.
   const std::vector<char> in_part =
       growth_ladder ? original_part_voxels(grid, domain) : std::vector<char>();
+  // CORE LIST item 47 — the part AS DRAWN, as bodies, once per run: which anchors
+  // it joins to a load. A rung that leaves one of those anchors on a body holding
+  // no load has let it go (lost_anchored_pieces).
+  const PrintedBodies as_drawn_bodies = [&] {
+    const std::vector<char> drawn = original_part_voxels(grid, domain);
+    std::vector<double> drawn_density(drawn.size(), 0.0);
+    for (std::size_t idx = 0; idx < drawn.size(); ++idx)
+      if (drawn[idx]) drawn_density[idx] = 1.0;
+    return printed_bodies(G, drawn_density, kIso);
+  }();
   const double voxel_mm3 = G.voxel_volume();
   const double part_mm3 = part_solid * voxel_mm3;
   auto measure_added_material = [&](const std::vector<double>& rho_field,
@@ -2382,6 +2392,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // run tags no load faces), so a CONNECTED variant — every existing fixture —
     // takes exactly the pre-belt path to exactly the pre-belt verdict.
     const bool load_path_ok = load_path_connected(G, rho, kIso);
+    // CORE LIST item 47 — the second connectivity fact: did this design let go of
+    // an anchored piece the part as drawn joined to a load? Measured here for the
+    // same reason as the belt: it governs the warm seed below AND the verdict.
+    const LostAnchors lost_anchors =
+        lost_anchored_pieces(G, as_drawn_bodies, printed_bodies(G, rho, kIso));
+    const bool anchors_kept = lost_anchors.design_bodies.empty();
 
     // Handoff 110 (Part A) — carry this rung's CONVERGED density forward to seed
     // the next (lighter) rung when inheritance is on; otherwise clear the seed so
@@ -2395,7 +2411,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // severance and buries the evidence of where it started. `warm_seed` is left
     // UNTOUCHED, so it still holds the last CONNECTED rung's density (or is empty).
     // With inheritance off it is empty either way, so this guard is inert there.
-    if (load_path_ok)
+    // A rung that let go of an anchored piece (item 47) seeds nothing either.
+    if (load_path_ok && anchors_kept)
       warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
 
     // Handoff 114 — rung-BOUNDARY density snapshot: the converged physical field
@@ -2602,7 +2619,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // stops (below), exactly the pre-belt condition on the pre-belt numbers.
     const double margin_effective = fda.margin_effective;
     const bool margin_ok = margin_effective >= options.margin_stop;
-    variant.accepted = fda.accepted;
+    variant.accepted = fda.accepted && anchors_kept;
 
     // Assemble this rung's report line (M5.2 / M5.2b).
     VariantReport& vr = variant.report;
@@ -2656,9 +2673,46 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // fail the CONNECTIVITY reason wins, because it is the more fundamental fact
     // and it tells the reader what the margin on that line is worth: a number
     // measured on a severed structure, whichever side of the threshold it landed.
+    // A lost anchored piece (item 47) is the second connectivity fact: below the
+    // belt, above the margin.
     if (!variant.accepted)
-      vr.rejection_reason =
-          load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+      vr.rejection_reason = !load_path_ok   ? kLoadPathNotConnectedReason
+                            : !anchors_kept ? kAnchorDetachedReason
+                                            : kMarginBelowRequiredReason;
+
+    // CORE LIST items 41 + 47 — the line's bodies: how many the file carries, the
+    // specks dropped, and the anchored pieces let go of, named by the anchor faces
+    // or regions whose own Fixture voxels they hold.
+    vr.bodies_exported = variant.v3.bodies_exported;
+    vr.specks_dropped = variant.v3.specks_dropped;
+    vr.speck_voxels = variant.v3.speck_voxels;
+    vr.speck_volume_mm3 = static_cast<double>(variant.v3.speck_voxels) * G.voxel_volume();
+    vr.anchored_pieces_lost = static_cast<int>(lost_anchors.design_bodies.size());
+    vr.lost_anchor_voxels = lost_anchors.voxels;
+    if (!anchors_kept) {
+      std::vector<char> lost_fixture(G.voxel_count(), 0);
+      for (const std::size_t idx : lost_anchors.fixture_voxels) lost_fixture[idx] = 1;
+      for (const MinimizePlasticOptions::AnchorVoxels& a : options.anchor_voxels) {
+        bool hit = false;
+        for (const std::size_t p : a.part_voxels) {
+          const int pi = static_cast<int>(p % static_cast<std::size_t>(grid.nx));
+          const int pj = static_cast<int>((p / static_cast<std::size_t>(grid.nx)) %
+                                          static_cast<std::size_t>(grid.ny));
+          const int pk = static_cast<int>(p / (static_cast<std::size_t>(grid.nx) *
+                                               static_cast<std::size_t>(grid.ny)));
+          if (lost_fixture[G.index(pi + domain.offset_i, pj + domain.offset_j,
+                                   pk + domain.offset_k)]) {
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) continue;
+        if (a.face_id >= 0) vr.lost_anchor_face_ids.push_back(a.face_id);
+        if (a.region_id >= 0) vr.lost_anchor_region_ids.push_back(a.region_id);
+      }
+    }
+    vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
+                         vr.anchored_pieces_lost > 0;
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
     // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER

@@ -569,7 +569,19 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
         sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
         variant.optimization.physical_density, printed_iso, sf,
         ResampleInterp::Tricubic);
-    smooth = keep_largest_component(raw);
+    // CORE LIST item 41 — every body holding an anchor or a load, mapped from the
+    // solve grid's bodies (keep_largest_component's shell on a one-body part).
+    BodyShells shells = carrying_body_shells(
+        raw, sg,
+        printed_bodies(sg, variant.optimization.physical_density, printed_iso));
+    if (shells.bodies_without_shell > 0)
+      std::fprintf(stderr,
+                   "WARNING: variant vf %.2f: %d carrying body(ies) left no shell "
+                   "in the smooth_factor %d resample, so the exported file does "
+                   "not carry them.\n",
+                   variant.requested_volume_fraction, shells.bodies_without_shell,
+                   sf);
+    smooth = std::move(shells.mesh);
   }
   // CAD-FACE PROJECTION (task 2026-08-06-cad-face-projection), DEFAULT OFF.
   //
@@ -609,7 +621,7 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   TriangleMesh projected;
   if (out.project_cad_faces && cad != nullptr && !cad->faces.empty() &&
       !cad->faces_are_fitted) {
-    const TriangleMesh& src = (sf > 1) ? smooth : variant.v3.mesh;
+    const TriangleMesh& src = (sf > 1) ? smooth : variant.exported_mesh();
     CadProjectOptions po = cad_project_options_for_grid(sg.spacing);
     po.enabled = true;
     const CadAttribution att = attribute_to_cad_faces(src, *cad, po);
@@ -617,7 +629,7 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   }
   const TriangleMesh& model_mesh =
       !projected.vertices.empty() ? projected
-                                  : ((sf > 1) ? smooth : variant.v3.mesh);
+                                  : ((sf > 1) ? smooth : variant.exported_mesh());
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
   if (R) baked = rotate_mesh(model_mesh, *R);
@@ -14529,6 +14541,29 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  "rejected_variants.\n",
                  i, v.requested_volume_fraction, kLoadPathNotConnectedReason,
                  v.report.margin_effective);
+    std::fflush(stderr);
+  }
+
+  // CORE LIST item 47 — LOUD DETACHMENT: a rung whose design let go of an
+  // anchored piece is rejected; say which anchors, once per rung.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (v.report.rejection_reason != kAnchorDetachedReason) continue;
+    std::string faces;
+    for (const int f : v.report.lost_anchor_face_ids)
+      faces += (faces.empty() ? "" : ", ") + std::to_string(f);
+    for (const int r : v.report.lost_anchor_region_ids)
+      faces += (faces.empty() ? "region " : ", region ") + std::to_string(r);
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) was REJECTED — %s. %d anchored "
+                 "piece(s) (%lld voxels; anchor face(s): %s) hold no load in this "
+                 "design: the material joining them to the part was removed, so "
+                 "the bolt there would hold nothing. No mesh is exported for it "
+                 "and no later rung inherits its design. See report.json "
+                 "rejected_variants.\n",
+                 i, v.requested_volume_fraction, kAnchorDetachedReason,
+                 v.report.anchored_pieces_lost, v.report.lost_anchor_voxels,
+                 faces.empty() ? "not named" : faces.c_str());
     std::fflush(stderr);
   }
 

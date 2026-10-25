@@ -248,6 +248,63 @@ int remap_node_to_domain(const VoxelGrid& part, const DesignDomain& domain,
 TriangleMesh marching_cubes(const VoxelGrid& grid,
                             const std::vector<double>& density, double iso = 0.5);
 
+// ── THE PRINTED MATERIAL AS BODIES (CORE LIST items 41 + 47) ────────────────
+//
+// A body is a 26-connected component of PRINTED voxels (non-Empty, density > iso:
+// the load-path belt's own definition, and the FEA's — hex elements sharing a
+// corner node are joined). It CARRIES when it holds a Load or a Fixture voxel; a
+// body holding neither is a loose speck. `decidable` is false unless the grid tags
+// BOTH a Load and a Fixture voxel (the belt's own condition): on a self-weight run
+// there is no declared load to tell a carrying body from a lost one, and every
+// caller keeps today's single-largest-shell rule.
+struct PrintedBody {
+  long long voxels = 0;
+  long long load_voxels = 0;
+  long long anchor_voxels = 0;
+  bool carries() const { return load_voxels > 0 || anchor_voxels > 0; }
+};
+struct PrintedBodies {
+  bool decidable = false;
+  std::vector<int> body_of_voxel;   // grid-indexed body id, -1 where not printed
+  std::vector<PrintedBody> bodies;  // in order of each body's lowest voxel index
+};
+PrintedBodies printed_bodies(const VoxelGrid& grid,
+                             const std::vector<double>& density, double iso);
+
+// The shells of a marching-cubes mesh of `grid`'s field (the solve grid's own, or a
+// finer resample of it) that the EXPORT keeps: for every carrying body, the largest
+// shell that lies on it, and no shell of a speck. A shell is assigned to a body by
+// majority over its vertices, each vertex voting for the nearest printed voxel
+// centre in the 3x3x3 block around it (exact on the solve grid, where a vertex sits
+// on an edge from a printed centre to an empty one). One body's inner cavity and
+// any resample fragment are dropped exactly as keep_largest_component drops them.
+// `same_as_largest` is true when the kept set is the single largest shell (or the
+// field is not decidable), and `mesh` is then keep_largest_component(raw) byte for
+// byte, so every one-body part exports exactly what it exported before.
+struct BodyShells {
+  TriangleMesh mesh;
+  bool same_as_largest = true;
+  int bodies_exported = 0;       // carrying bodies with a shell in `mesh`
+  int bodies_without_shell = 0;  // carrying bodies no shell was assigned to
+  int specks_dropped = 0;        // bodies holding neither a load nor an anchor
+  long long speck_voxels = 0;
+};
+BodyShells carrying_body_shells(const TriangleMesh& raw, const VoxelGrid& grid,
+                                const PrintedBodies& bodies);
+
+// Item 47: the design's bodies that hold Fixture voxels the part AS DRAWN joined to
+// a load, but that hold no Load voxel themselves — anchored pieces the design let
+// go of. An anchor the part as drawn never joined to a load (a separate anchored
+// block) is not counted: the design did not lose it. Both fields must be over the
+// same grid. Empty when the grid tags no Load voxel (a self-weight run).
+struct LostAnchors {
+  std::vector<int> design_bodies;  // ids into `design.bodies`
+  long long voxels = 0;            // printed voxels of those bodies
+  std::vector<std::size_t> fixture_voxels;  // their Fixture voxels, grid-indexed
+};
+LostAnchors lost_anchored_pieces(const VoxelGrid& grid, const PrintedBodies& as_drawn,
+                                 const PrintedBodies& design);
+
 // Result of the Gate V3 property suite. `passes` is the conjunction of the four
 // ARCHITECTURE §7 V3 gates; the individual fields expose why.
 struct V3Report {
@@ -268,6 +325,18 @@ struct V3Report {
   // this count SURFACES the drop so a caller can warn instead of shipping a
   // silently-broken result (diagnosis 064). Not a §7 V3 gate; a diagnostic signal.
   int load_fixture_islands = 0;
+  // CORE LIST item 41 — WHAT THE FILE CARRIES. `mesh` above stays the single
+  // largest shell (the §7 gate's input, and the shell the lattice path pushes);
+  // the exported solid is every carrying body (carrying_body_shells). Stored only
+  // when it differs from `mesh`, so a one-body part holds one copy, not two: read
+  // it through exported_mesh().
+  TriangleMesh export_mesh;
+  int bodies_exported = 1;
+  int specks_dropped = 0;
+  long long speck_voxels = 0;
+  const TriangleMesh& exported_mesh() const {
+    return export_mesh.triangles.empty() ? mesh : export_mesh;
+  }
   int min_feature_violations = 0;  // gate 4: solid voxels not in any 2x2x2 block
   bool passes = false;
 

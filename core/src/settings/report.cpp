@@ -151,6 +151,25 @@ void emit_variant(std::string& out, const VariantReport& v,
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
   out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
+  // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
+  // more than one body, a speck or a lost anchor to report.
+  if (v.bodies_reported) {
+    auto ids = [](const std::vector<int>& xs) {
+      std::string s = "[";
+      for (std::size_t i = 0; i < xs.size(); ++i)
+        s += (i ? ", " : "") + std::to_string(xs[i]);
+      return s + "]";
+    };
+    out += ",\n" + in2 + "\"bodies\": {\"exported\": " +
+           std::to_string(v.bodies_exported) +
+           ", \"specks_dropped\": " + std::to_string(v.specks_dropped) +
+           ", \"speck_voxels\": " + std::to_string(v.speck_voxels) +
+           ", \"speck_volume_mm3\": " + num_json(v.speck_volume_mm3) +
+           ", \"anchored_pieces_lost\": " + std::to_string(v.anchored_pieces_lost) +
+           ", \"lost_anchor_voxels\": " + std::to_string(v.lost_anchor_voxels) +
+           ", \"lost_anchor_face_ids\": " + ids(v.lost_anchor_face_ids) +
+           ", \"lost_anchor_region_ids\": " + ids(v.lost_anchor_region_ids) + "}";
+  }
   // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
   // of a growth run, and the licence for the [0,1] fraction bounds to be read on
   // the growth scale (validate_variant_object below). Emitted ONLY when the run
@@ -695,6 +714,22 @@ static void validate_variant_object(const JsonValue& v, const std::string& ctx) 
             !acc->boolean))
         throw ReportError(
             ctx + ": a non-empty rejection_reason requires accepted=false");
+    }
+
+    // CORE LIST items 41 + 47 — the optional "bodies" block. A lost anchor is a
+    // rejection, so it may appear only on a line that declares accepted=false.
+    if (const JsonValue* bd = find_field(v, "bodies")) {
+      if (bd->type != JsonValue::Type::Object)
+        throw ReportError(ctx + ": bodies must be an object");
+      require_int(*bd, "exported", ctx + ".bodies");
+      require_int(*bd, "specks_dropped", ctx + ".bodies");
+      require_int(*bd, "anchored_pieces_lost", ctx + ".bodies");
+      require_array(*bd, "lost_anchor_face_ids", ctx + ".bodies");
+      require_array(*bd, "lost_anchor_region_ids", ctx + ".bodies");
+      if (require_number(*bd, "anchored_pieces_lost", ctx + ".bodies") > 0.0 &&
+          !(acc != nullptr && acc->type == JsonValue::Type::Bool && !acc->boolean))
+        throw ReportError(ctx + ": a line that lost an anchored piece must be "
+                                "rejected (accepted=false)");
     }
 
     // CORE LIST item 40 — a rung's request and whether its target clamped to the

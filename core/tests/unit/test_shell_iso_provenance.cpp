@@ -135,6 +135,11 @@ int main() {
             "check_v3's mesh must BE the isosurface at the iso it was given — "
             "this is the shell the latticed export pushes and the strut clip is "
             "evaluated against");
+      // CORE LIST item 41: the SOLID export now writes exported_mesh(), every
+      // carrying body. This fixture tags no anchor or load, so it must be the
+      // same isosurface at the same iso.
+      CHECK(same_mesh(r.exported_mesh(), direct),
+            "check_v3's exported_mesh() is cut at the iso it was given too");
     }
   }
 
@@ -201,6 +206,9 @@ int main() {
             "\u2605 analyze_fixed_design's v3.mesh must be the isosurface at the "
             "printed_iso it was PASSED — the file-scope kIso = 0.5 it shadows "
             "must not reach check_v3");
+      CHECK(same_mesh(a.v3.exported_mesh(), direct),
+            "analyze_fixed_design's exported_mesh() (item 41) is cut at the "
+            "printed_iso it was passed too");
     }
   }
 
