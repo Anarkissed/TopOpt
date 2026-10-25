@@ -1060,6 +1060,14 @@ inline constexpr const char* kRungNonConvergentReason =
 // in precedence, above the margin.
 inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
 
+// REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
+// kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding
+// (tangential) springs, so the anchors cannot hold the load in some direction: the
+// part is held by springs that stand for no real support. Not a pass, whatever the
+// margin says. Below the connectivity facts, above the margin.
+inline constexpr const char* kAnchorsSlidingReason =
+    "anchors cannot hold the load in some direction (held by the sliding springs)";
+
 // Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
 // rejection_reason values, from the two DIVERGENCE guards. Both are distinct
 // from kRungInfeasibleReason on purpose: neither claims the load path was lost.

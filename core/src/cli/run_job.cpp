@@ -10697,14 +10697,17 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   vr.margin_required = margin_required;
   vr.margin_effective = a.margin_effective;
   vr.contact_rounds = a.contact_rounds;  // REAL BOLTS
+  vr.contact_tangent_share = a.contact_tangent_share;
+  vr.contact_held_by_sliding = a.contact_held_by_sliding;
   vr.contact_settled = a.contact_settled;
   vr.contact_kept_last = a.contact_kept_last;
   vr.contact_engaged = a.contact_engaged;
   vr.contact_released = a.contact_released;
   vr.contact_load_share = a.contact_load_share;
   if (!a.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok ? kLoadPathNotConnectedReason
+                          : a.contact_held_by_sliding ? kAnchorsSlidingReason
+                                                      : kMarginBelowRequiredReason;
   JobReport report;
   report.material = job.material;
   (a.accepted ? report.variants : report.rejected).push_back(vr);

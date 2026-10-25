@@ -216,13 +216,11 @@ namespace fea_detail {
 // reduced system.
 
 // REAL BOLTS — add the bearing springs (DirichletBC::spring > 0) to the assembled K:
-// at each engaged spring's node, spring n n^T + kt (I - n n^T), kt = spring_tangent +
-// spring_tangent_rel x the mean of the node's element diagonal (taken before any spring
-// is added); a released spring adds nothing. No spring entry, no change.
+// at each engaged spring's node, spring n n^T + spring_tangent (I - n n^T); a released
+// spring adds nothing. No spring entry, no change.
 void add_contact_springs(SpMat& K, const std::vector<DirichletBC>& bcs, int num_nodes,
                          const char* who) {
   if (!has_contact_springs(bcs)) return;
-  const Vec diag = K.diagonal();
   std::vector<Eigen::Triplet<double>> t;
   for (const DirichletBC& b : bcs) {
     if (!(b.spring > 0.0)) continue;
@@ -231,8 +229,7 @@ void add_contact_springs(SpMat& K, const std::vector<DirichletBC>& bcs, int num_
     if (b.released) continue;
     const int d = 3 * b.node;
     const double n[3] = {b.normal.x, b.normal.y, b.normal.z};
-    const double kt =
-        b.spring_tangent + b.spring_tangent_rel * (diag[d] + diag[d + 1] + diag[d + 2]) / 3.0;
+    const double kt = b.spring_tangent;
     for (int a = 0; a < 3; ++a)
       for (int c = 0; c < 3; ++c)
         t.emplace_back(d + a, d + c, (b.spring - kt) * n[a] * n[c] + (a == c ? kt : 0.0));

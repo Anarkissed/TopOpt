@@ -443,14 +443,16 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     // Winkler support of steel, E 200 GPa acting through 1 mm: (E / L) per mm^2 of the
     // face's true area (the per-node area is below). Fixed in mm, so it
     // does not stiffen toward a clamp as the grid refines. Across the normal, a pressing
-    // node has 1e-4 of that per-area stiffness: nearly frictionless, it holds only the
-    // sliding and spinning a frictionless support leaves free. A released node has
-    // nothing: any stiffness on the half pulling away acts as glue (the steel barely
+    // node has 1e-4 of that per-area stiffness: near-frictionless (the reviewer's ruling
+    // of 2026-10-25 21:45), it holds only the sliding and spinning a frictionless
+    // support leaves free, and the certification reports how much of the reaction it
+    // carries (FixedDesignAnalysis::contact_tangent_share; over 5 %, the anchors cannot
+    // hold the load in some direction and the design is not accepted). A released node
+    // has nothing: any stiffness on the half pulling away acts as glue (the steel barely
     // compresses, so that half moves ~50x further than the contact closes; measured on
     // the plate, it put the peak there and grew it with resolution). A STICK spring
     // (friction with no slip limit) makes the stuck / released boundary a new singular
-    // edge, from the element diagonal or per mm^2 alike (the plate, 2026-10-25): it
-    // waits for a ruling (frictionless / weak stick / Coulomb stick-slip).
+    // edge (the plate, 2026-10-25); Coulomb stick-slip is a later batch.
     constexpr double kBearingSteelMpa = 200000.0;
     constexpr double kBearingLengthMm = 1.0;
     constexpr double kBearingTangentFraction = 1e-4;

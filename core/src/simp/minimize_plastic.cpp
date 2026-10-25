@@ -2829,6 +2829,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.volume_fraction = variant.optimization.volume_fraction;
     vr.printed_fraction = printed_fraction;
     vr.contact_rounds = fda.contact_rounds;  // REAL BOLTS
+    vr.contact_tangent_share = fda.contact_tangent_share;
+    vr.contact_held_by_sliding = fda.contact_held_by_sliding;
     vr.contact_settled = fda.contact_settled;
     vr.contact_kept_last = fda.contact_kept_last;
     vr.contact_engaged = fda.contact_engaged;
@@ -2882,9 +2884,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // A lost anchored piece (item 47) is the second connectivity fact: below the
     // belt, above the margin.
     if (!variant.accepted)
-      vr.rejection_reason = !load_path_ok   ? kLoadPathNotConnectedReason
-                            : !anchors_kept ? kAnchorDetachedReason
-                                            : kMarginBelowRequiredReason;
+      vr.rejection_reason = !load_path_ok                ? kLoadPathNotConnectedReason
+                            : !anchors_kept              ? kAnchorDetachedReason
+                            : fda.contact_held_by_sliding ? kAnchorsSlidingReason
+                                                         : kMarginBelowRequiredReason;
 
     // CORE LIST items 41 + 47 — the line's bodies: how many the file carries, the
     // specks dropped, and the anchored pieces let go of, named by the anchor faces

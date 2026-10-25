@@ -782,9 +782,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
           el.a * m.KA(r, r) + el.b * m.KB(r, r) + el.c * m.KC(r, r);
     }
 
-  // REAL BOLTS — the bearing springs (a relative tangent from the ELEMENT diagonal, all
-  // resolved before any is added, as the assembled path takes K's diagonal before S),
-  // then their stiffness into the diagonal.
+  // REAL BOLTS — the bearing springs, and their stiffness into the diagonal.
   for (const DirichletBC& bc : bcs) {
     if (!(bc.spring > 0.0)) continue;
     if (bc.node < 0 || bc.node >= num_nodes)
@@ -793,9 +791,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
     MfSpring sp;
     sp.node = bc.node;
     sp.k = bc.spring;
-    const std::size_t d = 3 * static_cast<std::size_t>(bc.node);
-    sp.kt = bc.spring_tangent +
-            bc.spring_tangent_rel * (diagfull[d] + diagfull[d + 1] + diagfull[d + 2]) / 3.0;
+    sp.kt = bc.spring_tangent;
     sp.n[0] = bc.normal.x;
     sp.n[1] = bc.normal.y;
     sp.n[2] = bc.normal.z;

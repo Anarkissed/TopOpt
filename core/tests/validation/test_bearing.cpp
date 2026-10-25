@@ -21,6 +21,10 @@
 //       springs carrying the load (not the tangential stabilisation), and the glued
 //       margin printed beside it. (Res 32 puts 4 voxels across the bore's radius: too
 //       coarse to judge.)
+//   (e) THE SLIDING GUARD (the reviewer's ruling of 2026-10-25 21:45): pulled along the
+//       bore's own axis, a frictionless pin holds nothing, so the reaction sits in the
+//       weak sliding springs; over 5 % of it there, the design is NOT accepted and the
+//       line says why. The side pull of (d) stays under 5 %.
 // Eigen + the mesh importer; OCCT-free.
 
 #include "topopt/fea.hpp"
@@ -28,6 +32,7 @@
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/part.hpp"
+#include "topopt/pipeline.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/step.hpp"
 
@@ -70,7 +75,8 @@ int bore_face(const StepModel& m) {
   return -1;
 }
 
-JobDescription plate_job(const StepModel& m, int resolution, const std::string& model) {
+JobDescription plate_job(const StepModel& m, int resolution, const std::string& model,
+                         Vec3 force = Vec3{100.0, 0.0, 0.0}) {
   JobDescription job;
   job.model = "plate_bore.stl";
   job.material = "PLA";
@@ -81,7 +87,7 @@ JobDescription plate_job(const StepModel& m, int resolution, const std::string& 
   job.loads.anchor_face_ids = {bore_face(m)};
   JobLoadGroup g;
   g.face_ids = {plane_facing(m, Vec3{1.0, 0.0, 0.0})};
-  g.force = Vec3{100.0, 0.0, 0.0};
+  g.force = force;
   job.loads.groups.push_back(g);
   job.loads.anchor_model = model;
   job.output.report = "report.json";
@@ -232,8 +238,10 @@ int main() {
       CHECK(b.analysis.contact_rounds >= 2 && b.analysis.contact_rounds <= 6 &&
                 b.analysis.contact_settled,
             "(d) the certification ran the contact loop and it settled");
-      CHECK(b.analysis.contact_load_share > 0.95,
-            "(d) the springs carry the load, not the stabilisation");
+      CHECK(b.analysis.contact_load_share > 0.95 &&
+                b.analysis.contact_tangent_share < kAnchorsSlidingShare &&
+                !b.analysis.contact_held_by_sliding,
+            "(d) the springs carry the load, not the sliding springs");
     }
     const double change = std::fabs(bearing[2] - bearing[1]) / bearing[1];
     std::printf("[bearing] change 64 -> 96: bearing %.2f %%, glued %.2f %%\n", 100.0 * change,
@@ -242,6 +250,25 @@ int main() {
   } catch (const std::exception& e) {
     ++g_failures;
     std::fprintf(stderr, "FAIL: (d) threw: %s\n", e.what());
+  }
+
+  // ── (e) the sliding guard ─────────────────────────────────────────────────────
+  try {
+    const AnalyzeJobResult z =
+        analyze_job(plate_job(model, 48, "bearing", Vec3{0.0, 0.0, 100.0}), dir,
+                    std::string(TMP_DIR) + "/bearing_plate_axial", materials, rules);
+    const std::string report = z.report_json;
+    std::printf("[bearing] pulled along the bore's axis: %.1f %% of the reaction sliding, %s\n",
+                100.0 * z.analysis.contact_tangent_share,
+                z.analysis.accepted ? "accepted" : "rejected");
+    CHECK(z.analysis.contact_held_by_sliding && !z.analysis.accepted,
+          "(e) a load the anchors cannot hold is not a pass");
+    CHECK(report.find(kAnchorsSlidingReason) != std::string::npos &&
+              report.find("\"held_by_sliding\": true") != std::string::npos,
+          "(e) the report says why");
+  } catch (const std::exception& e) {
+    ++g_failures;
+    std::fprintf(stderr, "FAIL: (e) threw: %s\n", e.what());
   }
 
   if (g_failures == 0) {

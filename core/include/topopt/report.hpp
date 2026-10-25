@@ -265,6 +265,8 @@ struct VariantReport {
   // run's document keeps its bytes. settled false = the set still changed after the
   // last allowed solve (reported, never passed silently).
   int contact_rounds = 0;
+  double contact_tangent_share = 0.0;  // of the reaction, in the weak sliding springs
+  bool contact_held_by_sliding = false;  // over kAnchorsSlidingShare: not a pass
   bool contact_settled = true;
   bool contact_kept_last = false;
   int contact_engaged = 0;

@@ -286,6 +286,8 @@ FixedDesignAnalysis analyze_fixed_design(
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
     }
+    out.solve_iterations += sc.cg.iterations;
+    out.solve_ms += sc.t_solve_ms;
     if (!bearing) break;
     ++out.contact_rounds;
     std::vector<DirichletBC> next = contact_bcs;
@@ -317,19 +319,26 @@ FixedDesignAnalysis analyze_fixed_design(
   if (bearing) {
     // The set the field was solved with, and how much of the load its engaged
     // springs carry (the rest is the stabilisation's: near 1 when the supports hold).
-    Vec3 R{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
+    Vec3 R{0.0, 0.0, 0.0}, T{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
     for (const DirichletBC& b : contact_bcs) {
       if (!(b.spring > 0.0)) continue;
       if (b.released) { ++out.contact_released; continue; }
       ++out.contact_engaged;
       const std::size_t d = 3 * static_cast<std::size_t>(b.node);
       const std::vector<double>& u = sc.solution.u;
-      const double g = b.spring * (u[d] * b.normal.x + u[d + 1] * b.normal.y +
-                                   u[d + 2] * b.normal.z);
-      R.x += g * b.normal.x;
-      R.y += g * b.normal.y;
-      R.z += g * b.normal.z;
+      const double un = u[d] * b.normal.x + u[d + 1] * b.normal.y + u[d + 2] * b.normal.z;
+      R.x += b.spring * un * b.normal.x;
+      R.y += b.spring * un * b.normal.y;
+      R.z += b.spring * un * b.normal.z;
+      T.x += b.spring_tangent * (u[d] - un * b.normal.x);
+      T.y += b.spring_tangent * (u[d + 1] - un * b.normal.y);
+      T.z += b.spring_tangent * (u[d + 2] - un * b.normal.z);
     }
+    const Vec3 RT{R.x + T.x, R.y + T.y, R.z + T.z};
+    const double rt = std::sqrt(RT.x * RT.x + RT.y * RT.y + RT.z * RT.z);
+    out.contact_tangent_share =
+        rt > 0.0 ? std::sqrt(T.x * T.x + T.y * T.y + T.z * T.z) / rt : 0.0;
+    out.contact_held_by_sliding = out.contact_tangent_share > kAnchorsSlidingShare;
     for (const NodalLoad& l : loads)
       (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
     const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
@@ -687,6 +696,9 @@ FixedDesignAnalysis analyze_fixed_design(
       // orientation and are deliberately left alone.
     }
   }
+  // REAL BOLTS: anchors that hold the load only through the weak sliding springs are
+  // no support at all in that direction, so no margin measured on them is a pass.
+  if (out.contact_held_by_sliding) out.accepted = false;
   return out;
 }
 

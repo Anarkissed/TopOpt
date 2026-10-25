@@ -232,7 +232,7 @@ void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
 struct MfSpring {
   int node = 0;
   double k = 0.0;   // along n
-  double kt = 0.0;  // across n, resolved (DirichletBC::spring_tangent + _rel x diagonal)
+  double kt = 0.0;  // across n (DirichletBC::spring_tangent)
   double n[3] = {0.0, 0.0, 0.0};
 };
 // y += S x at the spring nodes (full-length x / y).

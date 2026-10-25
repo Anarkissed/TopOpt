@@ -214,9 +214,8 @@ int main() {
           "D4 RED CONTROL: the shipped V-cycle is indefinite / divergent here");
 
     // REAL BOLTS (#362's condition 4): the same hierarchy held by BEARING springs at
-    // x = 0 instead of the clamp (some released, a tangential part both absolute and
-    // relative to the diagonal), so the l1 diagonal carries the springs' row sums and
-    // the bound still holds by construction.
+    // x = 0 instead of the clamp (some released, a tangential part), so the l1 diagonal
+    // carries the springs' row sums and the bound still holds by construction.
     std::vector<DirichletBC> springs;
     int nth = 0;
     for (int c = 0; c <= g.nz; ++c)
@@ -225,7 +224,6 @@ int main() {
         sp.node = topopt::fea_node_index(g, 0, b, c);
         sp.spring = 5000.0;
         sp.spring_tangent = 5.0;
-        sp.spring_tangent_rel = 0.5;
         sp.normal = Vec3{-1.0, 0.0, 0.0};
         sp.released = (nth++ % 5) == 0;
         springs.push_back(sp);
