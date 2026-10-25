@@ -357,6 +357,18 @@ struct StrengthenVersionReport {
   int repairs = 0;
   double seconds = 0.0;
   std::string note;
+  // THE FINE START (core-loose-pieces, ruling 2026-10-25: don't carry specks
+  // across grids). Where the version's first fine run started — "coarse design"
+  // (the passing coarse design resampled onto the fine grid) or "hole array"
+  // (no design to hand on; not expected) — how many LOOSE pieces the hand-off
+  // held (26-connected, touching no support or load) and the design voxels they
+  // lost, the non-frozen loose voxels left (0: the start holds none), and the
+  // frozen-only pieces still loose (the solves take those out of the system).
+  std::string fine_start;
+  int fine_start_loose = 0;
+  long long fine_start_loose_voxels_removed = 0;
+  long long fine_start_loose_left = 0;
+  int fine_start_frozen_loose = 0;
 };
 struct StrengthenReport {
   bool evaluated = false;

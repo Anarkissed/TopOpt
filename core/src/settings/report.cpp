@@ -630,7 +630,14 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
-           ", \"note\": " + str_json(v.note) + "}";
+           ", \"note\": " + str_json(v.note) +
+           ", \"fine_start\": {\"from\": " + str_json(v.fine_start) +
+           ", \"loose_pieces\": " + std::to_string(v.fine_start_loose) +
+           ", \"loose_voxels_removed\": " +
+           std::to_string(v.fine_start_loose_voxels_removed) +
+           ", \"loose_voxels_left\": " + std::to_string(v.fine_start_loose_left) +
+           ", \"frozen_loose_pieces\": " + std::to_string(v.fine_start_frozen_loose) +
+           "}}";
   }
   out += sr.versions.empty() ? "]\n" : "\n    ]\n";
   out += "  }\n";

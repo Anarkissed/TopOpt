@@ -12,7 +12,9 @@
 //   (c) a target above 0.95 x the box filled solid is reported UNREACHABLE, with no
 //       variant behind it;
 //   (d) a part that fails as drawn is referenced to the requirement;
-//   (e) without the key the run is today's growth ladder: no "strengthen" block.
+//   (e) without the key the run is today's growth ladder: no "strengthen" block;
+//   (f) a version's fine run starts from the passing coarse design, its loose
+//       pieces taken out (ruling 2026-10-25: don't carry specks across grids).
 //
 // Eigen (minimize_plastic) on a mesh part, OCCT-free; the parametric level set,
 // capped at a few iterations.
@@ -284,6 +286,26 @@ int main() {
           ++unreachable;
           continue;
         }
+        // DON'T CARRY SPECKS ACROSS GRIDS (ruling 2026-10-25): a version that
+        // ran its fine grid started from the passing coarse design with its
+        // loose pieces taken out — no loose design material left in the start.
+        CHECK(v.has("fine_start") &&
+                  v.at("fine_start").at("from").str == "coarse design" &&
+                  static_cast<long long>(
+                      v.at("fine_start").at("loose_voxels_left").num) == 0,
+              "the fine run starts from the cleaned coarse design (no loose "
+              "voxels left)");
+        if (v.has("fine_start"))
+          std::printf("[50]   v%d fine start: %s, %d loose piece(s) taken out "
+                      "(%lld voxels), %lld left, %d frozen loose\n",
+                      static_cast<int>(v.at("version").num),
+                      v.at("fine_start").at("from").str.c_str(),
+                      static_cast<int>(v.at("fine_start").at("loose_pieces").num),
+                      static_cast<long long>(
+                          v.at("fine_start").at("loose_voxels_removed").num),
+                      static_cast<long long>(
+                          v.at("fine_start").at("loose_voxels_left").num),
+                      static_cast<int>(v.at("fine_start").at("frozen_loose_pieces").num));
         if (st == "merged") continue;
         ++passing;
         CHECK(ver >= tgt, "(a)(b) a version that is not unreachable meets its "
