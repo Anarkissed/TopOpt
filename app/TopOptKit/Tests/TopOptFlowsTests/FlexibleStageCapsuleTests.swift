@@ -12,11 +12,14 @@ import XCTest
 final class FlexibleStageCapsuleTests: XCTestCase {
 
     func testTheMenuIsTopologyFlexibleSurfaceThenAbout() {
+        // ★ SYNC #354 (89af86dd) A3, until P5 (Edit faces…): B5 (3f293974) removed WorkspaceStage.surface, so the inert
+        // "Surface ›" row is GONE from the menu — three rows: ‹ Topology, ● Flexible ✓, About Flexible…
         let items = FlexibleStageCapsule.menuItems(anchors: 1, loads: 1)
-        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-surface", "flexible-menu-about"])
-        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Surface \u{203A}", "About Flexible\u{2026}"])
-        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "cuts \u{00B7} unions \u{00B7} patterns", "limits \u{00B7} delete"])
-        XCTAssertEqual(items.map(\.action), [.topology, .none, .surface, .about])
+        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-about"])
+        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "About Flexible\u{2026}"])
+        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "limits \u{00B7} delete"])
+        XCTAssertEqual(items.map(\.action), [.topology, .none, .about])
+        XCTAssertFalse(items.contains { $0.title.hasPrefix("Surface") }, "no dead Surface row in the morning build")
         let flex = items[1]
         XCTAssertFalse(flex.enabled, "● Flexible is where he is: disabled …")
         XCTAssertTrue(flex.checked, "… with a check")
@@ -33,14 +36,13 @@ final class FlexibleStageCapsuleTests: XCTestCase {
         FlexibleStageCapsule.perform(.topology, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(went, [.topology], "Topology → go(.topology) once")
         XCTAssertNil(chrome.open, "a stage change folds every card")
-        FlexibleStageCapsule.perform(.surface, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
-        XCTAssertEqual(went.map(\.rawValue), ["topology", "surface"])   // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface; RED until P5 (the row is inert)
+        // ★ SYNC #354 (89af86dd) A3, until P5 (Edit faces…): no Surface step — B5 (3f293974) removed the stage and the row.
         chrome.show(.setup)
         FlexibleStageCapsule.perform(.about, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(abouts, 1, "About → the limits sheet")
         XCTAssertNil(chrome.open)
         FlexibleStageCapsule.perform(.none, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
-        XCTAssertEqual(went.count, 2); XCTAssertEqual(abouts, 1, "the Flexible row does nothing")
+        XCTAssertEqual(went.count, 1); XCTAssertEqual(abouts, 1, "the Flexible row does nothing")   // ★ SYNC #354 (89af86dd) A3: 1 (no Surface step) until P5
     }
 
     func testTheSegmentsOnTheMainPage() {

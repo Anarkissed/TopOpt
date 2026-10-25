@@ -24,7 +24,7 @@ import TopOptDesign
 
 public struct FlexibleStageCapsule: View {
     public enum Page: Equatable, Sendable { case lattice, squish }
-    public enum Action: Equatable, Sendable { case topology, surface, about, none }
+    public enum Action: Equatable, Sendable { case topology, about, none }   // ★ SYNC #354 (89af86dd) A3: `.surface` gone with its row until P5 (Edit faces…)
     /// One row of the ● Flexible menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -57,15 +57,15 @@ public struct FlexibleStageCapsule: View {
 
     // MARK: the rules, as values
 
-    /// The menu's rows: ‹ Topology (its anchors and loads), ● Flexible ✓, Surface ›, About Flexible….
+    /// The menu's rows: ‹ Topology (its anchors and loads), ● Flexible ✓, About Flexible… (Surface › removed until P5: Edit faces…).
     public static func menuItems(anchors: Int, loads: Int) -> [Item] {
         func count(_ n: Int, _ w: String) -> String { n == 0 ? "no \(w)" : "\(n) \(w)\(n == 1 ? "" : "s")" }
         return [
             Item(id: "flexible-menu-topology", title: "\u{2039} Topology", detail: "\(count(anchors, "anchor")) \u{00B7} \(count(loads, "load"))",
                  enabled: true, checked: false, action: .topology),
             Item(id: "flexible-menu-flexible", title: FlexibleStageStyle.title, detail: "You are here", enabled: false, checked: true, action: .none),
-            Item(id: "flexible-menu-surface", title: "Surface \u{203A}", detail: "cuts \u{00B7} unions \u{00B7} patterns", enabled: true, checked: false,
-                 action: .surface),
+            // ★ SYNC #354 (89af86dd) A3: the "Surface ›" row REMOVED until P5 makes it "Edit faces…" — B5 (3f293974) removed
+            // WorkspaceStage.surface, so it went nowhere (no dead row in the morning build).
             Item(id: "flexible-menu-about", title: "About Flexible\u{2026}", detail: "limits \u{00B7} delete", enabled: true, checked: false, action: .about),
         ]
     }
@@ -81,7 +81,6 @@ public struct FlexibleStageCapsule: View {
         chrome?.foldAll()
         switch a {
         case .topology: go(.topology)
-        case .surface: break   // ★ SYNC #354 (89af86dd) COMPILE FIX ONLY: B5 (3f293974) removed WorkspaceStage.surface; the row is inert until P5 makes it "Edit faces…"
         case .about: about()
         case .none: break
         }
@@ -161,7 +160,7 @@ public struct FlexibleStageCapsule: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background(FlexibleCornerPairStyle.publish("capsuleMenu"))
-        .accessibilityLabel("Flexible: Topology, Surface and About Flexible")
+        .accessibilityLabel("Flexible: Topology and About Flexible")   // ★ SYNC #354 (89af86dd) A3: no Surface row until P5
         .accessibilityIdentifier("flexible-capsule-menu")
     }
 
