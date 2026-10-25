@@ -21,6 +21,11 @@ Syncs one way from that branch, merge only, never force. Pushed to origin/claude
   for #362's app tests: `~/dev/TopOpt/reviewer-inbox/2026-10-25-integration-evidence/`.
 - Open, not tonight: core refuses nothing when one face is both an anchor and a load (the load's tag overwrites the
   anchor's; the app refuses the pair). CORE LIST candidate.
+- CORE LIST candidates from #362 (09:18, after merging 3fd9f17e as 63850aa5), answered, not built: (a)
+  `strengthen.versions[].variant_index` (a "merged" version has no variants[] line; its note's "version N" is this
+  version minus 1, wrong only if a version between was unreachable); (b) face-free `cap.note` (the app builds its line
+  from at_anchor_face / at_load_face meanwhile); (c) strengthen without a design box, in the part's bounding box? (a
+  ruling; the app refuses for now); (d) the REDUCED TEST SUITE warning should list Manifold (test_keep).
 
 ## Item 40, as built (2026-10-24)
 
