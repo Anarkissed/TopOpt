@@ -591,6 +591,7 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
 //                    worse than zero — in BOTH rel res and energy).
 //   cold_fallback    the fallback started from zero instead of a warm guess
 //                    worse than zero in both norms.
+//   cold_start       the l1 retry started from zero for the same reason.
 //   productive       counted as productive by the safe-path latch.
 //   consecutive_failures  the safe-path latch counter AFTER this attempt.
 struct MgSafeAttemptReport {
@@ -601,6 +602,9 @@ struct MgSafeAttemptReport {
   // The fallback started COLD: the caller's warm guess was worse than zero in
   // both the stopping norm and energy, and the iterate did not seed.
   bool cold_fallback = false;
+  // The l1 RETRY itself started COLD, for the same reason: the caller's warm
+  // guess was worse than zero in both norms (r0 / r0_exact are then 1).
+  bool cold_start = false;
   bool productive = false;
   int cycles = 0;
   double res = 0.0, r0 = 0.0;

@@ -223,7 +223,7 @@ thread_local int g_mg_safe_log_first = kSafeLogFirst;
 thread_local int g_mg_safe_log_every = kSafeLogEvery;
 struct SafeLogWindow {
   long long first_seq = 0, last_seq = 0;
-  int attempts = 0, converged = 0, seeded = 0, dropped = 0;
+  int attempts = 0, converged = 0, seeded = 0, dropped = 0, cold = 0;
   long long cycles = 0;
   double ms = 0.0;
 };
@@ -235,11 +235,11 @@ void mg_safe_log_flush_window() {
   if (w.attempts == 0) return;
   std::fprintf(stderr,
                "[mg-safe] solves %lld-%lld: %d safe attempts (%d converged, %d "
-               "seeded the Jacobi-CG fallback, %d solved with islands dropped), "
-               "%lld l1 cycles, %.0f ms ; per-solve lines: the first %d of a run, "
-               "then one summary per %d\n",
+               "seeded the Jacobi-CG fallback, %d solved with islands dropped, %d "
+               "started cold), %lld l1 cycles, %.0f ms ; per-solve lines: the "
+               "first %d of a run, then one summary per %d\n",
                w.first_seq, w.last_seq, w.attempts, w.converged, w.seeded,
-               w.dropped, w.cycles, w.ms, g_mg_safe_log_first, g_mg_safe_log_every);
+               w.dropped, w.cold, w.cycles, w.ms, g_mg_safe_log_first, g_mg_safe_log_every);
   ++g_mg_safe_log_summaries;
   w = SafeLogWindow();
 }
@@ -2824,6 +2824,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       bool ok = false;
       bool seeded_fallback = false;
       bool cold_fallback = false;  // fallback starts from 0, not the warm start
+      bool cold_start = false;     // the RETRY starts from 0, not the warm start
+      double warm_rel_x = -1.0, warm_J_x = 0.0;  // the dropped guess (exact system)
       double r0 = 1.0;     // start, on the system the retry solves (HS)
       double r0x = 1.0;    // start, on the EXACT system m
       double resx = -1.0;  // end, on the EXACT system m (-1 = not evaluated)
@@ -2897,12 +2899,32 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         }
         if (warm && bxn > 0.0 && use2) q0x = quality(m, bx, bxn, x0);
         if (warm && bxn > 0.0) r0x = q0x.rel;
+        // THE RETRY'S OWN START (CI core-linux cli_demo 2026-10-25): the better
+        // of the warm guess and zero, judged on the EXACT system in the same
+        // two norms as the fallback's start below. A guess worse than zero in
+        // BOTH (rel res > 1 AND J > 0) is dropped and the retry starts cold.
+        // From the demo's warm starts (exact rel res 1e8-1e10) the stopping
+        // test ||r|| <= tol*||b|| asked the retry for 12-14 orders of
+        // reduction: 7 of 14 retries stopped short, none of their iterates
+        // beat a cold start ("0 seeded"), and the cold Jacobi-CG fallback ran
+        // out its cap at rel res 8.21e-4 on Linux (rung 2 rejected). A cold
+        // retry is then also the attempt's own start for the latch's
+        // PRODUCTIVE test (r0 = r0x = 1) and the fallback's base start.
+        if (warm && bxn > 0.0 && q0x.rel > 1.0 && q0x.J > 0.0) {
+          cold_start = true;
+          warm_rel_x = q0x.rel;
+          warm_J_x = q0x.J;
+          q0x = StartQuality{};  // cold: rel 1, J 0
+          r0 = 1.0;
+          r0x = 1.0;
+        }
         Vec xg;
         const int safe_max =
             g_mg_safe_test_max_cycles > 0 ? g_mg_safe_test_max_cycles : kSafeMaxCycles;
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
-                      xg, it, res, /*mixed=*/false, &rec, warm ? &x0 : nullptr,
-                      &o, kSafeWindow, kSafeMinGain);
+                      xg, it, res, /*mixed=*/false, &rec,
+                      warm && !cold_start ? &x0 : nullptr, &o, kSafeWindow,
+                      kSafeMinGain);
         diag.mg_cycles_attempted = shipped_it + it;
         if (ok) {
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
@@ -2923,9 +2945,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           // that system in both norms; the answer is unchanged in kind
           // whichever start wins.
           //
-          // (1) The BASE start is the caller's warm guess (cold when none),
-          // EXCEPT when that guess is worse than zero in both norms (rel res
-          // > 1 AND J > 0): then the fallback starts cold. A PLSM warm start
+          // (1) The BASE start is the retry's own start: the caller's warm
+          // guess (cold when none), EXCEPT when that guess is worse than zero
+          // in both norms (rel res > 1 AND J > 0; decided above, before the
+          // retry): then the fallback starts cold too. A PLSM warm start
           // can be: the previous design's field moves a region that has since
           // turned solid (the demo L-bracket measured exact rel res 1e8-1e10,
           // J up to 1e12), and Jacobi-CG from such a start pays iterations
@@ -2943,11 +2966,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           // the system the fallback solves, not on the one it came from.
           // A stopped retry therefore never leaves the fallback with a start
           // worse than zero or worse than the caller's guess.
-          StartQuality base = q0x;  // warm guess, or cold (1, 0)
-          if (warm && q0x.rel > 1.0 && q0x.J > 0.0) {
-            base = StartQuality{};  // cold: rel 1, J 0
-            cold_fallback = true;
-          }
+          const StartQuality base = q0x;  // warm guess, or cold (1, 0)
+          cold_fallback = cold_start;
           if (xg.size() == m.ng && xg.allFinite()) {
             const StartQuality qx = quality(m, bx, bxn, xg);
             resx = qx.rel;
@@ -2963,9 +2983,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // Latch: an attempt that carried, or that cut the EXACT-system residual
       // >= 10x from its own start, is productive; kMgLatchThreshold
       // consecutive unproductive attempts latch the safe path off for the run.
-      // (Judged against the attempt's own start, as before the cold-start
-      // guard: the guard decides where the fallback starts, not whether the
-      // retry is worth running.)
+      // (Judged against the attempt's own start: the warm guess, or zero when
+      // the retry started cold — r0x is then 1.)
       const bool productive =
           ok || (resx >= 0.0 && resx < r0x && resx <= 0.1 * r0x);
       if (ok) ++g_mg_safe_carries;
@@ -2981,6 +3000,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         rep.converged = ok;
         rep.seeded_fallback = seeded_fallback;
         rep.cold_fallback = cold_fallback;
+        rep.cold_start = cold_start;
         rep.productive = productive;
         rep.cycles = it;
         rep.res = res;
@@ -2991,19 +3011,23 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       }
       // The seeding decision, stated on the system it was judged on.
       char exact_note[192] = "";
+      char start_note[160] = "";
+      if (cold_start)
+        std::snprintf(start_note, sizeof start_note,
+                      " ; l1 retry started COLD (warm guess worse than zero: exact "
+                      "rel res %.3e, J %.3e)", warm_rel_x, warm_J_x);
       if (resx >= 0.0 && seeded_fallback)
         std::snprintf(exact_note, sizeof exact_note,
                       " ; Jacobi-CG fallback starts from the l1 iterate (exact rel "
                       "res %.3e < start %.3e)", resx, r0x);
       else if (resx >= 0.0)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; l1 iterate NOT handed over (exact rel res %.3e, warm start "
+                      " ; l1 iterate NOT handed over (exact rel res %.3e, start "
                       "%.3e%s)", resx, r0x,
                       cold_fallback ? "; Jacobi-CG fallback starts COLD" : "");
       else if (cold_fallback)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; Jacobi-CG fallback starts COLD (warm start exact rel res "
-                      "%.3e)", r0x);
+                      " ; Jacobi-CG fallback starts COLD");
       const double safe_ms = fea_detail::mf_steady_ms() - t_s0;
       // Bounded (see kSafeLogFirst): the full line for the first attempts of a
       // run and for the one that latches the safe path off; a summary per
@@ -3015,7 +3039,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                      "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
                      "islands: %s%d unanchored of %d pieces (%lld vox, largest %d), "
                      "kept frozen %d (%s), kept big %d, kept hinged %d, dropped %d "
-                     "islands / %lld vox of %lld elements%s%s%s%s\n",
+                     "islands / %lld vox of %lld elements%s%s%s%s%s\n",
                      seq, safe_direct ? "latched off" : "stalled", shipped_it,
                      shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
                      safe_ms, may_drop ? "" : "(not permitted) ",
@@ -3027,7 +3051,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                      use2 ? scan.droppable_voxels : 0LL, scan.elements,
                      scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
                      g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
-                     exact_note,
+                     start_note, exact_note,
                      (seq == g_mg_safe_log_first && !g_mg_safe_latched)
                          ? " ; further [mg-safe] solves are summarised" : "");
         ++g_mg_safe_log_lines;
@@ -3040,6 +3064,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         if (ok) ++w.converged;
         if (seeded_fallback) ++w.seeded;
         if (use2) ++w.dropped;
+        if (cold_start) ++w.cold;
         w.cycles += it;
         w.ms += safe_ms;
         if (w.attempts >= g_mg_safe_log_every) mg_safe_log_flush_window();
