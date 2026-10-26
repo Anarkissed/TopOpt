@@ -94,11 +94,11 @@ public enum VersionChanges {
 
     /// The automatic name. A first version is "first run · res 64"; the same settings on a newer
     /// engine are "engine update · same settings".
-    public static func autoName(part: String, number: Int, changes: [VersionChange], resolution: Int,
+    public static func autoName(part: String, number: VersionNumber, changes: [VersionChange], resolution: Int,
                                 engineUpdated: Bool = false) -> String {
         var bits: [String]
         if changes.isEmpty {
-            bits = number <= 1 ? ["first run", "res \(resolution)"]
+            bits = number == 1 ? ["first run", "res \(resolution)"]
                 : engineUpdated ? ["engine update", "same settings"] : ["same settings"]
         } else {
             bits = changes.prefix(2).map(\.phrase)

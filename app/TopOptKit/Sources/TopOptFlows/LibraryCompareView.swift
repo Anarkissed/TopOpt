@@ -133,6 +133,7 @@ struct LibraryQuickLookView: View {
                                     compare(LibraryCompareRequest(part: part.id, scope: .version(folder)))
                                 }
                             }
+                            pill("Export", primary: false) { close(); LibraryExport.start(model: model, library: library, folder: folder, result: r) }
                             pill("Open", primary: true) {
                                 if let recent = model.recentProjects.first(where: { $0.id == folder }) { close(); model.open(recent) }
                             }

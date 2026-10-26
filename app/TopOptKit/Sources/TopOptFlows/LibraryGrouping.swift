@@ -64,9 +64,12 @@ public enum LibraryGrouping {
 
     /// File the folders the index does not list; drop the entries whose folder is GONE (`exists` is
     /// false). An entry whose folder is there but not in `snapshots` (unreadable for now) is kept as it is.
+    /// `parents` names the version a new folder was made FROM (a draft, "New draft from vN"): it is
+    /// numbered from that one (his decision 11: v4 → v4.1). A folder with none continues the main line.
     public static func reconcile(_ index: LibraryIndex, with snapshots: [ProjectSnapshot],
                                  hash: (ProjectSnapshot) -> String?,
-                                 exists: (UUID) -> Bool) -> LibraryIndex {
+                                 exists: (UUID) -> Bool,
+                                 parents: [UUID: UUID] = [:]) -> LibraryIndex {
         var out = index
         let onDisk = Dictionary(snapshots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -78,10 +81,7 @@ public enum LibraryGrouping {
         // gone: only when the folder itself is not there
         for i in out.parts.indices {
             let gone = out.parts[i].versions.filter { onDisk[$0.folderID] == nil && !exists($0.folderID) }
-            guard !gone.isEmpty else { continue }
-            let highest = max(out.parts[i].lastNumber ?? 0, out.parts[i].versions.map(\.number).max() ?? 0)
-            out.parts[i].versions.removeAll { v in gone.contains { $0.folderID == v.folderID } }
-            if highest > (out.parts[i].versions.map(\.number).max() ?? 0) { out.parts[i].lastNumber = highest }
+            for v in gone { out.parts[i].forget(v) }
         }
         let emptied = Set(out.parts.filter { $0.versions.isEmpty }.map(\.id))
         if !emptied.isEmpty {
@@ -96,10 +96,11 @@ public enum LibraryGrouping {
         for s in new where known.insert(s.id).inserted {
             let h = hash(s).flatMap { $0 == emptyHash ? nil : $0 }
             if let h, let p = out.parts.firstIndex(where: { $0.modelHash == h }) {
-                let parent = out.parts[p].versions.max { $0.number < $1.number }
+                let stated = parents[s.id].flatMap { out.parts[p].version(folderID: $0) }
+                let parent = stated ?? out.parts[p].newestMainLine
                 let changes = parent.flatMap { onDisk[$0.folderID] }.map { VersionChanges.between($0, s) } ?? []
                 let own = baseName(s.name)
-                out.parts[p].versions.append(LibraryVersion(folderID: s.id, number: out.parts[p].nextNumber,
+                out.parts[p].versions.append(LibraryVersion(folderID: s.id, number: out.parts[p].nextNumber(from: parent?.number),
                                                             parentNumber: parent?.number,
                                                             name: own == out.parts[p].name ? nil : own,
                                                             changes: changes))
@@ -113,10 +114,10 @@ public enum LibraryGrouping {
 
     /// The app's call: reconcile against the store as it is now. When the root cannot be listed at all
     /// (a transient error, data protection before first unlock), nothing changes.
-    public static func reconcile(_ index: LibraryIndex, store: ProjectStore) -> LibraryIndex {
+    public static func reconcile(_ index: LibraryIndex, store: ProjectStore, parents: [UUID: UUID] = [:]) -> LibraryIndex {
         guard let present = store.folderIDsOnDisk() else { return index }
         return reconcile(index, with: store.loadAll().readable, hash: { store.modelHash(of: $0) },
-                         exists: { present.contains($0) })
+                         exists: { present.contains($0) }, parents: parents)
     }
 
     /// First launch, and every launch after: group when there is no index; reconcile a readable one
