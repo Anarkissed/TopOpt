@@ -551,7 +551,8 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "redesign", "wall_loops",
+             "infill_percent", "minimize_plastic", "redesign", "anchor_model", "scenarios",
+             "wall_loops",
              "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
@@ -677,10 +678,12 @@ JobDescription parse_job(const std::string& json_text) {
       job.loads.anchor_face_ids = parse_int_array(*aid, "anchor_face_ids");
     // groups: optional (empty => self-weight fallback). Each group's faces are
     // {"faces":[selectors]} OR {"face_ids":[ids]}, plus a "force":[fx,fy,fz].
-    if (const JsonValue* gs = find_key(lv, "groups")) {
-      if (gs->type != JsonValue::Type::Array)
-        schema_fail("\"loads.groups\" must be an array");
-      for (const JsonValue& gv : gs->arr) {
+    // One "groups" array (loads.groups, or a LOAD SCENARIO's own) into `into`.
+    auto parse_groups = [&](const JsonValue& gs, const char* what,
+                            std::vector<JobLoadGroup>& into) {
+      if (gs.type != JsonValue::Type::Array)
+        schema_fail(std::string("\"") + what + "\" must be an array");
+      for (const JsonValue& gv : gs.arr) {
         require_object(gv, "a loads group");
         reject_unknown_keys(gv, {"faces", "face_ids", "region_ids", "force"},
                             "a loads group");
@@ -699,8 +702,37 @@ JobDescription parse_job(const std::string& json_text) {
               "\"region_ids\"");
         grp.force = parse_vec3(require_key(gv, "force", "a loads group"),
                                "a loads group force");
-        job.loads.groups.push_back(std::move(grp));
+        into.push_back(std::move(grp));
       }
+    };
+    if (const JsonValue* gs = find_key(lv, "groups"))
+      parse_groups(*gs, "loads.groups", job.loads.groups);
+    // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45; the shared
+    // key): [{"name", "groups": [as loads.groups], "anchor_face_ids": [its ON
+    // anchors]}], sent only with two or more (then loads.groups / anchor_face_ids
+    // mirror scenario 1 for older readers). One scenario is today's job: ignored.
+    if (const JsonValue* ss = find_key(lv, "scenarios")) {
+      if (ss->type != JsonValue::Type::Array)
+        schema_fail("\"loads.scenarios\" must be an array");
+      std::vector<JobScenario> scenarios;
+      for (const JsonValue& sv : ss->arr) {
+        require_object(sv, "a load scenario");
+        reject_unknown_keys(sv, {"name", "groups", "anchor_face_ids"}, "a load scenario");
+        JobScenario sc;
+        sc.name = require_nonempty_string(require_key(sv, "name", "a load scenario"),
+                                          "a load scenario's name");
+        parse_groups(require_key(sv, "groups", "a load scenario"), "a scenario's groups",
+                     sc.groups);
+        if (sc.groups.empty())
+          schema_fail("load scenario \"" + sc.name + "\" has no load");
+        sc.anchor_face_ids = parse_int_array(
+            require_key(sv, "anchor_face_ids", "a load scenario"), "anchor_face_ids");
+        if (sc.anchor_face_ids.empty())
+          schema_fail("load scenario \"" + sc.name +
+                      "\" has no anchor: every scenario needs at least one anchor ON");
+        scenarios.push_back(std::move(sc));
+      }
+      if (scenarios.size() >= 2) job.loads.scenarios = std::move(scenarios);
     }
     // clearances: optional "Keep clear" keep-out regions (handoff 100). Each is a
     // raw B-rep face id + a kind ("bolt"/"face") + the editable mm distances (the
@@ -895,6 +927,14 @@ JobDescription parse_job(const std::string& json_text) {
       if (job.loads.redesign != "strengthen")
         schema_fail("\"loads.redesign\" must be \"strengthen\" (got \"" +
                     job.loads.redesign + "\")");
+    }
+    // REAL BOLTS — how anchors hold: "glued" (clamped, the default) or "bearing"
+    // (compression-only, frictionless springs). Absent => glued, byte for byte.
+    if (const JsonValue* am = find_key(lv, "anchor_model")) {
+      job.loads.anchor_model = require_string(*am, "loads.anchor_model");
+      if (job.loads.anchor_model != "glued" && job.loads.anchor_model != "bearing")
+        schema_fail("\"loads.anchor_model\" must be \"glued\" or \"bearing\" (got \"" +
+                    job.loads.anchor_model + "\")");
     }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
     if (const JsonValue* wl = find_key(lv, "wall_loops")) {
@@ -2650,6 +2690,15 @@ JobDescription parse_job(const std::string& json_text) {
 
   // CORE LIST item 50 — "Redesign to strengthen" rebuilds the part inside its design
   // box, so it needs both: the growth side of the checkbox and a box to build in.
+  // LOAD SCENARIOS: what they do not combine with yet (the safer option tonight).
+  if (!job.loads.scenarios.empty()) {
+    if (job.loads.anchor_model == "bearing")
+      schema_fail("\"loads.scenarios\" with bearing anchors (\"anchor_model\": "
+                  "\"bearing\") is not supported yet");
+    if (job.loads.redesign == "strengthen")
+      schema_fail("\"loads.scenarios\" with \"redesign\": \"strengthen\" is not supported "
+                  "yet");
+  }
   if (job.loads.redesign == "strengthen") {
     if (job.loads.minimize_plastic)
       schema_fail("\"loads.redesign\": \"strengthen\" needs "

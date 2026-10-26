@@ -43,6 +43,9 @@ extension FlexibleMainStage {
     }
 
     /// H23: a tap on empty canvas — the chip closes, a pending pick is dropped, nothing is created.
+    /// ★ TAP-EMPTY-DESELECT (the overnight release ruling of 2026-10-26, item 3): and it DESELECTS — the Selections group the
+    /// router made active goes too, so its face-prisms and numbers (drawn for the active group once he has picked: H15') leave
+    /// with the chip; the join still remembers the group (`lastGroup`). The chip's ✕ is the same miss.
     public func missTap() {
         if attach.active, !FlexibleAttach.controlStrayTapCancels { attachMiss(); return }   // ★ I2: the step line again, nothing else
         if attach.active { endAttach() }   // (the red control: today's — a stray tap ends it)
@@ -50,7 +53,15 @@ extension FlexibleMainStage {
         faceUI.closeTransient()
         let s = FlexibleFacePick.miss(facePick)
         if s != facePick { facePick = s }
+        if !Self.controlMissKeepsActive, let p = model?.project, p.selection.activeGroupID != nil {
+            routerWritesSelection = true
+            p.selection.clearActive()
+            routerWritesSelection = false
+        }
     }
+
+    /// ★ RED CONTROL (item 3): the miss before — the chip closes, the group stays active (its prisms and numbers still drawn).
+    @MainActor static var controlMissKeepsActive = false
 
     /// ★ ROUND 7, R7-D3: gravity setup starts (the tray's Gravity [Change]) — every card folds and the pick goes (its taps
     /// are #354's gravity picker until it is done; the join's group is remembered, as when leaving the stage).

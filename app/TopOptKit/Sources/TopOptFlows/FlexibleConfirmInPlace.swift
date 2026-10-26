@@ -29,27 +29,29 @@ extension HorizontalAlignment {
     static let flexKeepCentre = HorizontalAlignment(FlexKeepCentre.self)
 }
 
+/// ★ P2 (the redesign, point 5): the words are the shared ConfirmCopy's (#354's B2 lift of these); the take-out question's red
+/// control stays Flexible's (FlexibleStageModel.controlTakeOutFullName).
 enum FlexibleConfirmCopy {
-    static let keep = "Keep"
-    static let cancel = "Cancel"
+    static let keep = ConfirmCopy.keep
+    static let cancel = ConfirmCopy.cancel
     /// ★ U21 FIX ROUND 1 (the check: his l-bracket's "Face 6 · lattice" made the line overflow the card onto the Group tab):
     /// the face's own name only — a lattice-section suffix (" · lattice A") is dropped from the question (the face stays
     /// selected and pulsing on the part, so which one is never in doubt).
     static func takeOutAsk(_ name: String) -> String {
         if FlexibleStageModel.controlTakeOutFullName { return "Take \(name) out?" }
-        let short = name.components(separatedBy: " \u{00B7} ").first ?? name
-        return "Take \(short) out?"
+        return ConfirmCopy.takeOutAsk(name)
     }
-    static let takeOut = "Take out"
-    static func removeAsk(_ name: String) -> String { "Remove \(name)?" }
-    static let remove = "Remove"
+    static let takeOut = ConfirmCopy.takeOut
+    static func removeAsk(_ name: String) -> String { ConfirmCopy.removeAsk(name) }
+    static let remove = ConfirmCopy.remove
 }
 
+/// ★ P2: the shared ConfirmLayout's numbers.
 enum FlexibleConfirmLayout {
     /// The clear space between the red button's trailing edge and Keep's leading edge.
-    static let gap: CGFloat = 24
+    static let gap: CGFloat = ConfirmLayout.gap
     /// Keep's width (its height is a finger's 44 pt) — wide enough for "Cancel".
-    static let keepWidth: CGFloat = 64
+    static let keepWidth: CGFloat = ConfirmLayout.keepWidth
 }
 
 /// The ask on a delete control: while `asking`, the control is hidden and [Keep] sits centred on it, the question and the red
@@ -89,7 +91,27 @@ struct FlexibleConfirmInPlace: ViewModifier {
         Self.controlGapFromKeepOnly ? FlexibleConfirmLayout.keepWidth : max(FlexibleConfirmLayout.keepWidth, controlWidth.rounded(.up))
     }
 
-    func body(content: Content) -> some View {
+    /// ★ P2 (the redesign, point 5): the red controls the shared ask cannot take — its own flags live on ConfirmInPlace, and F's
+    /// 32 pt sizes are FlexibleTargets' — draw with Flexible's own code below; `controlRedAlwaysLeading` drives the shared ask
+    /// through `redOnTrailing`.
+    @MainActor static var ownDrawing: Bool { controlOldPlacement || controlGapFromKeepOnly || FlexibleTargets.controlSmall }
+
+    /// ★ P2: the shared ConfirmInPlace (#354's B2 lift of this modifier), its frames re-published on FlexibleKeepOutKey.
+    @ViewBuilder func body(content: Content) -> some View {
+        if Self.ownDrawing {
+            own(content)
+        } else {
+            content
+                .modifier(ConfirmInPlace(asking: asking, question: question, destructive: destructive, keep: keep,
+                                         confirmKey: confirmKey, keepKey: keepKey, questionID: questionID,
+                                         redOnTrailing: redOnTrailing && !Self.controlRedAlwaysLeading, idPrefix: "flexible",
+                                         confirm: confirm, cancel: cancel))
+                .modifier(FlexibleKeepOutBridge())
+        }
+    }
+
+    /// Flexible's own drawing of the ask (the red controls above).
+    private func own(_ content: Content) -> some View {
         content
             .background(GeometryReader { g in Color.clear.preference(key: FlexibleConfirmControlWidthKey.self, value: g.size.width) })
             .onPreferenceChange(FlexibleConfirmControlWidthKey.self) { controlWidth = $0 }
@@ -171,28 +193,13 @@ struct FlexibleCancelInPlace: ViewModifier {
     let keepKey: String
     let cancel: () -> Void
 
+    /// ★ P2 (the redesign, point 5): the shared CancelInPlace (#354's B2 lift of this modifier), its frame re-published on
+    /// FlexibleKeepOutKey; Flexible's red control (the old placement: the trash stays, no Cancel on it) goes in as `asking`.
     func body(content: Content) -> some View {
-        let asking = self.asking && !FlexibleConfirmInPlace.controlOldPlacement   // (the red control: the trash stays, no Cancel on it)
         content
-            .opacity(asking ? 0 : 1)
-            .allowsHitTesting(!asking)
-            .overlay {
-                if asking {
-                    Button(action: cancel) {
-                        Text(FlexibleConfirmCopy.cancel).font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                            .lineLimit(1).fixedSize()
-                            .frame(width: FlexibleConfirmLayout.keepWidth - 8, height: 32)
-                            .background(Capsule().fill(DS.Color.chipSolid.color))
-                            .frame(width: FlexibleConfirmLayout.keepWidth, height: FlexibleTargets.minimum)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .background(FlexibleConfirmInPlace.publish(keepKey))
-                    .accessibilityIdentifier("flexible-delete-cancel")
-                }
-            }
+            .modifier(CancelInPlace(asking: asking && !FlexibleConfirmInPlace.controlOldPlacement, keepKey: keepKey,
+                                    idPrefix: "flexible", cancel: cancel))
+            .modifier(FlexibleKeepOutBridge())
     }
 }
 

@@ -31,6 +31,18 @@ namespace topopt {
 // larger is safer, and worst_case is the number the M5.1 settings engine
 // consumes as its `worst_case_stress_margin` input.
 // CORE LIST item 42 B — one bridge's hold-itself receipt (VariantReport::bridge_holds).
+// LOAD SCENARIOS — one scenario's certification on a rung (VariantReport::scenarios;
+// report.json "scenarios": name, margin, peak_mpa, peak_mm, governs, unheld).
+struct ScenarioReport {
+  std::string name;
+  double margin = 0.0;             // its margin_effective
+  double peak_mpa = 0.0;           // its peak von Mises
+  Vec3 peak_mm{0.0, 0.0, 0.0};     // where (the voxel centre, mm)
+  bool governs = false;            // the worst scenario: the line's margin is this one's
+  bool unheld = false;             // its weak springs carry > 5 % of its load
+  double weak_share = 0.0;         // |the weak springs' force| / |its load|
+};
+
 struct BridgeHoldReport {
   double size_mm = 0.0;      // (2 x radius + 1) x voxel spacing
   double hold_margin = 0.0;  // the bridge's own effective margin under the hold load
@@ -261,6 +273,18 @@ struct VariantReport {
   // `bodies_reported` (more than one body exported, a speck dropped, or an anchor
   // lost), so every one-body, speck-free line keeps its exact bytes.
   bool bodies_reported = false;
+  // REAL BOLTS (bearing anchors): the certification's contact loop (FixedDesignAnalysis
+  // contact_*). Emitted as "bearing" only when it ran (contact_rounds > 0), so a glued
+  // run's document keeps its bytes. settled false = the set still changed after the
+  // last allowed solve (reported, never passed silently).
+  int contact_rounds = 0;
+  double contact_tangent_share = 0.0;  // of the reaction, in the weak sliding springs
+  bool contact_held_by_sliding = false;  // over kAnchorsSlidingShare: not a pass
+  bool contact_settled = true;
+  bool contact_kept_last = false;
+  int contact_engaged = 0;
+  int contact_released = 0;
+  double contact_load_share = 0.0;
   int bodies_exported = 1;
   int specks_dropped = 0;
   long long speck_voxels = 0;
@@ -275,6 +299,8 @@ struct VariantReport {
   // how many voxel layers were added to get there (at most 3), and whether it held
   // (a bridge that did not is lifted again, and items 47 / the belt judge the rung).
   std::vector<BridgeHoldReport> bridge_holds;
+  // LOAD SCENARIOS: every scenario's certification (empty when the job has none).
+  std::vector<ScenarioReport> scenarios;
   long long lost_anchor_voxels = 0;
   std::vector<int> lost_anchor_face_ids;
   std::vector<int> lost_anchor_region_ids;  // FRAGILE JOINTS (reviewer's ruling 2026-10-26): places where the printed part

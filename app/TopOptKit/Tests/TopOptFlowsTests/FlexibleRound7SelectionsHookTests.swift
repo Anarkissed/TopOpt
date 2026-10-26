@@ -44,13 +44,14 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
              after: "                    latticeDepthHandlesOverlay.ignoresSafeArea()\n"),
         Hook(id: "H22",
              before: "                              if legendDrilledIn { return true }\n                              guard let m = viewerMesh else { return false }\n",
-             line: "                              if flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: ",
-             gate: "flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp",
+             // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
+             line: "                              if flexibleMain.owns(project, stage), !editFaces.isEditing, force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: ",
+             gate: "flexibleMain.owns(project, stage), !editFaces.isEditing, force.phase == .edit, !fullScreenPageUp",
              after: "                              if visible.surfaceEditing {\n"),
         Hook(id: "H23",
              before: "                          onMiss: {\n",
-             line: "                              if flexibleMain.owns(project, stage), !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: ",
-             gate: "flexibleMain.owns(project, stage), !fullScreenPageUp",
+             line: "                              if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: ",
+             gate: "flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp",
              after: "                              guard visible.surfaceEditing else { return }\n"),
         // ★ RE-PINNED (sync of #354 at 89af86dd): #354's bare `selectionsLibraryCard` is now a chain (B5 3f293974's Edit faces card
         // first, then B3 7e37c45f's Topology list, B4 564db991's lattice list, the card last). Our owns-swap goes right after
@@ -58,12 +59,12 @@ final class FlexibleRound7SelectionsHookTests: XCTestCase {
         // its else is #354's chain. Was: `if <gate> { FlexibleSelectionsList(…) } else { selectionsLibraryCard }`.
         Hook(id: "H25",
              before: "            if editFaces.isEditing { selectionsLibraryCard }\n",
-             line: "            else if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: ",
-             gate: "flexibleMain.owns(project, stage), !fullScreenPageUp",
+             line: "            else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: ",
+             gate: "flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp",
              after: "            // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.\n"),
         Hook(id: "H32",
              before: "                latticeOnlyBadge\n                latticeEdgeLight\n",
-             line: "                if flexibleMain.owns(project, stage) { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: ",
+             line: "                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: ",
              gate: "flexibleMain.owns(project, stage)",
              after: "                // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,\n"),
     ]

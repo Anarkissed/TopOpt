@@ -616,9 +616,12 @@ public final class ProjectModel: ObservableObject {
         var anchors: [Int] = []
         var anchorRegions: [RegionID] = []
         var loads: [TopOptKit.LoadGroupSpec] = []
+        // ★ LOAD SCENARIOS (overnight release 2026-10-26): with 2+ scenarios the top level mirrors Scenario 1 for
+        // older readers (`scenarioWires` carries each one). With none, both filters pass everything.
+        let first = force.scenarioList[0].id
         for g in selection.groups {
             let kind = force.kind(for: g.id)
-            if kind.isAnchor {
+            if kind.isAnchor, force.anchorIsOn(g.id, in: first) {
                 // Painted faces carry a live overlay id; the run sees the dense re-import id.
                 anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
                 // ★ A region rides ALONGSIDE the faces (task 2026-08-14-face-regions
@@ -626,7 +629,7 @@ public final class ProjectModel: ObservableObject {
                 // `resolvedRunFaceID` — a region is resolved core-side against the
                 // run's own import, which is the whole reason it survives one.
                 anchorRegions.append(contentsOf: g.regionIDs)
-            } else if kind.isLoad {
+            } else if kind.isLoad, force.group(g.id, isIn: first) {
                 // ★★ ONE DIRECTION, OR NONE (2026-10-09, #362's find): the same verdict the
                 // pre-flight blocks on. A Push or Pull whose faces face opposite ways has no
                 // direction, and it used to be given +Z here — a push on two opposite faces went
@@ -650,6 +653,26 @@ public final class ProjectModel: ObservableObject {
         // only when the user actually answered the second question.
         let plate = buildOrientation.plateUp.map { simd_normalize($0) } ?? SIMD3<Float>(0, 0, 0)
         return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate), anchorRegions)
+    }
+
+    /// ★ LOAD SCENARIOS — each scenario's ON anchors and its own loads, as `loadCase()` resolves them (job
+    /// `loads.scenarios`). Empty with fewer than two scenarios, so the job stays exactly today's.
+    public func scenarioWires() -> [LoadScenarioWire] {
+        guard force.hasScenarios else { return [] }
+        return force.scenarioList.map { s in
+            var anchors: [Int] = []
+            var loads: [TopOptKit.LoadGroupSpec] = []
+            for g in selection.groups {
+                let kind = force.kind(for: g.id)
+                if kind.isAnchor, force.anchorIsOn(g.id, in: s.id) {
+                    anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
+                } else if kind.isLoad, force.group(g.id, isIn: s.id), case .vector(let f)? = loadDirection(for: g.id) {
+                    loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
+                                       force: SIMD3<Double>(f), regionIDs: g.regionIDs))
+                }
+            }
+            return LoadScenarioWire(name: s.name, anchorFaceIDs: anchors, loadGroups: loads)
+        }
     }
 
     /// The run's "Keep clear" clearances (handoff 100), derived from the selection +

@@ -187,6 +187,17 @@ public struct WorkspacePlaceholder: View {
     @State private var nameDraft = ""
     /// Collapse the (bottom-left) Selections panel by tapping its header.
     @State private var selectionsCollapsed = false
+    /// ★ his iPad 10-26 (3): the clearance PIECE picked inside the expanded group (its face key; a manual primitive's
+    /// sentinel key), nil = the whole group. Cleared whenever the selected group changes.
+    @State private var selectedPiece: SelectionArrowRule.PieceRef? = nil
+    // ★ load scenarios: the folder being renamed, its draft, the (i), the last-anchor refusal, the Add Anchor hint
+    @State private var renamingScenario: UUID? = nil
+    @State private var scenarioNameDraft = ""
+    @State private var scenarioInfoOpen = false
+    @State private var scenarioRefusal: String? = nil
+    @State private var scenarioAnchorHint: UUID? = nil
+    /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
+    private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
@@ -508,6 +519,8 @@ public struct WorkspacePlaceholder: View {
     /// (nothing happens, and the variants are untouched).
     @State private var pendingReplacement: ResultsReplacementPrompt?
     @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d: the re-run card's Save as new project is for an Optimize re-run only
+    @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
+    @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -751,6 +764,7 @@ public struct WorkspacePlaceholder: View {
                     if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
+                    if let r = LibraryOpen.takeExport(for: project.id) { libraryExportVariant = r; openLibraryExportIfReady() }   // Library (B3): Export from a card
                 }
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
@@ -837,7 +851,7 @@ public struct WorkspacePlaceholder: View {
                               if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend
                               if legendDrilledIn { return true }
                               guard let m = viewerMesh else { return false }
-                              if flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: every tap on the Flexible stage goes to the face chip's router; it never joins, moves or removes a face by itself (FlexibleFacePick)
+                              if flexibleMain.owns(project, stage), !editFaces.isEditing, force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: every tap on the Flexible stage goes to the face chip's router; it never joins, moves or removes a face by itself (FlexibleFacePick) · Flexible (PR #362) H61: under Edit faces the tap is Edit faces'
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
                                   return true
@@ -901,7 +915,7 @@ public struct WorkspacePlaceholder: View {
                           // user has visibly moved on makes the next action apply
                           // somewhere they are no longer looking.
                           onMiss: {
-                              if flexibleMain.owns(project, stage), !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: a tap on empty canvas closes the face chip; a pending face is dropped and nothing is created
+                              if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: a tap on empty canvas closes the face chip; a pending face is dropped and nothing is created · Flexible (PR #362) H61: under Edit faces the miss is Edit faces'
                               guard visible.surfaceEditing else { return }
                               // ★ CLEARING THE SELECTION IS NOT THE SAME AS THROWING
                               // AWAY WORK IN PROGRESS. A tap on the ground clears
@@ -1190,6 +1204,7 @@ public struct WorkspacePlaceholder: View {
                               }
                               : nil,
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
+                .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -1327,7 +1342,7 @@ public struct WorkspacePlaceholder: View {
                 // affordances (§1a): they left the TO page with everything else.
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
-                if viewerMesh != nil, flexibleMain.owns(project, stage) { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu
+                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place · Flexible (PR #362) H62: "Change lattice type…" asks with #354's card
                 else if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil, !flexibleMain.owns(project, stage) { latticeSettingsButtonOverlay }   // Flexible (PR #362) H28: Settings is the capsule's 'Squish' on the Flexible stage
@@ -1344,13 +1359,13 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
                 latticeOnlyBadge
                 latticeEdgeLight
-                if flexibleMain.owns(project, stage) { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
@@ -1368,7 +1383,7 @@ public struct WorkspacePlaceholder: View {
                     latticeDensityLegend
                     latticeProbeCallout
                 }
-                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
@@ -1400,7 +1415,7 @@ public struct WorkspacePlaceholder: View {
                             bottomBarHeight = ok
                         }
                     }
-                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) P + H34: the squish player (no chip column on this stage; the corner pair rides the bar's clearance)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) P + H34: the squish player (no chip column on this stage; the corner pair rides the bar's clearance) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
@@ -1448,7 +1463,7 @@ public struct WorkspacePlaceholder: View {
             if showFlexiblePage, project.lattice.flexible != nil {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
-                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible…
+                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible… · Flexible (PR #362) H60: Edit faces from the Squish page (after its Save & Exit check); Done re-opens it · Flexible (PR #362) H62: "Change lattice type…" from the Squish page, after its Save & Exit check
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
@@ -1468,6 +1483,7 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
+            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
@@ -1744,6 +1760,7 @@ public struct WorkspacePlaceholder: View {
     private func requestRun() {
         guard canOptimize else { return }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
+            if libraryAsks() { return }   // Library (B3)
             rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d: Optimize's card offers Save as new project
             return
         }
@@ -1873,9 +1890,11 @@ public struct WorkspacePlaceholder: View {
         // underneath reads through, which is the whole point of turning the
         // view on.
         let roleAlpha: Float = stressViewOn ? Self.stressUnderlayAlpha : 1
-        for g in selection.groups where !project.groupView.isHidden(g.id) {
+        for g in selection.groups where !project.groupView.isHidden(g.id) && scenarioDraws(g.id) {   // ★ load scenarios
             let c = force.tint(for: g)
-            let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
+            var v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
+            // ★ an anchor switched off in the open scenario is drawn DIMMED (addendum 03:32), never hidden
+            if scenarioAnchorOff(g.id) { let k: Float = 0.3, grey: Float = 0.62 * 0.7; v = SIMD4<Float>(v.x * k + grey, v.y * k + grey, v.z * k + grey, roleAlpha) }
             for f in groupTintedFaces(g) { tints[f] = v }
         }
         // Handoff 124 — a protected face gets the UNIQUE protect mint-teal, applied
@@ -2432,6 +2451,8 @@ public struct WorkspacePlaceholder: View {
         // the tapped face is one of the (now-active) group's own cleared faces.
         if let g = selection.activeGroup, groupClearanceFaces(g).contains(faceID) {
             chipsRevealedGroup = g.id
+            // ★ his iPad 10-26 (3): tapping a piece in 3D picks that same row (its group is now the selection, expanded)
+            selectedPiece = SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID))
         } else if chipsRevealedGroup != selection.activeGroupID {
             chipsRevealedGroup = nil
         }
@@ -2762,7 +2783,7 @@ public struct WorkspacePlaceholder: View {
 
             // ── MOVABLE (pill): each load group's weight pill at its arrow tail ──
             if let mesh = viewerMesh {
-                for g in loadGroups {
+                for g in loadGroups where SelectionArrowRule.groupShows(g.id, selectedGroup: selection.activeGroupID) {
                     if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                         let active = g.id == selection.activeGroupID
                         let anchor = CGPoint(x: arrow.tail.x, y: arrow.tail.y - (active ? 26 : 0))
@@ -3129,6 +3150,7 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: acceptedVariantCount) { n in
             topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,
                             landedByRun: TopologyResultsNotice.landedByRun(run.phase))
+            openLibraryExportIfReady()   // Library (B3): the results arrive after the open
         }
         .onChange(of: run.isStreaming) { streaming in
             if !streaming { topoNotice.noteFinished(accepted: acceptedVariantCount, resultsOpen: !viewOriginal) }
@@ -3151,6 +3173,8 @@ public struct WorkspacePlaceholder: View {
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
+        // Library (B3): the "Optimize as vN" card (approved Library mockup, screen 6)
+        .overlay { if nextVersionAsk { LibraryNextVersionCard(model: model, project: project, close: { nextVersionAsk = false }, optimize: { name in nextVersionAsk = false; optimizeAsNextVersion(name: name) }) } }
         // ★ B4 (APP LIST 6): THE LATTICE RUN'S RE-RUN CARD — "Re-running clears this lattice's results":
         // Re-run the lattice here (the LATTICE request) / Save as new project (the copy opens on Lattice) / Cancel.
         .alert(LatticeRerunChoice.title, isPresented: latticeRerunBinding) {
@@ -6859,6 +6883,9 @@ public struct WorkspacePlaceholder: View {
         guard force.gravityIsSet else { return [] }
         var items: [ClearanceHandleItem] = []
         for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
+            // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
+            guard SelectionArrowRule.pieceShows(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
+                                                selectedPiece: selectedPieceKey) else { continue }
             for h in entry.handles {
                 items.append(ClearanceHandleItem(
                     id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
@@ -9634,7 +9661,7 @@ public struct WorkspacePlaceholder: View {
             if selectionsCollapsed { latticePreviewNotice }
             // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
             if editFaces.isEditing { selectionsLibraryCard }
-            else if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i))
+            else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i)) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
             else if stage == .topology, !showLatticePage { topologySelectionsList }
             // ★ B4: the Lattice stage's Regions page — the same list: groups and lattice regions, eye, trash + Undo
@@ -9770,7 +9797,7 @@ public struct WorkspacePlaceholder: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(selection.groups) { g in groupRow(g) }
+                            selectionsListBody   // ★ load scenarios: the folders on Topology, the plain list elsewhere
                         }
                     }
                     .frame(maxHeight: 360)
@@ -11223,6 +11250,8 @@ public struct WorkspacePlaceholder: View {
                         .accessibilityLabel("Convert to a movable primitive")
                     }
                     clearancePrimitiveLine(g, p, showKind: true)
+                        .modifier(PieceRowPick(picked: selectedPieceKey == Int(p.id), id: "pick-auto-\(p.id)") {
+                            pickPiece(g.id, Int(p.id)) })   // ★ his iPad 10-26 (3)
                 }
             }
             ForEach(manual) { mp in
@@ -11231,6 +11260,9 @@ public struct WorkspacePlaceholder: View {
                         project.removeManualPrimitive(id: mp.id, from: g.id)
                     }
                     manualPrimitiveLine(g, mp)
+                        .modifier(PieceRowPick(picked: selectedPieceKey == ProjectModel.manualFaceKey(mp.id),
+                                               id: "pick-manual-\(mp.id.uuidString)") {
+                            pickPiece(g.id, ProjectModel.manualFaceKey(mp.id)) })   // ★ his iPad 10-26 (3)
                 }
             }
             if autoPrims.isEmpty && manual.isEmpty {
@@ -11245,6 +11277,151 @@ public struct WorkspacePlaceholder: View {
 
     /// The per-primitive "−" delete affordance (handoff item 2) — the counterpart to
     /// "+", and the more-used half because the finder OVER-finds.
+    /// ★ his iPad 10-26 (3): pick one piece of a group: the group becomes the selection, and only this piece's arrows show.
+    /// Tapping the picked piece again picks the whole group back.
+    /// ★ his iPad 10-26 (5): "If I tap into nothing: deselect whatever was selected … APP WIDE." The viewer calls this only for
+    /// a tap that hit no face (a handle or chip takes its own tap; an orbit drag is not a tap). Flexible's page (#362, H23),
+    /// the Surface editor and Edit faces keep their own empty-tap rules.
+    private func emptyTapClears() {
+        guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
+        selection.clearActive(); selectedPiece = nil; chipsRevealedGroup = nil
+        force.sync(groups: selection.groups)
+    }
+
+    // MARK: ★ LOAD SCENARIOS (his order 2026-10-26 + the 03:32 anchor addendum; the model is LoadScenarios.swift)
+
+    /// Scenarios apply on Topology (not Edit faces, not a Flexible page); everywhere else every group shows.
+    private var scenariosApply: Bool {
+        stage == .topology && !editFaces.isEditing && !flexibleMain.owns(project, stage)
+    }
+    /// Whether a group draws (arrow, chip, colour) in the open scenario.
+    private func scenarioDraws(_ g: UUID) -> Bool { !scenariosApply || force.showsInActiveScenario(g) }
+    /// A shared anchor switched off in the open scenario: drawn dimmed, never hidden.
+    private func scenarioAnchorOff(_ g: UUID) -> Bool {
+        scenariosApply && force.hasScenarios && force.kind(for: g).isAnchor && !force.anchorIsOn(g, in: force.activeScenarioID)
+    }
+
+    /// The Selections list. On Topology: one folder per scenario (the open one lists its loads, its own anchors and the
+    /// shared anchors, each with its switch), then "+ Add a load scenario" and its (i). Elsewhere the plain list.
+    private var selectionsListBody: AnyView {
+        guard scenariosApply else { return AnyView(ForEach(selection.groups) { g in groupRow(g) }) }
+        let open = force.activeScenarioID
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            if force.hasScenarios {
+                ForEach(Array(force.scenarioList.enumerated()), id: \.element.id) { i, s in
+                    scenarioFolderHeader(s, index: i, open: s.id == open)
+                    if s.id == open {
+                        ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
+                            VStack(alignment: .trailing, spacing: 0) {
+                                groupRow(g)
+                                if force.kind(for: g.id).isAnchor, force.scenarioID(of: g.id) == nil {
+                                    scenarioAnchorSwitch(g.id, in: s.id)
+                                }
+                            }
+                        }
+                        if scenarioAnchorHint == s.id {
+                            Text("Tap the faces that hold in \(s.name), then choose Anchor.")
+                                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                                .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)
+                        }
+                    }
+                }
+            } else {
+                ForEach(selection.groups) { g in groupRow(g) }
+            }
+            if let r = scenarioRefusal {
+                Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
+                    .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.xs)
+            }
+            addScenarioRow
+            if scenarioInfoOpen {
+                Text(LoadScenarioRule.info).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
+            }
+        })
+    }
+
+    /// A scenario's folder row: tap to open it; ⋯ renames it (and removes any but Scenario 1); the open one offers Add Anchor.
+    private func scenarioFolderHeader(_ s: LoadScenario, index: Int, open: Bool) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: open ? "folder.fill" : "folder")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
+            if renamingScenario == s.id {
+                TextField("Scenario name", text: $scenarioNameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { force.renameScenario(s.id, to: scenarioNameDraft); renamingScenario = nil }
+            } else {
+                Text(s.name).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+            }
+            Spacer()
+            if open {
+                Button { scenarioAnchorHint = s.id; selection.clearActive(); selectedPiece = nil } label: {
+                    HStack(spacing: 3) { Image(systemName: "plus"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
+                }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
+                .accessibilityIdentifier("scenario-add-anchor")
+            }
+            Menu {
+                Button("Rename") { scenarioNameDraft = s.name; renamingScenario = s.id }
+                if index > 0 {
+                    Button("Remove scenario (its loads go to \(force.scenarioList[0].name))", role: .destructive) {
+                        force.removeScenario(s.id); scenarioRefusal = nil
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").foregroundStyle(DS.Color.textTertiary.color)
+            }
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .contentShape(Rectangle())
+        .onTapGesture { openScenario(s.id) }
+        .accessibilityIdentifier("scenario-folder-\(index)")
+    }
+
+    /// Open a scenario: only its loads and arrows show from here; the selection clears.
+    private func openScenario(_ id: UUID) {
+        guard id != force.activeScenarioID else { return }
+        force.openScenario(id)
+        selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
+    }
+
+    /// A shared anchor's switch for THIS scenario only; the last one on refuses with the inline line.
+    private func scenarioAnchorSwitch(_ g: UUID, in s: UUID) -> some View {
+        Toggle(isOn: Binding(get: { force.anchorIsOn(g, in: s) },
+                             set: { on in scenarioRefusal = force.setAnchor(g, on: on, in: s, order: selection.groups.map(\.id)) })) {
+            Text("Holds in this scenario").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+        }
+        .toggleStyle(.switch).controlSize(.mini)
+        .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.s)
+        .accessibilityIdentifier("scenario-anchor-switch")
+    }
+
+    /// "+ Add a load scenario" and its (i).
+    private var addScenarioRow: some View {
+        HStack(spacing: DS.Space.s) {
+            Button {
+                force.addScenario()
+                selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
+            } label: {
+                HStack(spacing: 4) { Image(systemName: "plus"); Text("Add a load scenario").dsStyle(DS.TypeScale.caption).fontWeight(.semibold) }
+            }
+            .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
+            .accessibilityIdentifier("add-load-scenario")
+            Button { scenarioInfoOpen.toggle() } label: { Image(systemName: "info.circle") }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.textTertiary.color)
+                .accessibilityLabel("About load scenarios")
+            Spacer()
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+    }
+
+    private func pickPiece(_ group: UUID, _ key: Int) {
+        selection.setActive(group)
+        selectedPiece = selectedPieceKey == key ? nil : SelectionArrowRule.PieceRef(group: group, key: key)
+    }
+
     private func primitiveDeleteButton(_ id: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: "minus.circle.fill")
@@ -11522,7 +11699,7 @@ public struct WorkspacePlaceholder: View {
 
     /// The load groups (drawn as arrows, with tappable weight pills at their tails).
     private var loadGroups: [SelectionGroup] {
-        selection.groups.filter { force.kind(for: $0.id).isLoad }
+        selection.groups.filter { force.kind(for: $0.id).isLoad && scenarioDraws($0.id) }   // ★ load scenarios: the open one only
     }
 
     /// A load's arrow endpoints on screen: tip at the application point when the
@@ -11550,7 +11727,7 @@ public struct WorkspacePlaceholder: View {
     private var arrowsOverlay: some View {
         Canvas { ctx, _ in
             guard let mesh = viewerMesh, let proj = projection, force.phase == .edit else { return }
-            for g in loadGroups {
+            for g in loadGroups where SelectionArrowRule.groupShows(g.id, selectedGroup: selection.activeGroupID) {   // ★ his iPad 10-26 (2)
                 if let geo = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                     drawArrow(ctx, from: geo.tail, to: geo.tip, color: g.color.color)
                 }
@@ -11619,7 +11796,8 @@ public struct WorkspacePlaceholder: View {
                             .position(placed["load.pendingchip"]?.center ?? fallback)
                     }
                     // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
-                    ForEach(stage != .topology || topoForcesShown ? loadGroups : []) { g in
+                    ForEach((stage != .topology || topoForcesShown ? loadGroups : []).filter {
+                        SelectionArrowRule.groupShows($0.id, selectedGroup: selection.activeGroupID) }) { g in   // ★ his iPad 10-26 (2)(4)
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                             let active = g.id == selection.activeGroupID
                             // Keep-out pass owns placement (handoff 2026-07-27): the weight pill is
@@ -11803,7 +11981,7 @@ public struct WorkspacePlaceholder: View {
             // selection already exists — that is the precondition for being
             // there — so the sentence is noise occupying the width the second
             // action button needs.
-            if visible.showsSelectionHint {
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint, selectionsCollapsed: selectionsCollapsed) {
                 Text(hint)
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
@@ -11812,7 +11990,7 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             }
             Spacer()
-            if flexibleMain.owns(project, stage) { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup
+            if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)
             // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
             if !editFaces.isEditing, stage == .topology {
@@ -11857,6 +12035,12 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.horizontal, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4)
+    }
+
+    /// ★ His iPad (2026-10-26, problem 6): the hint sat ON TOP of the collapsed Selections pill, so he couldn't reopen it.
+    /// The hint never shows while the pill is collapsed: the pill is always tappable, whatever hint the stage would say.
+    static func hintShows(showsSelectionHint: Bool, selectionsCollapsed: Bool) -> Bool {
+        showsSelectionHint && !selectionsCollapsed
     }
 
     private var hint: String {
@@ -12149,7 +12333,8 @@ extension WorkspacePlaceholder {
                                                   anchors: force.anchorCount(in: selection.groups),
                                                   loads: force.loadCount(in: selection.groups))
         let rows = TopologyStageMenu.rows(typeInUse: project.lattice.stageMode, latticeGate: gate).map { r in
-            StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
+            StageCapsule.Item(id: r.id, title: r.target == .lattice ? FlexibleTopologyMenu.latticeRowTitle(r.title, project: project) : r.title,   // Flexible (PR #362) H59: on a Flexible project the lattice row says "Flexible" (the stage it opens), not "Lattice…"
+                              detail: r.detail, enabled: r.enabled, checked: r.checked,
                               action: r.target == .lattice ? .lattice : r.target == .editFaces ? .editFaces : .none)
         }
         let page: StageCapsule.Page = {
@@ -12697,6 +12882,31 @@ extension WorkspacePlaceholder {
         } else {
             model.toast = RerunCard.copyFailedToast
         }
+    }
+
+    // Library (B3): every Optimize on a version with results makes the next version (no in-place re-run)
+    private func libraryAsks() -> Bool {
+        guard model.library.makesNextVersion(of: project.id) else { return false }
+        nextVersionAsk = true
+        return true
+    }
+
+    // Library (B3): Optimize as the next version — its draft runs; the version it came from never changes
+    func optimizeAsNextVersion(name: String?) {
+        if let next = model.optimizeAsNextVersion(id: project.id, name: name) {
+            RerunCard.runOnOpen(next.id)
+            model.open(next)
+        } else {
+            model.toast = RerunCard.copyFailedToast
+        }
+    }
+
+    // Library (B3): Export from a card — Smooth on the chosen result, once its results are in
+    private func openLibraryExportIfReady() {
+        guard let r = libraryExportVariant, acceptedVariantCount > 0 else { return }
+        libraryExportVariant = nil
+        if stage != .topology { goToStage(.topology) }
+        openSmoothingPage(variantIndex: r)
     }
 }
 

@@ -9079,7 +9079,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_redesign, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_anchor_model, j_scenarios, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -9105,14 +9105,28 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.anchor_face_ids = j_anchor_face_ids;
   for (const int id : resolve_selectors(model, j_anchors, "anchors"))
     lc.anchor_face_ids.push_back(id);
-  for (const JobLoadGroup& g : j_groups) {
+  auto to_group = [&](const JobLoadGroup& g) {
     ProductionLoadCase::LoadGroup lg;
     lg.face_ids = g.face_ids;
     for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
       lg.face_ids.push_back(id);
     lg.region_ids = g.region_ids;
     lg.force = g.force;
-    lc.load_groups.push_back(std::move(lg));
+    return lg;
+  };
+  for (const JobLoadGroup& g : j_groups) lc.load_groups.push_back(to_group(g));
+  // LOAD SCENARIOS: each scenario's groups and ON anchors; the load case's anchors
+  // become their UNION (scenario 1's groups stay the mirror in load_groups).
+  for (const JobScenario& js : j_scenarios) {
+    ProductionLoadCase::Scenario sc;
+    sc.name = js.name;
+    for (const JobLoadGroup& g : js.groups) sc.groups.push_back(to_group(g));
+    sc.anchor_face_ids = js.anchor_face_ids;
+    for (const int f : js.anchor_face_ids)
+      if (std::find(lc.anchor_face_ids.begin(), lc.anchor_face_ids.end(), f) ==
+          lc.anchor_face_ids.end())
+        lc.anchor_face_ids.push_back(f);
+    lc.scenarios.push_back(std::move(sc));
   }
   // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
   // clearance. A distance the job omitted (== 0) defaults to the same spec
@@ -9173,6 +9187,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.strengthen = j_redesign == "strengthen";  // item 50
+  lc.anchor_bearing = j_anchor_model == "bearing";  // REAL BOLTS
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -10695,9 +10710,18 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   result.margin_required = margin_required;
   vr.margin_required = margin_required;
   vr.margin_effective = a.margin_effective;
+  vr.contact_rounds = a.contact_rounds;  // REAL BOLTS
+  vr.contact_tangent_share = a.contact_tangent_share;
+  vr.contact_held_by_sliding = a.contact_held_by_sliding;
+  vr.contact_settled = a.contact_settled;
+  vr.contact_kept_last = a.contact_kept_last;
+  vr.contact_engaged = a.contact_engaged;
+  vr.contact_released = a.contact_released;
+  vr.contact_load_share = a.contact_load_share;
   if (!a.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok ? kLoadPathNotConnectedReason
+                          : a.contact_held_by_sliding ? kAnchorsSlidingReason
+                                                      : kMarginBelowRequiredReason;
   JobReport report;
   report.material = job.material;
   (a.accepted ? report.variants : report.rejected).push_back(vr);

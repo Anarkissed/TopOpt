@@ -231,3 +231,20 @@ final class TopologyStageTests: XCTestCase {
                    encoding: .utf8)
     }
 }
+
+/// ★ His iPad (2026-10-26, problem 6): the bottom-left hint covered the collapsed Selections pill. With Selections collapsed
+/// the hint never shows, whatever hint the stage would show; expanded, it shows as before.
+@MainActor
+final class SelectionsPillNeverCoveredTests: XCTestCase {
+    func testTheHintNeverShowsOverTheCollapsedPill() throws {
+        for showsHint in [true, false] {
+            XCTAssertFalse(WorkspacePlaceholder.hintShows(showsSelectionHint: showsHint, selectionsCollapsed: true),
+                           "★ collapsed: no hint over the pill")
+        }
+        XCTAssertTrue(WorkspacePlaceholder.hintShows(showsSelectionHint: true, selectionsCollapsed: false), "expanded: as before")
+        var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }
+        let src = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
+        XCTAssertTrue(src.contains("if Self.hintShows(showsSelectionHint: visible.showsSelectionHint, selectionsCollapsed: selectionsCollapsed) {"),
+                      "the bar's one hint goes through the rule")
+    }
+}

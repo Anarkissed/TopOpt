@@ -30,8 +30,9 @@ public enum FlexibleChromeLayout {
     public static let capsuleTop: CGFloat = DS.Space.xl3 + 42 + PageChrome.gap
     public static let capsuleLeft: CGFloat = DS.Space.xl4
     public static let capsuleHeight: CGFloat = 44
-    /// The capsule's widest ("● Flexible ⌄ | Lattice | Squish" is ~280 pt).
-    public static let capsuleMaxWidth: CGFloat = 300
+    /// The capsule's widest ("● Flexible ⌄ | Lattice | Squish" is ~263 pt; ★ P5 (R9: "capsule ~320 pt keeping the 12 pt gizmo
+    /// check"): with its ✂ after a second divider ~312 pt).
+    public static let capsuleMaxWidth: CGFloat = 320
     /// The page segments inside it: 36 tall, 4 pt in.
     public static let segmentHeight: CGFloat = 36
     public static let segmentInset: CGFloat = 4

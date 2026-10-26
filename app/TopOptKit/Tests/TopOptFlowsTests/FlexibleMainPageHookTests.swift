@@ -32,14 +32,15 @@ final class FlexibleMainPageHookTests: XCTestCase {
             ("H4", "flexDisplacements: flexibleMain.dents(project, on: stage), flexScale: flexibleMain.dentScale(project, on: stage),"),
             ("H4", "bodyAlpha: flexibleMain.bodyAlpha(project, on: stage) ?? latticePreviewBodyAlpha,"),
             // ★ batch C (re-pinned on purpose): the toggles gain Stress, solved directly (FlexibleBatchCHookTests pins the whole line)
-            ("H5", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),   // ★ re-pinned (batch C verification; round 4 C2: openSettings)
+            // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
+            ("H5", "if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),   // ★ re-pinned (batch C verification; round 4 C2: openSettings)
             // ★ batch B review: from Topology the pill goes to the Lattice stage first (Exit then shows the lattice)
             // ★ re-pinned (round 4 C2 verification): "Building…" on another stage goes to the Lattice stage only
             ("H10", "if project.lattice.flexible == nil { latticeThisButton } else { FlexibleMainStatusPill(main: flexibleMain, open: { if stage != .lattice { goToStage(.lattice) }; showFlexiblePage = true }, goToLattice: { if stage != .lattice { goToStage(.lattice) } }) }"),
             // ★ batch B review: the player clears the bottom-right chip column (Gravity …) in its row
             // ★ RE-PINNED (round 7, R7-D1 — H34, approved 2026-10-14 19:45): no chip column on the Flexible stage (H24), the
             // corner pair rides the bar's clearance: chipColumnWidth 0. Was: the column's width.
-            ("P", "if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
+            ("P", "if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
         ]
         for (h, pin) in pins {
             XCTAssertEqual(ws.components(separatedBy: pin).count - 1, 1, "\(h) must appear exactly once: \(pin)")

@@ -22,38 +22,20 @@
 import SwiftUI
 import TopOptDesign
 
+/// ★ P2 (the redesign, point 5): the shared SelectionsSummary's (#354's B2 lift of this one — the same words, the same number
+/// format: FlexNumberSpec.format is FlexibleWeightUnit.number, which SelectionsSummary.format copies).
 public enum FlexibleSelectionsSummary {
     /// The group line's summary: what its faces are (Lattice ▦ / Solid ■) and how deep.
     @MainActor
-    public static func summary(project p: ProjectModel, group g: SelectionGroup) -> String {
-        var lat: [Double] = [], sol: [Double] = []
-        for r in p.latticeSelectableRefs(g) {
-            switch p.latticeSelectableRole(r, in: g.id) {
-            case .include: lat.append(p.latticeSlabDepthMM(r, in: g.id))
-            case .exclude: sol.append(p.latticeSlabDepthMM(r, in: g.id))
-            case nil: break
-            }
-        }
-        func range(_ v: [Double]) -> String {
-            let lo = v.min() ?? 0, hi = v.max() ?? 0
-            let a = FlexNumberSpec.format((lo * 10).rounded() / 10, decimals: 1), b = FlexNumberSpec.format((hi * 10).rounded() / 10, decimals: 1)
-            return a == b ? "\(a) mm" : "\(a)–\(b) mm"
-        }
-        if !lat.isEmpty, !sol.isEmpty { return "▦ \(lat.count) ■ \(sol.count)" }
-        if !lat.isEmpty { return "▦ \(lat.count) · \(range(lat))" }
-        if !sol.isEmpty { return "■ \(sol.count) · \(range(sol))" }
-        return "—"
-    }
+    public static func summary(project p: ProjectModel, group g: SelectionGroup) -> String { SelectionsSummary.summary(project: p, group: g) }
 
     /// One value when every face agrees (to 0.1 mm), else nil ("mixed").
-    public static func common(_ v: [Double]) -> Double? {
-        guard let f = v.first else { return nil }
-        return v.allSatisfy { abs($0 - f) < 0.05 } ? f : nil
-    }
-
+    public static func common(_ v: [Double]) -> Double? { SelectionsSummary.common(v) }
 }
 
-/// H25: the list, in #354's panel slot.
+/// H25: the list, in #354's panel slot. (★ P2: still Flexible's own view, not the shared SelectionsList — FlexibleSelectionsListTests
+/// reads its header ("Selections", the pill's id) and its trash (`main.askDelete(g.id)`) from this file, so the swap is a re-pin
+/// for the reviewer; its small pieces below are the shared ones.)
 public struct FlexibleSelectionsList: View {
     @ObservedObject var project: ProjectModel
     @ObservedObject var main: FlexibleMainStage
@@ -209,7 +191,7 @@ public struct FlexibleSelectionsList: View {
                 .modifier(FlexibleCancelInPlace(asking: ui.deleteAsk == g.id && !ui.deleteAskInChip, keepKey: "deleteCancel",
                                                 cancel: { ui.deleteAsk = nil }))
                 .background(publish("selTrash-\(g.id.uuidString)"))
-                .accessibilityLabel("Delete \(g.name), here and in Topology")
+                .accessibilityLabel(FlexibleSelectionsCopy.deleteAsk(g.name))   // ★ P3: the question it asks
                 .accessibilityIdentifier("flexible-sel-trash-\(g.id.uuidString)")
             }
         }
@@ -217,7 +199,7 @@ public struct FlexibleSelectionsList: View {
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
-    /// "Delete Group C here and in Topology?" [Delete] — his answer: the trash confirms (★ U21: [Cancel] on the trash itself).
+    /// "Delete ‘Group C’ from every stage?" [Delete] — his answer: the trash confirms (★ U21: [Cancel] on the trash itself).
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
         FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) })
             .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
@@ -366,23 +348,15 @@ public struct FlexibleSelectionsList: View {
 
 // MARK: - small shared pieces (the list and the chip)
 
-/// A face's state glyph: ▦ Lattice (violet), ■ Solid (white), ⬚ Off.
+/// A face's state glyph: ▦ Lattice (violet), ■ Solid (white), ⬚ Off. ★ P2: the shared StateGlyph (its violet is
+/// FlexibleStageStyle.facePrismToken's RGBA).
 struct FlexibleStateGlyph: View {
     let role: LatticeGroupRole?
-    var body: some View {
-        switch role {
-        case .include:
-            Image(systemName: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(FlexibleStageStyle.facePrismToken.color)
-        case .exclude:
-            Image(systemName: "square.fill").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-        case nil:
-            Image(systemName: "square.dashed").font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
-        }
-    }
+    var body: some View { StateGlyph(role: role) }
 }
 
 /// The group's role glyphs: Anchor (lock, green), Load (arrow, blue), Protect (shield, teal), Keep clear (no-sign, red).
+/// ★ P2: the shared RoleGlyphs; whether the group reads "Lattice" is Flexible's rule (FlexibleFaceCommits.readsLattice).
 struct FlexibleRoleGlyphs: View {
     @ObservedObject var project: ProjectModel
     let group: UUID
@@ -392,23 +366,11 @@ struct FlexibleRoleGlyphs: View {
     /// a Lattice face) shows the lattice glyph first, its shield beside it.
     @MainActor
     static func glyphs(_ project: ProjectModel, _ group: UUID) -> [(symbol: String, tint: RGBA)] {
-        let k = project.force.kind(for: group)
-        var out: [(symbol: String, tint: RGBA)] = []
-        if FlexibleFaceCommits.readsLattice(group, project) { out.append(("square.grid.3x3.fill", FlexibleStageStyle.facePrismToken)) }
-        if k.isAnchor { out.append(("lock.fill", DS.Color.okGreen)) }
-        if k.isLoad { out.append(("arrow.down", DS.Color.accent)) }
-        if project.force.isProtected(group) { out.append(("shield.lefthalf.filled", FlexibleFaceChip.protectTint)) }
-        if project.force.keepClearAffix(for: group) == .on { out.append(("nosign", DS.Color.clearance)) }
-        return out
+        RoleGlyphs.glyphs(project, group, readsLattice: FlexibleFaceCommits.readsLattice(group, project))
     }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(Array(Self.glyphs(project, group).enumerated()), id: \.offset) { _, g in
-                Image(systemName: g.symbol).foregroundStyle(g.tint.color)
-            }
-        }
-        .font(.system(size: size, weight: .semibold))
+        RoleGlyphs(project: project, group: group, readsLattice: FlexibleFaceCommits.readsLattice(group, project), size: size)
     }
 }
 
@@ -508,18 +470,9 @@ struct FlexibleDeleteConfirm: View {
     }
 }
 
-/// The group line's summary drawn with the state glyphs (▦ Lattice, ■ Solid) in place of the characters.
+/// The group line's summary drawn with the state glyphs (▦ Lattice, ■ Solid) in place of the characters. ★ P2: the shared
+/// SummaryLabel.
 struct FlexibleSummaryLabel: View {
     let summary: String
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(Array(summary.split(separator: " ", omittingEmptySubsequences: true).enumerated()), id: \.offset) { _, w in
-                if w == "▦" { FlexibleStateGlyph(role: .include) }
-                else if w == "■" { FlexibleStateGlyph(role: .exclude) }
-                else { Text(String(w)) }
-            }
-        }
-        .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
-        .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1).fixedSize()
-    }
+    var body: some View { SummaryLabel(summary: summary) }
 }

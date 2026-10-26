@@ -172,7 +172,9 @@ final class FlexibleFaceCommitTests: XCTestCase {
         XCTAssertNil(p.selection.groups.first { $0.id == c }, "★ gone (here and for Topology: one selection model)")
         XCTAssertNil(p.lattice.groupRoles[c]); XCTAssertNil(p.lattice.selectableDepthMM[r3.key]); XCTAssertFalse(p.force.isProtected(c))
         XCTAssertEqual(p.undo.past.count, past + 1, "★ ONE undo step")
-        XCTAssertEqual(FlexibleSelectionsCopy.deleteAsk("Group C"), "Delete Group C here and in Topology?")
+        // ★ RE-PINNED (the redesign P3, the reviewer's ruling R11 of 2026-10-24: "Delete 'X' from every stage?"); was
+        // "Delete Group C here and in Topology?".
+        XCTAssertEqual(FlexibleSelectionsCopy.deleteAsk("Group C"), "Delete \u{2018}Group C\u{2019} from every stage?")
         XCTAssertLessThanOrEqual(FlexibleSelectionsCopy.deleteAsk("Group C").count, 44)
         p.performUndo()
         XCTAssertEqual(p.editSnapshot, snap, "★ Undo: the group, its faces, its role, its depths — everything back")

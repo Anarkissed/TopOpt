@@ -60,9 +60,11 @@ public enum FlexibleSelectionsCopy {
     public static func loadToast(_ face: String) -> String { "\(face) is a Load. Set its weight on the Squish page." }
     /// ★ the review of R7-D2: ONE line of ≤ 44 characters whatever name he typed ("Delete Left side squeeze pad here and in
     /// Topology?" was 50 and widened the 348 pt list) — the name stays on the group's line right above the question.
+    /// ★ THE REDESIGN, P3 (point 3; the reviewer's ruling R11 of 2026-10-24: "Delete 'X' from every stage?"): the group goes
+    /// from every stage, named in curly quotes — 44 characters hold a name of up to 17; a longer one falls back.
     public static func deleteAsk(_ name: String) -> String {
-        let s = "Delete \(name) here and in Topology?"
-        return s.count <= 44 ? s : "Delete this group here and in Topology?"
+        let s = "Delete \u{2018}\(name)\u{2019} from every stage?"
+        return s.count <= 44 ? s : "Delete this group from every stage?"
     }
     public static func deleted(_ name: String) -> String {
         let s = "\(name) deleted here and in Topology"

@@ -44,6 +44,8 @@ public struct RunRequest: Equatable, Sendable {
     /// face-id contract is shared, handoff 134 + the mesh-optimize work).
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// ★ LOAD SCENARIOS (job `loads.scenarios`): sent only with 2+; `anchorFaceIDs`/`loadGroups` then mirror Scenario 1.
+    public var scenarios: [LoadScenarioWire] = []
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool
@@ -1442,10 +1444,15 @@ public final class RunModel: ObservableObject {
     /// and arm the completion notification. The workspace shows a re-open chip.
     public func runInBackground() {
         guard phase == .running else { return }
-        runningInBackground = true
         isMinimized = true
+        // ★ his iPad (2026-10-26): reopening the card and hiding it again must work every time; arm the notifier once
+        guard !runningInBackground else { return }
+        runningInBackground = true
         notifier.willRunInBackground()
     }
+
+    /// The card's "In Background" button is enabled whenever a run is going, including after he reopens the card.
+    public var canSendToBackground: Bool { phase == .running }
 
     /// Re-open the full progress card for a minimized in-flight run.
     public func restore() {

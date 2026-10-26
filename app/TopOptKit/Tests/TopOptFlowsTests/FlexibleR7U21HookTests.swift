@@ -128,6 +128,9 @@ final class FlexibleR7U21HookTests: XCTestCase {
             if line.contains("// Flexible (PR #362) H44: ") { return "                           isEnabled: model.canContinue) { model.continueToWorkspace() }" }
             return line
         }.joined(separator: "\n")
+        // re-pinned by Library (2026-10-25, reviewer ruling 22:36 (1)); was: no Library line to take back out.
+        // The Library's one addition, its Project row (with the blank line before it), comes out like the hooks do.
+        s = s.replacingOccurrences(of: "\n\n            LibraryImportProjectRow(model: model)   // Library: which project the new part joins (its own top padding, only when shown)", with: "")
         XCTAssertFalse(s.contains("flexDraft"), "★ no other line reads the draft")
         XCTAssertEqual(s.components(separatedBy: "\n").count, 251, "★ today's 250 lines (and the last newline)")
         XCTAssertTrue(s.contains("\n            fileRow.padding(.top, DS.Space.xl3)\n\n            Text(\"PRINT PROCESS\")\n"))

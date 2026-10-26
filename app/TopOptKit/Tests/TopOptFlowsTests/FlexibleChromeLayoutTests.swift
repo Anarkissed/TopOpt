@@ -28,7 +28,8 @@ final class FlexibleChromeLayoutTests: XCTestCase {
         XCTAssertEqual(FlexibleChromeLayout.capsuleLeft, 24)
         XCTAssertEqual(FlexibleChromeLayout.capsuleHeight, 44)
         XCTAssertEqual(FlexibleChromeLayout.segmentHeight, 36)
-        XCTAssertLessThanOrEqual(FlexibleChromeLayout.capsuleMaxWidth, 300)
+        // ★ RE-PINNED (the redesign P5, R9: "capsule ~320 pt keeping the 12 pt gizmo check"; was ≤ 300): its ✂ makes ~312
+        XCTAssertLessThanOrEqual(FlexibleChromeLayout.capsuleMaxWidth, 320)
         let cap = FlexibleChromeLayout.capsuleFrame(width: 1000)
         XCTAssertEqual(cap, CGRect(x: 24, y: 76, width: FlexibleChromeLayout.capsuleMaxWidth, height: 44), "capped at its widest")
         for (name, v) in Self.pads {

@@ -240,6 +240,67 @@ final class RedesignToStrengthenTests: XCTestCase {
 
     // MARK: (8) H56l: the cap's line, from its flags — never its note
 
+    // MARK: (10) thin joints: the variant's `fragile_joints` (core's loose-piece fix, the reviewer's ruling 2026-10-26 03:39)
+
+    /// strengthen_pass with its one variants[] line carrying `fragile_joints` = `count` (core's per-variant block).
+    static func fragileReport(_ count: Int, strengthen: Bool = true) throws -> RunReportBlocks {
+        try edited("strengthen_pass") { r in
+            var variants = r["variants"] as! [[String: Any]]
+            variants[0]["fragile_joints"] = ["count": count, "note": "core's own words, never shown"]
+            r["variants"] = variants
+            if !strengthen { r["strengthen"] = nil }
+        }
+    }
+
+    func testAVersionWithThinJointsSaysSoInPlainWords() throws {
+        let one = try Self.fragileReport(1)
+        XCTAssertEqual(one.rows.first?.fragileJoints, 1)
+        XCTAssertEqual(StrengthenText.cards(one).first?.lines.last, "1 thin joint (edge or corner only) — may be fragile to print")
+        XCTAssertEqual(StrengthenText.cards(try Self.fragileReport(3)).first?.lines.last,
+                       "3 thin joints (edge or corner only) — may be fragile to print")
+        // the unreachable versions have no line of their own, so no thin-joint line
+        XCTAssertFalse(StrengthenText.cards(one).dropFirst().contains { $0.lines.contains { $0.contains("thin joint") } })
+        // on a strengthen run the card carries it: no second line under the cards
+        XCTAssertFalse(StrengthenText.lines(one).contains { $0.contains("thin joint") })
+    }
+
+    func testARunWithoutStrengthenShowsTheThinJointLineUnderTheResults() throws {
+        let b = try Self.fragileReport(2, strengthen: false)
+        XCTAssertEqual(StrengthenText.cards(b), [])
+        XCTAssertEqual(StrengthenText.lines(b), ["Some results have thin joints (edge or corner only) — may be fragile to print"])
+    }
+
+    func testNoThinJointsNoLine() throws {
+        let b = try Self.blocks("strengthen_pass")
+        XCTAssertEqual(b.rows.first?.fragileJoints, 0)
+        XCTAssertFalse((StrengthenText.cards(b).flatMap(\.lines) + StrengthenText.lines(b)).contains { $0.contains("thin joint") })
+        XCTAssertEqual(StrengthenText.lines(try Self.fragileReport(0, strengthen: false)), [])
+    }
+
+    // MARK: (11) a refused version's best try (the reviewer's ruling 2026-10-26 07:29, item 50 acceptance (c))
+
+    /// strengthen_pass with version 2 refused after real tries: its best try `best`, its target 6.17, its note `note`.
+    static func refusedReport(best: Double, note: String) throws -> RunReportBlocks {
+        try edited("strengthen_pass") { r in
+            var s = r["strengthen"] as! [String: Any]
+            var vs = s["versions"] as! [[String: Any]]
+            vs[1]["status"] = "unreachable"; vs[1]["verified_margin"] = best; vs[1]["target_margin"] = 6.170280956
+            vs[1]["note"] = note
+            s["versions"] = vs; r["strengthen"] = s
+        }
+    }
+
+    func testARefusedVersionShowsItsBestTryAndWhatItNeeded() throws {
+        let short = try Self.refusedReport(best: 5.647687726, note: "verified 5.65× vs target 6.17×")
+        XCTAssertEqual(StrengthenText.cards(short)[1].lines, ["Best try 5.65×, needed 6.17×"])
+        // a reason that is not the margin rides on the same line
+        let clear = try Self.refusedReport(best: 6.4, note: "Keep Clear voxels (12)")
+        XCTAssertEqual(StrengthenText.cards(clear)[1].lines, ["Best try 6.40×, needed 6.17× — Keep Clear voxels (12)"])
+        // a version beyond the ceiling never had a try: its own note, as before
+        XCTAssertEqual(StrengthenText.cards(short)[2].lines,
+                       ["above 0.95 x the box filled solid (margin 11.95): unreachable in this design space"])
+    }
+
     func testTheCapLineIsBuiltFromItsFlagsNeverItsNote() throws {
         func capped(anchor: Bool, load: Bool, note: String? = nil) throws -> RunReportBlocks {
             try Self.edited("strengthen_pass") { r in

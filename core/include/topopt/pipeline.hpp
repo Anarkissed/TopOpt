@@ -206,6 +206,15 @@ struct MinimizePlasticOptions {
   // back together before the rung is certified, and the line says "bridged". Off by
   // default; the production load case arms it.
   bool bridge_pieces = false;
+  // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): two or more
+  // load cases, node-indexed on the PART grid like `bcs` / external_loads (each
+  // scenario's own supports and loads; an anchor OFF in it is a weak non-contact
+  // spring). Empty (the DEFAULT) = the one load case, byte for byte. Every rung
+  // optimises the smooth max of them (SimpOptions::scenarios) and is certified on each:
+  // the worst governs the margin, and a scenario whose weak springs carry more than
+  // kScenarioUnheldShare of its load is "unheld" (its load has no path to its
+  // anchors) and the rung is rejected.
+  std::vector<SimpScenario> scenarios;
   std::vector<double> initial_design;
 
   // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
@@ -1060,6 +1069,24 @@ inline constexpr const char* kRungNonConvergentReason =
 // in precedence, above the margin.
 inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
 
+// REAL BOLTS (bearing anchors; the reviewer's ruling of 2026-10-25 21:45): more than
+// kAnchorsSlidingShare (analyze.hpp) of the anchors' total reaction is carried by the weak sliding
+// (tangential) springs, so the anchors cannot hold the load in some direction: the
+// part is held by springs that stand for no real support. Not a pass, whatever the
+// margin says. Below the connectivity facts, above the margin.
+// LOAD SCENARIOS: above this share of a scenario's load carried by its weak springs
+// (the anchors OFF in it), its load has no path to its anchors: "<name>'s load has no
+// path to its anchors", and the rung is rejected.
+inline constexpr double kScenarioUnheldShare = 0.05;
+// ...and their stiffness: this fraction of the part's own element stiffness per node
+// (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
+// the solve is never singular.
+inline constexpr double kScenarioWeakSpringRel = 1e-6;
+inline constexpr const char* kScenarioUnheldSuffix = "'s load has no path to its anchors";
+
+inline constexpr const char* kAnchorsSlidingReason =
+    "anchors cannot hold the load in some direction (held by the sliding springs)";
+
 // Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
 // rejection_reason values, from the two DIVERGENCE guards. Both are distinct
 // from kRungInfeasibleReason on purpose: neither claims the load path was lost.
@@ -1768,6 +1795,7 @@ struct SolvedDesignDomain {
   // Node-indexed inputs REMAPPED onto `grid` (verbatim copies when !expanded).
   std::vector<DirichletBC> bcs;
   std::vector<NodalLoad> external_loads;  // empty when the caller declared none
+  std::vector<SimpScenario> scenarios;    // LOAD SCENARIOS, remapped (empty when none)
 };
 
 // Resolve the domain `minimize_plastic(part_grid, ..., options)` solves on.

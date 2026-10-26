@@ -98,6 +98,8 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var runningIDs: Set<UUID> = []
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
+    /// Library (B3): each version's draft this session (an edit to a version with results goes there).
+    private var libraryDrafts: [UUID: UUID] = [:]
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
     /// Internal (not private) so the write-after-delete race test can hold the queue.
@@ -165,6 +167,8 @@ public final class AppModel: ObservableObject {
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
     private let store: ProjectStore
+    /// The Library: Project → Part → Version over the same store (approved Library mockup, 2026-10-25).
+    public let library: LibraryModel
     /// App-wide print-preset persistence (separate from per-project `store`).
     private let presetStore: PrintParamsPresetStore
     private let now: () -> Date
@@ -213,6 +217,7 @@ public final class AppModel: ObservableObject {
         self.inspector = inspector
         self.rescaler = rescaler
         self.store = store
+        self.library = LibraryModel(store: store)
         self.presetStore = presetStore
         self.now = now
         self.remoteJobDefaults = remoteJobDefaults
@@ -301,7 +306,7 @@ public final class AppModel: ObservableObject {
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
         let latticeSpec = project.latticeRunSpec(emission: emission)
-        return RunRequest(modelPath: file.path, material: project.material,
+        var request = RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
                           projectName: project.name.isEmpty ? file.name : project.name,
@@ -340,6 +345,8 @@ public final class AppModel: ObservableObject {
                           // Defaults true on the project, so an untouched project
                           // asks for the armed posture explicitly.
                           projectCADFaces: project.projectCADFaces)
+        request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
+        return request
     }
 
     // MARK: - Materials
@@ -795,6 +802,7 @@ public final class AppModel: ObservableObject {
         // them managed between that check and its write — a deleted project never comes back.
         let s = store
         Self.resultsQueue.async { s.delete(id: id) }
+        library.refresh()   // Library: the version's entry goes with its folder
     }
 
     // MARK: - Recents / navigation
@@ -836,8 +844,47 @@ public final class AppModel: ObservableObject {
     public func backHome() {
         if printParamsSheetPresented { closePrintParams() }
         persistCurrentProject()
+        // Library (B3): a version whose edits went to its draft reopens as it ran
+        if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
+        library.refresh()   // Library: file what changed (a new version, a new part)
     }
+
+    // MARK: - Library (B3): drafts
+
+    /// The draft made this session for a version, if any.
+    func libraryDraft(of version: UUID) -> UUID? { libraryDrafts[version] }
+
+    /// Write `live` (a version's edited settings) into that version's draft — the one made this session,
+    /// else a new folder (the model and its sidecars copied from the version's folder, no results).
+    @discardableResult
+    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot) -> RecentProject? {
+        var d = live
+        d.id = libraryDrafts[project.id] ?? UUID()
+        d.optimized = nil
+        d.savedAt = now()
+        let model = project.modelSourceURL ?? URL(fileURLWithPath: store.modelPath(id: project.id, fileName: live.modelFileName))
+        do { try store.save(d, modelSource: model) } catch {
+            toast = "Couldn’t save the draft: \(error.localizedDescription)"
+            return nil
+        }
+        libraryDrafts[project.id] = d.id
+        library.noteParent(project.id, of: d.id)   // numbered from this version (his decision 11: v4 → v4.1)
+        let recent = ProjectDuplication.recent(for: d)
+        if let i = recentProjects.firstIndex(where: { $0.id == d.id }) { recentProjects[i] = recent }
+        else { recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == project.id } ?? -1) + 1) }
+        if thumbnails[d.id] == nil { thumbnails[d.id] = thumbnails[project.id] }
+        return recent
+    }
+
+    /// Drop a version's live copy, so it next opens from its folder (as it ran).
+    func forgetLiveVersion(_ id: UUID) {
+        guard !runningIDs.contains(id) else { return }
+        projectsById[id] = nil
+        runCancellables[id]?.cancel()
+        runCancellables[id] = nil
+    }
+
 
     // MARK: - Cold-launch remote re-attach (handoff 119)
 
@@ -978,6 +1025,13 @@ public final class AppModel: ObservableObject {
     /// never crash the flow.
     private func persist(_ project: ProjectModel) {
         guard var snapshot = project.snapshot(savedAt: now()) else { return }
+        // ★ Library (B3): a version's settings never change after it ran. Once he has grouped, an edit
+        // to a version with results is written to its DRAFT; the version's own folder is left as it ran.
+        if library.makesNextVersion(of: project.id), !runningIDs.contains(project.id),
+           let ran = store.snapshot(id: project.id), !LibrarySettings.same(ran, snapshot) {
+            if writeLibraryDraft(of: project, live: snapshot) != nil { library.refresh() }
+            return
+        }
         // THE `optimized` FLAG DESCRIBES THE DURABLE RECORD, NOT THE LIVE SESSION
         // (task 2026-08-03-variant-entry-gating-and-retention, bar AJ1, second half).
         //

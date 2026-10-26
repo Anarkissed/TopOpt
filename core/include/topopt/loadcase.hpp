@@ -95,6 +95,16 @@ struct ProductionLoadCase {
     Vec3 force{0.0, 0.0, 0.0};  // fx, fy, fz in N
   };
   std::vector<LoadGroup> load_groups;
+  // LOAD SCENARIOS (job loads.scenarios, two or more; empty = one load case). Each
+  // scenario's own groups and the anchors ON in it. `anchor_face_ids` must hold their
+  // UNION (every anchor is a support somewhere, so all are tagged and padded) and
+  // `load_groups` scenario 1's (the mirror).
+  struct Scenario {
+    std::string name;
+    std::vector<LoadGroup> groups;
+    std::vector<int> anchor_face_ids;
+  };
+  std::vector<Scenario> scenarios;
 
   // WHICH LADDER (task 2026-08-03-growth-ladder). Both modes now SEARCH, both
   // recommend, and each is one line:
@@ -116,6 +126,9 @@ struct ProductionLoadCase {
   // CORE LIST item 50 — "Redesign to strengthen" (job loads.redesign): the run is
   // rebuilt inside the design box from what is frozen (strengthen_part, run_job).
   bool strengthen = false;
+  // REAL BOLTS (job loads.anchor_model "bearing"): every anchor is a compression-only,
+  // frictionless normal spring (DirichletBC::spring), not a clamp. False = clamped.
+  bool anchor_bearing = false;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.

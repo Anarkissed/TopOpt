@@ -128,6 +128,8 @@ public struct StrengthenReport: Equatable, Sendable {
         public let massGrams: Double
         public let massFractionOfOriginal: Double
         public let note: String
+        /// The margin this version aimed for (`target_margin`): a refused version shows its best try against it.
+        public var targetMargin: Double = 0
     }
     public let asDrawnMargin: Double
     public let marginRequired: Double
@@ -150,7 +152,7 @@ public struct StrengthenReport: Equatable, Sendable {
                     status: $0["status"] as? String ?? "", volumeFraction: num($0["volume_fraction"]),
                     verifiedMargin: num($0["verified_margin"]), massGrams: num($0["mass_grams"]),
                     massFractionOfOriginal: num($0["mass_fraction_of_original"]),
-                    note: $0["note"] as? String ?? "")
+                    note: $0["note"] as? String ?? "", targetMargin: num($0["target_margin"]))
         }
         return StrengthenReport(asDrawnMargin: num(s["as_drawn_margin"]),
                                 marginRequired: num(s["margin_required"]),
@@ -170,6 +172,9 @@ public struct RunReportBlocks: Equatable, Sendable {
         public let accepted: Bool
         public let rejectionReason: String
         public let bodies: VariantBodies?
+        /// Places where the printed variant holds together only by an edge or a corner (`fragile_joints.count`;
+        /// core's loose-piece fix, the reviewer's ruling 2026-10-26 03:39). Reported, never fixed.
+        public var fragileJoints: Int = 0
     }
     public let strengthen: StrengthenReport?
     public let rows: [Row]
@@ -186,7 +191,8 @@ public struct RunReportBlocks: Equatable, Sendable {
                     printedFraction: num($0["printed_fraction"] ?? $0["volume_fraction"]),
                     accepted: $0["accepted"] as? Bool ?? accepted,
                     rejectionReason: $0["rejection_reason"] as? String ?? "",
-                    bodies: VariantBodies.decode($0["bodies"] as? [String: Any]))
+                    bodies: VariantBodies.decode($0["bodies"] as? [String: Any]),
+                    fragileJoints: int(($0["fragile_joints"] as? [String: Any])?["count"]))
             }
         }
         return RunReportBlocks(strengthen: StrengthenReport.decode(r["strengthen"] as? [String: Any]),
@@ -246,7 +252,9 @@ public enum StrengthenText {
         guard let s = blocks.strengthen else { return [] }
         return s.versions.map { v in
             var lines: [String] = []
-            if v.status == "unreachable" {
+            if v.status == "unreachable", v.verifiedMargin > 0, v.targetMargin > 0 {
+                lines.append(bestTryLine(v))
+            } else if v.status == "unreachable" {
                 lines.append(v.note.isEmpty ? "Unreachable in this design space" : plain(v.note))
             } else {
                 lines.append("Margin " + String(format: "%.2f", v.verifiedMargin) + "×")
@@ -257,6 +265,11 @@ public enum StrengthenText {
             let own = lineVersion(of: v, in: s)   // Flexible (PR #362) H56k: redesign to strengthen (overnight plan 2026-10-25) — a merged version reads the line of the version it merged into
             let bridged = own.status != "unreachable" && blocks.rows.contains {
                 abs($0.volumeFraction - own.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
+            }
+            if own.status != "unreachable",
+               let thin = blocks.rows.first(where: { abs($0.volumeFraction - own.volumeFraction) < 1e-6 })?.fragileJoints,
+               thin > 0 {
+                lines.append(thinJointsLine(thin))
             }
             return StrengthenCard(title: "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress",
                                   status: statusWord(v.status), lines: lines, bridged: bridged)
@@ -274,9 +287,27 @@ public enum StrengthenText {
         return cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil   // Flexible (PR #362) H56l: redesign to strengthen (overnight plan 2026-10-25) — the cap's line from its flags, never its note
     }
 
-    /// The lines under the cards: the cap's line, then the run's rejection lines.
+    /// A version refused after real tries (the reviewer's ruling 2026-10-26 07:29, item 50 (c)): its best verified try
+    /// against what it needed, on ONE line; a reason other than the margin (core's note: Keep Clear voxels, not accepted)
+    /// rides on the same line, in plain words.
+    static func bestTryLine(_ v: StrengthenReport.Version) -> String {
+        let line = "Best try " + String(format: "%.2f", v.verifiedMargin) + "×, needed "
+            + String(format: "%.2f", v.targetMargin) + "×"
+        let marginOnly = v.note.isEmpty || v.note.hasPrefix("verified ") || v.note.contains("missed the target")
+        return marginOnly ? line : line + " — " + plain(v.note)
+    }
+
+    /// A version's thin joints (core's `fragile_joints.count`), in plain words. core's own note is never shown.
+    public static func thinJointsLine(_ count: Int) -> String {
+        "\(count) thin joint\(count == 1 ? "" : "s") (edge or corner only) — may be fragile to print"
+    }
+    public static let someThinJointsLine = "Some results have thin joints (edge or corner only) — may be fragile to print"
+
+    /// The lines under the cards: the cap's line, then the run's rejection lines, then — on a run with no strengthen
+    /// cards to carry it — one thin-joint line when an accepted result has any.
     public static func lines(_ blocks: RunReportBlocks) -> [String] {
-        [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks)
+        let thin = blocks.strengthen == nil && blocks.rows.contains { $0.accepted && $0.fragileJoints > 0 }
+        return [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks) + (thin ? [someThinJointsLine] : [])
     }
 
     /// The run's rejection lines in plain words (item 47), once each.

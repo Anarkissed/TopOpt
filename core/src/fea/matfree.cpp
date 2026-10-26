@@ -602,6 +602,7 @@ void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
   mf_apply_full(elems, color_offsets, Ke, xfull, yfull);
   if (has_cubic)
     mf_apply_cubic_add(cub_elems, cub_color_offsets, KA, KB, KC, xfull, yfull);
+  if (!springs.empty()) mf_apply_springs(springs, xfull.data(), yfull.data());
   // yg is fully overwritten (every kept DOF is written), so no pre-zero needed.
   for (int k = 0; k < ng; ++k)
     yg[static_cast<std::size_t>(k)] =
@@ -653,6 +654,7 @@ void MatfreeReduced::apply_kgg_raw_f32(const float* xg, float* yg) const {
     xfull_f[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
         xg[static_cast<std::size_t>(k)];
   mf_apply_full_f32(elems, color_offsets, Ke, xfull_f, yfull_f);
+  if (!springs.empty()) mf_apply_springs(springs, xfull_f.data(), yfull_f.data());
   for (int k = 0; k < ng; ++k)
     yg[static_cast<std::size_t>(k)] =
         yfull_f[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
@@ -719,6 +721,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   m.up.assign(static_cast<std::size_t>(ndof), 0.0);
   bool nonzero_bc = false;
   for (const DirichletBC& bc : bcs) {
+    if (bc.spring > 0.0) continue;  // a bearing spring, resolved below (REAL BOLTS)
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
       throw std::invalid_argument(std::string(who) + ": BC index out of range");
@@ -779,6 +782,28 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
       diagfull[static_cast<std::size_t>(el.edof[r])] +=
           el.a * m.KA(r, r) + el.b * m.KB(r, r) + el.c * m.KC(r, r);
     }
+
+  // REAL BOLTS — the bearing springs, and their stiffness into the diagonal.
+  for (const DirichletBC& bc : bcs) {
+    if (!(bc.spring > 0.0)) continue;
+    if (bc.node < 0 || bc.node >= num_nodes)
+      throw std::invalid_argument(std::string(who) + ": spring node out of range");
+    if (bc.released) continue;  // the node is held by nothing
+    MfSpring sp;
+    sp.node = bc.node;
+    sp.k = bc.spring;
+    sp.kt = bc.spring_tangent;
+    sp.n[0] = bc.normal.x;
+    sp.n[1] = bc.normal.y;
+    sp.n[2] = bc.normal.z;
+    m.springs.push_back(sp);
+  }
+  for (const MfSpring& sp : m.springs) {
+    double S[9];
+    mf_spring_block(sp, S);
+    for (int a = 0; a < 3; ++a)
+      diagfull[3 * static_cast<std::size_t>(sp.node) + a] += S[4 * a];
+  }
 
   // Under-constrained: every free DOF void (no stiffness anywhere).
   if (nf > 0) {
