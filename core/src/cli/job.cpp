@@ -552,6 +552,7 @@ JobDescription parse_job(const std::string& json_text) {
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
              "infill_percent", "minimize_plastic", "redesign", "anchor_model", "scenarios",
+             "safety_margin",
              "wall_loops",
              "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
@@ -936,6 +937,14 @@ JobDescription parse_job(const std::string& json_text) {
       if (job.loads.anchor_model != "glued" && job.loads.anchor_model != "bearing")
         schema_fail("\"loads.anchor_model\" must be \"glued\" or \"bearing\" (got \"" +
                     job.loads.anchor_model + "\")");
+    }
+    // THE SAFETY MARGIN (his decision of 2026-10-26): a multiple of the load, 1.5 at the
+    // least. His words for a lower one, read verbatim.
+    if (const JsonValue* sm = find_key(lv, "safety_margin")) {
+      const double v = require_number(*sm, "loads.safety_margin");
+      if (!std::isfinite(v) || v < 1.5)
+        schema_fail("The safety margin can't be below 150% of the load");
+      job.loads.safety_margin = v;
     }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
     if (const JsonValue* wl = find_key(lv, "wall_loops")) {

@@ -628,6 +628,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Shared production solver config (matrix-free multigrid + Galerkin cache +
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
+  // THE USER'S SAFETY MARGIN (job loads.safety_margin, >= 1.5): the margin every design
+  // must reach. Not stated: the production default (1.5), byte for byte.
+  if (lc.safety_margin > 0.0) opts.margin_stop = lc.safety_margin;
   opts.anchor_voxels = std::move(anchor_voxels);  // item 47: names, receipt only
   opts.external_loads = external;  // the user's load case; empty => self-weight
 

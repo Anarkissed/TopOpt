@@ -978,6 +978,10 @@ struct JobLoadCase {
   std::string anchor_model;
   // LOAD SCENARIOS (loads.scenarios; two or more, else empty = today's job).
   std::vector<JobScenario> scenarios;
+  // THE USER'S SAFETY MARGIN (loads.safety_margin; his decision of 2026-10-26): the
+  // margin every design must reach, as a multiple of the load (1.5 = 150 %, also the
+  // minimum). 0 = not stated: the production default, 1.5, byte for byte.
+  double safety_margin = 0.0;
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
   // its INNER / OUTER line widths, so the accept gate can size the solid wall ring

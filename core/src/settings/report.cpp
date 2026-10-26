@@ -629,6 +629,9 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
   if (!sr.ceiling_unheld.empty())
     out += "    \"ceiling_unheld\": " + str_json(sr.ceiling_unheld) + ",\n";
   out += "    \"margin_required\": " + num_json(sr.margin_required) + ",\n";
+  // The user's safety margin (his decision of 2026-10-26): the margin version 1 is
+  // built to, as a multiple of the load (1.5 = 150 %).
+  out += "    \"safety_margin\": " + num_json(sr.margin_required) + ",\n";
   out += "    \"reference_margin\": " + num_json(sr.reference_margin) + ",\n";
   out += "    \"ceiling_margin\": " + num_json(sr.ceiling_margin) + ",\n";
   out += "    \"original_mass_grams\": " + num_json(sr.original_mass_grams) + ",\n";
@@ -666,6 +669,7 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
            ", \"note\": " + str_json(v.note) +
+           ", \"target_rule\": " + str_json(v.target_rule) +
            (v.scenarios.empty() ? std::string() : ", \"scenarios\": " + scenarios_json(v.scenarios)) +
            ", \"attempts\": [" +
            [&v]() {

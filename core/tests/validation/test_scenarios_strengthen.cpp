@@ -341,8 +341,17 @@ int main() {
   CHECK(bearing.find("Load scenarios can't be combined with bolt bearings yet") !=
             std::string::npos,
         "(d) with bolt bearings: the plain line");
-  std::printf("[scen+str] refusals: \"%s\" / \"%s\" / \"%s\"\n", no_anchor.c_str(), no_load.c_str(),
-              bearing.c_str());
+  // THE SAFETY MARGIN (his decision of 2026-10-26): 150 % of the load at the least.
+  const std::string low =
+      refusal(job_json("[" + both + ", " + free_b + "]", a_bot, b_bot, a_top, b_top,
+                       "\"safety_margin\": 1.2, "));
+  CHECK(low.find("The safety margin can't be below 150% of the load") != std::string::npos,
+        "(d) a safety margin under 150 %: the plain line");
+  CHECK(refusal(job_json("[" + both + ", " + free_b + "]", a_bot, b_bot, a_top, b_top,
+                         "\"safety_margin\": 2.0, ")).empty(),
+        "(d) a safety margin of 200 % parses");
+  std::printf("[scen+str] refusals: \"%s\" / \"%s\" / \"%s\" / \"%s\"\n", no_anchor.c_str(),
+              no_load.c_str(), bearing.c_str(), low.c_str());
 
   if (g_failures == 0) {
     std::printf("scenarios + strengthen: all %d checks passed\n", g_checks);

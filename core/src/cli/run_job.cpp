@@ -9079,7 +9079,8 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_redesign, j_anchor_model, j_scenarios, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_anchor_model, j_scenarios,
+               j_safety_margin, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -9188,6 +9189,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.minimize_plastic = j_minimize_plastic;
   lc.strengthen = j_redesign == "strengthen";  // item 50
   lc.anchor_bearing = j_anchor_model == "bearing";  // REAL BOLTS
+  lc.safety_margin = j_safety_margin;  // the user's safety margin (0 = default)
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -12269,7 +12271,10 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
 // version is then run once at the job's resolution and VERIFIED: its exported
 // solid (variant_export_model_mesh, the shell the file carries) re-voxelized and
 // certified by analyze_job, the same certification `topopt-cli analyze` runs.
-constexpr double kStrengthenStressCut[3] = {0.25, 0.50, 0.75};
+// THE LADDER (his decision of 2026-10-26, replacing 25 / 50 / 75 % less worst stress):
+// version 1's target is the user's safety margin (the lightest redesign that is just
+// safe), versions 2 and 3 each 10 % over the version before, on its VERIFIED margin.
+constexpr double kStrengthenLadderStep = 1.10;
 constexpr double kStrengthenDelta = 0.10;     // aim above the target (da Silva 2021)
 constexpr double kStrengthenGamma = 0.75;     // the repair's exponent
 constexpr double kStrengthenCeilingUse = 0.95;
@@ -12545,14 +12550,15 @@ MinimizePlasticResult strengthen_versions(
   // The reference: the part as drawn, certified.
   const AnalyzeJobResult drawn =
       analyze_job(job, job_dir, join_path(work, "as_drawn"), materials, rules, "", {});
+  // The drawing is measured as INFORMATION only ("your drawing: N x, M g"): the targets
+  // are the safety margin and the versions before (the ladder above).
   sr.as_drawn_margin = drawn.analysis.margin_effective;
-  sr.reference_margin = std::max(sr.as_drawn_margin, sr.margin_required);
+  sr.reference_margin = sr.margin_required;
   // LOAD SCENARIOS (ruling 2026-10-26 12:46): every step on the WORST scenario
   // (analyze_job certifies them all). A part as drawn that cannot carry one of them
   // has no margin worth referencing: the reference is the requirement alone.
   const bool with_scenarios = !job.loads.scenarios.empty();
   sr.as_drawn_unheld = drawn.unheld_scenario;
-  if (!sr.as_drawn_unheld.empty()) sr.reference_margin = sr.margin_required;
   sr.original_mass_grams = drawn.voxel_mass_grams;
 
   // The ceiling: the domain (box, minus keep-outs and Keep Clears, plus everything
@@ -12647,6 +12653,7 @@ MinimizePlasticResult strengthen_versions(
 
   MinimizePlasticResult out;
   double prev_vf = 0.0, prev_verified = 0.0;
+  bool prev_ok = true;  // the version before was built (version 1 builds on nothing)
   for (int k = 0; k < 3; ++k) {
     const auto t0 = std::chrono::steady_clock::now();
     StrengthenVersionReport vr;
@@ -12655,10 +12662,22 @@ MinimizePlasticResult strengthen_versions(
     p_base = 0;
     p_step = "search";
     say(0);
-    vr.stress_cut = kStrengthenStressCut[k];
-    const double target = std::max(sr.reference_margin / (1.0 - vr.stress_cut),
-                                   kStrengthenStepOver * prev_verified);
+    vr.stress_cut = 0.0;  // the old ladder's field; the target rule says what it is now
+    vr.target_rule = k == 0 ? "your safety margin"
+                            : "10% over version " + std::to_string(k) + "'s verified margin";
+    const double target =
+        k == 0 ? sr.margin_required
+               : std::max(kStrengthenLadderStep, kStrengthenStepOver) * prev_verified;
     vr.target_margin = target;
+    if (!prev_ok) {
+      vr.status = "unreachable";
+      vr.note = "version " + std::to_string(k) + " was not built, so there is nothing to " +
+                "build 10% over";
+      vr.target_margin = 0.0;
+      sr.versions.push_back(vr);
+      continue;
+    }
+    prev_ok = false;  // until this version is built (verified, repaired or merged)
     if (!sr.ceiling_unheld.empty()) {
       // LOAD SCENARIOS: even the box filled solid gives that load no path.
       vr.status = "unreachable";
@@ -12840,6 +12859,8 @@ MinimizePlasticResult strengthen_versions(
     if (!out.evaluated.empty() && std::fabs(vr.volume_fraction - prev_vf) <= 0.01 * prev_vf) {
       vr.status = "merged";
       vr.note = "the same design as version " + std::to_string(k);
+      prev_ok = true;
+      prev_verified = vr.verified_margin;
       sr.versions.push_back(vr);
       continue;
     }
@@ -12858,6 +12879,7 @@ MinimizePlasticResult strengthen_versions(
     }
     prev_vf = vr.volume_fraction;
     prev_verified = vr.verified_margin;
+    prev_ok = true;
     sr.versions.push_back(vr);
     out.solved_grid = best.solved_grid;
     out.used_multigrid = best.used_multigrid;

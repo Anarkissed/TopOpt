@@ -404,6 +404,9 @@ struct StrengthenVersionReport {
   // EVERY ATTEMPT of the version (its fine run, then each repair), as verified
   // (reviewer's ruling 2026-10-26): report.json versions[].attempts.
   std::vector<StrengthenAttemptReport> attempts;
+  // THE LADDER (his decision of 2026-10-26): how `target_margin` was set — "your safety
+  // margin" (version 1) or "10% over version N's verified margin".
+  std::string target_rule;
   // LOAD SCENARIOS (ruling 2026-10-26 12:46): every scenario verified on the shown
   // attempt's EXPORT (empty without scenarios); `verified_margin` is the worst's.
   std::vector<ScenarioReport> scenarios;
