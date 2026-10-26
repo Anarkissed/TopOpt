@@ -17,10 +17,11 @@
 //       and a contact-set change mid-run (Krylov recycling on, so a basis is carried
 //       across solves) gives the same field as a cold solve of the new set: the change
 //       drops the caches built on the old operator (#362's condition 1);
-//   (d) the bearing margin converges: under 5 % change from res 64 to res 96, the
+//   (d) the bearing margin converges: under 5 % change from res 96 to res 128, the
 //       springs carrying the load (not the tangential stabilisation), and the glued
-//       margin printed beside it. (Res 32 puts 4 voxels across the bore's radius: too
-//       coarse to judge.)
+//       margin printed beside it. (Since the corner fix, 2026-10-26, every margin is
+//       read on the stress averaged over a 1.44 mm radius, which settles once the voxel
+//       is well under it: the pair moved from 64 / 96 to 96 / 128, measured 0.7 %.)
 //   (e) THE SLIDING GUARD (the reviewer's ruling of 2026-10-25 21:45): pulled along the
 //       bore's own axis, a frictionless pin holds nothing, so the reaction sits in the
 //       weak sliding springs; over 5 % of it there, the design is NOT accepted and the
@@ -222,7 +223,7 @@ int main() {
   // ── (d) the margin converges ─────────────────────────────────────────────────
   try {
     double bearing[3] = {0, 0, 0}, glued[3] = {0, 0, 0};
-    const int res[3] = {48, 64, 96};
+    const int res[3] = {64, 96, 128};
     for (int r = 0; r < 3; ++r) {
       const std::string out = std::string(TMP_DIR) + "/bearing_plate_" + std::to_string(res[r]);
       const AnalyzeJobResult b =
@@ -244,9 +245,9 @@ int main() {
             "(d) the springs carry the load, not the sliding springs");
     }
     const double change = std::fabs(bearing[2] - bearing[1]) / bearing[1];
-    std::printf("[bearing] change 64 -> 96: bearing %.2f %%, glued %.2f %%\n", 100.0 * change,
+    std::printf("[bearing] change 96 -> 128: bearing %.2f %%, glued %.2f %%\n", 100.0 * change,
                 100.0 * std::fabs(glued[2] - glued[1]) / glued[1]);
-    CHECK(change < 0.05, "(d) the bearing margin changes under 5 % from res 64 to 96");
+    CHECK(change < 0.05, "(d) the bearing margin changes under 5 % from res 96 to 128");
   } catch (const std::exception& e) {
     ++g_failures;
     std::fprintf(stderr, "FAIL: (d) threw: %s\n", e.what());
