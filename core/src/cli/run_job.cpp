@@ -12556,6 +12556,17 @@ MinimizePlasticResult strengthen_versions(
     return o;
   };
   const MinimizePlasticOptions coarse_opts = quiet(coarse.options);
+  // LATER COARSE RUNS START FROM A DESIGN (reviewer's order, 2026-10-26): the
+  // first coarse run of the pass starts from the level set's hole array as
+  // before; every later one — the rest of the bracket and every later version's
+  // — starts from the most recent coarse design, its loose pieces taken out
+  // (clean_strengthen_start on the coarse domain). At the low fractions the
+  // bracket reaches, the hole array is a field of disconnected blobs, which is
+  // what sent his Fine job's coarse runs 5-6 into the Jacobi-CG fallback.
+  const SolvedDesignDomain coarse_domain =
+      resolve_design_domain(coarse.grid, coarse.bcs, coarse.options);
+  const DesignMask coarse_mask = design_domain_mask(coarse_domain, coarse.options);
+  std::vector<double> coarse_last;  // the most recent coarse design
   const MinimizePlasticOptions fine_opts = quiet(options);
   auto run_one = [&](const JobSetup* s, double vf,
                      const std::vector<double>& seed) {
@@ -12624,9 +12635,28 @@ MinimizePlasticResult strengthen_versions(
     std::vector<double> pass_design;  // the passing coarse design (coarse grid)
     VoxelGrid pass_grid;
     while (vr.coarse_runs < kStrengthenCoarseRuns) {
-      MinimizePlasticResult cr = run_one(&coarse, vf, {});
+      std::vector<double> cseed;
+      if (!coarse_last.empty()) {
+        StrengthenStart cs = clean_strengthen_start(coarse_domain.grid, coarse_last,
+                                                    coarse_mask, coarse_domain, iso,
+                                                    "previous coarse design");
+        if (!cs.design.empty()) {
+          std::fprintf(stderr,
+                       "[strengthen] version %d coarse run %d at vf %.4f: starts from "
+                       "the previous coarse design: %d loose piece(s) taken out (%lld "
+                       "design voxels), %lld non-frozen loose voxels left ; %.1f ms\n",
+                       k + 1, vr.coarse_runs + 1, vf, cs.loose, cs.loose_voxels_removed,
+                       cs.loose_left, cs.ms);
+          cseed = std::move(cs.design);
+          ++vr.coarse_seeded;
+        }
+      }
+      MinimizePlasticResult cr = run_one(&coarse, vf, cseed);
       const double m = margin_of(cr);
       ++vr.coarse_runs;
+      if (cr.evaluated.front().optimization.physical_density.size() ==
+          coarse_domain.grid.voxel_count())
+        coarse_last = cr.evaluated.front().optimization.physical_density;
       best_m = std::max(best_m, m);
       if (m >= aim) {
         pass_vf = vf;

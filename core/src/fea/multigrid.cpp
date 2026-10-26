@@ -3134,16 +3134,24 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // Bounded (see kSafeLogFirst): the full line for the first attempts of a
       // run and for the one that latches the safe path off; a summary per
       // kSafeLogEvery attempts otherwise.
-      if (seq <= g_mg_safe_log_first || g_mg_safe_latched) {
-        if (g_mg_safe_latched) mg_safe_log_flush_window();
+      // An attempt that did NOT converge always prints its full line (it seeds
+      // or precedes a Jacobi-CG fallback, the case a run needs explained),
+      // with the solve's tolerance and how the retry started.
+      if (seq <= g_mg_safe_log_first || g_mg_safe_latched || !ok) {
+        if (g_mg_safe_latched || (!ok && seq > g_mg_safe_log_first))
+          mg_safe_log_flush_window();
         std::fprintf(stderr,
                      "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
                      "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
+                     "tol %.0e, %s ; "
                      "loose pieces at the floor: %d of %d pieces (%lld vox, largest "
                      "%d, %d frozen) of %lld elements%s%s%s%s\n",
                      seq, safe_direct ? "latched off" : "stalled", shipped_it,
                      shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
-                     safe_ms, loose.unanchored, loose.pieces, loose.unanchored_voxels,
+                     safe_ms, tolerance,
+                     !warm ? "no guess (cold)"
+                           : (cold_start ? "warm guess dropped (cold)" : "warm start"),
+                     loose.unanchored, loose.pieces, loose.unanchored_voxels,
                      loose.largest_unanchored, loose.frozen_loose, loose.elements,
                      g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
                      start_note, exact_note,
@@ -3187,8 +3195,18 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // held coarse operator, never silently reuse it.
       if (lattice != nullptr) pc.lattice = *lattice;
       fea_detail::MfCgTimes tm;
+      const double t_fb0 = fea_detail::mf_steady_ms();
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
                               diag.residual, diag.converged, &rec, &pc, &tm);
+      // After a safe attempt, say how the Jacobi-CG fallback it led to went
+      // (stderr only; never printed on a solve the safe retry did not reach).
+      if (have_h && safe_ok)
+        std::fprintf(stderr,
+                     "[mg-safe] solve %lld fallback: Jacobi-CG %s in %d iterations, "
+                     "rel res %.3e, %.0f ms (tol %.0e, cap %d)\n",
+                     g_mg_safe_solve_seq, diag.converged ? "CONVERGED" : "did not converge",
+                     diag.iterations, diag.residual, fea_detail::mf_steady_ms() - t_fb0,
+                     tolerance, cap);
       diag.used_multigrid = false;
       diag.mg_levels = 0;
       diag.recycle_dim = rec.dim;

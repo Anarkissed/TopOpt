@@ -646,6 +646,7 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"specks\": " + std::to_string(v.specks) +
            ", \"keep_clear_voxels\": " + std::to_string(v.keep_clear_voxels) +
            ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
+           ", \"coarse_seeded_runs\": " + std::to_string(v.coarse_seeded) +
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
            ", \"note\": " + str_json(v.note) +

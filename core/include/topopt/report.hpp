@@ -364,6 +364,10 @@ struct StrengthenVersionReport {
   int specks = 0;
   long long keep_clear_voxels = 0;    // exported voxels inside a Keep Clear
   int coarse_runs = 0;
+  // Coarse runs that started from the previous coarse design (cleaned of loose
+  // pieces) instead of the level set's hole array: every coarse run but the
+  // pass's first (reviewer's order, 2026-10-26).
+  int coarse_seeded = 0;
   int repairs = 0;
   double seconds = 0.0;
   std::string note;
