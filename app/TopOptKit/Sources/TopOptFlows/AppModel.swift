@@ -306,7 +306,7 @@ public final class AppModel: ObservableObject {
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
         let latticeSpec = project.latticeRunSpec(emission: emission)
-        return RunRequest(modelPath: file.path, material: project.material,
+        var request = RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
                           projectName: project.name.isEmpty ? file.name : project.name,
@@ -345,6 +345,8 @@ public final class AppModel: ObservableObject {
                           // Defaults true on the project, so an untouched project
                           // asks for the armed posture explicitly.
                           projectCADFaces: project.projectCADFaces)
+        request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
+        return request
     }
 
     // MARK: - Materials

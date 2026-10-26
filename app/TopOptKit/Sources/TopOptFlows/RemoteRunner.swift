@@ -948,16 +948,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The decoder and the announcement banner are ALREADY built and tested
         // for that day; only this line is in the way.
         job["bake_build_orientation"] = "off"
+        // One load group on the wire (the top level and each scenario use the same shape).
+        func loadGroupJSON(_ g: TopOptKit.LoadGroupSpec) -> [String: Any] {
+            var e: [String: Any] = ["force": [g.force.x, g.force.y, g.force.z]]
+            // Emit "face_ids" only when there ARE face ids: a group that is
+            // now ONE region must not ship an empty array where a 23-element
+            // one used to be — and a group with no regions must ship exactly
+            // what it always did.
+            if !g.faceIDs.isEmpty { e["face_ids"] = g.faceIDs }
+            if !g.regionIDs.isEmpty { e["region_ids"] = g.regionIDs }
+            return e
+        }
         if !request.loadGroups.isEmpty {
-            loads["groups"] = request.loadGroups.map { g -> [String: Any] in
-                var e: [String: Any] = ["force": [g.force.x, g.force.y, g.force.z]]
-                // Emit "face_ids" only when there ARE face ids: a group that is
-                // now ONE region must not ship an empty array where a 23-element
-                // one used to be — and a group with no regions must ship exactly
-                // what it always did.
-                if !g.faceIDs.isEmpty { e["face_ids"] = g.faceIDs }
-                if !g.regionIDs.isEmpty { e["region_ids"] = g.regionIDs }
-                return e
+            loads["groups"] = request.loadGroups.map(loadGroupJSON)
+        }
+        // ★ LOAD SCENARIOS (overnight release 2026-10-26, the shared key): only with 2+ scenarios; the groups and
+        // anchor_face_ids above already mirror Scenario 1. Each scenario sends its own ON anchors.
+        if request.scenarios.count >= 2 {
+            loads["scenarios"] = request.scenarios.map { s -> [String: Any] in
+                ["name": s.name, "anchor_face_ids": s.anchorFaceIDs, "groups": s.loadGroups.map(loadGroupJSON)]
             }
         }
         if request.infillPercent >= 0 {

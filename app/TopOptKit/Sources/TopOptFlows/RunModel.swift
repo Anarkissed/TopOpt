@@ -44,6 +44,8 @@ public struct RunRequest: Equatable, Sendable {
     /// face-id contract is shared, handoff 134 + the mesh-optimize work).
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// ★ LOAD SCENARIOS (job `loads.scenarios`): sent only with 2+; `anchorFaceIDs`/`loadGroups` then mirror Scenario 1.
+    public var scenarios: [LoadScenarioWire] = []
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool

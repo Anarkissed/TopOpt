@@ -1301,6 +1301,7 @@ public struct ResultsScreen: View {
             ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
             if let blocks = model.reportBlocks { RunReportCardsView(blocks: blocks) }   // Flexible (PR #362) H56g: redesign to strengthen (overnight plan 2026-10-25) — the versions' cards + item 47's line
             recommendationCaption  // WHICH OBJECT is recommended, and what it weighs
+            ScenarioResultLines(results: model.scenarioResults)   // ★ load scenarios: the worst case named; unheld, one line
             addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
             latticeDetailCaption   // the latticed object's own mass + where it is

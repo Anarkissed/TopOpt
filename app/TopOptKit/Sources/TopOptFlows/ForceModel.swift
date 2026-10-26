@@ -194,6 +194,8 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// Storage stays kgf everywhere — this is presentation only, so flipping the
     /// default changes no stored weight and no job.
     public var unit: WeightUnit = .lbs
+    /// ★ LOAD SCENARIOS (his order 2026-10-26; LoadScenarios.swift). nil = one scenario, byte-identical to before.
+    public var scenarios: LoadScenarioSet? = nil
 
     /// Per selection-group role/direction/weight, keyed by `SelectionGroup.id`.
     /// A group with no entry here is `.pending`.
@@ -328,12 +330,13 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public func kind(for id: UUID) -> GroupKind { kinds[id] ?? .pending }
 
     /// Declare a group a fixed Anchor (proto `mkAnchor`).
-    public mutating func makeAnchor(_ id: UUID) { kinds[id] = .anchor }
+    public mutating func makeAnchor(_ id: UUID) { claimForOpenScenario(id); kinds[id] = .anchor }
 
     /// Declare a group a Load: it spawns along gravity with the default weight, or
     /// keeps its existing weight if it was already a load. Re-tapping Load resets
     /// the direction to gravity (proto `mkLoad`: `a.dir='gravity'`).
     public mutating func makeLoad(_ id: UUID) {
+        claimForOpenScenario(id)
         let kg = kinds[id]?.weightKg ?? Self.defaultWeightKg
         kinds[id] = .load(direction: .gravity, weightKg: kg)
     }
@@ -608,6 +611,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
             manualPrimitives = pruned.isEmpty ? nil : pruned
         }
         pruneBoreOverrides { live.contains($0) }
+        syncScenarios(live: live)
     }
 
     // MARK: - manual (user-placed) primitives + deletion (handoff group-editing)
@@ -893,6 +897,7 @@ extension ForceModel {
         case manualPrimitives       // user-placed primitives (handoff group-editing, optional)
         case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional)
         case gravityBaseModel       // purely-visual arrow base (gravity round 2, optional)
+        case scenarios              // load scenarios (2026-10-26, optional)
     }
 
     public init(from decoder: Decoder) throws {
@@ -939,6 +944,7 @@ extension ForceModel {
         // Gravity round 2 — the purely-visual arrow base. Absent in pre-round-2 snapshots →
         // nil (draw from the mesh centre), so old projects load with gravity unchanged (V6).
         gravityBaseModel = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravityBaseModel)
+        scenarios = try c.decodeIfPresent(LoadScenarioSet.self, forKey: .scenarios)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -965,5 +971,6 @@ extension ForceModel {
         // Gravity round 2 — only emit the arrow base when the user has placed one, so a
         // project that never touched it is byte-identical to a pre-round-2 snapshot (V6).
         try c.encodeIfPresent(gravityBaseModel, forKey: .gravityBaseModel)
+        try c.encodeIfPresent(scenarios, forKey: .scenarios)
     }
 }
