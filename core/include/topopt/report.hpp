@@ -282,7 +282,12 @@ struct VariantReport {
   // fragile when printed; reported, never fixed. report.json "fragile_joints"
   // only when > 0, so every other line keeps its exact bytes.
   int fragile_joints = 0;
+  // Where (mm, the solve grid's model frame): the midpoint of each joint's first
+  // edge / corner contact, in a deterministic order, at most
+  // kFragileJointPositionsMax of them (fragile_joints is the full count).
+  std::vector<Vec3> fragile_joint_positions_mm;
 };
+inline constexpr std::size_t kFragileJointPositionsMax = 50;
 
 // ── WHAT FROZE THE PART, and the rungs it made redundant (CORE LIST item 40) ──
 //

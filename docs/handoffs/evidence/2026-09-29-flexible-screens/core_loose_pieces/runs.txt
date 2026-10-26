@@ -94,3 +94,61 @@
 #   report.json writer — the writer itself was not exercised end-to-end by a CLI run): stderr "topopt-cli: stopped: the solver did not converge — job
 #   <job folder> (<job file>, model <model>): <detail>", report.json {"status": "stopped", "error": "stopped: the solver did not converge",
 #   "job": ..., "job_file": ..., "model": ..., "detail": ..., "solver": {iterations, relative_residual, elapsed_ms}}, exit code 4.
+
+## REVIEW FIXES (independent review of 4d67e43d, 2026-10-26) — commit c67ccbbf (core f071d3fdf06e)
+#   Limits chosen (R1c): wall clock 45 min of SOLVING per Jacobi-CG solve (kSolverSafetyNetMs = 2,700,000 ms), polled every 16 iterations;
+#   GenEO setup (solve-begin, basis build / refresh) and pauses (a gap between polls > 30 s, mf_pause_gap_ms) are NOT counted (the deadline
+#   moves forward by them); iteration cap with no caller cap = min(max(1000, 2 ng), 250,000) on the MG fallback, min(2 ng, 250,000) on the
+#   plain matrix-free CG (fea_detail::kFallbackIterCap). Cap -> SolverNonConvergence (rung rejected); only the wall clock -> SolverStopped.
+#   R1b (skip a predictably over-cap GenEO build): not done — N_t is only known after the LOBPCG build; the per-structure refusal memo
+#   already prevents a second build, and its time no longer counts.
+#   test_loose_review RED on 4d67e43d (+ behaviour-neutral test hooks) — test_loose_review_RED_4d67e43d.log: R1 SolverStopped after a 400 ms
+#   GenEO setup vs a 150 ms limit; R2 SolverStopped after a 400 ms pause; R3 SolverStopped at the cap (MG fallback and plain CG); R4 staircase
+#   neck certified with the stairs at the floor (16 voxels, stair stress 0, worst margin 2.706 vs 2.557 with no drop); R5 no opt-out (8 voxels
+#   dropped under the dummy scope). GREEN at c67ccbbf — test_loose_review_GREEN_c67ccbbf.log: R1 converged (878 its; the build stood down,
+#   plain CG went on), R2 converged (control: the same stretch counted as work stops), R3 SolverNonConvergence x2, R4 bit-identical to the
+#   no-drop field (0 voxels at the floor, worst margin 2.557), R5 0 dropped and bit-identical to the pre-rule system.
+#   Flexible bridge (app/TopOptKit/Sources/TopOptBridge/flexible_squish_fe.cpp) holds FeaLoosePieceRuleOff: `swift build --scratch-path
+#   <scratchpad>/swiftbuild` in app/TopOptKit after app/scripts/build_core.sh (vendored core f071d3fdf06e) — Build complete (66 s). No Swift
+#   tests run.
+#   17-test comparison at c67ccbbf: unchanged from e46b49cd (16 identical, test_recycle as named) — compare17.txt.
+#   RUN H — his Fine job on c67ccbbf (core f071d3fdf06e), 22:59:43 -> stopped by me (own PID) at 23:29:08 once the first fine solves had
+#   converged, as asked: version 1 fine start at vf 0.0380 from the coarse design (0 loose in the hand-off); fine solves 1-5 (465,760
+#   elements) CONVERGED on l1 MG-PCG in 186 / 136 / 177 / 128 / 127 cycles (9.5-14.7 s each), no fallback on the fine grid — the same as
+#   run F (the review fixes do not touch trajectory solves). Coarse grid: the same 3 of 443 safe attempts fell to Jacobi-CG and finished.
+#   389 PROGRESS lines, 0 backward jumps.
+
+## RE-CERTIFICATION GATE (reviewer, 2026-10-26): his completed runs re-certified with the old and the final CLI
+#   Inputs: 4 completed worker jobs (read-only; job.json + model + variant_NNN.stl copied to the session scratchpad only): 13185527 (res 64,
+#   core 61cfce05), ad68d4c0 (res 64, 61cfce05), dda471a2 (res 64, b21c5d9a), efe18e33 (res 128 = Fine, 03ad2df5); every ACCEPTED variant (13).
+#   Path: `topopt-cli analyze job.json --mesh variant_NNN.stl --out <dir>` (the CLI's own certification of the exported design).
+#   old = /Users/nadim/dev/TopOpt/worker-bin/180a23637fc6/topopt-cli (the worker's current binary); new = c67ccbbf (core f071d3fdf06e);
+#   final = f93e7a74 (core f2ca3eeb57ae). Compared: worst-case margin, effective margin, max von Mises (MPa), accepted, load path (the report's
+#   rejection reason), and fields.bin bytes (the certified displacement + stress fields: identical bytes => identical compliance f.u — the
+#   analyze report carries no compliance number). 'loose' = [loose] lines in that run's stderr; 'nc' = solves that did not converge.
+#   RESULT: 13 / 13 IDENTICAL (all three binaries; fields.bin byte-identical). No margin changed. NOTE: an exported mesh is re-voxelized as a
+#   fully solid part (one modulus, no void phase), so the rule cannot engage on this path ('loose 0' everywhere); designs WITH a void
+#   phase are covered by the 17-test comparison and test_loose_review R4.
+#   job | variant | old: worst margin / effective / max stress MPa / accepted / load path / fields.bin sha | new: worst margin / effective / max stress MPa / accepted / load path / fields.bin sha | final: worst margin / effective / max stress MPa / accepted / load path / fields.bin sha | same?
+#   13185527 | variant_026 | 7.981525052 / 2.821895244 / 7.483823597 / True / ok / 2e08c83d46e5 (loose 0, nc 0) | 7.981525052 / 2.821895244 / 7.483823597 / True / ok / 2e08c83d46e5 (loose 0, nc 0) | 7.981525052 / 2.821895244 / 7.483823597 / True / ok / 2e08c83d46e5 (loose 0, nc 0) | IDENTICAL
+#   13185527 | variant_038 | 8.250367994 / 2.916945578 / 7.222910597 / True / ok / 74eeb1c79f55 (loose 0, nc 0) | 8.250367994 / 2.916945578 / 7.222910597 / True / ok / 74eeb1c79f55 (loose 0, nc 0) | 8.250367994 / 2.916945578 / 7.222910597 / True / ok / 74eeb1c79f55 (loose 0, nc 0) | IDENTICAL
+#   13185527 | variant_052 | 8.239803578 / 2.913210493 / 7.268518162 / True / ok / f8ce7e585e56 (loose 0, nc 0) | 8.239803578 / 2.913210493 / 7.268518162 / True / ok / f8ce7e585e56 (loose 0, nc 0) | 8.239803578 / 2.913210493 / 7.268518162 / True / ok / f8ce7e585e56 (loose 0, nc 0) | IDENTICAL
+#   13185527 | variant_068 | 8.019715582 / 2.835397636 / 7.384563384 / True / ok / 2fb241ce75ec (loose 0, nc 0) | 8.019715582 / 2.835397636 / 7.384563384 / True / ok / 2fb241ce75ec (loose 0, nc 0) | 8.019715582 / 2.835397636 / 7.384563384 / True / ok / 2fb241ce75ec (loose 0, nc 0) | IDENTICAL
+#   ad68d4c0 | variant_110 | 26.81556259 / 9.480733075 / 1.810035717 / True / ok / 3c6a1b146c25 (loose 0, nc 0) | 26.81556259 / 9.480733075 / 1.810035717 / True / ok / 3c6a1b146c25 (loose 0, nc 0) | 26.81556259 / 9.480733075 / 1.810035717 / True / ok / 3c6a1b146c25 (loose 0, nc 0) | IDENTICAL
+#   ad68d4c0 | variant_125 | 27.1113894 / 9.585323646 / 1.59195697 / True / ok / 8b10130eccc7 (loose 0, nc 0) | 27.1113894 / 9.585323646 / 1.59195697 / True / ok / 8b10130eccc7 (loose 0, nc 0) | 27.1113894 / 9.585323646 / 1.59195697 / True / ok / 8b10130eccc7 (loose 0, nc 0) | IDENTICAL
+#   ad68d4c0 | variant_155 | 29.46007766 / 10.41571035 / 1.398413968 / True / ok / dd96dc2ba8b3 (loose 0, nc 0) | 29.46007766 / 10.41571035 / 1.398413968 / True / ok / dd96dc2ba8b3 (loose 0, nc 0) | 29.46007766 / 10.41571035 / 1.398413968 / True / ok / dd96dc2ba8b3 (loose 0, nc 0) | IDENTICAL
+#   dda471a2 | variant_110 | 19.01833284 / 6.723996058 / 3.154850665 / True / ok / b54b864f161b (loose 0, nc 0) | 19.01833284 / 6.723996058 / 3.154850665 / True / ok / b54b864f161b (loose 0, nc 0) | 19.01833284 / 6.723996058 / 3.154850665 / True / ok / b54b864f161b (loose 0, nc 0) | IDENTICAL
+#   dda471a2 | variant_125 | 20.84694731 / 7.370508904 / 2.878119233 / True / ok / 066e0750a245 (loose 0, nc 0) | 20.84694731 / 7.370508904 / 2.878119233 / True / ok / 066e0750a245 (loose 0, nc 0) | 20.84694731 / 7.370508904 / 2.878119233 / True / ok / 066e0750a245 (loose 0, nc 0) | IDENTICAL
+#   dda471a2 | variant_155 | 22.80873442 / 8.064105389 / 2.630571206 / True / ok / 7550025d6468 (loose 0, nc 0) | 22.80873442 / 8.064105389 / 2.630571206 / True / ok / 7550025d6468 (loose 0, nc 0) | 22.80873442 / 8.064105389 / 2.630571206 / True / ok / 7550025d6468 (loose 0, nc 0) | IDENTICAL
+#   efe18e33 | variant_110 | 9.042319438 / 3.196942696 / 4.805100023 / True / ok / f7605324e737 (loose 0, nc 0) | 9.042319438 / 3.196942696 / 4.805100023 / True / ok / f7605324e737 (loose 0, nc 0) | 9.042319438 / 3.196942696 / 4.805100023 / True / ok / f7605324e737 (loose 0, nc 0) | IDENTICAL
+#   efe18e33 | variant_125 | 9.400585095 / 3.323608734 / 4.638680471 / True / ok / b44bc54c63f6 (loose 0, nc 0) | 9.400585095 / 3.323608734 / 4.638680471 / True / ok / b44bc54c63f6 (loose 0, nc 0) | 9.400585095 / 3.323608734 / 4.638680471 / True / ok / b44bc54c63f6 (loose 0, nc 0) | IDENTICAL
+#   efe18e33 | variant_155 | 9.369002385 / 3.31244256 / 4.448936476 / True / ok / e34651160144 (loose 0, nc 0) | 9.369002385 / 3.31244256 / 4.448936476 / True / ok / e34651160144 (loose 0, nc 0) | 9.369002385 / 3.31244256 / 4.448936476 / True / ok / e34651160144 (loose 0, nc 0) | IDENTICAL
+
+## FRAGILE JOINTS — report.json shape (f93e7a74), for the app
+#   Key path: report.json -> "variants"[i] (and "rejected"[i]) -> "fragile_joints"; present only when the printed part has >= 1 such joint
+#   (absent = none). {"count": N, "message": "N places where the part holds together only along an edge or at a corner: fragile when
+#   printed", "positions_mm": [[x, y, z], ...]} — one position per joint (midpoint of its first edge/corner contact, model frame, mm,
+#   deterministic order), at most 50 (count stays the full number). No face ids. Sample from the ctest's own CLI run (cli_out1): count 15,
+#   positions [[-26.25, -16.25, 3.75], [2.5, -17.5, 1.875], ...].
+
+## FINAL CTEST: f93e7a74 — 160 / 160 passed incl. cli_demo (1994 s) — ctest_full.txt.

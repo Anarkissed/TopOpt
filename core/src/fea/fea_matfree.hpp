@@ -532,6 +532,13 @@ inline constexpr int kSolveDeadlinePollIters = 256;
 // THE SAFETY NET's poll cadence (fea.hpp SolverStopped): one steady-clock read
 // every this-many Jacobi-CG iterations.
 inline constexpr int kSafetyNetPollIters = 16;
+// THE SAFETY NET's iteration backstop (review 2026-10-26): with no caller cap a
+// Jacobi-CG solve runs at most min(max(1000, 2 ng), this) iterations (the MG
+// solve's fallback; min(2 ng, this) for the plain CG). Reaching it is a
+// SolverNonConvergence — the rung is rejected and the search goes on. The old
+// Carriage Arms fallback needed 149,725, so 250,000 leaves it room; 2 ng was
+// ~3,000,000 on his fine grid.
+inline constexpr int kFallbackIterCap = 250000;
 
 // The armed deadline for THIS thread, in absolute mf_steady_ms() milliseconds;
 // 0 = disarmed. Thread-local and sticky, like the stagnation latch and the
@@ -563,6 +570,31 @@ inline void mf_test_safety_net_ms(double ms) {
 inline double& mf_safety_net_deadline() {
   static thread_local double d = 0.0;
   return d;
+}
+
+// TEST ONLY — never set by production code (all 0 / defaults = off).
+//   mf_test_geneo_setup_sleep_ms: mf_cg_solve sleeps this long at the start of
+//     each GenEO engagement (inside its setup span), standing in for a long
+//     basis build (877 s measured at ng 1.2M).
+//   mf_test_pause_at / mf_test_pause_ms: mf_cg_solve sleeps `ms` once, at CG
+//     iteration `at` (> 0), standing in for the worker's SIGSTOP pause.
+//   mf_pause_gap_ms: the safety net treats a gap between two of its polls
+//     longer than this as a pause, not work (production 30 s); tests shorten it.
+inline double& mf_test_geneo_setup_sleep_ms() {
+  static thread_local double ms = 0.0;
+  return ms;
+}
+inline int& mf_test_pause_at() {
+  static thread_local int at = 0;
+  return at;
+}
+inline double& mf_test_pause_ms() {
+  static thread_local double ms = 0.0;
+  return ms;
+}
+inline double& mf_pause_gap_ms() {
+  static thread_local double ms = 30000.0;
+  return ms;
 }
 
 // SAFE-RETRY probes (tests / diagnostics only; production never calls these).

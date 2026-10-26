@@ -2,6 +2,8 @@
 # base = git archive 322b1c78 (cmp/base/build); head = git archive e46b49cd (FINAL, face rule); same cmake flags (Release, TOPOPT_REQUIRE_DEPS=ON),
 # same machine. Diff of stdout+stderr minus '[mg] smoother check (S7)' / '[mg-safe]' lines and timings (<number> ms|s); new '[loose]' lines are counted and named.
 # Earlier heads, same method: 0e808d1f (26-connected rule) 17/17 IDENTICAL; 592f48f0 (+GenEO stand-down) 17/17 IDENTICAL.
+# RE-RUN at c67ccbbf (review fixes): the SAME result as e46b49cd below — 16 IDENTICAL, test_recycle '[mgcg void]' the same two numbers
+# (plain cg 113, recycled cg 130); compare4 output appended at the end of this file.
 
 ## RESULT at e46b49cd: 16 IDENTICAL, 1 DIFFERS (test_recycle; passes)
 # test_recycle '[mgcg void]' (void_heavy_grid(16), the soft-void fixture on the MG path) holds 5 pieces hinged to the body only by an edge or
@@ -57,3 +59,28 @@ test_v3 rc=0 3s	test_v3 rc=0 2s
 test_analyze_fixed_design rc=0 5s	test_analyze_fixed_design rc=0 5s
 test_minimize_plastic rc=0 18s	test_minimize_plastic rc=0 20s
 DONE	DONE
+
+## RE-RUN at c67ccbbf (git archive, cmp/head4)
+test_mg_tuning: IDENTICAL
+test_mg_coarse_hook: IDENTICAL
+test_mg_algebraic_level1: IDENTICAL
+test_mixed_precision: IDENTICAL
+test_recycle: DIFFERS ([loose] lines: 4)
+  out: 5 diff lines
+    ---
+    +++
+    @@ -5 +5 @@
+    -  [mgcg   void  ] plain cg=188 recycled cg=285 dim=16  max|du|/max|u|=4.443e-16
+    +  [mgcg   void  ] plain cg=113 recycled cg=130 dim=16  max|du|/max|u|=9.433e-14
+test_matfree: IDENTICAL
+test_galerkin_cache: IDENTICAL
+test_matfree_cubic: IDENTICAL
+test_matfree_threads: IDENTICAL
+test_simp: IDENTICAL
+test_plsm: IDENTICAL
+test_variants: IDENTICAL
+test_mbb: IDENTICAL
+test_mask: IDENTICAL
+test_v3: IDENTICAL
+test_analyze_fixed_design: IDENTICAL
+test_minimize_plastic: IDENTICAL

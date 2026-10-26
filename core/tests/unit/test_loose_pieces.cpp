@@ -344,17 +344,16 @@ int main() {
 #endif
 
   // ---------------------------------------------------------------------------
-  // N: THE SAFETY NET (ruling 2026-10-25, item 5). A Jacobi-CG solve that
-  // reaches its own iteration cap (no caller cap) or its time limit STOPS THE
-  // JOB: it throws SolverStopped, "stopped: the solver did not converge", which
-  // is NOT a SolverNonConvergence (so no rung-rejection catch absorbs it). A
-  // caller's explicit cap keeps today's SolverNonConvergence. Fixture: an 8^3
+  // N: THE SAFETY NET (ruling 2026-10-25, item 5; limits per the review of
+  // 2026-10-26). A Jacobi-CG solve past its WALL CLOCK stops the job: it throws
+  // SolverStopped, "stopped: the solver did not converge", which is NOT a
+  // SolverNonConvergence (so no rung-rejection catch absorbs it). Reaching the
+  // iteration CAP — its own or the caller's — is a SolverNonConvergence. Fixture: an 8^3
   // box of floor material (1e-9 E0) clamped at x = 0, holding a 2 x 2 solid bar
   // that its tip load anchors but that only the floor supports (a 1e9 contrast,
   // asked for an unreachable 1e-100, so CG runs to its cap), the safe retry off
   // so the fallback runs.
-  // RED on 322b1c78: the uncapped fallback threw SolverNonConvergence (a rung
-  // rejection the run carried on past) and had no time limit at all.
+  // RED on 322b1c78: no time limit at all.
   // ---------------------------------------------------------------------------
   {
     VoxelGrid g;
@@ -409,18 +408,18 @@ int main() {
       return o;
     };
     const Outcome a = attempt(0, false);
-    check(a.stopped && !a.nonconv,
-          "N1: the MG solve's Jacobi-CG fallback at its own cap STOPS the job "
-          "(SolverStopped, 'stopped: the solver did not converge')");
+    check(a.nonconv && !a.stopped,
+          "N1: the MG solve's Jacobi-CG fallback at its own cap is a "
+          "SolverNonConvergence (a rejected rung; review 2026-10-26), not a stop");
     const Outcome b = attempt(0, true);
-    check(b.stopped && !b.nonconv,
-          "N1: so does the plain matrix-free Jacobi-CG at its own cap");
+    check(b.nonconv && !b.stopped,
+          "N1: so is the plain matrix-free Jacobi-CG at its own cap");
     const Outcome c = attempt(50, false);
     check(c.nonconv && !c.stopped,
           "N2: a caller's explicit cap keeps today's SolverNonConvergence");
 #ifdef TOPOPT_LOOSE_PIECE_RULE
     // The time limit (TEST ONLY override: 1 microsecond, so the first poll, at
-    // 256 iterations, trips it).
+    // 16 iterations, trips it). Only the wall clock throws SolverStopped.
     topopt::fea_detail::mf_test_safety_net_ms(1e-3);
     const Outcome t = attempt(0, false);
     const Outcome tp = attempt(0, true);
@@ -431,8 +430,10 @@ int main() {
           "N3: past its time limit a Jacobi-CG solve STOPS the job (MG fallback, "
           "plain CG, and under a caller's cap too)");
     check(topopt::fea_detail::mf_safety_net_ms() == topopt::kSolverSafetyNetMs &&
-              topopt::kSolverSafetyNetMs == 600000.0,
-          "N3: the shipped time limit is 10 minutes per Jacobi-CG solve");
+              topopt::kSolverSafetyNetMs == 45.0 * 60.0 * 1000.0 &&
+              topopt::fea_detail::kFallbackIterCap == 250000,
+          "N3: the shipped backstop is 45 minutes of solving per Jacobi-CG solve and "
+          "an iteration cap of min(max(1000, 2 ng), 250,000)");
 
     // N4: the net is polled between CG iterations, so a long setup inside the
     // solve must stand down at its deadline: GenEO's basis build (877 s on his

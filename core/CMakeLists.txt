@@ -863,6 +863,13 @@ if(Eigen3_FOUND)
   target_link_libraries(test_loose_pieces PRIVATE topopt)
   target_include_directories(test_loose_pieces PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME fea_loose_pieces COMMAND test_loose_pieces)
+  # The independent review of the rule (2026-10-26): R1 GenEO setup never counts
+  # against the net, R2 a pause is not work, R3 the cap is a rejection not a stop,
+  # R4 certification reads a staircase neck at true stiffness, R5 the opt-out scope.
+  add_executable(test_loose_review tests/unit/test_loose_review.cpp)
+  target_link_libraries(test_loose_review PRIVATE topopt)
+  target_include_directories(test_loose_review PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_loose_review COMMAND test_loose_review)
 
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
   # That task let a measurement harness supply the prolongators for levels 2..
