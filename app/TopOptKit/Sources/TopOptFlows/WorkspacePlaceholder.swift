@@ -1330,7 +1330,7 @@ public struct WorkspacePlaceholder: View {
                 // affordances (§1a): they left the TO page with everything else.
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
-                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place
+                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place · Flexible (PR #362) H62: "Change lattice type…" asks with #354's card
                 else if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil, !flexibleMain.owns(project, stage) { latticeSettingsButtonOverlay }   // Flexible (PR #362) H28: Settings is the capsule's 'Squish' on the Flexible stage
@@ -1451,7 +1451,7 @@ public struct WorkspacePlaceholder: View {
             if showFlexiblePage, project.lattice.flexible != nil {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
-                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible… · Flexible (PR #362) H60: Edit faces from the Squish page (after its Save & Exit check); Done re-opens it
+                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible… · Flexible (PR #362) H60: Edit faces from the Squish page (after its Save & Exit check); Done re-opens it · Flexible (PR #362) H62: "Change lattice type…" from the Squish page, after its Save & Exit check
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
@@ -1471,6 +1471,7 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
+            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {

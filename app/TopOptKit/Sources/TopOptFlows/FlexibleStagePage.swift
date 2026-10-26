@@ -47,6 +47,8 @@ public struct FlexibleStagePage: View {
     let onLeave: (WorkspaceStage) -> Void
     /// ★ P5 (H60): Edit faces from this page (nil: no ✂, no row action).
     let onEditFaces: (() -> Void)?
+    /// ★ P4 (H62): "Change lattice type…" from this page (nil: the row does nothing).
+    let onChangeType: (() -> Void)?
     let onAbout: () -> Void
 
     // the overlay mesh and its per-vertex channels, rebuilt only when their inputs change
@@ -137,12 +139,14 @@ public struct FlexibleStagePage: View {
     /// ★ R7-D1 (H36): `onLeave` / `onAbout` — the capsule's hops (every existing construction compiles unchanged).
     /// ★ P5 (H60): `onEditFaces` — Edit faces from this page (the capsule's menu row and its ✂), after Save & Exit's own check.
     public init(project: ProjectModel, model: FlexibleStageModel, onLeave: @escaping (WorkspaceStage) -> Void = { _ in },
-                onAbout: @escaping () -> Void = {}, onEditFaces: (() -> Void)? = nil, onExit: @escaping () -> Void) {
+                onAbout: @escaping () -> Void = {}, onEditFaces: (() -> Void)? = nil, onChangeType: (() -> Void)? = nil,
+                onExit: @escaping () -> Void) {
         self.project = project
         self.model = model
         self.onLeave = onLeave
         self.onAbout = onAbout
         self.onEditFaces = onEditFaces
+        self.onChangeType = onChangeType
         self.onExit = onExit
     }
     /// Test control only (R7-D1): the top line's band from the Exit row alone (it lands on the capsule at 11" portrait).
@@ -155,6 +159,7 @@ public struct FlexibleStagePage: View {
         self.onLeave = { _ in }
         self.onAbout = {}
         self.onEditFaces = nil
+        self.onChangeType = nil
         self.onExit = onExit
     }
 
@@ -166,6 +171,15 @@ public struct FlexibleStagePage: View {
         guard let onEditFaces else { return nil }
         if controlEditFacesSkipsLeave { return onEditFaces }
         return { leave(onEditFaces) }
+    }
+
+    /// ★ P4 (the redesign, point 2): "Change lattice type…" from the Squish page runs the page's Save & Exit check first — it
+    /// saves the draft, so a duplicate carries it; blocked, the fix opens and the card does not. RED CONTROL: called directly.
+    @MainActor static var controlChangeTypeSkipsLeave = false
+    @MainActor static func changeTypeHop(onChangeType: (() -> Void)?, leave: @escaping ((() -> Void)?) -> Void) -> (() -> Void)? {
+        guard let onChangeType else { return nil }
+        if controlChangeTypeSkipsLeave { return onChangeType }
+        return { leave(onChangeType) }
     }
     /// ★ R7-V (his img4: "a 'bend' icon view … the entire group's bend at the full depth - all together", and his answer:
     /// frozen): the page's ONE scale — k × the loop's amount, or k × 1 while Bend shows without Play (the current group's
@@ -826,7 +840,8 @@ public struct FlexibleStagePage: View {
         FlexibleStageCapsule(main: nil, model: model, project: project, page: .squish,
                              go: { dest in leave(then: { onLeave(dest) }) }, lattice: { leave(then: nil) }, squish: {},
                              about: onAbout, modified: FlexibleSettingsExit.modified(model.settings, since: opened),
-                             editFaces: Self.editFacesHop(onEditFaces: onEditFaces, leave: { leave(then: $0) }))
+                             editFaces: Self.editFacesHop(onEditFaces: onEditFaces, leave: { leave(then: $0) }),
+                             changeType: Self.changeTypeHop(onChangeType: onChangeType, leave: { leave(then: $0) }))
             .padding(.leading, FlexibleChromeLayout.capsuleLeft)
             .padding(.top, FlexibleChromeLayout.capsuleTop)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

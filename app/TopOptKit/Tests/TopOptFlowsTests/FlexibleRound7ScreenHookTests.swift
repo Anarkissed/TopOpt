@@ -48,8 +48,8 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
              gate: ", !flexibleMain.owns(project, stage)",
              anchor: "                // disclosure mechanism in that panel (bar R12).\n"),
         Hook(id: "H27",
-             // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
-             pin: "                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: ",
+             // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure; ★ and the redesign P4 (H62): H27 / H36 hand "Change lattice type…" its closure.
+             pin: "                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: ",
              gate: ", flexibleMain.owns(project, stage)",
              anchor: "                // ★ §1b — the ONE button: it NAVIGATES between the two stages.\n"),
         Hook(id: "H28",
@@ -73,7 +73,7 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
              gate: "flexibleMain.owns(project, stage)",
              anchor: "                            bottomBarHeight = ok\n                        }\n                    }\n"),
         Hook(id: "H36",
-             pin: "                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) },   // Flexible (PR #362) H36: ",
+             pin: "                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: ",
              gate: "onLeave: { goToStage($0) }",
              anchor: "stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),\n"),
         Hook(id: "H37",
@@ -99,8 +99,8 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         }
         // the else branches keep today's statements
         let elses: [(String, String)] = [
-            // ★ RE-PINNED (the redesign P5, H60 approved in the overnight release ruling of 2026-10-26): the capsule takes Edit faces' closure
-            ("H27", "{ FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: "),
+            // ★ RE-PINNED (the redesign P5, H60 approved in the overnight release ruling of 2026-10-26): the capsule takes Edit faces' closure; ★ P4 (H62): and Change lattice type's
+            ("H27", "{ FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: "),
         ]
         for (id, head) in elses {
             guard let r = ws.range(of: head), let nl = ws[r.upperBound...].firstIndex(of: "\n") else { out.append("\(id): no line"); continue }

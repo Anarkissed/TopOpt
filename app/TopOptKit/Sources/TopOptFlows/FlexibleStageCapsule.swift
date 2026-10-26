@@ -24,7 +24,7 @@ import TopOptDesign
 
 public struct FlexibleStageCapsule: View {
     public enum Page: Equatable, Sendable { case lattice, squish }
-    public enum Action: Equatable, Sendable { case topology, about, none, editFaces }   // ★ P5: `.editFaces` (B5's mode; was `.surface`)
+    public enum Action: Equatable, Sendable { case topology, about, none, editFaces, changeType }   // ★ P5: `.editFaces` (B5's mode; was `.surface`); ★ P4: `.changeType`
     /// One row of the ● Flexible menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -50,12 +50,15 @@ public struct FlexibleStageCapsule: View {
     /// ★ P5 (the redesign, point 1): Edit faces (B5's mode) — the menu's "Edit faces…" row and the ✂ after [Lattice | Squish]
     /// run this ONE closure (nil: neither acts, and no ✂ is drawn).
     let editFaces: (() -> Void)?
+    /// ★ P4 (the redesign, point 2): "Change lattice type…" — #354's card asks (FlexibleChangeType; nil: the row does nothing).
+    let changeType: (() -> Void)?
 
     public init(main: FlexibleMainStage?, model: FlexibleStageModel? = nil, project: ProjectModel, page: Page,
                 go: @escaping (WorkspaceStage) -> Void, lattice: @escaping () -> Void = {}, squish: @escaping () -> Void,
-                about: @escaping () -> Void, modified: Bool = false, editFaces: (() -> Void)? = nil) {
+                about: @escaping () -> Void, modified: Bool = false, editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil) {
         self.main = main; self.squishModel = model; self.project = project; self.page = page; self.go = go
         self.lattice = lattice; self.squish = squish; self.about = about; self.modified = modified; self.editFaces = editFaces
+        self.changeType = changeType
     }
 
     // MARK: the rules, as values
@@ -67,6 +70,9 @@ public struct FlexibleStageCapsule: View {
             Item(id: "flexible-menu-topology", title: "\u{2039} Topology", detail: "\(count(anchors, "anchor")) \u{00B7} \(count(loads, "load"))",
                  enabled: true, checked: false, action: .topology),
             Item(id: "flexible-menu-flexible", title: FlexibleStageStyle.title, detail: "You are here", enabled: false, checked: true, action: .none),
+            // ★ P4 (the redesign, point 2): one lattice type per project — the way to another type asks first (#354's card)
+            Item(id: "flexible-menu-change-type", title: FlexibleChangeType.title, detail: FlexibleChangeType.detail, enabled: true,
+                 checked: false, action: .changeType),
             // ★ P5 (the redesign, point 1): "Edit faces…" — B5's mode, where Surface › was (B5 3f293974 removed that stage)
             Item(id: "flexible-menu-edit-faces", title: TopologyStageMenu.editFacesTitle, detail: "cuts \u{00B7} unions \u{00B7} patterns",
                  enabled: true, checked: false, action: .editFaces),
@@ -94,13 +100,14 @@ public struct FlexibleStageCapsule: View {
 
     /// A menu row: a stage change or the sheet folds every card on the main page first.
     @MainActor static func perform(_ a: Action, chrome: FlexibleChromeState?, go: (WorkspaceStage) -> Void, about: () -> Void,
-                                   editFaces: (() -> Void)? = nil) {
+                                   editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil) {
         guard a != .none else { return }
         chrome?.foldAll()
         switch a {
         case .topology: go(.topology)
         case .about: about()
         case .editFaces: editFaces?()
+        case .changeType: changeType?()
         case .none: break
         }
     }
@@ -149,7 +156,7 @@ public struct FlexibleStageCapsule: View {
             ForEach(items, id: \.id) { item in
                 if Self.dividerBefore(item.id) { Divider() }
                 Button {
-                    Self.perform(item.action, chrome: chrome, go: go, about: about, editFaces: editFaces)
+                    Self.perform(item.action, chrome: chrome, go: go, about: about, editFaces: editFaces, changeType: changeType)
                 } label: {
                     if item.checked {
                         Label(item.title, systemImage: "checkmark")
@@ -180,7 +187,7 @@ public struct FlexibleStageCapsule: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background(FlexibleCornerPairStyle.publish("capsuleMenu"))
-        .accessibilityLabel("Flexible: Topology, Edit faces and About Flexible")   // ★ P5
+        .accessibilityLabel("Flexible: Topology, Change lattice type, Edit faces and About Flexible")   // ★ P5, P4
         .accessibilityIdentifier("flexible-capsule-menu")
     }
 

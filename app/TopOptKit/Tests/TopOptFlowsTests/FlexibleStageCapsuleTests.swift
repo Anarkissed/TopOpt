@@ -16,10 +16,11 @@ final class FlexibleStageCapsuleTests: XCTestCase {
         // mode) is back where "Surface ›" was. Was (★ SYNC #354 89af86dd A3, until P5) three rows: ‹ Topology, ● Flexible ✓,
         // About Flexible….
         let items = FlexibleStageCapsule.menuItems(anchors: 1, loads: 1)
-        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-edit-faces", "flexible-menu-about"])
-        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Edit faces\u{2026}", "About Flexible\u{2026}"])
-        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "cuts \u{00B7} unions \u{00B7} patterns", "limits \u{00B7} delete"])
-        XCTAssertEqual(items.map(\.action), [.topology, .none, .editFaces, .about])
+        // ★ RE-PINNED (the redesign P4, point 2): "Change lattice type…" right after ● Flexible ✓.
+        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-change-type", "flexible-menu-edit-faces", "flexible-menu-about"])
+        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Change lattice type\u{2026}", "Edit faces\u{2026}", "About Flexible\u{2026}"])
+        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", FlexibleChangeType.detail, "cuts \u{00B7} unions \u{00B7} patterns", "limits \u{00B7} delete"])
+        XCTAssertEqual(items.map(\.action), [.topology, .none, .changeType, .editFaces, .about])
         XCTAssertFalse(items.contains { $0.title.hasPrefix("Surface") }, "no dead Surface row in the morning build")
         let flex = items[1]
         XCTAssertFalse(flex.enabled, "● Flexible is where he is: disabled …")

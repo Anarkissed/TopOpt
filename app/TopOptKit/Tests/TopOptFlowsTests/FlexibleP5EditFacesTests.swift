@@ -39,7 +39,8 @@ final class FlexibleP5EditFacesTests: XCTestCase {
         XCTAssertEqual(row.title, "Edit faces\u{2026}")
         XCTAssertEqual(row.detail, "cuts \u{00B7} unions \u{00B7} patterns")
         XCTAssertTrue(row.enabled)
-        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-edit-faces", "flexible-menu-about"],
+        // ★ RE-PINNED (P4 adds "Change lattice type…" right after ● Flexible ✓; Edit faces… keeps its divider)
+        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-change-type", "flexible-menu-edit-faces", "flexible-menu-about"],
                        "after ● Flexible ✓ (a divider before it), before About")
         XCTAssertTrue(FlexibleStageCapsule.dividerBefore("flexible-menu-edit-faces"), "★ after a divider")
         let chrome = FlexibleChromeState()
@@ -54,7 +55,8 @@ final class FlexibleP5EditFacesTests: XCTestCase {
         XCTAssertEqual(opened, 2, "★ the ✂ runs the same closure")
         XCTAssertNil(chrome.open)
         let src = try FlexibleSource.code("FlexibleStageCapsule.swift")
-        XCTAssertTrue(src.contains("Self.perform(item.action, chrome: chrome, go: go, about: about, editFaces: editFaces)"), "the row: `editFaces`")
+        // ★ RE-PINNED (P4: the row's call hands `changeType` too)
+        XCTAssertTrue(src.contains("Self.perform(item.action, chrome: chrome, go: go, about: about, editFaces: editFaces, changeType: changeType)"), "the row: `editFaces`")
         XCTAssertTrue(src.contains("Self.tapScissors(chrome: chrome, editFaces: action)"), "the ✂: the same `editFaces`")
         XCTAssertTrue(src.contains("if let editFaces { scissors(editFaces) }"))
         XCTAssertTrue(FlexibleStageCapsule.scissorsEnabled, "★ grey in look, but enabled (R9)")

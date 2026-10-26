@@ -195,6 +195,8 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public internal(set) var facePick = FlexibleFacePickSession()
     /// ★ P5 (FlexibleEditFaces): Edit faces is up, opened from a Flexible page — Flexible's own layers are off until Done.
     @Published public internal(set) var faceEditing = false
+    /// ★ P4 (FlexibleChangeType): #354's "Change lattice type?" card is up over the Flexible pages.
+    @Published public internal(set) var changeTypeAsking = false
     /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,
     /// observed only by the chip's layer and the list, so a drag never re-runs the workspace.
     public let faceUI = FlexibleFaceChipState()
