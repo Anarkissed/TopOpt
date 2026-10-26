@@ -30,8 +30,9 @@ struct FlexibleFaceChip: View {
     /// instead (one 44 pt icon with the link count), so the card keeps chip M's height.
     var attachCompact = false
 
-    static let protectTint = RGBA(hex: 0x2EE0C7)
-    static let segmentWidth: CGFloat = 80
+    /// ★ P2 (the redesign, point 5): the shared FaceChip's (#354's B2 lift; the same values).
+    static let protectTint = FaceChip.protectTint
+    static let segmentWidth: CGFloat = FaceChip.segmentWidth
 
     /// A Load group's weight, read-only — set on the Squish page. ★ the review of R7-D2: in the FLEXIBLE stage's unit (his
     /// lb — the player's "11 lb each" and the Squish page's boxes), not Topology's kg; a Load the chip made this session whose
@@ -337,30 +338,11 @@ struct FlexibleFaceChip: View {
         .frame(minHeight: 44)
     }
 
-    /// [▦ Lattice | ■ Solid | ⬚ Off]: 3 × 80, 36 tall, in a 44 pt target.
+    /// [▦ Lattice | ■ Solid | ⬚ Off]: 3 × 80, 36 tall, in a 44 pt target. ★ P2 (the redesign, point 5): the shared
+    /// FaceStateSegment (#354's B2 lift of this segment), its frames re-published on FlexibleKeepOutKey.
     private func segment(current: LatticeSelectableRole?, mixed: Bool, set: @escaping (LatticeSelectableRole) -> Void) -> some View {
-        HStack(spacing: 2) {
-            ForEach([LatticeSelectableRole.include, .exclude, .off], id: \.self) { r in
-                let on = !mixed && current == r
-                Button { set(r) } label: {
-                    HStack(spacing: 4) {
-                        FlexibleStateGlyph(role: r.regionRole)
-                        Text(r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                    }
-                    .frame(width: Self.segmentWidth, height: 36)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(on ? DS.Color.fillSelected.color : Color.clear))
-                    .frame(height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel((r == .include ? "Lattice" : r == .exclude ? "Solid" : "Off") + (on ? ", selected" : ""))
-                .accessibilityIdentifier("flexible-chip-seg-\(r.rawValue)")
-                .background(publish("chipSeg-\(r.rawValue)"))
-            }
-        }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(DS.Color.fillSubtle.color))
+        FaceStateSegment(current: current, mixed: mixed, idPrefix: "flexible", set: set)
+            .modifier(FlexibleKeepOutBridge())
     }
 
     private func actionLine(_ text: String, button: String, symbol: String, id: String, action: @escaping () -> Void) -> some View {
@@ -423,6 +405,8 @@ struct FlexibleFaceChip: View {
 
 /// His change (c): "Add to Group C as lattice" — a FILLED button (the DS accent, white semibold label, the group's swatch
 /// with a white ring, 48 tall, radius 14, the accent glow, 85 % when pressed, the button trait), the depth it takes under it.
+/// (★ P2: still Flexible's own drawing — FlexibleFaceChipTests reads its fill, its white semibold label and its button trait
+/// from this file; moving them to the shared JoinButton is a re-pin for the reviewer.)
 struct FlexibleJoinButton: View {
     let group: SelectionGroup
     let note: String
@@ -467,55 +451,31 @@ struct FlexibleJoinButtonStyle: ButtonStyle {
     }
 }
 
-/// One of chip N's five buttons (and the role line's four): an 18 pt glyph over an 11.5 pt bold word, 64 × 56.
+/// One of chip N's five buttons (and the role line's four): an 18 pt glyph over an 11.5 pt bold word, 64 × 56. ★ P2 (the
+/// redesign, point 5): the shared NewFaceButton (#354's B2 lift of this button), its frames re-published on FlexibleKeepOutKey.
 struct FlexibleNewFaceButton: View {
     let kind: FlexibleNewFaceKind
     var lit: Bool = false
     /// ★ R7-E1: Protect locked on (a Lattice group) — a small lock in its corner.
     var locked: Bool = false
     let action: () -> Void
-    static let size = CGSize(width: 64, height: 56)
+    static let size = NewFaceButton.size
 
-    static func style(_ k: FlexibleNewFaceKind) -> (symbol: String, tint: RGBA, fill: Double) {
+    /// The shared kind (the same five cases and raw values).
+    static func shared(_ k: FlexibleNewFaceKind) -> NewFaceKind {
         switch k {
-        case .lattice: return ("square.grid.3x3.fill", FlexibleStageStyle.facePrismToken, 0)
-        case .anchor: return ("lock.fill", DS.Color.okGreen, 0.20)
-        case .load: return ("arrow.down", DS.Color.accent, 0.18)
-        case .protect: return ("shield.lefthalf.filled", FlexibleFaceChip.protectTint, 0.16)
-        case .keepClear: return ("nosign", DS.Color.clearance, 0.16)
+        case .lattice: return .lattice
+        case .anchor: return .anchor
+        case .load: return .load
+        case .protect: return .protect
+        case .keepClear: return .keepClear
         }
     }
 
+    static func style(_ k: FlexibleNewFaceKind) -> (symbol: String, tint: RGBA, fill: Double) { NewFaceButton.style(shared(k)) }
+
     var body: some View {
-        let s = Self.style(kind)
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: s.symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(s.tint.color)
-                Text(FlexibleSelectionsCopy.kindWord(kind)).font(.system(size: 11.5, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .frame(width: Self.size.width, height: Self.size.height)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(s.fill > 0 ? s.tint.opacity(s.fill).color : DS.Color.fillSubtle.color)
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder((lit ? s.tint : RGBA(0, 0, 0, 0)).color, lineWidth: 2)))
-            .overlay(alignment: .topTrailing) {
-                if locked {
-                    // ★ R7-E1: Protect locked on while a face of the group is Lattice
-                    Image(systemName: "lock.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(s.tint.color)
-                        .padding(5)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipRole-\(kind.rawValue)-lock": g.frame(in: .global)])
-                        }.allowsHitTesting(false))
-                        .accessibilityHidden(true)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["chipNew-\(kind.rawValue)": g.frame(in: .global)]) }
-            .allowsHitTesting(false))
-        .accessibilityLabel(FlexibleSelectionsCopy.kindWord(kind))
-        .accessibilityIdentifier("flexible-chip-new-\(kind.rawValue)")
+        NewFaceButton(kind: Self.shared(kind), lit: lit, locked: locked, idPrefix: "flexible", action: action)
+            .modifier(FlexibleKeepOutBridge())
     }
 }

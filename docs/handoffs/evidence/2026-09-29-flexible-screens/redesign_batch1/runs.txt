@@ -1027,3 +1027,381 @@
   	 Executed 2 tests, with 0 failures (0 unexpected) in 0.178 (0.179) seconds
   	 Executed 204 tests, with 0 failures (0 unexpected) in 1146.371 (1146.395) seconds
   	 Executed 204 tests, with 0 failures (0 unexpected) in 1146.371 (1146.396) seconds
+
+## item 6 (P2, the merge of claude/flexible-redesign-p2 788f732f) — compiled with no fix; the P2 narrow classes + every class of items 1-5
+  filter: \.(FlexibleMainPageHookTests|FlexibleBatchCHookTests|FlexibleSurfaceNavTests|FlexibleRound6Tests|FlexibleR7M1Tests|FlexibleRound7ScreenHookTests|FlexibleRound7SelectionsHookTests|FlexibleH39HotfixHookTests|FlexibleR7U21HookTests|FlexibleStepRepairHookTests|FlexibleRound9HookTests|FlexibleS1VerifyTests|FlexibleMainPageRound4Tests|FlexibleChromeLayoutTests|FlexibleSettingsRound4Tests|FlexibleRound6HostedTests|FlexibleSelectionsListTests|FlexibleBatchMXrayTests|FlexibleSquishPlayerTests|WorkspaceBodySizeTests|LatticeStaleTypeTests|FlexibleStageCapsuleTests|FlexibleU2Tests|FlexibleFaceCommitTests|FlexibleR7D2ReviewTests|FlexibleRound7ScreenHostedTests|RerunCardTests|FlexibleSquishCopyTests|FlexibleRound7D1ReviewTests|FlexibleR7U21CHandlesTests|SelectionsListTests|FaceChipTests|FlexibleFaceChipTests|FlexibleChromeStateTests|FlexibleCornerPairTests|FlexibleI2AttachHostedTests|FlexibleR7D2ReviewHostedTests|FlexibleRound7CalloutHostedTests|FlexibleRound7D1ReviewHostedTests|FlexibleRound7DesignIntegrationHostedTests|FlexibleRound7FitHostedTests|FlexibleRound7SelectionsHostedTests|FlexibleR7RHostedTests|FlexibleU21DeleteUndoTests|FlexibleLatticeIsProtectedTests|FlexibleH39HostedTests|FlexibleP3DeleteWordingTests|FlexibleH59MenuTitleTests|FlexibleTapEmptyDeselectTests|FlexibleP5EditFacesTests|FlexibleP4ChangeTypeTests)/
+  Test Case '-[TopOptFlowsTests.FaceChipTests testADraggedChipKeepsItsSpotForThatFaceAndTheLeaderReAims]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FaceChipTests testADragMovesTheChipUnderTheFingerClampedInside]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FaceChipTests testAutoPlacementOrderAndTheKeepOuts]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FaceChipTests testTheJoinIsAFilledButtonWithItsExactLabel]' passed (0.002 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleBatchCHookTests testStressIsSolvedDirectlyAndTheOctetTriggerIsUntouched]' passed (0.036 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleBatchCHookTests testTheProbeFindsAFlexibleWall]' passed (0.746 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleBatchCHookTests testTheSettingsPageLegendDrillsInAndTapsDoNotSelect]' passed (0.011 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleBatchCHookTests testTheWorkspaceHooksAreInPlace]' passed (0.164 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 0.956 (0.957) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleBatchMXrayTests testTheDentViewTurnsXRayOnAndGhostsTheWalls]' passed (37.056 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleBatchMXrayTests testTheSolidDentPlaneIsNeverStripedByTheWalls]' passed (109.694 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 146.750 (146.750) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleSitsUnderTheNameClearOfTheGizmo]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheCapsuleTopIsStageNavPlacementsFormula]' passed (0.038 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheMinimisedSelectionsPillKeepsTwelveFromTheSetupChip]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testThePairSitsOnTheCornerTwelveApart]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeLayoutTests testTheViewsRowIsSixFortyFourPointIconsEightApart]' passed (0.000 seconds).
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 0.039 (0.040) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleChromeStateTests testAModelTapAStageChangeAndTheSquishPageFoldTheCards]' passed (0.004 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeStateTests testOpeningAnyCardClosesTheOthers]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeStateTests testTheFaceChipWaitsWhileTheTrayOrTheCardIsOpen]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleChromeStateTests testThePanelsNeverChangeTheBarsMeasuredHeight]' passed (7.074 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 7.078 (7.079) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testReadySendsOncePreviewAndTheCaretNeverSend]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testShowLooksWithoutSending]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheCalloutPopsOncePerNewIssueAndNeverForAnAdvisory]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheCalloutsButtonsApplyFixesOrSendHimToSquish]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheCardIsPreviewCoreExportOnly]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheExportStringsLiveOnceInTheSharedRows]' passed (0.005 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheSetupChipReadsQualityPlateAndGravityLive]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheSplitButtonsTable]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheTrayIsQualityPlateUpGravityAndPrintParametersOnly]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTheTraysRowsDoOneThingEach]' passed (0.012 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleCornerPairTests testTodaysPillIsTheRedControl]' passed (0.000 seconds).
+  	 Executed 11 tests, with 0 failures (0 unexpected) in 0.021 (0.022) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleFaceChipTests testADraggedChipKeepsItsSpotForThatFaceAndTheLeaderReAims]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceChipTests testAutoPlacementOrderAndTheKeepOuts]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceChipTests testTheDragGestureWritesTheSpotLiveAndLetsGoClear]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceChipTests testTheInfoShowsOnlyHisFourRowsFromTheDrawersOwnNumbers]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceChipTests testTheJoinIsAFilledButtonWithItsExactLabel]' passed (0.002 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testALockedGroupTakesNoWrite]' passed (0.010 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testAnchorLoadProtectKeepClearMakeAGroupWithTheFaceOff]' passed (0.011 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testDeleteIsOneUndoStepAndUndoRestoresEverything]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testEveryLineFits44]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testJoinWritesTheGroupsCommonDepthAndExpand]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testKeepClearAsksFirstThenBlocksAndLatticeInsteadClearsIt]' passed (0.013 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testLatticeOnANewFaceSetsProtectLikeTheLatticeUnderRecipe]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testRenameCommitsAndAnEmptyNameKeepsTheOld]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleFaceCommitTests testTheSegmentDeclaresSeedsAndOffKeepsTheDepth]' passed (0.010 seconds).
+  	 Executed 9 tests, with 0 failures (0 unexpected) in 0.081 (0.082) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleH39HostedTests testAFlexibleSessionThenTopologyNeverShowsTheRegionsPanelUnlessHeOpensItThere]' skipped (0.001 seconds).
+  	 Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleH39HotfixHookTests testEveryCoreSceneTheFlexibleStageOpensGoesThroughTheDoor]' passed (0.266 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleH39HotfixHookTests testH39TheRegionsToggleIsDrawnOnlyOffTheFlexibleStage]' passed (0.300 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleH39HotfixHookTests testH40TheContactShadowKeepsThePrintedBody]' passed (0.136 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleH39HotfixHookTests testNothingOnTheFlexibleStageCanSetRegionsOpen]' passed (0.460 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 1.162 (1.162) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleH59MenuTitleTests testTheHookIsAtTheRowsCallSite]' passed (0.053 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleH59MenuTitleTests testTopologysLatticeRowSaysFlexibleOnAFlexibleProject]' passed (0.001 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 0.054 (0.054) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testAStrayTapKeepsTheStep]' passed (19.117 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testAttachOnlyOnALatticeFace]' passed (26.738 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testLinkTrashAsksInPlace]' passed (22.191 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testStepOneShowsTheLatticeAlone]' passed (22.730 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testStepTwoShowsTheModelAndTheGhost]' passed (26.199 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testTagsFollowTheCamera]' passed (28.636 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testTheCardFits]' passed (18.846 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleI2AttachHostedTests testTwoStepsMakeOneLink]' passed (32.239 seconds).
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 196.696 (196.697) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleLatticeIsProtectedTests testAnOldProjectOpensAndAProjectWithTheWithdrawnKeyStillOpens]' passed (0.014 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleLatticeIsProtectedTests testBothRoutesReadLatticeWithTheShieldBesideIt]' passed (0.011 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleLatticeIsProtectedTests testLatticeOnANewFaceIsLatticeAndProtectedAndTopologysJobIsTodays]' passed (0.425 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleLatticeIsProtectedTests testTheChipsLatticeButtonCommitsThroughTheStage]' passed (0.010 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleLatticeIsProtectedTests testTheWithdrawnLatticeOnlyRoleWouldBlockTopology]' passed (0.083 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.544 (0.544) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageHookTests testPreviewBakeInputsDropFlexible]' passed (0.010 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageHookTests testTheExitButtonAndThePageConsultTheReadiness]' passed (0.017 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageHookTests testTheWorkspaceHooksAreInPlace]' passed (0.230 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 0.257 (0.257) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testACalibrateFirstFilamentIsCoresRefusalInOneLine]' passed (1.770 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testALatticeReadyNoteShowsOnceWhenABuildLands]' passed (11.693 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testNotSentLinesAreOneShortLineEach]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testReadySendsTheJobToCoresFlexibleRunner]' passed (6.708 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheExportStepSaysTheExportsWaitOnCoreInOneLine]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheHooksAreInPlace]' passed (0.050 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeButtonOpensSettingsWhenNothingCanShowAndExitShowsIt]' passed (8.830 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheLatticeViewIsTheXRayRendering]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheNoteBandIsReservedBesideTheViewRow]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testThePillSendsWhenReadyAndOpensSettingsOnlyToFix]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testTheViewRowHasNoXRayButton]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleMainPageRound4Tests testWhatCoreCannotRunIsSaidNotSent]' passed (1.011 seconds).
+  	 Executed 12 tests, with 0 failures (0 unexpected) in 30.071 (30.073) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleP3DeleteWordingTests testASeventeenCharacterNameKeepsItsNameAndEighteenFallBack]' passed (0.000 seconds).
+  	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testChoosingStructuralOnTheCopyEndsFlexiblesClaim]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testEachChoiceDoesOneThingAndClosesTheCard]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testOnTheSquishPageTheRowRunsTheLeaveCheckFirst]' passed (0.006 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testTheCardIsMountedBesideNumber354sInsideItsChunk]' passed (0.032 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testTheCardShowsOnAFlexibleProjectWhereNumber354sMountNeverDoes]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP4ChangeTypeTests testTheRowIsAfterFlexibleAndAsksWithTheCard]' passed (0.000 seconds).
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 0.039 (0.040) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleP5EditFacesTests testDoneReturnsToTheFlexiblePageItCameFrom]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP5EditFacesTests testOnTheSquishPageEditFacesRunsTheLeaveCheckFirst]' passed (0.005 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP5EditFacesTests testTheRowAndTheScissorsShareOneClosureAndTheScissorsIsEnabled]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP5EditFacesTests testUnderEditFacesNoTapReachesFlexibleAndItsPositiveSitesAreGated]' passed (0.057 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleP5EditFacesTests testUnderEditFacesOwnsStaysAndOnlyFlexiblesLayersGoOff]' passed (0.032 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.096 (0.097) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testANumberBoxTakesATapAcross44Points]' passed (29.044 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testTheLayerPassesTapsThroughWithAFacePicked]' passed (4.401 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Landscape]' passed (61.854 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad11Portrait]' passed (60.323 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Landscape]' passed (60.269 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewHostedTests testTheReviewFindingsOnHisPad13Portrait]' passed (60.262 seconds).
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 276.154 (276.155) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testAPrismNumberUnderAPanelMovesToAnotherSpotOfItsPrism]' passed (0.012 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheAutoSpotKeepsOffTheFacesOwnOutline]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheChipsInfoCardSitsBelowTheChipNeverOnIt]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheDeleteQuestionAndItsMessageFitOneLineWhateverTheName]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheDeleteQuestionNeverWidensItsPanel]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheInfoReadsTheFlexibleLatticeDrawnInsideThatFace]' passed (0.051 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheJoinOffersOnlyAGroupThatHasALatticeFace]' passed (0.011 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheLatticeButtonIsNeverGreyedAndTheRouteLineIsGone]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheMainPagesNumberBoxesHaveA44PointTarget]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheMessageSitsAboveThePlayerWhenPlayIsOn]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testTheWeightsReadInTheFlexibleUnitAndANewLoadPointsToTheSquishPage]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewTests testWhenNoSpotIsClearOfTheFaceTheChromeStillWins]' passed (0.098 seconds).
+  	 Executed 12 tests, with 0 failures (0 unexpected) in 0.190 (0.192) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' passed (7.127 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' passed (0.140 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' passed (0.099 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' passed (5.408 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' passed (3.673 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' passed (1.824 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' passed (1.847 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' passed (1.842 seconds).
+  	 Executed 9 tests, with 0 failures (0 unexpected) in 21.959 (21.960) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testFsNewControlsAreFingerTargets]' passed (27.812 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testTheFaceCardsNamedChipsAreDrawnOnHisPad]' passed (31.015 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7RHostedTests testWithBendOnTheDepthChipIsDrawnWhereTheBentFacePutsIt]' passed (24.601 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 83.429 (83.429) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAKnobFarFromTheFloorIsStillDrawn]' passed (0.007 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAnExpandBeingDraggedIsNeverHidden]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAPushedDiscStillDragsOutward]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAShortProjectionPointingLeftDragsOutward]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testImg6KnobLeftOfFloorKeepsTheUnitsApart]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testNoRoomForTwentyFourPointsHidesTheExpandHandle]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testSweepSixteenDirectionsBothScreens]' passed (0.032 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testTheBoxMovesBeforeTheKnobFlips]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testTheCaptionsCarryTheHandleIcons]' passed (1.030 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testTheGestureCallsTheDrawnClosures]' passed (0.006 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21CHandlesTests testTheTwoIconsAreDifferentGlyphsFromOneSource]' passed (0.002 seconds).
+  	 Executed 11 tests, with 0 failures (0 unexpected) in 1.078 (1.079) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21HookTests testEveryHookIsPinnedOnceAtItsAnchorWithItsGate]' passed (1.354 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7U21HookTests testTheSheetWithoutItsHooksIsTodays]' passed (0.003 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 1.357 (1.357) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testAMemberThatFacesAwayIsDrawnDashed]' passed (4.025 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testOneLegendCardCarriesTheViewRows]' passed (16.021 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testPastEightGroupsTheNumberRidesTheWallInTheGroupsView]' passed (4.970 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testPrismsLeavesXrayAsItIs]' passed (5.500 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce]' passed (3.090 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testSelectingAPressedFaceShowsItsPrismAndNumberAtOnce]' passed (3.894 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheFourMainButtonsClearTheNoteLegendAndPlayer]' passed (0.032 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainLegendCardCarriesThePrismsRowWhilePrismsIsOn]' passed (8.825 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView]' passed (4.172 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheMainPageWearsNoGroupColourInAnyViewOrTurn]' passed (119.729 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePagesOneListCarriesTheGlassAndThePrisms]' passed (2.698 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsButtonIsTheFourthAndShowsEveryPrism]' passed (13.069 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsViewDrawsEveryPressedFacesPrismWithItsNumber]' passed (2.566 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsPageWallsTheOpenGroupOnly]' passed (6.108 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheSettingsTogglesSitUnderTheGizmoClearOfEverything]' passed (37.783 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testTheTagsDiscsAndHiddenOutlinesAreOnThePage]' passed (27.951 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6HostedTests testWithNoDentTheChipStandsOnTheDrawnPrismsFloor]' passed (2.440 seconds).
+  	 Executed 17 tests, with 0 failures (0 unexpected) in 262.874 (262.876) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAFaintPrismsSideEdgesStandOnlyWhereItsOutlineTurns]' passed (0.021 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAGlassOutlineIsOneClosedLoopPerBoundary]' passed (0.027 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testAWallIsItsRegionsOwnOutlineProudOfTheFace]' passed (0.025 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testEachGroupsGlassReadsAsItsColourOverTheHeat]' passed (13.247 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testNoPageCallsTheFramePainterOutsideItsControl]' passed (0.024 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheColourAndDeepestInfoSayWhatRoundSixDraws]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheLegendKeepsClearOfTheViewButtons]' passed (0.005 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheStampTurnRowSaysItTurnsTheStamp]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheViewsAreNeverASettingAndNeverABuild]' passed (0.480 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testTheWorkspaceHandsTheMainPagesPrismsToTheViewer]' passed (0.059 seconds).
+  FLEX-R6-3k 11l card (922.0, 292.0, 248.0, 84.0) row (934.0, 345.0, 224.0, 14.0) · 13p card (Test Case '-[TopOptFlowsTests.FlexibleRound6Tests testWallsAndFaintPrismsAreSlightlyVisibleOnHisPad]' passed (18.051 seconds).
+  	 Executed 11 tests, with 0 failures (0 unexpected) in 31.939 (31.940) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7CalloutHostedTests testABlockerPopsTheCalloutAtOnceOnHisPad]' passed (10.369 seconds).
+  	 Executed 1 test, with 0 failures (0 unexpected) in 10.369 (10.369) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewHostedTests testOnHisPadThePlayerAndTheLegendKeepClearOfAnOpenCard]' passed (27.275 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewHostedTests testTheChipColumnH24TakesOffIsTodaysColumnMeasuredOnHisPad]' passed (11.377 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 38.652 (38.652) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testSecondaryButtonsInTheCardAndTheCalloutAreOutlined]' passed (0.004 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testTheMainLegendSitsUnderTheViewsRowAndNoPanelCoversIt]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlatePageIsOneQuestionAndSixBigButtonsWithTheResolvedOneLit]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePlayerNeverGoesUnderTheCubeTheViewsTheCapsuleOrAnOpenPanel]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewTests testThePreviewStepNamesTheFacesAndTheSquishPanelSaysSquish]' passed (0.001 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.011 (0.011) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignIntegrationHostedTests test11Landscape]' passed (73.632 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignIntegrationHostedTests test11Portrait]' passed (73.099 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignIntegrationHostedTests test13Landscape]' passed (72.642 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignIntegrationHostedTests test13Portrait]' passed (70.786 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignIntegrationHostedTests testMiniPortrait]' passed (76.431 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 366.588 (366.589) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheButtonsLineReadsWholeInEveryStateOnEveryPad]' passed (13.757 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheCardReadsWholeInEveryCoreRunScenarioOnTheMiniAndTheThirteen]' passed (12.795 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testThePlatePageIsOneLineAndSixBigButtonsOnTheMiniAndTheThirteen]' passed (0.655 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7FitHostedTests testTheSetupTraysRowsReadWholeOnTheMiniAndTheThirteen]' passed (0.991 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 28.199 (28.199) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHookTests testEachHookIsOnceAtItsAnchorWithItsGateAndTodaysElse]' passed (0.853 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHookTests testOffTheFlexibleStageTodaysExportStepAndChipColumn]' passed (0.038 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHookTests testRemovingAnyGateTurnsThePinRed]' passed (12.376 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHookTests testTheGateIsTheFlexibleStageOnly]' passed (0.006 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 13.273 (13.273) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHostedTests testOnTheSquishPageTheNoticeBandAndThePanelClearTheCapsule]' passed (14.991 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHostedTests testTheFlexibleStageWearsTheCapsuleTheViewsAndTheCornerPair]' passed (57.369 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenHostedTests testTheViewsRowIsHeatStressXrayLatticePrismsPlay]' passed (0.000 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 72.361 (72.361) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed]' passed (1.176 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testH35IsWithdrawnNoLatticeOnlyRoleAnywhere]' passed (0.675 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheNewFlexibleFilesExist]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testTheOldLinesAreGoneAndNothingElseOfOursIsInThoseSpots]' passed (0.240 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 2.092 (2.093) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testAMovedChipStaysWhereHeLeftItForThatFace]' passed (25.410 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheHandlesNumberIsTheListsAndTheInfoOpensHisFour]' passed (25.431 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheLayerIsHitTransparent]' passed (1.412 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheListTheChipAndTheFilledJoinButton]' passed (52.771 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testTheTrashAsksFirstAndUndoBringsTheGroupBack]' passed (16.660 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsHostedTests testU21LatticePageTrashCancelInPlace]' passed (33.342 seconds).
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 155.026 (155.026) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testAFinishedProjectIsNeverReRunWithoutTheCard]' passed (0.024 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testAGateRemovedCopyGoesRed]' passed (4.457 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testAHiddenGroupStillTakesPartInTheRun]' passed (0.012 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testCancelChangesNothing]' passed (0.005 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testEveryHookIsPinnedOnceWithItsGate]' passed (0.633 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testShowingTheGroupAgainRestoresItsItemsExactly]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testTheCopyCarriesTheWholeSetupAndTheOriginalIsUntouched]' passed (0.017 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testTheCopysRunIsOneShot]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testTheWorkspaceIdentityFollowsTheProject]' passed (0.011 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound9HookTests testThumbnailsAreOnlyEverRenderedFromTheImportedPart]' passed (0.002 seconds).
+  	 Executed 10 tests, with 0 failures (0 unexpected) in 5.163 (5.164) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleS1VerifyTests testLegendDrilledInCarriesTheFlexibleKey]' passed (0.049 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleS1VerifyTests testTheAppsSectorMembershipIsCoresOnACurvedSector]' passed (2.332 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleS1VerifyTests testTheFlexibleKeysDrillInCountsWithoutTheOctetPreview]' passed (0.002 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 2.383 (2.384) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testLinesAre44AndBoxesAreNumberBoxes]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testTheHeaderHasNothingElseAndTodaysCardDid]' passed (0.017 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSelectionsListTests testTheSummaryForms]' passed (0.011 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 0.029 (0.029) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testAutoAndPhysicsAreDisclosureCarets]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testNoStampHandleIsDrawnUnderThePanel]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testShapeIsATrueEitherOr]' passed (0.548 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheDepthPrismAndChipAreTheLatticeStagesFacePrismPurple]' passed (0.533 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFaceListListsHisFacesAndATapSelectsThatFace]' passed (0.475 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFinishReachesTheJob]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFinishRowFitsThePanel]' passed (0.003 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheFinishShapesTheLatticeField]' passed (2.965 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheMigrationDropsCheckStampsAndKeepsADesignStampAsTheShape]' passed (0.002 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testThePanelAndTheLegendMinimize]' passed (0.520 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testThePanelIsOnlyAsTallAsItsContent]' passed (0.009 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheSettingsPageDrawsNoLattice]' passed (0.356 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheStampShapeWritesFlatCurvesAndItsStamp]' passed (0.019 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSettingsRound4Tests testTheStampSinksWhereItSitsAndThePrismStandsOnItsFootprint]' passed (0.499 seconds).
+  	 Executed 14 tests, with 0 failures (0 unexpected) in 5.951 (5.952) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleSquishCopyTests testNoUserFacingSettingsNamesTheFlexiblePage]' passed (0.021 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishCopyTests testTheAccessibilityIdsStay]' passed (0.003 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 0.024 (0.024) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testANewDentOnTheSameMeshIsUploaded]' passed (0.019 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testHisPauseHoldsUntilHePressesPlay]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testPlayLoopsRestFullRestAndResumesWhereItIs]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testReducedMotionDoesNotAutoPlay]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testTheEndsSayRestAndTheFullLoad]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testTheRendererHooksArePinned]' passed (0.028 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleSquishPlayerTests testTheRendererStepsTheLoop]' passed (0.650 seconds).
+  	 Executed 7 tests, with 0 failures (0 unexpected) in 0.698 (0.698) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleStageCapsuleTests testEachMenuRowDoesOneThingAndFoldsTheCards]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStageCapsuleTests testLeavingTheSquishPageRunsSaveAndExitsCheckFirst]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStageCapsuleTests testTheAmberDotIsAFixOnTheSquishPageAndTheWhiteDotUnsavedChanges]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStageCapsuleTests testTheMenuIsTopologyFlexibleSurfaceThenAbout]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStageCapsuleTests testTheSegmentsOnTheMainPage]' passed (0.000 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleStepRepairHookTests testAppModelImportGatesPaintOnTheRepairedPartOnly]' passed (0.041 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStepRepairHookTests testEveryHookIsPinnedOnceAtItsAnchorWithItsGate]' passed (0.534 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleStepRepairHookTests testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn]' passed (0.213 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 0.787 (0.788) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleSurfaceNavTests testTheSurfaceRoundTripDoesNotRePopSettings]' passed (0.037 seconds).
+  	 Executed 1 test, with 0 failures (0 unexpected) in 0.037 (0.037) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleTapEmptyDeselectTests testATapOnNothingDeselectsTheGroupAsWellAsTheChip]' passed (0.013 seconds).
+  	 Executed 1 test, with 0 failures (0 unexpected) in 0.013 (0.013) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testFaceTakeOutAsksFirst]' passed (1.853 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testGroupTrashThenUndoReopensTheGroup]' passed (4.692 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testLatticeCalloutAndPressRowRemoveAskFirst]' passed (1.841 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testOneToolbarUndoRestoresTheTrashedGroup]' passed (6.354 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPopupRemoveAsksFirst]' passed (1.789 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testPressTrashAsksFirst]' passed (3.522 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testResetAllThenUndoReopensTheGroup]' passed (6.606 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutIsItsOwnUndoStep]' passed (3.980 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutOnlyFaceThenUndoReopensItsGroup]' passed (2.670 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutQuestionNamesTheFaceOnly]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU21DeleteUndoTests testTakeOutSelectedFaceThenUndoReselectsIt]' passed (4.753 seconds).
+  	 Executed 11 tests, with 0 failures (0 unexpected) in 38.060 (38.062) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testOKKeepsAndCancelReverts]' passed (1.543 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testTheShapeRowAndTheWindow]' passed (29.751 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testThreeDIsOneTableAndTheGizmoShowsEachCurveHeadOn]' passed (1.583 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21BOnTheSmallestIPadLandscapeTheChartsAndButtonsFit]' passed (10.730 seconds).
+    13p 3D sweep yaw 225°: view 610×941 · drawn x 93…517 y 297…672 · gizmo (474.0, 0.0, 136.0, 136.Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21BThe3DTableFitsByAspectAndClearsTheGizmoWhenTurned]' passed (14.968 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21BTheWindowIsEightyPercentWithTheLegendBesideTheCharts]' passed (28.351 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnTheTappedControl]' passed (50.502 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21DeleteLatticeSheetCancelOnTheButton]' passed (6.532 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21FixRowsRemoveAskInPlace]' passed (20.139 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21NoLatticeNoticeOnThePage]' passed (23.185 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21OneDepthNumberOnThePage]' passed (21.946 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21TakeOutAskFitsThePanelOnHisLBracket]' passed (13.180 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testX20bAFacesShapeRowOpensTheWindow]' passed (32.535 seconds).
+  	 Executed 13 tests, with 0 failures (0 unexpected) in 254.945 (254.947) seconds
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' passed (0.549 seconds).
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' passed (0.211 seconds).
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' passed (0.790 seconds).
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' passed (0.554 seconds).
+  Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' passed (0.013 seconds).
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 2.118 (2.119) seconds
+  Test Case '-[TopOptFlowsTests.RerunCardTests testAPendingRunIsTakenOnceAndOnlyByItsProject]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.RerunCardTests testChangedInputsNeverGreyOut]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.RerunCardTests testSameInputsWithoutResultsStillGreyOut]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.RerunCardTests testSameInputsWithResultsStayEnabled]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.RerunCardTests testTheCardSaysTheResultsAreCleared]' passed (0.000 seconds).
+  	 Executed 5 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+  Test Case '-[TopOptFlowsTests.SelectionsListTests testLinesAre44AndTheTrashAsksFirst]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.SelectionsListTests testTheHeaderHasNothingElseAndTodaysCardDid]' passed (0.016 seconds).
+  Test Case '-[TopOptFlowsTests.SelectionsListTests testTheSummaryForms]' passed (0.001 seconds).
+  	 Executed 3 tests, with 0 failures (0 unexpected) in 0.018 (0.018) seconds
+  Test Case '-[TopOptFlowsTests.WorkspaceBodySizeTests testTheChunkHooksArePinned]' passed (0.062 seconds).
+  Test Case '-[TopOptFlowsTests.WorkspaceBodySizeTests testTheWorkspaceBodyValueStaysSmallForTheIPadStack]' passed (0.101 seconds).
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 0.163 (0.163) seconds
+  	 Executed 286 tests, with 1 test skipped and 0 failures (0 unexpected) in 2059.802 (2059.836) seconds
+  	 Executed 286 tests, with 1 test skipped and 0 failures (0 unexpected) in 2059.802 (2059.837) seconds
+
+## item 6 — RED CONTROL: FlexibleConfirmInPlace.controlOldPlacement and controlRedAlwaysLeading flipped to true (temporarily, never committed)
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:277: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:277: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:277: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:277: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:312: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:313: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:312: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:313: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:312: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:313: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:312: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-redesign/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleU2Tests.swift:313: error: -[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnThe
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnTheTappedControl]' failed (60.081 seconds).
+
+## item 6 — restored: the U2 keep test again + FlexibleAngledGoldenTests (32 GOLDEN + 1 PART-SKIP, 0 DIFFERS)
+  filter: FlexibleU2Tests/testU21ConfirmKeepSitsOnTheTappedControl (restored) + FlexibleAngledGoldenTests
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden]' passed (3.763 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes]' passed (4.870 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testFacePressFramesAreTheGolden]' passed (2.298 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testFacePressFramesAreTheGoldenOnTheM2Stand]' passed (0.747 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testFacePressRunJobBytesUnchanged]' passed (0.482 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testFramesAreTheGoldenOnStepParts]' passed (0.461 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testHisRound5HeldSendBytesUnchanged]' passed (0.552 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testHisRound5SceneJobBytesUnchanged]' passed (0.528 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testLatticeSubtreesReEncodeIdentically]' passed (0.017 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testNoComparedGoldenCarriesTheCoreFingerprint]' passed (0.058 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testProbeDocumentsAreAcceptedSinceS1AndTheBaseRefusalsAreKept]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testSceneJobBytesUnchanged]' passed (0.464 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleAngledGoldenTests testTheStageJobSeesALatticeSettingButNeverFlexible]' passed (0.091 seconds).
+  	 Executed 13 tests, with 0 failures (0 unexpected) in 14.331 (14.333) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleU2Tests testU21ConfirmKeepSitsOnTheTappedControl]' passed (50.351 seconds).
+  	 Executed 1 test, with 0 failures (0 unexpected) in 50.351 (50.351) seconds
+  	 Executed 14 tests, with 0 failures (0 unexpected) in 64.683 (64.684) seconds
+  	 Executed 14 tests, with 0 failures (0 unexpected) in 64.683 (64.685) seconds
