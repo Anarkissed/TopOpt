@@ -190,12 +190,14 @@ final class FlexibleR7D2ReviewTests: XCTestCase {
     // MARK: R6 — the delete question fits one line
 
     func testTheDeleteQuestionAndItsMessageFitOneLineWhateverTheName() {
-        XCTAssertEqual(FlexibleSelectionsCopy.deleteAsk("Group C"), "Delete Group C here and in Topology?", "a short name: as before")
+        // ★ RE-PINNED (the redesign P3, the reviewer's ruling R11 of 2026-10-24: "Delete 'X' from every stage?"; the message
+        // after Delete unchanged): was "Delete Group C here and in Topology?" and the suffix "here and in Topology?".
+        XCTAssertEqual(FlexibleSelectionsCopy.deleteAsk("Group C"), "Delete \u{2018}Group C\u{2019} from every stage?", "a short name: named, in quotes")
         XCTAssertEqual(FlexibleSelectionsCopy.deleted("Group C"), "Group C deleted here and in Topology")
         for name in ["Left side squeeze pad", "A name he typed that is rather long", String(repeating: "W", count: 60)] {
             XCTAssertLessThanOrEqual(FlexibleSelectionsCopy.deleteAsk(name).count, 44, "★ ≤ 44: \(FlexibleSelectionsCopy.deleteAsk(name))")
             XCTAssertLessThanOrEqual(FlexibleSelectionsCopy.deleted(name).count, 44, "★ ≤ 44: \(FlexibleSelectionsCopy.deleted(name))")
-            XCTAssertTrue(FlexibleSelectionsCopy.deleteAsk(name).hasSuffix("here and in Topology?"))
+            XCTAssertTrue(FlexibleSelectionsCopy.deleteAsk(name).hasSuffix("from every stage?"))
         }
         // ★ RED CONTROL: the old sentence with his renamed group — 50 characters, past his line
         XCTAssertGreaterThan("Delete Left side squeeze pad here and in Topology?".count, 44, "★ RED CONTROL: the old question overflowed")

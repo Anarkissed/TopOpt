@@ -210,7 +210,7 @@ struct FlexibleFaceChip: View {
                 .modifier(FlexibleCancelInPlace(asking: ui.deleteAsk == g.id && ui.deleteAskInChip, keepKey: "deleteCancel",
                                                 cancel: { ui.deleteAsk = nil }))
                 .background(publish("chipTrash"))
-                .accessibilityLabel("Delete \(g.name), here and in Topology")
+                .accessibilityLabel(FlexibleSelectionsCopy.deleteAsk(g.name))   // ★ P3: the question it asks
                 .accessibilityIdentifier("flexible-chip-trash")
             }
             closeButton

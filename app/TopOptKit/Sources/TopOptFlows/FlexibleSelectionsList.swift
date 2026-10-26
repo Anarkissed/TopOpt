@@ -209,7 +209,7 @@ public struct FlexibleSelectionsList: View {
                 .modifier(FlexibleCancelInPlace(asking: ui.deleteAsk == g.id && !ui.deleteAskInChip, keepKey: "deleteCancel",
                                                 cancel: { ui.deleteAsk = nil }))
                 .background(publish("selTrash-\(g.id.uuidString)"))
-                .accessibilityLabel("Delete \(g.name), here and in Topology")
+                .accessibilityLabel(FlexibleSelectionsCopy.deleteAsk(g.name))   // ★ P3: the question it asks
                 .accessibilityIdentifier("flexible-sel-trash-\(g.id.uuidString)")
             }
         }
@@ -217,7 +217,7 @@ public struct FlexibleSelectionsList: View {
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
-    /// "Delete Group C here and in Topology?" [Delete] — his answer: the trash confirms (★ U21: [Cancel] on the trash itself).
+    /// "Delete ‘Group C’ from every stage?" [Delete] — his answer: the trash confirms (★ U21: [Cancel] on the trash itself).
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
         FlexibleDeleteConfirm(name: g.name, delete: { main.confirmDelete(project: project, cardsChanged: cardsChanged) })
             .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
