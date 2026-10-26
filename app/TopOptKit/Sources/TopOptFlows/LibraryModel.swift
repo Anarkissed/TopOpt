@@ -60,6 +60,9 @@ public final class LibraryModel: ObservableObject {
     private var resultsCache: [UUID: [LibraryResult]] = [:]
     private var resultsOrder: [UUID] = []
     private var loadingSummaries = false
+    /// The version each new folder was made FROM (a draft, "New draft from vN"), until it is filed — so it
+    /// is numbered from that version (his decision 11: v4 → v4.1).
+    private var pendingParents: [UUID: UUID] = [:]
 
     private static let queue = DispatchQueue(label: "topopt.library.results", qos: .utility)
 
@@ -86,7 +89,8 @@ public final class LibraryModel: ObservableObject {
             }
         case let .readable(existing):
             let before = Set(existing.parts.map(\.id))
-            var r = LibraryGrouping.reconcile(existing, store: store)
+            var r = LibraryGrouping.reconcile(existing, store: store, parents: pendingParents)
+            pendingParents = pendingParents.filter { r.part(containing: $0.key) == nil }
             if let t = importTargetProject, let p = r.projects.firstIndex(where: { $0.id == t }) {
                 let filed = Set(r.projects.flatMap(\.partIDs))
                 for part in r.parts where !before.contains(part.id) && !filed.contains(part.id) {
@@ -129,6 +133,9 @@ public final class LibraryModel: ObservableObject {
         mode = .library
         loadThumbnailsFromCache()
     }
+
+    /// A new folder was made from `version` (a draft, or "New draft from vN"): number it from that one.
+    public func noteParent(_ version: UUID, of folder: UUID) { pendingParents[folder] = version }
 
     /// Not now: the sheet closes; today's Home stays, and Library ⋯ offers grouping again.
     public func notNow() { lastProposal = nil }

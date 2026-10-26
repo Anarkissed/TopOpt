@@ -69,23 +69,27 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
     public var modelHash: String?
     /// In number order.
     public var versions: [LibraryVersion]
-    /// The highest number this part ever gave, kept when that version's folder is deleted, so a
+    /// The highest MAIN-LINE number this part ever gave, kept when that version's folder is deleted, so a
     /// number is never given twice (nil = the highest listed). Audit 2026-10-25.
     public var lastNumber: Int?
+    /// The same for branches (his decision 11): the highest branch given under each version ("4" → 2
+    /// once v4.2 existed). nil = the highest listed.
+    public var lastChild: [String: Int]?
 
     public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
-                lastNumber: Int? = nil) {
+                lastNumber: Int? = nil, lastChild: [String: Int]? = nil) {
         self.id = id
         self.name = name
         self.modelHash = modelHash
         self.versions = versions
         self.lastNumber = lastNumber
+        self.lastChild = lastChild
     }
 
-    /// The number the next version gets: never one given before.
-    public var nextNumber: Int { max(lastNumber ?? 0, versions.map(\.number).max() ?? 0) + 1 }
+    /// The next main-line number: never one given before.
+    public var nextNumber: VersionNumber { nextNumber(from: nil) }
 
-    public func version(number: Int) -> LibraryVersion? { versions.first { $0.number == number } }
+    public func version(number: VersionNumber) -> LibraryVersion? { versions.first { $0.number == number } }
     public func version(folderID: UUID) -> LibraryVersion? { versions.first { $0.folderID == folderID } }
 }
 
@@ -93,9 +97,10 @@ public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
 public struct LibraryVersion: Codable, Equatable, Sendable {
     /// The project folder this version is (`ProjectSnapshot.id`).
     public let folderID: UUID
-    public var number: Int
+    /// v7 on the main line, v4.1 a branch from v4 (his decision 11).
+    public var number: VersionNumber
     /// The version it came from; nil for a first version.
-    public var parentNumber: Int?
+    public var parentNumber: VersionNumber?
     /// His own name; nil means the automatic one (`VersionChanges.autoName`). His decision 9
     /// (2026-10-25): grouped copies DROP their old "copy N" names.
     public var name: String?
@@ -113,7 +118,7 @@ public struct LibraryVersion: Codable, Equatable, Sendable {
     /// His switch on Storage: true keeps all results, false lets Trim take them; nil follows the rule.
     public var keepAll: Bool?
 
-    public init(folderID: UUID, number: Int, parentNumber: Int? = nil, name: String? = nil,
+    public init(folderID: UUID, number: VersionNumber, parentNumber: VersionNumber? = nil, name: String? = nil,
                 changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,
                 summary: [ResultSummary]? = nil) {
         self.folderID = folderID

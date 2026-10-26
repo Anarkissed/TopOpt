@@ -98,6 +98,8 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var runningIDs: Set<UUID> = []
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
+    /// Library (B3): each version's draft this session (an edit to a version with results goes there).
+    private var libraryDrafts: [UUID: UUID] = [:]
     /// Serial queue for the (potentially large) results encode/decode + file IO, so
     /// persisting/restoring variants never blocks the main thread (persist-c).
     /// Internal (not private) so the write-after-delete race test can hold the queue.
@@ -840,9 +842,47 @@ public final class AppModel: ObservableObject {
     public func backHome() {
         if printParamsSheetPresented { closePrintParams() }
         persistCurrentProject()
+        // Library (B3): a version whose edits went to its draft reopens as it ran
+        if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
         library.refresh()   // Library: file what changed (a new version, a new part)
     }
+
+    // MARK: - Library (B3): drafts
+
+    /// The draft made this session for a version, if any.
+    func libraryDraft(of version: UUID) -> UUID? { libraryDrafts[version] }
+
+    /// Write `live` (a version's edited settings) into that version's draft — the one made this session,
+    /// else a new folder (the model and its sidecars copied from the version's folder, no results).
+    @discardableResult
+    func writeLibraryDraft(of project: ProjectModel, live: ProjectSnapshot) -> RecentProject? {
+        var d = live
+        d.id = libraryDrafts[project.id] ?? UUID()
+        d.optimized = nil
+        d.savedAt = now()
+        let model = project.modelSourceURL ?? URL(fileURLWithPath: store.modelPath(id: project.id, fileName: live.modelFileName))
+        do { try store.save(d, modelSource: model) } catch {
+            toast = "Couldn’t save the draft: \(error.localizedDescription)"
+            return nil
+        }
+        libraryDrafts[project.id] = d.id
+        library.noteParent(project.id, of: d.id)   // numbered from this version (his decision 11: v4 → v4.1)
+        let recent = ProjectDuplication.recent(for: d)
+        if let i = recentProjects.firstIndex(where: { $0.id == d.id }) { recentProjects[i] = recent }
+        else { recentProjects.insert(recent, at: (recentProjects.firstIndex { $0.id == project.id } ?? -1) + 1) }
+        if thumbnails[d.id] == nil { thumbnails[d.id] = thumbnails[project.id] }
+        return recent
+    }
+
+    /// Drop a version's live copy, so it next opens from its folder (as it ran).
+    func forgetLiveVersion(_ id: UUID) {
+        guard !runningIDs.contains(id) else { return }
+        projectsById[id] = nil
+        runCancellables[id]?.cancel()
+        runCancellables[id] = nil
+    }
+
 
     // MARK: - Cold-launch remote re-attach (handoff 119)
 
@@ -983,6 +1023,13 @@ public final class AppModel: ObservableObject {
     /// never crash the flow.
     private func persist(_ project: ProjectModel) {
         guard var snapshot = project.snapshot(savedAt: now()) else { return }
+        // ★ Library (B3): a version's settings never change after it ran. Once he has grouped, an edit
+        // to a version with results is written to its DRAFT; the version's own folder is left as it ran.
+        if library.makesNextVersion(of: project.id), !runningIDs.contains(project.id),
+           let ran = store.snapshot(id: project.id), !LibrarySettings.same(ran, snapshot) {
+            if writeLibraryDraft(of: project, live: snapshot) != nil { library.refresh() }
+            return
+        }
         // THE `optimized` FLAG DESCRIBES THE DURABLE RECORD, NOT THE LIVE SESSION
         // (task 2026-08-03-variant-entry-gating-and-retention, bar AJ1, second half).
         //

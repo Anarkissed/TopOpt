@@ -508,6 +508,8 @@ public struct WorkspacePlaceholder: View {
     /// (nothing happens, and the variants are untouched).
     @State private var pendingReplacement: ResultsReplacementPrompt?
     @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d: the re-run card's Save as new project is for an Optimize re-run only
+    @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
+    @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -751,6 +753,7 @@ public struct WorkspacePlaceholder: View {
                     if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
+                    if let r = LibraryOpen.takeExport(for: project.id) { libraryExportVariant = r; openLibraryExportIfReady() }   // Library (B3): Export from a card
                 }
             MetalMeshView(mesh: flexibleMain.mesh(project, on: stage) ?? stageMesh,   // Flexible (PR #362) H4: the part + its dented map quads
                           camera: cameraModel,
@@ -1744,6 +1747,7 @@ public struct WorkspacePlaceholder: View {
     private func requestRun() {
         guard canOptimize else { return }
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
+            if libraryAsks() { return }   // Library (B3)
             rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d: Optimize's card offers Save as new project
             return
         }
@@ -3129,6 +3133,7 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: acceptedVariantCount) { n in
             topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,
                             landedByRun: TopologyResultsNotice.landedByRun(run.phase))
+            openLibraryExportIfReady()   // Library (B3): the results arrive after the open
         }
         .onChange(of: run.isStreaming) { streaming in
             if !streaming { topoNotice.noteFinished(accepted: acceptedVariantCount, resultsOpen: !viewOriginal) }
@@ -3151,6 +3156,8 @@ public struct WorkspacePlaceholder: View {
         } message: {
             Text(pendingReplacement?.message ?? "")
         }
+        // Library (B3): the "Optimize as vN" card (approved Library mockup, screen 6)
+        .overlay { if nextVersionAsk { LibraryNextVersionCard(model: model, project: project, close: { nextVersionAsk = false }, optimize: { name in nextVersionAsk = false; optimizeAsNextVersion(name: name) }) } }
         // ★ B4 (APP LIST 6): THE LATTICE RUN'S RE-RUN CARD — "Re-running clears this lattice's results":
         // Re-run the lattice here (the LATTICE request) / Save as new project (the copy opens on Lattice) / Cancel.
         .alert(LatticeRerunChoice.title, isPresented: latticeRerunBinding) {
@@ -12697,6 +12704,31 @@ extension WorkspacePlaceholder {
         } else {
             model.toast = RerunCard.copyFailedToast
         }
+    }
+
+    // Library (B3): every Optimize on a version with results makes the next version (no in-place re-run)
+    private func libraryAsks() -> Bool {
+        guard model.library.makesNextVersion(of: project.id) else { return false }
+        nextVersionAsk = true
+        return true
+    }
+
+    // Library (B3): Optimize as the next version — its draft runs; the version it came from never changes
+    func optimizeAsNextVersion(name: String?) {
+        if let next = model.optimizeAsNextVersion(id: project.id, name: name) {
+            RerunCard.runOnOpen(next.id)
+            model.open(next)
+        } else {
+            model.toast = RerunCard.copyFailedToast
+        }
+    }
+
+    // Library (B3): Export from a card — Smooth on the chosen result, once its results are in
+    private func openLibraryExportIfReady() {
+        guard let r = libraryExportVariant, acceptedVariantCount > 0 else { return }
+        libraryExportVariant = nil
+        if stage != .topology { goToStage(.topology) }
+        openSmoothingPage(variantIndex: r)
     }
 }
 

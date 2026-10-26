@@ -740,7 +740,7 @@ struct LibraryPartCard: View {
 
 enum LibraryFilter: String, CaseIterable { case all, top, print, strong }
 enum LibrarySort: String, CaseIterable {
-    case newest = "Newest", oldest = "Oldest", rated = "Best rated", lightest = "Lightest", strongest = "Strongest"
+    case newest = "Newest", oldest = "Oldest", recent = "Recently saved", rated = "Best rated", lightest = "Lightest", strongest = "Strongest"
 }
 
 struct PartFolderView: View {
@@ -769,13 +769,15 @@ struct PartFolderView: View {
         case .strong: done = done.filter { $0.summary?.contains(where: \.accepted) == true }
         }
         switch sort {
-        case .newest: done.sort { $0.number > $1.number }
+        // his decision 11: a branch (v4.1) sits right under the version it came from
+        case .newest: done.sort { VersionNumber.newestFirst($0.number, $1.number) }
         case .oldest: done.sort { $0.number < $1.number }
+        case .recent: done.sort { (library.snapshots[$0.folderID]?.savedAt ?? .distantPast) > (library.snapshots[$1.folderID]?.savedAt ?? .distantPast) }
         case .rated: done.sort { ($0.marks.map(\.stars).max() ?? 0, $0.number) > ($1.marks.map(\.stars).max() ?? 0, $1.number) }
         case .lightest: done.sort { (best($0)?.massGrams ?? .infinity) < (best($1)?.massGrams ?? .infinity) }
         case .strongest: done.sort { (best($0)?.worstCaseMargin ?? -1) > (best($1)?.worstCaseMargin ?? -1) }
         }
-        return (filter == .all ? pending.sorted { $0.number > $1.number } : []) + done
+        return (filter == .all ? pending.sorted { VersionNumber.newestFirst($0.number, $1.number) } : []) + done
     }
 
     private var openTarget: LibraryVersion? {
@@ -802,13 +804,34 @@ struct PartFolderView: View {
                     }
                     .buttonStyle(.plain).accessibilityIdentifier("library-compare")
                     if let t = openTarget {
-                        Button { openFolder(t.folderID) } label: {
-                            Text(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)").dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(.white)
-                                .padding(.horizontal, DS.Space.l).frame(height: 44)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
-                                .dsShadow(.accentGlow)
+                        HStack(spacing: 0) {
+                            Button { openFolder(t.folderID) } label: {
+                                Text(library.isDraft(t) ? "Open v\(t.number) draft" : "Open v\(t.number)").dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(.white)
+                                    .padding(.horizontal, DS.Space.l).frame(height: 44)
+                            }
+                            .buttonStyle(.plain).accessibilityIdentifier("library-open")
+                            Rectangle().fill(Color.white.opacity(0.35)).frame(width: 1, height: 26)
+                            // his decision 6: the ⌄ lists the drafts (newest first), then every version
+                            Menu {
+                                let drafts = library.drafts(of: part)
+                                if !drafts.isEmpty {
+                                    Section("Drafts") {
+                                        ForEach(drafts, id: \.folderID) { d in Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) } }
+                                    }
+                                }
+                                Section("Versions") {
+                                    ForEach(part.versions.filter { !library.isDraft($0) }.sorted { $0.number > $1.number }, id: \.folderID) { d in
+                                        Button(library.shortTitle(of: d, in: part)) { openFolder(d.folderID) }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "chevron.down").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                                    .frame(width: 40, height: 44)
+                            }
+                            .accessibilityIdentifier("library-open-menu")
                         }
-                        .buttonStyle(.plain).accessibilityIdentifier("library-open")
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Color.accent.color))
+                        .dsShadow(.accentGlow)
                     }
                 }
                 HStack(spacing: DS.Space.sm) {
@@ -936,7 +959,14 @@ struct LibraryVersionCard: View {
     private func info(pending: Bool, r: Int, mark: ResultMark) -> some View {
         let v = version
         return VStack(alignment: .leading, spacing: DS.Space.sm) {
-            Text(library.shortTitle(of: v, in: part)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
+            HStack(spacing: DS.Space.xs) {
+                if !v.number.isMainLine {
+                    Image(systemName: "arrow.turn.down.right").font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(DS.Color.accentCyan.color)
+                        .accessibilityLabel("A branch from v\(v.number.parent?.description ?? "")")
+                }
+                Text(library.shortTitle(of: v, in: part)).dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
+            }
             Text(changeLine(v)).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
             if pending {
                 ForEach(Array(v.changes.prefix(3).enumerated()), id: \.offset) { _, c in changeRow(c) }
@@ -983,15 +1013,19 @@ struct LibraryVersionCard: View {
                 Label(mark.rejected ? "Not rejected" : "Reject", systemImage: "xmark.circle")
             }
         }
+        if !pending { Button { export(r) } label: { Label("Export…", systemImage: "square.and.arrow.up") } }
         Button(action: open) { Label("Open v\(v.number)", systemImage: "arrow.up.forward.app") }
         // #362 H51's behaviour, carried over: Duplicate is now "New draft from vN" (H52 unchanged)
         Button {
-            _ = model.duplicateProject(id: v.folderID)
+            if let copy = model.duplicateProject(id: v.folderID) { library.noteParent(v.folderID, of: copy.id) }
             library.refresh()
         } label: { Label("New draft from v\(v.number)", systemImage: "plus.square.on.square") }
         Button(action: rename) { Label("Rename…", systemImage: "pencil") }
         Button(role: .destructive, action: delete) { Label("Delete v\(v.number)…", systemImage: "trash") }
     }
+
+    /// Export from a card: open this version on its Export step (Smooth, with this result).
+    private func export(_ r: Int) { LibraryExport.start(model: model, library: library, folder: version.folderID, result: r) }
 
     private var parentPicture: CGImage? {
         guard let p = version.parentNumber.flatMap(part.version(number:)) else { return nil }
@@ -1247,6 +1281,21 @@ private struct LibraryImportProjectMenu: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous).strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1))
             }
             .accessibilityIdentifier("import-project-row")
+            .padding(.top, DS.Space.l)   // only when shown: a hidden row adds no height (the sheet's clicks stay put)
         }
+    }
+}
+
+/// Export from a card (screen 8): open that version on today's Export step. A Topology version opens on
+/// Smooth with the chosen result; a lattice version opens as it is (its Export is the Lattice button's ⌃).
+@MainActor
+enum LibraryExport {
+    static func start(model: AppModel, library: LibraryModel, folder: UUID, result: Int) {
+        guard let recent = model.recentProjects.first(where: { $0.id == folder }) else { return }
+        let s = library.snapshots[folder]
+        let lattice = s?.lattice?.flexible != nil || s?.lattice?.enabled == true
+        if !lattice { LibraryOpen.exportOnOpen(folder, result: result) }
+        model.open(recent)
+        if lattice { model.toast = "Lattice ⌃ → Export" }
     }
 }

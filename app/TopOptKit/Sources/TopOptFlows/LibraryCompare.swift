@@ -39,7 +39,7 @@ public struct CompareSession: Equatable {
 
     /// The results Compare offers: every result of every version that has results, without drafts.
     public static func queue(_ part: LibraryPart, skipRejected: Bool) -> [CompareItem] {
-        var rows: [(item: CompareItem, stars: Double, number: Int)] = []
+        var rows: [(item: CompareItem, stars: Double, number: VersionNumber)] = []
         for v in part.versions {
             guard let summary = v.summary else { continue }
             for r in summary.indices {
