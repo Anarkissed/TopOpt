@@ -858,21 +858,43 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
   // Snapshot the armed deadline once for the whole solve (0 = disarmed).
   const double deadline = fea_detail::mf_solve_deadline();
-  // THE SAFETY NET (fea.hpp SolverStopped): this solve's own time limit, from
-  // now. Always armed; it reads a clock every kSolveDeadlinePollIters
+  // THE SAFETY NET (fea.hpp SolverStopped): a backstop on this solve's own
+  // SOLVING time. Always armed; it reads a clock every kSafetyNetPollIters
   // iterations and changes no arithmetic, so a solve that never trips it is
-  // bit-identical.
+  // bit-identical. Two kinds of wall time never count against it:
+  //   * GenEO's setup (solve-begin, basis build / refresh): the deadline moves
+  //     forward by each setup span, so a long build — or one that gives up at
+  //     the deadline, or is refused — leaves plain CG going with the budget it
+  //     had (review 2026-10-26, R1);
+  //   * a pause: a gap between two polls longer than mf_pause_gap_ms (30 s;
+  //     16 iterations never take that long) is the worker's SIGSTOP, not work,
+  //     and moves the deadline forward by the gap (R2).
   const double net_ms = fea_detail::mf_safety_net_ms();
   const double net_t0 = mf_steady_ms();
-  // ... and its deadline, visible to the setups called below (GenEO), restored
-  // on every exit, throws included.
+  double net_deadline = net_ms > 0.0 ? net_t0 + net_ms : 0.0;
+  double net_last_poll = net_t0;
+  double net_credit_ms = 0.0;  // setup + pauses, not counted
+  // ... and the deadline, visible to the setups called below (GenEO stands a
+  // build down at it), restored on every exit, throws included.
   struct NetDeadlineScope {
     double prev;
     explicit NetDeadlineScope(double d) : prev(fea_detail::mf_safety_net_deadline()) {
       fea_detail::mf_safety_net_deadline() = d;
     }
     ~NetDeadlineScope() { fea_detail::mf_safety_net_deadline() = prev; }
-  } net_scope(net_ms > 0.0 ? net_t0 + net_ms : 0.0);
+  } net_scope(net_deadline);
+  // Run one GenEO setup step with its wall time credited back to the net.
+  auto net_uncounted = [&](auto&& fn) {
+    const double t0 = mf_steady_ms();
+    fn();
+    if (net_deadline > 0.0) {
+      const double now = mf_steady_ms();
+      net_deadline += now - t0;
+      net_credit_ms += now - t0;
+      net_last_poll = now;
+      fea_detail::mf_safety_net_deadline() = net_deadline;
+    }
+  };
 
   // External additive preconditioner (matrix-free GenEO two-level, phase 2). Snapshot
   // the installed hook once for the whole solve; when none is installed (the default)
@@ -925,13 +947,15 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   bool geneo_pending = false;
   int geneo_engage_at = -1;
   if (ctx != nullptr && geneo_enabled()) {
-    span(t_geneo_setup, [&] { geneo_solve_begin(m, *ctx); });
+    net_uncounted([&] { span(t_geneo_setup, [&] { geneo_solve_begin(m, *ctx); }); });
     geneo_engage_at = geneo_engage_threshold();
     // A threshold of zero (the standing-preconditioner harness posture, or a
     // held basis whose cost model prices engagement at nothing) engages before
     // the first iteration, exactly as the pre-gate lifecycle did.
     if (geneo_engage_at == 0)
-      span(t_geneo_setup, [&] { geneo_active = geneo_engage_now(m, *ctx, 0); });
+      net_uncounted([&] {
+        span(t_geneo_setup, [&] { geneo_active = geneo_engage_now(m, *ctx, 0); });
+      });
     geneo_pending = !geneo_active && geneo_engage_at >= 0;
   }
 
@@ -1017,22 +1041,35 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     }
     // Every kSafetyNetPollIters iterations (a clock read is nothing next to
     // one fine apply), so the net overshoots its limit by a few iterations at
-    // most — and by at most one GenEO setup, which stands down at the deadline.
-    if ((i % kSafetyNetPollIters) == 0 && i > 0 && net_ms > 0.0) {
-      const double elapsed = mf_steady_ms() - net_t0;
-      if (elapsed >= net_ms) {
+    // most.
+    if ((i % kSafetyNetPollIters) == 0 && i > 0 && net_deadline > 0.0) {
+      const double now = mf_steady_ms();
+      const double gap = now - net_last_poll;
+      if (gap > fea_detail::mf_pause_gap_ms()) {  // a pause, not work
+        net_deadline += gap;
+        net_credit_ms += gap;
+        fea_detail::mf_safety_net_deadline() = net_deadline;
+      }
+      net_last_poll = now;
+      if (now >= net_deadline) {
         error_out = std::sqrt(residualNorm2 / rhsNorm2);
         iters_out = i;
         converged_out = false;
         write_times();
-        char buf[200];
+        const double solving = (now - net_t0) - net_credit_ms;
+        char buf[240];
         std::snprintf(buf, sizeof buf,
-                      "the matrix-free Jacobi-CG ran %d iterations in %.0f s, past "
+                      "the matrix-free Jacobi-CG ran %d iterations in %.0f s of "
+                      "solving (%.0f s of GenEO setup and pauses not counted), past "
                       "its %.0f s time limit, at rel res %.3e",
-                      i, elapsed / 1000.0, net_ms / 1000.0, error_out);
-        throw SolverStopped(buf, i, error_out, elapsed);
+                      i, solving / 1000.0, net_credit_ms / 1000.0, net_ms / 1000.0,
+                      error_out);
+        throw SolverStopped(buf, i, error_out, solving);
       }
     }
+    if (fea_detail::mf_test_pause_at() > 0 && i == fea_detail::mf_test_pause_at())  // TEST ONLY
+      std::this_thread::sleep_for(std::chrono::microseconds(
+          static_cast<long long>(1000.0 * fea_detail::mf_test_pause_ms())));
     m.apply_kgg(p, tmp);  // tmp = K p
     // Hand CG's own direction and its ALREADY-computed operator image to the
     // recycler's decimating sample. No extra matvec; no-op off a harvest solve.
@@ -1061,7 +1098,16 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     if (geneo_pending && i + 1 >= geneo_engage_at) {
       geneo_pending = false;
       bool built = false;
-      span(t_geneo_setup, [&] { built = geneo_engage_now(m, *ctx, i + 1); });
+      // Its setup never counts against the safety net; a build that gives up
+      // (at the deadline, or refused) returns false and plain CG continues.
+      net_uncounted([&] {
+        span(t_geneo_setup, [&] {
+          if (fea_detail::mf_test_geneo_setup_sleep_ms() > 0.0)  // TEST ONLY
+            std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(
+                1000.0 * fea_detail::mf_test_geneo_setup_sleep_ms())));
+          built = geneo_engage_now(m, *ctx, i + 1);
+        });
+      });
       if (built) {
         geneo_active = true;
         for (int q = 0; q < n; ++q)
@@ -1178,7 +1224,12 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     pc.youngs_modulus = youngs_modulus;
     pc.poisson = poisson;
     fea_detail::MfCgTimes tm;
-    fea_detail::mf_cg_solve(m, tolerance, max_iterations, x, diag.iterations,
+    // The iteration cap: the caller's, else min(2 ng, kFallbackIterCap) (the
+    // safety net's backstop count; reaching it is a SolverNonConvergence).
+    const int cg_cap = max_iterations > 0
+                           ? max_iterations
+                           : std::min(2 * m.ng, fea_detail::kFallbackIterCap);
+    fea_detail::mf_cg_solve(m, tolerance, cg_cap, x, diag.iterations,
                             diag.residual, diag.converged, &rec, &pc, &tm);
     diag.recycle_dim = rec.dim;
     diag.recycle_setup_matvecs = rec.setup_matvecs;
@@ -1190,14 +1241,6 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
     diag.matvecs = fea_matvec_count() - mv_entry;
     if (info) *info = diag;
-    // THE SAFETY NET's iteration cap (fea.hpp SolverStopped): with no caller
-    // cap, reaching the default 2 ng stops the job; an explicit cap keeps
-    // today's SolverNonConvergence.
-    if (!diag.converged && max_iterations <= 0 && diag.iterations >= 2 * m.ng)
-      throw SolverStopped(
-          "fea_solve_cg_matfree: the Jacobi-CG reached its iteration cap (" +
-              std::to_string(2 * m.ng) + ") without converging",
-          diag.iterations, diag.residual, diag.t_total_ms);
     if (!diag.converged)
       throw SolverNonConvergence(
           "fea_solve_cg_matfree: CG did not reach the requested tolerance "

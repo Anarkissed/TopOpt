@@ -2480,6 +2480,7 @@ struct IslandScan {
   bool keep_mask = false;       // frozen = the registered mask (else the proxy)
   bool majority_loose = false;  // more than half the solid voxels are loose
   double ms = 0.0;              // the census's own wall time (one flood fill)
+  bool face_only = true;        // faces (search) or 26-connected (certified)
 };
 
 // Deterministic FACE-connected (6-connected) census of the solid voxels
@@ -2491,9 +2492,11 @@ struct IslandScan {
 IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
                         const std::vector<DirichletBC>& bcs,
                         const std::vector<NodalLoad>& loads,
-                        const std::vector<char>* active_mask) {
+                        const std::vector<char>* active_mask,
+                        bool face_only = true) {
   const double t0 = fea_detail::mf_steady_ms();
   IslandScan R;
+  R.face_only = face_only;
   const std::size_t nv = grid.voxel_count();
   if (ey.size() != nv) return R;
   auto present = [&](std::size_t e) {
@@ -2556,19 +2559,29 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
         for (int nd : en)
           if (anchor[static_cast<std::size_t>(nd)]) { anchored = true; break; }
       }
-      // The 6 FACE neighbours only: a face shares 4 nodes and transmits load;
-      // an edge (2 nodes) or a corner (1 node) is a hinge — a near-zero mode
-      // the void alone resists — so it does not connect.
-      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
-                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
-      for (const auto& c : nb) {
-        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 ||
-            c[2] >= nz)
-          continue;
-        const std::size_t f = grid.index(c[0], c[1], c[2]);
-        if (solid[f] && label[f] < 0) {
-          label[f] = id;
-          queue.push_back(static_cast<int>(f));
+      // The 6 FACE neighbours only (the default, every trajectory / search
+      // solve): a face shares 4 nodes and transmits load; an edge (2 nodes) or
+      // a corner (1 node) is a hinge — a near-zero mode the void alone resists
+      // — so it does not connect. A CERTIFIED solve (face_only false) walks all
+      // 26 neighbours: there a hinge to the anchored body keeps its true
+      // stiffness, the connectivity load_path_connected accepts the part on.
+      for (int dz = -1; dz <= 1; ++dz) {
+        const int c = k + dz;
+        if (c < 0 || c >= nz) continue;
+        for (int dy = -1; dy <= 1; ++dy) {
+          const int b = j + dy;
+          if (b < 0 || b >= ny) continue;
+          for (int dx = -1; dx <= 1; ++dx) {
+            const int a = i + dx;
+            if (a < 0 || a >= nx) continue;
+            const int manhattan = (dx != 0) + (dy != 0) + (dz != 0);
+            if (manhattan == 0 || (face_only && manhattan != 1)) continue;
+            const std::size_t f = grid.index(a, b, c);
+            if (solid[f] && label[f] < 0) {
+              label[f] = id;
+              queue.push_back(static_cast<int>(f));
+            }
+          }
         }
       }
     }
@@ -2604,6 +2617,7 @@ thread_local LooseLogWindow g_loose_log_win;
 thread_local fea_detail::MgLooseStats g_loose_stats;
 thread_local bool g_loose_majority_warned = false;
 thread_local bool g_loose_rule = true;  // TEST ONLY switch (fea_detail)
+thread_local int g_loose_rule_off = 0;  // FeaLoosePieceRuleOff depth
 void loose_log_flush_window() {
   LooseLogWindow& w = g_loose_log_win;
   if (w.solves == 0) return;
@@ -2647,9 +2661,10 @@ void loose_record(const IslandScan& s) {
     std::fprintf(stderr,
                  "[loose] solve %lld: %d loose piece(s) of %d (%lld voxels, largest "
                  "%d; %d frozen) solved at the floor modulus %.3g, of %lld elements ; "
-                 "flood fill %.1f ms%s\n",
+                 "%s ; flood fill %.1f ms%s\n",
                  seq, s.unanchored, s.pieces, s.unanchored_voxels,
-                 s.largest_unanchored, s.frozen_loose, s.floor_e, s.elements, s.ms,
+                 s.largest_unanchored, s.frozen_loose, s.floor_e, s.elements,
+                 s.face_only ? "face rule" : "certified: 26-connected", s.ms,
                  st.with_loose == kLooseLogFirst
                      ? " ; further [loose] solves are summarised" : "");
     return;
@@ -2710,8 +2725,14 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   IslandScan loose;
   std::vector<double> ey_loose;
   const std::vector<double>* ey_solve = elem_youngs;
-  if (g_loose_rule && elem_youngs != nullptr && lattice == nullptr) {
-    loose = scan_islands(grid, *elem_youngs, bcs, loads, active_mask);
+  if (g_loose_rule && g_loose_rule_off == 0 && elem_youngs != nullptr &&
+      lattice == nullptr) {
+    // A CERTIFIED solve (a FeaIslandDropForbid is held: certification, final
+    // compliance, analysis) classifies by 26-connectivity; every other solve by
+    // faces (fea.hpp, review 2026-10-26 R4).
+    const bool certified = g_island_drop_forbid > 0;
+    loose = scan_islands(grid, *elem_youngs, bcs, loads, active_mask,
+                         /*face_only=*/!certified);
     if (!loose.drop.empty()) {
       ey_loose = *elem_youngs;
       for (int e : loose.drop) ey_loose[static_cast<std::size_t>(e)] = loose.floor_e;
@@ -2738,8 +2759,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   std::vector<double> u = m.up;
   if (m.ng > 0) {
     const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
-    const int cap =
-        max_iterations > 0 ? max_iterations : std::max(1000, 2 * m.ng);
+    // The iteration cap: the caller's, else min(max(1000, 2 ng),
+    // kFallbackIterCap) — the safety net's backstop count (review 2026-10-26).
+    // Reaching it is a SolverNonConvergence (a rejected rung), never a stop.
+    const int cap = max_iterations > 0
+                        ? max_iterations
+                        : std::min(std::max(1000, 2 * m.ng), fea_detail::kFallbackIterCap);
 
     // Per-run stagnation latch (handoff 127): once MG has stagnated on
     // kMgLatchThreshold consecutive solves this run, stop even BUILDING the
@@ -3180,16 +3205,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
       diag.matvecs = fea_matvec_count() - mv_entry;
       if (info) *info = diag;
-      // THE SAFETY NET (ruling 2026-10-25, item 5): with no caller cap, the
-      // fallback's own cap max(1000, 2 ng) is the net's iteration limit (its
-      // time limit throws from inside mf_cg_solve). Reaching it STOPS THE JOB
-      // (SolverStopped is not a SolverNonConvergence, so no rung-rejection
-      // catch absorbs it). A caller's explicit cap keeps today's meaning.
-      if (!diag.converged && max_iterations <= 0 && diag.iterations >= cap)
-        throw SolverStopped(
-            "fea_solve_mgcg_matfree: the Jacobi-CG fallback reached its "
-            "iteration cap (" + std::to_string(cap) + ") without converging",
-            diag.iterations, diag.residual, diag.t_total_ms);
+      // Reaching the cap is a SolverNonConvergence (the rung is rejected and
+      // the search goes on); only the safety net's wall clock, inside
+      // mf_cg_solve, throws SolverStopped.
       if (!diag.converged)
         throw SolverNonConvergence(
             "fea_solve_mgcg_matfree: CG did not reach the requested tolerance "
@@ -3461,6 +3479,10 @@ const std::vector<char>* fea_matfree_set_island_keep_mask(const std::vector<char
   const std::vector<char>* prev = g_island_keep_mask;
   g_island_keep_mask = m;
   return prev;
+}
+void fea_matfree_loose_rule_off_enter() { ++g_loose_rule_off; }
+void fea_matfree_loose_rule_off_exit() {
+  if (g_loose_rule_off > 0) --g_loose_rule_off;
 }
 void fea_matfree_island_drop_scope_enter(bool permit) {
   if (permit) ++g_island_drop_permit;

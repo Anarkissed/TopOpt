@@ -1215,6 +1215,11 @@ bool core_solve(const Problem& P, double lambda, const topopt::FeaSolution* gues
   // up (the hierarchy never built, or the V-cycles stagnated and Jacobi-CG ran out). Its deadline
   // throws from INSIDE the recurrence, before `info` is filled: say the clock.
   try {
+    // Core's LOOSE-PIECE rule is for SIMP / level-set density fields, where a soft
+    // voxel is void. Here the soft lattice (clamped at 1e-4 x the stiff modulus) is
+    // a real material a stiff piece can hang on, so the rule is OFF for this solve:
+    // it solves exactly the system its moduli describe, as before the rule existed.
+    topopt::FeaLoosePieceRuleOff loose_rule_off;
     sol = jacobi_only ? topopt::fea_solve_cg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
                                                      &info, guess, nullptr)
                       : topopt::fea_solve_mgcg_matfree(P.fe.g, P.fe.E, P.nu, P.bcs, loads, P.tolerance, max_iterations,
