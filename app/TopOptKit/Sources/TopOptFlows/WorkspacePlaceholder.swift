@@ -190,6 +190,12 @@ public struct WorkspacePlaceholder: View {
     /// ★ his iPad 10-26 (3): the clearance PIECE picked inside the expanded group (its face key; a manual primitive's
     /// sentinel key), nil = the whole group. Cleared whenever the selected group changes.
     @State private var selectedPiece: SelectionArrowRule.PieceRef? = nil
+    // ★ load scenarios: the folder being renamed, its draft, the (i), the last-anchor refusal, the Add Anchor hint
+    @State private var renamingScenario: UUID? = nil
+    @State private var scenarioNameDraft = ""
+    @State private var scenarioInfoOpen = false
+    @State private var scenarioRefusal: String? = nil
+    @State private var scenarioAnchorHint: UUID? = nil
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
@@ -1884,9 +1890,11 @@ public struct WorkspacePlaceholder: View {
         // underneath reads through, which is the whole point of turning the
         // view on.
         let roleAlpha: Float = stressViewOn ? Self.stressUnderlayAlpha : 1
-        for g in selection.groups where !project.groupView.isHidden(g.id) {
+        for g in selection.groups where !project.groupView.isHidden(g.id) && scenarioDraws(g.id) {   // ★ load scenarios
             let c = force.tint(for: g)
-            let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
+            var v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), roleAlpha)
+            // ★ an anchor switched off in the open scenario is drawn DIMMED (addendum 03:32), never hidden
+            if scenarioAnchorOff(g.id) { let k: Float = 0.3, grey: Float = 0.62 * 0.7; v = SIMD4<Float>(v.x * k + grey, v.y * k + grey, v.z * k + grey, roleAlpha) }
             for f in groupTintedFaces(g) { tints[f] = v }
         }
         // Handoff 124 — a protected face gets the UNIQUE protect mint-teal, applied
@@ -9789,7 +9797,7 @@ public struct WorkspacePlaceholder: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(selection.groups) { g in groupRow(g) }
+                            selectionsListBody   // ★ load scenarios: the folders on Topology, the plain list elsewhere
                         }
                     }
                     .frame(maxHeight: 360)
@@ -11280,6 +11288,135 @@ public struct WorkspacePlaceholder: View {
         force.sync(groups: selection.groups)
     }
 
+    // MARK: ★ LOAD SCENARIOS (his order 2026-10-26 + the 03:32 anchor addendum; the model is LoadScenarios.swift)
+
+    /// Scenarios apply on Topology (not Edit faces, not a Flexible page); everywhere else every group shows.
+    private var scenariosApply: Bool {
+        stage == .topology && !editFaces.isEditing && !flexibleMain.owns(project, stage)
+    }
+    /// Whether a group draws (arrow, chip, colour) in the open scenario.
+    private func scenarioDraws(_ g: UUID) -> Bool { !scenariosApply || force.showsInActiveScenario(g) }
+    /// A shared anchor switched off in the open scenario: drawn dimmed, never hidden.
+    private func scenarioAnchorOff(_ g: UUID) -> Bool {
+        scenariosApply && force.hasScenarios && force.kind(for: g).isAnchor && !force.anchorIsOn(g, in: force.activeScenarioID)
+    }
+
+    /// The Selections list. On Topology: one folder per scenario (the open one lists its loads, its own anchors and the
+    /// shared anchors, each with its switch), then "+ Add a load scenario" and its (i). Elsewhere the plain list.
+    private var selectionsListBody: AnyView {
+        guard scenariosApply else { return AnyView(ForEach(selection.groups) { g in groupRow(g) }) }
+        let open = force.activeScenarioID
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            if force.hasScenarios {
+                ForEach(Array(force.scenarioList.enumerated()), id: \.element.id) { i, s in
+                    scenarioFolderHeader(s, index: i, open: s.id == open)
+                    if s.id == open {
+                        ForEach(selection.groups.filter { force.group($0.id, isIn: s.id) }) { g in
+                            VStack(alignment: .trailing, spacing: 0) {
+                                groupRow(g)
+                                if force.kind(for: g.id).isAnchor, force.scenarioID(of: g.id) == nil {
+                                    scenarioAnchorSwitch(g.id, in: s.id)
+                                }
+                            }
+                        }
+                        if scenarioAnchorHint == s.id {
+                            Text("Tap the faces that hold in \(s.name), then choose Anchor.")
+                                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                                .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)
+                        }
+                    }
+                }
+            } else {
+                ForEach(selection.groups) { g in groupRow(g) }
+            }
+            if let r = scenarioRefusal {
+                Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
+                    .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.xs)
+            }
+            addScenarioRow
+            if scenarioInfoOpen {
+                Text(LoadScenarioRule.info).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
+            }
+        })
+    }
+
+    /// A scenario's folder row: tap to open it; ⋯ renames it (and removes any but Scenario 1); the open one offers Add Anchor.
+    private func scenarioFolderHeader(_ s: LoadScenario, index: Int, open: Bool) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: open ? "folder.fill" : "folder")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
+            if renamingScenario == s.id {
+                TextField("Scenario name", text: $scenarioNameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { force.renameScenario(s.id, to: scenarioNameDraft); renamingScenario = nil }
+            } else {
+                Text(s.name).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+            }
+            Spacer()
+            if open {
+                Button { scenarioAnchorHint = s.id; selection.clearActive(); selectedPiece = nil } label: {
+                    HStack(spacing: 3) { Image(systemName: "plus"); Text("Add Anchor").dsStyle(DS.TypeScale.caption) }
+                }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
+                .accessibilityIdentifier("scenario-add-anchor")
+            }
+            Menu {
+                Button("Rename") { scenarioNameDraft = s.name; renamingScenario = s.id }
+                if index > 0 {
+                    Button("Remove scenario (its loads go to \(force.scenarioList[0].name))", role: .destructive) {
+                        force.removeScenario(s.id); scenarioRefusal = nil
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").foregroundStyle(DS.Color.textTertiary.color)
+            }
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .contentShape(Rectangle())
+        .onTapGesture { openScenario(s.id) }
+        .accessibilityIdentifier("scenario-folder-\(index)")
+    }
+
+    /// Open a scenario: only its loads and arrows show from here; the selection clears.
+    private func openScenario(_ id: UUID) {
+        guard id != force.activeScenarioID else { return }
+        force.openScenario(id)
+        selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
+    }
+
+    /// A shared anchor's switch for THIS scenario only; the last one on refuses with the inline line.
+    private func scenarioAnchorSwitch(_ g: UUID, in s: UUID) -> some View {
+        Toggle(isOn: Binding(get: { force.anchorIsOn(g, in: s) },
+                             set: { on in scenarioRefusal = force.setAnchor(g, on: on, in: s, order: selection.groups.map(\.id)) })) {
+            Text("Holds in this scenario").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+        }
+        .toggleStyle(.switch).controlSize(.mini)
+        .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.s)
+        .accessibilityIdentifier("scenario-anchor-switch")
+    }
+
+    /// "+ Add a load scenario" and its (i).
+    private var addScenarioRow: some View {
+        HStack(spacing: DS.Space.s) {
+            Button {
+                force.addScenario()
+                selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
+            } label: {
+                HStack(spacing: 4) { Image(systemName: "plus"); Text("Add a load scenario").dsStyle(DS.TypeScale.caption).fontWeight(.semibold) }
+            }
+            .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
+            .accessibilityIdentifier("add-load-scenario")
+            Button { scenarioInfoOpen.toggle() } label: { Image(systemName: "info.circle") }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.textTertiary.color)
+                .accessibilityLabel("About load scenarios")
+            Spacer()
+        }
+        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+    }
+
     private func pickPiece(_ group: UUID, _ key: Int) {
         selection.setActive(group)
         selectedPiece = selectedPieceKey == key ? nil : SelectionArrowRule.PieceRef(group: group, key: key)
@@ -11562,7 +11699,7 @@ public struct WorkspacePlaceholder: View {
 
     /// The load groups (drawn as arrows, with tappable weight pills at their tails).
     private var loadGroups: [SelectionGroup] {
-        selection.groups.filter { force.kind(for: $0.id).isLoad }
+        selection.groups.filter { force.kind(for: $0.id).isLoad && scenarioDraws($0.id) }   // ★ load scenarios: the open one only
     }
 
     /// A load's arrow endpoints on screen: tip at the application point when the

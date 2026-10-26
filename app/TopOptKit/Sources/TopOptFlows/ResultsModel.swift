@@ -840,6 +840,8 @@ public final class ResultsModel: ObservableObject {
     /// ladders optimize for OPPOSITE things and their tabs look alike, so a screen
     /// that does not say which one ran leaves the user to infer it from a sign.
     public var ladderModeLine: String { ladderMode.resultsLine }
+    /// ★ LOAD SCENARIOS: each scenario's result (report.json `scenarios`); empty for a one-scenario run.
+    public private(set) var scenarioResults: [ScenarioResult] = []
     public private(set) var reportBlocks: RunReportBlocks?   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — the strengthen cards + bodies (RedesignToStrengthen.swift)
 
     /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
@@ -1210,6 +1212,10 @@ public final class ResultsModel: ObservableObject {
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
         if let t = outcome.timing { runTiming = t }
+        // ★ LOAD SCENARIOS: report.json `scenarios` (a streamed partial carries no report and never erases it)
+        if let d = outcome.reportJSON, let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            scenarioResults = ScenarioResult.parse(o)
+        }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
         // Only a report-bearing outcome updates the lattice notes: `apply` also runs for
