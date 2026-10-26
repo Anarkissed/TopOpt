@@ -1,0 +1,59 @@
+# 17-test byte-identity comparison (core-loose-pieces)
+# base = git archive 322b1c78 (cmp/base/build); head = git archive e46b49cd (FINAL, face rule); same cmake flags (Release, TOPOPT_REQUIRE_DEPS=ON),
+# same machine. Diff of stdout+stderr minus '[mg] smoother check (S7)' / '[mg-safe]' lines and timings (<number> ms|s); new '[loose]' lines are counted and named.
+# Earlier heads, same method: 0e808d1f (26-connected rule) 17/17 IDENTICAL; 592f48f0 (+GenEO stand-down) 17/17 IDENTICAL.
+
+## RESULT at e46b49cd: 16 IDENTICAL, 1 DIFFERS (test_recycle; passes)
+# test_recycle '[mgcg void]' (void_heavy_grid(16), the soft-void fixture on the MG path) holds 5 pieces hinged to the body only by an edge or
+# a corner (230 voxels, largest 119; 5 hold full-modulus voxels). Under the FACE rule they are loose and solved at the floor: plain cg 188 -> 113,
+# recycled cg 285 -> 130, max|du|/max|u| 4.4e-16 -> 9.4e-14 (recycled vs plain, both exact). Allowed by the ruling (an edge/corner-hinged fixture).
+
+test_mg_tuning: IDENTICAL
+test_mg_coarse_hook: IDENTICAL
+test_mg_algebraic_level1: IDENTICAL
+test_mixed_precision: IDENTICAL
+test_recycle: DIFFERS ([loose] lines: 4)
+  out: 5 diff lines
+    ---
+    +++
+    @@ -5 +5 @@
+    -  [mgcg   void  ] plain cg=188 recycled cg=285 dim=16  max|du|/max|u|=4.443e-16
+    +  [mgcg   void  ] plain cg=113 recycled cg=130 dim=16  max|du|/max|u|=9.433e-14
+test_matfree: IDENTICAL
+test_galerkin_cache: IDENTICAL
+test_matfree_cubic: IDENTICAL
+test_matfree_threads: IDENTICAL
+test_simp: IDENTICAL
+test_plsm: IDENTICAL
+test_variants: IDENTICAL
+test_mbb: IDENTICAL
+test_mask: IDENTICAL
+test_v3: IDENTICAL
+test_analyze_fixed_design: IDENTICAL
+test_minimize_plastic: IDENTICAL
+
+## [loose] lines in test_recycle (head)
+[loose] solve 6: 5 loose piece(s) of 13 (230 voxels, largest 119; 5 frozen) solved at the floor modulus 3.5e-06, of 1920 elements ; flood fill 0.0 ms
+[loose] solve 7: 5 loose piece(s) of 13 (230 voxels, largest 119; 5 frozen) solved at the floor modulus 3.5e-06, of 1920 elements ; flood fill 0.1 ms
+[loose] solve 8: 5 loose piece(s) of 13 (230 voxels, largest 119; 5 frozen) solved at the floor modulus 3.5e-06, of 1920 elements ; flood fill 0.0 ms
+[loose] solve 9: 5 loose piece(s) of 13 (230 voxels, largest 119; 5 frozen) solved at the floor modulus 3.5e-06, of 1920 elements ; flood fill 0.0 ms
+
+## run times (s) base / head
+test_mg_tuning rc=0 1s	test_mg_tuning rc=0 1s
+test_mg_coarse_hook rc=0 5s	test_mg_coarse_hook rc=0 4s
+test_mg_algebraic_level1 rc=0 6s	test_mg_algebraic_level1 rc=0 3s
+test_mixed_precision rc=0 12s	test_mixed_precision rc=0 10s
+test_recycle rc=0 14s	test_recycle rc=0 10s
+test_matfree rc=0 1s	test_matfree rc=0 1s
+test_galerkin_cache rc=0 4s	test_galerkin_cache rc=0 5s
+test_matfree_cubic rc=0 46s	test_matfree_cubic rc=0 62s
+test_matfree_threads rc=0 12s	test_matfree_threads rc=0 12s
+test_simp rc=0 47s	test_simp rc=0 51s
+test_plsm rc=0 6s	test_plsm rc=0 6s
+test_variants rc=0 5s	test_variants rc=0 6s
+test_mbb rc=0 5s	test_mbb rc=0 5s
+test_mask rc=0 6s	test_mask rc=0 7s
+test_v3 rc=0 3s	test_v3 rc=0 2s
+test_analyze_fixed_design rc=0 5s	test_analyze_fixed_design rc=0 5s
+test_minimize_plastic rc=0 18s	test_minimize_plastic rc=0 20s
+DONE	DONE
