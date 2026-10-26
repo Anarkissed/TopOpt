@@ -76,7 +76,8 @@ final class FlexibleS1VerifyTests: XCTestCase {
         XCTAssertTrue(ws.contains("onLatticeProbeExit: legendDrilledIn\n"))
         XCTAssertTrue(ws.contains("if legendDrilledIn { return true }"))
         // the key H14 trusts: mounted exactly while the stage owns the page, and it resets the mode when it goes
-        XCTAssertTrue(ws.contains("if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode,"))
+        // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
+        XCTAssertTrue(ws.contains("if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode,"))
         let legends = try FlexibleSource.text("FlexibleMainLegends.swift")
         XCTAssertTrue(legends.contains(".onDisappear {\n            if drilled != nil { mode = .groups }"))
         XCTAssertTrue(legends.contains("if let k = drilled, !now.contains(k) { mode = .groups }"))

@@ -24,14 +24,15 @@ final class FlexibleBatchCHookTests: XCTestCase {
             // ★ RE-PINNED (batch C verification): the toggles take the workspace's solver
             // (FlexibleStressSolve.swift — the regions the load case reaches, the sim's state said)
             // ★ RE-PINNED (round 4, C2 — his answer 2): the Lattice button, with nothing to show, opens Settings
-            ("H5'", "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),
+            // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
+            ("H5'", "if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }"),
             // ★ and Settings' Save & Exit hands it over too (the first Exit, before the toggles rendered)
             ("H2'", "flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })"),
             // ★ #354's "grading your lattice" banner stands down under Flexible (it grades nothing there)
             ("B1", "if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }"),
             // ★ RE-PINNED (round 7, R7-D1 — H33, approved 2026-10-14 19:45): no chip column on the Flexible stage (H24 stops
             // drawing it there), so the legend keeps out no stale Topology chip widths: chipColumnWidth 0. Was: the column's width.
-            ("H6", "if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
+            ("H6", "if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }"),
             ("H7", "if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }"),
             // ★ RE-PINNED (S1, the #361 sync — the reviewer's ruling of 2026-10-08 19:13 (i)): H7/H8 ride #354's
             // `legendDrilledIn` (the key's drill-in only counts while the key is on screen), never a raw

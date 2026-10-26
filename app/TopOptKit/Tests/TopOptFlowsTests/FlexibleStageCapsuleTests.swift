@@ -12,13 +12,14 @@ import XCTest
 final class FlexibleStageCapsuleTests: XCTestCase {
 
     func testTheMenuIsTopologyFlexibleSurfaceThenAbout() {
-        // ★ SYNC #354 (89af86dd) A3, until P5 (Edit faces…): B5 (3f293974) removed WorkspaceStage.surface, so the inert
-        // "Surface ›" row is GONE from the menu — three rows: ‹ Topology, ● Flexible ✓, About Flexible…
+        // ★ RE-PINNED (the redesign P5, point 1; R9 and the overnight release ruling of 2026-10-26): "Edit faces…" (B5's
+        // mode) is back where "Surface ›" was. Was (★ SYNC #354 89af86dd A3, until P5) three rows: ‹ Topology, ● Flexible ✓,
+        // About Flexible….
         let items = FlexibleStageCapsule.menuItems(anchors: 1, loads: 1)
-        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-about"])
-        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "About Flexible\u{2026}"])
-        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "limits \u{00B7} delete"])
-        XCTAssertEqual(items.map(\.action), [.topology, .none, .about])
+        XCTAssertEqual(items.map(\.id), ["flexible-menu-topology", "flexible-menu-flexible", "flexible-menu-edit-faces", "flexible-menu-about"])
+        XCTAssertEqual(items.map(\.title), ["\u{2039} Topology", "Flexible", "Edit faces\u{2026}", "About Flexible\u{2026}"])
+        XCTAssertEqual(items.map(\.detail), ["1 anchor \u{00B7} 1 load", "You are here", "cuts \u{00B7} unions \u{00B7} patterns", "limits \u{00B7} delete"])
+        XCTAssertEqual(items.map(\.action), [.topology, .none, .editFaces, .about])
         XCTAssertFalse(items.contains { $0.title.hasPrefix("Surface") }, "no dead Surface row in the morning build")
         let flex = items[1]
         XCTAssertFalse(flex.enabled, "● Flexible is where he is: disabled …")
@@ -36,7 +37,13 @@ final class FlexibleStageCapsuleTests: XCTestCase {
         FlexibleStageCapsule.perform(.topology, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(went, [.topology], "Topology → go(.topology) once")
         XCTAssertNil(chrome.open, "a stage change folds every card")
-        // ★ SYNC #354 (89af86dd) A3, until P5 (Edit faces…): no Surface step — B5 (3f293974) removed the stage and the row.
+        // ★ RE-PINNED (the redesign P5): Edit faces… opens B5's mode and folds the cards (was: no Surface step, A3)
+        var edits = 0
+        chrome.show(.setup)
+        FlexibleStageCapsule.perform(.editFaces, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 }, editFaces: { edits += 1 })
+        XCTAssertEqual(edits, 1, "Edit faces… → B5's mode")
+        XCTAssertNil(chrome.open)
+        XCTAssertEqual(went, [.topology], "no stage change")
         chrome.show(.setup)
         FlexibleStageCapsule.perform(.about, chrome: chrome, go: { went.append($0) }, about: { abouts += 1 })
         XCTAssertEqual(abouts, 1, "About → the limits sheet")
