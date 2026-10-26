@@ -230,7 +230,21 @@ LoadcaseLogFn set_loadcase_log_sink(LoadcaseLogFn sink) {
 
 ProductionRunSetup build_production_loadcase(const StepModel& model,
                                              int resolution,
-                                             const ProductionLoadCase& lc) {
+                                             const ProductionLoadCase& lc_in) {
+  // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): every
+  // scenario's load faces are tagged, padded and pre-flighted like one load case's
+  // (`lc` carries all their groups; its anchors are already their union), and each
+  // scenario's own supports and loads are built at the end. No scenarios: `lc` IS
+  // `lc_in`, byte for byte.
+  const bool scenarios = lc_in.scenarios.size() >= 2;
+  ProductionLoadCase lc_all;
+  if (scenarios) {
+    lc_all = lc_in;
+    lc_all.load_groups.clear();
+    for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios)
+      for (const ProductionLoadCase::LoadGroup& g : sc.groups) lc_all.load_groups.push_back(g);
+  }
+  const ProductionLoadCase& lc = scenarios ? lc_all : lc_in;
   ProductionRunSetup setup;
   VoxelGrid& grid = setup.grid;
   grid = voxelize(model.mesh, resolution);
@@ -957,6 +971,101 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
                                 -1, &setup.clearance_reports);
     for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
       log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
+  }
+
+  // LOAD SCENARIOS — each scenario's own supports and loads (part grid). An anchor ON
+  // in it is clamped as today (a region anchor is ON in every scenario: the key names
+  // face ids); an anchor OFF in it is NOT removed but held by weak non-contact springs,
+  // isotropic, sized by minimize_plastic (kScenarioWeakSpringRel of the part's own
+  // element stiffness: only the driver knows the material), so the solve is never
+  // singular and the push on that piece must travel through the part. Every load group
+  // gets its own traction, as one load case's do.
+  if (scenarios) {
+    if (lc_in.anchor_bearing)
+      throw std::invalid_argument(
+          "load scenarios with bearing anchors (loads.anchor_model \"bearing\") are not "
+          "supported yet");
+    if (lc_in.strengthen)
+      throw std::invalid_argument(
+          "load scenarios with \"Redesign to strengthen\" are not supported yet");
+    const double k_weak = 1.0;  // a placeholder: minimize_plastic sizes it
+    VoxelGrid no_load = grid;
+    for (VoxelTag& t : no_load.tags)
+      if (t == VoxelTag::Load) t = VoxelTag::Interior;
+    auto corners = [&](std::size_t v, auto&& visit) {
+      const int i = static_cast<int>(v % static_cast<std::size_t>(grid.nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(grid.nx)) %
+                                     static_cast<std::size_t>(grid.ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(grid.nx) *
+                                          static_cast<std::size_t>(grid.ny)));
+      for (int c = 0; c < 8; ++c)
+        visit(fea_node_index(grid, i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)));
+    };
+    opts.scenarios.clear();
+    for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios) {
+      for (const int f : sc.anchor_face_ids)
+        validate_face_id(f, model, "load scenario \"" + sc.name + "\" anchor");
+      SimpScenario s;
+      s.name = sc.name;
+      std::set<int> held, weak;
+      for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
+        const bool on = a.face_id < 0 || std::find(sc.anchor_face_ids.begin(),
+                                                   sc.anchor_face_ids.end(),
+                                                   a.face_id) != sc.anchor_face_ids.end();
+        if (!on) continue;
+        for (const std::size_t v : a.part_voxels)
+          if (grid.tags[v] == VoxelTag::Fixture)
+            corners(v, [&](int n) {
+              if (held.insert(n).second)
+                for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
+            });
+      }
+      if (held.empty())
+        throw std::invalid_argument("load scenario \"" + sc.name +
+                                    "\" has no anchor ON in the part");
+      for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
+        if (a.face_id < 0 || std::find(sc.anchor_face_ids.begin(), sc.anchor_face_ids.end(),
+                                       a.face_id) != sc.anchor_face_ids.end())
+          continue;
+        for (const std::size_t v : a.part_voxels)
+          if (grid.tags[v] == VoxelTag::Fixture)
+            corners(v, [&](int n) {
+              if (held.count(n) || !weak.insert(n).second) return;
+              DirichletBC b;
+              b.node = n;
+              b.spring = k_weak;
+              b.spring_tangent = k_weak;
+              b.normal = Vec3{1.0, 0.0, 0.0};
+              b.contact = false;
+              s.bcs.push_back(b);
+            });
+      }
+      for (const ProductionLoadCase::LoadGroup& g : sc.groups) {
+        if (!(std::fabs(g.force.x) + std::fabs(g.force.y) + std::fabs(g.force.z) > 0.0))
+          continue;
+        VoxelGrid gg = no_load;
+        for (const int fid : g.face_ids) {
+          validate_face_id(fid, model, "load scenario \"" + sc.name + "\" group");
+          tag_step_face(gg, model, fid, VoxelTag::Load);
+        }
+        for (const int rid : g.region_ids)
+          tag_step_region(gg, model, region_or_throw(rid, "load scenario group"),
+                          VoxelTag::Load);
+        if (count_tagged(gg, VoxelTag::Load) == 0) continue;
+        const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, g.force);
+        s.loads.insert(s.loads.end(), tl.begin(), tl.end());
+      }
+      if (s.loads.empty())
+        throw std::invalid_argument("load scenario \"" + sc.name +
+                                    "\": its load tagged nothing at this resolution");
+      std::printf("[loadcase] load scenario \"%s\": %zu clamped nodes, %zu weak-spring "
+                  "nodes (anchors OFF), %zu load entries\n",
+                  sc.name.c_str(), held.size(), weak.size(), s.loads.size());
+      opts.scenarios.push_back(std::move(s));
+    }
+    // The mirror: older readers (and the coarse warm-start seed) see scenario 1.
+    setup.bcs = opts.scenarios.front().bcs;
+    opts.external_loads = opts.scenarios.front().loads;
   }
 
   return setup;

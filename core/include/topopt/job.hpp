@@ -814,6 +814,13 @@ struct JobLoadGroup {
   Vec3 force{0.0, 0.0, 0.0};           // fx, fy, fz in N
 };
 
+// LOAD SCENARIOS (loads.scenarios): one load case, its groups and the anchors ON in it.
+struct JobScenario {
+  std::string name;
+  std::vector<JobLoadGroup> groups;
+  std::vector<int> anchor_face_ids;
+};
+
 // One "Keep clear" clearance region (handoff 100) — the CLI counterpart of the
 // app's per-face clearance. `face_id` is a raw B-rep face id (the id form the app
 // / LAN worker forwards); `kind` is "bolt" (swept cylinder about a bore) or
@@ -969,6 +976,8 @@ struct JobLoadCase {
   // REAL BOLTS (the reviewer's brief of 2026-10-25 20:10): "" or "glued" = anchors
   // clamped (today); "bearing" = compression-only frictionless springs.
   std::string anchor_model;
+  // LOAD SCENARIOS (loads.scenarios; two or more, else empty = today's job).
+  std::vector<JobScenario> scenarios;
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
   // its INNER / OUTER line widths, so the accept gate can size the solid wall ring

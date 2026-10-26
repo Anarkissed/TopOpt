@@ -376,9 +376,15 @@ struct DirichletBC {
   double spring_tangent = 0.0;
   Vec3 normal{0.0, 0.0, 0.0};
   bool released = false;
+  // false: a plain support spring, never part of a contact set (never released). LOAD
+  // SCENARIOS use one for an anchor that is OFF in a scenario: isotropic (spring ==
+  // spring_tangent), ~1e-6 of an anchor's stiffness, so the solve is never singular.
+  bool contact = true;
 };
 
-// REAL BOLTS — the contact set. True when `bcs` carries a bearing spring.
+// True when `bcs` carries any spring (DirichletBC::spring > 0).
+bool has_springs(const std::vector<DirichletBC>& bcs);
+// REAL BOLTS — the contact set. True when `bcs` carries a bearing (contact) spring.
 bool has_contact_springs(const std::vector<DirichletBC>& bcs);
 
 // One contact update from a solved displacement field `u` (DOF-ordered, size 3 x

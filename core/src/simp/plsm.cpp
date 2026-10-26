@@ -232,6 +232,7 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
   constexpr int kPlsmContactEvery = 10;
   std::vector<DirichletBC> contact_bcs;
   const bool bearing = has_contact_springs(bcs);
+  ScenarioSolveState scenario_state;  // LOAD SCENARIOS; untouched when there are none
   if (bearing) contact_bcs = bcs;
   const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   if (!(options.volume_fraction > 0.0))
@@ -689,7 +690,12 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // certification solve stay TIGHT and COLD.
     SimpCompliance sc;
     try {
-      sc = simp_compliance(grid, params, rho, live_bcs, loads, tol_loose,
+      // LOAD SCENARIOS: every scenario, each warm-started, the smooth max governs.
+      sc = !options.scenarios.empty()
+               ? simp_scenarios_compliance(grid, params, rho, options.scenarios, tol_loose,
+                                           options.cg_max_iterations, options.solver,
+                                           scenario_state, true)
+               : simp_compliance(grid, params, rho, live_bcs, loads, tol_loose,
                            options.cg_max_iterations,
                            (plsm.warm_start && have_warm) ? &warm : nullptr,
                            nullptr, options.solver);
@@ -1151,7 +1157,11 @@ PlsmRunResult plsm_optimize(const VoxelGrid& grid, const SimpParams& params,
     // solver's floating-speck drop (multigrid safe retry, arm G) is forbidden.
     FeaIslandDropForbid no_island_drop;
     const SimpCompliance fc =
-        simp_compliance(grid, params, r.physical_density, live_bcs, loads, tol_tight,
+        !options.scenarios.empty()
+            ? simp_scenarios_compliance(grid, params, r.physical_density, options.scenarios,
+                                        tol_tight, options.cg_max_iterations, options.solver,
+                                        scenario_state, false)
+            : simp_compliance(grid, params, r.physical_density, live_bcs, loads, tol_tight,
                         options.cg_max_iterations, nullptr, nullptr,
                         options.solver);
     r.compliance = fc.compliance;

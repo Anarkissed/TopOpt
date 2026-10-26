@@ -2390,6 +2390,16 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME bearing COMMAND test_bearing)
 
+  # LOAD SCENARIOS, engine (reviewer 2026-10-26 03:45): every scenario solved each
+  # iteration (smooth max), certified each; an OFF anchor is a weak spring; two blocks
+  # a push can only join through the gap come out as one body.
+  add_executable(test_scenarios tests/validation/test_scenarios.cpp)
+  target_link_libraries(test_scenarios PRIVATE topopt)
+  target_compile_definitions(test_scenarios PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenarios COMMAND test_scenarios)
+
   # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
   # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).
   if(manifold_FOUND)
