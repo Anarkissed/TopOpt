@@ -685,28 +685,32 @@ struct SolverDeadlineExceeded : public SolverNonConvergence {
 };
 
 // ---------------------------------------------------------------------------
-// THE SAFETY NET (ruling 2026-10-25, item 5: "it shouldn't hang at all").
+// THE SAFETY NET (ruling 2026-10-25, item 5: "it shouldn't hang at all";
+// limits set by the independent review of 2026-10-26).
 //
-// Every matrix-free Jacobi-CG solve — the MG solve's fallback and the plain
-// matrix-free CG — carries a TIME LIMIT (kSolverSafetyNetMs from the start of
-// the CG, polled every kSolveDeadlinePollIters iterations whether or not a
-// trajectory deadline is armed) and, when the caller set no cap of its own, an
-// ITERATION CAP (the fallback's max(1000, 2 ng); 2 ng for the plain CG). If
-// either fires the solve throws SolverStopped and THE JOB STOPS: the CLI writes
-// report.json with status "stopped" and kSolverStoppedMessage naming the job,
-// says the same on stderr and exits non-zero, with no result. It is
-// deliberately NOT a SolverNonConvergence, so no rung-rejection / certification
-// catch absorbs it and lets a run carry on past a solve that never ended. A
-// caller's explicit cap (max_iterations > 0) keeps its old meaning
-// (SolverNonConvergence).
-//
+// A BACKSTOP, not a tight limit. Every matrix-free Jacobi-CG solve — the MG
+// solve's fallback and the plain matrix-free CG — carries:
+//   * a WALL CLOCK of kSolverSafetyNetMs = 45 minutes of SOLVING per solve,
+//     polled every kSafetyNetPollIters = 16 CG iterations, always armed.
+//     GenEO's setup never counts (the deadline moves forward by each setup
+//     span; a build that gives up at the deadline, or is refused, leaves plain
+//     CG going), and neither does a PAUSE (a gap between two polls longer than
+//     30 s — the worker's SIGSTOP — moves the deadline forward by the gap).
+//     Past it the solve throws SolverStopped and THE JOB STOPS: the CLI writes
+//     the report it was asked for with status "stopped" and
+//     kSolverStoppedMessage, naming the job, says the same on stderr, exits 4,
+//     and ships no result. It is deliberately NOT a SolverNonConvergence, so no
+//     rung-rejection / certification catch absorbs it.
+//   * an ITERATION CAP, when the caller set none: min(max(1000, 2 ng), 250,000)
+//     on the MG solve's fallback, min(2 ng, 250,000) on the plain CG
+//     (fea_detail::kFallbackIterCap). Reaching it is a SolverNonConvergence, as
+//     it always was: that rung is rejected and the search goes on.
 // The root fix makes it a net and not a timer: every solve takes its loose
-// pieces out first (fea_matfree_last_dropped_islands), which is what sent his
-// Fine strengthen run into a 40-minute fallback. A run that never trips it is
-// bit-identical (the poll reads a clock and changes no arithmetic).
+// pieces out first (fea_matfree_last_dropped_islands). A run that never trips
+// it is bit-identical (the poll reads a clock and changes no arithmetic).
 inline constexpr const char* kSolverStoppedMessage =
     "stopped: the solver did not converge";
-inline constexpr double kSolverSafetyNetMs = 10.0 * 60.0 * 1000.0;  // 10 min
+inline constexpr double kSolverSafetyNetMs = 45.0 * 60.0 * 1000.0;  // 45 min of solving
 struct SolverStopped : public std::runtime_error {
   SolverStopped(const std::string& detail_, int iterations_, double residual_,
                 double elapsed_ms_)
@@ -1365,7 +1369,13 @@ void fea_matfree_reset_mg_safe_failures();
 // carries no load, and is loose. The shipped MG-CG, the safe retry and the Jacobi-CG fallback
 // solve that one system; an empty loose set leaves the solve exactly as it
 // was. It replaces the old in-retry island drop (arm G: <= 27 voxels, isolated,
-// unfrozen, <= 5 % of elements, only under a FeaIslandDropPermit). Per-run state resets with
+// unfrozen, <= 5 % of elements, only under a FeaIslandDropPermit).
+// In a CERTIFIED solve (under a FeaIslandDropForbid: certification, the final
+// compliance, analysis) a piece is loose only if it is not even 26-connected
+// (edge / corner contacts included) to an anchor or a load — the connectivity
+// the acceptance check (load_path_connected) assumes — so a piece hinged to
+// the anchored body is solved at its true stiffness and its stress is read
+// (review 2026-10-26, R4). Trajectory / search solves keep the FACE rule. Per-run state resets with
 // fea_matfree_reset_mg_stagnation_latch(); a latched run (3 shipped stalls)
 // goes straight to the safe path, and 3 consecutive UNPRODUCTIVE safe attempts
 // (neither converged nor cut the residual 10x) latch it off too (today's
@@ -1383,13 +1393,13 @@ bool fea_matfree_mg_safe_latched();
 // floor material they were solved as (they carry no load).
 const std::vector<int>& fea_matfree_last_dropped_islands();
 double fea_matfree_last_dropped_floor_youngs();
-// RAII scopes (thread-local, nestable). HISTORICAL: they gated the old arm-G
-// drop (off unless a permit was held; a forbid overrode every permit). The
-// connection rule applies to every solve, so they no longer change what is
-// solved — a loose piece carries no load in a trajectory solve and in a
-// certified one alike (the certification reads zero stress there, analyze.cpp).
-// They are kept so callers compile and so mg_island_permit_stats can still
-// observe which solves ran under which scope.
+// RAII scopes (thread-local, nestable). They gated the old arm-G drop (off
+// unless a permit was held; a forbid overrode every permit). Under the
+// connection rule every solve takes its loose pieces out; a FORBID now marks a
+// CERTIFIED solve, in which "loose" means not even 26-connected to an anchor or
+// a load (see above), and the certification reads zero stress on such a piece
+// (analyze.cpp). A permit changes nothing; it is kept so callers compile and so
+// mg_island_permit_stats can still observe the scopes.
 void fea_matfree_island_drop_scope_enter(bool permit);
 void fea_matfree_island_drop_scope_exit(bool permit);
 struct FeaIslandDropPermit {
@@ -1418,6 +1428,21 @@ struct FeaIslandDropForbid {
   ~FeaIslandDropForbid() { fea_matfree_island_drop_scope_exit(false); }
   FeaIslandDropForbid(const FeaIslandDropForbid&) = delete;
   FeaIslandDropForbid& operator=(const FeaIslandDropForbid&) = delete;
+};
+
+// THE CONNECTION RULE, OFF, for a caller that is not a SIMP / level-set
+// density solve (the Flexible stage's squish FE: a graded field whose soft
+// lattice is a real material, not void) — RAII, thread-local, nestable. Inside
+// it no census runs and the solve is exactly the system its moduli describe,
+// as before the rule existed (review 2026-10-26, R5).
+#define TOPOPT_LOOSE_RULE_OFF_SCOPE 1
+void fea_matfree_loose_rule_off_enter();
+void fea_matfree_loose_rule_off_exit();
+struct FeaLoosePieceRuleOff {
+  FeaLoosePieceRuleOff() { fea_matfree_loose_rule_off_enter(); }
+  ~FeaLoosePieceRuleOff() { fea_matfree_loose_rule_off_exit(); }
+  FeaLoosePieceRuleOff(const FeaLoosePieceRuleOff&) = delete;
+  FeaLoosePieceRuleOff& operator=(const FeaLoosePieceRuleOff&) = delete;
 };
 
 // THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the

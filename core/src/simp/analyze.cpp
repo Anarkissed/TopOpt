@@ -283,14 +283,15 @@ FixedDesignAnalysis analyze_fixed_design(
                                          loads, cg_tolerance, cg_max_iterations,
                                          &sc.cg);
     } else {
-      // THE CONNECTION RULE (ruling 2026-10-25) holds here too: the matrix-free
-      // solve takes the LOOSE pieces — material touching no support or load
-      // through solid — out of the system (solved at the floor modulus). The
-      // forbid scope no longer changes that; it is kept as the record that this
-      // is a certified solve (mg_island_permit_stats). A loose piece carries no
-      // load, so the stress loop below reads ZERO there (at the floor its
-      // strain is the void's, which E_solid would turn into a stress the piece
-      // does not carry).
+      // THE CONNECTION RULE (ruling 2026-10-25), CERTIFIED: under this forbid
+      // scope the matrix-free solve calls a piece LOOSE only if it is not even
+      // 26-connected (edge / corner contacts included) to a support or a load —
+      // the connectivity load_path_connected accepts the part on — so a piece
+      // hinged to the body is solved at its true stiffness and its stress is
+      // read here (review 2026-10-26, R4). A loose piece is solved at the floor
+      // modulus and carries no load, so the stress loop below reads ZERO there
+      // (at the floor its strain is the void's, which E_solid would turn into a
+      // stress the piece does not carry).
       FeaIslandDropForbid no_island_drop;
       sc = simp_compliance(grid, params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,

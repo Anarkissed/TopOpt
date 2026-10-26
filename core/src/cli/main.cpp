@@ -155,6 +155,7 @@ int report_solver_stopped(const topopt::SolverStopped& e, const std::string& job
   std::fprintf(stderr, "topopt-cli: %s — job %s (%s, model %s): %s\n",
                topopt::kSolverStoppedMessage, job_id.c_str(), job_path.c_str(),
                model.c_str(), e.detail.c_str());
+  if (out_dir.empty()) return 4;  // a verb with no output directory (preflight)
   std::filesystem::create_directories(out_dir, ec);
   const std::string path =
       out_dir + "/" + (report_name.empty() ? std::string("report.json") : report_name);
@@ -316,6 +317,9 @@ int run_preflight(int argc, char** argv, const std::string& materials_default) {
       return 3;
     }
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    // preflight writes nothing (no --out): the stop is said on stderr, exit 4.
+    return report_solver_stopped(e, job_path, "", "", "");
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -346,8 +350,10 @@ int run_lattice_variant(int argc, char** argv,
     }
   }
 
+  std::string stop_model;  // for a safety-net stop's report
   try {
     const topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_model = job.model;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =
@@ -404,6 +410,9 @@ int run_lattice_variant(int argc, char** argv,
     std::printf("fields: %s\n", r.fields_path.c_str());
     std::printf("wall: %.2f s\n", r.wall_seconds);
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "lattice_variant_report.json",
+                                 stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -454,6 +463,8 @@ static int run_flexible(int argc, char** argv) {
     }
     std::printf("flexible: ran; receipt in %s/run_info.json\n", out_dir.c_str());
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "flexible_report.json", "");
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
