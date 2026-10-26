@@ -187,6 +187,11 @@ public struct WorkspacePlaceholder: View {
     @State private var nameDraft = ""
     /// Collapse the (bottom-left) Selections panel by tapping its header.
     @State private var selectionsCollapsed = false
+    /// ★ his iPad 10-26 (3): the clearance PIECE picked inside the expanded group (its face key; a manual primitive's
+    /// sentinel key), nil = the whole group. Cleared whenever the selected group changes.
+    @State private var selectedPiece: SelectionArrowRule.PieceRef? = nil
+    /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
+    private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
@@ -1193,6 +1198,7 @@ public struct WorkspacePlaceholder: View {
                               }
                               : nil,
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
+                .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -2436,6 +2442,8 @@ public struct WorkspacePlaceholder: View {
         // the tapped face is one of the (now-active) group's own cleared faces.
         if let g = selection.activeGroup, groupClearanceFaces(g).contains(faceID) {
             chipsRevealedGroup = g.id
+            // ★ his iPad 10-26 (3): tapping a piece in 3D picks that same row (its group is now the selection, expanded)
+            selectedPiece = SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID))
         } else if chipsRevealedGroup != selection.activeGroupID {
             chipsRevealedGroup = nil
         }
@@ -2766,7 +2774,7 @@ public struct WorkspacePlaceholder: View {
 
             // ── MOVABLE (pill): each load group's weight pill at its arrow tail ──
             if let mesh = viewerMesh {
-                for g in loadGroups {
+                for g in loadGroups where SelectionArrowRule.groupShows(g.id, selectedGroup: selection.activeGroupID) {
                     if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                         let active = g.id == selection.activeGroupID
                         let anchor = CGPoint(x: arrow.tail.x, y: arrow.tail.y - (active ? 26 : 0))
@@ -6866,6 +6874,9 @@ public struct WorkspacePlaceholder: View {
         guard force.gravityIsSet else { return [] }
         var items: [ClearanceHandleItem] = []
         for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
+            // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
+            guard SelectionArrowRule.pieceShows(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
+                                                selectedPiece: selectedPieceKey) else { continue }
             for h in entry.handles {
                 items.append(ClearanceHandleItem(
                     id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
@@ -11230,6 +11241,8 @@ public struct WorkspacePlaceholder: View {
                         .accessibilityLabel("Convert to a movable primitive")
                     }
                     clearancePrimitiveLine(g, p, showKind: true)
+                        .modifier(PieceRowPick(picked: selectedPieceKey == Int(p.id), id: "pick-auto-\(p.id)") {
+                            pickPiece(g.id, Int(p.id)) })   // ★ his iPad 10-26 (3)
                 }
             }
             ForEach(manual) { mp in
@@ -11238,6 +11251,9 @@ public struct WorkspacePlaceholder: View {
                         project.removeManualPrimitive(id: mp.id, from: g.id)
                     }
                     manualPrimitiveLine(g, mp)
+                        .modifier(PieceRowPick(picked: selectedPieceKey == ProjectModel.manualFaceKey(mp.id),
+                                               id: "pick-manual-\(mp.id.uuidString)") {
+                            pickPiece(g.id, ProjectModel.manualFaceKey(mp.id)) })   // ★ his iPad 10-26 (3)
                 }
             }
             if autoPrims.isEmpty && manual.isEmpty {
@@ -11252,6 +11268,22 @@ public struct WorkspacePlaceholder: View {
 
     /// The per-primitive "−" delete affordance (handoff item 2) — the counterpart to
     /// "+", and the more-used half because the finder OVER-finds.
+    /// ★ his iPad 10-26 (3): pick one piece of a group: the group becomes the selection, and only this piece's arrows show.
+    /// Tapping the picked piece again picks the whole group back.
+    /// ★ his iPad 10-26 (5): "If I tap into nothing: deselect whatever was selected … APP WIDE." The viewer calls this only for
+    /// a tap that hit no face (a handle or chip takes its own tap; an orbit drag is not a tap). Flexible's page (#362, H23),
+    /// the Surface editor and Edit faces keep their own empty-tap rules.
+    private func emptyTapClears() {
+        guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
+        selection.clearActive(); selectedPiece = nil; chipsRevealedGroup = nil
+        force.sync(groups: selection.groups)
+    }
+
+    private func pickPiece(_ group: UUID, _ key: Int) {
+        selection.setActive(group)
+        selectedPiece = selectedPieceKey == key ? nil : SelectionArrowRule.PieceRef(group: group, key: key)
+    }
+
     private func primitiveDeleteButton(_ id: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: "minus.circle.fill")
@@ -11557,7 +11589,7 @@ public struct WorkspacePlaceholder: View {
     private var arrowsOverlay: some View {
         Canvas { ctx, _ in
             guard let mesh = viewerMesh, let proj = projection, force.phase == .edit else { return }
-            for g in loadGroups {
+            for g in loadGroups where SelectionArrowRule.groupShows(g.id, selectedGroup: selection.activeGroupID) {   // ★ his iPad 10-26 (2)
                 if let geo = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                     drawArrow(ctx, from: geo.tail, to: geo.tip, color: g.color.color)
                 }
@@ -11626,7 +11658,8 @@ public struct WorkspacePlaceholder: View {
                             .position(placed["load.pendingchip"]?.center ?? fallback)
                     }
                     // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
-                    ForEach(stage != .topology || topoForcesShown ? loadGroups : []) { g in
+                    ForEach((stage != .topology || topoForcesShown ? loadGroups : []).filter {
+                        SelectionArrowRule.groupShows($0.id, selectedGroup: selection.activeGroupID) }) { g in   // ★ his iPad 10-26 (2)(4)
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                             let active = g.id == selection.activeGroupID
                             // Keep-out pass owns placement (handoff 2026-07-27): the weight pill is
@@ -11810,7 +11843,7 @@ public struct WorkspacePlaceholder: View {
             // selection already exists — that is the precondition for being
             // there — so the sentence is noise occupying the width the second
             // action button needs.
-            if visible.showsSelectionHint {
+            if Self.hintShows(showsSelectionHint: visible.showsSelectionHint, selectionsCollapsed: selectionsCollapsed) {
                 Text(hint)
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
@@ -11864,6 +11897,12 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.horizontal, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4)
+    }
+
+    /// ★ His iPad (2026-10-26, problem 6): the hint sat ON TOP of the collapsed Selections pill, so he couldn't reopen it.
+    /// The hint never shows while the pill is collapsed: the pill is always tappable, whatever hint the stage would say.
+    static func hintShows(showsSelectionHint: Bool, selectionsCollapsed: Bool) -> Bool {
+        showsSelectionHint && !selectionsCollapsed
     }
 
     private var hint: String {

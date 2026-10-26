@@ -5611,6 +5611,9 @@ struct MeshViewInputs {
     var onPickDouble: ((FaceID, SIMD3<Float>?) -> Void)?
     /// Tap that hit no face (drop the pending group, M7.6).
     var onMiss: (() -> Void)?
+    /// ★ his iPad 10-26 (5): a tap that hit no face, AFTER `onMiss`: the workspace clears the selection app-wide. A tap
+    /// recognizer, so an orbit drag never reaches it.
+    var onEmptyTap: (() -> Void)? = nil
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
     /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
@@ -5860,7 +5863,7 @@ public struct DetentPulse: Equatable, Sendable {
 
 #if os(iOS)
 public struct MetalMeshView: UIViewRepresentable {
-    let inputs: MeshViewInputs
+    var inputs: MeshViewInputs
 
     public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
@@ -6025,7 +6028,7 @@ public struct MetalMeshView: UIViewRepresentable {
 }
 #elseif os(macOS)
 public struct MetalMeshView: NSViewRepresentable {
-    let inputs: MeshViewInputs
+    var inputs: MeshViewInputs
 
     public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
@@ -6227,6 +6230,7 @@ extension MetalMeshView {
         /// that one needs a face, and leaving a key is not a thing you do TO a face.
         private var onLatticeProbeExit: (() -> Void)?
         private var onMiss: (() -> Void)?
+        private var onEmptyTap: (() -> Void)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
         private var onRedo: (() -> Void)?
@@ -6272,6 +6276,7 @@ extension MetalMeshView {
             onLatticeProbeExit = inputs.onLatticeProbeExit
             renderer.onLatticeCellsBaked = inputs.onLatticeCellsBaked
             onMiss = inputs.onMiss
+            onEmptyTap = inputs.onEmptyTap
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
@@ -6896,7 +6901,7 @@ extension MetalMeshView {
                 // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
                 // that can tell two pieces of one face apart.
                 if onPickPoint?(faceID, surfaceHit?.point) != true { onPickFace?(faceID) }
-            } else { onMiss?() }
+            } else { onMiss?(); onEmptyTap?() }
         }
 
         #if os(iOS)
@@ -7239,3 +7244,16 @@ public struct DetentPulse: Equatable, Sendable {
     }
 }
 #endif
+
+extension MetalMeshView {
+    /// ★ his iPad 10-26 (5): run `action` on a tap that hit empty space (after `onMiss`).
+    public func onEmptyTap(_ action: @escaping () -> Void) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onEmptyTap = action
+        return copy
+#else
+        self
+#endif
+    }
+}

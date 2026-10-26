@@ -107,7 +107,7 @@ public struct RunScreen: View {
                     PillButton("Cancel", style: .secondary) { model.cancel() }
                     PillButton(model.runningInBackground ? "In Background" : "Run in Background",
                                style: .secondary,
-                               isEnabled: !model.runningInBackground) { model.runInBackground() }
+                               isEnabled: model.canSendToBackground) { model.runInBackground() }
                 }
                 .padding(.top, DS.Space.s)
                 .frame(maxWidth: .infinity)
