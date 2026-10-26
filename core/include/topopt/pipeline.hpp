@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/analyze.hpp"            // FixedDesignAnalysis (load scenarios)
 #include "topopt/build_frame.hpp"        // BakeBuildOrientation
 #include "topopt/plsm.hpp"               // PlsmOptions / PlsmMode (default Off)
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
@@ -1075,14 +1076,35 @@ inline constexpr const char* kAnchorDetachedReason = "anchored piece detached";
 // part is held by springs that stand for no real support. Not a pass, whatever the
 // margin says. Below the connectivity facts, above the margin.
 // LOAD SCENARIOS: above this share of a scenario's load carried by its weak springs
-// (the anchors OFF in it), its load has no path to its anchors: "<name>'s load has no
-// path to its anchors", and the rung is rejected.
+// (the anchors OFF in it), its load has no path to its anchors: "Scenario “<name>”'s
+// load has no path to its anchors" (scenario_unheld_reason), and the rung is rejected.
 inline constexpr double kScenarioUnheldShare = 0.05;
 // ...and their stiffness: this fraction of the part's own element stiffness per node
 // (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
 // the solve is never singular.
 inline constexpr double kScenarioWeakSpringRel = 1e-6;
-inline constexpr const char* kScenarioUnheldSuffix = "'s load has no path to its anchors";
+// The plain wording he reads: "Scenario “<name>”'s load has no path to its anchors".
+std::string scenario_unheld_reason(const std::string& name);
+
+// LOAD SCENARIOS — the one per-scenario certification, shared by the rung gate
+// (minimize_plastic), analyze_job and "Redesign to strengthen": `certify` is run on
+// every scenario's supports and loads; the WORST (a non-convergent one first, else the
+// lowest margin_effective) governs and its analysis is returned; each scenario's
+// margin, peak and where, and the share of its load its weak springs carry (over
+// kScenarioUnheldShare = unheld: the governing analysis is then not accepted).
+struct ScenarioCertification {
+  FixedDesignAnalysis governing;
+  std::vector<ScenarioReport> reports;
+  std::string unheld;  // the first unheld scenario's name; "" = every one is held
+};
+ScenarioCertification certify_scenarios(
+    const VoxelGrid& grid, const std::vector<SimpScenario>& scenarios,
+    const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
+                                            const std::vector<NodalLoad>&)>& certify);
+// The weak springs (an anchor OFF in a scenario) sized for the material and grid:
+// kScenarioWeakSpringRel x E x h per node, isotropic.
+std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
+                                          double youngs_modulus_mpa, double spacing);
 
 inline constexpr const char* kAnchorsSlidingReason =
     "anchors cannot hold the load in some direction (held by the sliding springs)";

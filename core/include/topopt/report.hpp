@@ -404,6 +404,9 @@ struct StrengthenVersionReport {
   // EVERY ATTEMPT of the version (its fine run, then each repair), as verified
   // (reviewer's ruling 2026-10-26): report.json versions[].attempts.
   std::vector<StrengthenAttemptReport> attempts;
+  // LOAD SCENARIOS (ruling 2026-10-26 12:46): every scenario verified on the shown
+  // attempt's EXPORT (empty without scenarios); `verified_margin` is the worst's.
+  std::vector<ScenarioReport> scenarios;
   std::string fine_start;
   int fine_start_loose = 0;
   long long fine_start_loose_voxels_removed = 0;
@@ -412,6 +415,11 @@ struct StrengthenVersionReport {
 };
 struct StrengthenReport {
   bool evaluated = false;
+  // LOAD SCENARIOS: the scenario whose load has no path to its anchors in the part as
+  // drawn (then the reference is the requirement alone), and in the box filled solid
+  // (then no version can hold it). "" = every scenario held, and always without them.
+  std::string as_drawn_unheld;
+  std::string ceiling_unheld;
   double as_drawn_margin = 0.0;
   double margin_required = 0.0;
   double reference_margin = 0.0;

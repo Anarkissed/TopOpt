@@ -1444,6 +1444,10 @@ struct AnalyzeJobResult {
   StepModel model;                     // the imported model (BCs come from ITS faces)
   std::vector<int> fixture_face_ids;   // faces matched by the fixture selectors
   FixedDesignAnalysis analysis;        // stress / mass / margin / gate verdict
+  // LOAD SCENARIOS: every scenario's certification on this design (empty when the job
+  // has none; `analysis` is then the worst scenario's), and the first unheld one's name.
+  std::vector<ScenarioReport> scenarios;
+  std::string unheld_scenario;
   bool analyzed_mesh = false;          // true iff a substitute mesh was re-voxelized
   std::string analyzed_mesh_path;      // that mesh's path ("" when analyzing the solid)
   double voxel_mass_grams = 0.0;       // analysis.mass_grams (the re-analyzed voxel mass)

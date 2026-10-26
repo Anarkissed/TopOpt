@@ -10348,8 +10348,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
-  result.analysis = analyze_fixed_design(
-      design_grid, params, density, cert_bcs, loads, material, build_dir,
+  auto certify_one = [&](const std::vector<DirichletBC>& cbcs,
+                         const std::vector<NodalLoad>& cloads) {
+    return analyze_fixed_design(
+      design_grid, params, density, cbcs, cloads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid, /*lattice=*/nullptr,
@@ -10358,6 +10360,25 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       // so a part's recommendation cannot change just because it was re-analysed.
       score_orientations, resolve_build_direction_is_inferred(options),
       bake_plan.auto_apply);
+  };
+  // LOAD SCENARIOS (rulings 2026-10-26 03:45 and 12:46): EVERY scenario certified on
+  // this design (the export, for strengthen's verify), the worst governs. Their supports
+  // and loads on the certified grid (the design box's when a mesh was voxelized onto
+  // it), the weak springs sized for the material. One load case: the one solve, as
+  // always.
+  const std::vector<SimpScenario> cert_scenarios =
+      loadcase && !options.scenarios.empty()
+          ? sized_scenarios(expand_for_mesh ? domain.scenarios : options.scenarios,
+                            material.youngs_modulus_mpa, cert_grid.spacing)
+          : std::vector<SimpScenario>();
+  if (cert_scenarios.empty()) {
+    result.analysis = certify_one(cert_bcs, loads);
+  } else {
+    ScenarioCertification sc = certify_scenarios(design_grid, cert_scenarios, certify_one);
+    result.analysis = std::move(sc.governing);
+    result.scenarios = std::move(sc.reports);
+    result.unheld_scenario = std::move(sc.unheld);
+  }
   const FixedDesignAnalysis& a = result.analysis;
   // The orientation this re-analysis certifies, and the rotation the exported
   // geometry carries (empty when the export stays in model coordinates).
@@ -10718,10 +10739,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   vr.contact_engaged = a.contact_engaged;
   vr.contact_released = a.contact_released;
   vr.contact_load_share = a.contact_load_share;
+  vr.scenarios = result.scenarios;  // LOAD SCENARIOS (empty when none)
   if (!a.accepted)
-    vr.rejection_reason = !load_path_ok ? kLoadPathNotConnectedReason
-                          : a.contact_held_by_sliding ? kAnchorsSlidingReason
-                                                      : kMarginBelowRequiredReason;
+    vr.rejection_reason = !load_path_ok ? std::string(kLoadPathNotConnectedReason)
+                          : !result.unheld_scenario.empty()
+                              ? scenario_unheld_reason(result.unheld_scenario)
+                          : a.contact_held_by_sliding ? std::string(kAnchorsSlidingReason)
+                                                      : std::string(kMarginBelowRequiredReason);
   JobReport report;
   report.material = job.material;
   (a.accepted ? report.variants : report.rejected).push_back(vr);
@@ -12523,6 +12547,12 @@ MinimizePlasticResult strengthen_versions(
       analyze_job(job, job_dir, join_path(work, "as_drawn"), materials, rules, "", {});
   sr.as_drawn_margin = drawn.analysis.margin_effective;
   sr.reference_margin = std::max(sr.as_drawn_margin, sr.margin_required);
+  // LOAD SCENARIOS (ruling 2026-10-26 12:46): every step on the WORST scenario
+  // (analyze_job certifies them all). A part as drawn that cannot carry one of them
+  // has no margin worth referencing: the reference is the requirement alone.
+  const bool with_scenarios = !job.loads.scenarios.empty();
+  sr.as_drawn_unheld = drawn.unheld_scenario;
+  if (!sr.as_drawn_unheld.empty()) sr.reference_margin = sr.margin_required;
   sr.original_mass_grams = drawn.voxel_mass_grams;
 
   // The ceiling: the domain (box, minus keep-outs and Keep Clears, plus everything
@@ -12560,6 +12590,7 @@ MinimizePlasticResult strengthen_versions(
         analyze_job(job, job_dir, join_path(work, "ceiling"), materials, rules,
                     ceiling_stl, {});
     sr.ceiling_margin = ceil.analysis.margin_effective;
+    sr.ceiling_unheld = ceil.unheld_scenario;
     strengthen_cap_site(sr, G, ceil.analysis.von_mises_field, model);
   }
 
@@ -12628,6 +12659,13 @@ MinimizePlasticResult strengthen_versions(
     const double target = std::max(sr.reference_margin / (1.0 - vr.stress_cut),
                                    kStrengthenStepOver * prev_verified);
     vr.target_margin = target;
+    if (!sr.ceiling_unheld.empty()) {
+      // LOAD SCENARIOS: even the box filled solid gives that load no path.
+      vr.status = "unreachable";
+      vr.note = scenario_unheld_reason(sr.ceiling_unheld) + ", even with the box filled solid";
+      sr.versions.push_back(vr);
+      continue;
+    }
     if (target > kStrengthenCeilingUse * sr.ceiling_margin) {
       vr.status = "unreachable";
       char note[200];
@@ -12691,6 +12729,7 @@ MinimizePlasticResult strengthen_versions(
     MinimizePlasticResult best;
     double best_verified = -1.0;
     StrengthenAttemptReport best_attempt;
+    int shown_bridges = 0;  // 42-B's straight bridges on the shown attempt
     bool ok = false;
     for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
       MinimizePlasticResult r = run_one(nullptr, vf, seed);
@@ -12735,6 +12774,9 @@ MinimizePlasticResult strengthen_versions(
       att.keep_clear_voxels = clear;
       att.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
       att.rejection_reason = v.report.rejection_reason;
+      att.unheld_scenario = a.unheld_scenario;  // LOAD SCENARIOS, on the export
+      if (!att.unheld_scenario.empty())
+        att.unheld_reason = scenario_unheld_reason(att.unheld_scenario);
       vr.attempts.push_back(att);
       const bool accepted_here =
           strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason);
@@ -12762,6 +12804,8 @@ MinimizePlasticResult strengthen_versions(
         vr.specks = v.v3.specks_dropped;
         vr.keep_clear_voxels = clear;
         vr.repairs = attempt;
+        vr.scenarios = a.scenarios;  // LOAD SCENARIOS: every one, on this export
+        shown_bridges = v.report.bridges;
         best_attempt = att;
         best = std::move(r);
       }
@@ -12801,6 +12845,13 @@ MinimizePlasticResult strengthen_versions(
     }
     vr.status = vr.repairs > 0 ? "repaired" : "verified";
     if (vr.essentially_original) vr.note = "essentially your original";
+    if (with_scenarios && shown_bridges > 0) {
+      // LOAD SCENARIOS: the scenarios did not grow the connection on their own; the
+      // fallback joined the split (said, never silent).
+      const std::string b = "the split was joined by the straight bridge (" +
+                            std::to_string(shown_bridges) + "), the fallback";
+      vr.note = vr.note.empty() ? b : vr.note + "; " + b;
+    }
     {
       const std::string specks = strengthen_speck_note(best_attempt);
       if (!specks.empty()) vr.note = vr.note.empty() ? specks : vr.note + "; " + specks;

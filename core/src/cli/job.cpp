@@ -721,15 +721,16 @@ JobDescription parse_job(const std::string& json_text) {
         JobScenario sc;
         sc.name = require_nonempty_string(require_key(sv, "name", "a load scenario"),
                                           "a load scenario's name");
+        // His words, read verbatim in the failure sheet (the integrator's wording of
+        // 2026-10-26): plain lines, the scenario named in curly quotes.
+        const std::string named = "Scenario \u201C" + sc.name + "\u201D";
         parse_groups(require_key(sv, "groups", "a load scenario"), "a scenario's groups",
                      sc.groups);
-        if (sc.groups.empty())
-          schema_fail("load scenario \"" + sc.name + "\" has no load");
-        sc.anchor_face_ids = parse_int_array(
-            require_key(sv, "anchor_face_ids", "a load scenario"), "anchor_face_ids");
-        if (sc.anchor_face_ids.empty())
-          schema_fail("load scenario \"" + sc.name +
-                      "\" has no anchor: every scenario needs at least one anchor ON");
+        if (sc.groups.empty()) schema_fail(named + " has no load");
+        const JsonValue& av = require_key(sv, "anchor_face_ids", "a load scenario");
+        if (av.type == JsonValue::Type::Array && av.arr.empty())
+          schema_fail(named + " has no anchor switched on");
+        sc.anchor_face_ids = parse_int_array(av, "anchor_face_ids");
         scenarios.push_back(std::move(sc));
       }
       if (scenarios.size() >= 2) job.loads.scenarios = std::move(scenarios);
@@ -2690,15 +2691,10 @@ JobDescription parse_job(const std::string& json_text) {
 
   // CORE LIST item 50 — "Redesign to strengthen" rebuilds the part inside its design
   // box, so it needs both: the growth side of the checkbox and a box to build in.
-  // LOAD SCENARIOS: what they do not combine with yet (the safer option tonight).
-  if (!job.loads.scenarios.empty()) {
-    if (job.loads.anchor_model == "bearing")
-      schema_fail("\"loads.scenarios\" with bearing anchors (\"anchor_model\": "
-                  "\"bearing\") is not supported yet");
-    if (job.loads.redesign == "strengthen")
-      schema_fail("\"loads.scenarios\" with \"redesign\": \"strengthen\" is not supported "
-                  "yet");
-  }
+  // LOAD SCENARIOS: what they do not combine with yet. With "Redesign to strengthen"
+  // they do (the reviewer's ruling of 2026-10-26 12:46).
+  if (!job.loads.scenarios.empty() && job.loads.anchor_model == "bearing")
+    schema_fail("Load scenarios can't be combined with bolt bearings yet");
   if (job.loads.redesign == "strengthen") {
     if (job.loads.minimize_plastic)
       schema_fail("\"loads.redesign\": \"strengthen\" needs "
