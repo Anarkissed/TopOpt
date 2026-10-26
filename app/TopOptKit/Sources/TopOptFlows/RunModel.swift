@@ -1442,10 +1442,15 @@ public final class RunModel: ObservableObject {
     /// and arm the completion notification. The workspace shows a re-open chip.
     public func runInBackground() {
         guard phase == .running else { return }
-        runningInBackground = true
         isMinimized = true
+        // ★ his iPad (2026-10-26): reopening the card and hiding it again must work every time; arm the notifier once
+        guard !runningInBackground else { return }
+        runningInBackground = true
         notifier.willRunInBackground()
     }
+
+    /// The card's "In Background" button is enabled whenever a run is going, including after he reopens the card.
+    public var canSendToBackground: Bool { phase == .running }
 
     /// Re-open the full progress card for a minimized in-flight run.
     public func restore() {
