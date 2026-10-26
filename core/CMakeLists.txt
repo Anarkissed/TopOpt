@@ -2363,6 +2363,11 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME strengthen COMMAND test_strengthen)
+  # Item 50 acceptance (ruling 2026-10-26): specks are a note, not a refusal; a
+  # refused version's note names the real reason.
+  add_executable(test_strengthen_accept tests/unit/test_strengthen_accept.cpp)
+  target_link_libraries(test_strengthen_accept PRIVATE topopt)
+  add_test(NAME strengthen_accept COMMAND test_strengthen_accept)
 
   # CORE LIST item 42, option B: a part that was one piece as drawn stays one piece
   # (split carrying bodies are bridged before certification, and said so); item 47's
