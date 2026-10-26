@@ -75,29 +75,44 @@ public struct FlexibleCornerPair: View {
 
     private var viewport: CGSize { geometry.viewport == .zero ? CGSize(width: 1032, height: 1376) : geometry.viewport }
 
+    /// ★ P2 (the redesign, point 5): the shared `CornerPair` (#354's B2 lift of this view) measures its panel into a geometry of
+    /// its own; Flexible's player and chip read FlexibleChromeGeometry, which `panel` below still writes (the chrome's card read
+    /// when the measure lands), so the shell's copy is only its own.
+    @StateObject private var shellGeometry = ChromeGeometry()
+
+    /// ★ P2: the pair and its one panel are laid out by the shared `CornerPair`; what goes in its three slots stays Flexible's
+    /// (the Setup chip + tray, the Lattice split button, the panels and their measure). `controlPanelInLayout` is Flexible's own
+    /// red control (the shell's lives on CornerPairStyle), so with it on the page keeps its own VStack.
     public var body: some View {
-        let pair = HStack(alignment: .bottom, spacing: FlexibleChromeLayout.pairGap) {
-            FlexibleSetupChipView(project: project, open: chrome.open == .setup) {
-                tray.page = .rows
-                chrome.toggle(.setup)
-            }
-            .background(FlexibleCornerPairStyle.publish("setupChip"))
-            if let m = main.model {
-                FlexibleLatticeSplit(model: m, run: main.coreRun, main: main, chrome: chrome, project: project, viewport: viewport,
-                                     openSquish: openSquish)
-            } else {
-                FlexibleLatticeButtonView(status: FlexibleMainStatus.of(model: nil), state: .idle, line: FlexibleMainStatus.notOpened,
-                                          width: FlexibleChromeLayout.latticeButtonSize(viewport).width, cardOpen: false,
-                                          main: { chrome.foldAll(); openSquish() }, caret: {})
-                    .background(FlexibleCornerPairStyle.publish("latticeSplit"))
-            }
-        }
         if Self.controlPanelInLayout {
-            VStack(alignment: .trailing, spacing: FlexibleChromeLayout.panelGap) { panel; pair }
-        } else {
-            pair.overlay(alignment: .bottomTrailing) {
-                panel.offset(y: -(PageChrome.actionButton + FlexibleChromeLayout.panelGap))
+            VStack(alignment: .trailing, spacing: FlexibleChromeLayout.panelGap) {
+                panel
+                HStack(alignment: .bottom, spacing: FlexibleChromeLayout.pairGap) { chip; split }
             }
+        } else {
+            CornerPair(geometry: shellGeometry, open: chrome.open.map { String(describing: $0) }) { chip } split: { split } panel: { panel }
+        }
+    }
+
+    /// The Setup chip (its tray is the `.setup` panel).
+    private var chip: some View {
+        FlexibleSetupChipView(project: project, open: chrome.open == .setup) {
+            tray.page = .rows
+            chrome.toggle(.setup)
+        }
+        .background(FlexibleCornerPairStyle.publish("setupChip"))
+    }
+
+    /// The Lattice split button (before the stage's model arrives: the steps, nothing to send yet).
+    @ViewBuilder private var split: some View {
+        if let m = main.model {
+            FlexibleLatticeSplit(model: m, run: main.coreRun, main: main, chrome: chrome, project: project, viewport: viewport,
+                                 openSquish: openSquish)
+        } else {
+            FlexibleLatticeButtonView(status: FlexibleMainStatus.of(model: nil), state: .idle, line: FlexibleMainStatus.notOpened,
+                                      width: FlexibleChromeLayout.latticeButtonSize(viewport).width, cardOpen: false,
+                                      main: { chrome.foldAll(); openSquish() }, caret: {})
+                .background(FlexibleCornerPairStyle.publish("latticeSplit"))
         }
     }
 
@@ -315,6 +330,19 @@ enum FlexibleCornerPairStyle {
     static func publish(_ key: String) -> some View {
         GeometryReader { g in Color.clear.preference(key: FlexibleKeepOutKey.self, value: [key: g.frame(in: .global)]) }
             .allowsHitTesting(false)
+    }
+}
+
+/// ★ P2 (the redesign, point 5): the shared shells (#354's B2 lift of Flexible's views) publish their frames on
+/// ChromeKeepOutKey; Flexible's keep-outs and its hosted tests read FlexibleKeepOutKey. An adapter re-publishes what its shell
+/// published there — the same names, the same global frames, the same merge — and stops them going further up.
+struct FlexibleKeepOutBridge: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .backgroundPreferenceValue(ChromeKeepOutKey.self) { frames in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: frames).allowsHitTesting(false)
+            }
+            .transformPreference(ChromeKeepOutKey.self) { $0 = [:] }
     }
 }
 
