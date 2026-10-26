@@ -232,3 +232,42 @@ Branch `claude/topology-core-scen-strengthen`, from the release (`origin/claude/
 - Evidence jobs (his Carriage Arms copy 4, res 48), in scratch `evid/`. Scenario 2 = the left plate's 22 anchor
   faces off, 20 N down + 5 N sideways (outward, −x) on the left drum's top (face 34). Scenario 3 = the mirror (face 18,
   +x). The sideways direction is my reading of "sideways".
+
+## STEP 2, THE CORNER FIX (the reviewer's ruling of 2026-10-26 13:12): the Theory of Critical Distances
+
+- **Method:** the VOLUME method. Every margin reads the stress TENSOR averaged over the SOLID voxels within
+  `kTcdRadiusMm` of each voxel (`analyze_fixed_design`, analyze.cpp; a sphere, whose solid part at a surface hot
+  spot is the method's hemisphere). Von Mises and the interlayer tension (every build direction, the orientation
+  scorer included) both come from the averaged tensor. Solid only (printed, not latticed, not loose), so a uniform
+  stress averages to itself and a thin member is averaged only over itself. The fields (`von_mises_field`,
+  `stress_tensor_field`) stay raw for display, and `peak_von_mises_raw` / `peak_interlayer_raw` keep the raw peaks.
+  A voxel coarser than the radius averages each voxel over itself alone, byte for byte the old margin. One place
+  reads stress for a verdict, so the certification and strengthen's export-verify (analyze_job) both get it. The
+  optimizer's own loop optimises compliance, not stress, so it needs nothing.
+- **L:** 0.934 mm, the critical distance Ahmed & Susmel 2017 (FIS 41:252, doi 10.3221/IGF-ESIS.41.34) measured on
+  printed PLA: E 3296 MPa, σ_UTS 42.5 MPa, σ0 = 2 σ_UTS = 85 MPa, and the point method at L/2 = 0.467 mm predicted
+  notched strength within 20 % for every notch sharpness. Radius = 1.54 L = 1.438 mm (the volume method's
+  hemisphere, as the paper describes it). It is used for every FDM material: none of ours carries a fracture
+  toughness to derive its own L = (1/π)(K_Ic/σ0)², and this is the only measured L for a printed polymer.
+  Ahmed & Susmel 2019 (FFEMS 42:883, doi 10.1111/ffe.12958) backs reading infill as a homogenised linear-elastic
+  material plus the TCD, within ±20 %, which is our infill knockdown.
+- **Tests:** `test_tcd` 8/8.
+  - Plain tension reads yield/(F/A) exactly (8.80 = 8.80): nothing forgiven.
+  - An L-bracket's re-entrant corner settles: 0.917 / 0.744 / 0.707 / 0.689 at h 1 / 0.5 / 0.25 / 0.125 mm, 2.6 % at
+    the last step, while the raw single-voxel margin falls 0.683 → 0.248 (25 % at the last step).
+  - A grid coarser than the radius reads its raw margin exactly.
+- **The bore plate:** it converges at the fine end. Bearing 13.17 / 12.87 / 11.99 / 11.91 at res 48 / 64 / 96 / 128
+  (0.7 % from 96 to 128); glued 25.63 / 26.43 / 25.36 / 24.33 (4.1 %). The step from 64 to 96 is 6.8 %, at h 0.375 →
+  0.25 mm against a 1.44 mm radius, so `test_bearing` (d) checks 96 → 128 now. The averaged bearing peak sits in the
+  bearing zone (r ≈ 3.0, ±141–148°): the contact, not a corner.
+
+## STEP 3, THE NEW STRENGTHEN LADDER (his decision of 2026-10-26)
+
+- **Key:** `loads.safety_margin` (a number: 1.5 = 150 %, also the minimum; below → "The safety margin can't be below
+  150% of the load"). It sets the required margin (`margin_stop`) of every loadcase run. Absent = 1.5, byte for byte.
+- **Targets:** version 1 = the safety margin. Versions 2 and 3 = 1.10 × the previous version's VERIFIED margin
+  (`kStrengthenLadderStep`; the 1.05 step-over is kept as a floor). A version after an unbuilt one is unreachable,
+  and its note says so. The drawing is measured as information only: `reference_margin` is the safety margin.
+- **report.json:** `strengthen.safety_margin`; `versions[].target_rule` ("your safety margin" / "10% over version N's
+  verified margin"); `stress_cut` stays in the schema, always 0. test_strengthen's (a) / (d) pin the new ladder (a
+  ruled change), and (b) adds the 10 % rule: 23/23. test_scenarios_strengthen adds the safety-margin refusal: 15/15.
