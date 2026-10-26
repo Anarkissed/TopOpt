@@ -301,11 +301,17 @@ std::vector<BridgeHoldReport> hold_bridges(
 // face-connected pieces of printed voxels that touch through edge / corner
 // neighbours only. One pass on the final printed voxels: label the face
 // components, then count the distinct component pairs met across an edge or a
-// corner. Deterministic; no ids reach any user-facing text.
-int fragile_joint_count(const VoxelGrid& g, const std::vector<double>& rho,
-                        double iso) {
+// corner. Deterministic; no ids reach any user-facing text; each joint's
+// position (mm, model frame) is the midpoint of its first contact.
+struct FragileJoints {
+  int count = 0;
+  std::vector<Vec3> positions_mm;  // at most kFragileJointPositionsMax
+};
+FragileJoints fragile_joints(const VoxelGrid& g, const std::vector<double>& rho,
+                             double iso) {
+  FragileJoints out;
   const std::size_t nv = g.voxel_count();
-  if (rho.size() != nv) return 0;
+  if (rho.size() != nv) return out;
   auto printed = [&](std::size_t e) {
     return g.tags[e] != VoxelTag::Empty && rho[e] > iso;
   };
@@ -336,7 +342,14 @@ int fragile_joint_count(const VoxelGrid& g, const std::vector<double>& rho,
     }
     ++id;
   }
-  std::vector<std::uint64_t> pairs;
+  // Every edge / corner contact between two different face-pieces, keyed by
+  // the piece pair; per pair the FIRST contact in ascending voxel order gives
+  // the joint's position (the midpoint of the two voxel centres).
+  struct Contact {
+    std::uint64_t key;
+    std::size_t e, f;
+  };
+  std::vector<Contact> contacts;
   for (int k = 0; k < nz; ++k)
     for (int j = 0; j < ny; ++j)
       for (int i = 0; i < nx; ++i) {
@@ -348,15 +361,33 @@ int fragile_joint_count(const VoxelGrid& g, const std::vector<double>& rho,
               if (std::abs(dx) + std::abs(dy) + std::abs(dz) < 2) continue;  // self / face
               const int a = i + dx, b = j + dy, c = k + dz;
               if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
-              const int lf = label[g.index(a, b, c)];
+              const std::size_t f = g.index(a, b, c);
+              const int lf = label[f];
               if (lf < 0 || lf == label[e]) continue;
               const std::uint64_t lo = static_cast<std::uint64_t>(std::min(lf, label[e]));
               const std::uint64_t hi = static_cast<std::uint64_t>(std::max(lf, label[e]));
-              pairs.push_back((lo << 32) | hi);
+              contacts.push_back({(lo << 32) | hi, e, f});
             }
       }
-  std::sort(pairs.begin(), pairs.end());
-  return static_cast<int>(std::unique(pairs.begin(), pairs.end()) - pairs.begin());
+  std::stable_sort(contacts.begin(), contacts.end(),
+                   [](const Contact& x, const Contact& y) { return x.key < y.key; });
+  for (std::size_t q = 0; q < contacts.size(); ++q) {
+    if (q > 0 && contacts[q].key == contacts[q - 1].key) continue;
+    ++out.count;
+    if (out.positions_mm.size() >= kFragileJointPositionsMax) continue;
+    auto centre = [&](std::size_t v) {
+      const int i = static_cast<int>(v % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(nx) *
+                                          static_cast<std::size_t>(ny)));
+      return g.voxel_center(i, j, k);
+    };
+    const Vec3 ce = centre(contacts[q].e), cf = centre(contacts[q].f);
+    out.positions_mm.push_back(
+        Vec3{0.5 * (ce.x + cf.x), 0.5 * (ce.y + cf.y), 0.5 * (ce.z + cf.z)});
+  }
+  return out;
 }
 
 }  // namespace
@@ -2983,8 +3014,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
                          vr.anchored_pieces_lost > 0 || vr.bridges > 0;
     // Edge / corner-only joints in what prints: reported as fragile, not fixed.
-    vr.fragile_joints =
-        fragile_joint_count(G, variant.optimization.physical_density, kIso);
+    {
+      FragileJoints fj = fragile_joints(G, variant.optimization.physical_density, kIso);
+      vr.fragile_joints = fj.count;
+      vr.fragile_joint_positions_mm = std::move(fj.positions_mm);
+    }
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
     // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER

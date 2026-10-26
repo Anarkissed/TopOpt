@@ -151,15 +151,24 @@ void emit_variant(std::string& out, const VariantReport& v,
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
   out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
-  // Edge / corner-only joints (report.hpp fragile_joints), only when there are any.
-  if (v.fragile_joints > 0)
+  // Edge / corner-only joints (report.hpp fragile_joints), only when there are
+  // any (absent = none): {"count": N, "message": "...", "positions_mm":
+  // [[x, y, z], ...]} — at most kFragileJointPositionsMax positions.
+  if (v.fragile_joints > 0) {
     out += ",\n" + in2 + "\"fragile_joints\": {\"count\": " +
-           std::to_string(v.fragile_joints) + ", \"note\": " +
+           std::to_string(v.fragile_joints) + ", \"message\": " +
            str_json(std::to_string(v.fragile_joints) +
                     (v.fragile_joints == 1 ? " place where" : " places where") +
                     " the part holds together only along an edge or at a corner: "
                     "fragile when printed") +
-           "}";
+           ", \"positions_mm\": [";
+    for (std::size_t q = 0; q < v.fragile_joint_positions_mm.size(); ++q) {
+      const Vec3& p = v.fragile_joint_positions_mm[q];
+      out += std::string(q ? ", " : "") + "[" + num_json(p.x) + ", " + num_json(p.y) +
+             ", " + num_json(p.z) + "]";
+    }
+    out += "]}";
+  }
   // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
   // more than one body, a speck or a lost anchor to report.
   if (v.bodies_reported) {
