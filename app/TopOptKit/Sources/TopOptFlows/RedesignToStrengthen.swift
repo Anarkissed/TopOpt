@@ -130,6 +130,8 @@ public struct StrengthenReport: Equatable, Sendable {
         public let note: String
         /// The margin this version aimed for (`target_margin`): a refused version shows its best try against it.
         public var targetMargin: Double = 0
+        /// ★ load scenarios (ruling 2026-10-26 12:46): this version's own `scenarios[]`; its margin is the worst one's.
+        public var scenarios: [ScenarioResult] = []
     }
     public let asDrawnMargin: Double
     public let marginRequired: Double
@@ -138,6 +140,9 @@ public struct StrengthenReport: Equatable, Sendable {
     public let coarseResolution: Int
     public let cap: Cap?
     public let versions: [Version]
+    /// ★ THE NEW LADDER (ruling 2026-10-26 13:12): the safety margin the versions were built for. nil = a report from the
+    /// 25/50/75 % ladder, whose cards keep their old titles.
+    public var safetyMargin: Double? = nil
 
     public static func decode(_ s: [String: Any]?) -> StrengthenReport? {
         guard let s else { return nil }
@@ -152,14 +157,16 @@ public struct StrengthenReport: Equatable, Sendable {
                     status: $0["status"] as? String ?? "", volumeFraction: num($0["volume_fraction"]),
                     verifiedMargin: num($0["verified_margin"]), massGrams: num($0["mass_grams"]),
                     massFractionOfOriginal: num($0["mass_fraction_of_original"]),
-                    note: $0["note"] as? String ?? "", targetMargin: num($0["target_margin"]))
+                    note: $0["note"] as? String ?? "", targetMargin: num($0["target_margin"]),
+                    scenarios: ScenarioResult.parse($0))
         }
         return StrengthenReport(asDrawnMargin: num(s["as_drawn_margin"]),
                                 marginRequired: num(s["margin_required"]),
                                 ceilingMargin: num(s["ceiling_margin"]),
                                 originalMassGrams: num(s["original_mass_grams"]),
                                 coarseResolution: int(s["coarse_resolution"]),
-                                cap: cap, versions: versions)
+                                cap: cap, versions: versions,
+                                safetyMargin: (s["safety_margin"] as? NSNumber)?.doubleValue)
     }
 }
 
@@ -178,6 +185,8 @@ public struct RunReportBlocks: Equatable, Sendable {
     }
     public let strengthen: StrengthenReport?
     public let rows: [Row]
+    /// ★ report.json's top-level `safety_margin` (ruling 2026-10-26 13:12): "Built for N% of your load". nil = not sent.
+    public var safetyMargin: Double? = nil
 
     public static func decode(reportJSON: Data) -> RunReportBlocks? {
         guard let r = (try? JSONSerialization.jsonObject(with: reportJSON)) as? [String: Any] else { return nil }
@@ -195,8 +204,12 @@ public struct RunReportBlocks: Equatable, Sendable {
                     fragileJoints: int(($0["fragile_joints"] as? [String: Any])?["count"]))
             }
         }
-        return RunReportBlocks(strengthen: StrengthenReport.decode(r["strengthen"] as? [String: Any]),
-                               rows: rows("variants", accepted: true) + rows("rejected_variants", accepted: false))
+        var strengthen = StrengthenReport.decode(r["strengthen"] as? [String: Any])
+        let margin = (r["safety_margin"] as? NSNumber)?.doubleValue ?? strengthen?.safetyMargin
+        if strengthen?.safetyMargin == nil { strengthen?.safetyMargin = margin }
+        return RunReportBlocks(strengthen: strengthen,
+                               rows: rows("variants", accepted: true) + rows("rejected_variants", accepted: false),
+                               safetyMargin: margin)
     }
 }
 
@@ -262,6 +275,9 @@ public enum StrengthenText {
                              + percent(v.massFractionOfOriginal) + " % of the original")
                 if !v.note.isEmpty { lines.append(plain(v.note)) }
             }
+            // ★ load scenarios: the card names its governing scenario ("Worst case: <name> · N×", after core's note) — a
+            // best try names it in its own line instead — and an unheld one gets one line. Thin joints stay last.
+            lines.append(contentsOf: ScenarioResult.lines(v.scenarios).filter { !(isBestTry(v) && $0.hasPrefix("Worst case")) })
             let own = lineVersion(of: v, in: s)   // Flexible (PR #362) H56k: redesign to strengthen (overnight plan 2026-10-25) — a merged version reads the line of the version it merged into
             let bridged = own.status != "unreachable" && blocks.rows.contains {
                 abs($0.volumeFraction - own.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
@@ -271,9 +287,16 @@ public enum StrengthenText {
                thin > 0 {
                 lines.append(thinJointsLine(thin))
             }
-            return StrengthenCard(title: "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress",
+            return StrengthenCard(title: title(v, in: s),
                                   status: statusWord(v.status), lines: lines, bridged: bridged)
         }
+    }
+
+    /// A card's title. The new ladder (a report with `safety_margin`): "Version 1: just safe", then "Version N: +10%".
+    /// A 25/50/75 % report keeps "Version N · M % less worst stress".
+    static func title(_ v: StrengthenReport.Version, in s: StrengthenReport) -> String {
+        guard s.safetyMargin != nil else { return "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress" }
+        return v.version <= 1 ? "Version \(v.version): just safe" : "Version \(v.version): +10%"
     }
 
     public static let capAnchorLine = "The strongest possible version is limited at an anchor"
@@ -290,11 +313,17 @@ public enum StrengthenText {
     /// A version refused after real tries (the reviewer's ruling 2026-10-26 07:29, item 50 (c)): its best verified try
     /// against what it needed, on ONE line; a reason other than the margin (core's note: Keep Clear voxels, not accepted)
     /// rides on the same line, in plain words.
+    static func isBestTry(_ v: StrengthenReport.Version) -> Bool {
+        v.status == "unreachable" && v.verifiedMargin > 0 && v.targetMargin > 0
+    }
+
     static func bestTryLine(_ v: StrengthenReport.Version) -> String {
         let line = "Best try " + String(format: "%.2f", v.verifiedMargin) + "×, needed "
             + String(format: "%.2f", v.targetMargin) + "×"
         let marginOnly = v.note.isEmpty || v.note.hasPrefix("verified ") || v.note.contains("missed the target")
-        return marginOnly ? line : line + " — " + plain(v.note)
+        // ★ load scenarios (362, 2026-10-26): a refused try names the scenario that governed it
+        let worst = v.scenarios.count >= 2 ? v.scenarios.first(where: { $0.governs }).map { " — worst: " + $0.name } ?? "" : ""
+        return (marginOnly ? line : line + " — " + plain(v.note)) + worst
     }
 
     /// A version's thin joints (core's `fragile_joints.count`), in plain words. core's own note is never shown.

@@ -36,6 +36,24 @@ public enum LoadScenarioRule {
     public static let info = "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together."
     /// The inline refusal when the last anchor on would be switched off.
     public static let lastAnchorRefusal = "A scenario needs at least one anchor on."
+    /// ★ OPTIMIZE'S PRE-FLIGHT (362's ruling 2026-10-26 06:54): the same words core refuses with, before anything is sent.
+    public static func noAnchorLine(_ name: String) -> String { "Scenario “\(name)” has no anchor switched on" }
+    public static func noLoadLine(_ name: String) -> String { "Scenario “\(name)” has no load" }
+    /// The iPad's own solver reads one load case: a 2-scenario run there would check Scenario 1 alone, silently.
+    public static let onDeviceLine = "Load scenarios run on the Mac worker only"
+    /// The one-tap fix under a scenario left with every anchor off (an anchor group was deleted).
+    public static let switchAnchorsOnLabel = "Switch its anchors on"
+
+    /// Why Optimize may not send this request, or nil. Only a 2+ scenario request is ever refused here. Scenarios WITH
+    /// "Redesign to strengthen" are sent (his order, ruling 2026-10-26 12:46: "It needs to work together!"). Bolt
+    /// bearings: the app never sends `anchor_model`, so core's bearing refusal cannot arise from the app.
+    public static func refusal(for request: RunRequest, workerSelected: Bool) -> String? {
+        guard request.scenarios.count >= 2 else { return nil }
+        if let s = request.scenarios.first(where: { $0.anchorFaceIDs.isEmpty }) { return noAnchorLine(s.name) }
+        if let s = request.scenarios.first(where: { $0.loadGroups.isEmpty }) { return noLoadLine(s.name) }
+        if !workerSelected { return onDeviceLine }
+        return nil
+    }
     public static func defaultName(_ index: Int) -> String { "Scenario \(index + 1)" }
 }
 
@@ -133,6 +151,13 @@ extension ForceModel {
         return nil
     }
 
+    /// Switch every anchor of a scenario back on (the one-tap fix when none is left on).
+    public mutating func switchAllAnchorsOn(in scenario: UUID) {
+        guard var set = scenarios, let i = set.scenarios.firstIndex(where: { $0.id == scenario }) else { return }
+        set.scenarios[i].anchorsOff = []
+        scenarios = set
+    }
+
     /// From `makeAnchor` / `makeLoad`, BEFORE the role is written: a group that becomes a load or an anchor while a later
     /// scenario is open belongs to that scenario ("Add Anchor" in Scenario 2 holds in Scenario 2 only). A load or anchor keeps
     /// what it already is; in Scenario 1 nothing is recorded (a load there is Scenario 1's, an anchor is shared).
@@ -179,13 +204,16 @@ public struct ScenarioResult: Equatable, Sendable {
         }
     }
 
+    /// "Worst case: <name> · N×" for the governing scenario, or nil (fewer than two scenarios, or none governs).
+    public static func governingLine(_ results: [ScenarioResult]) -> String? {
+        guard results.count >= 2, let g = results.first(where: { $0.governs }) else { return nil }
+        return g.margin.map { "Worst case: \(g.name) · \(String(format: "%.2f", $0))×" } ?? "Worst case: \(g.name)"
+    }
+
     /// The results lines: the governing scenario named with its margin, then one plain line per unheld scenario.
     public static func lines(_ results: [ScenarioResult]) -> [String] {
         guard results.count >= 2 else { return [] }
-        var out: [String] = []
-        if let g = results.first(where: { $0.governs }) {
-            out.append(g.margin.map { "Worst case: \(g.name) · margin \(String(format: "%.2f", $0))×" } ?? "Worst case: \(g.name)")
-        }
+        var out: [String] = governingLine(results).map { [$0] } ?? []
         for r in results where r.unheld { out.append("\(r.name)'s load has no path to its anchors") }
         return out
     }
@@ -204,6 +232,9 @@ struct ScenarioResultLines: View {
                         .foregroundStyle((l.hasPrefix("Worst case") ? DS.Color.textPrimary : DS.Color.warning).color)
                 }
             }
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioResults": geo.frame(in: .global)])
+            }.allowsHitTesting(false))
             .accessibilityIdentifier("scenario-results")
         }
     }

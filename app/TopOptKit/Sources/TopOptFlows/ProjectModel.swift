@@ -2139,6 +2139,12 @@ public final class ProjectModel: ObservableObject {
         resolvedClearances().map { ($0.groupID, $0.volume) }
     }
 
+    /// The same volumes with the piece each one is (its face id, or a manual primitive's sentinel key), so one piece can
+    /// be hidden on its own (his ask 2026-10-26).
+    public func clearancePieceVolumes() -> [(groupID: UUID, piece: Int, volume: ClearanceVolume)] {
+        resolvedClearances().map { ($0.groupID, $0.faceID, $0.volume) }
+    }
+
     /// A resolved clearance for ONE cleared face: the rendered volume plus the FIXED
     /// bore facts (radius, tessellation span) the Phase B drag handles need. Shared by
     /// `clearanceVolumes()` (the render) and `clearanceHandles()` (the drag anchors) so

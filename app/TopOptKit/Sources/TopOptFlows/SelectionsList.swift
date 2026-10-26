@@ -102,6 +102,18 @@ public enum SelectionsSummary {
     }
 }
 
+/// ★ load scenarios (reviewer 2026-10-26 13:22): a folder of lines — its header row, the groups listed under it, and a tail
+/// (lines under its groups). The list draws folders in place of the plain list when it is handed them.
+public struct SelectionsFolder: Identifiable {
+    public let id: UUID
+    public let header: AnyView
+    public let groups: [SelectionGroup]
+    public let tail: AnyView?
+    public init(id: UUID, header: AnyView, groups: [SelectionGroup], tail: AnyView? = nil) {
+        self.id = id; self.header = header; self.groups = groups; self.tail = tail
+    }
+}
+
 public struct SelectionsList: View {
     @ObservedObject var project: ProjectModel
     @Binding var collapsed: Bool
@@ -124,6 +136,11 @@ public struct SelectionsList: View {
     let isHidden: (UUID) -> Bool
     let toggleEye: ((UUID) -> Void)?
     let ask: ((String) -> String)?
+    /// ★ Folders (nil: the plain list), a control at the end of a group's line (nil: none), and a footer PINNED under the
+    /// scroll — never scrolled away — while the list is open (reviewer 2026-10-26 13:22: "+ Add a load scenario").
+    var folders: [SelectionsFolder]? = nil
+    var lineAccessory: (SelectionGroup) -> AnyView? = { _ in nil }
+    var footer: AnyView? = nil
 
     public init(project: ProjectModel, collapsed: Binding<Bool>, picked: UUID?, deleteAsk: UUID?,
                 isLocked: @escaping (UUID) -> Bool = { _ in false }, readsLattice: @escaping (UUID) -> Bool = { _ in false },
@@ -138,6 +155,14 @@ public struct SelectionsList: View {
         self.pick = pick; self.askDelete = askDelete; self.confirmDelete = confirmDelete; self.cancelDelete = cancelDelete
         self.noteFrame = noteFrame; self.idPrefix = idPrefix; self.rows = rows
         self.summary = summary; self.isHidden = isHidden; self.toggleEye = toggleEye; self.ask = ask
+    }
+
+    /// The same list with folders, a line accessory and a pinned footer (load scenarios on Topology).
+    func scenarioHooks(folders: [SelectionsFolder]?, lineAccessory: @escaping (SelectionGroup) -> AnyView?,
+                       footer: AnyView?) -> SelectionsList {
+        var copy = self
+        copy.folders = folders; copy.lineAccessory = lineAccessory; copy.footer = footer
+        return copy
     }
 
     static let lineHeight: CGFloat = 44
@@ -168,7 +193,7 @@ public struct SelectionsList: View {
             }
             if !collapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
-                if groups.isEmpty {
+                if groups.isEmpty, folders == nil {
                     Text(SelectionsCopy.empty)
                         .font(.system(size: 13)).foregroundStyle(DS.Color.textTertiary.color)
                         .padding(DS.Space.l)
@@ -176,7 +201,17 @@ public struct SelectionsList: View {
                 } else {
                     // as tall as its rows, scrolling past 420 (a 420 pt scroll view with three short lines was a tall empty panel)
                     ScrollView {
-                        VStack(spacing: 0) { ForEach(groups) { g in section(g) } }
+                        VStack(spacing: 0) {
+                            if let folders {
+                                ForEach(folders) { f in
+                                    f.header
+                                    ForEach(f.groups) { g in section(g) }
+                                    if let t = f.tail { t }
+                                }
+                            } else {
+                                ForEach(groups) { g in section(g) }
+                            }
+                        }
                             .padding(.vertical, DS.Space.xs)
                             .background(GeometryReader { g in
                                 Color.clear.onAppear { contentHeight = g.size.height }
@@ -184,6 +219,10 @@ public struct SelectionsList: View {
                             })
                     }
                     .frame(height: min(Self.maxListHeight, max(contentHeight, Self.lineHeight)))
+                }
+                if let footer {
+                    Divider().overlay(DS.Color.strokeSubtle.color)
+                    footer
                 }
             }
         }
@@ -266,6 +305,7 @@ public struct SelectionsList: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
+            if let a = lineAccessory(g) { a }
             if let toggleEye {
                 let hidden = isHidden(g.id)
                 Button { toggleEye(g.id) } label: {

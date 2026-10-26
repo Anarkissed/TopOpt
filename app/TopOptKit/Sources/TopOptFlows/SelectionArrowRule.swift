@@ -15,7 +15,7 @@ import TopOptDesign
 public enum SelectionArrowRule {
 
     /// A picked piece: its group and its key (a face id, or a manual primitive's sentinel key).
-    public struct PieceRef: Equatable, Sendable {
+    public struct PieceRef: Hashable, Sendable {
         public let group: UUID
         public let key: Int
         public init(group: UUID, key: Int) { self.group = group; self.key = key }
@@ -31,6 +31,12 @@ public enum SelectionArrowRule {
     public static func pieceShows(group: UUID, piece: Int, selectedGroup: UUID?, selectedPiece: Int?) -> Bool {
         guard groupShows(group, selectedGroup: selectedGroup) else { return false }
         return selectedPiece == nil || selectedPiece == piece
+    }
+
+    /// ★ his ask 2026-10-26: a piece inside a group (a face, a keep-out cylinder or slab) can be hidden on its own. View
+    /// only, like the group's eye: the piece still counts in the run.
+    public static func pieceDrawn(group: UUID, piece: Int, hidden: Set<PieceRef>) -> Bool {
+        !hidden.contains(PieceRef(group: group, key: piece))
     }
 
     /// A tap clears the selection only when it lands on EMPTY space: no face of the model, no handle, no chip, and it was a
@@ -56,6 +62,9 @@ struct PieceRowPick: ViewModifier {
                 .strokeBorder(picked ? DS.Color.accent.color : Color.clear, lineWidth: 1.5))
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["piecePick-\(id)": geo.frame(in: .global)])
+            }.allowsHitTesting(false))
             .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
             .accessibilityIdentifier(id)
     }

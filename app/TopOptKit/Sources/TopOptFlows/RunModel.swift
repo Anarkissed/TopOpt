@@ -46,6 +46,8 @@ public struct RunRequest: Equatable, Sendable {
     public let loadGroups: [TopOptKit.LoadGroupSpec]
     /// ★ LOAD SCENARIOS (job `loads.scenarios`): sent only with 2+; `anchorFaceIDs`/`loadGroups` then mirror Scenario 1.
     public var scenarios: [LoadScenarioWire] = []
+    /// ★ THE SAFETY MARGIN (SafetyMargin.swift): sent under TO-core's key once it is named, and only when not 150 %.
+    public var safetyMargin: Double = SafetyMargin.defaultValue
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool

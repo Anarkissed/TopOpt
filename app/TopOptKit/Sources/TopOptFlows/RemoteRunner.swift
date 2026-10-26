@@ -969,6 +969,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 ["name": s.name, "anchor_face_ids": s.anchorFaceIDs, "groups": s.loadGroups.map(loadGroupJSON)]
             }
         }
+        // ★ THE SAFETY MARGIN (ruling 2026-10-26 13:12): under TO-core's key once named; 150 % sends nothing (core's default).
+        if let key = SafetyMargin.jobKey, abs(request.safetyMargin - SafetyMargin.defaultValue) > 1e-9 {
+            loads[key] = request.safetyMargin
+        }
         if request.infillPercent >= 0 {
             loads["infill_percent"] = request.infillPercent
         }

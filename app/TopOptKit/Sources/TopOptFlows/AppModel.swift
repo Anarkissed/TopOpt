@@ -346,6 +346,7 @@ public final class AppModel: ObservableObject {
                           // asks for the armed posture explicitly.
                           projectCADFaces: project.projectCADFaces)
         request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
+        request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
         return request
     }
 

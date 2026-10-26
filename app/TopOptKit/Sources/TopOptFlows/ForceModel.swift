@@ -196,6 +196,8 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public var unit: WeightUnit = .lbs
     /// ★ LOAD SCENARIOS (his order 2026-10-26; LoadScenarios.swift). nil = one scenario, byte-identical to before.
     public var scenarios: LoadScenarioSet? = nil
+    /// ★ THE SAFETY MARGIN (ruling 2026-10-26 13:12; SafetyMargin.swift). nil = 150 %, byte-identical to before.
+    public var safetyMargin: Double? = nil
 
     /// Per selection-group role/direction/weight, keyed by `SelectionGroup.id`.
     /// A group with no entry here is `.pending`.
@@ -898,6 +900,7 @@ extension ForceModel {
         case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional)
         case gravityBaseModel       // purely-visual arrow base (gravity round 2, optional)
         case scenarios              // load scenarios (2026-10-26, optional)
+        case safetyMargin           // the safety margin (2026-10-26, optional; nil = 150 %)
     }
 
     public init(from decoder: Decoder) throws {
@@ -945,6 +948,7 @@ extension ForceModel {
         // nil (draw from the mesh centre), so old projects load with gravity unchanged (V6).
         gravityBaseModel = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravityBaseModel)
         scenarios = try c.decodeIfPresent(LoadScenarioSet.self, forKey: .scenarios)
+        safetyMargin = try c.decodeIfPresent(Double.self, forKey: .safetyMargin)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -972,5 +976,6 @@ extension ForceModel {
         // project that never touched it is byte-identical to a pre-round-2 snapshot (V6).
         try c.encodeIfPresent(gravityBaseModel, forKey: .gravityBaseModel)
         try c.encodeIfPresent(scenarios, forKey: .scenarios)
+        try c.encodeIfPresent(safetyMargin, forKey: .safetyMargin)
     }
 }

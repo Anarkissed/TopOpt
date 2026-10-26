@@ -133,13 +133,123 @@ final class LoadScenarioTests: XCTestCase {
             ["name": "Scenario 1", "margin": 2.4, "governs": false, "unheld": false],
             ["name": "Held by one plate", "margin": 1.31, "governs": true, "unheld": false],
             ["name": "Scenario 3", "margin": 0, "governs": false, "unheld": true]]])
-        XCTAssertEqual(ScenarioResult.lines(r), ["Worst case: Held by one plate · margin 1.31×",
+        XCTAssertEqual(ScenarioResult.lines(r), ["Worst case: Held by one plate · 1.31×",
                                                  "Scenario 3's load has no path to its anchors"])
         XCTAssertEqual(ScenarioResult.lines(ScenarioResult.parse([:])), [], "no scenarios block: no line")
     }
 
+    /// Ruling 2026-10-26 12:46: each strengthen version card names its governing scenario from versions[].scenarios.
+    func testEachStrengthenCardNamesItsWorstScenario() {
+        let sc: [[String: Any]] = [["name": "Scenario 1", "margin": 3.1, "governs": false, "unheld": false],
+                                   ["name": "Left plate off", "margin": 2.04, "governs": true, "unheld": false]]
+        let blocks = RunReportBlocks.decode(report: ["strengthen": [
+            "as_drawn_margin": 1.5, "margin_required": 1.5, "ceiling_margin": 9, "original_mass_grams": 40, "coarse_resolution": 24,
+            "versions": [["version": 1, "stress_cut": 0.25, "status": "verified", "volume_fraction": 0.3, "verified_margin": 2.04,
+                          "mass_grams": 30, "mass_fraction_of_original": 0.75, "note": "", "target_margin": 2.0, "scenarios": sc],
+                         ["version": 2, "stress_cut": 0.5, "status": "verified", "volume_fraction": 0.4, "verified_margin": 3.0,
+                          "mass_grams": 36, "mass_fraction_of_original": 0.9, "note": ""]]]])
+        let cards = StrengthenText.cards(blocks)
+        XCTAssertTrue(cards[0].lines.contains("Worst case: Left plate off · 2.04×"), "\(cards[0].lines)")
+        XCTAssertFalse(cards[1].lines.contains { $0.hasPrefix("Worst case") }, "a one-scenario version: no line")
+        // 362's order: margin, mass, (note), Worst case, thin joints last; a refused best try names the worst in its line
+        XCTAssertEqual(cards[0].lines, ["Margin 2.04×", "30.0 g · 75 % of the original", "Worst case: Left plate off · 2.04×"])
+        let refused = RunReportBlocks.decode(report: ["strengthen": [
+            "as_drawn_margin": 1.0, "margin_required": 1.5, "ceiling_margin": 9, "original_mass_grams": 40, "coarse_resolution": 24,
+            "versions": [["version": 1, "stress_cut": 0.25, "status": "unreachable", "volume_fraction": 0.3, "verified_margin": 1.42,
+                          "mass_grams": 30, "mass_fraction_of_original": 0.75, "note": "", "target_margin": 1.5,
+                          "scenarios": [["name": "Scenario 1", "margin": 2.0, "governs": false, "unheld": false],
+                                        ["name": "Scenario 2", "margin": 1.42, "governs": true, "unheld": false]]]]]])
+        XCTAssertEqual(StrengthenText.cards(refused)[0].lines, ["Best try 1.42×, needed 1.50× — worst: Scenario 2"])
+    }
+
+    // MARK: the safety margin (ruling 2026-10-26 13:12)
+
+    func testSafetyMarginDefaultsTo150StoresNothingAndRefusesBelow() throws {
+        var f = ForceModel()
+        XCTAssertEqual(f.safetyMarginValue, 1.5)
+        XCTAssertEqual(f.setSafetyMargin(1.2), "The safety margin can't be below 150% of the load")
+        XCTAssertEqual(f.safetyMarginValue, 1.5, "a refusal changes nothing")
+        XCTAssertNil(f.setSafetyMargin(2.0)); XCTAssertEqual(f.safetyMarginValue, 2.0)
+        let back = try JSONDecoder().decode(ForceModel.self, from: JSONEncoder().encode(f))
+        XCTAssertEqual(back.safetyMarginValue, 2.0, "survives a relaunch")
+        f.setSafetyMargin(1.5)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(f), as: UTF8.self).contains("safetyMargin"), "150 % stores nothing")
+        XCTAssertEqual(SafetyMargin.parseCustom("175%"), .success(1.75))
+        XCTAssertEqual(SafetyMargin.parseCustom("149"), .failure(.init(line: SafetyMargin.belowMinimumLine)))
+        XCTAssertEqual(SafetyMargin.presets.map(\.label), ["Light use: 150% of your load", "Everyday part: 200%",
+                                                         "Repeated loads, or hard to replace: 300%"])
+        XCTAssertEqual(SafetyMargin.label(for: 1.75), "Custom: 175%")
+        XCTAssertEqual(SafetyMargin.info, "150% means a safety factor of 1.5. Printing's weaker layers and infill are already counted.")
+        XCTAssertEqual(SafetyMargin.builtForLine(2), "Built for 200% of your load")
+    }
+
+    func testNoSafetyMarginKeyIsSentUntilTOCoreNamesIt() throws {
+        XCTAssertNil(SafetyMargin.jobKey, "★ the app never invents a key")
+        var r = request([]); r.safetyMargin = 3
+        let a = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(r)) as! NSDictionary
+        let b = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(request([]))) as! NSDictionary
+        XCTAssertEqual(a, b)
+    }
+
+    /// The new ladder's words, only on a report that carries `safety_margin`; a 25/50/75 % report keeps its titles.
+    func testTheNewLadderTitlesOnlyWithANewReport() {
+        func report(_ margin: Double?) -> [String: Any] {
+            var s: [String: Any] = ["as_drawn_margin": 1.2, "margin_required": 1.5, "ceiling_margin": 9, "original_mass_grams": 40,
+                                    "coarse_resolution": 24,
+                                    "versions": [1, 2, 3].map { ["version": $0, "stress_cut": 0.25 * Double($0), "status": "verified",
+                                                                 "volume_fraction": 0.1 * Double($0), "verified_margin": 1.5, "mass_grams": 30,
+                                                                 "mass_fraction_of_original": 0.7, "note": ""] as [String: Any] }]
+            if let margin { s["safety_margin"] = margin }
+            return ["strengthen": s]
+        }
+        XCTAssertEqual(StrengthenText.cards(RunReportBlocks.decode(report: report(1.5))).map(\.title),
+                       ["Version 1: just safe", "Version 2: +10%", "Version 3: +10%"])
+        XCTAssertEqual(StrengthenText.cards(RunReportBlocks.decode(report: report(nil))).map(\.title),
+                       ["Version 1 · 25 % less worst stress", "Version 2 · 50 % less worst stress", "Version 3 · 75 % less worst stress"])
+        XCTAssertEqual(RunReportBlocks.decode(report: report(2)).safetyMargin, 2)
+        XCTAssertNil(RunReportBlocks.decode(report: report(nil)).safetyMargin)
+    }
+
     func testTheInfoIsHisSentence() {
         XCTAssertEqual(LoadScenarioRule.info, "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together.")
+    }
+
+    // MARK: Optimize's pre-flight (362's ruling 2026-10-26): core's own words, before the send
+
+    private func wire(_ name: String, anchors: [Int], loads: Int) -> LoadScenarioWire {
+        LoadScenarioWire(name: name, anchorFaceIDs: anchors,
+                         loadGroups: Array(repeating: .init(faceIDs: [5], force: SIMD3(0, 0, -10)), count: loads))
+    }
+
+    func testOptimizeRefusesWhatCoreRefusesInItsWords() {
+        let ok = [wire("Scenario 1", anchors: [1], loads: 1), wire("Held by one plate", anchors: [2], loads: 1)]
+        XCTAssertNil(LoadScenarioRule.refusal(for: request(ok), workerSelected: true))
+        XCTAssertNil(LoadScenarioRule.refusal(for: request([]), workerSelected: false), "no scenarios: never refused here")
+        XCTAssertEqual(LoadScenarioRule.refusal(for: request([ok[0], wire("Held by one plate", anchors: [], loads: 1)]), workerSelected: true),
+                       "Scenario “Held by one plate” has no anchor switched on")
+        XCTAssertEqual(LoadScenarioRule.refusal(for: request([ok[0], wire("Scenario 2", anchors: [2], loads: 0)]), workerSelected: true),
+                       "Scenario “Scenario 2” has no load")
+        XCTAssertEqual(LoadScenarioRule.refusal(for: request(ok), workerSelected: false), LoadScenarioRule.onDeviceLine,
+                       "★ the iPad's solver would check Scenario 1 alone")
+        var strengthen = RunRequest(modelPath: "/m.step", material: "PLA", materialsPath: "/x", rulesPath: "/y", resolution: 40,
+                                    projectName: "p", anchorFaceIDs: [1], loadGroups: [.init(faceIDs: [5], force: SIMD3(0, 0, -10))],
+                                    minimizePlastic: false, designBox: .init(min: SIMD3(0, 0, 0), max: SIMD3(1, 1, 1)))
+        strengthen.scenarios = ok
+        XCTAssertNil(LoadScenarioRule.refusal(for: strengthen, workerSelected: true),
+                     "★ scenarios WITH Redesign to strengthen are sent (his order 2026-10-26 12:46)")
+        XCTAssertEqual(strengthen.forWorker().redesign, StrengthenRoute.redesignValue, "and carry loads.redesign")
+    }
+
+    /// The gap: an anchor group deleted while the other is off leaves a scenario with none on; the request is refused
+    /// and the one-tap fix switches its anchors back on.
+    func testADeletedAnchorGroupNeverSendsAScenarioWithNoAnchor() {
+        var (f, s1, s2) = twoScenarios()
+        XCTAssertNil(f.setAnchor(anchorA, on: false, in: s2, order: [anchorA, anchorB]))
+        f.clearKind(anchorB)   // the group with the last anchor on is deleted
+        XCTAssertEqual(f.anchorsOn(in: s2, order: [anchorA, anchorB]), [], "★ the gap")
+        XCTAssertEqual(f.anchorsOn(in: s1, order: [anchorA, anchorB]), [anchorA])
+        f.switchAllAnchorsOn(in: s2)
+        XCTAssertEqual(f.anchorsOn(in: s2, order: [anchorA, anchorB]), [anchorA], "the one-tap fix")
     }
 
     /// The workspace wiring (source pins).
@@ -151,5 +261,9 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertTrue(src.contains("scenarioAnchorOff(g.id)"), "an anchor off here is dimmed, not hidden")
         XCTAssertTrue(src.contains("force.addScenario()"), "+ Add a load scenario")
         XCTAssertTrue(src.contains("LoadScenarioRule.info"), "the (i)")
+        XCTAssertTrue(src.contains("if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }"), "Optimize's pre-flight")
+        XCTAssertTrue(src.contains("force.switchAllAnchorsOn(in: s.id)"), "the gap's one-tap fix")
+        // (the controls themselves are found ON SCREEN in LoadScenarioHostedTests; these only pin the wiring)
+        XCTAssertFalse(src.contains("selectionsListBody"), "★ no dead copy in the old library card")
     }
 }
