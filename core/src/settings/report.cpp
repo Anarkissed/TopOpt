@@ -648,7 +648,23 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
-           ", \"note\": " + str_json(v.note) +
+           ", \"note\": " + str_json(v.note) + ", \"attempts\": [" +
+           [&v]() {
+             std::string a;
+             for (std::size_t q = 0; q < v.attempts.size(); ++q) {
+               const StrengthenAttemptReport& t = v.attempts[q];
+               a += std::string(q ? ", " : "") + "{\"attempt\": " +
+                    std::to_string(t.attempt) +
+                    ", \"verified_margin\": " + num_json(t.verified_margin) +
+                    ", \"specks\": " + std::to_string(t.specks) +
+                    ", \"speck_volume_mm3\": " + num_json(t.speck_volume_mm3) +
+                    ", \"keep_clear_voxels\": " + std::to_string(t.keep_clear_voxels) +
+                    ", \"anchors_attached\": " + (t.anchors_attached ? "true" : "false") +
+                    ", \"rejection_reason\": " + str_json(t.rejection_reason) + "}";
+             }
+             return a;
+           }() +
+           "]" +
            ", \"fine_start\": {\"from\": " + str_json(v.fine_start) +
            ", \"loose_pieces\": " + std::to_string(v.fine_start_loose) +
            ", \"loose_voxels_removed\": " +
