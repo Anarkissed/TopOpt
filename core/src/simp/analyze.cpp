@@ -245,6 +245,9 @@ FixedDesignAnalysis analyze_fixed_design(
   // malformed-problem throws (bad index, void-only system) are NOT caught and still
   // propagate.
   SimpCompliance sc;
+  // The voxels the solve held at the floor as LOOSE (empty when none, and on
+  // every path that is not the matrix-free solve).
+  std::vector<char> loose;
   try {
     if (has_lattice) {
       // Composite solve: solid voxels use the scalar-penalized isotropic modulus
@@ -267,13 +270,25 @@ FixedDesignAnalysis analyze_fixed_design(
                                          loads, cg_tolerance, cg_max_iterations,
                                          &sc.cg);
     } else {
-      // Certification reads stresses from this field at each voxel's TRUE
-      // modulus, so it must never solve a floating speck at the floor
-      // (the safe retry's arm G): forbid it whatever an outer scope permits.
+      // THE CONNECTION RULE (ruling 2026-10-25) holds here too: the matrix-free
+      // solve takes the LOOSE pieces — material touching no support or load
+      // through solid — out of the system (solved at the floor modulus). The
+      // forbid scope no longer changes that; it is kept as the record that this
+      // is a certified solve (mg_island_permit_stats). A loose piece carries no
+      // load, so the stress loop below reads ZERO there (at the floor its
+      // strain is the void's, which E_solid would turn into a stress the piece
+      // does not carry).
       FeaIslandDropForbid no_island_drop;
       sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
+      if (solver_kind == SolverKind::MultigridCG_Matfree) {
+        const std::vector<int>& lv = fea_matfree_last_dropped_islands();
+        if (!lv.empty()) {
+          loose.assign(grid.voxel_count(), 0);
+          for (int e : lv) loose[static_cast<std::size_t>(e)] = 1;
+        }
+      }
     }
   } catch (const SolverNonConvergence& e) {
     out.non_convergent = true;
@@ -356,6 +371,12 @@ FixedDesignAnalysis analyze_fixed_design(
           lat_rho_hi = std::max(lat_rho_hi, rho);
           lat_max_vm = std::max(lat_max_vm, st.von_mises);
           effective_material += rho;
+        } else if (!loose.empty() && loose[idx]) {
+          // LOOSE: printed (it counts toward the mass) but connected through
+          // solid to no support or load, so it carries no load: zero stress,
+          // left out of the strength maxima and the interlayer field. The
+          // export's bridge / item-47 rules decide what happens to it.
+          effective_material += 1.0;
         } else {
           const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson,
                                             grid.spacing, ue);

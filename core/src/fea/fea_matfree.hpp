@@ -529,6 +529,9 @@ bool mg_coarse_space_hook_installed();
 // granularity (a few hundred applies past the deadline) is nothing against a
 // budget measured in minutes.
 inline constexpr int kSolveDeadlinePollIters = 256;
+// THE SAFETY NET's poll cadence (fea.hpp SolverStopped): one steady-clock read
+// every this-many Jacobi-CG iterations.
+inline constexpr int kSafetyNetPollIters = 16;
 
 // The armed deadline for THIS thread, in absolute mf_steady_ms() milliseconds;
 // 0 = disarmed. Thread-local and sticky, like the stagnation latch and the
@@ -537,6 +540,29 @@ inline constexpr int kSolveDeadlinePollIters = 256;
 inline double& mf_solve_deadline() {
   static thread_local double deadline = 0.0;
   return deadline;
+}
+
+// THE SAFETY NET's time limit for THIS thread's matrix-free Jacobi-CG solves
+// (fea.hpp SolverStopped), in milliseconds from the start of the CG. The
+// production value is kSolverSafetyNetMs; only mf_test_safety_net_ms (TEST
+// ONLY) changes it. Polled on the kSolveDeadlinePollIters cadence.
+inline double& mf_safety_net_ms() {
+  static thread_local double ms = kSolverSafetyNetMs;
+  return ms;
+}
+// TEST ONLY: set the net's time limit; <= 0 restores kSolverSafetyNetMs.
+inline void mf_test_safety_net_ms(double ms) {
+  mf_safety_net_ms() = ms > 0.0 ? ms : kSolverSafetyNetMs;
+}
+// The absolute mf_steady_ms() at which THIS thread's running Jacobi-CG solve's
+// safety net fires; 0 = no such solve running. mf_cg_solve sets it for its own
+// duration, so a long setup it calls — GenEO's basis build (877 s measured on
+// his Carriage Arms at res 96) — stands down at the limit instead of running
+// past it (the net is polled only between CG iterations). Read on the calling
+// thread; a pool worker must be handed the value.
+inline double& mf_safety_net_deadline() {
+  static thread_local double d = 0.0;
+  return d;
 }
 
 // SAFE-RETRY probes (tests / diagnostics only; production never calls these).
@@ -561,16 +587,24 @@ MgSmootherProbe mg_smoother_probe(const VoxelGrid& grid, double poisson,
                                   const std::vector<double>& elem_youngs,
                                   int power_iters, int vcycle_iters);
 
-// Arm G's census on (grid, elem_youngs, bcs, loads), exactly as the safe retry
-// computes it.
+// THE CONNECTION RULE's census on (grid, elem_youngs, bcs, loads), exactly as
+// every matrix-free solve computes it (multigrid.cpp scan_islands): pieces are
+// FACE-connected components of the solid voxels; a piece is LOOSE iff none of its
+// element nodes carries a Dirichlet BC or a non-zero load; every loose voxel is
+// in `drop` (ascending) and is solved at `floor_e`. `frozen_loose` counts loose
+// pieces holding a frozen voxel (report only); `majority_loose` = more than half
+// the solid voxels are loose (a reported warning, never a refusal).
+#define TOPOPT_LOOSE_PIECE_RULE 1
 struct MgIslandCensus {
   long long elements = 0, solid = 0;
   int pieces = 0, unanchored = 0, largest_unanchored = 0;
   long long unanchored_voxels = 0;
-  int kept_frozen = 0, kept_big = 0, kept_hinged = 0, droppable = 0;
-  long long droppable_voxels = 0;
-  bool capped = false;
+  int frozen_loose = 0;
+  int droppable = 0;               // == unanchored: every loose piece goes
+  long long droppable_voxels = 0;  // == unanchored_voxels
+  bool majority_loose = false;
   double floor_e = 0.0;
+  double ms = 0.0;                 // the flood fill's wall time
   std::vector<int> drop;
 };
 MgIslandCensus mg_island_census(const VoxelGrid& grid,
@@ -578,15 +612,39 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
                                 const std::vector<DirichletBC>& bcs,
                                 const std::vector<NodalLoad>& loads);
 
+// Per run (reset with fea_matfree_reset_mg_stagnation_latch): the connection
+// rule's census on this thread's matrix-free solves. `scanned` = solves that
+// ran the census, `with_loose` = those that took loose pieces out; flood-fill
+// wall times (total / max / last); the largest loose set seen; the last
+// census's numbers; how many "more than half the solid is loose" warnings
+// printed (at most one per run). Observation only.
+struct MgLooseStats {
+  long long scanned = 0, with_loose = 0;
+  double ms_total = 0.0, ms_max = 0.0, last_ms = 0.0;
+  int max_loose = 0;
+  long long max_loose_voxels = 0;
+  int last_pieces = 0, last_loose = 0, last_frozen_loose = 0;
+  long long last_loose_voxels = 0;
+  int majority_warnings = 0;
+};
+const MgLooseStats& mg_loose_stats();
+// TEST ONLY — never called by production code. false turns the connection rule
+// OFF on this thread (every solve then sees its loose pieces at their true
+// modulus, the pre-rule system), so a test can build a stalled shipped attempt
+// on purpose to exercise the safe retry / fallback machinery. true (the
+// default) restores it.
+void mg_test_loose_rule(bool enable);
+
 // The LAST safe-retry attempt on this thread (tests / diagnostics; read-only
 // observation of the decisions the retry already makes — nothing reads it back).
 // Reset with fea_matfree_reset_mg_stagnation_latch(); seq == 0 = none this run.
+//   dropped          the solve had LOOSE pieces out of its system (the
+//                    connection rule; the retry and the fallback both solve it).
 //   res / r0         the retry's own relative residual at its end / start, on
-//                    the system it solved (the island-dropped one when
-//                    `dropped`); an attempt that breaks down before its first
-//                    update reports res == its starting residual.
-//   seeded_fallback  its iterate was handed to the exact Jacobi-CG fallback
-//                    (only when, on the exact system, it beats the fallback's
+//                    the system it solved; an attempt that breaks down before
+//                    its first update reports res == its starting residual.
+//   seeded_fallback  its iterate was handed to the Jacobi-CG fallback (only
+//                    when, on the fallback's system, it beats the fallback's
 //                    base start — the warm guess, or cold when that guess is
 //                    worse than zero — in BOTH rel res and energy).
 //   cold_fallback    the fallback started from zero instead of a warm guess
@@ -608,10 +666,12 @@ struct MgSafeAttemptReport {
   bool productive = false;
   int cycles = 0;
   double res = 0.0, r0 = 0.0;
-  // The same iterate / start on the EXACT system (the one the Jacobi-CG
-  // fallback solves; differs from res / r0 when islands were dropped). Seeding
-  // and `productive` are judged on these. res_exact = -1 when not evaluated
-  // (the attempt converged, or its iterate was unusable).
+  // The same iterate / start evaluated afresh on the system the Jacobi-CG
+  // fallback solves — since the connection rule the retry's own system too, so
+  // these equal res / r0 up to the recurrence's drift (before it, an old arm-G
+  // retry could solve an island-dropped system). Seeding and `productive` are
+  // judged on these. res_exact = -1 when not evaluated (the attempt converged,
+  // or its iterate was unusable).
   double res_exact = -1.0, r0_exact = -1.0;
   int consecutive_failures = 0;
 };
@@ -620,8 +680,10 @@ const MgSafeAttemptReport& mg_last_safe_attempt();
 // Per matrix-free MG solve on this thread since the last
 // fea_matfree_reset_mg_stagnation_latch(): how many ran with the island drop
 // PERMITTED (a FeaIslandDropPermit held, no FeaIslandDropForbid) and how many
-// did not, and which the LAST one was. Observation only. A certified solve (a
-// run's final compliance, certification) must be a not-permitted one.
+// did not, and which the LAST one was. Observation only: since the connection
+// rule the scopes no longer change what is solved (every solve takes its loose
+// pieces out); they still mark the certified solves (final compliance,
+// certification), which run not-permitted.
 struct MgIslandPermitStats {
   long long permitted = 0;
   long long not_permitted = 0;

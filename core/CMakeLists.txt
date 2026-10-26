@@ -856,6 +856,13 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_mg_safe_retry PRIVATE
     MG_SAFE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mg_safe")
   add_test(NAME fea_mg_safe_retry COMMAND test_mg_safe_retry)
+  # THE CONNECTION RULE (ruling 2026-10-25): every solve takes its LOOSE pieces
+  # (26-connected, touching no support or load, any size, hinged or frozen) out
+  # of the system; ~290 of them cost the solver nothing.
+  add_executable(test_loose_pieces tests/unit/test_loose_pieces.cpp)
+  target_link_libraries(test_loose_pieces PRIVATE topopt)
+  target_include_directories(test_loose_pieces PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_loose_pieces COMMAND test_loose_pieces)
 
   # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
   # That task let a measurement harness supply the prolongators for levels 2..

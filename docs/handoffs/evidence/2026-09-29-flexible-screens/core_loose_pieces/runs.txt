@@ -1,0 +1,96 @@
+# core-loose-pieces — evidence (2026-10-25/26). Branch claude/core-loose-pieces from 322b1c78 (core 180a23637fc6, the worker's core).
+# NOT pushed. Merge only; nothing rebased, forced, amended, reset or stashed. The worker's CLI (worker-core-61cfce05) was never touched.
+# His rig files (job8bc1e265 = Fine, job02a425e5 = Balanced: job.json + model.step) were read from the scratch copies only; NOT copied
+# into any repo, worktree, fixture or this folder. Only numbers are recorded here. Builds: core/build-loose (worktree), cmp/{base,head*}
+# (git archives, untracked), nice -n 10, -j <= 8. All CLI runs: `topopt-cli run <scratch>/<job>/job.json --out <scratch>/<run>/out`.
+# The machine was shared (load 10-86) until ~20:20, when the other core agent freed it; wall times below are under that load.
+
+## COMMITS
+#   649d2aeb  connection rule (26-connected at that commit) + safety net (time limit / auto cap -> SolverStopped, report.json "stopped")
+#   0e808d1f  strengthen: fine run starts from the cleaned coarse design; PROGRESS lines through the pass
+#   592f48f0  safety net bounds GenEO's basis build (stands down at the deadline); poll every 16 iterations
+#   e46b49cd  FACE (6-) connectivity (reviewer's ruling 2026-10-26 00:08 UTC); fragile edge/corner joints reported in report.json
+#   (this file's commit: docs only)
+
+## RED (today's code = 322b1c78 = core 180a23637fc6)
+#   His Fine job, worker.log 8bc1e265 (the worker's own run, same core): fine solve 1 (465,760 elements): "2031 unanchored of 2038 pieces
+#   (32307 vox, largest 101) ... kept big 326, kept hinged 406, dropped 1299 islands" -> l1 MG-PCG did not converge in 600 cycles (rel res
+#   1.476e2) -> Jacobi-CG fallback with no limit, 16:42 -> 17:44 killed (rc -9) after 40 min in mf_cg_solve.
+#   His Balanced job, worker.log 02a425e5: fine solve 1 (197,160 elements): "1122 unanchored of 1128 pieces (15420 vox, 7.8 % of elements)
+#   ... CAP EXCEEDED: nothing dropped" -> l1 did not converge in 2,400 cycles (rel res 1.73e-2) -> seeded Jacobi-CG fallback, open-ended.
+#   test_loose_pieces on 322b1c78 (test_loose_pieces_RED_322b1c78.log): 5 FAIL — L1 (0 of 4,617 planted loose voxels at the floor), L2 (the
+#   l1 MG-PCG did not converge in 4,200 cycles; Jacobi-CG ran out its 40,000-iteration cap), L3, N1 x2 (the uncapped fallback threw a
+#   rung-rejection SolverNonConvergence, not a stop). 320 s.
+
+## GREEN: test_loose_pieces at the final head (test_loose_pieces_GREEN_head.log): all checks pass, 15 s.
+#   288-slot fixture: 346 loose pieces (4,617 voxels; 54 bars of 63 voxels, 58 hinged pairs = 116 pieces, 1 frozen) around an anchored 7x7
+#   beam: every loose voxel at the floor and nothing else; the solve converges on multigrid (no Jacobi-CG fallback) and is BIT-IDENTICAL to
+#   the clean beam in the same MG cycles (300 shipped + 54 l1). L4: a corner-hinged cube and an edge-hinged bar on the beam are LOOSE; a
+#   face-joined cube is part of the body; a loaded voxel is anchored. N1-N4: the safety net (cap / time limit -> SolverStopped; an explicit
+#   caller cap keeps SolverNonConvergence; GenEO's build stands down at the deadline).
+
+## FLOOD FILL (the census, one pass per solve), ms, from the [loose] lines
+#   his Fine grid, 465,760 elements: 6.6 ms (run A, 26-conn); 9.0-23.4 ms (experiments, both rules, machine at load 40-60)
+#   Balanced fine, 197,160 elements: 3.1-5.1 ms;  coarse grids 59,040 / 24,462 elements: 1.2-3.2 / 0.4-1.8 ms
+
+## RUN A — Fine, connection rule only (26-conn), OLD strengthen hand-off (fine run starts from the level set's hole array); binary = the working tree before 649d2aeb (180a23637fc6-dirty-b0f84ac2: rule + net, no stop report)
+#   18:23:53 -> 19:27:40 (63.8 min), exit 1 (that binary predates the report.json stop handling).
+#   as drawn / ceiling / 6 coarse runs: every safe attempt converged (coarse run 4 first solve: 526 loose pieces / 2,552 voxels out, 749 l1 cycles).
+#   FINE solve 1: 1,313 loose of 1,319 pieces (12,079 voxels, largest 32) at the floor, flood fill 6.6 ms -> l1 MG-PCG did NOT converge in 600
+#   cycles (rel res 1.278e2; the old run: 1.476e2). Taking the loose pieces out did NOT fix this start.
+#   -> Jacobi-CG fallback -> "topopt-cli: stopped: the solver did not converge (the matrix-free Jacobi-CG ran 512 iterations in 1362 s, past its
+#   600 s time limit, at rel res 2.939e+00)". The 762 s overshoot was GenEO's LOBPCG basis build (sampled: geneo_engage_now -> lobpcg), which
+#   592f48f0 makes stand down at the deadline (N4).
+
+## EXPERIMENTS — Fine grid, straight to the fine run at vf 0.0987 from the hole array (scratch-only hooks, never committed), 3 PLSM iterations
+#   census on that start: 26-conn 839 loose of 843 pieces (19,811 vox); 6-conn 1,869 loose of 1,876 (48,499 vox); hinge-only voxels 28,688 of 108,130
+#   26-conn rule:                     l1 did not converge in 600 cycles, rel res 3.114e1
+#   6-conn rule (face):               l1 did not converge in 600 cycles, rel res 2.215e2
+#   26-conn + 2,500-cycle first window: l1 did not converge in 2,500 cycles, rel res 1.111e1
+#   => the hole-array start at this fraction is ill-conditioned for the l1 MG whatever the piece rule; strengthen no longer hands it to the fine run.
+
+## RUNS B / C — 26-conn rule + the clean coarse-design hand-off (binary 0e808d1f), stopped by me at 20:23 to switch to the face rule
+#   B Balanced 18:44 -> 20:23: as drawn, ceiling, coarse search, version 1 fine (start vf 0.0987, 0 loose pieces in the hand-off) + 1 repair,
+#     version 2 coarse + fine (start vf 0.1233): 743 safe attempts, 743 converged, 0 Jacobi-CG fallbacks; fine solves 60-200 l1 cycles.
+#     667 PROGRESS lines, 0 backward jumps.
+#   C Fine 19:06 -> 20:23: version 1 fine start vf 0.0200 (0 loose in the hand-off); fine solves 1-5 converged in 426 / 163 / 179 / 147 / 140 l1
+#     cycles, no fallback on the fine grid. 499 safe attempts, 497 converged; 2 coarse-grid solves (59,040 elements, the 6th coarse run, from the
+#     hole array at a low fraction) fell to the Jacobi-CG fallback and finished there. 453 PROGRESS lines, 0 backward jumps.
+
+## FINAL — RUNS F (Fine, job8bc1e265) and G (Balanced, job02a425e5): binary e46b49cd (core c523445a638b, face rule + clean hand-off +
+## net + GenEO stand-down), both started 20:26:36 (--threads 5 / 4), stopped by me (own PIDs) at 22:00:59 after 94 min (> 90 min rule),
+## to give the CPU to the full ctest. Neither stopped, hung or fell into an open-ended fallback.
+#   F Fine: as drawn + ceiling + 7 coarse runs (59,040 elements), then version 1's fine run from the cleaned coarse design at vf 0.0380
+#     ("[strengthen] version 1: fine start at vf 0.0380 from the coarse design: 0 loose piece(s) taken out (0 design voxels), 0 non-frozen
+#     loose voxels left, 0 frozen piece(s) still loose ; 7.0 ms").
+#     FINE GRID (465,760 elements): 105 of 105 solves CONVERGED on l1 MG-PCG, 0 Jacobi-CG fallbacks. Solves 1-5: 186 / 136 / 177 / 128 / 127
+#     l1 cycles (11-16 s each); 6-55: 6,905 cycles (138 avg); 56-105: 6,768 cycles (135 avg). Fine solve 1 took 2 loose pieces (78 voxels,
+#     largest 73) out, flood fill 3.3 ms; later ones 1-2 voxels, 3.4 ms. Version 1 still in its fine run at the stop.
+#     Coarse grid: 3 of 443 safe attempts fell to the Jacobi-CG fallback (in two of the coarse runs, which start from the level set's hole
+#     array at a low fraction) and finished there (the run went on).
+#     PROGRESS: 503 lines, 0 backward jumps; first "PROGRESS rung=0 rungs=3 iter=0 stage=strengthen step=reference", last
+#     "PROGRESS rung=0 rungs=3 iter=500 stage=strengthen step=fine".
+#   G Balanced: version 1 fine (vf 0.0592, 0 loose in the hand-off) + 1 repair fine run, version 2 coarse search + fine (vf 0.1293; the
+#     hand-off lost 1 loose piece, 3 design voxels, 0 left).
+#     FINE GRID (197,160 elements): 1 fine-grid solve fell to the Jacobi-CG fallback (version 1's first fine run, 84 solves: one of solves
+#     56-84, its last stretch) and finished there; every other fine solve converged on l1 MG (version 1: 85-132 cycles each in the first
+#     five; the repair and version 2's fine run: all converged). Coarse grid (24,462 elements): 0 fallbacks. In all 1,118 safe attempts,
+#     1,117 converged.
+#     PROGRESS: 991 lines, 0 backward jumps; last "PROGRESS rung=1 rungs=3 iter=464 stage=strengthen step=fine".
+#   Before (worker.log, same jobs, core 180a23637fc6): both hung at their FIRST fine solve (Fine 40 min in an unlimited Jacobi-CG; Balanced
+#   open-ended in the seeded fallback).
+
+## TESTS
+#   narrow (build-loose, e46b49cd): test_loose_pieces, test_mg_safe_retry (112 s), test_export_bodies, test_strengthen 18/18, test_minimize_plastic
+#   597/597, test_geneo 55/55, test_matfree, test_mgcg_matfree, test_recycle, test_plsm, test_analyze_fixed_design — all pass.
+#   17-test comparison: compare17.txt (16 IDENTICAL; test_recycle '[mgcg void]' differs: 5 edge/corner-hinged pieces now loose; passes).
+#   Full ctest: see ctest_full.txt.
+
+## SAMPLES
+#   PROGRESS (run G stdout): PROGRESS rung=0 rungs=3 iter=0 stage=strengthen step=reference | PROGRESS rung=0 rungs=3 iter=1 stage=strengthen step=coarse | PROGRESS rung=0 rungs=3 iter=331 stage=strengthen step=fine | PROGRESS rung=0 rungs=3 iter=400 stage=strengthen step=verify | PROGRESS rung=1 rungs=3 iter=0 stage=strengthen step=search
+#   fragile joints (report.json written by the ctest's own CLI runs, cli_out1 / dbx_run): "fragile_joints": {"count": 15, "note": "15 places where
+#   the part holds together only along an edge or at a corner: fragile when printed"}
+#   stop report (main.cpp, on SolverStopped; the exception is unit-tested (N1-N4) and fired for real in run A, whose binary predated the
+#   report.json writer — the writer itself was not exercised end-to-end by a CLI run): stderr "topopt-cli: stopped: the solver did not converge — job
+#   <job folder> (<job file>, model <model>): <detail>", report.json {"status": "stopped", "error": "stopped: the solver did not converge",
+#   "job": ..., "job_file": ..., "model": ..., "detail": ..., "solver": {iterations, relative_residual, elapsed_ms}}, exit code 4.

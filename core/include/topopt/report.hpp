@@ -276,7 +276,12 @@ struct VariantReport {
   std::vector<BridgeHoldReport> bridge_holds;
   long long lost_anchor_voxels = 0;
   std::vector<int> lost_anchor_face_ids;
-  std::vector<int> lost_anchor_region_ids;
+  std::vector<int> lost_anchor_region_ids;  // FRAGILE JOINTS (reviewer's ruling 2026-10-26): places where the printed part
+  // holds together only along an edge or at a corner (two face-connected pieces
+  // touching through edge / corner neighbours only). A hinge in the solve,
+  // fragile when printed; reported, never fixed. report.json "fragile_joints"
+  // only when > 0, so every other line keeps its exact bytes.
+  int fragile_joints = 0;
 };
 
 // ── WHAT FROZE THE PART, and the rungs it made redundant (CORE LIST item 40) ──
@@ -357,6 +362,18 @@ struct StrengthenVersionReport {
   int repairs = 0;
   double seconds = 0.0;
   std::string note;
+  // THE FINE START (core-loose-pieces, ruling 2026-10-25: don't carry specks
+  // across grids). Where the version's first fine run started — "coarse design"
+  // (the passing coarse design resampled onto the fine grid) or "hole array"
+  // (no design to hand on; not expected) — how many LOOSE pieces the hand-off
+  // held (face-connected, touching no support or load) and the design voxels they
+  // lost, the non-frozen loose voxels left (0: the start holds none), and the
+  // frozen-only pieces still loose (the solves take those out of the system).
+  std::string fine_start;
+  int fine_start_loose = 0;
+  long long fine_start_loose_voxels_removed = 0;
+  long long fine_start_loose_left = 0;
+  int fine_start_frozen_loose = 0;
 };
 struct StrengthenReport {
   bool evaluated = false;
