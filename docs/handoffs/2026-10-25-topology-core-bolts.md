@@ -2,7 +2,14 @@
 
 Agent: TO-core. Reviewer: "reviewer" on agent-comms #TO-core; #362 on #CoreGroup owns the solver files.
 Branch: `claude/topology-core-bolts`, made from `origin/claude/flexible-screens` at `322b1c78` (the solver cure
-included), plus a docs-only merge of `origin/claude/topology-core`. Merge only, never force.
+included), plus a docs-only merge of `origin/claude/topology-core`, plus #362's core-loose-pieces (`4d67e43d`, merged
+at `ec391df6`). Merge only, never force.
+
+In the merge, analyze.cpp keeps both the loose-voxel set and the contact loop. `loose` is cleared at each contact
+solve, so the stress loop reads the last solve's set (#362 agreed). simp.cpp's active-domain retry rethrows
+SolverStopped (#362's ask). After the merge, his arms at res 48 give identical margins and iteration counts.
+
+Evidence for the reviewer: `~/dev/TopOpt/reviewer-inbox/2026-10-25-real-bolts/README.md`.
 
 ## The item: REAL BOLTS (the reviewer's brief of 2026-10-25 20:10, approved by him)
 
@@ -55,7 +62,8 @@ solver signature changed. The springs enter:
 - Any stiffness on the released half acts as glue: the steel barely compresses (~2e-5 mm), while the half pulling away
   moves by the part's own stretch (~1e-3 mm). An isotropic 1e-3 per-area stabilisation carried 23–44% of the load.
 - Equal stiffness per node over-stiffened the bore's edge rows, which have half the area, and drew the load to the top
-  and bottom edges. Area weighting fixed it: 7.53 / 6.48 / 6.50 at res 48 / 64 / 96, with the peak in the bearing zone.
+  and bottom edges. Area weighting fixed it: 7.53 / 6.48 / 6.50 at res 48 / 64 / 96, with the peak in the bearing zone
+  (7.53 / 6.55 / 6.50 with the hysteresis band, 0.76 % from 64 to 96).
 - Without the hysteresis band, his arms' contact set was still changing after 6 solves (chatter).
 
 ## The stick ruling (20:37), withdrawn (21:45): option A, near-frictionless
@@ -65,7 +73,7 @@ any linear stick stiff enough to hold the part makes the stuck / released bounda
 
 | tangential | res 48 / 64 / 96 (/ 128) | 64 → 96 |
 |---|---|---|
-| 1e-4 per mm² (nearly frictionless) | 7.53 / 6.48 / 6.50 | +0.4 % |
+| 1e-4 per mm² (nearly frictionless) | 7.53 / 6.48 / 6.50 (with the band: 7.53 / 6.55 / 6.50) | +0.4 % (−0.76 %) |
 | 1 × diagonal | 6.70 / 4.67 / 4.24 | −9 % |
 | 0.1 × diagonal | 7.88 / 6.39 / 5.27 | −17.5 % |
 | 0.01 × diagonal | 8.14 / 7.50 / 7.08 | −5.5 % |
