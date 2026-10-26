@@ -108,17 +108,6 @@ struct KnockdownSpec {
 // 2026-10-25 21:45). See FixedDesignAnalysis::contact_tangent_share.
 inline constexpr double kAnchorsSlidingShare = 0.05;
 
-// THE CORNER FIX (the reviewer's ruling of 2026-10-26 13:12): the radius, in mm, of the
-// critical volume every margin's stress is averaged over (the Theory of Critical
-// Distances, volume method: a hemisphere of radius 1.54 L at a surface hot spot,
-// Bellett et al. 2005 as used in Taylor 2007). L = 0.934 mm, the critical distance
-// Ahmed & Susmel 2017 (FIS 41:252) measured on printed PLA (point method at L/2 = 0.467
-// mm predicted notched strength within 20 % for every notch sharpness): the only
-// measured L for a printed polymer, used for every FDM material (none carries a
-// fracture toughness to derive its own). See FixedDesignAnalysis::tcd_radius_mm.
-inline constexpr double kTcdCriticalDistanceMm = 0.934;
-inline constexpr double kTcdRadiusMm = 1.54 * kTcdCriticalDistanceMm;
-
 struct FixedDesignAnalysis {
   // Per-voxel von Mises stress over the PRINTED material (density > iso),
   // grid-indexed (grid.voxel_count()), MPa; zero off the printed set.
@@ -133,13 +122,8 @@ struct FixedDesignAnalysis {
   int support_volume_voxels = 0;
   std::size_t printed_voxels = 0;
   double printed_fraction = 0.0;  // printed_voxels / part_solid (0 if part_solid==0)
-  // The stresses every margin is taken on: the critical-distance (TCD) averages (see
-  // kTcdRadiusMm). The single worst voxel's raw values are kept beside them.
   double max_von_mises = 0.0;
   double max_interlayer_tension = 0.0;
-  double peak_von_mises_raw = 0.0;
-  double peak_interlayer_raw = 0.0;
-  double tcd_radius_mm = 0.0;
   StressMargin margin;  // SOLID margin (the reported/displayed value)
   V3Report v3;          // §7 V3 suite on the fixed density (min-feature count, mesh, ...)
   // The acceptance gate, on the INFILL-ADJUSTED margin (the optimizer's ladder

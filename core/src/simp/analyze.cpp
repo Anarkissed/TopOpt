@@ -368,9 +368,6 @@ FixedDesignAnalysis analyze_fixed_design(
   // retained grid-indexed (M7.0b field (a)); printed voxels are counted for mass.
   std::vector<std::array<double, 6>> stress(grid.voxel_count(),
                                             std::array<double, 6>{});
-  // The voxels whose stress is the solid material's (printed, not latticed, not loose):
-  // the set the critical-distance average reads (see THE CORNER FIX below).
-  std::vector<char> tcd_solid(grid.voxel_count(), 0);
   out.von_mises_field.assign(grid.voxel_count(), 0.0);
   out.stress_tensor_field.assign(6 * grid.voxel_count(), 0.0);
   const int node_count = fea_node_count(grid);
@@ -444,7 +441,6 @@ FixedDesignAnalysis analyze_fixed_design(
           const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson,
                                             grid.spacing, ue);
           stress[idx] = st.sigma;
-          tcd_solid[idx] = 1;
           out.von_mises_field[idx] = st.von_mises;
           if (knockdown.width_aware) {
             // k_v in (0, 1] (wall_area_fraction in [0,1], core knockdown >= floor),
@@ -469,63 +465,6 @@ FixedDesignAnalysis analyze_fixed_design(
           effective_material += 1.0;
         }
       }
-  // ── THE CORNER FIX: the Theory of Critical Distances, volume method (the reviewer's
-  // ruling of 2026-10-26 13:12; Ahmed & Susmel 2017, 2019; Taylor 2007) ─────────────
-  // A sharp corner reads a higher peak at every finer grid, so a margin taken at the
-  // single worst voxel depends on the resolution. The TCD reads the stress a material
-  // averages over a critical volume instead: every margin below is taken on the stress
-  // TENSOR averaged over the SOLID voxels within kTcdRadiusMm of each voxel (a sphere;
-  // at a surface hot spot its solid part is the method's hemisphere), so a uniform
-  // stress is never forgiven (its average is itself) and a thin member is averaged
-  // only over itself. Von Mises, the interlayer tension (any build direction, the
-  // orientation scorer included) and the margins all read the averaged tensor; the
-  // fields (von_mises_field / stress_tensor_field) stay the raw ones, for display, and
-  // the raw peaks are kept (peak_von_mises_raw / peak_interlayer_raw). A grid whose
-  // voxel is coarser than the radius averages each voxel over itself alone: byte for
-  // byte the pre-TCD margin.
-  out.peak_von_mises_raw = max_von_mises;
-  out.peak_interlayer_raw = max_interlayer_tension(grid, stress, build_dir);
-  out.tcd_radius_mm = kTcdRadiusMm;
-  if (kTcdRadiusMm >= grid.spacing) {
-    const int r = static_cast<int>(std::floor(kTcdRadiusMm / grid.spacing + 1e-9));
-    std::vector<std::array<int, 3>> offsets;
-    for (int dk = -r; dk <= r; ++dk)
-      for (int dj = -r; dj <= r; ++dj)
-        for (int di = -r; di <= r; ++di)
-          if ((di * di + dj * dj + dk * dk) * grid.spacing * grid.spacing <=
-              kTcdRadiusMm * kTcdRadiusMm * (1.0 + 1e-12))
-            offsets.push_back({di, dj, dk});
-    std::vector<std::array<double, 6>> averaged(grid.voxel_count(),
-                                                std::array<double, 6>{});
-    max_von_mises = 0.0;
-    for (int k = 0; k < grid.nz; ++k)
-      for (int j = 0; j < grid.ny; ++j)
-        for (int i = 0; i < grid.nx; ++i) {
-          const std::size_t idx = grid.index(i, j, k);
-          if (!tcd_solid[idx]) continue;
-          std::array<double, 6> sum{};
-          int n = 0;
-          for (const auto& o : offsets) {
-            const int x = i + o[0], y = j + o[1], z = k + o[2];
-            if (x < 0 || y < 0 || z < 0 || x >= grid.nx || y >= grid.ny || z >= grid.nz)
-              continue;
-            const std::size_t q = grid.index(x, y, z);
-            if (!tcd_solid[q]) continue;
-            for (int c = 0; c < 6; ++c)
-              sum[static_cast<std::size_t>(c)] += stress[q][static_cast<std::size_t>(c)];
-            ++n;
-          }
-          for (int c = 0; c < 6; ++c)
-            averaged[idx][static_cast<std::size_t>(c)] = sum[static_cast<std::size_t>(c)] / n;
-          const std::array<double, 6>& a = averaged[idx];
-          const double vm = std::sqrt(
-              0.5 * ((a[0] - a[1]) * (a[0] - a[1]) + (a[1] - a[2]) * (a[1] - a[2]) +
-                     (a[2] - a[0]) * (a[2] - a[0])) +
-              3.0 * (a[3] * a[3] + a[4] * a[4] + a[5] * a[5]));
-          if (vm > max_von_mises) max_von_mises = vm;
-        }
-    stress = std::move(averaged);
-  }
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
   // Per-node displacement of the SAME solve — no new solve. DOF-ordered; exposed
