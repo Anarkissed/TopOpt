@@ -54,6 +54,8 @@ public struct ImportSheet: View {
 
             Group { if flexDraft.on { FlexibleImportFilamentMenu(draft: flexDraft) } else { materialDropdown } }.padding(.top, DS.Space.l)   // Flexible (PR #362) H43: the flexible filaments when Flexible is chosen; else today's material dropdown
 
+            LibraryImportProjectRow(model: model).padding(.top, DS.Space.l)   // Library: which project the new part joins
+
             minimizePlasticRow.padding(.top, DS.Space.l)
 
             qualityPicker.padding(.top, DS.Space.l)
