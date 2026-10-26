@@ -220,7 +220,7 @@ namespace fea_detail {
 // spring adds nothing. No spring entry, no change.
 void add_contact_springs(SpMat& K, const std::vector<DirichletBC>& bcs, int num_nodes,
                          const char* who) {
-  if (!has_contact_springs(bcs)) return;
+  if (!has_springs(bcs)) return;
   std::vector<Eigen::Triplet<double>> t;
   for (const DirichletBC& b : bcs) {
     if (!(b.spring > 0.0)) continue;

@@ -339,7 +339,7 @@ FixedDesignAnalysis analyze_fixed_design(
     // springs carry (the rest is the stabilisation's: near 1 when the supports hold).
     Vec3 R{0.0, 0.0, 0.0}, T{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
     for (const DirichletBC& b : contact_bcs) {
-      if (!(b.spring > 0.0)) continue;
+      if (!(b.spring > 0.0) || !b.contact) continue;
       if (b.released) { ++out.contact_released; continue; }
       ++out.contact_engaged;
       const std::size_t d = 3 * static_cast<std::size_t>(b.node);

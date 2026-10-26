@@ -8,9 +8,15 @@
 
 namespace topopt {
 
-bool has_contact_springs(const std::vector<DirichletBC>& bcs) {
+bool has_springs(const std::vector<DirichletBC>& bcs) {
   for (const DirichletBC& b : bcs)
     if (b.spring > 0.0) return true;
+  return false;
+}
+
+bool has_contact_springs(const std::vector<DirichletBC>& bcs) {
+  for (const DirichletBC& b : bcs)
+    if (b.spring > 0.0 && b.contact) return true;
   return false;
 }
 
@@ -27,7 +33,7 @@ ContactUpdate contact_update(std::vector<DirichletBC>& bcs, const std::vector<do
   // Arms at res 48: still changing after 6 solves). tol = 1e-3 of the largest |u . n|.
   double gmax = 0.0;
   for (const DirichletBC& b : bcs)
-    if (b.spring > 0.0) gmax = std::max(gmax, std::fabs(gap(b)));
+    if (b.spring > 0.0 && b.contact) gmax = std::max(gmax, std::fabs(gap(b)));
   const double tol = 1e-3 * gmax;
   auto next_released = [&](const DirichletBC& b) {
     const double g = gap(b);
@@ -35,10 +41,10 @@ ContactUpdate contact_update(std::vector<DirichletBC>& bcs, const std::vector<do
   };
   int engaged_next = 0;
   for (const DirichletBC& b : bcs)
-    if (b.spring > 0.0 && !next_released(b)) ++engaged_next;
+    if (b.spring > 0.0 && b.contact && !next_released(b)) ++engaged_next;
   if (engaged_next == 0) r.kept_last = true;
   for (DirichletBC& b : bcs) {
-    if (!(b.spring > 0.0)) continue;
+    if (!(b.spring > 0.0) || !b.contact) continue;
     const bool next = !r.kept_last && next_released(b);
     if (next != b.released) {
       b.released = next;

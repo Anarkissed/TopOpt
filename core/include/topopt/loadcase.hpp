@@ -95,6 +95,16 @@ struct ProductionLoadCase {
     Vec3 force{0.0, 0.0, 0.0};  // fx, fy, fz in N
   };
   std::vector<LoadGroup> load_groups;
+  // LOAD SCENARIOS (job loads.scenarios, two or more; empty = one load case). Each
+  // scenario's own groups and the anchors ON in it. `anchor_face_ids` must hold their
+  // UNION (every anchor is a support somewhere, so all are tagged and padded) and
+  // `load_groups` scenario 1's (the mirror).
+  struct Scenario {
+    std::string name;
+    std::vector<LoadGroup> groups;
+    std::vector<int> anchor_face_ids;
+  };
+  std::vector<Scenario> scenarios;
 
   // WHICH LADDER (task 2026-08-03-growth-ladder). Both modes now SEARCH, both
   // recommend, and each is one line:

@@ -20,6 +20,7 @@
 #include <vector>
 
 namespace topopt {
+static std::string scenarios_json(const std::vector<ScenarioReport>& ss);  // LOAD SCENARIOS
 namespace {
 
 // --- Serialization --------------------------------------------------------
@@ -202,6 +203,8 @@ void emit_variant(std::string& out, const VariantReport& v,
     }
     out += "}";
   }
+  if (!v.scenarios.empty())  // LOAD SCENARIOS: every scenario's certification
+    out += ",\n" + in2 + "\"scenarios\": " + scenarios_json(v.scenarios);
   if (v.contact_rounds > 0)  // REAL BOLTS: the bearing anchors' contact loop
     out += ",\n" + in2 + "\"bearing\": {\"contact_rounds\": " +
            std::to_string(v.contact_rounds) +
@@ -671,6 +674,23 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
   out += "  }\n";
 }
 
+// LOAD SCENARIOS — the shared key (the reviewer's ruling of 2026-10-26 03:45):
+// [{"name", "margin", "peak_mpa", "peak_mm": [x, y, z], "governs", "unheld"}] (+ the
+// weak springs' share, "weak_share").
+static std::string scenarios_json(const std::vector<ScenarioReport>& ss) {
+  std::string out = "[";
+  for (std::size_t i = 0; i < ss.size(); ++i) {
+    const ScenarioReport& s = ss[i];
+    out += std::string(i ? ", " : "") + "{\"name\": " + str_json(s.name) +
+           ", \"margin\": " + num_json(s.margin) + ", \"peak_mpa\": " + num_json(s.peak_mpa) +
+           ", \"peak_mm\": [" + num_json(s.peak_mm.x) + ", " + num_json(s.peak_mm.y) + ", " +
+           num_json(s.peak_mm.z) + "], \"governs\": " + (s.governs ? "true" : "false") +
+           ", \"unheld\": " + (s.unheld ? "true" : "false") +
+           ", \"weak_share\": " + num_json(s.weak_share) + "}";
+  }
+  return out + "]";
+}
+
 std::string job_report_json(const JobReport& report) {
   std::string out = "{\n";
   out += "  \"material\": " + str_json(report.material) + ",\n";
@@ -685,6 +705,19 @@ std::string job_report_json(const JobReport& report) {
     emit_frozen_share(out, report.frozen_share,
                       /*trailing_comma=*/report.strengthen.evaluated);
   if (report.strengthen.evaluated) emit_strengthen(out, report.strengthen);
+  // LOAD SCENARIOS, top level: the scenarios of the LAST accepted line (the lightest
+  // that passed), else of the last rejected line. Absent when the job has none.
+  const std::vector<ScenarioReport>* top = nullptr;
+  for (const VariantReport& v : report.variants)
+    if (!v.scenarios.empty()) top = &v.scenarios;
+  if (top == nullptr)
+    for (const VariantReport& v : report.rejected)
+      if (!v.scenarios.empty()) top = &v.scenarios;
+  if (top != nullptr) {
+    // The block before it ended with "\n": reopen it with a comma.
+    out.insert(out.size() - 1, ",");
+    out += "  \"scenarios\": " + scenarios_json(*top) + "\n";
+  }
   out += "}\n";
   return out;
 }

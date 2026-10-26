@@ -152,3 +152,40 @@ needs 4–8× more cycles to resolve them.
 On the spring systems the shipped MG-CG smoother (damped Jacobi, ω 0.6) stalls: a steel spring with a tilted normal is
 a strongly coupled 3×3 block, and scalar Jacobi is unsafe on it. The cure's l1 retry converges every solve
 (365–481 cycles, about 1 s at res 48 on his arms), and the latch then skips the shipped attempt.
+
+## LOAD SCENARIOS, engine (the reviewer's overnight release ruling, 2026-10-26 03:45), on top of bolts
+
+The shared key: `loads.scenarios = [{"name", "groups": [as loads.groups], "anchor_face_ids": [its ON anchors]}]`, sent
+only with 2 or more. With 0 or 1 the job is today's, byte for byte (one scenario is parsed and ignored). report.json:
+each line carries `"scenarios": [{"name", "margin", "peak_mpa", "peak_mm", "governs", "unheld", "weak_share"}]`, and
+the top level carries the same array for the last accepted line (else the last rejected one). Each line's margin is
+the worst scenario's.
+
+- **Optimizer** (`simp_scenarios_compliance`, simp.cpp; used by both simp_optimize loops and PLSM): every iteration
+  solves every scenario, each warm-started from its own last field. I chose a SMOOTH MAX of the normalised
+  compliances: J = (Σ (c_s / c_s0)^8)^(1/8), with c_s0 the scenario's first compliance; gradient Σ (r_s/J)^7 / c_s0 ×
+  dc_s. The worst scenario dominates, and the gradient stays smooth. The coarse warm-start seed solves scenario 1
+  alone. The active domain is bypassed (it is a single-load-case optimisation).
+- **Certification** (minimize_plastic): every scenario is certified on the rung's design; the worst governs, and its
+  analysis is the rung's. That is the same design-level certification the ladder always ran; strengthen's
+  export-verify path is refused with scenarios tonight.
+- **An anchor OFF in a scenario** is NOT removed. It's held by weak, isotropic, non-contact springs
+  (`DirichletBC::contact = false`, never released): 1e-6 of the part's own element stiffness per node (E × h, what
+  a clamp holds the part with), sized in minimize_plastic, since only the driver knows the material. A region anchor
+  is ON in every scenario (the key names face ids). The loose-piece rule counts weak springs as supports, so it
+  classifies against the union of all scenarios' anchors.
+- **Guard:** a scenario whose weak springs carry more than 5 % of its load is `unheld`; the rung is rejected with
+  "<scenario>'s load has no path to its anchors" (after the belt and item 47, before the sliding guard and the margin).
+- **Refused tonight (the safer option):** a scenario with no anchor ON; a scenario whose load tags nothing; scenarios
+  with bearing anchors; scenarios with "Redesign to strengthen".
+- **Why it works:** Cool, Aage & Sigmund 2025 (SMO 68:73, doi 10.1007/s00158-025-04004-z): a load case whose only
+  path is the connection is among the cheapest connectivity methods; its caveat, that it only connects loads to
+  supports, is harmless here, because the push and the support sit on the two halves to be joined. A fixed load, no
+  self-weight (Bruyneel & Duysinx 2005).
+- **Test:** `test_scenarios` 10/10 (red first: it didn't compile before the feature). Two blocks with a gap; scenario
+  1 has both anchored, scenario 2 has block B's anchor off and a push on B. Result: one body; scenario 2 held (weak
+  springs 0.66 %) and governing at margin 47.2; accepted; report.json carries the key. At vf 0.70 the blocks stay
+  apart, scenario 2 is unheld, and the rung is rejected: the guard fires. Finding: one scenario alone also fills the
+  gap in this geometry (more material always lowers compliance, and the gap is the only free space), so that line is
+  printed as context, not as a control.
+- Not done (not a gate): the Carriage Arms run with three scenarios.
