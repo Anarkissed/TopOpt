@@ -12224,8 +12224,10 @@ JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
 // holds, doubled while it fails, then bisected) instead of moved +-5 % a step.
 //
 // Every optimize is an ordinary one-rung minimize_plastic call on the run's own
-// (domain_box_only, volume_basis_domain) options, fresh from uniform; no solver
-// file is involved. Each version's fraction is searched on a res/2 grid, the
+// (domain_box_only, volume_basis_domain) options; no solver file is involved.
+// The coarse runs start fresh; a version's fine run starts from the passing
+// coarse design with its loose pieces taken out (clean_strengthen_start; ruling
+// 2026-10-25), a repair from the design it repairs, cleaned the same way. Each version's fraction is searched on a res/2 grid, the
 // version is then run once at the job's resolution and VERIFIED: its exported
 // solid (variant_export_model_mesh, the shell the file carries) re-voxelized and
 // certified by analyze_job, the same certification `topopt-cli analyze` runs.
@@ -12355,13 +12357,126 @@ void strengthen_cap_site(StrengthenReport& sr, const VoxelGrid& G,
   sr.cap_note = line;
 }
 
+// ── DON'T CARRY SPECKS ACROSS GRIDS (core-loose-pieces, ruling 2026-10-25) ──
+// The fine run of a version starts from a DESIGN, never from a speckled one:
+// the coarse search's passing design (resampled onto the fine grid by voxel
+// centre) or, for a repair, the fine design it repairs. Before it is handed on,
+// its LOOSE pieces — face-connected pieces of material touching no support or
+// load, the solves' own rule (fea_loose_pieces) — lose their design material.
+// Frozen voxels cannot be removed (the run unions them in), so a frozen piece
+// that is loose stays and the solves' connection rule takes it out of each
+// system; `loose_left` counts the NON-frozen loose voxels left, which is 0 by
+// construction and checked by a second census. (Until this, the fine run
+// started from the parametric level set's hole array at the coarse fraction:
+// on his Carriage Arms at that fraction it was 2,038 pieces, 2,031 of them
+// loose, and the first fine solve never ended.)
+struct StrengthenStart {
+  std::vector<double> design;          // on the fine grid; empty = none
+  std::string from;                    // "coarse design" | "repaired design"
+  int loose = 0;                       // loose pieces in the hand-off
+  long long loose_voxels_removed = 0;  // design voxels they lost
+  long long loose_left = 0;            // non-frozen loose voxels left (0)
+  int frozen_loose = 0;                // frozen-only pieces still loose
+  double ms = 0.0;                     // the two censuses' wall time
+};
+
+StrengthenStart clean_strengthen_start(const VoxelGrid& G, std::vector<double> design,
+                                       const DesignMask& mask,
+                                       const SolvedDesignDomain& domain, double iso,
+                                       const char* from) {
+  StrengthenStart out;
+  const std::size_t nv = G.voxel_count();
+  if (design.size() != nv || mask.size() != nv) return out;
+  out.from = from;
+  auto frozen = [&](std::size_t i) {
+    return mask[i] == MaskValue::FrozenSolid || G.tags[i] == VoxelTag::Load ||
+           G.tags[i] == VoxelTag::Fixture;
+  };
+  for (std::size_t i = 0; i < nv; ++i)
+    if (G.tags[i] == VoxelTag::Empty || mask[i] == MaskValue::FrozenVoid)
+      design[i] = 0.0;
+  // What anchors a piece: the run's supports, its declared loads, and every node
+  // of a Load voxel (a superset of the loaded nodes, so the cleaning never
+  // removes a piece a solve would keep).
+  std::vector<NodalLoad> loads = domain.external_loads;
+  for (int k = 0; k < G.nz; ++k)
+    for (int j = 0; j < G.ny; ++j)
+      for (int i = 0; i < G.nx; ++i) {
+        if (G.tag(i, j, k) != VoxelTag::Load) continue;
+        for (int c = 0; c < 8; ++c)
+          loads.push_back({fea_node_index(G, i + (c & 1), j + ((c >> 1) & 1),
+                                          k + ((c >> 2) & 1)),
+                           0, 1.0});
+      }
+  auto census = [&]() {
+    std::vector<char> solid(nv, 0);
+    for (std::size_t i = 0; i < nv; ++i)
+      solid[i] = G.tags[i] != VoxelTag::Empty && (design[i] > iso || frozen(i)) ? 1 : 0;
+    return fea_loose_pieces(G, solid, domain.bcs, loads);
+  };
+  const LoosePieceCensus before = census();
+  out.loose = before.loose;
+  for (int e : before.loose_voxel) {
+    const std::size_t i = static_cast<std::size_t>(e);
+    if (frozen(i)) continue;
+    design[i] = 0.0;
+    ++out.loose_voxels_removed;
+  }
+  const LoosePieceCensus after = census();
+  for (int e : after.loose_voxel)
+    if (!frozen(static_cast<std::size_t>(e))) ++out.loose_left;
+  out.frozen_loose = after.loose;
+  out.ms = before.ms + after.ms;
+  out.design = std::move(design);
+  return out;
+}
+
+// The coarse design, resampled onto the fine grid: each fine voxel takes the
+// density of the coarse voxel holding its centre (0 outside the coarse grid).
+std::vector<double> resample_design(const VoxelGrid& coarse,
+                                    const std::vector<double>& rho,
+                                    const VoxelGrid& fine) {
+  std::vector<double> out;
+  if (rho.size() != coarse.voxel_count() || !(coarse.spacing > 0.0)) return out;
+  out.assign(fine.voxel_count(), 0.0);
+  for (int k = 0; k < fine.nz; ++k)
+    for (int j = 0; j < fine.ny; ++j)
+      for (int i = 0; i < fine.nx; ++i) {
+        const Vec3 c = fine.voxel_center(i, j, k);
+        const int a = static_cast<int>(std::floor((c.x - coarse.origin.x) / coarse.spacing));
+        const int b = static_cast<int>(std::floor((c.y - coarse.origin.y) / coarse.spacing));
+        const int d = static_cast<int>(std::floor((c.z - coarse.origin.z) / coarse.spacing));
+        if (a < 0 || b < 0 || d < 0 || a >= coarse.nx || b >= coarse.ny || d >= coarse.nz)
+          continue;
+        out[fine.index(i, j, k)] = rho[coarse.index(a, b, d)];
+      }
+  return out;
+}
+
+void record_start(StrengthenVersionReport& vr, const StrengthenStart& st, int version,
+                  double vf) {
+  vr.fine_start = st.design.empty() ? "hole array" : st.from;
+  vr.fine_start_loose = st.loose;
+  vr.fine_start_loose_voxels_removed = st.loose_voxels_removed;
+  vr.fine_start_loose_left = st.loose_left;
+  vr.fine_start_frozen_loose = st.frozen_loose;
+  std::fprintf(stderr,
+               "[strengthen] version %d: fine start at vf %.4f from the %s: %d loose "
+               "piece(s) taken out (%lld design voxels), %lld non-frozen loose voxels "
+               "left, %d frozen piece(s) still loose (the solves take them out) ; "
+               "%.1f ms\n",
+               version, vf, vr.fine_start.c_str(), st.loose, st.loose_voxels_removed,
+               st.loose_left, st.frozen_loose, st.ms);
+  std::fflush(stderr);
+}
+
 MinimizePlasticResult strengthen_versions(
     const JobDescription& job, const std::string& job_dir,
     const std::string& out_dir, const MaterialLibrary& materials,
     const SettingsRules& rules, const StepModel& model, bool model_is_mesh,
     const Material& material, const VoxelGrid& grid,
     const std::vector<DirichletBC>& bcs, const MinimizePlasticOptions& options,
-    const SolvedDesignDomain& domain) {
+    const SolvedDesignDomain& domain, bool emit_progress) {
   const std::string work = join_path(out_dir, "strengthen");
   std::filesystem::create_directories(work);
   StrengthenReport sr;
@@ -12371,6 +12486,23 @@ MinimizePlasticResult strengthen_versions(
   sr.vf_step = 0.0;  // bracketing search, no per-step cap (see above)
   sr.margin_required = options.margin_stop;
   const double iso = run_printed_iso(options);
+
+  // PROGRESS lines through the whole pass (the worker only understands
+  // `PROGRESS rung=<i> rungs=<n> iter=<k>`; extra keys are ignored). The three
+  // versions are the three "rungs" ("Variant k of 3" on the app); within a
+  // version `iter` counts every optimizer iteration of its coarse and fine runs,
+  // cumulatively, so it never runs backwards; it restarts only when the version
+  // (the rung) advances, as a ladder's does. The minimize_plastic runs below
+  // forward nothing of their own (quiet() clears their progress).
+  int p_rung = 0, p_base = 0, p_last = 0;
+  const char* p_step = "reference";
+  auto say = [&](int iter) {
+    if (!emit_progress) return;
+    std::printf("PROGRESS rung=%d rungs=%d iter=%d stage=strengthen step=%s\n", p_rung,
+                3, iter, p_step);
+    std::fflush(stdout);
+  };
+  say(0);
 
   // The reference: the part as drawn, certified.
   const AnalyzeJobResult drawn =
@@ -12407,6 +12539,8 @@ MinimizePlasticResult strengthen_versions(
   }
   const std::string ceiling_stl = join_path(work, "ceiling.stl");
   write_stl_file(ceiling_stl, keep_largest_component(marching_cubes(G, filled, 0.5)));
+  p_step = "ceiling";
+  say(0);
   {
     const AnalyzeJobResult ceil =
         analyze_job(job, job_dir, join_path(work, "ceiling"), materials, rules,
@@ -12428,6 +12562,7 @@ MinimizePlasticResult strengthen_versions(
     o.on_variant = nullptr;  // the caller streams the final versions itself
     o.on_density_snapshot = nullptr;
     o.on_iteration = nullptr;
+    o.progress = nullptr;    // the pass speaks for itself (say() above)
     return o;
   };
   const MinimizePlasticOptions coarse_opts = quiet(coarse.options);
@@ -12437,8 +12572,17 @@ MinimizePlasticResult strengthen_versions(
     MinimizePlasticOptions o = s ? coarse_opts : fine_opts;
     o.volume_fraction_ladder = {vf};
     o.initial_design = seed;
-    return minimize_plastic(s ? s->grid : grid, material, job.material,
-                            s ? s->bcs : bcs, rules, o);
+    p_step = s ? "coarse" : "fine";
+    p_last = 0;
+    if (emit_progress)
+      o.progress = [&](std::size_t, std::size_t, int it) {
+        p_last = std::max(p_last, it);
+        say(p_base + it);
+      };
+    MinimizePlasticResult r = minimize_plastic(s ? s->grid : grid, material,
+                                               job.material, s ? s->bcs : bcs, rules, o);
+    p_base += p_last;
+    return r;
   };
   auto margin_of = [](const MinimizePlasticResult& r) {
     const MinimizePlasticVariant& v = r.evaluated.front();
@@ -12462,6 +12606,10 @@ MinimizePlasticResult strengthen_versions(
     const auto t0 = std::chrono::steady_clock::now();
     StrengthenVersionReport vr;
     vr.version = k + 1;
+    p_rung = k;
+    p_base = 0;
+    p_step = "search";
+    say(0);
     vr.stress_cut = kStrengthenStressCut[k];
     const double target = std::max(sr.reference_margin / (1.0 - vr.stress_cut),
                                    kStrengthenStepOver * prev_verified);
@@ -12483,12 +12631,17 @@ MinimizePlasticResult strengthen_versions(
     double vf = std::clamp(std::pow(target / sr.ceiling_margin, 1.0 / 1.5),
                            floor_vf, 1.0);
     double pass_vf = -1.0, fail_vf = -1.0, best_m = -1.0;
+    std::vector<double> pass_design;  // the passing coarse design (coarse grid)
+    VoxelGrid pass_grid;
     while (vr.coarse_runs < kStrengthenCoarseRuns) {
-      const double m = margin_of(run_one(&coarse, vf, {}));
+      MinimizePlasticResult cr = run_one(&coarse, vf, {});
+      const double m = margin_of(cr);
       ++vr.coarse_runs;
       best_m = std::max(best_m, m);
       if (m >= aim) {
         pass_vf = vf;
+        pass_design = std::move(cr.evaluated.front().optimization.physical_density);
+        pass_grid = std::move(cr.solved_grid);
         if (vf <= floor_vf + 1e-9) break;
         vf = fail_vf > 0.0 ? 0.5 * (vf + fail_vf) : std::max(floor_vf, 0.5 * vf);
       } else {
@@ -12511,15 +12664,24 @@ MinimizePlasticResult strengthen_versions(
       sr.versions.push_back(vr);
       continue;
     }
-    // 2. Fine run, verify the export, repair at most twice.
+    // 2. Fine run, verify the export, repair at most twice. The fine run starts
+    // from the passing coarse design, its loose pieces taken out (see
+    // clean_strengthen_start): the fine start holds no loose design material.
     vf = pass_vf;
-    std::vector<double> seed;
+    StrengthenStart start = clean_strengthen_start(
+        G, resample_design(pass_grid, pass_design, G), mask, domain, iso,
+        "coarse design");
+    record_start(vr, start, k + 1, vf);
+    const std::vector<double> coarse_start = std::move(start.design);
+    std::vector<double> seed = coarse_start;
     MinimizePlasticResult best;
     double best_verified = -1.0;
     bool ok = false;
     for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
       MinimizePlasticResult r = run_one(nullptr, vf, seed);
       const MinimizePlasticVariant& v = r.evaluated.front();
+      p_step = "verify";
+      say(p_base);
       const std::string stl =
           join_path(work, "v" + std::to_string(k + 1) + "_" +
                               std::to_string(attempt) + ".stl");
@@ -12576,9 +12738,14 @@ MinimizePlasticResult strengthen_versions(
         break;
       }
       // Repair: raise the fraction by the shortfall (at least x1.25, so two repairs
-      // can cover a coarse-to-fine gap), from this design or, if it let an anchor
-      // go, fresh.
-      seed = std::move(next_seed);
+      // can cover a coarse-to-fine gap), from this design — its loose pieces
+      // taken out first — or, if it let an anchor go, from the clean coarse
+      // start again (never from a speckled hole array).
+      seed = next_seed.empty()
+                 ? coarse_start
+                 : clean_strengthen_start(G, std::move(next_seed), mask, domain, iso,
+                                          "repaired design")
+                       .design;
       const double ratio = verified > 0.0 ? target / verified : 2.0;
       vf = std::min(1.0, vf * std::max(1.25, std::pow(ratio, 1.0 / kStrengthenGamma)));
     }
@@ -14639,7 +14806,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // final ones are streamed, through the same callback a ladder rung uses.
     result.pipeline =
         strengthen_versions(job, job_dir, out_dir, materials, rules, result.model,
-                            model_is_mesh, material, grid, bcs, options, domain);
+                            model_is_mesh, material, grid, bcs, options, domain,
+                            emit_progress);
     if (options.on_variant)
       for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
         options.on_variant(v, result.pipeline.evaluated);

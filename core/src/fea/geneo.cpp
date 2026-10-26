@@ -758,12 +758,23 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
   // core order below, so the basis is bit-identical to the static split.
   const int ncores = static_cast<int>(cores.size());
   std::atomic<int> next_core{0};
+  // THE SAFETY NET (fea.hpp SolverStopped): the calling Jacobi-CG solve's
+  // deadline (0 = none). A build still running at it stands down — no basis,
+  // the solve stays plain — so the net fires at its next poll instead of after
+  // the whole build. Read here, on the solver's thread; the workers get the
+  // value. A build that finishes in time is untouched (bit-identical).
+  const double net_deadline = mf_safety_net_deadline();
+  std::atomic<bool> abandoned{false};
   mf_parallel_ranges(
       0, std::max(1, std::min(ncores, mf_thread_count())), 1,
       [&](int wlo, int whi) {
         for (int w = wlo; w < whi; ++w)
         for (int si = next_core.fetch_add(1); si < ncores;
              si = next_core.fetch_add(1)) {
+          if (net_deadline > 0.0 && mf_steady_ms() >= net_deadline) {
+            abandoned.store(true);
+            break;
+          }
           LocalOp L = build_local(g, emod, cores[si], cfg.overlap, K0, fixed,
                                   W, ctx.lattice, KAp, KBp, KCp);
           if (L.n < 24) continue;
@@ -793,6 +804,7 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
         }
       });
 
+  if (abandoned.load()) return false;  // past the safety net: no basis
   S.cols.clear();
   long long bytes = 0;
   for (std::size_t si = 0; si < built.size(); ++si) {

@@ -10,6 +10,8 @@
 #include "topopt/plsm.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -289,6 +291,72 @@ std::vector<BridgeHoldReport> hold_bridges(
     }
   }
   return out;
+}
+
+// FRAGILE JOINTS (reviewer's ruling 2026-10-26 00:08 UTC; a report line only, no
+// fix): the places where the printed part holds together only along an EDGE or
+// at a CORNER. The solve's connection rule is FACE connectivity (a hex8 edge or
+// corner contact is a hinge that carries no load), while the export's bodies
+// (items 41 / 47, unchanged) are 26-connected; a joint is a pair of
+// face-connected pieces of printed voxels that touch through edge / corner
+// neighbours only. One pass on the final printed voxels: label the face
+// components, then count the distinct component pairs met across an edge or a
+// corner. Deterministic; no ids reach any user-facing text.
+int fragile_joint_count(const VoxelGrid& g, const std::vector<double>& rho,
+                        double iso) {
+  const std::size_t nv = g.voxel_count();
+  if (rho.size() != nv) return 0;
+  auto printed = [&](std::size_t e) {
+    return g.tags[e] != VoxelTag::Empty && rho[e] > iso;
+  };
+  std::vector<int> label(nv, -1);
+  std::vector<int> queue;
+  int id = 0;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  for (std::size_t seed = 0; seed < nv; ++seed) {
+    if (!printed(seed) || label[seed] >= 0) continue;
+    queue.clear();
+    queue.push_back(static_cast<int>(seed));
+    label[seed] = id;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+      const int e = queue[q];
+      const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& c : nb) {
+        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 ||
+            c[2] >= nz)
+          continue;
+        const std::size_t f = g.index(c[0], c[1], c[2]);
+        if (printed(f) && label[f] < 0) {
+          label[f] = id;
+          queue.push_back(static_cast<int>(f));
+        }
+      }
+    }
+    ++id;
+  }
+  std::vector<std::uint64_t> pairs;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t e = g.index(i, j, k);
+        if (label[e] < 0) continue;
+        for (int dz = -1; dz <= 1; ++dz)
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              if (std::abs(dx) + std::abs(dy) + std::abs(dz) < 2) continue;  // self / face
+              const int a = i + dx, b = j + dy, c = k + dz;
+              if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
+              const int lf = label[g.index(a, b, c)];
+              if (lf < 0 || lf == label[e]) continue;
+              const std::uint64_t lo = static_cast<std::uint64_t>(std::min(lf, label[e]));
+              const std::uint64_t hi = static_cast<std::uint64_t>(std::max(lf, label[e]));
+              pairs.push_back((lo << 32) | hi);
+            }
+      }
+  std::sort(pairs.begin(), pairs.end());
+  return static_cast<int>(std::unique(pairs.begin(), pairs.end()) - pairs.begin());
 }
 
 }  // namespace
@@ -2925,6 +2993,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.bridge_holds = bridge_holds;
     vr.bodies_reported = vr.bodies_exported > 1 || vr.specks_dropped > 0 ||
                          vr.anchored_pieces_lost > 0 || vr.bridges > 0;
+    // Edge / corner-only joints in what prints: reported as fragile, not fixed.
+    vr.fragile_joints =
+        fragile_joint_count(G, variant.optimization.physical_density, kIso);
 
     // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
     // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER

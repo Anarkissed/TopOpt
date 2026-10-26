@@ -163,20 +163,16 @@ thread_local bool g_mg_latched = false;
 //   * l1-Jacobi smoother on every level (D_l1 = row sums of |A|, computed
 //     element-by-element on the matrix-free fine level), omega = 1. Provably
 //     lambda_max(D_l1^-1 A) <= 1, so the cycle is SPD and contracts.
-//   * arm G, when the caller PERMITS it (FeaIslandDropPermit — the SIMP
-//     trajectory/compliance solve does, certification never does): tiny
-//     ISOLATED solid islands floating in the density floor are solved at the
-//     floor modulus, removing their ~6 near-rigid modes each. Isolated means:
-//     6-connected piece of <= 27 voxels that shares no node with a Dirichlet
-//     BC or a load, holds no frozen / Load / Fixture voxel, and has no solid
-//     or frozen voxel anywhere in its 26-neighbourhood (not even an edge or
-//     corner hinge to another body). All of them together <= 5 % of elements.
+//   * (arm G, the old in-retry island drop, is SUPERSEDED by THE CONNECTION
+//     RULE above scan_islands: every solve now takes its LOOSE pieces out
+//     before the shipped attempt, so the shipped path, this retry and the
+//     Jacobi-CG fallback all solve the same system.)
 // Every solve that converges on the shipped path never reaches this code, so
-// it is bit-identical. Deterministic: cycle-count gate, ascending BFS, no clock.
+// it is bit-identical. Deterministic: cycle-count gate, no clock.
 //
-// A retry that does not reach tolerance hands its iterate to the exact
-// Jacobi-CG fallback as the starting guess (PCG never raises the energy error
-// of its start), so the fallback's answer is still the exact system's.
+// A retry that does not reach tolerance hands its iterate to the Jacobi-CG
+// fallback as the starting guess (PCG never raises the energy error of its
+// start), so the fallback's answer is still that system's.
 //
 // After kMgLatchThreshold consecutive SHIPPED stalls the existing latch trips;
 // with the retry enabled a latched run skips the doomed shipped attempt and goes
@@ -235,7 +231,7 @@ void mg_safe_log_flush_window() {
   if (w.attempts == 0) return;
   std::fprintf(stderr,
                "[mg-safe] solves %lld-%lld: %d safe attempts (%d converged, %d "
-               "seeded the Jacobi-CG fallback, %d solved with islands dropped, %d "
+               "seeded the Jacobi-CG fallback, %d with loose pieces out, %d "
                "started cold), %lld l1 cycles, %.0f ms ; per-solve lines: the "
                "first %d of a run, then one summary per %d\n",
                w.first_seq, w.last_seq, w.attempts, w.converged, w.seeded,
@@ -254,14 +250,8 @@ thread_local SafeLogTail g_mg_safe_log_tail;
 // whether it ran under an island-drop permit with no forbid. Reset per run.
 thread_local fea_detail::MgIslandPermitStats g_mg_permit_stats;
 
-// Arm G caps. Only SPECKS are ever dropped: each island at most this many
-// voxels, and all of them together at most this fraction of the system's
-// elements. If the cap would be exceeded nothing is dropped (and it is logged).
-// The cap is against the ELEMENT count, not the "solid" count: on a degenerate
-// rung almost everything is at the floor, so a fraction-of-solid cap refuses
-// exactly the case it exists for (his part: 8,703 island voxels = 21 % of solid
-// but 2.3 % of elements).
-constexpr int kIslandMaxVoxels = 27;              // a 3x3x3 block
+// (The old arm-G caps — a 27-voxel island size and a 5 %-of-elements total —
+// are gone with the size rule: see THE CONNECTION RULE above scan_islands.)
 
 // Safe-retry cycle budget. The shipped 300-cycle budget is far too short for
 // the l1 cycle on a stalled thin-wall field (Carriage Arms: rel res 1.3e-2 at
@@ -287,7 +277,6 @@ constexpr int kSafeMaxCycles = 6000;
 // kSafeMinGain, and kSafeMaxCycles stays the total cap. Warm-start retries
 // keep the first window at kSafeWindow (bit-identical).
 constexpr int kSafeColdFirstWindow = 2500;
-constexpr double kIslandMaxElementFraction = 0.05;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
 // --- MEASUREMENT-ONLY latch RE-ARM period (task solver-speed-arm-and-diagnose)
@@ -2480,38 +2469,67 @@ void vcycle_quality(const MfHierarchy& H, const MgOpts& o, int iters,
   }
 }
 
-// --- Arm G: tiny unanchored solid islands ----------------------------------
+// --- THE CONNECTION RULE: loose pieces (ruling 2026-10-25) -------------------
+// "It shouldn't hang at all." His Fine strengthen run (Carriage Arms, job
+// 8bc1e265) sat 40 minutes in the Jacobi-CG fallback: its first fine solve held
+// 2,031 unanchored pieces, the old arm G kept 326 of them because they were
+// bigger than an ABSOLUTE 27 voxels (a coarse speck is 8x bigger on the fine
+// grid) and 406 because they were hinged to each other, and their near-rigid
+// modes broke the l1 MG-PCG. The rule is now CONNECTION, not size:
+//
+//   * A PIECE is a FACE-connected (6-connected) component of the SOLID voxels
+//     (solid = E >= kIslandSolidThreshold x Emax). Only a shared face (4 nodes)
+//     connects: a piece hanging on an EDGE (2 nodes) or a CORNER (1 node) is a
+//     hinge in a hex8 model — it rotates about that edge or node, resisted only
+//     by the void — so it carries no load, and hundreds of such near-zero modes
+//     are what the l1 MG cannot handle (reviewer's ruling, 2026-10-26 00:08 UTC).
+//   * A piece is ANCHORED iff one of its element nodes carries a Dirichlet BC or
+//     a non-zero load (so a chain of face-sharing solid voxels reaches an engaged
+//     support or a load). Everything else is LOOSE, whatever its size: no size
+//     rule, no share cap, no frozen keep, no hinge keep. The export's bridge /
+//     item-47 rules are unchanged; edge / corner-only joints in the exported
+//     part are REPORTED as fragile for printing (report.json).
+//   * EVERY matrix-free solve (the graded isotropic operator) takes the loose
+//     voxels OUT OF THE SYSTEM by solving them at the FLOOR modulus — the void
+//     modulus every solve already carries, which reaches the anchors through void
+//     elements. The shipped MG-CG, the l1 safe retry and the Jacobi-CG fallback
+//     all solve that one system. No DOF-set change, no BC change, no cache-key
+//     change. The DESIGN is not touched: a loose piece may reconnect; if it does
+//     not, its zero sensitivity lets the optimizer drop it.
+//   * Frozen (protected) pieces that are loose follow the same solve rule; the
+//     census counts them (frozen_loose). At the end they go to the export's
+//     bridge / item-47 rules as before.
+//   * More than half the solid loose is REPORTED (a broken design), never a
+//     refusal to clean.
+// An empty loose set leaves the solve exactly as it was (same operator, same
+// iterations, same output). Deterministic: ascending seeds, fixed neighbour
+// order, no clock in any decision (the census's wall time is reported only).
 struct IslandScan {
-  std::vector<int> drop;        // voxel indices to solve at the floor, ascending
+  std::vector<int> drop;        // LOOSE voxels, solved at the floor, ascending
   double floor_e = 0.0;         // the floor modulus they are solved at
   long long elements = 0;       // elements in the system
   long long solid = 0;          // voxels with E >= threshold * Emax
-  int pieces = 0;               // 6-connected solid pieces
-  int unanchored = 0;           // pieces touching no Dirichlet / loaded node
+  int pieces = 0;               // face-connected solid pieces
+  int unanchored = 0;           // LOOSE pieces (touch no Dirichlet / loaded node)
   long long unanchored_voxels = 0;
   int largest_unanchored = 0;
-  int kept_frozen = 0;          // unanchored pieces kept: hold a frozen voxel
+  int frozen_loose = 0;         // loose pieces holding a frozen voxel (report only)
   bool keep_mask = false;       // frozen = the registered mask (else the proxy)
-  int kept_big = 0;             // unanchored pieces kept: larger than kIslandMaxVoxels
-  int kept_hinged = 0;          // unanchored pieces kept: edge/corner-touch other solid or a frozen voxel
-  int droppable = 0;            // islands passing every rule
-  long long droppable_voxels = 0;
-  bool capped = false;          // total would exceed the cap -> nothing dropped
+  bool majority_loose = false;  // more than half the solid voxels are loose
+  double ms = 0.0;              // the census's own wall time (one flood fill)
 };
 
-// Deterministic 6-connected census of the solid voxels (E >= 1e-3 * Emax) in
-// ascending voxel order. A piece is ANCHORED if any of its voxels has a node
-// carrying a Dirichlet BC or a non-zero load. A piece is KEPT if it is anchored,
-// larger than kIslandMaxVoxels, or holds a FROZEN voxel: a Load / Fixture tagged
-// voxel, or a voxel of the run's registered frozen mask (FeaIslandKeepMask). With
-// no mask registered the proxy is a full-modulus voxel (E >= Emax: FrozenSolid is
-// pinned at rho = 1, so this keeps every island that could hold one — and, more
-// conservatively, any rho = 1 design voxel). The remaining islands are dropped
-// only if together they stay within kIslandMaxElementFraction.
+// Deterministic FACE-connected (6-connected) census of the solid voxels
+// (E >= 1e-3 * Emax) in ascending voxel order. A piece is ANCHORED if any of its voxels has a node
+// carrying a Dirichlet BC or a non-zero load; every other piece is LOOSE and all
+// its voxels are returned in `drop`. "Frozen" is reported only: a Load / Fixture
+// tagged voxel, or a voxel of the run's registered frozen mask
+// (FeaIslandKeepMask); with no mask registered the proxy is a full-modulus voxel.
 IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
                         const std::vector<DirichletBC>& bcs,
                         const std::vector<NodalLoad>& loads,
                         const std::vector<char>* active_mask) {
+  const double t0 = fea_detail::mf_steady_ms();
   IslandScan R;
   const std::size_t nv = grid.voxel_count();
   if (ey.size() != nv) return R;
@@ -2529,7 +2547,10 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
     any = true;
   }
   R.floor_e = emin;
-  if (!any || !(emin < kIslandSolidThreshold * emax)) return R;  // no floor phase
+  if (!any || !(emin < kIslandSolidThreshold * emax)) {  // no floor phase
+    R.ms = fea_detail::mf_steady_ms() - t0;
+    return R;
+  }
   const std::vector<char>* keep =
       (g_island_keep_mask != nullptr && g_island_keep_mask->size() == nv)
           ? g_island_keep_mask
@@ -2556,26 +2577,26 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
 
   std::vector<int> label(nv, -1);
   std::vector<int> queue;
-  std::vector<int> members;
   const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
   for (std::size_t seed = 0; seed < nv; ++seed) {
     if (!solid[seed] || label[seed] >= 0) continue;
     const int id = R.pieces++;
     queue.clear();
-    members.clear();
     queue.push_back(static_cast<int>(seed));
     label[seed] = id;
     bool anchored = false, frozen = false;
     for (std::size_t q = 0; q < queue.size(); ++q) {
       const int e = queue[q];
-      members.push_back(e);
       const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
-      if (frozen_voxel(static_cast<std::size_t>(e))) frozen = true;
+      if (!frozen && frozen_voxel(static_cast<std::size_t>(e))) frozen = true;
       if (!anchored) {
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         for (int nd : en)
           if (anchor[static_cast<std::size_t>(nd)]) { anchored = true; break; }
       }
+      // The 6 FACE neighbours only: a face shares 4 nodes and transmits load;
+      // an edge (2 nodes) or a corner (1 node) is a hinge — a near-zero mode
+      // the void alone resists — so it does not connect.
       const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
                             {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
       for (const auto& c : nb) {
@@ -2591,41 +2612,96 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
     }
     if (anchored) continue;
     ++R.unanchored;
-    const int sz = static_cast<int>(members.size());
+    const int sz = static_cast<int>(queue.size());
     R.unanchored_voxels += sz;
     R.largest_unanchored = std::max(R.largest_unanchored, sz);
-    if (sz > kIslandMaxVoxels) { ++R.kept_big; continue; }
-    if (frozen) { ++R.kept_frozen; continue; }
-    // ISOLATION: an island is a speck only if no voxel in its 26-neighbourhood
-    // is solid outside it or frozen — i.e. it shares not even an edge or a
-    // corner node with another body (a hinged appendage is part of whatever
-    // it hangs from, e.g. under a 26-connected keep-largest-component export).
-    bool hinged = false;
-    for (int e : members) {
-      const int i = e % nx, j = (e / nx) % ny, k = e / (nx * ny);
-      for (int dz = -1; dz <= 1 && !hinged; ++dz)
-        for (int dy = -1; dy <= 1 && !hinged; ++dy)
-          for (int dx = -1; dx <= 1 && !hinged; ++dx) {
-            const int a = i + dx, b = j + dy, c = k + dz;
-            if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
-            const std::size_t f = grid.index(a, b, c);
-            if (grid.tags[f] == VoxelTag::Empty) continue;
-            if ((solid[f] && label[f] != id) || frozen_voxel(f)) hinged = true;
-          }
-      if (hinged) break;
-    }
-    if (hinged) { ++R.kept_hinged; continue; }
-    ++R.droppable;
-    R.droppable_voxels += sz;
-    for (int e : members) R.drop.push_back(e);
-  }
-  if (static_cast<double>(R.droppable_voxels) >
-      kIslandMaxElementFraction * static_cast<double>(R.elements)) {
-    R.capped = true;
-    R.drop.clear();
+    if (frozen) ++R.frozen_loose;
+    for (int e : queue) R.drop.push_back(e);
   }
   std::sort(R.drop.begin(), R.drop.end());
+  R.majority_loose = 2 * R.unanchored_voxels > R.solid;
+  R.ms = fea_detail::mf_steady_ms() - t0;
   return R;
+}
+
+// The bounded [loose] stderr report. Per run: the first kLooseLogFirst solves
+// that took loose pieces out print a full line (counts, voxels, the census's
+// wall time); after that one summary per kLooseLogEvery such solves; the
+// "more than half the solid is loose" warning prints once per run. A solve with
+// no loose piece prints nothing, so a run that never had one is byte-identical
+// on stderr too. Stderr only: no number depends on any of this.
+constexpr int kLooseLogFirst = 5;
+constexpr int kLooseLogEvery = 50;
+struct LooseLogWindow {
+  long long first_seq = 0, last_seq = 0;
+  int solves = 0, max_pieces = 0;
+  long long max_voxels = 0;
+  double ms = 0.0, ms_max = 0.0;
+};
+thread_local LooseLogWindow g_loose_log_win;
+thread_local fea_detail::MgLooseStats g_loose_stats;
+thread_local bool g_loose_majority_warned = false;
+thread_local bool g_loose_rule = true;  // TEST ONLY switch (fea_detail)
+void loose_log_flush_window() {
+  LooseLogWindow& w = g_loose_log_win;
+  if (w.solves == 0) return;
+  std::fprintf(stderr,
+               "[loose] solves %lld-%lld: %d took loose pieces out (up to %d pieces "
+               "/ %lld voxels), flood fill %.0f ms in all, %.1f ms at most ; "
+               "per-solve lines: the first %d of a run, then one summary per %d\n",
+               w.first_seq, w.last_seq, w.solves, w.max_pieces, w.max_voxels, w.ms,
+               w.ms_max, kLooseLogFirst, kLooseLogEvery);
+  w = LooseLogWindow();
+}
+struct LooseLogTail {
+  ~LooseLogTail() { loose_log_flush_window(); }
+};
+thread_local LooseLogTail g_loose_log_tail;
+void loose_record(const IslandScan& s) {
+  fea_detail::MgLooseStats& st = g_loose_stats;
+  const long long seq = ++st.scanned;
+  st.ms_total += s.ms;
+  st.ms_max = std::max(st.ms_max, s.ms);
+  st.last_pieces = s.pieces;
+  st.last_loose = s.unanchored;
+  st.last_loose_voxels = s.unanchored_voxels;
+  st.last_frozen_loose = s.frozen_loose;
+  st.last_ms = s.ms;
+  if (s.drop.empty()) return;
+  ++st.with_loose;
+  st.max_loose = std::max(st.max_loose, s.unanchored);
+  st.max_loose_voxels = std::max(st.max_loose_voxels, s.unanchored_voxels);
+  if (s.majority_loose && !g_loose_majority_warned) {
+    g_loose_majority_warned = true;
+    ++st.majority_warnings;
+    std::fprintf(stderr,
+                 "[loose] WARNING: more than half the solid is loose on solve %lld "
+                 "(%lld of %lld solid voxels in %d piece(s) touch no support or "
+                 "load): the design is broken there; the loose material is solved "
+                 "at the floor modulus (reported once per run)\n",
+                 seq, s.unanchored_voxels, s.solid, s.unanchored);
+  }
+  if (st.with_loose <= kLooseLogFirst) {
+    std::fprintf(stderr,
+                 "[loose] solve %lld: %d loose piece(s) of %d (%lld voxels, largest "
+                 "%d; %d frozen) solved at the floor modulus %.3g, of %lld elements ; "
+                 "flood fill %.1f ms%s\n",
+                 seq, s.unanchored, s.pieces, s.unanchored_voxels,
+                 s.largest_unanchored, s.frozen_loose, s.floor_e, s.elements, s.ms,
+                 st.with_loose == kLooseLogFirst
+                     ? " ; further [loose] solves are summarised" : "");
+    return;
+  }
+  static_cast<void>(&g_loose_log_tail);  // arm the thread-exit flush
+  LooseLogWindow& w = g_loose_log_win;
+  if (w.solves == 0) w.first_seq = seq;
+  w.last_seq = seq;
+  ++w.solves;
+  w.max_pieces = std::max(w.max_pieces, s.unanchored);
+  w.max_voxels = std::max(w.max_voxels, s.unanchored_voxels);
+  w.ms += s.ms;
+  w.ms_max = std::max(w.ms_max, s.ms);
+  if (w.solves >= kLooseLogEvery) loose_log_flush_window();
 }
 
 // Matrix-free MG-CG solve, falling back to the exact matrix-free Jacobi-CG when
@@ -2662,16 +2738,36 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     if (permitted) ++g_mg_permit_stats.permitted;
     else ++g_mg_permit_stats.not_permitted;
   }
+  // THE CONNECTION RULE (see scan_islands): find this solve's LOOSE pieces —
+  // one flood fill — and solve them at the floor modulus, so no path below
+  // (shipped MG-CG, l1 safe retry, Jacobi-CG fallback, GenEO) ever sees an
+  // unsupported piece. The plain graded isotropic operator only: a lattice /
+  // cubic solve and a uniform-modulus solve keep their system untouched. An
+  // empty loose set passes `elem_youngs` itself on, so the solve is exactly
+  // what it was.
+  IslandScan loose;
+  std::vector<double> ey_loose;
+  const std::vector<double>* ey_solve = elem_youngs;
+  if (g_loose_rule && elem_youngs != nullptr && lattice == nullptr) {
+    loose = scan_islands(grid, *elem_youngs, bcs, loads, active_mask);
+    if (!loose.drop.empty()) {
+      ey_loose = *elem_youngs;
+      for (int e : loose.drop) ey_loose[static_cast<std::size_t>(e)] = loose.floor_e;
+      ey_solve = &ey_loose;
+    }
+    loose_record(loose);
+  }
   MatfreeReduced m = fea_detail::mf_build_reduced(
-      grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
+      grid, youngs_modulus, poisson, bcs, loads, ey_solve,
       lattice != nullptr ? "fea_solve_cg_lattice_matfree"
                          : "fea_solve_mgcg_matfree",
       info, active_mask, lattice);
   const double t_built = fea_detail::mf_steady_ms();
-  // Arm G report of THIS solve: cleared on entry, set only by a safe retry that
-  // dropped islands and carried.
-  g_mg_last_dropped.clear();
-  g_mg_last_dropped_floor = 0.0;
+  // The loose voxels THIS solve held at the floor modulus (whichever path then
+  // carried it: they all solve this one system), for the caller's energy /
+  // sensitivity / stress accounting. Empty when there were none.
+  g_mg_last_dropped = loose.drop;
+  g_mg_last_dropped_floor = loose.drop.empty() ? 0.0 : loose.floor_e;
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -2845,35 +2941,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const long long seq = ++g_mg_safe_solve_seq;
       ++g_mg_safe_engagements;
       const double t_s0 = fea_detail::mf_steady_ms();
-      // Arm G: only when the caller permits it and the operator is the plain
-      // graded isotropic one (a lattice/cubic or uniform-modulus solve keeps
-      // its system untouched).
-      const bool may_drop = g_island_drop_permit > 0 && g_island_drop_forbid == 0 &&
-                            elem_youngs != nullptr && lattice == nullptr;
-      IslandScan scan;
-      if (may_drop)
-        scan = scan_islands(grid, *elem_youngs, bcs, loads, active_mask);
-      MatfreeReduced m2;
-      MfHierarchy H2;
-      bool use2 = false;
-      if (!scan.drop.empty()) {
-        std::vector<double> ey2 = *elem_youngs;
-        for (int e : scan.drop) ey2[static_cast<std::size_t>(e)] = scan.floor_e;
-        // Release the shipped coarse levels before building the second set, so
-        // the peak holds one hierarchy, not two.
-        H = MfHierarchy();
-        m2 = fea_detail::mf_build_reduced(grid, youngs_modulus, poisson, bcs,
-                                          loads, &ey2, "fea_solve_mgcg_matfree",
-                                          nullptr, active_mask, nullptr);
-        // Same element set => same kept DOFs; anything else is refused.
-        use2 = m2.ng == m.ng && m2.kept_global == m.kept_global &&
-               build_mf_hierarchy(m2, nnx, nny, nnz, H2);
-        if (!use2) {
-          H2 = MfHierarchy();
-          if (!build_mf_hierarchy(m, nnx, nny, nnz, H)) H = MfHierarchy();
-        }
-      }
-      MfHierarchy& HS = use2 ? H2 : H;
+      // (The old arm G scanned and rebuilt a second system here. The loose
+      // pieces are now out of `m` from the start — THE CONNECTION RULE at the
+      // top of this solve — so the retry solves the shipped attempt's system.)
+      MfHierarchy& HS = H;
       bool ok = false;
       bool seeded_fallback = false;
       bool cold_fallback = false;  // fallback starts from 0, not the warm start
@@ -2911,16 +2982,13 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         Vec x0;
         if (warm) x0 = Eigen::Map<const Vec>(xkept.data(),
                                              static_cast<Eigen::Index>(m.ng));
-        // Starting relative residuals (1 when cold). The retry's own (r0, on
-        // HS) is reported; seeding the fallback and the latch's PRODUCTIVE test
-        // (>= 10x reduction) are judged on the EXACT system `m` (the islands
-        // back at their true modulus), because that is the system the Jacobi-CG
-        // fallback solves: an iterate of the island-DROPPED system can sit far
-        // below HS's start yet far above the exact one's (the dropped specks
-        // carry the near-rigid motion's forces). Uncounted applies, so no
-        // matvec count moves; HS is m itself when nothing was dropped. The
-        // apply's two full-DOF work vectors live only for the evaluation (not
-        // through the l1 solve), so the retry's peak memory is unchanged.
+        // Starting relative residuals (1 when cold). Seeding the fallback and
+        // the latch's PRODUCTIVE test (>= 10x reduction) are judged on `m`, the
+        // system the Jacobi-CG fallback solves — which is also the system the
+        // retry solves (HS.m is &m: the loose pieces are out of both).
+        // Uncounted applies, so no matvec count moves. The apply's two
+        // full-DOF work vectors live only for the evaluation (not through the
+        // l1 solve), so the retry's peak memory is unchanged.
         const Eigen::Map<const Vec> bx(m.rg.data(), static_cast<Eigen::Index>(m.ng));
         const double bxn = bx.norm();
         //
@@ -2944,13 +3012,11 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           q.J = 0.5 * x.dot(ax) - b.dot(x);
           return q;
         };
-        StartQuality q0x;  // the warm start on the EXACT system (cold: 1, 0)
+        StartQuality q0x;  // the warm start on the solved system (cold: 1, 0)
         if (warm && rgv.norm() > 0.0) {
-          const StartQuality q0 = quality(*HS.m, rgv, rgv.norm(), x0);
-          r0 = q0.rel;
-          if (!use2) q0x = q0;
+          q0x = quality(*HS.m, rgv, rgv.norm(), x0);
+          r0 = q0x.rel;
         }
-        if (warm && bxn > 0.0 && use2) q0x = quality(m, bx, bxn, x0);
         if (warm && bxn > 0.0) r0x = q0x.rel;
         // THE RETRY'S OWN START (CI core-linux cli_demo 2026-10-25): the better
         // of the warm guess and zero, judged on the EXACT system in the same
@@ -2987,10 +3053,6 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           diag.used_multigrid = true;
           diag.mg_levels = HS.levels();
           solved = true;
-          if (use2) {
-            g_mg_last_dropped = scan.drop;
-            g_mg_last_dropped_floor = scan.floor_e;
-          }
         } else if (bxn > 0.0) {
           // Did not reach tolerance: choose the Jacobi-CG fallback's START.
           // PCG never raises the energy-norm error of its start, and it stops
@@ -3049,7 +3111,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       {  // observation only (fea_detail::mg_last_safe_attempt)
         fea_detail::MgSafeAttemptReport& rep = g_mg_last_safe;
         rep.seq = seq;
-        rep.dropped = use2;
+        rep.dropped = !loose.drop.empty();
         rep.converged = ok;
         rep.seeded_fallback = seeded_fallback;
         rep.cold_fallback = cold_fallback;
@@ -3090,19 +3152,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         std::fprintf(stderr,
                      "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
                      "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
-                     "islands: %s%d unanchored of %d pieces (%lld vox, largest %d), "
-                     "kept frozen %d (%s), kept big %d, kept hinged %d, dropped %d "
-                     "islands / %lld vox of %lld elements%s%s%s%s%s\n",
+                     "loose pieces at the floor: %d of %d pieces (%lld vox, largest "
+                     "%d, %d frozen) of %lld elements%s%s%s%s\n",
                      seq, safe_direct ? "latched off" : "stalled", shipped_it,
                      shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
-                     safe_ms, may_drop ? "" : "(not permitted) ",
-                     scan.unanchored, scan.pieces, scan.unanchored_voxels,
-                     scan.largest_unanchored, scan.kept_frozen,
-                     scan.keep_mask ? "frozen mask" : "full-modulus proxy",
-                     scan.kept_big, scan.kept_hinged,
-                     use2 ? scan.droppable : 0,
-                     use2 ? scan.droppable_voxels : 0LL, scan.elements,
-                     scan.capped ? " (CAP EXCEEDED: nothing dropped)" : "",
+                     safe_ms, loose.unanchored, loose.pieces, loose.unanchored_voxels,
+                     loose.largest_unanchored, loose.frozen_loose, loose.elements,
                      g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
                      start_note, exact_note,
                      (seq == g_mg_safe_log_first && !g_mg_safe_latched)
@@ -3116,7 +3171,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         ++w.attempts;
         if (ok) ++w.converged;
         if (seeded_fallback) ++w.seeded;
-        if (use2) ++w.dropped;
+        if (!loose.drop.empty()) ++w.dropped;
         if (cold_start) ++w.cold;
         w.cycles += it;
         w.ms += safe_ms;
@@ -3134,7 +3189,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // its coarse basis / decomposition for THIS system.
       fea_detail::MfSolveContext pc;
       pc.grid = &grid;
-      pc.elem_youngs = elem_youngs;
+      // The moduli of the system `m` actually holds (loose voxels at the floor),
+      // so a GenEO coarse space is built from — and keyed on — that one system.
+      pc.elem_youngs = ey_solve;
       pc.youngs_modulus = youngs_modulus;
       pc.poisson = poisson;
       // Lattice fields (multiscale production wiring): GenEO assembles its
@@ -3161,6 +3218,16 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
       diag.matvecs = fea_matvec_count() - mv_entry;
       if (info) *info = diag;
+      // THE SAFETY NET (ruling 2026-10-25, item 5): with no caller cap, the
+      // fallback's own cap max(1000, 2 ng) is the net's iteration limit (its
+      // time limit throws from inside mf_cg_solve). Reaching it STOPS THE JOB
+      // (SolverStopped is not a SolverNonConvergence, so no rung-rejection
+      // catch absorbs it). A caller's explicit cap keeps today's meaning.
+      if (!diag.converged && max_iterations <= 0 && diag.iterations >= cap)
+        throw SolverStopped(
+            "fea_solve_mgcg_matfree: the Jacobi-CG fallback reached its "
+            "iteration cap (" + std::to_string(cap) + ") without converging",
+            diag.iterations, diag.residual, diag.t_total_ms);
       if (!diag.converged)
         throw SolverNonConvergence(
             "fea_solve_mgcg_matfree: CG did not reach the requested tolerance "
@@ -3320,16 +3387,18 @@ MgIslandCensus mg_island_census(const VoxelGrid& grid,
   C.unanchored = S.unanchored;
   C.largest_unanchored = S.largest_unanchored;
   C.unanchored_voxels = S.unanchored_voxels;
-  C.kept_frozen = S.kept_frozen;
-  C.kept_big = S.kept_big;
-  C.kept_hinged = S.kept_hinged;
-  C.droppable = S.droppable;
-  C.droppable_voxels = S.droppable_voxels;
-  C.capped = S.capped;
+  C.frozen_loose = S.frozen_loose;
+  C.droppable = S.unanchored;
+  C.droppable_voxels = S.unanchored_voxels;
+  C.majority_loose = S.majority_loose;
   C.floor_e = S.floor_e;
+  C.ms = S.ms;
   C.drop = S.drop;
   return C;
 }
+
+const MgLooseStats& mg_loose_stats() { return g_loose_stats; }
+void mg_test_loose_rule(bool enable) { g_loose_rule = enable; }
 
 const MgSafeAttemptReport& mg_last_safe_attempt() { return g_mg_last_safe; }
 const MgIslandPermitStats& mg_island_permit_stats() { return g_mg_permit_stats; }
@@ -3378,6 +3447,10 @@ void fea_matfree_reset_mg_stagnation_latch() {
   g_mg_permit_stats = fea_detail::MgIslandPermitStats();
   mg_safe_log_flush_window();  // the previous run's tail, if any
   g_mg_safe_log_win = SafeLogWindow();
+  loose_log_flush_window();    // likewise the connection rule's [loose] tail
+  g_loose_log_win = LooseLogWindow();
+  g_loose_stats = fea_detail::MgLooseStats();
+  g_loose_majority_warned = false;
   g_mg_safe_log_lines = 0;
   g_mg_safe_log_summaries = 0;
   g_mg_latched_solves = 0;
@@ -3386,6 +3459,34 @@ void fea_matfree_reset_mg_stagnation_latch() {
 }
 
 bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
+
+// THE CONNECTION RULE on a design: the solve's own classifier (scan_islands),
+// fed a two-phase modulus field — 1 on the design's material, 1e-9 elsewhere in
+// the part — so a design is cleaned by exactly the rule its solves apply.
+LoosePieceCensus fea_loose_pieces(const VoxelGrid& grid,
+                                  const std::vector<char>& solid,
+                                  const std::vector<DirichletBC>& bcs,
+                                  const std::vector<NodalLoad>& loads) {
+  LoosePieceCensus out;
+  const std::size_t nv = grid.voxel_count();
+  if (solid.size() != nv) return out;
+  std::vector<double> ey(nv, 0.0);
+  for (std::size_t e = 0; e < nv; ++e)
+    if (grid.tags[e] != VoxelTag::Empty) ey[e] = solid[e] != 0 ? 1.0 : 1e-9;
+  // No registered keep mask is consulted for anything but the frozen COUNT,
+  // which this census does not report; clear it so the proxy cannot vary.
+  const std::vector<char>* prev = g_island_keep_mask;
+  g_island_keep_mask = nullptr;
+  const IslandScan S = scan_islands(grid, ey, bcs, loads, nullptr);
+  g_island_keep_mask = prev;
+  out.pieces = S.pieces;
+  out.loose = S.unanchored;
+  out.loose_voxels = S.unanchored_voxels;
+  out.largest_loose = S.largest_unanchored;
+  out.loose_voxel = S.drop;
+  out.ms = S.ms;
+  return out;
+}
 
 void fea_matfree_set_mg_safe_retry(bool enable) { g_mg_safe_retry = enable; }
 bool fea_matfree_mg_safe_retry_enabled() { return g_mg_safe_retry; }

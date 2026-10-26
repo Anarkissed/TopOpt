@@ -10,15 +10,20 @@
 // binary is the repo's dev/CI driver, not an installed product).
 //
 // Exit codes: 0 success; 1 any job/pipeline failure (diagnostic on stderr);
-// 2 usage error.
+// 2 usage error; 4 the solver's safety net stopped the job ("stopped: the
+// solver did not converge" — report.json says so and names the job; no result).
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#include "topopt/fea.hpp"  // SolverStopped (the solver's safety net)
 #include "topopt/job.hpp"
 #include "topopt/flexible/run.hpp"  // `flexible` subcommand
 #include "topopt/materials.hpp"
@@ -114,6 +119,62 @@ int usage(const char* argv0) {
 
 std::string dirname_of(const std::string& path);  // defined below
 
+// THE SOLVER'S SAFETY NET STOPPED THE JOB (ruling 2026-10-25; fea.hpp
+// SolverStopped): a Jacobi-CG solve ran past its time limit or iteration cap.
+// The job STOPS — never hangs, never ships a result — and says so in the report
+// it was asked for and on stderr, naming the job: its folder (the worker's
+// per-job folder is the job id) and its file. Returns the exit code (4).
+std::string json_escape(const std::string& in) {
+  std::string out;
+  for (const char c : in) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char b[8];
+          std::snprintf(b, sizeof b, "\\u%04x", static_cast<unsigned>(c));
+          out += b;
+        } else {
+          out += c;
+        }
+    }
+  }
+  return out;
+}
+
+int report_solver_stopped(const topopt::SolverStopped& e, const std::string& job_path,
+                          const std::string& out_dir, const std::string& report_name,
+                          const std::string& model) {
+  std::error_code ec;
+  const std::filesystem::path abs = std::filesystem::absolute(job_path, ec);
+  const std::string job_id =
+      ec ? dirname_of(job_path) : abs.parent_path().filename().string();
+  std::fprintf(stderr, "topopt-cli: %s — job %s (%s, model %s): %s\n",
+               topopt::kSolverStoppedMessage, job_id.c_str(), job_path.c_str(),
+               model.c_str(), e.detail.c_str());
+  std::filesystem::create_directories(out_dir, ec);
+  const std::string path =
+      out_dir + "/" + (report_name.empty() ? std::string("report.json") : report_name);
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (f) {
+    char nums[160];
+    std::snprintf(nums, sizeof nums,
+                  "\"iterations\": %d, \"relative_residual\": %.6g, "
+                  "\"elapsed_ms\": %.0f",
+                  e.iterations, e.residual, e.elapsed_ms);
+    f << "{\n  \"status\": \"stopped\",\n  \"error\": \""
+      << json_escape(topopt::kSolverStoppedMessage) << "\",\n  \"job\": \""
+      << json_escape(job_id) << "\",\n  \"job_file\": \"" << json_escape(job_path)
+      << "\",\n  \"model\": \"" << json_escape(model) << "\",\n  \"detail\": \""
+      << json_escape(e.detail) << "\",\n  \"solver\": {" << nums << "}\n}\n";
+    std::fprintf(stderr, "report: %s\n", path.c_str());
+  }
+  return 4;
+}
+
 // `analyze` subcommand — parse its flags and run analyze_job. Returns the process
 // exit code.
 int run_analyze(int argc, char** argv, const std::string& materials_default,
@@ -149,8 +210,10 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     }
   }
 
+  std::string stop_model;  // for a safety-net stop's report
   try {
     const topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_model = job.model;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =
@@ -189,6 +252,9 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     std::printf("provenance: %s\n", r.provenance_path.c_str());
     std::printf("fields: %s\n", r.fields_path.c_str());
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "analysis_report.json",
+                                 stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -510,8 +576,11 @@ int main(int argc, char** argv) {
     }
   }
 
+  std::string stop_report = "report.json", stop_model;  // for a safety-net stop
   try {
     topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_report = job.output.report;
+    stop_model = job.model;
     // ── ★ THIS VERB RUNS THE PARAMETRIC LEVEL SET AND NOTHING ELSE ──────────
     // (task 2026-08-10-plsm-production; maintainer instruction, confirmed.)
     //
@@ -743,6 +812,8 @@ int main(int argc, char** argv) {
     if (result.snapshot_count > 0)
       std::printf("snapshots: %zu written\n", result.snapshot_count);
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, stop_report, stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;

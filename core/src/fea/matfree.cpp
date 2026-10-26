@@ -36,6 +36,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <functional>
 #include <limits>
 #include <mutex>
@@ -882,6 +883,21 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
   // Snapshot the armed deadline once for the whole solve (0 = disarmed).
   const double deadline = fea_detail::mf_solve_deadline();
+  // THE SAFETY NET (fea.hpp SolverStopped): this solve's own time limit, from
+  // now. Always armed; it reads a clock every kSolveDeadlinePollIters
+  // iterations and changes no arithmetic, so a solve that never trips it is
+  // bit-identical.
+  const double net_ms = fea_detail::mf_safety_net_ms();
+  const double net_t0 = mf_steady_ms();
+  // ... and its deadline, visible to the setups called below (GenEO), restored
+  // on every exit, throws included.
+  struct NetDeadlineScope {
+    double prev;
+    explicit NetDeadlineScope(double d) : prev(fea_detail::mf_safety_net_deadline()) {
+      fea_detail::mf_safety_net_deadline() = d;
+    }
+    ~NetDeadlineScope() { fea_detail::mf_safety_net_deadline() = prev; }
+  } net_scope(net_ms > 0.0 ? net_t0 + net_ms : 0.0);
 
   // External additive preconditioner (matrix-free GenEO two-level, phase 2). Snapshot
   // the installed hook once for the whole solve; when none is installed (the default)
@@ -1023,6 +1039,24 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
           "mf_cg_solve: the solve deadline passed before CG reached the "
           "requested tolerance (the iteration blew its time budget)",
           i, error_out);
+    }
+    // Every kSafetyNetPollIters iterations (a clock read is nothing next to
+    // one fine apply), so the net overshoots its limit by a few iterations at
+    // most — and by at most one GenEO setup, which stands down at the deadline.
+    if ((i % kSafetyNetPollIters) == 0 && i > 0 && net_ms > 0.0) {
+      const double elapsed = mf_steady_ms() - net_t0;
+      if (elapsed >= net_ms) {
+        error_out = std::sqrt(residualNorm2 / rhsNorm2);
+        iters_out = i;
+        converged_out = false;
+        write_times();
+        char buf[200];
+        std::snprintf(buf, sizeof buf,
+                      "the matrix-free Jacobi-CG ran %d iterations in %.0f s, past "
+                      "its %.0f s time limit, at rel res %.3e",
+                      i, elapsed / 1000.0, net_ms / 1000.0, error_out);
+        throw SolverStopped(buf, i, error_out, elapsed);
+      }
     }
     m.apply_kgg(p, tmp);  // tmp = K p
     // Hand CG's own direction and its ALREADY-computed operator image to the
@@ -1181,6 +1215,14 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
     diag.matvecs = fea_matvec_count() - mv_entry;
     if (info) *info = diag;
+    // THE SAFETY NET's iteration cap (fea.hpp SolverStopped): with no caller
+    // cap, reaching the default 2 ng stops the job; an explicit cap keeps
+    // today's SolverNonConvergence.
+    if (!diag.converged && max_iterations <= 0 && diag.iterations >= 2 * m.ng)
+      throw SolverStopped(
+          "fea_solve_cg_matfree: the Jacobi-CG reached its iteration cap (" +
+              std::to_string(2 * m.ng) + ") without converging",
+          diag.iterations, diag.residual, diag.t_total_ms);
     if (!diag.converged)
       throw SolverNonConvergence(
           "fea_solve_cg_matfree: CG did not reach the requested tolerance "

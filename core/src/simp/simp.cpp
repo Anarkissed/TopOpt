@@ -1923,6 +1923,10 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
     // restricted solve; a throw latches below and prev_mask is never read again.
     ad.prev_mask = mask;
     return c;
+  } catch (const SolverStopped&) {
+    // The safety net fired (#362, core-loose-pieces): a stopped solve is a bug report,
+    // never something to retry on the full domain.
+    throw;
   } catch (const std::exception& ex) {
     ad.latched = true;
     ad.latch_iteration = iteration;

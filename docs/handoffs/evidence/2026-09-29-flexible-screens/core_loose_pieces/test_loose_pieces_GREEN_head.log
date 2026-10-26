@@ -1,0 +1,42 @@
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.823 3.842 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 3.823 3.842 ; lambda_max(D_l1^-1 A): 0.529 0.709
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 4.350e-08) -> l1-Jacobi MG-PCG CONVERGED in 54 cycles, rel res 8.100e-09, 1240 ms ; loose pieces at the floor: 0 of 1 pieces (0 vox, largest 0, 0 frozen) of 65536 elements
+[loose] WARNING: more than half the solid is loose on solve 1 (4617 of 7753 solid voxels in 346 piece(s) touch no support or load): the design is broken there; the loose material is solved at the floor modulus (reported once per run)
+[loose] solve 1: 346 loose piece(s) of 347 (4617 voxels, largest 63; 1 frozen) solved at the floor modulus 1e-06, of 65536 elements ; flood fill 0.6 ms
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.823 3.842 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg-safe] lambda_max(D^-1 A) per smoothed level (omega=0.60 => safe <= 3.33): 3.823 3.842 ; lambda_max(D_l1^-1 A): 0.529 0.709
+[mg-safe] solve 1: shipped stalled (300 cycles, rel res 4.350e-08) -> l1-Jacobi MG-PCG CONVERGED in 54 cycles, rel res 8.100e-09, 1135 ms ; loose pieces at the floor: 346 of 347 pieces (4617 vox, largest 63, 1 frozen) of 65536 elements
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+[mg] smoother check (S7): 3 levels, lambda_max(D^-1 A) per smoothed level: 3.975 4.815 ; omega=0.60 => safe <= 3.333 : UNSAFE (omega*lambda >= 2; the safe retry covers a stall)
+      fixture: 64x32x32, 346 loose pieces planted (4617 voxels): 54 bars of 63 voxels, 58 hinged pairs, 1 frozen
+ok:   setup: ~300 loose pieces, with > 27-voxel ones, hinged pairs and a frozen one
+      clean beam: used_mg=1 converged=1 mg cycles=354 its=54 safe engaged=1 threw=0
+ok:   setup: the clean beam converges on multigrid
+      with the pieces: used_mg=1 converged=1 mg cycles=354 its=54 safe engaged=1 threw=0 ; solved at the floor: 4617 of 4617 planted voxels, 0 others ; compliance 1752.63601126 vs clean 1752.63601126
+ok:   L1: every planted loose voxel (big, hinged and frozen ones included) is solved at the floor modulus, and nothing else
+ok:   L2: the solve converges on multigrid (no Jacobi-CG fallback)
+ok:   L3: it is bit-identical to the beam with no pieces, in the same MG cycles
+      census: 347 pieces, 346 loose (4617 voxels, largest 63), 1 frozen loose, majority loose 1, flood fill 0.49 ms
+ok:   L1 census: one anchored piece (the beam); every planted piece loose, a hinged pair counted as its two face-connected pieces, the frozen one counted
+ok:   L1: more than half the solid loose is a reported warning (once per run), not a refusal to clean
+      last run: 1 solve(s) scanned, 1 with loose pieces, flood fill 0.55 ms
+      L4 census: 5 pieces, 3 loose (31 voxels)
+ok:   L4: a corner-hinged cube and an edge-hinged bar are LOOSE; a face-joined cube is part of the anchored body; a loaded voxel is anchored; a voxel one voxel clear is loose
+ok:   L4: fea_loose_pieces classifies a design exactly as the solve does
+      MG fallback, cap 0: stopped=1 nonconvergence=0 converged=0 : stopped: the solver did not converge (fea_solve_mgcg_matfree: the Jacobi-CG fallback reached its iteration cap (3888) without converging)
+ok:   N1: the MG solve's Jacobi-CG fallback at its own cap STOPS the job (SolverStopped, 'stopped: the solver did not converge')
+      plain Jacobi-CG, cap 0: stopped=1 nonconvergence=0 converged=0 : stopped: the solver did not converge (fea_solve_cg_matfree: the Jacobi-CG reached its iteration cap (3888) without converging)
+ok:   N1: so does the plain matrix-free Jacobi-CG at its own cap
+      MG fallback, cap 50: stopped=0 nonconvergence=1 converged=0 : fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations
+ok:   N2: a caller's explicit cap keeps today's SolverNonConvergence
+      MG fallback, cap 0: stopped=1 nonconvergence=0 converged=0 : stopped: the solver did not converge (the matrix-free Jacobi-CG ran 16 iterations in 0 s, past its 0 s time limit, at rel res 2.719e+01)
+      plain Jacobi-CG, cap 0: stopped=1 nonconvergence=0 converged=0 : stopped: the solver did not converge (the matrix-free Jacobi-CG ran 16 iterations in 0 s, past its 0 s time limit, at rel res 2.719e+01)
+      MG fallback, cap 100000: stopped=1 nonconvergence=0 converged=0 : stopped: the solver did not converge (the matrix-free Jacobi-CG ran 16 iterations in 0 s, past its 0 s time limit, at rel res 2.719e+01)
+ok:   N3: past its time limit a Jacobi-CG solve STOPS the job (MG fallback, plain CG, and under a caller's cap too)
+ok:   N3: the shipped time limit is 10 minutes per Jacobi-CG solve
+      GenEO build past the deadline: built=0 (builds 0) ; with no deadline: built=1 (builds 1)
+ok:   N4: GenEO's basis build stands down at the solve's safety-net deadline (POSITIVE CONTROL: it builds with none)
+loose_pieces: all checks passed
+rc=0 (e46b49cd, fingerprint c523445a638b dirty=false)

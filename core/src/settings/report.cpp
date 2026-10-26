@@ -151,6 +151,15 @@ void emit_variant(std::string& out, const VariantReport& v,
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
   out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
+  // Edge / corner-only joints (report.hpp fragile_joints), only when there are any.
+  if (v.fragile_joints > 0)
+    out += ",\n" + in2 + "\"fragile_joints\": {\"count\": " +
+           std::to_string(v.fragile_joints) + ", \"note\": " +
+           str_json(std::to_string(v.fragile_joints) +
+                    (v.fragile_joints == 1 ? " place where" : " places where") +
+                    " the part holds together only along an edge or at a corner: "
+                    "fragile when printed") +
+           "}";
   // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
   // more than one body, a speck or a lost anchor to report.
   if (v.bodies_reported) {
@@ -640,7 +649,14 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
-           ", \"note\": " + str_json(v.note) + "}";
+           ", \"note\": " + str_json(v.note) +
+           ", \"fine_start\": {\"from\": " + str_json(v.fine_start) +
+           ", \"loose_pieces\": " + std::to_string(v.fine_start_loose) +
+           ", \"loose_voxels_removed\": " +
+           std::to_string(v.fine_start_loose_voxels_removed) +
+           ", \"loose_voxels_left\": " + std::to_string(v.fine_start_loose_left) +
+           ", \"frozen_loose_pieces\": " + std::to_string(v.fine_start_frozen_loose) +
+           "}}";
   }
   out += sr.versions.empty() ? "]\n" : "\n    ]\n";
   out += "  }\n";
