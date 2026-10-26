@@ -589,7 +589,7 @@ MgSmootherProbe mg_smoother_probe(const VoxelGrid& grid, double poisson,
 
 // THE CONNECTION RULE's census on (grid, elem_youngs, bcs, loads), exactly as
 // every matrix-free solve computes it (multigrid.cpp scan_islands): pieces are
-// 26-connected components of the solid voxels; a piece is LOOSE iff none of its
+// FACE-connected components of the solid voxels; a piece is LOOSE iff none of its
 // element nodes carries a Dirichlet BC or a non-zero load; every loose voxel is
 // in `drop` (ascending) and is solved at `floor_e`. `frozen_loose` counts loose
 // pieces holding a frozen voxel (report only); `majority_loose` = more than half

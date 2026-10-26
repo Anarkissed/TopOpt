@@ -2440,13 +2440,18 @@ void vcycle_quality(const MfHierarchy& H, const MgOpts& o, int iters,
 // grid) and 406 because they were hinged to each other, and their near-rigid
 // modes broke the l1 MG-PCG. The rule is now CONNECTION, not size:
 //
-//   * A PIECE is a 26-connected component of the SOLID voxels (solid = E >=
-//     kIslandSolidThreshold x Emax). A face, edge or corner contact shares nodes
-//     with the next voxel, so it connects.
+//   * A PIECE is a FACE-connected (6-connected) component of the SOLID voxels
+//     (solid = E >= kIslandSolidThreshold x Emax). Only a shared face (4 nodes)
+//     connects: a piece hanging on an EDGE (2 nodes) or a CORNER (1 node) is a
+//     hinge in a hex8 model — it rotates about that edge or node, resisted only
+//     by the void — so it carries no load, and hundreds of such near-zero modes
+//     are what the l1 MG cannot handle (reviewer's ruling, 2026-10-26 00:08 UTC).
 //   * A piece is ANCHORED iff one of its element nodes carries a Dirichlet BC or
-//     a non-zero load. Everything else is LOOSE: it is not connected through
-//     solid to anything that holds or loads it, so it carries no load, whatever
-//     its size. No size rule, no share cap, no frozen keep, no hinge keep.
+//     a non-zero load (so a chain of face-sharing solid voxels reaches an engaged
+//     support or a load). Everything else is LOOSE, whatever its size: no size
+//     rule, no share cap, no frozen keep, no hinge keep. The export's bridge /
+//     item-47 rules are unchanged; edge / corner-only joints in the exported
+//     part are REPORTED as fragile for printing (report.json).
 //   * EVERY matrix-free solve (the graded isotropic operator) takes the loose
 //     voxels OUT OF THE SYSTEM by solving them at the FLOOR modulus — the void
 //     modulus every solve already carries, which reaches the anchors through void
@@ -2467,7 +2472,7 @@ struct IslandScan {
   double floor_e = 0.0;         // the floor modulus they are solved at
   long long elements = 0;       // elements in the system
   long long solid = 0;          // voxels with E >= threshold * Emax
-  int pieces = 0;               // 26-connected solid pieces
+  int pieces = 0;               // face-connected solid pieces
   int unanchored = 0;           // LOOSE pieces (touch no Dirichlet / loaded node)
   long long unanchored_voxels = 0;
   int largest_unanchored = 0;
@@ -2477,8 +2482,8 @@ struct IslandScan {
   double ms = 0.0;              // the census's own wall time (one flood fill)
 };
 
-// Deterministic 26-connected census of the solid voxels (E >= 1e-3 * Emax) in
-// ascending voxel order. A piece is ANCHORED if any of its voxels has a node
+// Deterministic FACE-connected (6-connected) census of the solid voxels
+// (E >= 1e-3 * Emax) in ascending voxel order. A piece is ANCHORED if any of its voxels has a node
 // carrying a Dirichlet BC or a non-zero load; every other piece is LOOSE and all
 // its voxels are returned in `drop`. "Frozen" is reported only: a Load / Fixture
 // tagged voxel, or a voxel of the run's registered frozen mask
@@ -2551,22 +2556,19 @@ IslandScan scan_islands(const VoxelGrid& grid, const std::vector<double>& ey,
         for (int nd : en)
           if (anchor[static_cast<std::size_t>(nd)]) { anchored = true; break; }
       }
-      // All 26 neighbours: a face, edge or corner contact shares nodes.
-      for (int dz = -1; dz <= 1; ++dz) {
-        const int c = k + dz;
-        if (c < 0 || c >= nz) continue;
-        for (int dy = -1; dy <= 1; ++dy) {
-          const int b = j + dy;
-          if (b < 0 || b >= ny) continue;
-          for (int dx = -1; dx <= 1; ++dx) {
-            const int a = i + dx;
-            if (a < 0 || a >= nx || (dx == 0 && dy == 0 && dz == 0)) continue;
-            const std::size_t f = grid.index(a, b, c);
-            if (solid[f] && label[f] < 0) {
-              label[f] = id;
-              queue.push_back(static_cast<int>(f));
-            }
-          }
+      // The 6 FACE neighbours only: a face shares 4 nodes and transmits load;
+      // an edge (2 nodes) or a corner (1 node) is a hinge — a near-zero mode
+      // the void alone resists — so it does not connect.
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& c : nb) {
+        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 ||
+            c[2] >= nz)
+          continue;
+        const std::size_t f = grid.index(c[0], c[1], c[2]);
+        if (solid[f] && label[f] < 0) {
+          label[f] = id;
+          queue.push_back(static_cast<int>(f));
         }
       }
     }

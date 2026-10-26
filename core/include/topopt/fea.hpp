@@ -1321,10 +1321,11 @@ bool fea_matfree_mg_stagnation_latched();
 //
 // THE CONNECTION RULE (ruling 2026-10-25) — on EVERY matrix-free solve of the
 // graded isotropic operator, before the shipped attempt: the LOOSE pieces —
-// 26-connected components of the solid voxels (E >= 1e-3 Emax) that touch no
-// node carrying a Dirichlet BC or a non-zero load — are solved at the FLOOR
-// modulus (the void's), whatever their size, hinged to each other or not,
-// frozen or not. The shipped MG-CG, the safe retry and the Jacobi-CG fallback
+// FACE-connected (6-connected) components of the solid voxels (E >= 1e-3 Emax)
+// that touch no node carrying a Dirichlet BC or a non-zero load — are solved at
+// the FLOOR modulus (the void's), whatever their size, frozen or not. A piece
+// that reaches the body only through an edge or a corner contact is a hinge,
+// carries no load, and is loose. The shipped MG-CG, the safe retry and the Jacobi-CG fallback
 // solve that one system; an empty loose set leaves the solve exactly as it
 // was. It replaces the old in-retry island drop (arm G: <= 27 voxels, isolated,
 // unfrozen, <= 5 % of elements, only under a FeaIslandDropPermit). Per-run state resets with
@@ -1383,13 +1384,13 @@ struct FeaIslandDropForbid {
 };
 
 // THE CONNECTION RULE, on a DESIGN (not a solve): the same classifier the
-// solves use — 26-connected pieces of `solid` (non-zero = material; voxels
+// solves use — face-connected pieces of `solid` (non-zero = material; voxels
 // tagged Empty never count), LOOSE iff no element node of the piece carries a
 // Dirichlet BC or a non-zero load — for a caller that must clean a design before
 // handing it on (strengthen's coarse-to-fine hand-off). `loose` holds every
 // loose voxel, ascending; `ms` is the flood fill's wall time.
 struct LoosePieceCensus {
-  int pieces = 0;               // 26-connected pieces of `solid`
+  int pieces = 0;               // face-connected pieces of `solid`
   int loose = 0;                // ... of which touch no support or load
   long long loose_voxels = 0;
   int largest_loose = 0;

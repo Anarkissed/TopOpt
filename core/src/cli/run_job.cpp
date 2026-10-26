@@ -12351,7 +12351,7 @@ void strengthen_cap_site(StrengthenReport& sr, const VoxelGrid& G,
 // The fine run of a version starts from a DESIGN, never from a speckled one:
 // the coarse search's passing design (resampled onto the fine grid by voxel
 // centre) or, for a repair, the fine design it repairs. Before it is handed on,
-// its LOOSE pieces — 26-connected pieces of material touching no support or
+// its LOOSE pieces — face-connected pieces of material touching no support or
 // load, the solves' own rule (fea_loose_pieces) — lose their design material.
 // Frozen voxels cannot be removed (the run unions them in), so a frozen piece
 // that is loose stays and the solves' connection rule takes it out of each

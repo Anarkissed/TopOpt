@@ -16,7 +16,7 @@
 //   * 7x3x3 = 63-voxel bars (> 27: the old size rule kept them);
 //   * hinged pairs — a 2x2x2 block and a voxel touching it at a corner or along
 //     an edge, hinged to EACH OTHER but to nothing anchored (the old hinge rule
-//     kept both);
+//     kept both; under the FACE rule they are two loose pieces);
 //   * one loose FROZEN piece (a 2x2x2 block at E0, registered in the run's
 //     frozen mask the way plsm_optimize registers its FrozenSolid set; the old
 //     frozen rule kept it).
@@ -28,9 +28,11 @@
 //   L3  it is BIT-IDENTICAL to the same beam with no pieces planted at all
 //       (the loose voxels at the floor are exactly the void around them), in the
 //       same number of MG cycles: the loose pieces cost the solver nothing.
-//   L4  the classification is by connection: a planted piece that touches the
-//       beam only at a corner (a hinge to the anchored body) is NOT loose; a
-//       piece holding a loaded node is NOT loose.
+//   L4  the classification is by FACE connection (reviewer's ruling 2026-10-26
+//       00:08 UTC): a cube touching the beam only at a CORNER and a bar touching
+//       it only along an EDGE are hinges, carry no load and are LOOSE; a cube
+//       sharing a FACE with the beam is part of it; a piece holding a loaded
+//       node is anchored.
 // RED on 322b1c78 (core 180a23637fc6): L1 and L3 fail (the old rule kept the
 // big, hinged and frozen pieces in the system).
 
@@ -78,7 +80,7 @@ struct Fixture {
   std::vector<NodalLoad> loads;
   std::vector<char> frozen;      // the run's frozen mask
   std::vector<char> planted;     // planted LOOSE voxels
-  int pieces = 0;                // planted loose pieces (26-connected)
+  int pieces = 0;                // planted loose pieces (face-connected)
   long long voxels = 0;          // planted loose voxels
   int big = 0, hinged = 0, frozen_pieces = 0;
 };
@@ -162,15 +164,17 @@ Fixture make_fixture(bool plant) {
               block(o, p, q, 3, 3, 3, E);
             }
             break;
-          case 7:  // corner hinge: shares one node with the block
+          case 7:  // corner hinge: shares one node with the block (2 pieces)
             block(o, p, q, 2, 2, 2, E);
             put(o + 2, p + 2, q + 2, E);
             ++F.hinged;
+            ++F.pieces;
             break;
-          case 8:  // edge hinge: shares two nodes with the block
+          case 8:  // edge hinge: shares two nodes with the block (2 pieces)
             block(o, p, q, 2, 2, 2, E);
             put(o + 2, p + 2, q, E);
             ++F.hinged;
+            ++F.pieces;
             break;
           default: block(o, p, q, 3, 3, 2, E); break;
         }
@@ -278,7 +282,8 @@ int main() {
               C.unanchored_voxels == F.voxels && C.largest_unanchored == 63 &&
               C.frozen_loose == 1,
           "L1 census: one anchored piece (the beam); every planted piece loose, "
-          "hinged pairs counted once, the frozen one counted");
+          "a hinged pair counted as its two face-connected pieces, the frozen one "
+          "counted");
     // 4,617 loose voxels against the beam's 3,136: more than half the solid is
     // loose, which the run REPORTS (once) and still cleans.
     check(C.majority_loose && st_warned_once(),
@@ -289,30 +294,44 @@ int main() {
                 "fill %.2f ms\n", st.scanned, st.with_loose, st.ms_total);
   }
   {
-    // L4: connection, not proximity. A 3x3x3 cube touching the beam only at a
-    // CORNER is part of the anchored body; a single voxel on a loaded node is
-    // anchored by the load; a single voxel one voxel clear of the beam is loose.
+    // L4: FACE connection, not proximity. A 3x3x3 cube touching the beam only at
+    // a CORNER and a 3-voxel bar touching it only along an EDGE are hinges: LOOSE.
+    // A 2x2x2 cube sharing a FACE with the beam is part of it. A single voxel on
+    // a loaded node is anchored by the load; a voxel one voxel clear is loose.
     Fixture K = make_fixture(false);
     for (int k = 19; k < 22; ++k)
       for (int j = 19; j < 22; ++j)
         for (int i = 30; i < 33; ++i) K.ey[K.g.index(i, j, k)] = 0.5 * kE0;
     const std::size_t e_corner = K.g.index(30, 19, 19);  // corner-touches (29,18,18)
+    for (int i = 40; i < 43; ++i) K.ey[K.g.index(i, 11, 11)] = 0.5 * kE0;
+    const std::size_t e_edge = K.g.index(41, 11, 11);  // edge-touches (41,12,12)
+    for (int k = 13; k < 15; ++k)
+      for (int j = 19; j < 21; ++j)
+        for (int i = 20; i < 22; ++i) K.ey[K.g.index(i, j, k)] = 0.5 * kE0;
+    const std::size_t e_face = K.g.index(20, 19, 13);  // shares a face with (20,18,13)
     const std::size_t e_loaded = K.g.index(40, 2, 2);
     K.ey[e_loaded] = 0.5 * kE0;
     K.loads.push_back({topopt::fea_node_index(K.g, 40, 2, 2), 0, 1e-3});
     const std::size_t e_clear = K.g.index(50, 20, 14);  // y = 20: one voxel clear
     K.ey[e_clear] = 0.5 * kE0;
     const auto C = topopt::fea_detail::mg_island_census(K.g, K.ey, K.bcs, K.loads);
-    bool corner_kept = true, loaded_kept = true, clear_dropped = false;
+    bool corner_dropped = false, edge_dropped = false, face_kept = true,
+         loaded_kept = true, clear_dropped = false;
     for (int e : C.drop) {
-      if (static_cast<std::size_t>(e) == e_corner) corner_kept = false;
-      if (static_cast<std::size_t>(e) == e_loaded) loaded_kept = false;
-      if (static_cast<std::size_t>(e) == e_clear) clear_dropped = true;
+      const std::size_t u = static_cast<std::size_t>(e);
+      if (u == e_corner) corner_dropped = true;
+      if (u == e_edge) edge_dropped = true;
+      if (u == e_face) face_kept = false;
+      if (u == e_loaded) loaded_kept = false;
+      if (u == e_clear) clear_dropped = true;
     }
-    check(corner_kept && loaded_kept && clear_dropped && C.unanchored == 1 &&
-              C.pieces == 3,
-          "L4: a corner-hinged cube is part of the anchored body, a loaded voxel is "
-          "anchored, a voxel one voxel clear of the beam is loose");
+    std::printf("      L4 census: %d pieces, %d loose (%lld voxels)\n", C.pieces,
+                C.unanchored, C.unanchored_voxels);
+    check(corner_dropped && edge_dropped && face_kept && loaded_kept && clear_dropped &&
+              C.unanchored == 3 && C.unanchored_voxels == 27 + 3 + 1 && C.pieces == 5,
+          "L4: a corner-hinged cube and an edge-hinged bar are LOOSE; a face-joined "
+          "cube is part of the anchored body; a loaded voxel is anchored; a voxel one "
+          "voxel clear is loose");
     // The same rule on a DESIGN (fea_loose_pieces, the strengthen hand-off's).
     std::vector<char> solid(K.g.voxel_count(), 0);
     for (std::size_t e = 0; e < solid.size(); ++e) solid[e] = K.ey[e] >= 1.0 ? 1 : 0;

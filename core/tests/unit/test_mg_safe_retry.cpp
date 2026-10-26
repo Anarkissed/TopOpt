@@ -14,9 +14,9 @@
 //   S5   a solve the shipped path converges is BIT-IDENTICAL with the retry on
 //        and off, and the retry never engages on it.
 //   G    THE CONNECTION RULE (ruling 2026-10-25): on a field of floating specks
-//        in 1e-9 filler the census finds exactly the planted specks (26-connected
-//        pieces touching no support or load: a frozen speck and a 32-voxel blob
-//        are loose, a loaded speck and one hinged to the beam are not), there is
+//        in 1e-9 filler the census finds exactly the planted specks (FACE-connected
+//        pieces touching no support or load: a frozen speck, a 32-voxel blob and
+//        a speck hinged to the beam by an edge are loose, a loaded speck is not), there is
 //        no cap (a stride-2 checkerboard is cleaned, with the majority warning),
 //        and EVERY solve — no permit needed, a forbid changes nothing — solves the
 //        specks at the floor: it converges on multigrid to the exact system's
@@ -273,8 +273,9 @@ int main() {
   }
 
   // ---------------------------------------------------------------------------
-  // G: the census — THE CONNECTION RULE (ruling 2026-10-25). A piece is a
-  // 26-connected component of the solid voxels; it is LOOSE iff it touches no
+  // G: the census — THE CONNECTION RULE (ruling 2026-10-25; FACE connectivity,
+  // ruling 2026-10-26). A piece is a face-connected component of the solid
+  // voxels; it is LOOSE iff it touches no
   // Dirichlet / loaded node, whatever its size, frozen or not. (Before the rule:
   // 6-connected, <= 27 voxels, isolated, unfrozen, <= 5 % of the elements.)
   // ---------------------------------------------------------------------------
@@ -292,8 +293,8 @@ int main() {
 
     // Connection rules: a speck at full modulus (frozen proxy) is LOOSE (and
     // counted frozen); a speck on a loaded node is anchored; a 4x4x2 = 32-voxel
-    // blob is LOOSE (no size rule); a speck that only EDGE-touches the beam (a
-    // hinge) is part of the beam, so anchored.
+    // blob is LOOSE (no size rule); a speck that only EDGE-touches the beam is a
+    // hinge, carries no load, and is LOOSE too (the face rule).
     SpeckField K = F;
     const std::size_t e_frozen = K.g.index(2, 1, 1);
     K.ey[e_frozen] = 1000.0;
@@ -309,22 +310,22 @@ int main() {
     const std::size_t e_hinge = K.g.index(20, 5, 5);
     K.ey[e_hinge] = 500.0;
     auto CK = topopt::fea_detail::mg_island_census(K.g, K.ey, K.bcs, K.loads);
-    bool frozen_dropped = false, loaded_kept = true, hinge_kept = true,
+    bool frozen_dropped = false, loaded_kept = true, hinge_dropped = false,
          beam_kept = true;
     std::size_t blob_dropped = 0;
     for (int e : CK.drop) {
       const std::size_t u = static_cast<std::size_t>(e);
       if (u == e_frozen) frozen_dropped = true;
       if (u == e_loaded) loaded_kept = false;
-      if (u == e_hinge) hinge_kept = false;
+      if (u == e_hinge) hinge_dropped = true;
       for (std::size_t b : blob) blob_dropped += (u == b) ? 1 : 0;
       const int j = (e / K.g.nx) % K.g.ny, k = e / (K.g.nx * K.g.ny);
       if (in_beam(j, k)) beam_kept = false;
     }
     check(frozen_dropped && CK.frozen_loose >= 1 && blob_dropped == blob.size() &&
-              loaded_kept && hinge_kept && beam_kept,
-          "G: a frozen speck and a 32-voxel blob are LOOSE (no size / frozen keep); "
-          "a loaded speck and a speck hinged to the beam are anchored");
+              loaded_kept && hinge_dropped && beam_kept,
+          "G: a frozen speck, a 32-voxel blob and a speck edge-hinged to the beam are "
+          "LOOSE (no size / frozen / hinge keep); a loaded speck is anchored");
 
     // A registered frozen mask only decides the frozen COUNT: the masked grey
     // speck is loose like the rest and counted; the full-modulus design speck is
