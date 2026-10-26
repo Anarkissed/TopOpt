@@ -12156,7 +12156,8 @@ extension WorkspacePlaceholder {
                                                   anchors: force.anchorCount(in: selection.groups),
                                                   loads: force.loadCount(in: selection.groups))
         let rows = TopologyStageMenu.rows(typeInUse: project.lattice.stageMode, latticeGate: gate).map { r in
-            StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
+            StageCapsule.Item(id: r.id, title: r.target == .lattice ? FlexibleTopologyMenu.latticeRowTitle(r.title, project: project) : r.title,   // Flexible (PR #362) H59: on a Flexible project the lattice row says "Flexible" (the stage it opens), not "Lattice…"
+                              detail: r.detail, enabled: r.enabled, checked: r.checked,
                               action: r.target == .lattice ? .lattice : r.target == .editFaces ? .editFaces : .none)
         }
         let page: StageCapsule.Page = {
