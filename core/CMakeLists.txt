@@ -2400,6 +2400,13 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME bearing COMMAND test_bearing)
 
+  # THE CORNER FIX (reviewer 2026-10-26 13:12): margins on the stress averaged over a
+  # fixed critical volume (TCD); a uniform stress is not forgiven; a sharp corner
+  # settles across grids.
+  add_executable(test_tcd tests/validation/test_tcd.cpp)
+  target_link_libraries(test_tcd PRIVATE topopt)
+  add_test(NAME tcd COMMAND test_tcd)
+
   # LOAD SCENARIOS, engine (reviewer 2026-10-26 03:45): every scenario solved each
   # iteration (smooth max), certified each; an OFF anchor is a weak spring; two blocks
   # a push can only join through the gap come out as one body.
