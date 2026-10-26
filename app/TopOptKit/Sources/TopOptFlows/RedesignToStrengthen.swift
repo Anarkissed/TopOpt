@@ -170,6 +170,9 @@ public struct RunReportBlocks: Equatable, Sendable {
         public let accepted: Bool
         public let rejectionReason: String
         public let bodies: VariantBodies?
+        /// Places where the printed variant holds together only by an edge or a corner (`fragile_joints.count`;
+        /// core's loose-piece fix, the reviewer's ruling 2026-10-26 03:39). Reported, never fixed.
+        public var fragileJoints: Int = 0
     }
     public let strengthen: StrengthenReport?
     public let rows: [Row]
@@ -186,7 +189,8 @@ public struct RunReportBlocks: Equatable, Sendable {
                     printedFraction: num($0["printed_fraction"] ?? $0["volume_fraction"]),
                     accepted: $0["accepted"] as? Bool ?? accepted,
                     rejectionReason: $0["rejection_reason"] as? String ?? "",
-                    bodies: VariantBodies.decode($0["bodies"] as? [String: Any]))
+                    bodies: VariantBodies.decode($0["bodies"] as? [String: Any]),
+                    fragileJoints: int(($0["fragile_joints"] as? [String: Any])?["count"]))
             }
         }
         return RunReportBlocks(strengthen: StrengthenReport.decode(r["strengthen"] as? [String: Any]),
@@ -258,6 +262,11 @@ public enum StrengthenText {
             let bridged = own.status != "unreachable" && blocks.rows.contains {
                 abs($0.volumeFraction - own.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
             }
+            if own.status != "unreachable",
+               let thin = blocks.rows.first(where: { abs($0.volumeFraction - own.volumeFraction) < 1e-6 })?.fragileJoints,
+               thin > 0 {
+                lines.append(thinJointsLine(thin))
+            }
             return StrengthenCard(title: "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress",
                                   status: statusWord(v.status), lines: lines, bridged: bridged)
         }
@@ -274,9 +283,17 @@ public enum StrengthenText {
         return cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil   // Flexible (PR #362) H56l: redesign to strengthen (overnight plan 2026-10-25) — the cap's line from its flags, never its note
     }
 
-    /// The lines under the cards: the cap's line, then the run's rejection lines.
+    /// A version's thin joints (core's `fragile_joints.count`), in plain words. core's own note is never shown.
+    public static func thinJointsLine(_ count: Int) -> String {
+        "\(count) thin joint\(count == 1 ? "" : "s") (edge or corner only) — may be fragile to print"
+    }
+    public static let someThinJointsLine = "Some results have thin joints (edge or corner only) — may be fragile to print"
+
+    /// The lines under the cards: the cap's line, then the run's rejection lines, then — on a run with no strengthen
+    /// cards to carry it — one thin-joint line when an accepted result has any.
     public static func lines(_ blocks: RunReportBlocks) -> [String] {
-        [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks)
+        let thin = blocks.strengthen == nil && blocks.rows.contains { $0.accepted && $0.fragileJoints > 0 }
+        return [capLine(blocks)].compactMap { $0 } + rejectionLines(blocks) + (thin ? [someThinJointsLine] : [])
     }
 
     /// The run's rejection lines in plain words (item 47), once each.

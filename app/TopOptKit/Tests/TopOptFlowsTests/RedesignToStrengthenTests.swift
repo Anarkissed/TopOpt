@@ -240,6 +240,43 @@ final class RedesignToStrengthenTests: XCTestCase {
 
     // MARK: (8) H56l: the cap's line, from its flags — never its note
 
+    // MARK: (10) thin joints: the variant's `fragile_joints` (core's loose-piece fix, the reviewer's ruling 2026-10-26 03:39)
+
+    /// strengthen_pass with its one variants[] line carrying `fragile_joints` = `count` (core's per-variant block).
+    static func fragileReport(_ count: Int, strengthen: Bool = true) throws -> RunReportBlocks {
+        try edited("strengthen_pass") { r in
+            var variants = r["variants"] as! [[String: Any]]
+            variants[0]["fragile_joints"] = ["count": count, "note": "core's own words, never shown"]
+            r["variants"] = variants
+            if !strengthen { r["strengthen"] = nil }
+        }
+    }
+
+    func testAVersionWithThinJointsSaysSoInPlainWords() throws {
+        let one = try Self.fragileReport(1)
+        XCTAssertEqual(one.rows.first?.fragileJoints, 1)
+        XCTAssertEqual(StrengthenText.cards(one).first?.lines.last, "1 thin joint (edge or corner only) — may be fragile to print")
+        XCTAssertEqual(StrengthenText.cards(try Self.fragileReport(3)).first?.lines.last,
+                       "3 thin joints (edge or corner only) — may be fragile to print")
+        // the unreachable versions have no line of their own, so no thin-joint line
+        XCTAssertFalse(StrengthenText.cards(one).dropFirst().contains { $0.lines.contains { $0.contains("thin joint") } })
+        // on a strengthen run the card carries it: no second line under the cards
+        XCTAssertFalse(StrengthenText.lines(one).contains { $0.contains("thin joint") })
+    }
+
+    func testARunWithoutStrengthenShowsTheThinJointLineUnderTheResults() throws {
+        let b = try Self.fragileReport(2, strengthen: false)
+        XCTAssertEqual(StrengthenText.cards(b), [])
+        XCTAssertEqual(StrengthenText.lines(b), ["Some results have thin joints (edge or corner only) — may be fragile to print"])
+    }
+
+    func testNoThinJointsNoLine() throws {
+        let b = try Self.blocks("strengthen_pass")
+        XCTAssertEqual(b.rows.first?.fragileJoints, 0)
+        XCTAssertFalse((StrengthenText.cards(b).flatMap(\.lines) + StrengthenText.lines(b)).contains { $0.contains("thin joint") })
+        XCTAssertEqual(StrengthenText.lines(try Self.fragileReport(0, strengthen: false)), [])
+    }
+
     func testTheCapLineIsBuiltFromItsFlagsNeverItsNote() throws {
         func capped(anchor: Bool, load: Bool, note: String? = nil) throws -> RunReportBlocks {
             try Self.edited("strengthen_pass") { r in
