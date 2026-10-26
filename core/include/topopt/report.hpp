@@ -7,6 +7,7 @@
 #include "topopt/gate_diagnosis.hpp"  // GateDiagnosis (value types only)
 #include "topopt/mesh.hpp"      // Vec3
 #include "topopt/settings.hpp"  // SlicerSettings
+#include "topopt/strengthen_accept.hpp"  // StrengthenAttemptReport
 
 namespace topopt {
 
@@ -378,6 +379,9 @@ struct StrengthenVersionReport {
   // held (face-connected, touching no support or load) and the design voxels they
   // lost, the non-frozen loose voxels left (0: the start holds none), and the
   // frozen-only pieces still loose (the solves take those out of the system).
+  // EVERY ATTEMPT of the version (its fine run, then each repair), as verified
+  // (reviewer's ruling 2026-10-26): report.json versions[].attempts.
+  std::vector<StrengthenAttemptReport> attempts;
   std::string fine_start;
   int fine_start_loose = 0;
   long long fine_start_loose_voxels_removed = 0;

@@ -12696,6 +12696,7 @@ MinimizePlasticResult strengthen_versions(
     std::vector<double> seed = coarse_start;
     MinimizePlasticResult best;
     double best_verified = -1.0;
+    StrengthenAttemptReport best_attempt;
     bool ok = false;
     for (int attempt = 0; attempt <= kStrengthenRepairs; ++attempt) {
       MinimizePlasticResult r = run_one(nullptr, vf, seed);
@@ -12728,14 +12729,30 @@ MinimizePlasticResult strengthen_versions(
           const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
           defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
         }
-      const bool clean = v.accepted && v.v3.specks_dropped == 0 && clear == 0;
+      // ITEM 50 ACCEPTANCE (reviewer's ruling 2026-10-26; strengthen_accept.hpp):
+      // the verified export meets the target (already >= 1.05 x the previous
+      // version's), no anchored piece detached / load path severed, no Keep
+      // Clear voxel. Dropped specks are a note, never a refusal.
+      StrengthenAttemptReport att;
+      att.attempt = attempt;
+      att.verified_margin = verified;
+      att.specks = v.v3.specks_dropped;
+      att.speck_volume_mm3 = v.report.speck_volume_mm3;
+      att.keep_clear_voxels = clear;
+      att.anchors_attached = v.report.rejection_reason != kAnchorDetachedReason;
+      att.rejection_reason = v.report.rejection_reason;
+      vr.attempts.push_back(att);
+      const bool accepted_here =
+          strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason);
       // A repair warm-starts from this design only if it kept every anchor:
       // warm-starting from a design that let anchored pieces go kept them loose.
       std::vector<double> next_seed =
           v.report.rejection_reason != kAnchorDetachedReason
               ? v.optimization.physical_density
               : std::vector<double>();
-      if (verified > best_verified) {
+      // The version shows the ACCEPTED attempt when there is one, else the best
+      // verified one.
+      if (accepted_here || verified > best_verified) {
         best_verified = verified;
         vr.volume_fraction = vf;
         vr.in_loop_margin = v.report.margin_effective;
@@ -12751,9 +12768,10 @@ MinimizePlasticResult strengthen_versions(
         vr.specks = v.v3.specks_dropped;
         vr.keep_clear_voxels = clear;
         vr.repairs = attempt;
+        best_attempt = att;
         best = std::move(r);
       }
-      if (clean && verified >= target) {
+      if (accepted_here) {
         ok = true;
         break;
       }
@@ -12772,9 +12790,11 @@ MinimizePlasticResult strengthen_versions(
     vr.seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     if (!ok) {
+      // The REAL reason, from the attempt shown (strengthen_refusal_note).
       vr.status = "unreachable";
-      vr.note = "the verified export missed the target after " +
-                std::to_string(kStrengthenRepairs) + " repairs (best shown)";
+      vr.note = strengthen_refusal_note(best_attempt, target, kMarginBelowRequiredReason,
+                                        static_cast<int>(vr.attempts.size()) - 1,
+                                        kStrengthenRepairs);
       sr.versions.push_back(vr);
       continue;
     }
@@ -12787,6 +12807,10 @@ MinimizePlasticResult strengthen_versions(
     }
     vr.status = vr.repairs > 0 ? "repaired" : "verified";
     if (vr.essentially_original) vr.note = "essentially your original";
+    {
+      const std::string specks = strengthen_speck_note(best_attempt);
+      if (!specks.empty()) vr.note = vr.note.empty() ? specks : vr.note + "; " + specks;
+    }
     prev_vf = vr.volume_fraction;
     prev_verified = vr.verified_margin;
     sr.versions.push_back(vr);
