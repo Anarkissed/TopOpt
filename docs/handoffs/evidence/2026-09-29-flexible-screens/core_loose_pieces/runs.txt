@@ -172,3 +172,29 @@
 #   test_export_bodies, test_analyze_fixed_design — pass.
 #   17-test comparison at 269ca010 and at 6cb055c9: 16 IDENTICAL, test_recycle '[mgcg void]' the same two numbers as before (113 / 130).
 #   HELD (coordinator's CPU rule: his worker job active): full ctest + cli_demo, and his Fine / Balanced runs over version 1.
+
+## ROUND 4 (coordinator's order 2026-10-26, after release 5cf6773b / core 2fe4173959ba) — merge a9d89c26 (core 6b0cc4ad63c7)
+#   git merge --no-ff 5cf6773b into claude/core-loose-pieces. Conflicts: 5 hunks in core/src/fea/multigrid.cpp, all the [mg-safe]
+#   wording (the speck-fix branch's hand-written 4b1296a3 vs this branch's e49838d2). Kept ONE wording, the plainer one (e49838d2's:
+#   "multigrid (l1 smoother) CONVERGED | did not converge ... ; a Jacobi-CG FALLBACK follows", the summary "N safe attempts, N converged
+#   on multigrid (l1 smoother), fallback: none | K (Jacobi-CG; ...)") and the "FALLBACK: [mg-safe] solve N fell back to Jacobi-CG: ..."
+#   line. Kept 269ca010 (coarse seeding) and 6cb055c9 (cold first window: (cold_start || !warm) ? kSafeColdFirstWindow : 0); TO-core's
+#   `!b.released` anchor test and the release's load scenarios / bolts / Job 1 come in unchanged.
+#   Narrow tests at a9d89c26: test_strengthen_accept, test_loose_pieces, test_loose_review, test_mg_safe_retry, test_strengthen 19/19,
+#   test_export_bodies, test_minimize_plastic, test_analyze_fixed_design — pass.
+#   17-test comparison vs 85cadb88: 17 / 17 IDENTICAL (compare17.txt; test_recycle identical too, as the release already showed).
+#
+#   His jobs through version 1 (scratch copies of his job folders, read-only inputs; binary = core/build-loose at a9d89c26,
+#   core 6b0cc4ad63c7; nice -n 15, --threads 6; one at a time under ~/dev/TopOpt/HEAVY.lock; each stopped by me (own PID) once
+#   version 2 had begun):
+#     RUN N — Fine (job8bc1e265): 09:57:12 -> version 1 done ~11:58 (2 h 01 min). Coarse runs 2-6 started from the previous cleaned
+#       coarse design (0 loose voxels removed); fine start at vf 0.0200 from the coarse design (1 loose piece, 10 design voxels taken
+#       out, 0 non-frozen loose voxels left); fine run 600 iterations, verify, version 2's coarse search began.
+#       [mg-safe]: 707 safe attempts by the end of version 1, 707 converged on multigrid; FALLBACK lines 0.
+#       (806 / 806 converged when stopped at 12:01 inside version 2's coarse search; still 0 FALLBACK.)
+#     RUN O — Balanced (job02a425e5): 12:01:45 -> version 1 done ~12:39 (38 min). Coarse runs 2-6 seeded (run 6: 1 loose piece,
+#       1 design voxel out); fine start at vf 0.0592 from the coarse design (0 loose pieces); version 2's coarse search began.
+#       [mg-safe]: 727 safe attempts by the end of version 1, 727 converged on multigrid; FALLBACK lines 0.
+#       (769 / 769 converged when stopped at 12:39; still 0 FALLBACK.)
+#   Compare round 3 (269ca010, before the cold first window): Fine had 3 coarse-grid fallbacks (tight cold solves 46, 57, 58).
+#   FULL CTEST at a9d89c26 (core 6b0cc4ad63c7): 163 / 163 passed incl. cli_demo (2196.90 s), 4492 s in all (ctest_full.txt).
