@@ -551,7 +551,8 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "face_regions", "anchor_region_ids",
              "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic", "redesign", "wall_loops",
+             "infill_percent", "minimize_plastic", "redesign", "anchor_model",
+             "wall_loops",
              "layer_height_mm",
              "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
@@ -895,6 +896,14 @@ JobDescription parse_job(const std::string& json_text) {
       if (job.loads.redesign != "strengthen")
         schema_fail("\"loads.redesign\" must be \"strengthen\" (got \"" +
                     job.loads.redesign + "\")");
+    }
+    // REAL BOLTS — how anchors hold: "glued" (clamped, the default) or "bearing"
+    // (compression-only, frictionless springs). Absent => glued, byte for byte.
+    if (const JsonValue* am = find_key(lv, "anchor_model")) {
+      job.loads.anchor_model = require_string(*am, "loads.anchor_model");
+      if (job.loads.anchor_model != "glued" && job.loads.anchor_model != "bearing")
+        schema_fail("\"loads.anchor_model\" must be \"glued\" or \"bearing\" (got \"" +
+                    job.loads.anchor_model + "\")");
     }
     // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
     if (const JsonValue* wl = find_key(lv, "wall_loops")) {

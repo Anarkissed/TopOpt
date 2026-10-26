@@ -260,6 +260,18 @@ struct VariantReport {
   // `bodies_reported` (more than one body exported, a speck dropped, or an anchor
   // lost), so every one-body, speck-free line keeps its exact bytes.
   bool bodies_reported = false;
+  // REAL BOLTS (bearing anchors): the certification's contact loop (FixedDesignAnalysis
+  // contact_*). Emitted as "bearing" only when it ran (contact_rounds > 0), so a glued
+  // run's document keeps its bytes. settled false = the set still changed after the
+  // last allowed solve (reported, never passed silently).
+  int contact_rounds = 0;
+  double contact_tangent_share = 0.0;  // of the reaction, in the weak sliding springs
+  bool contact_held_by_sliding = false;  // over kAnchorsSlidingShare: not a pass
+  bool contact_settled = true;
+  bool contact_kept_last = false;
+  int contact_engaged = 0;
+  int contact_released = 0;
+  double contact_load_share = 0.0;
   int bodies_exported = 1;
   int specks_dropped = 0;
   long long speck_voxels = 0;

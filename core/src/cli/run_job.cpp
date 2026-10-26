@@ -9079,7 +9079,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
                // bool->int, int->double) it COMPILED and silently carried wrong
                // values. test_job_loadcase_copy caught it; that is what it is for.
                j_build_dir, j_infill_percent, j_layer_height_mm,
-               j_minimize_plastic, j_redesign, j_wall_loops,
+               j_minimize_plastic, j_redesign, j_anchor_model, j_wall_loops,
                j_wall_line_width_mm, j_wall_line_width_outer_mm] = job.loads;
   // NOT CARRIED, on purpose: `present` answers "was a loads block given at all",
   // which is the CALLER's question (every call site gates on job.loads.present
@@ -9173,6 +9173,7 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   lc.face_protection_region_depths_mm = j_face_protection_region_depths_mm;
   lc.minimize_plastic = j_minimize_plastic;
   lc.strengthen = j_redesign == "strengthen";  // item 50
+  lc.anchor_bearing = j_anchor_model == "bearing";  // REAL BOLTS
   lc.build_dir = j_build_dir;
   lc.infill_percent = j_infill_percent;
   lc.wall_loops = j_wall_loops;
@@ -10695,9 +10696,18 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   result.margin_required = margin_required;
   vr.margin_required = margin_required;
   vr.margin_effective = a.margin_effective;
+  vr.contact_rounds = a.contact_rounds;  // REAL BOLTS
+  vr.contact_tangent_share = a.contact_tangent_share;
+  vr.contact_held_by_sliding = a.contact_held_by_sliding;
+  vr.contact_settled = a.contact_settled;
+  vr.contact_kept_last = a.contact_kept_last;
+  vr.contact_engaged = a.contact_engaged;
+  vr.contact_released = a.contact_released;
+  vr.contact_load_share = a.contact_load_share;
   if (!a.accepted)
-    vr.rejection_reason =
-        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+    vr.rejection_reason = !load_path_ok ? kLoadPathNotConnectedReason
+                          : a.contact_held_by_sliding ? kAnchorsSlidingReason
+                                                      : kMarginBelowRequiredReason;
   JobReport report;
   report.material = job.material;
   (a.accepted ? report.variants : report.rejected).push_back(vr);

@@ -223,6 +223,37 @@ void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
 // This is exactly K restricted to the kept DOFs (fixed and void DOFs carry a zero
 // in the scattered vector and are never read back), so it equals the assembled
 // reduced operator DOF-for-DOF.
+// REAL BOLTS — one ENGAGED bearing spring (DirichletBC::spring > 0, not released) in
+// full-DOF numbering: S = k n n^T + kt (I - n n^T), exactly as the assembled path adds
+// it. Every operator the matrix-free system is used through (the matvec in both
+// precisions, the Jacobi / point-block / l1 diagonals, the level-1 Galerkin product,
+// the lambda probe) adds these. No spring: an empty list, and every one of them is
+// byte-identical.
+struct MfSpring {
+  int node = 0;
+  double k = 0.0;   // along n
+  double kt = 0.0;  // across n (DirichletBC::spring_tangent)
+  double n[3] = {0.0, 0.0, 0.0};
+};
+// y += S x at the spring nodes (full-length x / y).
+template <class T>
+inline void mf_apply_springs(const std::vector<MfSpring>& springs, const T* x, T* y) {
+  for (const MfSpring& sp : springs) {
+    const std::size_t d = 3 * static_cast<std::size_t>(sp.node);
+    const T g = static_cast<T>(sp.k - sp.kt) *
+                (static_cast<T>(sp.n[0]) * x[d] + static_cast<T>(sp.n[1]) * x[d + 1] +
+                 static_cast<T>(sp.n[2]) * x[d + 2]);
+    for (int a = 0; a < 3; ++a)
+      y[d + a] += static_cast<T>(sp.kt) * x[d + a] + g * static_cast<T>(sp.n[a]);
+  }
+}
+// S's 3x3 block at the spring's node, row-major.
+inline void mf_spring_block(const MfSpring& sp, double S[9]) {
+  for (int a = 0; a < 3; ++a)
+    for (int b = 0; b < 3; ++b)
+      S[3 * a + b] = (sp.k - sp.kt) * sp.n[a] * sp.n[b] + (a == b ? sp.kt : 0.0);
+}
+
 struct MatfreeReduced {
   std::vector<MfElem> elems;
   std::vector<int> color_offsets;   // kNumColors+1 delimiters into elems
@@ -234,6 +265,7 @@ struct MatfreeReduced {
   std::vector<int> cub_color_offsets;  // kNumColors+1 delimiters into cub_elems
   Hex8Stiffness KA, KB, KC;            // built only when a lattice build ran
   bool has_cubic = false;
+  std::vector<MfSpring> springs;    // REAL BOLTS; empty on every glued run
   int ndof = 0;
   int ng = 0;                       // surviving free-DOF count
   std::vector<int> kept_global;     // kg -> global DOF

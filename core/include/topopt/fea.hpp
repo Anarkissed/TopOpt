@@ -362,7 +362,41 @@ struct DirichletBC {
   int node = 0;
   int component = 0;
   double value = 0.0;
+  // REAL BOLTS (bearing anchors, job key loads.anchor_model "bearing"; the reviewer's
+  // brief of 2026-10-25 20:10). An entry with spring > 0 is NOT a constraint: it is a
+  // penalty spring at `node`: `spring` N/mm along the unit `normal` (out of the part,
+  // into the bolt or support; a per-area stiffness times the node's area, so it does
+  // not stiffen toward a clamp as the grid refines), and across it a weak tangential
+  // spring `spring_tangent` N/mm (near-frictionless: the reviewer's ruling of
+  // 2026-10-25 21:45). `released`: the part pulls away there (the normal spring is in
+  // tension), so the node is held by NOTHING, neither normal nor tangential.
+  // `component` and `value` are unused. Every {node, component, value} entry is
+  // unchanged.
+  double spring = 0.0;
+  double spring_tangent = 0.0;
+  Vec3 normal{0.0, 0.0, 0.0};
+  bool released = false;
 };
+
+// REAL BOLTS — the contact set. True when `bcs` carries a bearing spring.
+bool has_contact_springs(const std::vector<DirichletBC>& bcs);
+
+// One contact update from a solved displacement field `u` (DOF-ordered, size 3 x
+// node count): a spring whose node clearly moves away from its support (u . normal <
+// -tol) is released, a released one that clearly presses (u . normal > +tol) is
+// engaged again, and one inside that band keeps its state (tol = 1e-3 of the largest
+// |u . normal|: without the band the edge of the contact chatters). A change that would leave
+// NO spring engaged is not applied (`kept_last`): a support that holds nothing is a
+// singular system, never solved. When the set changes, the caches built on the old
+// operator are dropped (the Krylov recycling space, the GenEO basis, the safe retry's
+// consecutive-failure count; the stagnation latch keeps its shipped rule).
+struct ContactUpdate {
+  int changed = 0;
+  int engaged = 0;
+  int released = 0;
+  bool kept_last = false;
+};
+ContactUpdate contact_update(std::vector<DirichletBC>& bcs, const std::vector<double>& u);
 
 // A nodal force `value` applied to (node, component). A point load is one
 // entry; a distributed load is the same force split across several nodes.
@@ -1312,6 +1346,9 @@ long long fea_geneo_decisions_dropped();
 // is for tests/diagnostics. Both are inert off the matrix-free multigrid path.
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
+// REAL BOLTS: only the safe retry's consecutive-failure count, for a contact-set
+// change mid-run (the operator changed; the latch keeps its shipped rule).
+void fea_matfree_reset_mg_safe_failures();
 
 // SAFE-SMOOTHER RETRY (thin-wall solver cure S3 + S5 gate + arm G). The shipped
 // V-cycle smoother (damped Jacobi, omega = 0.6) is formally unsafe on a hex8 at

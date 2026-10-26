@@ -231,6 +231,31 @@ int main() {
           "S3/D4: the l1 V-cycle is positive definite and contracts");
     check(P.rayleigh_shipped < 0.0 || P.rho_shipped > 1.0,
           "D4 RED CONTROL: the shipped V-cycle is indefinite / divergent here");
+
+    // REAL BOLTS (#362's condition 4): the same hierarchy held by BEARING springs at
+    // x = 0 instead of the clamp (some released, a tangential part), so the l1 diagonal
+    // carries the springs' row sums and the bound still holds by construction.
+    std::vector<DirichletBC> springs;
+    int nth = 0;
+    for (int c = 0; c <= g.nz; ++c)
+      for (int b = 0; b <= g.ny; ++b) {
+        DirichletBC sp;
+        sp.node = topopt::fea_node_index(g, 0, b, c);
+        sp.spring = 5000.0;
+        sp.spring_tangent = 5.0;
+        sp.normal = Vec3{-1.0, 0.0, 0.0};
+        sp.released = (nth++ % 5) == 0;
+        springs.push_back(sp);
+      }
+    const auto Q = topopt::fea_detail::mg_smoother_probe(g, nu, springs, loads, ey, 200, 40);
+    bool l1_springs = Q.built && !Q.lambda_l1.empty();
+    std::printf("      with bearing springs, lambda_max(D_l1^-1 A):");
+    for (double v : Q.lambda_l1) {
+      std::printf(" %.4f", v);
+      l1_springs = l1_springs && v <= 1.0 + 1e-9 && v > 0.0;
+    }
+    std::printf("\n");
+    check(l1_springs, "S3 + springs: lambda_max(D_l1^-1 A) <= 1 on every smoothed level");
   }
 
   // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <string>
 #include <vector>
@@ -245,10 +246,22 @@ FixedDesignAnalysis analyze_fixed_design(
   // malformed-problem throws (bad index, void-only system) are NOT caught and still
   // propagate.
   SimpCompliance sc;
+  // REAL BOLTS (bearing anchors, the reviewer's brief of 2026-10-25 20:10): which side
+  // of each anchor presses is not known in advance, so solve, release the springs in
+  // tension, and re-solve until the contact set stops changing, at most
+  // kContactRounds solves. Glued anchors (no spring entry): one solve, as before.
+  constexpr int kContactRounds = 6;
+  const bool bearing = has_contact_springs(bcs);
+  std::vector<DirichletBC> contact_bcs;
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& B = bearing ? contact_bcs : bcs;
   // The voxels the solve held at the floor as LOOSE (empty when none, and on
-  // every path that is not the matrix-free solve).
+  // every path that is not the matrix-free solve). With bearing anchors, the LAST
+  // contact solve's: the set it was solved with is the one the field belongs to.
   std::vector<char> loose;
   try {
+   for (;;) {
+    loose.clear();
     if (has_lattice) {
       // Composite solve: solid voxels use the scalar-penalized isotropic modulus
       // E(rho) (bit-identical to what simp_compliance builds for them); latticed
@@ -266,7 +279,7 @@ FixedDesignAnalysis analyze_fixed_design(
             if (!lat_mask[e]) elem_youngs[e] = simp_youngs(params, density[e]);
           }
       sc.solution = fea_solve_cg_lattice(grid, elem_youngs, lat_mask, lat_c11,
-                                         lat_c12, lat_c44, params.poisson, bcs,
+                                         lat_c12, lat_c44, params.poisson, B,
                                          loads, cg_tolerance, cg_max_iterations,
                                          &sc.cg);
     } else {
@@ -280,7 +293,7 @@ FixedDesignAnalysis analyze_fixed_design(
       // (at the floor its strain is the void's, which E_solid would turn into a
       // stress the piece does not carry).
       FeaIslandDropForbid no_island_drop;
-      sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
+      sc = simp_compliance(grid, params, density, B, loads, cg_tolerance,
                            cg_max_iterations, /*initial_guess=*/nullptr,
                            /*solver=*/nullptr, solver_kind);
       if (solver_kind == SolverKind::MultigridCG_Matfree) {
@@ -291,6 +304,23 @@ FixedDesignAnalysis analyze_fixed_design(
         }
       }
     }
+    out.solve_iterations += sc.cg.iterations;
+    out.solve_ms += sc.t_solve_ms;
+    if (!bearing) break;
+    ++out.contact_rounds;
+    std::vector<DirichletBC> next = contact_bcs;
+    const ContactUpdate cu = contact_update(next, sc.solution.u);
+    std::fprintf(stderr, "[contact] certification solve %d: %d pressing, %d let go, %d changed%s\n",
+                 out.contact_rounds, cu.engaged, cu.released, cu.changed,
+                 cu.kept_last ? " (every anchor pulled away: last set kept)" : "");
+    out.contact_kept_last = out.contact_kept_last || cu.kept_last;
+    if (cu.changed == 0) break;  // settled: the field below is this set's
+    if (out.contact_rounds >= kContactRounds) {
+      out.contact_settled = false;  // reported, never passed silently
+      break;
+    }
+    contact_bcs = std::move(next);
+   }
   } catch (const SolverNonConvergence& e) {
     out.non_convergent = true;
     out.non_convergent_iteration = e.iterations;
@@ -302,6 +332,35 @@ FixedDesignAnalysis analyze_fixed_design(
            "non-convergence rejection: a failed certification solve must never "
            "certify a design");
     return out;
+  }
+
+  if (bearing) {
+    // The set the field was solved with, and how much of the load its engaged
+    // springs carry (the rest is the stabilisation's: near 1 when the supports hold).
+    Vec3 R{0.0, 0.0, 0.0}, T{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
+    for (const DirichletBC& b : contact_bcs) {
+      if (!(b.spring > 0.0)) continue;
+      if (b.released) { ++out.contact_released; continue; }
+      ++out.contact_engaged;
+      const std::size_t d = 3 * static_cast<std::size_t>(b.node);
+      const std::vector<double>& u = sc.solution.u;
+      const double un = u[d] * b.normal.x + u[d + 1] * b.normal.y + u[d + 2] * b.normal.z;
+      R.x += b.spring * un * b.normal.x;
+      R.y += b.spring * un * b.normal.y;
+      R.z += b.spring * un * b.normal.z;
+      T.x += b.spring_tangent * (u[d] - un * b.normal.x);
+      T.y += b.spring_tangent * (u[d + 1] - un * b.normal.y);
+      T.z += b.spring_tangent * (u[d + 2] - un * b.normal.z);
+    }
+    const Vec3 RT{R.x + T.x, R.y + T.y, R.z + T.z};
+    const double rt = std::sqrt(RT.x * RT.x + RT.y * RT.y + RT.z * RT.z);
+    out.contact_tangent_share =
+        rt > 0.0 ? std::sqrt(T.x * T.x + T.y * T.y + T.z * T.z) / rt : 0.0;
+    out.contact_held_by_sliding = out.contact_tangent_share > kAnchorsSlidingShare;
+    for (const NodalLoad& l : loads)
+      (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+    const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+    out.contact_load_share = fm > 0.0 ? std::sqrt(R.x * R.x + R.y * R.y + R.z * R.z) / fm : 0.0;
   }
 
   // Peak stresses over the PRINTED material (density > iso), using the solid
@@ -661,6 +720,9 @@ FixedDesignAnalysis analyze_fixed_design(
       // orientation and are deliberately left alone.
     }
   }
+  // REAL BOLTS: anchors that hold the load only through the weak sliding springs are
+  // no support at all in that direction, so no margin measured on them is a pass.
+  if (out.contact_held_by_sliding) out.accepted = false;
   return out;
 }
 

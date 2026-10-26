@@ -29,6 +29,11 @@
 
 namespace topopt {
 
+// REAL BOLTS: the optimizer re-reads the bearing contact set every this many
+// iterations (the reviewer's brief of 2026-10-25 20:10: "every N iterations, not every
+// step"); the certification then settles it fully (analyze.cpp).
+constexpr int kContactEvery = 10;
+
 namespace {
 
 void validate_params(const SimpParams& p) {
@@ -1918,6 +1923,10 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
     // restricted solve; a throw latches below and prev_mask is never read again.
     ad.prev_mask = mask;
     return c;
+  } catch (const SolverStopped&) {
+    // The safety net fired (#362, core-loose-pieces): a stopped solve is a bug report,
+    // never something to retry on the full domain.
+    throw;
   } catch (const std::exception& ex) {
     ad.latched = true;
     ad.latch_iteration = iteration;
@@ -2154,6 +2163,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // very ~2 GB / ~7 GB-transient matrix that OOMs on the design box. Constructing
   // it under MultigridCG_Matfree would reintroduce the crash the matrix-free path
   // exists to avoid, so skip it entirely for both multigrid kinds.
+  // REAL BOLTS (bearing anchors): the contact set this run solves with, updated from
+  // the field every kContactEvery iterations, not every step (the certification
+  // then settles it fully). Glued anchors: `live_bcs` IS `bcs`.
+  std::vector<DirichletBC> contact_bcs;
+  const bool bearing = has_contact_springs(bcs);
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   std::unique_ptr<PenalizedSolver> solver;
   if (options.solver == SolverKind::JacobiCG)
     solver = std::make_unique<PenalizedSolver>(grid, params.poisson, bcs, loads);
@@ -2257,7 +2273,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
                                                           : 0.0);
         c = active_domain_solve(
-            active_domain, grid, traj_params, xphys, bcs, loads, traj_tol,
+            active_domain, grid, traj_params, xphys, live_bcs, loads, traj_tol,
             options.cg_max_iterations,
             // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
             // OPT-IN. The guess has always been held and passed; until this task
@@ -2300,6 +2316,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         break;
       }
       if (!use_solver) warm = c.solution;
+      if (bearing && (result.iterations + 1) % kContactEvery == 0)
+        (void)contact_update(contact_bcs, c.solution.u);
       if (!c.cg.converged) {
         // Some solver paths REPORT non-convergence via cg.converged rather than
         // throwing; treat it identically to the throw above (same honest end).
@@ -2602,7 +2620,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // solves — the specks are solved at their true modulus.
       FeaIslandDropForbid no_island_drop;
       const SimpCompliance fc = simp_compliance(
-          grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
+          grid, params, result.physical_density, live_bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
           options.solver);
       result.compliance = fc.compliance;
@@ -3163,6 +3181,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // the multigrid kinds (which bypass it) must not construct it. This is the
   // mask-aware MMA optimizer the design-box run uses, so the gate is what keeps
   // the on-device design-box path matrix-free (no assembled fine K).
+  // REAL BOLTS (bearing anchors): the contact set this run solves with, updated from
+  // the field every kContactEvery iterations, not every step (the certification
+  // then settles it fully). Glued anchors: `live_bcs` IS `bcs`.
+  std::vector<DirichletBC> contact_bcs;
+  const bool bearing = has_contact_springs(bcs);
+  if (bearing) contact_bcs = bcs;
+  const std::vector<DirichletBC>& live_bcs = bearing ? contact_bcs : bcs;
   std::unique_ptr<PenalizedSolver> solver;
   if (options.solver == SolverKind::JacobiCG)
     solver =
@@ -3286,7 +3311,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
                                                           : 0.0);
         c = active_domain_solve(
-            active_domain, analysis, traj_params, xphys, bcs, loads, traj_tol,
+            active_domain, analysis, traj_params, xphys, live_bcs, loads, traj_tol,
             options.cg_max_iterations,
             // MATRIX-FREE WARM START (task 2026-08-10-plsm-production, S3):
             // OPT-IN. The guess has always been held and passed; until this task
@@ -3320,6 +3345,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         break;
       }
       if (!use_solver) warm = c.solution;
+      if (bearing && (result.iterations + 1) % kContactEvery == 0)
+        (void)contact_update(contact_bcs, c.solution.u);
       if (!c.cg.converged) {
         result.non_convergent = true;
         result.non_convergent_iteration = c.cg.iterations;
@@ -3703,7 +3730,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // overload.
       FeaIslandDropForbid no_island_drop;
       const SimpCompliance fc = simp_compliance(
-          analysis, semdot_law(params, options), result.physical_density, bcs,
+          analysis, semdot_law(params, options), result.physical_density, live_bcs,
           loads, options.cg_tolerance, options.cg_max_iterations, nullptr,
           use_solver ? solver.get() : nullptr, options.solver);
       result.compliance = fc.compliance;

@@ -103,6 +103,11 @@ struct KnockdownSpec {
 // subset of MinimizePlasticVariant that the recovery block fills (von_mises_field,
 // stress_tensor_field, displacement_field, mass_grams, support_volume_voxels,
 // margin, v3, accepted) plus the intermediate scalars the report line consumes.
+// REAL BOLTS: above this share of the anchors' reaction in the weak sliding springs,
+// the anchors cannot hold the load in some direction (the reviewer's ruling of
+// 2026-10-25 21:45). See FixedDesignAnalysis::contact_tangent_share.
+inline constexpr double kAnchorsSlidingShare = 0.05;
+
 struct FixedDesignAnalysis {
   // Per-voxel von Mises stress over the PRINTED material (density > iso),
   // grid-indexed (grid.voxel_count()), MPa; zero off the printed set.
@@ -136,6 +141,27 @@ struct FixedDesignAnalysis {
   // converged). The certification solve is NOT softened or retried — the tolerance
   // is unchanged; this flag only records that it missed.
   bool non_convergent = false;
+  // REAL BOLTS (bearing anchors): the certification's contact loop. 0 rounds = glued
+  // anchors. `contact_settled` false = the set still changed after the last allowed
+  // solve; `contact_kept_last` = a release would have left no spring engaged, so the
+  // last set was kept; `contact_load_share` = |the engaged springs' total force| /
+  // |the applied load| (near 1 when the supports carry the load, not the
+  // stabilisation).
+  // contact_tangent_share = |the weak tangential springs' total force| / |the anchors'
+  // total reaction|; over kAnchorsSlidingShare the anchors cannot hold the load in
+  // some direction (contact_held_by_sliding) and the design is NOT accepted. The
+  // certification's own solves: CG iterations and wall, summed over the contact solves
+  // (also filled on a glued run: one solve), for the cost against glued.
+  int contact_rounds = 0;
+  double contact_tangent_share = 0.0;
+  bool contact_held_by_sliding = false;
+  long long solve_iterations = 0;
+  double solve_ms = 0.0;
+  bool contact_settled = true;
+  bool contact_kept_last = false;
+  int contact_engaged = 0;
+  int contact_released = 0;
+  double contact_load_share = 0.0;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
 
