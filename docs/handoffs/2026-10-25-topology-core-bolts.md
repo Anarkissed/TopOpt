@@ -260,6 +260,25 @@ Branch `claude/topology-core-scen-strengthen`, from the release (`origin/claude/
   (0.7 % from 96 to 128); glued 25.63 / 26.43 / 25.36 / 24.33 (4.1 %). The step from 64 to 96 is 6.8 %, at h 0.375 →
   0.25 mm against a 1.44 mm radius, so `test_bearing` (d) checks 96 → 128 now. The averaged bearing peak sits in the
   bearing zone (r ≈ 3.0, ±141–148°): the contact, not a corner.
+- **His arms (bar a), MISSED.** Glued certification at res 48 / 64 / 96 / 128 (2026-10-26 13:56, the scratchpad
+  `tcd_probe`):
+
+  | | 48 | 64 | 96 | 128 | 96 → 128 |
+  |---|---|---|---|---|---|
+  | as drawn, old (single voxel) | 3.939 | 3.940 | 2.844 | 2.481 | −12.8 % |
+  | as drawn, new (TCD) | 3.939 | 3.940 | 4.661 | 4.083 | −12.4 % |
+  | box filled, old | 7.165 | 8.054 | 5.209 | 3.196 | −38.6 % |
+  | box filled, new | 7.165 | 8.054 | 6.550 | 5.297 | −19.1 % |
+
+  The voxel is 2.55 / 1.91 / 1.27 / 0.96 mm, so the radius is 0.6 / 0.75 / 1.1 / 1.5 voxels: at 48 / 64 it reads the
+  single voxel (by design), and at 96 / 128 the critical volume is the voxel plus its neighbours. The bracket
+  settles only from h ≈ radius / 6, so on the arms this would need res ~500–950. No radius up to 5 mm settles both
+  rows (2.5 mm: +1.7 % / −5.2 %; 4 mm: −4.0 % / −11.8 %; 5 mm: −2.3 % / −9.3 %, scalar average). The proposed fix:
+  re-solve a fine local box (~15 mm, h ≈ radius / 8) around the worst spots, its cut faces driven by the global
+  displacements. Posted to the reviewer 2026-10-26 14:07 EDT with three options for the bundle; awaiting the ruling.
+- **#362's tweaks** (claude/core-loose-pieces eb470de7: coarse seeding 269ca010, cold first window 6cb055c9, plain
+  [mg-safe] wording e49838d2) merged clean at 599636ca. The coarse seed carries across versions with the sequential
+  ladder.
 
 ## STEP 3, THE NEW STRENGTHEN LADDER (his decision of 2026-10-26)
 
