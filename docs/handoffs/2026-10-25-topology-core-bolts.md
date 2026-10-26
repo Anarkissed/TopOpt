@@ -200,3 +200,35 @@ as a pre-flight block on Optimize; both halves ship together):
 - with strengthen: "Load scenarios can't be combined with Redesign to strengthen yet"
 Where they are today: job.cpp (the schema: no anchor ON, no load, bearing, strengthen) and loadcase.cpp (the same
 checks, plus "its load tagged nothing at this resolution").
+
+## LOAD SCENARIOS WITH "REDESIGN TO STRENGTHEN" (the reviewer's ruling of 2026-10-26 12:46, his "it needs to work together!")
+
+Branch `claude/topology-core-scen-strengthen`, from the release (`origin/claude/flexible-screens` 5cf6773b).
+
+- One certification for scenarios everywhere: `certify_scenarios` (pipeline.hpp / minimize_plastic.cpp) runs a given
+  certify on every scenario's supports and loads, picks the worst (a non-convergent one first, else the lowest
+  margin), reports each scenario's margin, peak and weak-spring share, and marks the first unheld one. The rung gate
+  (minimize_plastic), `analyze_job` and strengthen all use it. `sized_scenarios` sizes the weak springs (1e-6 × E ×
+  h per node).
+- `analyze_job` certifies every scenario on the analysed design (on the design box's grid when a mesh was voxelized
+  onto it). `AnalyzeJobResult::scenarios` / `unheld_scenario`; its report line carries "scenarios" and the reason.
+- Strengthen, every step on the worst scenario:
+  - **reference:** max(as-drawn worst, required). If the part as drawn can't carry a scenario at all
+    (`as_drawn_unheld`), the reference is the requirement alone.
+  - **targets:** × 1/(1 − cut), as before.
+  - **ceiling:** the worst scenario's. If the box filled solid can't carry a scenario (`ceiling_unheld`), every
+    version is unreachable: "Scenario “X”'s load has no path to its anchors, even with the box filled solid".
+  - **search and fine runs:** the coarse search and the fine runs solve all scenarios (the smooth max).
+  - **verify:** checks EVERY scenario on the export.
+  - **acceptance:** every scenario held, and the worst verified margin meets the target. Repairs, the 1.05× step,
+    IoU and specks are unchanged.
+  - **report:** `versions[].scenarios`; the version's margin is the worst's. When 42-B's straight bridge fires in a
+    scenario run, the note says so.
+- Plain refusals: "Scenario “<name>” has no anchor switched on", "Scenario “<name>” has no load", "Load scenarios
+  can't be combined with bolt bearings yet"; the unheld line is "Scenario “<name>”'s load has no path to its anchors".
+- Test: `test_scenarios_strengthen` 13/13, red first. Two blocks with a gap: v1 (target 2.0) verified at 9.11 and v2
+  (target 9.57) at 11.16, each ONE body, both scenarios held on the export, "B free" governing. v3 is unreachable,
+  above 0.95 × the ceiling of 11.29. 21 narrow tests pass.
+- Evidence jobs (his Carriage Arms copy 4, res 48), in scratch `evid/`. Scenario 2 = the left plate's 22 anchor
+  faces off, 20 N down + 5 N sideways (outward, −x) on the left drum's top (face 34). Scenario 3 = the mirror (face 18,
+  +x). The sideways direction is my reading of "sideways".
