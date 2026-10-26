@@ -326,7 +326,9 @@ extension FlexiblePressFixtures {
     static func enterLatticeStage(_ project: ProjectModel, click: (CGPoint) -> Void,
                                   file: StaticString = #filePath, line: UInt = #line) throws {
         let rowID = "topology-menu-lattice"
-        let title = TopologyStageMenu.latticeTitle(typeInUse: project.lattice.stageMode)
+        // ★ RE-PINNED (H59, the overnight release ruling 2026-10-26: "the menu says Flexible"): the row's words as the page draws
+        // them — "Flexible" on a Flexible project (was #354's latticeTitle alone, "Lattice…").
+        let title = FlexibleTopologyMenu.latticeRowTitle(TopologyStageMenu.latticeTitle(typeInUse: project.lattice.stageMode), project: project)
         final class Pick { var title: String?; var enabled = false; var rows: [String]? }
         let pick = Pick()
         let obs = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { n in

@@ -48,7 +48,8 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
              gate: ", !flexibleMain.owns(project, stage)",
              anchor: "                // disclosure mechanism in that panel (bar R12).\n"),
         Hook(id: "H27",
-             pin: "                if viewerMesh != nil, flexibleMain.owns(project, stage) { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: ",
+             // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure; ★ and the redesign P4 (H62): H27 / H36 hand "Change lattice type…" its closure.
+             pin: "                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: ",
              gate: ", flexibleMain.owns(project, stage)",
              anchor: "                // ★ §1b — the ONE button: it NAVIGATES between the two stages.\n"),
         Hook(id: "H28",
@@ -56,7 +57,7 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
              gate: ", !flexibleMain.owns(project, stage)",
              anchor: "                if viewerMesh != nil { latticeStageModeOverlay }\n"),
         Hook(id: "H30",
-             pin: "            if flexibleMain.owns(project, stage) { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: ",
+             pin: "            if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: ",
              gate: "flexibleMain.owns(project, stage)",
              anchor: "            Spacer()\n"),
         Hook(id: "H31",
@@ -64,15 +65,15 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
              gate: ", !flexibleMain.owns(project, stage)",
              anchor: "                    .transition(.opacity).zIndex(48)\n            }\n"),
         Hook(id: "H33",
-             pin: "                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6",
+             pin: "                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6",
              gate: "flexibleMain.owns(project, stage)",
              anchor: "                    latticeProbeCallout\n                }\n"),
         Hook(id: "H34",
-             pin: "                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362)",
+             pin: "                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362)",
              gate: "flexibleMain.owns(project, stage)",
              anchor: "                            bottomBarHeight = ok\n                        }\n                    }\n"),
         Hook(id: "H36",
-             pin: "                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true },   // Flexible (PR #362) H36: ",
+             pin: "                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: ",
              gate: "onLeave: { goToStage($0) }",
              anchor: "stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),\n"),
         Hook(id: "H37",
@@ -98,7 +99,8 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         }
         // the else branches keep today's statements
         let elses: [(String, String)] = [
-            ("H27", "{ FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: "),
+            // ★ RE-PINNED (the redesign P5, H60 approved in the overnight release ruling of 2026-10-26): the capsule takes Edit faces' closure; ★ P4 (H62): and Change lattice type's
+            ("H27", "{ FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: "),
         ]
         for (id, head) in elses {
             guard let r = ws.range(of: head), let nl = ws[r.upperBound...].firstIndex(of: "\n") else { out.append("\(id): no line"); continue }

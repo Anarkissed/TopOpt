@@ -394,7 +394,8 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
     func testTheHooksAreInPlace() throws {
         let ws = try FlexibleSource.text("WorkspacePlaceholder.swift")
         let pins = [
-            "if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }",
+            // ★ RE-PINNED (the redesign P5; H60 / H61 approved in the overnight release ruling of 2026-10-26): the positive owns() gates carry `!editFaces.isEditing` (Flexible is off under Edit faces), and H27 / H36 hand Edit faces its closure.
+            "if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }",
             // ★ RE-PINNED (round 7, R7-D1 — H31, approved 2026-10-14 19:45): not on the Flexible stage (the corner card says
             // it); Topology and Surface keep the Export step. Was: mounted for every stage of a Flexible project.
             "if project.lattice.flexible != nil, !flexibleMain.owns(project, stage) { FlexibleExportMount(run: flexibleMain.coreRun).zIndex(48) }",

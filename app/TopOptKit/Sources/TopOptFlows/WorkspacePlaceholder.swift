@@ -845,7 +845,7 @@ public struct WorkspacePlaceholder: View {
                               if flexibleMain.read(project, mode: latticeLegendMode, face: fid, point: pt) { return true }   // Flexible (PR #362) H7: a surface tap reads the drilled-in Flexible legend
                               if legendDrilledIn { return true }
                               guard let m = viewerMesh else { return false }
-                              if flexibleMain.owns(project, stage), force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: every tap on the Flexible stage goes to the face chip's router; it never joins, moves or removes a face by itself (FlexibleFacePick)
+                              if flexibleMain.owns(project, stage), !editFaces.isEditing, force.phase == .edit, !fullScreenPageUp { flexibleMain.tapFace(project, face: fid, point: pt, mesh: m); return true }   // Flexible (PR #362) H22: every tap on the Flexible stage goes to the face chip's router; it never joins, moves or removes a face by itself (FlexibleFacePick) · Flexible (PR #362) H61: under Edit faces the tap is Edit faces'
                               if visible.surfaceEditing {
                                   handleSurfacePick(fid, at: pt, mesh: m)
                                   return true
@@ -909,7 +909,7 @@ public struct WorkspacePlaceholder: View {
                           // user has visibly moved on makes the next action apply
                           // somewhere they are no longer looking.
                           onMiss: {
-                              if flexibleMain.owns(project, stage), !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: a tap on empty canvas closes the face chip; a pending face is dropped and nothing is created
+                              if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { flexibleMain.missTap(); return }   // Flexible (PR #362) H23: a tap on empty canvas closes the face chip; a pending face is dropped and nothing is created · Flexible (PR #362) H61: under Edit faces the miss is Edit faces'
                               guard visible.surfaceEditing else { return }
                               // ★ CLEARING THE SELECTION IS NOT THE SAME AS THROWING
                               // AWAY WORK IN PROGRESS. A tap on the ground clears
@@ -1336,7 +1336,7 @@ public struct WorkspacePlaceholder: View {
                 // affordances (§1a): they left the TO page with everything else.
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
-                if viewerMesh != nil, flexibleMain.owns(project, stage) { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu
+                if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place · Flexible (PR #362) H62: "Change lattice type…" asks with #354's card
                 else if viewerMesh != nil { stageNavigationButtonOverlay }
                 if viewerMesh != nil { latticeStageModeOverlay }
                 if viewerMesh != nil, !flexibleMain.owns(project, stage) { latticeSettingsButtonOverlay }   // Flexible (PR #362) H28: Settings is the capsule's 'Squish' on the Flexible stage
@@ -1353,13 +1353,13 @@ public struct WorkspacePlaceholder: View {
                 // the entire app. Please add to the TO page side-by-side just below
                 // the position gizmo (with padding between them)"). The Surface
                 // stage keeps them in its own tray, where the rest of its tools are.
-                if flexibleMain.owns(project, stage) { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainViewToggles(main: flexibleMain, solver: FlexibleStressSolver(app: model, sim: latticeSim), openSettings: { showFlexiblePage = true }) }   // Flexible (PR #362) H5 (+C, C2): Dent heat / Stress / Lattice (the Lattice view IS the X-ray); with nothing to show the Lattice button opens Settings; Stress solved directly (never through startStressSolveIfNeeded's octet gate — FlexibleStressSolve.swift) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 else if viewerMesh != nil, visible.wireframe, !visible.surfaceEditing {
                     viewModeToggles
                 }
                 latticeOnlyBadge
                 latticeEdgeLight
-                if flexibleMain.owns(project, stage) { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleOnModelLayer(main: flexibleMain, project: project, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H32: the face chip (new-face choices / Lattice·Solid·Off; draggable, with its leader) and the picked prism's depth and expand handles with their numbers · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 // ★ THE VON MISES SCALE, ON THE RIGHT EDGE (maintainer,
                 // 2026-08-18: "Please also add a legend on the right edge").
                 // Only while the plot is actually up — a key to nothing is
@@ -1377,7 +1377,7 @@ public struct WorkspacePlaceholder: View {
                     latticeDensityLegend
                     latticeProbeCallout
                 }
-                if flexibleMain.owns(project, stage) { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainLegends(main: flexibleMain, mode: $latticeLegendMode, projection: projection, settle: settleQuat, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) H6: one legend per view (Squish / Stress / Lattice), tap to read (FlexibleMainLegends.swift) (H33: no chip column on this stage; the corner pair rides the bar's clearance) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
                 // ★ "Simulation running", top-centre (maintainer, 2026-08-18).
                 if latticeSimIsRunning, !simBannerDismissed, !flexibleMain.owns(project, stage) { simRunningBanner }   // Flexible (PR #362): not under Flexible — it grades no lattice there; the Stress legend says "Simulating…"
                 // ★ AND THE GEOMETRY REBAKE. Only when the FEA banner is NOT up:
@@ -1409,7 +1409,7 @@ public struct WorkspacePlaceholder: View {
                             bottomBarHeight = ok
                         }
                     }
-                if flexibleMain.owns(project, stage) { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) P + H34: the squish player (no chip column on this stage; the corner pair rides the bar's clearance)
+                if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleMainPlayerSlot(main: flexibleMain, bottomClearance: bottomBarClearance, chipColumnWidth: 0) }   // Flexible (PR #362) P + H34: the squish player (no chip column on this stage; the corner pair rides the bar's clearance) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
@@ -1457,7 +1457,7 @@ public struct WorkspacePlaceholder: View {
             if showFlexiblePage, project.lattice.flexible != nil {
                 FlexibleStagePage(project: project, model: flexibleMain.model(for: project, materialsPath: FlexibleResources.materialsPath,
                                   stampsPath: FlexibleResources.stampsPath, persist: { model.persistCurrentProject() }),
-                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible…
+                                  onLeave: { goToStage($0) }, onAbout: { showLatticeModeSheet = true }, onEditFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.squish), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, onChangeType: { flexibleMain.askChangeType() },   // Flexible (PR #362) H36: the Squish page's capsule leaves for Topology or Surface after Save & Exit's own check, and opens About Flexible… · Flexible (PR #362) H60: Edit faces from the Squish page (after its Save & Exit check); Done re-opens it · Flexible (PR #362) H62: "Change lattice type…" from the Squish page, after its Save & Exit check
                                   onExit: { showFlexiblePage = false; latticeSettingsSavedThisSession = true; flexibleMain.didExitSettings(solver: FlexibleStressSolver(app: model, sim: latticeSim)) })
                     .transition(.opacity).zIndex(48)
             }
@@ -1477,6 +1477,7 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
+            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
@@ -9652,7 +9653,7 @@ public struct WorkspacePlaceholder: View {
             if selectionsCollapsed { latticePreviewNotice }
             // ★ B5: Edit faces shows today's library card (the Surface stage's), whose header carries Regions.
             if editFaces.isEditing { selectionsLibraryCard }
-            else if flexibleMain.owns(project, stage), !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i))
+            else if flexibleMain.owns(project, stage), !editFaces.isEditing, !fullScreenPageUp { FlexibleSelectionsList(project: project, main: flexibleMain, collapsed: $selectionsCollapsed, cards: latticeSelectableCards, groupCards: latticeFaceCards, cardsChanged: { refreshLatticeFaceCards() }) }   // Flexible (PR #362) H25: the B1 list (one quiet line per group; the picked group's faces with their depth/expand boxes and (i)) · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             // ★ B3 (B1): Topology's list is SelectionsList — one line per group, eye, trash in place + Undo.
             else if stage == .topology, !showLatticePage { topologySelectionsList }
             // ★ B4: the Lattice stage's Regions page — the same list: groups and lattice regions, eye, trash + Undo
@@ -11852,7 +11853,7 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             }
             Spacer()
-            if flexibleMain.owns(project, stage) { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup
+            if flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleCornerPair(main: flexibleMain, project: project, app: model, openSquish: { showFlexiblePage = true }, changeGravity: { force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil }) } else {   // Flexible (PR #362) H30: A1's corner pair (Setup chip + the Lattice split button); no iPad chip and no Optimize on this stage, Print Parameters inside Setup · Flexible (PR #362) H61: off under Edit faces (B5's mode has the page)
             AnyView(Group {   // Flexible (PR #362) H57: the bar's chain, type-erased (its nested type overflowed the iPad main thread's stack; crash 2026-10-25)
             // ★ B5: Edit faces keeps the bar the Surface stage had (today's four, the last branch).
             if !editFaces.isEditing, stage == .topology {
@@ -12195,7 +12196,8 @@ extension WorkspacePlaceholder {
                                                   anchors: force.anchorCount(in: selection.groups),
                                                   loads: force.loadCount(in: selection.groups))
         let rows = TopologyStageMenu.rows(typeInUse: project.lattice.stageMode, latticeGate: gate).map { r in
-            StageCapsule.Item(id: r.id, title: r.title, detail: r.detail, enabled: r.enabled, checked: r.checked,
+            StageCapsule.Item(id: r.id, title: r.target == .lattice ? FlexibleTopologyMenu.latticeRowTitle(r.title, project: project) : r.title,   // Flexible (PR #362) H59: on a Flexible project the lattice row says "Flexible" (the stage it opens), not "Lattice…"
+                              detail: r.detail, enabled: r.enabled, checked: r.checked,
                               action: r.target == .lattice ? .lattice : r.target == .editFaces ? .editFaces : .none)
         }
         let page: StageCapsule.Page = {
