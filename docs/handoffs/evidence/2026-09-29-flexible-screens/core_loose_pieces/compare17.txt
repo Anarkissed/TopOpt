@@ -84,3 +84,48 @@ test_mask: IDENTICAL
 test_v3: IDENTICAL
 test_analyze_fixed_design: IDENTICAL
 test_minimize_plastic: IDENTICAL
+
+## RE-RUN at 6cb055c9 (git archive, cmp/head6): unchanged
+test_mg_tuning: IDENTICAL
+test_mg_coarse_hook: IDENTICAL
+test_mg_algebraic_level1: IDENTICAL
+test_mixed_precision: IDENTICAL
+test_recycle: DIFFERS ([loose] lines: 4)
+  out: 5 diff lines
+    ---
+    +++
+    @@ -5 +5 @@
+    -  [mgcg   void  ] plain cg=188 recycled cg=285 dim=16  max|du|/max|u|=4.443e-16
+    +  [mgcg   void  ] plain cg=113 recycled cg=130 dim=16  max|du|/max|u|=9.433e-14
+test_matfree: IDENTICAL
+test_galerkin_cache: IDENTICAL
+test_matfree_cubic: IDENTICAL
+test_matfree_threads: IDENTICAL
+test_simp: IDENTICAL
+test_plsm: IDENTICAL
+test_variants: IDENTICAL
+test_mbb: IDENTICAL
+test_mask: IDENTICAL
+test_v3: IDENTICAL
+test_analyze_fixed_design: IDENTICAL
+test_minimize_plastic: IDENTICAL
+
+## RE-RUN at merge a9d89c26 (release 5cf6773b / core 2fe4173959ba merged into core-loose-pieces; core 6b0cc4ad63c7), git archive cmp/m7,
+## against 85cadb88 (cmp/b85, the speck-fix base; its [loose] lines are filtered on both sides): 17 / 17 IDENTICAL
+test_mg_tuning: IDENTICAL
+test_mg_coarse_hook: IDENTICAL
+test_mg_algebraic_level1: IDENTICAL
+test_mixed_precision: IDENTICAL
+test_recycle: IDENTICAL ([loose] lines: 4)
+test_matfree: IDENTICAL
+test_galerkin_cache: IDENTICAL
+test_matfree_cubic: IDENTICAL
+test_matfree_threads: IDENTICAL
+test_simp: IDENTICAL
+test_plsm: IDENTICAL
+test_variants: IDENTICAL
+test_mbb: IDENTICAL
+test_mask: IDENTICAL
+test_v3: IDENTICAL
+test_analyze_fixed_design: IDENTICAL
+test_minimize_plastic: IDENTICAL

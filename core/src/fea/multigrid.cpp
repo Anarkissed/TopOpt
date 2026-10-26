@@ -229,9 +229,9 @@ thread_local long long g_mg_safe_log_summaries = 0;
 void mg_safe_log_flush_window() {
   SafeLogWindow& w = g_mg_safe_log_win;
   if (w.attempts == 0) return;
-  // Said plainly (he read "0 seeded the Jacobi-CG fallback" as a fallback):
-  // how many converged ON MULTIGRID, and "fallback: none" or how many went on
-  // to the Jacobi-CG fallback.
+  // Said plainly (the owner read "0 seeded the Jacobi-CG fallback" as a
+  // fallback): how many converged ON MULTIGRID, and "fallback: none" or the
+  // number that went on to the Jacobi-CG fallback.
   char fb[96];
   if (w.attempts == w.converged)
     std::snprintf(fb, sizeof fb, "fallback: none");
@@ -285,6 +285,11 @@ constexpr int kSafeMaxCycles = 6000;
 // converges in 1,332 cycles given a longer first window. Later windows keep kSafeWindow /
 // kSafeMinGain, and kSafeMaxCycles stays the total cap. Warm-start retries
 // keep the first window at kSafeWindow (bit-identical).
+// A retry with NO warm guess at all starts from zero just the same and gets
+// the same first window (reviewer's order 2026-10-26): the tight final-
+// compliance / certification solves are such — his Fine job's coarse solves
+// 46 / 57 / 58 (tol 1e-8, cold) stood at rel res 3.2 / 80 / 11 at cycle 600,
+// stopped, and fell to ~1,550 Jacobi-CG iterations each.
 constexpr int kSafeColdFirstWindow = 2500;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
@@ -3077,7 +3082,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
                       xg, it, res, /*mixed=*/false, &rec,
                       warm && !cold_start ? &x0 : nullptr, &o, kSafeWindow,
-                      kSafeMinGain, cold_start ? kSafeColdFirstWindow : 0);
+                      kSafeMinGain, (cold_start || !warm) ? kSafeColdFirstWindow : 0);
         diag.mg_cycles_attempted = shipped_it + it;
         if (ok) {
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
@@ -3163,12 +3168,12 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       char start_note[160] = "";
       if (cold_start)
         std::snprintf(start_note, sizeof start_note,
-                      " ; the multigrid retry started COLD (warm guess worse than zero: "
-                      "rel res %.3e, J %.3e)", warm_rel_x, warm_J_x);
+                      " ; the multigrid retry started COLD (warm guess worse than "
+                      "zero: rel res %.3e, J %.3e)", warm_rel_x, warm_J_x);
       if (resx >= 0.0 && seeded_fallback)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; the Jacobi-CG fallback starts from the multigrid iterate (rel "
-                      "res %.3e < start %.3e)", resx, r0x);
+                      " ; the Jacobi-CG fallback starts from the multigrid iterate "
+                      "(rel res %.3e < start %.3e)", resx, r0x);
       else if (resx >= 0.0)
         std::snprintf(exact_note, sizeof exact_note,
                       " ; multigrid iterate NOT handed over (rel res %.3e, start "
@@ -3181,16 +3186,24 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // Bounded (see kSafeLogFirst): the full line for the first attempts of a
       // run and for the one that latches the safe path off; a summary per
       // kSafeLogEvery attempts otherwise.
-      if (seq <= g_mg_safe_log_first || g_mg_safe_latched) {
-        if (g_mg_safe_latched) mg_safe_log_flush_window();
+      // An attempt that did NOT converge always prints its full line (it seeds
+      // or precedes a Jacobi-CG fallback, the case a run needs explained),
+      // with the solve's tolerance and how the retry started.
+      if (seq <= g_mg_safe_log_first || g_mg_safe_latched || !ok) {
+        if (g_mg_safe_latched || (!ok && seq > g_mg_safe_log_first))
+          mg_safe_log_flush_window();
         std::fprintf(stderr,
                      "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
                      "multigrid (l1 smoother) %s in %d cycles, rel res %.3e, %.0f ms%s ; "
+                     "tol %.0e, %s ; "
                      "loose pieces at the floor: %d of %d pieces (%lld vox, largest "
                      "%d, %d frozen) of %lld elements%s%s%s%s\n",
                      seq, safe_direct ? "latched off" : "stalled", shipped_it,
                      shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
-                     safe_ms, ok ? "" : " ; a Jacobi-CG FALLBACK follows", loose.unanchored, loose.pieces, loose.unanchored_voxels,
+                     safe_ms, ok ? "" : " ; a Jacobi-CG FALLBACK follows", tolerance,
+                     !warm ? "no guess (cold)"
+                           : (cold_start ? "warm guess dropped (cold)" : "warm start"),
+                     loose.unanchored, loose.pieces, loose.unanchored_voxels,
                      loose.largest_unanchored, loose.frozen_loose, loose.elements,
                      g_mg_safe_latched ? " ; safe path LATCHED OFF for the run" : "",
                      start_note, exact_note,
@@ -3237,8 +3250,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const double t_fb0 = fea_detail::mf_steady_ms();
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
                               diag.residual, diag.converged, &rec, &pc, &tm);
-      // After a safe attempt, a real fallback says so plainly (stderr only;
-      // never printed on a solve the safe retry did not reach).
+      // After a safe attempt, say how the Jacobi-CG fallback it led to went
+      // (stderr only; never printed on a solve the safe retry did not reach).
       if (have_h && safe_ok)
         std::fprintf(stderr,
                      "FALLBACK: [mg-safe] solve %lld fell back to Jacobi-CG: %s in %d "

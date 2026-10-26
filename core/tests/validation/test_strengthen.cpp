@@ -18,7 +18,9 @@
 //   (d) a part that fails as drawn: version 1's target is still the safety margin;
 //   (e) without the key the run is today's growth ladder: no "strengthen" block;
 //   (f) a version's fine run starts from the passing coarse design, its loose
-//       pieces taken out (ruling 2026-10-25: don't carry specks across grids).
+//       pieces taken out (ruling 2026-10-25: don't carry specks across grids);
+//   (g) every coarse run but the pass's first starts from the previous coarse
+//       design, cleaned (reviewer's order 2026-10-26).
 //
 // Eigen (minimize_plastic) on a mesh part, OCCT-free; the parametric level set,
 // capped at a few iterations.
@@ -272,6 +274,22 @@ int main() {
       double prev = 0.0;
       int unreachable = 0;
       std::size_t passing = 0;
+      // (g) every coarse run but the pass's first starts from the previous coarse
+      // design, cleaned (reviewer's order 2026-10-26: no hole-array start after
+      // the first).
+      bool first_coarse = true;
+      for (const Json& v : vs.arr) {
+        const int runs = static_cast<int>(v.at("coarse_runs").num);
+        if (runs == 0) continue;
+        const int seeded =
+            v.has("coarse_seeded_runs") ? static_cast<int>(v.at("coarse_seeded_runs").num) : -1;
+        std::printf("[50]   v%d: %d coarse run(s), %d seeded from the previous coarse design\n",
+                    static_cast<int>(v.at("version").num), runs, seeded);
+        CHECK(seeded == runs - (first_coarse ? 1 : 0),
+              "(g) every coarse run after the pass's first starts from the previous "
+              "coarse design (coarse_seeded_runs)");
+        first_coarse = false;
+      }
       for (const Json& v : vs.arr) {
         const std::string st = v.at("status").str;
         const double tgt = v.at("target_margin").num;

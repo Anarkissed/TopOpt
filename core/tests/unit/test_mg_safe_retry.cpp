@@ -930,6 +930,31 @@ int main() {
                 R.cycles < 2500,
             "F: the cold-start retry runs past the 600-cycle first window and "
             "converges (600 < cycles < 2500)");
+      // F2 (reviewer's order 2026-10-26, item 2): a solve with NO warm guess at
+      // all starts from zero exactly like the dropped-guess one above — the tight
+      // final-compliance / certification solves are such (his Fine job's coarse
+      // solves 46 and 57: tol 1e-8, cold, rel res 3.2 / 80 at cycle 600, then
+      // ~1,550 Jacobi-CG iterations). It gets the same longer first window.
+      // RED before the fix: it stopped at 600 cycles and fell to Jacobi-CG.
+      topopt::fea_matfree_reset_mg_stagnation_latch();
+      CgInfo fn;
+      bool threw_n = false;
+      try {
+        topopt::fea_solve_mgcg_matfree(g, ey, poisson, bcs, loads, ftol, 0, &fn);
+      } catch (const topopt::SolverNonConvergence&) {
+        threw_n = true;
+      }
+      const topopt::fea_detail::MgSafeAttemptReport RN =
+          topopt::fea_detail::mg_last_safe_attempt();
+      std::printf("      no-guess retry: %s in %d cycles, rel res %.3e | used_mg=%d "
+                  "its=%d threw=%d cold_start=%d\n",
+                  RN.converged ? "CONVERGED" : "stopped", RN.cycles, RN.res,
+                  fn.used_multigrid ? 1 : 0, fn.iterations, threw_n ? 1 : 0,
+                  RN.cold_start ? 1 : 0);
+      check(RN.seq == 1 && !RN.cold_start && !threw_n && RN.converged &&
+                fn.used_multigrid && RN.cycles > 600 && RN.cycles < 2500,
+            "F2: a retry with no warm guess (a tight cold solve) gets the longer "
+            "first window too and converges on multigrid (600 < cycles < 2500)");
     }
   }
 
