@@ -84,3 +84,28 @@ test_mask: IDENTICAL
 test_v3: IDENTICAL
 test_analyze_fixed_design: IDENTICAL
 test_minimize_plastic: IDENTICAL
+
+## RE-RUN at 6cb055c9 (git archive, cmp/head6): unchanged
+test_mg_tuning: IDENTICAL
+test_mg_coarse_hook: IDENTICAL
+test_mg_algebraic_level1: IDENTICAL
+test_mixed_precision: IDENTICAL
+test_recycle: DIFFERS ([loose] lines: 4)
+  out: 5 diff lines
+    ---
+    +++
+    @@ -5 +5 @@
+    -  [mgcg   void  ] plain cg=188 recycled cg=285 dim=16  max|du|/max|u|=4.443e-16
+    +  [mgcg   void  ] plain cg=113 recycled cg=130 dim=16  max|du|/max|u|=9.433e-14
+test_matfree: IDENTICAL
+test_galerkin_cache: IDENTICAL
+test_matfree_cubic: IDENTICAL
+test_matfree_threads: IDENTICAL
+test_simp: IDENTICAL
+test_plsm: IDENTICAL
+test_variants: IDENTICAL
+test_mbb: IDENTICAL
+test_mask: IDENTICAL
+test_v3: IDENTICAL
+test_analyze_fixed_design: IDENTICAL
+test_minimize_plastic: IDENTICAL

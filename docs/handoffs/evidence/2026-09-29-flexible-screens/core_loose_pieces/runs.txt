@@ -152,3 +152,23 @@
 #   positions [[-26.25, -16.25, 3.75], [2.5, -17.5, 1.875], ...].
 
 ## FINAL CTEST: f93e7a74 — 160 / 160 passed incl. cli_demo (1994 s) — ctest_full.txt.
+
+## ROUND 3 (reviewer's order 2026-10-26, after the f2ca3eeb57ae swap) — commits 269ca010, 6cb055c9
+#   Item 1 (269ca010): every coarse run but the pass's first starts from the previous coarse design, cleaned of loose pieces
+#   (versions[].coarse_seeded_runs). test_strengthen (g) RED on 85cadb88 (1/19: key absent), GREEN 19/19; the bar's v1 now vf 0.570,
+#   6.79 g, verified 11.2 >= 7.92 (was 0.712, 8.25 g, 11.8). [mg-safe] now prints a full line for every attempt that does not converge
+#   (tolerance, warm / dropped / no guess, loose count) and a "fallback:" line with the Jacobi-CG outcome.
+#   Diagnosis (runs I = Fine, J = Balanced on 269ca010, nice 15, 3 threads; both started with the worker idle, stopped by me at
+#   02:02 on the coordinator's order when his worker job started): the coarse seeding worked (coarse runs 2-6 started from the cleaned
+#   previous design, 0-1 loose voxels removed), but Fine still had 3 coarse-grid fallbacks — all TIGHT, COLD solves, 0 loose pieces:
+#     solve 46 (coarse run 5): tol 1e-08, no guess (cold): l1 stopped at 600 cycles, rel res 3.203 -> Jacobi-CG CONVERGED in 1548 its, 56 s
+#     solve 57 (coarse run 6): tol 1e-08, no guess (cold): l1 stopped at 600 cycles, rel res 80.25 -> Jacobi-CG CONVERGED in 1547 its, 69 s
+#     solve 58 (coarse run 6): tol 1e-08, no guess (cold): l1 stopped at 600 cycles, rel res 11.48 -> (fallback; stopped before it ended)
+#   Balanced J: 529/529 safe attempts converged through its coarse search and into version 1's fine run (0 fallbacks so far) when stopped.
+#   Item 2 (6cb055c9, proposed and approved): a retry with NO warm guess gets the cold-start first window (2,500 cycles) a dropped guess
+#   already had: (cold_start || !warm) ? kSafeColdFirstWindow : 0. test_mg_safe_retry F2 (demo L-bracket, no guess) RED on 269ca010:
+#   stopped at 600 cycles (rel res 7.39), 6,498 Jacobi-CG iterations; GREEN: converged on multigrid in 1,501 cycles.
+#   Narrow tests on 6cb055c9: test_mg_safe_retry, test_loose_pieces, test_loose_review, test_strengthen 19/19, test_minimize_plastic,
+#   test_export_bodies, test_analyze_fixed_design — pass.
+#   17-test comparison at 269ca010 and at 6cb055c9: 16 IDENTICAL, test_recycle '[mgcg void]' the same two numbers as before (113 / 130).
+#   HELD (coordinator's CPU rule: his worker job active): full ctest + cli_demo, and his Fine / Balanced runs over version 1.
