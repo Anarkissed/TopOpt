@@ -178,6 +178,22 @@ extension ForceModel {
     }
 }
 
+/// ★ HIS iPad 2026-10-26 14:13: "All pieces including primitives in all other scenarios should be hidden when in a
+/// scenario. I don't want to see anything." What one group draws in the open scenario — its colour, its keep-out volumes,
+/// their knobs and chips: everything, a switched-off anchor FAINT (its colour and its keep-outs), or nothing at all.
+public enum ScenarioDraw: Equatable, Sendable {
+    case shown, dimmed, hidden
+}
+
+extension ForceModel {
+    /// `applies`: scenarios rule this screen (Topology). Off it, or with one scenario, everything is shown.
+    public func scenarioDraw(_ group: UUID, applies: Bool) -> ScenarioDraw {
+        guard applies, hasScenarios else { return .shown }
+        guard showsInActiveScenario(group) else { return .hidden }
+        return kind(for: group).isAnchor && !anchorIsOn(group, in: activeScenarioID) ? .dimmed : .shown
+    }
+}
+
 /// One scenario on the wire (job.json `loads.scenarios[]`, the overnight release's shared key).
 public struct LoadScenarioWire: Equatable, Sendable {
     public let name: String

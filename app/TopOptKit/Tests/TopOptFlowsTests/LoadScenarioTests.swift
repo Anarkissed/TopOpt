@@ -94,6 +94,32 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertEqual(f.scenarios?.scenarios[1].anchorsOff.isEmpty, true)
     }
 
+    /// ★ HIS iPad 14:13 (1): in a scenario, nothing of another scenario draws; a switched-off anchor draws faint.
+    func testOtherScenariosDrawNothingAndAnOffAnchorDrawsFaint() {
+        var (f, s1, s2) = twoScenarios()
+        XCTAssertEqual(f.scenarioDraw(load1, applies: true), .hidden, "★ Scenario 1's load, in Scenario 2")
+        XCTAssertEqual(f.scenarioDraw(load2, applies: true), .shown)
+        XCTAssertEqual(f.scenarioDraw(keep, applies: true), .shown, "no load/anchor role: every scenario")
+        _ = f.setAnchor(anchorA, on: false, in: s2, order: [anchorA, anchorB])
+        XCTAssertEqual(f.scenarioDraw(anchorA, applies: true), .dimmed, "★ off here: faint, never gone")
+        XCTAssertEqual(f.scenarioDraw(anchorA, applies: false), .shown, "off Topology: everything")
+        f.openScenario(s1)
+        XCTAssertEqual(f.scenarioDraw(load1, applies: true), .shown); XCTAssertEqual(f.scenarioDraw(load2, applies: true), .hidden)
+        XCTAssertEqual(f.scenarioDraw(anchorA, applies: true), .shown, "on in Scenario 1")
+        // the keep-out volumes as drawn
+        let vol = ClearanceVolume(faceID: 1, kind: .bolt, shape: .degenerate)
+        let items = [anchorA, load1, load2].map { _ in ClearanceRenderItem(volume: vol, selected: false) }
+        f.openScenario(s2)
+        let drawn = SelectionArrowRule.keepOuts(items, pieces: [(anchorA, 1), (load1, 2), (load2, 3)], hidden: [],
+                                                draw: { f.scenarioDraw($0, applies: true) })
+        XCTAssertEqual(drawn.count, 2, "★ Scenario 1's load draws no keep-out in Scenario 2")
+        XCTAssertEqual(drawn[0].faceAlpha, SelectionArrowRule.faintFaceAlpha, "★ the off anchor's keep-out is faint")
+        XCTAssertNil(drawn[1].faceAlpha)
+        let pieceHidden = SelectionArrowRule.keepOuts(items, pieces: [(anchorA, 1), (load1, 2), (load2, 3)],
+                                                      hidden: [.init(group: load2, key: 3)], draw: { _ in .shown })
+        XCTAssertEqual(pieceHidden.count, 2, "a hidden piece draws none")
+    }
+
     // MARK: the wire (overnight release's shared key)
 
     private func request(_ scenarios: [LoadScenarioWire]) -> RunRequest {
@@ -183,12 +209,15 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertEqual(SafetyMargin.builtForLine(2), "Built for 200% of your load")
     }
 
-    func testNoSafetyMarginKeyIsSentUntilTOCoreNamesIt() throws {
-        XCTAssertNil(SafetyMargin.jobKey, "★ the app never invents a key")
-        var r = request([]); r.safetyMargin = 3
-        let a = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(r)) as! NSDictionary
-        let b = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(request([]))) as! NSDictionary
-        XCTAssertEqual(a, b)
+    /// TO-core's key (13:34): loads.safety_margin, a multiple of the load; 150 % (the default) sends nothing, so an untouched
+    /// project's job is byte-identical.
+    func testTheSafetyMarginGoesOutAsLoadsSafetyMarginOnlyWhenNot150() throws {
+        XCTAssertEqual(SafetyMargin.jobKey, "safety_margin")
+        var r = request([]); r.safetyMargin = 2
+        let job = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(r)) as! [String: Any]
+        XCTAssertEqual((job["loads"] as? [String: Any])?["safety_margin"] as? Double, 2)
+        let plain = try JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(request([]))) as! [String: Any]
+        XCTAssertNil((plain["loads"] as? [String: Any])?["safety_margin"], "150 %: no key")
     }
 
     /// The new ladder's words, only on a report that carries `safety_margin`; a 25/50/75 % report keeps its titles.
@@ -208,6 +237,19 @@ final class LoadScenarioTests: XCTestCase {
                        ["Version 1 · 25 % less worst stress", "Version 2 · 50 % less worst stress", "Version 3 · 75 % less worst stress"])
         XCTAssertEqual(RunReportBlocks.decode(report: report(2)).safetyMargin, 2)
         XCTAssertNil(RunReportBlocks.decode(report: report(nil)).safetyMargin)
+    }
+
+    /// His ask (resizable): the grip's drag moves the height twice the finger (the panel grows about its centre), floored at
+    /// two lines and capped at the screen's room; the room is the canvas less the chrome PageLeftModal keeps.
+    func testTheGripResizesWithinTheScreen() {
+        XCTAssertEqual(SelectionsList.resized(from: 500, drag: -100, max: 900), 300)
+        XCTAssertEqual(SelectionsList.resized(from: 500, drag: 300, max: 900), 900, "capped at the screen")
+        XCTAssertEqual(SelectionsList.resized(from: 200, drag: -400, max: 900), SelectionsList.lineHeight * 2, "never gone")
+        let portrait = SelectionsList.screenMax(canvasHeight: 1376, footerReserve: 190)
+        let landscape = SelectionsList.screenMax(canvasHeight: 1032, footerReserve: 190)
+        XCTAssertGreaterThan(portrait, 700, "★ much bigger than the old 420 in portrait (\(portrait))")
+        XCTAssertLessThan(landscape, portrait)
+        XCTAssertGreaterThanOrEqual(landscape, SelectionsList.maxListHeight)
     }
 
     func testTheInfoIsHisSentence() {

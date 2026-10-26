@@ -58,7 +58,8 @@ final class LoadScenarioHostedTests: XCTestCase {
         for _ in 0..<12 {
             guard let list = h.frames.all["selectionsList"], let f = h.frames.all[key] else { return }
             if list.insetBy(dx: -1, dy: -1).contains(f) { return }
-            let probe = NSPoint(x: list.midX, y: h.size.height - (list.maxY - 60))
+            // just under the header — inside the scroll, never in the pinned footer
+            let probe = NSPoint(x: list.midX, y: h.size.height - (list.minY + SelectionsList.lineHeight + 30))
             var v = h.view.hitTest(probe)
             while let x = v, !(x is NSScrollView) { v = x.superview }
             guard let sv = v as? NSScrollView else { return }
@@ -69,6 +70,16 @@ final class LoadScenarioHostedTests: XCTestCase {
             clip.scroll(to: o); sv.reflectScrolledClipView(clip)
             pump(0.4)
         }
+    }
+
+    /// Opt-in (SCENARIO_SHOT_DIR=<dir>): the page as a PNG, for him to judge the look (the 3D view draws nothing offscreen).
+    func picture(_ h: Host, _ name: String) throws {
+        guard let dir = ProcessInfo.processInfo.environment["SCENARIO_SHOT_DIR"] else { return }
+        h.view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(h.view.bitmapImageRepForCachingDisplay(in: h.view.bounds))
+        h.view.cacheDisplay(in: h.view.bounds, to: rep)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: dir).appendingPathComponent(name))
     }
 
     /// A frame he can see and tap: laid out, inside the window, inside the Selections list.
@@ -161,6 +172,105 @@ final class LoadScenarioHostedTests: XCTestCase {
         let ft = try onScreen(h, "pieceTrash-topology-face-trash-\(face)", "Face \(face)'s trash")
         click(h, CGPoint(x: ft.midX, y: ft.midY))
         XCTAssertNotNil(p.selection.groups.first { $0.id == c.id }, "the group is still there until he confirms")
+    }
+
+    /// ★ HIS iPad 14:13 (2): in a scenario the groups sit tabbed in from the folder row. (3): each piece is its own card,
+    /// clearly apart from the next, with its eye and trash inside it.
+    func testScenarioGroupsSitTabbedInAndEachPieceIsItsOwnCard() throws {
+        let r = try project()
+        let p = r.project
+        let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
+        let h = host(WorkspacePlaceholder(model: r.app, project: p), size: CGSize(width: 1032, height: 1376))
+        pump(3)
+        // (3) the cards — each pair read at ONE scroll position (onScreen scrolls the list to what it looks for)
+        let prims = p.force.manualPrimitives(for: c.id)
+        let list = try XCTUnwrap(h.frames.all["selectionsList"])
+        for (i, mp) in prims.enumerated() {
+            let key = ProjectModel.manualFaceKey(mp.id)
+            _ = try onScreen(h, "pieceTrash-delete-manual-\(mp.id.uuidString)", "its trash")
+            let card = try XCTUnwrap(h.frames.all["piecePick-pick-manual-\(mp.id.uuidString)"], "a cylinder's card")
+            let eye = try XCTUnwrap(h.frames.all["pieceEye-\(c.id.uuidString)-\(key)"], "its eye")
+            let trash = try XCTUnwrap(h.frames.all["pieceTrash-delete-manual-\(mp.id.uuidString)"])
+            XCTAssertGreaterThan(card.width, list.width * 0.6, "a card spans the row: \(card)")
+            XCTAssertTrue(card.contains(CGPoint(x: eye.midX, y: eye.midY)), "★ the eye is inside its card: \(eye) in \(card)")
+            XCTAssertTrue(card.contains(CGPoint(x: trash.midX, y: trash.midY)), "★ the trash is inside its card: \(trash) in \(card)")
+            if i > 0, let prev = h.frames.all["piecePick-pick-manual-\(prims[i - 1].id.uuidString)"] {
+                XCTAssertGreaterThanOrEqual(card.minY - prev.maxY, PieceRowPick.spacing - 0.5, "★ cards stand apart: \(prev) then \(card)")
+            }
+        }
+        try picture(h, "pieces_open_group.png")
+        // (2) the indent
+        let add = try onScreen(h, "addLoadScenario", "+ Add a load scenario")
+        click(h, CGPoint(x: add.midX, y: add.midY))
+        let folder = try onScreen(h, "scenarioFolder-1", "Scenario 2's folder")
+        let line = try onScreen(h, "selGroup-\(c.id.uuidString)", "Group C's line in Scenario 2")
+        XCTAssertGreaterThanOrEqual(line.minX - folder.minX, SelectionsList.folderIndent - 0.5, "★ tabbed in: \(line) under \(folder)")
+        try picture(h, "scenario_2_folder.png")
+    }
+
+    func drag(_ h: Host, from p: CGPoint, by dy: CGFloat) {
+        func ev(_ t: NSEvent.EventType, _ y: CGFloat) {
+            let e = NSEvent.mouseEvent(with: t, location: NSPoint(x: p.x, y: h.size.height - y), modifierFlags: [],
+                                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: h.window.windowNumber,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            h.window.sendEvent(e); pump(0.05)
+        }
+        ev(.leftMouseDown, p.y)
+        for k in 1...8 { ev(.leftMouseDragged, p.y + dy * CGFloat(k) / 8) }
+        ev(.leftMouseUp, p.y + dy)
+        pump(0.8)
+    }
+
+    /// ★ HIS iPad 14:13 + 14:3x: each group has an open button that keeps its pieces open with nothing picked; its pieces sit
+    /// tabbed in; the list grows to the screen and its grip resizes it.
+    func testOpenButtonsIndentedPiecesAndTheGripResizes() throws {
+        let r = try project()
+        let p = r.project
+        let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
+        let size = CGSize(width: 1032, height: 1376)
+        let h = host(WorkspacePlaceholder(model: r.app, project: p), size: size)
+        pump(3)
+        // the pieces sit tabbed in from the group's line
+        let line = try onScreen(h, "selGroup-\(c.id.uuidString)", "Group C's line")
+        let mp = try XCTUnwrap(p.force.manualPrimitives(for: c.id).first)
+        let card = try onScreen(h, "piecePick-pick-manual-\(mp.id.uuidString)", "a cylinder's card")
+        XCTAssertGreaterThanOrEqual(card.minX - line.minX, PieceIndent.indent, "★ the pieces sit tabbed in: \(card) under \(line)")
+        // open stays open with nothing picked
+        p.selection.clearActive(); pump(0.8)
+        XCTAssertNil(h.frames.all["piecePick-pick-manual-\(mp.id.uuidString)"], "closed and not picked: no pieces")
+        let open = try onScreen(h, "selOpen-\(c.id.uuidString)", "Group C's open button")
+        click(h, CGPoint(x: open.midX, y: open.midY))
+        XCTAssertNil(p.selection.activeGroupID, "the open button picks nothing")
+        _ = try onScreen(h, "piecePick-pick-manual-\(mp.id.uuidString)", "★ a cylinder's card, the group open with nothing picked")
+        // the list may grow far past 420 pt; the grip makes it shorter, then taller again
+        let tall = try XCTUnwrap(h.frames.all["selectionsList"])
+        try picture(h, "open_group_tall_list.png")
+        XCTAssertGreaterThan(tall.height, SelectionsList.lineHeight + 1 + SelectionsList.maxListHeight + 4,
+                             "★ the open list grows past the old 420 pt cap (\(tall.height))")
+        // the grip is on his screen, under the rows and above the pinned footer (a synthetic mouse drag does not reach SwiftUI's
+        // DragGesture offscreen; the drag's math is `SelectionsList.resized`, tested in LoadScenarioTests)
+        let grip = try onScreen(h, "selectionsGrip", "the resize grip")
+        let addRow = try onScreen(h, "addLoadScenario", "+ Add a load scenario")
+        XCTAssertLessThan(grip.maxY, addRow.minY, "the grip sits above the pinned footer")
+    }
+
+    /// ★ HIS iPad 14:13: a scenario folder has its own open button: Scenario 1 opens beside the open Scenario 2.
+    func testAScenarioFolderOpensWithItsButton() throws {
+        let r = try project()
+        let p = r.project
+        let bottom = try XCTUnwrap(p.selection.groups.first { $0.name == "Bottom" }).id
+        let h = host(WorkspacePlaceholder(model: r.app, project: p), size: CGSize(width: 1032, height: 1376))
+        pump(3)
+        let add = try onScreen(h, "addLoadScenario", "+ Add a load scenario")
+        click(h, CGPoint(x: add.midX, y: add.midY))
+        let s2 = p.force.activeScenarioID
+        let b = try onScreen(h, "scenarioFolderOpen-0", "Scenario 1's open button")
+        click(h, CGPoint(x: b.midX, y: b.midY))
+        XCTAssertEqual(p.force.activeScenarioID, s2, "the button opens the folder, not the scenario")
+        let top = try XCTUnwrap(p.selection.groups.first { $0.name == "Top" }).id
+        _ = try onScreen(h, "selGroup-\(top.uuidString)", "★ Scenario 1's load listed under its open folder")
+        XCTAssertTrue(p.force.anchorIsOn(bottom, in: p.force.scenarioList[0].id))
+        try picture(h, "two_folders_open.png")
     }
 
     /// The safety margin's row is on the same screen (ruling 13:12), pinned with the add row.

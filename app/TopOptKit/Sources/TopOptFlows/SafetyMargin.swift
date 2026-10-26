@@ -10,8 +10,9 @@ public enum SafetyMargin {
     public static let minimum = 1.5
     public static let defaultValue = 1.5
 
-    /// The job key TO-core reads (ruling 13:12: "Post the key name here for #354"). nil = not sent yet.
-    public static let jobKey: String? = nil
+    /// The job key TO-core reads (posted 2026-10-26 13:34: `loads.safety_margin`, the multiple of the load; absent = 1.5).
+    /// nil would mean "not sent, picker hidden" — kept optional so a core without it can be shipped against.
+    public static let jobKey: String? = "safety_margin"
 
     public struct Preset: Equatable, Sendable {
         public let value: Double

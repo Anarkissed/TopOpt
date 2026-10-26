@@ -192,6 +192,11 @@ public struct WorkspacePlaceholder: View {
     @State private var selectedPiece: SelectionArrowRule.PieceRef? = nil
     // ★ his ask 2026-10-26: pieces inside a group hidden one at a time (view only, this session, like the group's eye)
     @State private var hiddenPieces: Set<SelectionArrowRule.PieceRef> = []
+    // ★ his iPad 14:13: groups and scenario folders kept open by their button; the list's dragged height
+    @State private var openGroups: Set<UUID> = []
+    @State private var openFolders: Set<UUID> = []
+    @State private var closedFolders: Set<UUID> = []
+    @State private var selectionsHeight: CGFloat? = nil
     // ★ load scenarios: the folder being renamed, its draft, the (i), the last-anchor refusal, the Add Anchor hint
     @State private var renamingScenario: UUID? = nil
     @State private var scenarioNameDraft = ""
@@ -2293,13 +2298,14 @@ public struct WorkspacePlaceholder: View {
     /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
     private var keepOutRenderItems: [ClearanceRenderItem] {
         let active = selection.activeGroupID
-        // ★ his ask 2026-10-26: a hidden piece draws no volume (the same volumes in the same order, with their piece)
-        let drawn = hiddenPieces.isEmpty ? nil : project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID }
-            .map { SelectionArrowRule.pieceDrawn(group: $0.groupID, piece: $0.piece, hidden: hiddenPieces) }
+        // ★ a hidden piece, and every group outside the open scenario, draws no volume; a switched-off anchor's are faint
+        // (his iPad 2026-10-26 14:13). The same volumes in the same order, with their piece.
+        let filtering = !hiddenPieces.isEmpty || (scenariosApply && force.hasScenarios)
+        let pieces = filtering ? project.groupView.showing(project.clearancePieceVolumes()) { $0.groupID }.map { ($0.groupID, $0.piece) } : []
         return project.groupView.showing(project.clearanceVolumes()) { $0.groupID }.map {   // Flexible (PR #362) H49a: a hidden group draws no keep-out / protect / load / anchor volume (GroupEyeHides)
             ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
         }
-        .enumerated().filter { drawn?[$0.offset] ?? true }.map(\.element)
+        .keepOutsDrawn(filtering ? pieces : nil, hidden: hiddenPieces) { force.scenarioDraw($0, applies: scenariosApply) }
     }
 
     /// ★ §3d — THE LATTICE DEPTH PLANES: one slab per latticed face or primitive,
@@ -6901,7 +6907,8 @@ public struct WorkspacePlaceholder: View {
             // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
             guard SelectionArrowRule.pieceShows(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
                                                 selectedPiece: selectedPieceKey),
-                  SelectionArrowRule.pieceDrawn(group: entry.groupID, piece: entry.faceID, hidden: hiddenPieces) else { continue }
+                  SelectionArrowRule.pieceDrawn(group: entry.groupID, piece: entry.faceID, hidden: hiddenPieces),
+                  force.scenarioDraw(entry.groupID, applies: scenariosApply) == .shown else { continue }   // ★ no knobs off the open scenario
             for h in entry.handles {
                 items.append(ClearanceHandleItem(
                     id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
@@ -9855,6 +9862,8 @@ public struct WorkspacePlaceholder: View {
     /// The §6 placement, in a modifier so the panel body does not have to hold a
     /// `GeometryReader` of its own.
     private struct WorkspacePanelPlacement: ViewModifier {
+        /// Room kept under the list for its pinned footer (the add row, its (i), the safety margin) and the grip.
+        static let footerReserve: CGFloat = 190
         /// ★ MINIMIZED ⇒ BOTTOM-LEFT (maintainer, 2026-08-17). One placement for
         /// the ONE Selections panel, so both of its mount sites — the workspace
         /// and the lattice page's library — move together by construction.
@@ -9864,6 +9873,10 @@ public struct WorkspacePlaceholder: View {
                 content.pageLeftModal(canvasHeight: geo.size.height,
                                       minimized: minimized,
                                       canvasWidth: geo.size.width)
+                    // ★ his iPad 2026-10-26: the open list may grow to the screen — what is left after the top rows, the
+                    // header, the pinned footer and the edges
+                    .environment(\.selectionsListMaxHeight,
+                                 SelectionsList.screenMax(canvasHeight: geo.size.height, footerReserve: Self.footerReserve))
             }
         }
     }
@@ -10153,7 +10166,7 @@ public struct WorkspacePlaceholder: View {
         // reveal requires a tap on the primitive, one of its faces, or the group
         // row — a face tap that merely grew a selection no longer pops the chips
         // open under the finger. Otherwise: the compact summary.
-        if g.id == selection.activeGroupID, chipsRevealedGroup == g.id || everyPiece {
+        if everyPiece || (g.id == selection.activeGroupID && chipsRevealedGroup == g.id) {
             lockedClearanceEditor(g)
         } else {
             compactClearanceEditor(g)
@@ -11242,47 +11255,28 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private func lockedClearanceEditor(_ g: SelectionGroup) -> some View {
         let autoPrims = clearancePrimitives(g)
         let manual = project.manualPrimitives(in: g.id)
-        VStack(alignment: .trailing, spacing: 6) {
+        // ★ his iPad 14:13: every piece its own card (PieceRowPick), 8 pt apart — name, then its move / eye / trash, then
+        // its values underneath
+        VStack(alignment: .trailing, spacing: PieceRowPick.spacing) {
             if autoPrims.count > 1 { clearanceSyncRowCheckbox(g) }
-            ForEach(autoPrims) { p in
-                HStack(alignment: .top, spacing: DS.Space.xs) {
-                    primitiveDeleteButton("delete-auto-\(p.id)") { project.deleteAutoClearance(face: p.id) }
-                    // G2: grab an AUTO-found clearance's gizmo → convert it to an explicit
-                    // MANUAL primitive (its geometry becomes user-supplied) and select it.
-                    if selection.activeGroupID == g.id {
-                        // Round-2 T6: the move icon is the ONLY way to grab a
-                        // primitive from the panel — a real 44 pt target now, not
-                        // a bare 12 pt glyph.
-                        Button {
-                            selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
-                        } label: {
-                            Image(systemName: "move.3d").font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(DS.Color.accent.color.opacity(0.9))
-                                .frame(width: 34, height: 34)
-                                .background(RoundedRectangle(cornerRadius: DS.Radius.field)
-                                    .fill(DS.Color.accent.opacity(0.14).color))
-                                .contentShape(Rectangle().inset(by: -5))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("grab-auto-\(p.id)")
-                        .accessibilityLabel("Convert to a movable primitive")
-                    }
-                    clearancePrimitiveLine(g, p, showKind: true)
-                        .modifier(PieceRowPick(picked: selectedPieceKey == Int(p.id), id: "pick-auto-\(p.id)") {
-                            pickPiece(g.id, Int(p.id)) })   // ★ his iPad 10-26 (3)
-                    pieceEye(g, Int(p.id), name: "this keep-out")
+            // (★ his iPad 14:13: the cards sit tabbed in from the group's line — `pieceIndent` below)
+            ForEach(Array(autoPrims.enumerated()), id: \.element.id) { i, p in
+                pieceCard(g, key: Int(p.id), title: ClearanceChipLayout.kindLabel(p.kind) + " \(i + 1)",
+                          pickID: "pick-auto-\(p.id)", trashID: "delete-auto-\(p.id)",
+                          // G2 / round-2 T6: the move icon converts an auto-found keep-out to a movable primitive
+                          grab: selection.activeGroupID == g.id ? (id: "grab-auto-\(p.id)", action: {
+                              selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
+                          }) : nil,
+                          delete: { project.deleteAutoClearance(face: p.id) }) {
+                    clearancePrimitiveLine(g, p, showKind: false)
                 }
             }
-            ForEach(manual) { mp in
-                HStack(alignment: .top, spacing: DS.Space.xs) {
-                    primitiveDeleteButton("delete-manual-\(mp.id.uuidString)") {
-                        project.removeManualPrimitive(id: mp.id, from: g.id)
-                    }
-                    manualPrimitiveLine(g, mp)
-                        .modifier(PieceRowPick(picked: selectedPieceKey == ProjectModel.manualFaceKey(mp.id),
-                                               id: "pick-manual-\(mp.id.uuidString)") {
-                            pickPiece(g.id, ProjectModel.manualFaceKey(mp.id)) })   // ★ his iPad 10-26 (3)
-                    pieceEye(g, ProjectModel.manualFaceKey(mp.id), name: "this keep-out")
+            ForEach(Array(manual.enumerated()), id: \.element.id) { i, mp in
+                pieceCard(g, key: ProjectModel.manualFaceKey(mp.id),
+                          title: (mp.kind == .bolt ? "Cylinder" : "Plane") + " \(i + 1) · manual", titleColor: Self.clearanceTint,
+                          pickID: "pick-manual-\(mp.id.uuidString)", trashID: "delete-manual-\(mp.id.uuidString)",
+                          delete: { project.removeManualPrimitive(id: mp.id, from: g.id) }) {
+                    manualPrimitiveLine(g, mp, showKind: false)
                 }
             }
             if autoPrims.isEmpty && manual.isEmpty {
@@ -11293,6 +11287,39 @@ public struct WorkspacePlaceholder: View {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.top, 2)
+        .modifier(PieceIndent())
+    }
+
+    /// ★ ONE PIECE'S CARD (his iPad 14:13): its name on the left; its move (when it has one), (i), eye and trash on the
+    /// right; its values underneath. The whole card picks the piece (PieceRowPick); a hidden piece's card greys out.
+    private func pieceCard<Content: View>(_ g: SelectionGroup, key: Int, title: String, titleColor: Color = DS.Color.textPrimary.color,
+                                          pickID: String, trashID: String, info: String? = nil,
+                                          grab: (id: String, action: () -> Void)? = nil, canDelete: Bool = true,
+                                          delete: @escaping () -> Void,
+                                          @ViewBuilder content: () -> Content) -> some View {
+        let shown = SelectionArrowRule.pieceDrawn(group: g.id, piece: key, hidden: hiddenPieces)
+        return VStack(alignment: .trailing, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.xs) {
+                Text(title).font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(shown ? titleColor : DS.Color.textQuaternary.color).lineLimit(1)
+                Spacer(minLength: DS.Space.xs)
+                if let grab {
+                    Button(action: grab.action) {
+                        Image(systemName: "move.3d").font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(DS.Color.accent.color.opacity(0.9))
+                            .frame(width: 36, height: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(grab.id)
+                    .accessibilityLabel("Convert to a movable primitive")
+                }
+                if let info { InfoPopoverButton(text: info, id: "\(pickID)-info") }
+                pieceEye(g, key, name: title)
+                if canDelete { pieceTrash(name: title, id: trashID, delete) }
+            }
+            content().opacity(shown ? 1 : 0.45)
+        }
+        .modifier(PieceRowPick(picked: selectedPieceKey == key, id: pickID) { pickPiece(g.id, key) })
     }
 
     /// The per-primitive "−" delete affordance (handoff item 2) — the counterpart to
@@ -11329,6 +11356,7 @@ public struct WorkspacePlaceholder: View {
         let order = selection.groups.map(\.id)
         return force.scenarioList.enumerated().map { i, s in
             let isOpen = s.id == open
+            let shown = folderShown(s.id)
             let noAnchor = force.anchorsOn(in: s.id, order: order).isEmpty
             let tail: AnyView? = isOpen && (noAnchor || scenarioAnchorHint == s.id) ? AnyView(VStack(alignment: .leading, spacing: DS.Space.xs) {
                 // ★ the gap (an anchor group deleted, the rest switched off): said at once, with its one-tap fix
@@ -11350,15 +11378,24 @@ public struct WorkspacePlaceholder: View {
             }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)) : nil
             return SelectionsFolder(id: s.id, header: AnyView(scenarioFolderHeader(s, index: i, open: isOpen)),
-                                    groups: isOpen ? selection.groups.filter { force.group($0.id, isIn: s.id) } : [],
-                                    tail: tail)
+                                    groups: shown ? selection.groups.filter { force.group($0.id, isIn: s.id) } : [],
+                                    tail: shown ? tail : nil,
+                                    accessory: { scenarioLineSwitch($0, in: s.id) })
         }
     }
 
     /// A shared anchor's on/off switch for the OPEN scenario, at the end of its line in the list.
-    func scenarioLineSwitch(_ g: SelectionGroup) -> AnyView? {
+    func scenarioLineSwitch(_ g: SelectionGroup, in scenario: UUID? = nil) -> AnyView? {
         guard scenariosApply, force.hasScenarios, force.kind(for: g.id).isAnchor, force.scenarioID(of: g.id) == nil else { return nil }
-        return AnyView(scenarioAnchorSwitch(g.id, in: force.activeScenarioID))
+        return AnyView(scenarioAnchorSwitch(g.id, in: scenario ?? force.activeScenarioID))
+    }
+
+    /// A scenario folder lists its groups while it is open: the open scenario unless he closed it, any other once he opened it.
+    private func folderShown(_ id: UUID) -> Bool {
+        id == force.activeScenarioID ? !closedFolders.contains(id) : openFolders.contains(id)
+    }
+    private func toggleFolder(_ id: UUID) {
+        if folderShown(id) { openFolders.remove(id); closedFolders.insert(id) } else { closedFolders.remove(id); openFolders.insert(id) }
     }
 
     /// ★ PINNED under Topology's list, never scrolled away: the last-anchor refusal, "+ Add a load scenario" and its (i),
@@ -11384,6 +11421,17 @@ public struct WorkspacePlaceholder: View {
     /// A scenario's folder row: tap to open it; ⋯ renames it (and removes any but Scenario 1); the open one offers Add Anchor.
     private func scenarioFolderHeader(_ s: LoadScenario, index: Int, open: Bool) -> some View {
         HStack(spacing: DS.Space.s) {
+            Button { toggleFolder(s.id) } label: {
+                Image(systemName: folderShown(s.id) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+                    .frame(width: 22, height: 32).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioFolderOpen-\(index)": geo.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityLabel(folderShown(s.id) ? "Close \(s.name)" : "Open \(s.name)")
+            .accessibilityIdentifier("scenario-folder-open-\(index)")
             Image(systemName: open ? "folder.fill" : "folder")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
@@ -11413,7 +11461,7 @@ public struct WorkspacePlaceholder: View {
                 Image(systemName: "ellipsis.circle").foregroundStyle(DS.Color.textTertiary.color)
             }
         }
-        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+        .padding(.leading, DS.Space.xs).padding(.trailing, DS.Space.l).padding(.vertical, DS.Space.s)
         .contentShape(Rectangle())
         .onTapGesture { openScenario(s.id) }
         .background(GeometryReader { geo in
@@ -11567,24 +11615,21 @@ public struct WorkspacePlaceholder: View {
         selectedPiece = selectedPieceKey == key ? nil : SelectionArrowRule.PieceRef(group: group, key: key)
     }
 
-    private func primitiveDeleteButton(_ id: String, _ action: @escaping () -> Void) -> some View {
-        // ★ his ask 2026-10-26: the same trash as every other delete (it was a faint 13 pt "−")
-        pieceTrash(name: "this keep-out", id: id, action)
-    }
-
     /// One MANUAL primitive's editable lines — the same "Margin/Axial/Depth" chips an
     /// auto primitive shows, but reading/writing the primitive's OWN override (a manual
     /// primitive is never part of the group's shared-sync set). Tinted the clearance
     /// red + tagged "(manual)" so it reads distinctly from a found bore.
-    @ViewBuilder private func manualPrimitiveLine(_ g: SelectionGroup, _ mp: ManualPrimitive) -> some View {
+    @ViewBuilder private func manualPrimitiveLine(_ g: SelectionGroup, _ mp: ManualPrimitive, showKind: Bool = true) -> some View {
         // DEFECT 1: the panel reads the SAME `clearanceMetric(groupID:faceID:role:)` the
         // 3D-viewport chip reads (keyed by the primitive's sentinel faceID), so the two chips
         // for one value can never diverge again — they are literally the same call.
         let key = ProjectModel.manualFaceKey(mp.id)
         VStack(alignment: .trailing, spacing: 4) {
-            Text(mp.kind == .bolt ? "Cylinder · manual" : "Plane · manual")
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(Self.clearanceTint)
+            if showKind {
+                Text(mp.kind == .bolt ? "Cylinder · manual" : "Plane · manual")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(Self.clearanceTint)
+            }
             if mp.kind == .bolt {
                 clearanceMetricRow("Margin", metricPill("Margin", g.id, key, .margin))
                 clearanceMetricRow("Axial", metricPill("Axial", g.id, key, .axial))
@@ -12933,6 +12978,9 @@ extension WorkspacePlaceholder {
                            isLocked: { !project.groupView.canEdit($0) },
                            pick: { id in
                                topoDeleteAsk = nil
+                               // ★ a group under another scenario's folder: that scenario opens first (the 3D shows the open one)
+                               if scenariosApply, force.hasScenarios, !force.showsInActiveScenario(id),
+                                  let sc = force.scenarioList.first(where: { force.group(id, isIn: $0.id) }) { openScenario(sc.id) }
                                if selection.activeGroupID == id { leaveGroupEditing() } else { selection.setActive(id) }
                            },
                            askDelete: { topoDeleteAsk = $0 },
@@ -12946,6 +12994,9 @@ extension WorkspacePlaceholder {
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
                 .scenarioHooks(folders: scenarioFolders, lineAccessory: { scenarioLineSwitch($0) }, footer: selectionsFooter)   // ★ load scenarios (reviewer 2026-10-26 13:22)
+                .openAndResize(isOpen: { openGroups.contains($0) },
+                               toggleOpen: { id in if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) } },
+                               height: $selectionsHeight)   // ★ his iPad 2026-10-26: open buttons, resizable
             if !selectionsCollapsed {
                 HStack(spacing: DS.Space.s) {
                     if let t = topoTrashed, project.canUndoTrash(t) {
@@ -12987,24 +13038,18 @@ extension WorkspacePlaceholder {
     private func topologyGroupRows(_ g: SelectionGroup) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             groupRow(g, inList: true)
-            ForEach(g.faces, id: \.self) { f in
-                // ★ his ask 2026-10-26: every piece inside the group is picked one at a time, with its own hide and delete
-                HStack(spacing: DS.Space.s) {
-                    Text("Face \(f)").font(.system(size: 12.5))
-                        .foregroundStyle((SelectionArrowRule.pieceDrawn(group: g.id, piece: Int(f), hidden: hiddenPieces)
-                                          ? DS.Color.textSecondary : DS.Color.textQuaternary).color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .modifier(PieceRowPick(picked: selectedPieceKey == Int(f), id: "topology-face-pick-\(f)") { pickPiece(g.id, Int(f)) })
-                    InfoPopoverButton(text: "Face \(f) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
-                                      + "Tap it on the model to take it out of the group.",
-                                      id: "topology-face-info-\(f)")
-                    pieceEye(g, Int(f), name: "Face \(f)")
-                    if project.groupView.canEdit(g.id) {
-                        pieceTrash(name: "Face \(f)", id: "topology-face-trash-\(f)") { removePieceFace(g, f) }
-                    }
+            // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
+            VStack(spacing: PieceRowPick.spacing) {
+                ForEach(g.faces, id: \.self) { f in
+                    pieceCard(g, key: Int(f), title: "Face \(f)", pickID: "topology-face-pick-\(f)",
+                              trashID: "topology-face-trash-\(f)",
+                              info: "Face \(f) is in \(g.name) (\(force.panelKindLabel(for: g.id))). "
+                                  + "Tap it on the model to take it out of the group.",
+                              canDelete: project.groupView.canEdit(g.id), delete: { removePieceFace(g, f) }) { EmptyView() }
                 }
-                .padding(.horizontal, DS.Space.l)
             }
+            .modifier(PieceIndent())
+            .padding(.horizontal, DS.Space.l)
         }
         .padding(.bottom, DS.Space.s)
     }

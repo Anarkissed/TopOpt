@@ -109,8 +109,21 @@ public struct SelectionsFolder: Identifiable {
     public let header: AnyView
     public let groups: [SelectionGroup]
     public let tail: AnyView?
-    public init(id: UUID, header: AnyView, groups: [SelectionGroup], tail: AnyView? = nil) {
-        self.id = id; self.header = header; self.groups = groups; self.tail = tail
+    /// A control at the end of a group's line IN THIS FOLDER (an anchor's switch for this scenario).
+    public let accessory: (SelectionGroup) -> AnyView?
+    public init(id: UUID, header: AnyView, groups: [SelectionGroup], tail: AnyView? = nil,
+                accessory: @escaping (SelectionGroup) -> AnyView? = { _ in nil }) {
+        self.id = id; self.header = header; self.groups = groups; self.tail = tail; self.accessory = accessory
+    }
+}
+
+/// ★ HOW TALL THE OPEN LIST MAY GROW (his iPad 2026-10-26: "make the Selections modal get much bigger than its maximum").
+/// The workspace sets it from the screen (WorkspacePanelPlacement); a list that is not told keeps 420 pt.
+private struct SelectionsListMaxHeightKey: EnvironmentKey { static let defaultValue: CGFloat = SelectionsList.maxListHeight }
+extension EnvironmentValues {
+    var selectionsListMaxHeight: CGFloat {
+        get { self[SelectionsListMaxHeightKey.self] }
+        set { self[SelectionsListMaxHeightKey.self] = newValue }
     }
 }
 
@@ -141,6 +154,15 @@ public struct SelectionsList: View {
     var folders: [SelectionsFolder]? = nil
     var lineAccessory: (SelectionGroup) -> AnyView? = { _ in nil }
     var footer: AnyView? = nil
+    /// ★ his iPad 14:13: an open/close button on each group's line; an open group shows its rows without being picked.
+    /// nil: no button (the picked group alone shows its rows, as before).
+    var isOpen: ((UUID) -> Bool)? = nil
+    var toggleOpen: ((UUID) -> Void)? = nil
+    /// ★ his ask: the list's height, set by dragging the grip under it (nil: as tall as its rows, up to the screen).
+    /// No binding: no grip.
+    var chosenHeight: Binding<CGFloat?>? = nil
+    @Environment(\.selectionsListMaxHeight) private var maxHeight
+    @State private var dragFrom: CGFloat? = nil
 
     public init(project: ProjectModel, collapsed: Binding<Bool>, picked: UUID?, deleteAsk: UUID?,
                 isLocked: @escaping (UUID) -> Bool = { _ in false }, readsLattice: @escaping (UUID) -> Bool = { _ in false },
@@ -165,11 +187,22 @@ public struct SelectionsList: View {
         return copy
     }
 
+    /// The same list with an open/close button per group and a resize grip (Topology, his iPad 2026-10-26).
+    func openAndResize(isOpen: @escaping (UUID) -> Bool, toggleOpen: @escaping (UUID) -> Void,
+                       height: Binding<CGFloat?>) -> SelectionsList {
+        var copy = self
+        copy.isOpen = isOpen; copy.toggleOpen = toggleOpen; copy.chosenHeight = height
+        return copy
+    }
+
+    /// How far a scenario folder's groups sit in from the folder row.
+    static let folderIndent: CGFloat = 20
     static let lineHeight: CGFloat = 44
     static let captionsHeight: CGFloat = 20
     static let maxListHeight: CGFloat = 420
     /// The most the open list draws (its header, the divider, 420 pt of lines) — a face chip's second tier keeps out of the
     /// list's whole reach (FaceChipLayout.listReach).
+    /// (The Flexible list keeps 420 pt; Topology's taller list is kept out by its MEASURED frame, which the chip reads too.)
     static let maxDrawnHeight: CGFloat = lineHeight + 1 + maxListHeight + 4
     /// The open rows' columns, measured to fit the 348 pt panel — 24 in, the glyph, the name (never cut), two 80 pt boxes,
     /// the 44 pt (i), 12 out.
@@ -205,8 +238,16 @@ public struct SelectionsList: View {
                             if let folders {
                                 ForEach(folders) { f in
                                     f.header
-                                    ForEach(f.groups) { g in section(g) }
-                                    if let t = f.tail { t }
+                                    // ★ his iPad 14:13: the folder's contents sit tabbed in, a guide line down their edge
+                                    VStack(spacing: 0) {
+                                        ForEach(f.groups) { g in section(g, accessory: f.accessory) }
+                                        if let t = f.tail { t }
+                                    }
+                                    .padding(.leading, Self.folderIndent)
+                                    .overlay(alignment: .leading) {
+                                        Rectangle().fill(DS.Color.strokeSubtle.color).frame(width: 1)
+                                            .padding(.leading, Self.folderIndent / 2 + 6).padding(.vertical, 4)
+                                    }
                                 }
                             } else {
                                 ForEach(groups) { g in section(g) }
@@ -218,8 +259,9 @@ public struct SelectionsList: View {
                                     .onChange(of: g.size.height) { contentHeight = $0 }
                             })
                     }
-                    .frame(height: min(Self.maxListHeight, max(contentHeight, Self.lineHeight)))
+                    .frame(height: listHeight)
                 }
+                if chosenHeight != nil, !groups.isEmpty { grip }
                 if let footer {
                     Divider().overlay(DS.Color.strokeSubtle.color)
                     footer
@@ -268,12 +310,12 @@ public struct SelectionsList: View {
 
     // MARK: one group
 
-    @ViewBuilder private func section(_ g: SelectionGroup) -> some View {
+    @ViewBuilder private func section(_ g: SelectionGroup, accessory: ((SelectionGroup) -> AnyView?)? = nil) -> some View {
         let isPicked = picked == g.id
         VStack(alignment: .leading, spacing: 0) {
-            groupLine(g, picked: isPicked)
+            groupLine(g, picked: isPicked, accessory: accessory)
             if deleteAsk == g.id, ConfirmInPlace.controlOldPlacement { deleteConfirm(g) }   // (red control)
-            if isPicked { rows(g) }
+            if isPicked || isOpen?(g.id) == true { rows(g) }
         }
         .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
         .overlay(alignment: .leading) {
@@ -281,21 +323,38 @@ public struct SelectionsList: View {
         }
     }
 
-    private func groupLine(_ g: SelectionGroup, picked isPicked: Bool) -> some View {
+    private func groupLine(_ g: SelectionGroup, picked isPicked: Bool,
+                           accessory folderAccessory: ((SelectionGroup) -> AnyView?)? = nil) -> some View {
         let locked = isLocked(g.id)
+        let accessory = folderAccessory.map { $0(g) } ?? lineAccessory(g)
         return HStack(spacing: DS.Space.s) {
+            if let toggleOpen, let isOpen {
+                let open = isOpen(g.id) || isPicked
+                Button { toggleOpen(g.id) } label: {
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
+                        .frame(width: 22, height: Self.lineHeight).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(publish("selOpen-\(g.id.uuidString)"))
+                .accessibilityLabel(open ? "Close \(g.name)" : "Open \(g.name)")
+                .accessibilityIdentifier("\(idPrefix)-sel-open-\(g.id.uuidString)")
+            }
             Button { pick(g.id) } label: {
                 HStack(spacing: DS.Space.s) {
                     RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 12, height: 12)
                     Text(g.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                        .lineLimit(1)
+                        .lineLimit(1).layoutPriority(1)
                     RoleGlyphs(project: project, group: g.id, readsLattice: readsLattice(g.id), size: 13)
                     if let w = loadWeight(g.id) {
                         Text(w).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
                     }
                     Spacer(minLength: DS.Space.xs)
-                    SummaryLabel(summary: summary?(g) ?? SelectionsSummary.summary(project: project, group: g))
-                        .accessibilityIdentifier("\(idPrefix)-sel-summary-\(g.id.uuidString)")
+                    // ★ his iPad 14:13: a line with its own control (an anchor's scenario switch) gives the name the room
+                    if accessory == nil {
+                        SummaryLabel(summary: summary?(g) ?? SelectionsSummary.summary(project: project, group: g))
+                            .accessibilityIdentifier("\(idPrefix)-sel-summary-\(g.id.uuidString)")
+                    }
                     if locked {
                         Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)
                     }
@@ -305,7 +364,7 @@ public struct SelectionsList: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
-            if let a = lineAccessory(g) { a }
+            if let accessory { accessory }
             if let toggleEye {
                 let hidden = isHidden(g.id)
                 Button { toggleEye(g.id) } label: {
@@ -332,7 +391,7 @@ public struct SelectionsList: View {
                 .accessibilityIdentifier("\(idPrefix)-sel-trash-\(g.id.uuidString)")
             }
         }
-        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
+        .padding(.leading, toggleOpen == nil ? DS.Space.l : DS.Space.xs).padding(.trailing, DS.Space.xs)
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
@@ -340,6 +399,41 @@ public struct SelectionsList: View {
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
         DeleteConfirm(name: g.name, delete: confirmDelete, idPrefix: idPrefix, ask: ask)
             .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
+    }
+
+    /// The grip's height for a drag: the panel grows about its centre, so twice the finger; never under two lines, never past
+    /// the screen's room.
+    static func resized(from: CGFloat, drag: CGFloat, max cap: CGFloat) -> CGFloat {
+        Swift.min(cap, Swift.max(lineHeight * 2, from + 2 * drag))
+    }
+
+    /// The most the open list may be on a canvas this tall: PageLeftModal keeps `noteTop` above it twice (its spacer and its
+    /// padding) and `edge` below it twice; then the header and the pinned footer. Never under the old 420 pt.
+    static func screenMax(canvasHeight: CGFloat, footerReserve: CGFloat) -> CGFloat {
+        Swift.max(maxListHeight, canvasHeight - 2 * PageChrome.noteTop - 2 * PageChrome.edge - lineHeight - 2 - footerReserve)
+    }
+
+    /// As tall as its rows, up to the screen (or to the height he dragged it to).
+    private var listHeight: CGFloat {
+        let cap = max(Self.lineHeight, min(chosenHeight?.wrappedValue ?? maxHeight, maxHeight))
+        return min(cap, max(contentHeight, Self.lineHeight))
+    }
+
+    /// ★ his ask (14:3x): "make it resizeable" — a grip under the list; drag it down for more rows, up for fewer. The panel
+    /// grows about its centre, so the height moves twice the finger and the grip stays under it.
+    private var grip: some View {
+        Capsule().fill(DS.Color.textTertiary.color).frame(width: 36, height: 5)
+            .frame(maxWidth: .infinity).frame(height: 22).contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { v in
+                    let from = dragFrom ?? listHeight
+                    if dragFrom == nil { dragFrom = from }
+                    chosenHeight?.wrappedValue = Self.resized(from: from, drag: v.translation.height, max: maxHeight)
+                }
+                .onEnded { _ in dragFrom = nil })
+            .background(publish("selectionsGrip"))
+            .accessibilityLabel("Resize Selections")
+            .accessibilityIdentifier("\(idPrefix)-sel-grip")
     }
 
     private func publish(_ key: String) -> some View {
