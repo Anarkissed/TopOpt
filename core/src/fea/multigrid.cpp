@@ -229,13 +229,22 @@ thread_local long long g_mg_safe_log_summaries = 0;
 void mg_safe_log_flush_window() {
   SafeLogWindow& w = g_mg_safe_log_win;
   if (w.attempts == 0) return;
+  // Said plainly (the owner read "0 seeded the Jacobi-CG fallback" as a
+  // fallback): how many converged ON MULTIGRID, and "fallback: none" or the
+  // number that went on to the Jacobi-CG fallback.
+  char fb[96];
+  if (w.attempts == w.converged)
+    std::snprintf(fb, sizeof fb, "fallback: none");
+  else
+    std::snprintf(fb, sizeof fb, "fallback: %d (Jacobi-CG; %d started from the multigrid "
+                  "iterate)", w.attempts - w.converged, w.seeded);
   std::fprintf(stderr,
-               "[mg-safe] solves %lld-%lld: %d safe attempts (%d converged, %d "
-               "seeded the Jacobi-CG fallback, %d with loose pieces out, %d "
-               "started cold), %lld l1 cycles, %.0f ms ; per-solve lines: the "
-               "first %d of a run, then one summary per %d\n",
-               w.first_seq, w.last_seq, w.attempts, w.converged, w.seeded,
-               w.dropped, w.cold, w.cycles, w.ms, g_mg_safe_log_first, g_mg_safe_log_every);
+               "[mg-safe] solves %lld-%lld: %d safe attempts, %d converged on multigrid "
+               "(l1 smoother), %s ; %d with loose pieces out, %d started cold, %lld "
+               "multigrid cycles, %.0f ms ; per-solve lines: the first %d of a run, "
+               "then one summary per %d\n",
+               w.first_seq, w.last_seq, w.attempts, w.converged, fb, w.dropped, w.cold,
+               w.cycles, w.ms, g_mg_safe_log_first, g_mg_safe_log_every);
   ++g_mg_safe_log_summaries;
   w = SafeLogWindow();
 }
@@ -3121,15 +3130,15 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       char start_note[160] = "";
       if (cold_start)
         std::snprintf(start_note, sizeof start_note,
-                      " ; l1 retry started COLD (warm guess worse than zero: exact "
-                      "rel res %.3e, J %.3e)", warm_rel_x, warm_J_x);
+                      " ; the multigrid retry started COLD (warm guess worse than "
+                      "zero: rel res %.3e, J %.3e)", warm_rel_x, warm_J_x);
       if (resx >= 0.0 && seeded_fallback)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; Jacobi-CG fallback starts from the l1 iterate (exact rel "
-                      "res %.3e < start %.3e)", resx, r0x);
+                      " ; the Jacobi-CG fallback starts from the multigrid iterate "
+                      "(rel res %.3e < start %.3e)", resx, r0x);
       else if (resx >= 0.0)
         std::snprintf(exact_note, sizeof exact_note,
-                      " ; l1 iterate NOT handed over (exact rel res %.3e, start "
+                      " ; multigrid iterate NOT handed over (rel res %.3e, start "
                       "%.3e%s)", resx, r0x,
                       cold_fallback ? "; Jacobi-CG fallback starts COLD" : "");
       else if (cold_fallback)
@@ -3147,13 +3156,13 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           mg_safe_log_flush_window();
         std::fprintf(stderr,
                      "[mg-safe] solve %lld: shipped %s (%d cycles, rel res %.3e) -> "
-                     "l1-Jacobi MG-PCG %s in %d cycles, rel res %.3e, %.0f ms ; "
+                     "multigrid (l1 smoother) %s in %d cycles, rel res %.3e, %.0f ms%s ; "
                      "tol %.0e, %s ; "
                      "loose pieces at the floor: %d of %d pieces (%lld vox, largest "
                      "%d, %d frozen) of %lld elements%s%s%s%s\n",
                      seq, safe_direct ? "latched off" : "stalled", shipped_it,
                      shipped_res, ok ? "CONVERGED" : "did not converge", it, res,
-                     safe_ms, tolerance,
+                     safe_ms, ok ? "" : " ; a Jacobi-CG FALLBACK follows", tolerance,
                      !warm ? "no guess (cold)"
                            : (cold_start ? "warm guess dropped (cold)" : "warm start"),
                      loose.unanchored, loose.pieces, loose.unanchored_voxels,
@@ -3207,8 +3216,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // (stderr only; never printed on a solve the safe retry did not reach).
       if (have_h && safe_ok)
         std::fprintf(stderr,
-                     "[mg-safe] solve %lld fallback: Jacobi-CG %s in %d iterations, "
-                     "rel res %.3e, %.0f ms (tol %.0e, cap %d)\n",
+                     "FALLBACK: [mg-safe] solve %lld fell back to Jacobi-CG: %s in %d "
+                     "iterations, rel res %.3e, %.0f ms (tol %.0e, cap %d)\n",
                      g_mg_safe_solve_seq, diag.converged ? "CONVERGED" : "did not converge",
                      diag.iterations, diag.residual, fea_detail::mf_steady_ms() - t_fb0,
                      tolerance, cap);
