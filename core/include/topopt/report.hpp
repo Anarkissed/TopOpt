@@ -391,6 +391,10 @@ struct StrengthenVersionReport {
   int specks = 0;
   long long keep_clear_voxels = 0;    // exported voxels inside a Keep Clear
   int coarse_runs = 0;
+  // Coarse runs that started from the previous coarse design (cleaned of loose
+  // pieces) instead of the level set's hole array: every coarse run but the
+  // pass's first (reviewer's order, 2026-10-26).
+  int coarse_seeded = 0;
   int repairs = 0;
   double seconds = 0.0;
   std::string note;
@@ -404,6 +408,12 @@ struct StrengthenVersionReport {
   // EVERY ATTEMPT of the version (its fine run, then each repair), as verified
   // (reviewer's ruling 2026-10-26): report.json versions[].attempts.
   std::vector<StrengthenAttemptReport> attempts;
+  // THE LADDER (his decision of 2026-10-26): how `target_margin` was set — "your safety
+  // margin" (version 1) or "10% over version N's verified margin".
+  std::string target_rule;
+  // LOAD SCENARIOS (ruling 2026-10-26 12:46): every scenario verified on the shown
+  // attempt's EXPORT (empty without scenarios); `verified_margin` is the worst's.
+  std::vector<ScenarioReport> scenarios;
   std::string fine_start;
   int fine_start_loose = 0;
   long long fine_start_loose_voxels_removed = 0;
@@ -412,6 +422,11 @@ struct StrengthenVersionReport {
 };
 struct StrengthenReport {
   bool evaluated = false;
+  // LOAD SCENARIOS: the scenario whose load has no path to its anchors in the part as
+  // drawn (then the reference is the requirement alone), and in the box filled solid
+  // (then no version can hold it). "" = every scenario held, and always without them.
+  std::string as_drawn_unheld;
+  std::string ceiling_unheld;
   double as_drawn_margin = 0.0;
   double margin_required = 0.0;
   double reference_margin = 0.0;

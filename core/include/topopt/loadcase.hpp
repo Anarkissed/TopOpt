@@ -105,6 +105,8 @@ struct ProductionLoadCase {
     std::vector<int> anchor_face_ids;
   };
   std::vector<Scenario> scenarios;
+  // The user's safety margin (job loads.safety_margin); 0 = the production default.
+  double safety_margin = 0.0;
 
   // WHICH LADDER (task 2026-08-03-growth-ladder). Both modes now SEARCH, both
   // recommend, and each is one line:

@@ -7,14 +7,20 @@
 //
 // Through run_job on a small bar in a box (anchored at one end, pushed at the
 // other), read from report.json as the app reads it:
-//   (a) the reference is max(as drawn, required), and version 1 passes its target;
+//   (a) the reference is the safety margin (the requirement), and version 1 passes
+//       its target. THE LADDER CHANGED BY RULING (his decision of 2026-10-26): version 1
+//       is built to the safety margin, versions 2 and 3 to 10 % over the version before
+//       (it was 25 / 50 / 75 % less worst stress than max(as drawn, required)); the
+//       drawing is measured as information only. (a) and (d) pin the new rule;
 //   (b) the versions that pass are strictly stronger, each >= 1.05 x the previous;
 //   (c) a target above 0.95 x the box filled solid is reported UNREACHABLE, with no
 //       variant behind it;
-//   (d) a part that fails as drawn is referenced to the requirement;
+//   (d) a part that fails as drawn: version 1's target is still the safety margin;
 //   (e) without the key the run is today's growth ladder: no "strengthen" block;
 //   (f) a version's fine run starts from the passing coarse design, its loose
-//       pieces taken out (ruling 2026-10-25: don't carry specks across grids).
+//       pieces taken out (ruling 2026-10-25: don't carry specks across grids);
+//   (g) every coarse run but the pass's first starts from the previous coarse
+//       design, cleaned (reviewer's order 2026-10-26).
 //
 // Eigen (minimize_plastic) on a mesh part, OCCT-free; the parametric level set,
 // capped at a few iterations.
@@ -256,8 +262,9 @@ int main() {
       const double ceil = s.at("ceiling_margin").num;
       std::printf("[50] pass: as drawn %.4g, required %.4g, reference %.4g, ceiling %.4g\n",
                   drawn, req, ref, ceil);
-      CHECK(drawn >= req && std::fabs(ref - std::max(drawn, req)) < 1e-9 * ref,
-            "(a) the reference is max(as drawn, required); this part passes as drawn");
+      CHECK(drawn >= req && std::fabs(ref - req) < 1e-9 * ref &&
+                s.has("safety_margin") && std::fabs(s.at("safety_margin").num - req) < 1e-12,
+            "(a) the reference is the safety margin (the drawing is information only)");
       CHECK(s.has("cap") && s.at("cap").at("face_id").num >= 0 &&
                 !s.at("cap").at("note").str.empty(),
             "the ceiling's worst-stress site is named (one line per run)");
@@ -267,6 +274,22 @@ int main() {
       double prev = 0.0;
       int unreachable = 0;
       std::size_t passing = 0;
+      // (g) every coarse run but the pass's first starts from the previous coarse
+      // design, cleaned (reviewer's order 2026-10-26: no hole-array start after
+      // the first).
+      bool first_coarse = true;
+      for (const Json& v : vs.arr) {
+        const int runs = static_cast<int>(v.at("coarse_runs").num);
+        if (runs == 0) continue;
+        const int seeded =
+            v.has("coarse_seeded_runs") ? static_cast<int>(v.at("coarse_seeded_runs").num) : -1;
+        std::printf("[50]   v%d: %d coarse run(s), %d seeded from the previous coarse design\n",
+                    static_cast<int>(v.at("version").num), runs, seeded);
+        CHECK(seeded == runs - (first_coarse ? 1 : 0),
+              "(g) every coarse run after the pass's first starts from the previous "
+              "coarse design (coarse_seeded_runs)");
+        first_coarse = false;
+      }
       for (const Json& v : vs.arr) {
         const std::string st = v.at("status").str;
         const double tgt = v.at("target_margin").num;
@@ -311,6 +334,9 @@ int main() {
         CHECK(ver >= tgt, "(a)(b) a version that is not unreachable meets its "
                           "target on the VERIFIED (exported) geometry");
         CHECK(ver >= 1.05 * prev, "(b) each version is >= 1.05 x the previous");
+        CHECK(prev <= 0.0 || std::fabs(tgt - 1.10 * prev) <= 1e-9 * tgt,
+              "(b) the new ladder: a later version's target is 10 % over the previous "
+              "version's verified margin");
         CHECK(v.at("anchors_attached").boolean &&
                   static_cast<int>(v.at("specks").num) == 0 &&
                   static_cast<long long>(v.at("keep_clear_voxels").num) == 0,
@@ -342,8 +368,9 @@ int main() {
                 1e-9,
             "(d) a failing part is referenced to the requirement");
       CHECK(std::fabs(s.at("versions").arr[0].at("target_margin").num -
-                      s.at("margin_required").num * 4.0 / 3.0) < 1e-6,
-            "(d) its version 1 target is the requirement x 4/3");
+                      s.at("margin_required").num) < 1e-9 &&
+                s.at("versions").arr[0].at("target_rule").str == "your safety margin",
+            "(d) its version 1 target is the safety margin");
     } else {
       CHECK(false, "(d) the failing part's report carries the strengthen block");
     }

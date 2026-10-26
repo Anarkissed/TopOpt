@@ -189,3 +189,104 @@ the worst scenario's.
   gap in this geometry (more material always lowers compliance, and the gap is the only free space), so that line is
   printed as context, not as a control.
 - Not done (not a gate): the Carriage Arms run with three scenarios.
+
+## NEXT BATCH (the integrator's ruling, 2026-10-26 06:54 EDT; not tonight: rewording now would change the release fingerprint)
+
+Plain wording for core's scenario refusals, which he reads verbatim in the app's failure sheet (354 adds the same lines
+as a pre-flight block on Optimize; both halves ship together):
+- no anchor ON: "Scenario “<name>” has no anchor switched on"
+- no load: "Scenario “<name>” has no load"
+- with bearing anchors: "Load scenarios can't be combined with bolt bearings yet"
+- with strengthen: "Load scenarios can't be combined with Redesign to strengthen yet"
+Where they are today: job.cpp (the schema: no anchor ON, no load, bearing, strengthen) and loadcase.cpp (the same
+checks, plus "its load tagged nothing at this resolution").
+
+## LOAD SCENARIOS WITH "REDESIGN TO STRENGTHEN" (the reviewer's ruling of 2026-10-26 12:46, his "it needs to work together!")
+
+Branch `claude/topology-core-scen-strengthen`, from the release (`origin/claude/flexible-screens` 5cf6773b).
+
+- One certification for scenarios everywhere: `certify_scenarios` (pipeline.hpp / minimize_plastic.cpp) runs a given
+  certify on every scenario's supports and loads, picks the worst (a non-convergent one first, else the lowest
+  margin), reports each scenario's margin, peak and weak-spring share, and marks the first unheld one. The rung gate
+  (minimize_plastic), `analyze_job` and strengthen all use it. `sized_scenarios` sizes the weak springs (1e-6 × E ×
+  h per node).
+- `analyze_job` certifies every scenario on the analysed design (on the design box's grid when a mesh was voxelized
+  onto it). `AnalyzeJobResult::scenarios` / `unheld_scenario`; its report line carries "scenarios" and the reason.
+- Strengthen, every step on the worst scenario:
+  - **reference:** max(as-drawn worst, required). If the part as drawn can't carry a scenario at all
+    (`as_drawn_unheld`), the reference is the requirement alone.
+  - **targets:** × 1/(1 − cut), as before.
+  - **ceiling:** the worst scenario's. If the box filled solid can't carry a scenario (`ceiling_unheld`), every
+    version is unreachable: "Scenario “X”'s load has no path to its anchors, even with the box filled solid".
+  - **search and fine runs:** the coarse search and the fine runs solve all scenarios (the smooth max).
+  - **verify:** checks EVERY scenario on the export.
+  - **acceptance:** every scenario held, and the worst verified margin meets the target. Repairs, the 1.05× step,
+    IoU and specks are unchanged.
+  - **report:** `versions[].scenarios`; the version's margin is the worst's. When 42-B's straight bridge fires in a
+    scenario run, the note says so.
+- Plain refusals: "Scenario “<name>” has no anchor switched on", "Scenario “<name>” has no load", "Load scenarios
+  can't be combined with bolt bearings yet"; the unheld line is "Scenario “<name>”'s load has no path to its anchors".
+- Test: `test_scenarios_strengthen` 13/13, red first. Two blocks with a gap: v1 (target 2.0) verified at 9.11 and v2
+  (target 9.57) at 11.16, each ONE body, both scenarios held on the export, "B free" governing. v3 is unreachable,
+  above 0.95 × the ceiling of 11.29. 21 narrow tests pass.
+- Evidence jobs (his Carriage Arms copy 4, res 48), in scratch `evid/`. Scenario 2 = the left plate's 22 anchor
+  faces off, 20 N down + 5 N sideways (outward, −x) on the left drum's top (face 34). Scenario 3 = the mirror (face 18,
+  +x). The sideways direction is my reading of "sideways".
+
+## STEP 2, THE CORNER FIX (the reviewer's ruling of 2026-10-26 13:12): the Theory of Critical Distances
+
+- **Method:** the VOLUME method. Every margin reads the stress TENSOR averaged over the SOLID voxels within
+  `kTcdRadiusMm` of each voxel (`analyze_fixed_design`, analyze.cpp; a sphere, whose solid part at a surface hot
+  spot is the method's hemisphere). Von Mises and the interlayer tension (every build direction, the orientation
+  scorer included) both come from the averaged tensor. Solid only (printed, not latticed, not loose), so a uniform
+  stress averages to itself and a thin member is averaged only over itself. The fields (`von_mises_field`,
+  `stress_tensor_field`) stay raw for display, and `peak_von_mises_raw` / `peak_interlayer_raw` keep the raw peaks.
+  A voxel coarser than the radius averages each voxel over itself alone, byte for byte the old margin. One place
+  reads stress for a verdict, so the certification and strengthen's export-verify (analyze_job) both get it. The
+  optimizer's own loop optimises compliance, not stress, so it needs nothing.
+- **L:** 0.934 mm, the critical distance Ahmed & Susmel 2017 (FIS 41:252, doi 10.3221/IGF-ESIS.41.34) measured on
+  printed PLA: E 3296 MPa, σ_UTS 42.5 MPa, σ0 = 2 σ_UTS = 85 MPa, and the point method at L/2 = 0.467 mm predicted
+  notched strength within 20 % for every notch sharpness. Radius = 1.54 L = 1.438 mm (the volume method's
+  hemisphere, as the paper describes it). It is used for every FDM material: none of ours carries a fracture
+  toughness to derive its own L = (1/π)(K_Ic/σ0)², and this is the only measured L for a printed polymer.
+  Ahmed & Susmel 2019 (FFEMS 42:883, doi 10.1111/ffe.12958) backs reading infill as a homogenised linear-elastic
+  material plus the TCD, within ±20 %, which is our infill knockdown.
+- **Tests:** `test_tcd` 8/8.
+  - Plain tension reads yield/(F/A) exactly (8.80 = 8.80): nothing forgiven.
+  - An L-bracket's re-entrant corner settles: 0.917 / 0.744 / 0.707 / 0.689 at h 1 / 0.5 / 0.25 / 0.125 mm, 2.6 % at
+    the last step, while the raw single-voxel margin falls 0.683 → 0.248 (25 % at the last step).
+  - A grid coarser than the radius reads its raw margin exactly.
+- **The bore plate:** it converges at the fine end. Bearing 13.17 / 12.87 / 11.99 / 11.91 at res 48 / 64 / 96 / 128
+  (0.7 % from 96 to 128); glued 25.63 / 26.43 / 25.36 / 24.33 (4.1 %). The step from 64 to 96 is 6.8 %, at h 0.375 →
+  0.25 mm against a 1.44 mm radius, so `test_bearing` (d) checks 96 → 128 now. The averaged bearing peak sits in the
+  bearing zone (r ≈ 3.0, ±141–148°): the contact, not a corner.
+- **His arms (bar a), MISSED.** Glued certification at res 48 / 64 / 96 / 128 (2026-10-26 13:56, the scratchpad
+  `tcd_probe`):
+
+  | | 48 | 64 | 96 | 128 | 96 → 128 |
+  |---|---|---|---|---|---|
+  | as drawn, old (single voxel) | 3.939 | 3.940 | 2.844 | 2.481 | −12.8 % |
+  | as drawn, new (TCD) | 3.939 | 3.940 | 4.661 | 4.083 | −12.4 % |
+  | box filled, old | 7.165 | 8.054 | 5.209 | 3.196 | −38.6 % |
+  | box filled, new | 7.165 | 8.054 | 6.550 | 5.297 | −19.1 % |
+
+  The voxel is 2.55 / 1.91 / 1.27 / 0.96 mm, so the radius is 0.6 / 0.75 / 1.1 / 1.5 voxels: at 48 / 64 it reads the
+  single voxel (by design), and at 96 / 128 the critical volume is the voxel plus its neighbours. The bracket
+  settles only from h ≈ radius / 6, so on the arms this would need res ~500–950. No radius up to 5 mm settles both
+  rows (2.5 mm: +1.7 % / −5.2 %; 4 mm: −4.0 % / −11.8 %; 5 mm: −2.3 % / −9.3 %, scalar average). The proposed fix:
+  re-solve a fine local box (~15 mm, h ≈ radius / 8) around the worst spots, its cut faces driven by the global
+  displacements. Posted to the reviewer 2026-10-26 14:07 EDT with three options for the bundle; awaiting the ruling.
+- **#362's tweaks** (claude/core-loose-pieces eb470de7: coarse seeding 269ca010, cold first window 6cb055c9, plain
+  [mg-safe] wording e49838d2) merged clean at 599636ca. The coarse seed carries across versions with the sequential
+  ladder.
+
+## STEP 3, THE NEW STRENGTHEN LADDER (his decision of 2026-10-26)
+
+- **Key:** `loads.safety_margin` (a number: 1.5 = 150 %, also the minimum; below → "The safety margin can't be below
+  150% of the load"). It sets the required margin (`margin_stop`) of every loadcase run. Absent = 1.5, byte for byte.
+- **Targets:** version 1 = the safety margin. Versions 2 and 3 = 1.10 × the previous version's VERIFIED margin
+  (`kStrengthenLadderStep`; the 1.05 step-over is kept as a floor). A version after an unbuilt one is unreachable,
+  and its note says so. The drawing is measured as information only: `reference_margin` is the safety margin.
+- **report.json:** `strengthen.safety_margin`; `versions[].target_rule` ("your safety margin" / "10% over version N's
+  verified margin"); `stress_cut` stays in the schema, always 0. test_strengthen's (a) / (d) pin the new ladder (a
+  ruled change), and (b) adds the 10 % rule: 23/23. test_scenarios_strengthen adds the safety-margin refusal: 15/15.

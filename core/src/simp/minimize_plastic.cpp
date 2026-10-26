@@ -392,6 +392,74 @@ FragileJoints fragile_joints(const VoxelGrid& g, const std::vector<double>& rho,
 
 }  // namespace
 
+std::string scenario_unheld_reason(const std::string& name) {
+  return "Scenario \u201C" + name + "\u201D's load has no path to its anchors";
+}
+
+std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
+                                          double youngs_modulus_mpa, double spacing) {
+  for (SimpScenario& sc : scenarios)
+    for (DirichletBC& b : sc.bcs)
+      if (b.spring > 0.0 && !b.contact)
+        b.spring = b.spring_tangent = kScenarioWeakSpringRel * youngs_modulus_mpa * spacing;
+  return scenarios;
+}
+
+ScenarioCertification certify_scenarios(
+    const VoxelGrid& G, const std::vector<SimpScenario>& scenarios,
+    const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
+                                            const std::vector<NodalLoad>&)>& certify) {
+  ScenarioCertification out;
+  if (scenarios.empty()) return out;
+  std::size_t worst = 0;
+  std::vector<FixedDesignAnalysis> per;
+  per.reserve(scenarios.size());
+  for (std::size_t s = 0; s < scenarios.size(); ++s) {
+    const SimpScenario& sc = scenarios[s];
+    per.push_back(certify(sc.bcs, sc.loads));
+    const FixedDesignAnalysis& a = per.back();
+    ScenarioReport r;
+    r.name = sc.name;
+    r.margin = a.margin_effective;
+    r.peak_mpa = a.max_von_mises;
+    std::size_t pk = 0;
+    for (std::size_t e = 0; e < a.von_mises_field.size(); ++e)
+      if (a.von_mises_field[e] > a.von_mises_field[pk]) pk = e;
+    if (!a.von_mises_field.empty())
+      r.peak_mm = G.voxel_center(
+          static_cast<int>(pk % static_cast<std::size_t>(G.nx)),
+          static_cast<int>((pk / static_cast<std::size_t>(G.nx)) %
+                           static_cast<std::size_t>(G.ny)),
+          static_cast<int>(pk / (static_cast<std::size_t>(G.nx) *
+                                 static_cast<std::size_t>(G.ny))));
+    Vec3 W{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
+    if (a.displacement_field.size() == static_cast<std::size_t>(3 * fea_node_count(G)))
+      for (const DirichletBC& bc : sc.bcs) {
+        if (!(bc.spring > 0.0) || bc.contact) continue;  // the weak (OFF) springs
+        const double* u = &a.displacement_field[3 * static_cast<std::size_t>(bc.node)];
+        W.x += bc.spring * u[0];
+        W.y += bc.spring * u[1];
+        W.z += bc.spring * u[2];
+      }
+    for (const NodalLoad& l : sc.loads)
+      (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
+    const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
+    r.weak_share = fm > 0.0 ? std::sqrt(W.x * W.x + W.y * W.y + W.z * W.z) / fm : 0.0;
+    r.unheld = r.weak_share > kScenarioUnheldShare;
+    if (r.unheld && out.unheld.empty()) out.unheld = sc.name;
+    out.reports.push_back(r);
+    const auto worse = [](const FixedDesignAnalysis& x, const FixedDesignAnalysis& y) {
+      if (x.non_convergent != y.non_convergent) return x.non_convergent;
+      return x.margin_effective < y.margin_effective;
+    };
+    if (s > 0 && worse(a, per[worst])) worst = s;
+  }
+  out.reports[worst].governs = true;
+  out.governing = std::move(per[worst]);
+  if (!out.unheld.empty()) out.governing.accepted = false;
+  return out;
+}
+
 // --- THE ONE design-domain resolution (pipeline.hpp) -------------------------
 // The expansion + BC/load remap minimize_plastic used to perform inline, lifted
 // so the re-certification paths in run_job call the SAME code rather than a
@@ -811,12 +879,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // HERE, where the material is known: kScenarioWeakSpringRel of the part's own
   // element stiffness per node (E x h), which is what a clamp holds the part with. The
   // load case's value is a placeholder.
-  std::vector<SimpScenario> run_scenarios = domain.scenarios;
-  for (SimpScenario& sc : run_scenarios)
-    for (DirichletBC& b : sc.bcs)
-      if (b.spring > 0.0 && !b.contact)
-        b.spring = b.spring_tangent =
-            kScenarioWeakSpringRel * material.youngs_modulus_mpa * domain.grid.spacing;
+  const std::vector<SimpScenario> run_scenarios =
+      sized_scenarios(domain.scenarios, material.youngs_modulus_mpa, domain.grid.spacing);
   const bool expanded = domain.expanded;
   // The effective grid + BCs the whole pipeline runs on (the expanded pair with a
   // design box, else the caller's inputs verbatim).
@@ -2830,52 +2894,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     if (run_scenarios.empty()) {
       fda = certify(B, loads);
     } else {
-      std::size_t worst = 0;
-      std::vector<FixedDesignAnalysis> per;
-      per.reserve(run_scenarios.size());
-      for (std::size_t s = 0; s < run_scenarios.size(); ++s) {
-        const SimpScenario& sc = run_scenarios[s];
-        per.push_back(certify(sc.bcs, sc.loads));
-        const FixedDesignAnalysis& a = per.back();
-        ScenarioReport r;
-        r.name = sc.name;
-        r.margin = a.margin_effective;
-        r.peak_mpa = a.max_von_mises;
-        std::size_t pk = 0;
-        for (std::size_t e = 0; e < a.von_mises_field.size(); ++e)
-          if (a.von_mises_field[e] > a.von_mises_field[pk]) pk = e;
-        if (!a.von_mises_field.empty())
-          r.peak_mm = G.voxel_center(
-              static_cast<int>(pk % static_cast<std::size_t>(G.nx)),
-              static_cast<int>((pk / static_cast<std::size_t>(G.nx)) %
-                               static_cast<std::size_t>(G.ny)),
-              static_cast<int>(pk / (static_cast<std::size_t>(G.nx) *
-                                     static_cast<std::size_t>(G.ny))));
-        Vec3 W{0.0, 0.0, 0.0}, F{0.0, 0.0, 0.0};
-        if (a.displacement_field.size() == static_cast<std::size_t>(3 * fea_node_count(G)))
-          for (const DirichletBC& bc : sc.bcs) {
-            if (!(bc.spring > 0.0) || bc.contact) continue;  // the weak (OFF) springs
-            const double* u = &a.displacement_field[3 * static_cast<std::size_t>(bc.node)];
-            W.x += bc.spring * u[0];
-            W.y += bc.spring * u[1];
-            W.z += bc.spring * u[2];
-          }
-        for (const NodalLoad& l : sc.loads)
-          (l.component == 0 ? F.x : l.component == 1 ? F.y : F.z) += l.value;
-        const double fm = std::sqrt(F.x * F.x + F.y * F.y + F.z * F.z);
-        r.weak_share = fm > 0.0 ? std::sqrt(W.x * W.x + W.y * W.y + W.z * W.z) / fm : 0.0;
-        r.unheld = r.weak_share > kScenarioUnheldShare;
-        if (r.unheld && unheld_scenario.empty()) unheld_scenario = sc.name;
-        scenario_reports.push_back(r);
-        const auto worse = [](const FixedDesignAnalysis& x, const FixedDesignAnalysis& y) {
-          if (x.non_convergent != y.non_convergent) return x.non_convergent;
-          return x.margin_effective < y.margin_effective;
-        };
-        if (s > 0 && worse(a, per[worst])) worst = s;
-      }
-      scenario_reports[worst].governs = true;
-      fda = std::move(per[worst]);
-      if (!unheld_scenario.empty()) fda.accepted = false;
+      ScenarioCertification sc = certify_scenarios(G, run_scenarios, certify);
+      fda = std::move(sc.governing);
+      scenario_reports = std::move(sc.reports);
+      unheld_scenario = std::move(sc.unheld);
     }
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
@@ -3073,7 +3095,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.rejection_reason = !load_path_ok   ? std::string(kLoadPathNotConnectedReason)
                             : !anchors_kept ? std::string(kAnchorDetachedReason)
                             : !unheld_scenario.empty()
-                                ? unheld_scenario + kScenarioUnheldSuffix
+                                ? scenario_unheld_reason(unheld_scenario)
                             : fda.contact_held_by_sliding ? std::string(kAnchorsSlidingReason)
                                                           : std::string(kMarginBelowRequiredReason);
 

@@ -624,7 +624,14 @@ static void emit_frozen_share(std::string& out, const FrozenShareReport& fs,
 static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
   out += "  \"strengthen\": {\n";
   out += "    \"as_drawn_margin\": " + num_json(sr.as_drawn_margin) + ",\n";
+  if (!sr.as_drawn_unheld.empty())  // LOAD SCENARIOS
+    out += "    \"as_drawn_unheld\": " + str_json(sr.as_drawn_unheld) + ",\n";
+  if (!sr.ceiling_unheld.empty())
+    out += "    \"ceiling_unheld\": " + str_json(sr.ceiling_unheld) + ",\n";
   out += "    \"margin_required\": " + num_json(sr.margin_required) + ",\n";
+  // The user's safety margin (his decision of 2026-10-26): the margin version 1 is
+  // built to, as a multiple of the load (1.5 = 150 %).
+  out += "    \"safety_margin\": " + num_json(sr.margin_required) + ",\n";
   out += "    \"reference_margin\": " + num_json(sr.reference_margin) + ",\n";
   out += "    \"ceiling_margin\": " + num_json(sr.ceiling_margin) + ",\n";
   out += "    \"original_mass_grams\": " + num_json(sr.original_mass_grams) + ",\n";
@@ -659,9 +666,13 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            ", \"specks\": " + std::to_string(v.specks) +
            ", \"keep_clear_voxels\": " + std::to_string(v.keep_clear_voxels) +
            ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
+           ", \"coarse_seeded_runs\": " + std::to_string(v.coarse_seeded) +
            ", \"repairs\": " + std::to_string(v.repairs) +
            ", \"seconds\": " + num_json(v.seconds) +
-           ", \"note\": " + str_json(v.note) + ", \"attempts\": [" +
+           ", \"note\": " + str_json(v.note) +
+           ", \"target_rule\": " + str_json(v.target_rule) +
+           (v.scenarios.empty() ? std::string() : ", \"scenarios\": " + scenarios_json(v.scenarios)) +
+           ", \"attempts\": [" +
            [&v]() {
              std::string a;
              for (std::size_t q = 0; q < v.attempts.size(); ++q) {

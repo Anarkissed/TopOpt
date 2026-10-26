@@ -628,6 +628,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Shared production solver config (matrix-free multigrid + Galerkin cache +
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
+  // THE USER'S SAFETY MARGIN (job loads.safety_margin, >= 1.5): the margin every design
+  // must reach. Not stated: the production default (1.5), byte for byte.
+  if (lc.safety_margin > 0.0) opts.margin_stop = lc.safety_margin;
   opts.anchor_voxels = std::move(anchor_voxels);  // item 47: names, receipt only
   opts.external_loads = external;  // the user's load case; empty => self-weight
 
@@ -982,12 +985,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // gets its own traction, as one load case's do.
   if (scenarios) {
     if (lc_in.anchor_bearing)
-      throw std::invalid_argument(
-          "load scenarios with bearing anchors (loads.anchor_model \"bearing\") are not "
-          "supported yet");
-    if (lc_in.strengthen)
-      throw std::invalid_argument(
-          "load scenarios with \"Redesign to strengthen\" are not supported yet");
+      throw std::invalid_argument("Load scenarios can't be combined with bolt bearings yet");
     const double k_weak = 1.0;  // a placeholder: minimize_plastic sizes it
     VoxelGrid no_load = grid;
     for (VoxelTag& t : no_load.tags)
@@ -1021,8 +1019,8 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
             });
       }
       if (held.empty())
-        throw std::invalid_argument("load scenario \"" + sc.name +
-                                    "\" has no anchor ON in the part");
+        throw std::invalid_argument("Scenario \u201C" + sc.name +
+                                    "\u201D has no anchor switched on");
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
         if (a.face_id < 0 || std::find(sc.anchor_face_ids.begin(), sc.anchor_face_ids.end(),
                                        a.face_id) != sc.anchor_face_ids.end())
@@ -1056,8 +1054,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         s.loads.insert(s.loads.end(), tl.begin(), tl.end());
       }
       if (s.loads.empty())
-        throw std::invalid_argument("load scenario \"" + sc.name +
-                                    "\": its load tagged nothing at this resolution");
+        throw std::invalid_argument("Scenario \u201C" + sc.name +
+                                    "\u201D has no load: its load faces are too small for "
+                                    "this resolution");
       std::printf("[loadcase] load scenario \"%s\": %zu clamped nodes, %zu weak-spring "
                   "nodes (anchors OFF), %zu load entries\n",
                   sc.name.c_str(), held.size(), weak.size(), s.loads.size());
