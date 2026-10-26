@@ -128,6 +128,8 @@ public struct StrengthenReport: Equatable, Sendable {
         public let massGrams: Double
         public let massFractionOfOriginal: Double
         public let note: String
+        /// The margin this version aimed for (`target_margin`): a refused version shows its best try against it.
+        public var targetMargin: Double = 0
     }
     public let asDrawnMargin: Double
     public let marginRequired: Double
@@ -150,7 +152,7 @@ public struct StrengthenReport: Equatable, Sendable {
                     status: $0["status"] as? String ?? "", volumeFraction: num($0["volume_fraction"]),
                     verifiedMargin: num($0["verified_margin"]), massGrams: num($0["mass_grams"]),
                     massFractionOfOriginal: num($0["mass_fraction_of_original"]),
-                    note: $0["note"] as? String ?? "")
+                    note: $0["note"] as? String ?? "", targetMargin: num($0["target_margin"]))
         }
         return StrengthenReport(asDrawnMargin: num(s["as_drawn_margin"]),
                                 marginRequired: num(s["margin_required"]),
@@ -250,7 +252,9 @@ public enum StrengthenText {
         guard let s = blocks.strengthen else { return [] }
         return s.versions.map { v in
             var lines: [String] = []
-            if v.status == "unreachable" {
+            if v.status == "unreachable", v.verifiedMargin > 0, v.targetMargin > 0 {
+                lines.append(bestTryLine(v))
+            } else if v.status == "unreachable" {
                 lines.append(v.note.isEmpty ? "Unreachable in this design space" : plain(v.note))
             } else {
                 lines.append("Margin " + String(format: "%.2f", v.verifiedMargin) + "×")
@@ -281,6 +285,16 @@ public enum StrengthenText {
     public static func capLine(_ blocks: RunReportBlocks) -> String? {
         guard let cap = blocks.strengthen?.cap else { return nil }
         return cap.atAnchorFace ? capAnchorLine : cap.atLoadFace ? capLoadLine : nil   // Flexible (PR #362) H56l: redesign to strengthen (overnight plan 2026-10-25) — the cap's line from its flags, never its note
+    }
+
+    /// A version refused after real tries (the reviewer's ruling 2026-10-26 07:29, item 50 (c)): its best verified try
+    /// against what it needed, on ONE line; a reason other than the margin (core's note: Keep Clear voxels, not accepted)
+    /// rides on the same line, in plain words.
+    static func bestTryLine(_ v: StrengthenReport.Version) -> String {
+        let line = "Best try " + String(format: "%.2f", v.verifiedMargin) + "×, needed "
+            + String(format: "%.2f", v.targetMargin) + "×"
+        let marginOnly = v.note.isEmpty || v.note.hasPrefix("verified ") || v.note.contains("missed the target")
+        return marginOnly ? line : line + " — " + plain(v.note)
     }
 
     /// A version's thin joints (core's `fragile_joints.count`), in plain words. core's own note is never shown.
