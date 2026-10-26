@@ -58,7 +58,7 @@ solver signature changed. The springs enter:
   and bottom edges. Area weighting fixed it: 7.53 / 6.48 / 6.50 at res 48 / 64 / 96, with the peak in the bearing zone.
 - Without the hysteresis band, his arms' contact set was still changing after 6 solves (chatter).
 
-## The stick ruling (20:37) and why it is pending
+## The stick ruling (20:37), withdrawn (21:45): option A, near-frictionless
 
 The reviewer ruled a STICK spring on engaged contacts, sized from the node's element stiffness. Measured on the plate,
 any linear stick stiff enough to hold the part makes the stuck / released boundary a new singular edge:
@@ -71,10 +71,14 @@ any linear stick stiff enough to hold the part makes the stuck / released bounda
 | 0.01 × diagonal | 8.14 / 7.50 / 7.08 | −5.5 % |
 | 1 / 0.3 / 0.1 × the normal, per mm² | 6.32 → 3.12, 6.51 → 3.56, 6.79 → 4.05 (48 → 128) | — |
 
-Asked on #CoreGroup (20:48): (A) nearly frictionless (recommended for this batch), (B) the ruled stick at 0.01 ×
-diagonal, or (C) Coulomb stick-slip (stick up to μ × pressure; a third contact state, a separate batch). The solver
-supports both forms of tangent (`spring_tangent` N/mm + `spring_tangent_rel` × diagonal), so (A) or (B) only changes
-the load case's constant.
+Asked on #CoreGroup (20:48). The reviewer's 21:45 ruling: (A) near-frictionless for this batch, 1e-4 of the normal
+per mm². Coulomb stick-slip goes on the list as a later batch. The relative (diagonal) form was removed.
+
+THE SLIDING GUARD (same ruling): the certification reports the share of the anchors' total reaction carried by the
+weak sliding springs (`bearing.sliding_share`). Above 5 % (`kAnchorsSlidingShare`) the anchors can't hold the load in
+some direction, so the design is NOT accepted. Rejection reason: "anchors cannot hold the load in some direction (held
+by the sliding springs)", ordered after the belt and item 47, before the margin. `test_bearing` (e): the plate pulled
+along its bore's axis puts 100 % of the reaction on the sliding springs, and the design is rejected.
 
 ## The bar: his Carriage Arms (copy 4), bearing (nearly frictionless), res 48 / 64 / 96 / 128
 
@@ -105,9 +109,35 @@ build). Re-run glued on this branch at res 48, it matched exactly (3.939 / 7.165
   (9, 45.3, 101)). There the anchored mouth face (62 / 66, curved: a chamfer or fillet) meets the free outer face
   112, about 1 mm from face 17. That's the end of the bearing contact, still an anchor edge.
 - The anchors: 44 faces = 22 bolt holes (22 cylinders + 22 curved mouth faces), no flat faces; 980 springs at res 48.
+- The sliding guard did not fire: the sliding springs carry 4.6 / 2.8 % (48), 1.5 / 1.4 % (64), 2.0 / 1.9 % (96) and
+  3.8 / 2.6 % (128) of the reaction (as drawn / box), all under 5 %.
+- Certification cost against glued (CG iterations, solve s; bearing = 6 contact solves):
+
+  | res | as drawn, bearing | as drawn, glued | box, bearing | box, glued |
+  |---|---|---|---|---|
+  | 48 | 2413, 8.5 | 229, 2.3 | 1994, 15.1 | 267, 11.1 |
+  | 64 | 2742, 25.2 | 255, 9.7 | 2988, 63.7 | 409, 14.5 |
+  | 96 | 2198, 60.5 | 331, 16.4 | 4411, 304.4 | 650, 35.6 |
+  | 128 | 3989, 415.9 | 589, 48.5 | 7140, 771.7 | 1144, 102.8 |
+
+  6–11× the iterations and 1.4–8.6× the solve time; per contact solve, 1–2× glued's iterations.
 - The contact set did not settle within 6 solves at any resolution. At res 48 it settled in 8 (as drawn) and 10
   (box) solves, and the 6-solve margins were within 0.25 % / 0.5 % of the settled ones. The springs carry 97.5–99.1 %
   of the load.
+
+## Run-time cost per optimize (his live job, res 48, the same machine, run back to back)
+
+`inputs/job.json` (growth ladder 1.55 / 1.25 / 1.10, PLSM), glued then bearing; the machine was also carrying other
+sessions (load 10–14):
+
+| | wall | solves | MG cycles (l1 retry) | per solve | fell back to Jacobi-CG | margins (3 rungs) |
+|---|---|---|---|---|---|---|
+| glued | 418 s | 171 | ~50 k | 180–680 cycles, 1.1–4.0 s | 0 | 20.7 / 21.6 / 21.3, all accepted |
+| bearing | 4440 s (10.6×) | 245 | ~334 k | 720–1,940 cycles, 4.5–17 s | 17 | 10.8 / 10.8 / 10.7, all accepted |
+
+The contact set didn't settle within 6 solves in any rung's certification. #362's worry about ill-conditioning is
+confirmed: the sliding directions held only by the 1e-4 tangential springs are near-null modes, and the l1 smoother
+needs 4–8× more cycles to resolve them.
 
 ## Solver cost, noted for #362
 
