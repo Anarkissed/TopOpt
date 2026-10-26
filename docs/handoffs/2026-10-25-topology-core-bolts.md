@@ -189,3 +189,14 @@ the worst scenario's.
   gap in this geometry (more material always lowers compliance, and the gap is the only free space), so that line is
   printed as context, not as a control.
 - Not done (not a gate): the Carriage Arms run with three scenarios.
+
+## NEXT BATCH (the integrator's ruling, 2026-10-26 06:54 EDT; not tonight: rewording now would change the release fingerprint)
+
+Plain wording for core's scenario refusals, which he reads verbatim in the app's failure sheet (354 adds the same lines
+as a pre-flight block on Optimize; both halves ship together):
+- no anchor ON: "Scenario “<name>” has no anchor switched on"
+- no load: "Scenario “<name>” has no load"
+- with bearing anchors: "Load scenarios can't be combined with bolt bearings yet"
+- with strengthen: "Load scenarios can't be combined with Redesign to strengthen yet"
+Where they are today: job.cpp (the schema: no anchor ON, no load, bearing, strengthen) and loadcase.cpp (the same
+checks, plus "its load tagged nothing at this resolution").
