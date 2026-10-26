@@ -276,6 +276,11 @@ constexpr int kSafeMaxCycles = 6000;
 // converges in 1,332 cycles given a longer first window. Later windows keep kSafeWindow /
 // kSafeMinGain, and kSafeMaxCycles stays the total cap. Warm-start retries
 // keep the first window at kSafeWindow (bit-identical).
+// A retry with NO warm guess at all starts from zero just the same and gets
+// the same first window (reviewer's order 2026-10-26): the tight final-
+// compliance / certification solves are such — his Fine job's coarse solves
+// 46 / 57 / 58 (tol 1e-8, cold) stood at rel res 3.2 / 80 / 11 at cycle 600,
+// stopped, and fell to ~1,550 Jacobi-CG iterations each.
 constexpr int kSafeColdFirstWindow = 2500;
 constexpr double kIslandSolidThreshold = 1e-3;     // solid = E >= 1e-3 * Emax
 
@@ -3030,7 +3035,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         ok = mf_mgpcg(HS, scratch, rgv, tolerance, std::min(cap, safe_max),
                       xg, it, res, /*mixed=*/false, &rec,
                       warm && !cold_start ? &x0 : nullptr, &o, kSafeWindow,
-                      kSafeMinGain, cold_start ? kSafeColdFirstWindow : 0);
+                      kSafeMinGain, (cold_start || !warm) ? kSafeColdFirstWindow : 0);
         diag.mg_cycles_attempted = shipped_it + it;
         if (ok) {
           for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
