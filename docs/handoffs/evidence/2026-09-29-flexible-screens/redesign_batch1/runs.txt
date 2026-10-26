@@ -1,0 +1,93 @@
+# Redesign batch 1 (P0 · P2 · P3) — raw run summaries. app/TopOptKit, swift test --scratch-path /tmp/r7x20b-build, serial.
+
+## P0 run1 (unchanged tree 322b1c78) — the six evidence probes, one process
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test11l]' passed (229.144 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test11p]' passed (219.663 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test13l]' passed (265.742 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test13p]' passed (314.072 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 1028.621 (1028.627) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11l]' passed (166.593 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11lReady]' passed (50.382 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11p]' passed (184.560 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13l]' passed (157.084 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13p]' passed (154.606 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13pReady]' passed (37.775 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe testMiniP]' passed (147.871 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe testSetupChipEdgesKeyAndNotKey]' passed (1.078 seconds).
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 899.949 (899.952) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11l]' passed (299.234 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11lReady]' passed (36.155 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11p]' passed (298.822 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11pReady]' passed (36.796 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13l]' passed (333.996 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13p]' passed (329.806 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13pReady]' passed (41.510 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe testMiniP]' passed (284.461 seconds).
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 1660.779 (1660.783) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11l]' passed (100.136 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11lReady]' passed (39.534 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11p]' passed (112.587 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13l]' passed (107.432 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13p]' passed (118.276 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13pReady]' passed (47.436 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe testMiniP]' passed (127.874 seconds).
+  	 Executed 7 tests, with 0 failures (0 unexpected) in 653.276 (653.280) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test11l]' passed (357.280 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test11p]' passed (324.706 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test13l]' passed (240.836 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test13p]' passed (400.601 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 1323.424 (1323.429) seconds
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsEvidenceProbe.swift:170: error: -[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheMainPageOnHisPad] : XCTAssertTrue failed - his None pad opens in X-ray
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheMainPageOnHisPad]' failed (208.666 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testThePlayingTraceAcrossAnEditWhilePaused]' passed (89.520 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheSettingsPageHeatAndBendOnHisPad]' passed (94.008 seconds).
+  	 Executed 3 tests, with 1 failure (0 unexpected) in 392.194 (392.195) seconds
+  	 Executed 34 tests, with 1 failure (0 unexpected) in 5958.241 (5958.267) seconds
+  	 Executed 34 tests, with 1 failure (0 unexpected) in 5958.241 (5958.269) seconds
+
+## P0 run2 (unchanged tree 322b1c78)
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test11l]' passed (232.888 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test11p]' passed (221.223 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test13l]' passed (424.097 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleR7D2ReviewEvidenceProbe test13p]' passed (428.277 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 1306.485 (1306.490) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11l]' passed (243.316 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11lReady]' passed (69.420 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test11p]' passed (272.332 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13l]' passed (231.964 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13p]' passed (201.603 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe test13pReady]' passed (55.931 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe testMiniP]' passed (169.946 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7D1ReviewEvidenceProbe testSetupChipEdgesKeyAndNotKey]' passed (1.061 seconds).
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 1245.572 (1245.576) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11l]' passed (423.558 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11lReady]' passed (52.140 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11p]' passed (521.143 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test11pReady]' passed (41.015 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13l]' passed (439.481 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13p]' passed (497.488 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe test13pReady]' passed (45.504 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7DesignEvidenceProbe testMiniP]' passed (361.738 seconds).
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 2382.066 (2382.070) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11l]' passed (106.341 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11lReady]' passed (41.383 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test11p]' passed (103.715 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13l]' passed (106.621 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13p]' passed (110.838 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe test13pReady]' passed (42.193 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ScreenEvidenceProbe testMiniP]' passed (105.715 seconds).
+  	 Executed 7 tests, with 0 failures (0 unexpected) in 616.807 (616.808) seconds
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test11l]' passed (207.063 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test11p]' passed (207.632 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test13l]' passed (231.025 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7SelectionsEvidenceProbe test13p]' passed (393.647 seconds).
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 1039.367 (1039.372) seconds
+  /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsEvidenceProbe.swift:170: error: -[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheMainPageOnHisPad] : XCTAssertTrue failed - his None pad opens in X-ray
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheMainPageOnHisPad]' failed (141.363 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testThePlayingTraceAcrossAnEditWhilePaused]' passed (104.139 seconds).
+  Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsEvidenceProbe testTheSettingsPageHeatAndBendOnHisPad]' passed (95.118 seconds).
+  	 Executed 3 tests, with 1 failure (0 unexpected) in 340.621 (340.622) seconds
+  	 Executed 34 tests, with 1 failure (0 unexpected) in 6930.918 (6930.939) seconds
+  	 Executed 34 tests, with 1 failure (0 unexpected) in 6930.918 (6930.941) seconds
+
+## P0 cmp run1 vs run2: TOTAL same=126 diff=232 missing=0 (per PNG: p0_manifest.txt)
