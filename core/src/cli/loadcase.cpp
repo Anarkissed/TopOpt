@@ -968,12 +968,22 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // side of the expanded grid grows, so this offset is exact; see voxel.hpp). The
   // rasterizer's precedence guard needs that offset to protect part material. No
   // clearance → the overlay stays empty and the run is byte-identical.
-  if (!lc.clearances.empty()) {
-    opts.clearance_void =
+  // PROTECT keeps its reach clear too (ruling 2026-10-27 03:57): the keep regions' air
+  // joins the overlay (build_clearance_overlay). A run that could grow none there (no
+  // design box: every reduction run) leaves the overlay empty, as before.
+  if (!lc.clearances.empty() || !lc.keep_regions.empty()) {
+    long long keep_air = 0;
+    DesignMask overlay =
         build_clearance_overlay(model, grid, setup.solved_grid, lc.clearances,
-                                -1, &setup.clearance_reports);
+                                -1, &setup.clearance_reports, lc.keep_regions, &keep_air);
+    if (!lc.clearances.empty() || keep_air > 0) opts.clearance_void = std::move(overlay);
     for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
       log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
+    if (keep_air > 0 && loadcase_sink())
+      loadcase_sink()("[loadcase] protect: " + std::to_string(keep_air) +
+                      " voxels kept clear (inside protected holes and in front of "
+                      "protected faces, " + std::to_string(lc.keep_regions.size()) +
+                      " keep regions)");
   }
 
   // LOAD SCENARIOS — each scenario's own supports and loads (part grid). An anchor ON
@@ -1075,7 +1085,8 @@ DesignMask build_clearance_overlay(
     const VoxelGrid& solved_grid,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
     int skip_index,
-    std::vector<ProductionRunSetup::ClearanceReport>* reports) {
+    std::vector<ProductionRunSetup::ClearanceReport>* reports,
+    const std::vector<KeepRegion>& keeps, long long* keep_air_voxels) {
   // The part sits inside the solved grid at a whole-voxel offset — 0 on the
   // no-box path (solved == part), (part.origin − solved.origin)/spacing on the
   // design-box path (only the HIGH side of the expanded grid grows, so this
@@ -1111,6 +1122,39 @@ DesignMask build_clearance_overlay(
       reports->push_back(
           {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
   }
+  // PROTECT = the exact CAD AND nothing grows within its reach (ruling 2026-10-27
+  // 03:57). Every voxel the optimizer could fill (an element of the solved grid) whose
+  // centre is inside a keep region and OUTSIDE the part (its voxelization, at the
+  // offset above) is a Keep Clear: a protected hole's own air stays open, the band a
+  // region reaches past a protected face stays empty. The export's plain cut then only
+  // ever removes the voxel skin, so the file is the design that was certified. The
+  // part's own voxels inside are frozen solid (KEEP), never voided.
+  long long air = 0;
+  for (const KeepRegion& kr : keeps) {
+    auto first = [s](double v, double o, int n) {
+      return std::clamp(static_cast<int>(std::floor((v - o) / s - 0.5)), 0, n - 1);
+    };
+    auto last = [s](double v, double o, int n) {
+      return std::clamp(static_cast<int>(std::ceil((v - o) / s - 0.5)), 0, n - 1);
+    };
+    const VoxelGrid& g = solved_grid;
+    for (int k = first(kr.min.z, g.origin.z, g.nz); k <= last(kr.max.z, g.origin.z, g.nz); ++k)
+      for (int j = first(kr.min.y, g.origin.y, g.ny); j <= last(kr.max.y, g.origin.y, g.ny); ++j)
+        for (int i = first(kr.min.x, g.origin.x, g.nx); i <= last(kr.max.x, g.origin.x, g.nx);
+             ++i) {
+          if (!g.solid(i, j, k)) continue;  // no element: nothing can grow there
+          const int pi = i - oi, pj = j - oj, pk = k - ok;
+          if (pi >= 0 && pj >= 0 && pk >= 0 && pi < part_grid.nx && pj < part_grid.ny &&
+              pk < part_grid.nz && part_grid.solid(pi, pj, pk))
+            continue;  // the part's own material
+          if (!kr.contains(g.voxel_center(i, j, k))) continue;
+          const std::size_t idx = g.index(i, j, k);
+          if (clearance[idx] == MaskValue::FrozenVoid) continue;
+          clearance[idx] = MaskValue::FrozenVoid;
+          ++air;
+        }
+  }
+  if (keep_air_voxels) *keep_air_voxels = air;
   return clearance;
 }
 
@@ -1144,10 +1188,10 @@ PreflightLoadPath preflight_with_clearances(
     const StepModel& model, const VoxelGrid& part_grid,
     const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
-    int skip_index) {
+    int skip_index, const std::vector<KeepRegion>& keeps) {
   MinimizePlasticOptions probe = options;
   probe.clearance_void = build_clearance_overlay(
-      model, part_grid, domain.grid, clearances, skip_index, nullptr);
+      model, part_grid, domain.grid, clearances, skip_index, nullptr, keeps);
   return preflight_load_path(domain, probe);
 }
 
@@ -1159,12 +1203,13 @@ PreflightLoadPath preflight_with_clearances(
 double max_connected_axial_clearance_mm(
     const StepModel& model, const VoxelGrid& part_grid,
     const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
-    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci) {
+    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci,
+    const std::vector<KeepRegion>& keeps) {
   const double requested = clearances[ci].params.axial_clearance_mm;
   auto connected_at = [&](double mm) {
     clearances[ci].params.axial_clearance_mm = mm;
     return preflight_with_clearances(model, part_grid, domain, options,
-                                     clearances, -1)
+                                     clearances, -1, keeps)
         .walk.connected;
   };
   if (!connected_at(0.0)) return -1.0;
@@ -1271,12 +1316,12 @@ std::string preflight_refusal_report(
     cf.index = static_cast<int>(ci);
     cf.removal_reconnects =
         preflight_with_clearances(model, part_grid, domain, options,
-                                  lc.clearances, static_cast<int>(ci))
+                                  lc.clearances, static_cast<int>(ci), lc.keep_regions)
             .walk.connected;
     if (cf.removal_reconnects &&
         lc.clearances[ci].params.kind == ClearanceKind::Bolt)
       cf.max_axial_clearance_mm = max_connected_axial_clearance_mm(
-          model, part_grid, domain, options, lc.clearances, ci);
+          model, part_grid, domain, options, lc.clearances, ci, lc.keep_regions);
     any_single = any_single || cf.removal_reconnects;
     cfs_out.push_back(cf);
   }
@@ -1325,7 +1370,8 @@ std::string preflight_refusal_report(
     // "the clearances did it, jointly" from "the clearances are innocent":
     // remove ALL of them (an empty clearance list => an all-Active overlay).
     const bool none_at_all =
-        preflight_with_clearances(model, part_grid, domain, options, {}, -1)
+        preflight_with_clearances(model, part_grid, domain, options, {}, -1,
+                                  lc.keep_regions)
             .walk.connected;
     m += none_at_all
              ? "  VERIFIED CAUSE: no SINGLE clearance is responsible — removing "

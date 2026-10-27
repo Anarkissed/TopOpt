@@ -567,6 +567,11 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // optimizer froze the part there, so the two meet. Without Manifold in this build, or
 // on a mesh Manifold cannot take as a closed manifold, the voxel surface stays and a
 // WARNING says so (the kept material is still frozen, only not exact).
+// The voxel surface pokes up to half a voxel PAST the part's own faces, and outside a
+// region it stays: a region that sits flush on a face keeps those bumps just above it
+// (measured 0.29 mm over a 30-degree face at 1.1 mm voxels). So a region meant to make
+// a face exact reaches at least one voxel out past it, into the air, where the part
+// has nothing to restore (test_keep_oriented).
 TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
                                 const std::vector<KeepRegion>& keeps) {
   if (keeps.empty()) return exported;
@@ -589,6 +594,18 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
   // along lines on K's boundary (his plate: 22 four-way edges at r = 7.0).
   constexpr double kFuse = 0.05;  // mm, below any print resolution
   auto region = [](const KeepRegion& k, double grow) {
+    if (k.oriented) {  // centred primitive, then the region's own (right-handed) frame
+      const manifold::Manifold prim =
+          k.cylinder ? manifold::Manifold::Cylinder(2.0 * (k.half.z + grow), k.half.x + grow,
+                                                    -1.0, 128, true)
+                     : manifold::Manifold::Cube({2.0 * (k.half.x + grow),
+                                                 2.0 * (k.half.y + grow),
+                                                 2.0 * (k.half.z + grow)},
+                                                true);
+      auto col = [](const Vec3& v) { return manifold::vec3{v.x, v.y, v.z}; };
+      return prim.Transform(manifold::mat3x4(col(k.axes[0]), col(k.axes[1]), col(k.axes[2]),
+                                             col(k.center)));
+    }
     const manifold::vec3 lo{k.min.x - grow, k.min.y - grow, k.min.z - grow};
     const manifold::vec3 ext{k.max.x - k.min.x + 2 * grow, k.max.y - k.min.y + 2 * grow,
                              k.max.z - k.min.z + 2 * grow};
@@ -612,7 +629,15 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
     K = K + region(k, 0.0);
     K_part = K_part + region(k, kFuse);
   }
-  const manifold::Manifold E = to_manifold(exported), P = to_manifold(part);
+  // The voxel surface is NUDGED 1 um along a slanted direction first. A part face on
+  // a voxel plane (his flat bottom at z = 0) is otherwise exactly where the voxel
+  // surface is, and in the kFuse overlap the two coplanar sheets left edges on four
+  // triangles once written as floats (2 on the tilted test); 1 um apart they fuse
+  // cleanly, far below any print resolution. The part side is never moved.
+  constexpr double kNudge = 1e-3;  // mm
+  const manifold::Manifold E = to_manifold(exported).Translate(
+      {kNudge * 0.5377, kNudge * 0.8326, kNudge * 0.1327});
+  const manifold::Manifold P = to_manifold(part);
   if (E.Status() != manifold::Manifold::Error::NoError ||
       P.Status() != manifold::Manifold::Error::NoError) {
     std::fprintf(stderr,
@@ -12916,6 +12941,20 @@ MinimizePlasticResult strengthen_versions(
     out.mg_levels = best.mg_levels;
     out.mg_hierarchy_ever_built = best.mg_hierarchy_ever_built;
     out.growth_ladder = false;
+    // A version accepted on its VERIFIED export margin (strengthen_accept.hpp: the
+    // in-loop margin never refuses it) is that version's design even when its in-loop
+    // margin sat under the gate: it is written and listed with the accepted variants, at
+    // the margin it was accepted on. Without this a version was "verified" with no file
+    // (test_keep_strengthen: in loop 1.32, verified 2.43, target 1.5).
+    MinimizePlasticVariant& shown = best.evaluated.front();
+    if (!shown.accepted) {
+      shown.accepted = true;
+      shown.report.accepted = true;
+      shown.report.margin_effective = vr.verified_margin;
+      shown.report.rejection_reason.clear();
+      best.report.rejected.clear();  // a version's run is one rung
+      best.report.variants = {shown.report};
+    }
     append_rung(out, std::move(best));
   }
   if (out.evaluated.empty()) out.solved_grid = domain.grid;

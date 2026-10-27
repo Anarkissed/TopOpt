@@ -9,6 +9,7 @@
 #include "topopt/lattice_algorithm.hpp"  // the ONE algorithm vocabulary (§4)
 #include "topopt/flexible/job_block.hpp"  // the Flexible stage block
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -445,6 +446,89 @@ JobBox parse_box(const JsonValue& v, const std::string& name) {
   if (b.max.x < b.min.x || b.max.y < b.min.y || b.max.z < b.min.z)
     schema_fail("\"" + name + "\" max must be >= min componentwise");
   return b;
+}
+
+// An ORIENTED keep region (ruling 2026-10-26 23:48), keys as in parse_job. The frame
+// is stored right-handed and exactly orthonormal: a box's axes are checked to 1e-4
+// and then re-orthonormalized (a box is symmetric, so flipping the third axis to make
+// the frame right-handed is the same region); a cylinder's frame is built about its
+// unit axis. min/max become the bounding box.
+KeepRegion parse_oriented_keep_region(const JsonValue& kv, bool cylinder) {
+  const std::string where = cylinder ? "an oriented cylinder keep region"
+                                     : "an oriented box keep region";
+  auto dot3 = [](const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+  auto unit = [&](const Vec3& a) {
+    const double n = std::sqrt(dot3(a, a));
+    return Vec3{a.x / n, a.y / n, a.z / n};
+  };
+  auto cross3 = [](const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+  };
+  KeepRegion k;
+  k.cylinder = cylinder;
+  k.oriented = true;
+  if (cylinder) {
+    reject_unknown_keys(kv, {"shape", "axis_point", "axis_dir", "radius_mm", "half_length_mm"},
+                        where);
+    k.center = parse_vec3(require_key(kv, "axis_point", where), "keep region axis_point");
+    const Vec3 d = parse_vec3(require_key(kv, "axis_dir", where), "keep region axis_dir");
+    if (!(std::sqrt(dot3(d, d)) > 1e-9))
+      schema_fail("a keep region \"axis_dir\" must not be zero");
+    const double r = require_number(require_key(kv, "radius_mm", where), "keep region radius_mm");
+    const double hl =
+        require_number(require_key(kv, "half_length_mm", where), "keep region half_length_mm");
+    if (!(r > 0.0) || !(hl > 0.0))
+      schema_fail("a keep region \"radius_mm\" and \"half_length_mm\" must be > 0");
+    const Vec3 w = unit(d);
+    const Vec3 e = std::fabs(w.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0};
+    const double ew = dot3(e, w);
+    const Vec3 u = unit(Vec3{e.x - ew * w.x, e.y - ew * w.y, e.z - ew * w.z});
+    k.axes[0] = u;
+    k.axes[1] = cross3(w, u);
+    k.axes[2] = w;
+    k.half = Vec3{r, r, hl};
+  } else {
+    reject_unknown_keys(kv, {"shape", "center", "axes", "half_extents_mm"}, where);
+    k.center = parse_vec3(require_key(kv, "center", where), "keep region center");
+    const JsonValue& av = require_key(kv, "axes", where);
+    if (av.type != JsonValue::Type::Array || av.arr.size() != 3)
+      schema_fail("a keep region \"axes\" must be an array of 3 vectors");
+    Vec3 a[3];
+    for (int i = 0; i < 3; ++i)
+      a[i] = parse_vec3(av.arr[static_cast<std::size_t>(i)], "keep region axes");
+    constexpr double kTol = 1e-4;
+    for (int i = 0; i < 3; ++i) {
+      if (std::fabs(std::sqrt(dot3(a[i], a[i])) - 1.0) > kTol)
+        schema_fail("a keep region's \"axes\" must be unit vectors");
+      for (int j = i + 1; j < 3; ++j)
+        if (std::fabs(dot3(a[i], a[j])) > kTol)
+          schema_fail("a keep region's \"axes\" must be at right angles to each other");
+    }
+    const Vec3 u = unit(a[0]);
+    const double vu = dot3(a[1], u);
+    const Vec3 v = unit(Vec3{a[1].x - vu * u.x, a[1].y - vu * u.y, a[1].z - vu * u.z});
+    k.axes[0] = u;
+    k.axes[1] = v;
+    k.axes[2] = cross3(u, v);
+    k.half = parse_vec3(require_key(kv, "half_extents_mm", where), "keep region half_extents_mm");
+    if (!(k.half.x > 0.0 && k.half.y > 0.0 && k.half.z > 0.0))
+      schema_fail("a keep region's \"half_extents_mm\" must all be > 0");
+  }
+  const double c[3] = {k.center.x, k.center.y, k.center.z};
+  double ext[3];
+  for (int i = 0; i < 3; ++i) {
+    auto comp = [i](const Vec3& p) { return i == 0 ? p.x : i == 1 ? p.y : p.z; };
+    if (cylinder) {
+      const double wi = comp(k.axes[2]);
+      ext[i] = std::fabs(wi) * k.half.z + k.half.x * std::sqrt(std::max(0.0, 1.0 - wi * wi));
+    } else {
+      ext[i] = std::fabs(comp(k.axes[0])) * k.half.x + std::fabs(comp(k.axes[1])) * k.half.y +
+               std::fabs(comp(k.axes[2])) * k.half.z;
+    }
+  }
+  k.min = Vec3{c[0] - ext[0], c[1] - ext[1], c[2] - ext[2]};
+  k.max = Vec3{c[0] + ext[0], c[1] + ext[1], c[2] + ext[2]};
+  return k;
 }
 
 }  // namespace
@@ -1016,18 +1100,31 @@ JobDescription parse_job(const std::string& json_text) {
 
   // keep_regions (CORE LIST item KEEP): [{"shape": "box" | "cylinder", "min", "max",
   // "axis" (cylinder only: 0 | 1 | 2)}]. A cylinder's cross-section must be square.
+  // Or ORIENTED (ruling 2026-10-26 23:48), in the clearances' vocabulary:
+  //   {"shape": "cylinder", "axis_point", "axis_dir", "radius_mm", "half_length_mm"}
+  //     (axis_point is the middle: axis_point + t*axis_dir, |t| <= half_length_mm);
+  //   {"shape": "box", "center", "axes": [3 orthonormal vectors], "half_extents_mm"}.
+  // A region is oriented when it carries any of those keys, and then only those.
   if (const JsonValue* krs = find_key(root, "keep_regions")) {
     if (krs->type != JsonValue::Type::Array)
       schema_fail("\"keep_regions\" must be an array");
     for (const JsonValue& kv : krs->arr) {
       require_object(kv, "a keep region");
-      reject_unknown_keys(kv, {"shape", "min", "max", "axis"}, "a keep region");
+      bool oriented = false;
+      for (const char* key : {"axis_point", "axis_dir", "radius_mm", "half_length_mm",
+                              "center", "axes", "half_extents_mm"})
+        oriented = oriented || find_key(kv, key) != nullptr;
+      if (!oriented) reject_unknown_keys(kv, {"shape", "min", "max", "axis"}, "a keep region");
       KeepRegion k;
       const std::string shape =
           require_string(require_key(kv, "shape", "a keep region"), "keep region shape");
       if (shape != "box" && shape != "cylinder")
         schema_fail("a keep region \"shape\" must be \"box\" or \"cylinder\"");
       k.cylinder = shape == "cylinder";
+      if (oriented) {
+        job.keep_regions.push_back(parse_oriented_keep_region(kv, k.cylinder));
+        continue;
+      }
       k.min = parse_vec3(require_key(kv, "min", "a keep region"), "keep region min");
       k.max = parse_vec3(require_key(kv, "max", "a keep region"), "keep region max");
       if (!(k.max.x > k.min.x && k.max.y > k.min.y && k.max.z > k.min.z))
