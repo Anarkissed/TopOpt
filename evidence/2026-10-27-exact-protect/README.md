@@ -40,3 +40,17 @@ Reading: 139a5411 keeps every printed voxel whose centre is outside the original
 GROWTH from the voxel skin poking past a CAD surface, nor from growth INTO a Protected hole's own air — so the bumps come back
 on bores and faces, and strengthen's growth inside a Protected hole is kept (the 03:11 run plugs four holes his own run kept
 open). The first proof (af6d19d9, no redesign) met the bar on every face and bore.
+
+## Re-run on core 064bd163 (a66d764fef75) — Protect = exact AND nothing grows within its reach (ruling 03:57)
+
+Same strengthen job (q40, design box, 206 keep regions). 3 versions written and verified: 7.0×, 9.9×, 11.9×.
+
+| | V1 (vf 0.208) | V2 (vf 0.367) | V3 (vf 0.867) |
+|---|---|---|---|
+| 18 Protected hole faces: Ø vs CAD / out of round / plugged | 0.0000 / 0.0000 / none | 0.0000 / 0.0000 / none | 0.0000 / 0.0000 / none |
+| 8 flat faces + 4 counterbore rings (ray-sampled) | 0.0000 mm | 0.0000 mm | 0.0000 mm |
+| pieces in the file | **1** | **1** | **5** — the part + 4 loose ~155-triangle pieces |
+
+V3's loose pieces (pieces.py): each ≈ 14.7 × 14.7 × 30 mm, centred at (±51.6, 43.1 / 66.0, 121), i.e. 16.2 mm out from each cup's
+axis at 45°, spanning exactly z 106–136 (between the Protected rings). report.json carries no `bodies` / `fragile_joints` for
+any version, so nothing flagged them. The bar's "one piece per version" FAILS on V3; holes, faces and rings pass everywhere.
