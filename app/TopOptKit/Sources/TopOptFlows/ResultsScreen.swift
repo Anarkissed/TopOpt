@@ -84,6 +84,8 @@ public struct ResultsScreen: View {
     var canRedo: () -> Bool = { false }
     /// ★ Each load scenario's loads (point + unit direction) and anchors, drawn on the model when he picks it.
     var scenarioMarks: [String: ResultsScenarioMarks] = [:]
+    /// ★ Full screen (his note 2026-10-27) — the workspace hides its own capsule over Results while it is on.
+    var onFullScreen: ((Bool) -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // ★ Results redesign state (his mockup, 2026-10-27)
@@ -94,6 +96,14 @@ public struct ResultsScreen: View {
     @State private var viewMode: ResultsViewMode = .stress
     @State private var scenarioPick: String?
     @State private var compare: ResultsCompareSession?
+    /// ★ only the model, the view cube and the view buttons (his note 2026-10-27)
+    @State private var fullScreen = false
+    /// The screen's width — folded panels become pills when the two corners would crowd each other.
+    @State private var screenWidth: CGFloat = 1376
+    /// ★ tap-to-explore (his note 2026-10-27): the tapped surface point (model frame) and whether the key is minimised
+    @State private var stressProbe: SIMD3<Float>?
+    /// ★ his note 2026-10-27: minimised to start; it and Checks/Details take turns (one open at a time)
+    @State private var stressKeyMinimized = true
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
@@ -146,6 +156,7 @@ public struct ResultsScreen: View {
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
                 canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
                 scenarioMarks: [String: ResultsScenarioMarks] = [:],
+                onFullScreen: ((Bool) -> Void)? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -173,6 +184,7 @@ public struct ResultsScreen: View {
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
         self.scenarioMarks = scenarioMarks
+        self.onFullScreen = onFullScreen
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -215,25 +227,35 @@ public struct ResultsScreen: View {
                           loadFlowKey: loadFlowKey,
                           loadFlowGuides: loadFlowGuides,
                           bodyAlpha: bodyAlpha)
+                // ★ tap-to-explore: in the Stress view a tap reads the stress there; empty space clears it
+                .onSurfacePoint { p in stressProbe = viewMode == .stress && model.hasStress ? p : nil }
                 .ignoresSafeArea()
 
             // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
             // the scenario + view buttons + checks + Details (right column) and Export float and fold. The old banners
             // (voxel size, LAN fields, keep clear), the strengthen cards and the captions live behind Details now.
+            if fullScreen {
+                // ★ FULL SCREEN: the model, the view cube and the view buttons — nothing else
+                VStack(alignment: .trailing) {
+                    ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, PageChrome.gizmoClearance).padding(.trailing, PageChrome.edge)
+            } else {
             topBar
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             scenarioMarksOverlay.ignoresSafeArea()    // ★ the picked scenario's loads, anchors and worst point
             versionsColumn
             rightColumn
+            }
             // The optimization-history playbar exists ONLY when the variant carries real
             // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
             // finished mesh bottom-to-top — a fake "layer sweep" that is NOT optimization
             // history — which is a reject-class honesty violation for a remote run (the
             // worker never serialises keyframes, 097). No keyframes → no playbar.
-            if model.hasHistory { mediaPlayer }
-            if viewMode == .stress, model.hasStress, !model.hasHistory {
-                VStack { Spacer(); ResultsStressKey() }.padding(.bottom, PageChrome.edge + 4)
-            }
+            if model.hasHistory, !fullScreen { mediaPlayer }
+            if viewMode == .stress, model.hasStress, !fullScreen { stressProbeCallout.ignoresSafeArea() }
             orientationGizmo
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
@@ -247,7 +269,17 @@ public struct ResultsScreen: View {
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
-        .onChange(of: viewMode) { applyViewMode($0) }
+        .onChange(of: viewMode) { applyViewMode($0); stressProbe = nil }
+        .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
+        // ★ one at a time: opening the key folds Checks and closes Details; opening either minimises the key
+        .onChange(of: stressKeyMinimized) { m in if !m { withAnimation(DS.Motion.sheetIn) { checksOpen = false; detailsOpen = false } } }
+        .onChange(of: checksOpen) { o in if o { stressKeyMinimized = true } }
+        .onChange(of: detailsOpen) { o in if o { stressKeyMinimized = true } }
+        .onChange(of: fullScreen) { onFullScreen?($0) }
+        .onDisappear { if fullScreen { onFullScreen?(false) } }
+        .background(GeometryReader { g in
+            Color.clear.onAppear { screenWidth = g.size.width }.onChange(of: g.size.width) { screenWidth = $0 }
+        })
         .onReceive(ticker) { _ in
             // Signpost only the ticks that DO work (advance an animation). A quiet run
             // of "playback_tick" events here while the screen looks idle means a timer
@@ -1182,7 +1214,7 @@ public struct ResultsScreen: View {
             streamingChip
             if model.selectedLattice != nil { latticeDetailCaption }
             let rows = versionRows
-            ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen,
+            ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen, pill: crowded,
                                  pick: { model.select($0) },
                                  compare: rows.filter { $0.tabIndex != nil }.count >= 2 ? {
                                      compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
@@ -1197,15 +1229,47 @@ public struct ResultsScreen: View {
         VStack(alignment: .trailing, spacing: DS.Space.m) {
             let sc = model.scenarios(for: model.selected)
             if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
-            ResultsViewModePicker(modes: viewModes, mode: $viewMode)
+            ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
+            // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it
+            if viewMode == .stress, model.hasStress {
+                ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption,
+                                     reading: stressReading, minimized: $stressKeyMinimized)
+            }
             ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, detailsOpen: $detailsOpen, tab: $detailsTab,
                                     versionTitle: selectedRow?.title ?? "",
-                                    rows: { model.detailRows($0, version: selectedRow) })
+                                    rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
             exportButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, PageChrome.gizmoClearance)
         .padding([.trailing, .bottom], PageChrome.edge)
+    }
+
+    /// Both corners' full-width bars (340 + 330) and their gutters leave under 160 pt of model between them: pills.
+    private var crowded: Bool { screenWidth < 340 + ResultsChrome.columnWidth + 4 * PageChrome.edge + 160 }
+
+    /// The stress at the tapped point — the SAME field value the colour there is painted from.
+    private var stressReading: Double? {
+        guard let p = stressProbe, let f = model.selectedStressField else { return nil }
+        return Double(f.value(at: p))
+    }
+
+    /// The tapped point on the model: an arrow and its value, re-projected every frame so it rides the part through an orbit.
+    @ViewBuilder private var stressProbeCallout: some View {
+        if let p = stressProbe, let r = stressReading, let s = projection?.project(p) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
+                Text(String(format: "%.2f MPa", r)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 6)
+            .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95)).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .fixedSize()
+            .offset(x: s.x + 8, y: s.y - 15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("results-stress-probe")
+        }
     }
 
     private var viewModes: [ResultsViewMode] {

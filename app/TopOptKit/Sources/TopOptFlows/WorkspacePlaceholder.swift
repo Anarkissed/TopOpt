@@ -166,6 +166,8 @@ public struct WorkspacePlaceholder: View {
     /// stage opens on Setup — and no run opens it: a run that lands puts a dot on the capsule's
     /// Results segment and a message with Open Results (`topoNotice`). Only he opens it.
     @State private var viewOriginal = true
+    /// ★ Results' Full screen (his note 2026-10-27): the capsule over Results steps aside too.
+    @State private var resultsFullScreen = false
     /// B3: the Results dot + message (TopologyResultsNotice — it can never open a page).
     @State private var topoNotice = TopologyResultsNotice()
     /// B3: the corner pair's Setup panel is open.
@@ -1642,7 +1644,8 @@ public struct WorkspacePlaceholder: View {
                               // ★ Results redesign (2026-10-27): undo / redo at the top left, and each scenario's marks
                               undo: { project.performUndo() }, redo: { project.performRedo() },
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
-                              scenarioMarks: resultsScenarioMarks)
+                              scenarioMarks: resultsScenarioMarks,
+                              onFullScreen: { resultsFullScreen = $0 })
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -1653,7 +1656,7 @@ public struct WorkspacePlaceholder: View {
             if !fullScreenPageUp, seeResultsShown { seeResultsChip }
             // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup, on to Smooth),
             // and a landed run says so here — it never opens Results by itself.
-            if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp { topologyCapsuleOverlay }
+            if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
             })   // Flexible (PR #362) H58
         }

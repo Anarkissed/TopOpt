@@ -72,7 +72,7 @@ struct ResultsCompareView: View {
             Spacer()
             let sc = model.scenarios(for: model.selected)
             if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
-            ResultsViewModePicker(modes: model.hasStress ? [.stress, .solid, .xray] : [.solid, .xray], mode: $mode)
+            ResultsViewModePicker(modes: model.hasStress ? [.stress, .solid, .xray] : [.solid, .xray], mode: $mode)   // icons
         }
     }
 

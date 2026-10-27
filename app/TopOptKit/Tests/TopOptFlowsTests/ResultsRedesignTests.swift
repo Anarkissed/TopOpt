@@ -33,7 +33,11 @@ final class ResultsRedesignTests: XCTestCase {
         func v(_ vf: Double, _ g: Double, _ m: Double) -> OptimizeVariant {
             OptimizeVariant(requestedVolumeFraction: vf, achievedVolumeFraction: vf, massGrams: g, supportVolumeVoxels: 10,
                             meshTriangleCount: 100, worstCaseMargin: m, accepted: true, v3Passes: true,
-                            minFeatureViolations: vf < 0.2 ? 1061 : 0, minFeatureWarning: "1061 regions may be thinner")
+                            minFeatureViolations: vf < 0.2 ? 1061 : 0, minFeatureWarning: "1061 regions may be thinner",
+                            maxStressMPa: 6.3,   // a real run's report always carries its peak (the scale's top without a yield)
+                            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
+                            vonMisesField: (0..<64).map { Float($0) / 10 },            // a stress field → Stress
+                            displacementField: (0..<375).map { _ in Float(0.01) })     // a displacement field → Load paths
         }
         return OptimizeOutcome(variants: [v(0.1264, 92.2, 14.4), v(0.2629, 120.9, 22.2)], stoppedOnMargin: false, cancelled: false,
                                acceptedCount: 2, gridNx: 4, gridNy: 4, gridNz: 4, spacing: 1,

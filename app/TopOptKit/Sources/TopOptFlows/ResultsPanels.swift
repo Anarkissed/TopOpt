@@ -219,6 +219,21 @@ extension ResultsModel {
 
 public enum ResultsViewMode: String, CaseIterable, Sendable {
     case stress = "Stress", solid = "Solid", xray = "X-ray", loadPaths = "Load paths"
+
+    /// ★ his note 2026-10-27: icons, like the rest of the app (the word is the accessibility label).
+    var symbol: String {
+        switch self {
+        case .stress: return ""            // the colour wheel, drawn
+        case .solid: return "cube.fill"
+        case .xray: return "cube.transparent"
+        case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
+        }
+    }
+
+    /// Why a view is greyed (the run carries no field for it).
+    var unavailableReason: String {
+        self == .stress ? "Stress — this run sent no stress field" : "Load paths — this run sent no displacement field"
+    }
 }
 
 // MARK: - Compare
@@ -295,6 +310,7 @@ struct ResultsPanelHeader: View {
     var trailingTint: Color = DS.Color.textTertiary.color
     @Binding var open: Bool
     let id: String
+    var pill = false
 
     var body: some View {
         Button { withAnimation(DS.Motion.sheetIn) { open.toggle() } } label: {
@@ -302,7 +318,7 @@ struct ResultsPanelHeader: View {
                 Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .bold))
                     .foregroundStyle(DS.Color.textTertiary.color)
                 Text(title).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
-                Spacer(minLength: DS.Space.s)
+                if pill { Spacer().frame(width: DS.Space.xs) } else { Spacer(minLength: DS.Space.s) }
                 Text(trailing).font(.system(size: 13, weight: .semibold)).foregroundStyle(trailingTint).lineLimit(1)
             }
             .padding(.horizontal, DS.Space.l).frame(height: 50).contentShape(Rectangle())
@@ -317,6 +333,8 @@ struct ResultsVersionsPanel: View {
     let rows: [ResultsVersionRow]
     let selectedTab: Int
     @Binding var open: Bool
+    /// Folded AND short of room (his note 2026-10-27): a small pill instead of the full-width bar.
+    var pill = false
     let pick: (Int) -> Void
     let compare: (() -> Void)?
 
@@ -325,7 +343,7 @@ struct ResultsVersionsPanel: View {
             ResultsPanelHeader(title: "Versions",
                                trailing: open ? "\(rows.count)" : (rows.first { $0.tabIndex == selectedTab }?.title ?? ""),
                                trailingTint: open ? DS.Color.textTertiary.color : DS.Color.accent.color,
-                               open: $open, id: "results-versions-header")
+                               open: $open, id: "results-versions-header", pill: pill && !open)
             if open {
                 ForEach(rows) { r in
                     Divider().overlay(DS.Color.strokeSubtle.color)
@@ -346,7 +364,8 @@ struct ResultsVersionsPanel: View {
                 }
             }
         }
-        .frame(width: 340)
+        .frame(width: pill && !open ? nil : 340)
+        .fixedSize(horizontal: pill && !open, vertical: false)
         .resultsPanel()
         .background(ResultsChrome.publish("resultsVersions"))
     }
@@ -411,6 +430,8 @@ struct ResultsChecksAndDetails: View {
     @Binding var tab: ResultsDetailsTab
     let versionTitle: String
     let rows: (ResultsDetailsTab) -> [ResultsDetailRow]
+    /// Folded AND short of room: the Checks header and Details become pills at the right.
+    var pill = false
 
     var body: some View {
         VStack(spacing: DS.Space.s) {
@@ -421,7 +442,7 @@ struct ResultsChecksAndDetails: View {
                     let warns = checks.filter { $0.kind == .warn }.count
                     ResultsPanelHeader(title: "Checks", trailing: warns == 0 ? "All good" : "\(warns) to look at",
                                        trailingTint: (warns == 0 ? DS.Color.okGreen : DS.Color.warning).color,
-                                       open: $checksOpen, id: "results-checks-header")
+                                       open: $checksOpen, id: "results-checks-header", pill: pill && !checksOpen)
                     if checksOpen {
                         ForEach(checks) { c in
                             Divider().overlay(DS.Color.strokeSubtle.color)
@@ -429,13 +450,15 @@ struct ResultsChecksAndDetails: View {
                         }
                     }
                 }
+                .fixedSize(horizontal: pill && !checksOpen, vertical: false)
                 .resultsPanel()
                 .background(ResultsChrome.publish("resultsChecks"))
-                detailsButton
+                detailsButton.fixedSize(horizontal: pill && !checksOpen, vertical: false)
             }
         }
-        .frame(width: ResultsChrome.columnWidth)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(width: pill && !checksOpen && !detailsOpen ? nil : ResultsChrome.columnWidth, alignment: .trailing)
+        // ★ his note 2026-10-27: folded, the checks drop out of the middle of the screen, down by Export
+        .frame(maxHeight: .infinity, alignment: checksOpen || detailsOpen ? .top : .bottom)
     }
 
     private var detailsButton: some View {
@@ -444,7 +467,8 @@ struct ResultsChecksAndDetails: View {
                 Image(systemName: detailsOpen ? "chevron.down" : "chevron.up").font(.system(size: 12, weight: .bold))
                 Text("Details").dsStyle(DS.TypeScale.bodyStrong)
             }
-            .foregroundStyle(DS.Color.textPrimary.color).frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
+            .foregroundStyle(DS.Color.textPrimary.color).padding(.horizontal, DS.Space.l)
+            .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(detailsOpen ? nil : Capsule().fill(ResultsChrome.fill.color)
@@ -539,49 +563,60 @@ struct ResultsScenarioPicker: View {
     }
 }
 
-/// The view buttons, one capsule.
+/// The view buttons — ICONS, 44 pt each, like the rest of the app (his note 2026-10-27). Every view is always there; one the
+/// run cannot show is greyed and says why. An optional Full screen button ends the row.
 struct ResultsViewModePicker: View {
-    let modes: [ResultsViewMode]
+    var modes: [ResultsViewMode] = ResultsViewMode.allCases
+    var available: Set<ResultsViewMode> = Set(ResultsViewMode.allCases)
     @Binding var mode: ResultsViewMode
+    var fullScreen: Binding<Bool>? = nil
 
     var body: some View {
-        HStack(spacing: DS.Space.xxs) {
+        HStack(spacing: DS.Space.s) {
             ForEach(modes, id: \.self) { m in
-                Button { mode = m } label: {
-                    Text(m.rawValue).font(.system(size: 14, weight: m == mode ? .semibold : .regular))
-                        .foregroundStyle((m == mode ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                        .padding(.horizontal, DS.Space.m).frame(height: 36)
-                        .background(Capsule().fill(m == mode ? DS.Color.fillSubtle.color : Color.clear))
-                        .contentShape(Capsule())
+                let ok = available.contains(m)
+                Button { mode = m } label: { icon(m).frame(width: 44, height: 44).background(chip(on: m == mode)) }
+                    .buttonStyle(.plain)
+                    .disabled(!ok)
+                    .opacity(ok ? 1 : 0.35)
+                    .accessibilityLabel(ok ? m.rawValue : m.unavailableReason)
+                    .accessibilityAddTraits(m == mode ? .isSelected : [])
+                    .accessibilityIdentifier("results-view-\(m.rawValue)")
+                    .background(ResultsChrome.publish("resultsView-\(m.rawValue)"))
+            }
+            if let fullScreen {
+                let on = fullScreen.wrappedValue
+                Button { withAnimation(DS.Motion.sheetIn) { fullScreen.wrappedValue.toggle() } } label: {
+                    Image(systemName: on ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(width: 44, height: 44).background(chip(on: on))
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(m == mode ? .isSelected : [])
-                .accessibilityIdentifier("results-view-\(m.rawValue)")
+                .accessibilityLabel(on ? "Exit full screen" : "Full screen")
+                .accessibilityIdentifier("results-fullscreen")
+                .background(ResultsChrome.publish("resultsFullScreen"))
             }
         }
-        .padding(DS.Space.xxs)
-        .background(Capsule().fill(ResultsChrome.fill.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .background(ResultsChrome.publish("resultsViewModes"))
+    }
+
+    @ViewBuilder private func icon(_ m: ResultsViewMode) -> some View {
+        if m == .stress {
+            Circle().fill(AngularGradient(colors: [RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
+                                                   RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color],
+                                          center: .center))
+                .frame(width: 16, height: 16)
+        } else {
+            Image(systemName: m.symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+        }
+    }
+
+    private func chip(on: Bool) -> some View {
+        Capsule().fill(on ? DS.Color.accent.opacity(0.28).color : ResultsChrome.fill.color)
+            .overlay(Capsule().strokeBorder(on ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5))
     }
 }
 
-/// The small colour key under the model (Stress view).
-struct ResultsStressKey: View {
-    var body: some View {
-        VStack(spacing: 5) {
-            LinearGradient(colors: [RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
-                                    RGBA(250, 220, 60).color, RGBA(255, 70, 50).color], startPoint: .leading, endPoint: .trailing)
-                .frame(height: 6).clipShape(Capsule())
-            HStack { Text("Relaxed"); Spacer(); Text("At its limit") }
-                .font(.system(size: 12)).foregroundStyle(DS.Color.textSecondary.color)
-        }
-        .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
-        .frame(width: 240)
-        .background(RoundedRectangle(cornerRadius: 14).fill(ResultsChrome.fill.color)
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-        .accessibilityIdentifier("results-stress-key")
-    }
-}
 
 /// One load scenario's marks on the results model (model frame, mm): its loads (centroid + unit direction) and its anchors.
 public struct ResultsScenarioMarks: Equatable, Sendable {
@@ -593,4 +628,95 @@ public struct ResultsScenarioMarks: Equatable, Sendable {
     public let loads: [Load]
     public let anchors: [SIMD3<Float>]
     public init(loads: [Load], anchors: [SIMD3<Float>]) { self.loads = loads; self.anchors = anchors }
+}
+
+/// ★ THE TAP-TO-EXPLORE STRESS KEY (his note 2026-10-27: "make the legend tappable … any area you tap on the model shows the
+/// associated value from the Legend — check the Lattice stage"). The Lattice stage's own chrome and reading box
+/// (LatticeLegendChrome, LatticeLegendReading): a vertical scale, hot end up, an arrow on the bar at the tapped value, and the
+/// value in the accent squircle beside it. Minimised it is one line; tapping that line opens it again.
+struct ResultsStressExplore: View {
+    /// The top of the scale (MPa) — the SAME number the model's colours are divided by (`stressScaleMaxMPa`).
+    let peakMPa: Double
+    /// What the scale is keyed to ("PA12_CF · scaled to 21 MPa yield at 50% gyroid").
+    let caption: String
+    /// The stress where he tapped, or nil before a tap.
+    let reading: Double?
+    @Binding var minimized: Bool
+
+    static let barH: CGFloat = 150
+    /// ★ his note 2026-10-27: no empty space on the right — the box hugs the scale, and widens only for a reading.
+    static let width: CGFloat = 196
+    static let widthWithReading: CGFloat = 292
+
+    var body: some View {
+        Group {
+            if minimized {
+                Button { minimized = false } label: {
+                    HStack(spacing: DS.Space.s) {
+                        LinearGradient(colors: Self.ramp, startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 44, height: 6).clipShape(Capsule())
+                        Text(reading.map { String(format: "%.2f MPa", $0) } ?? "Stress key")
+                            .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle((reading == nil ? DS.Color.textSecondary : DS.Color.accent).color)
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(DS.Color.accent.color)
+                    }
+                    .padding(.horizontal, DS.Space.l).frame(height: 40)
+                    .background(Capsule().fill(ResultsChrome.fill.color).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open the stress key")
+            } else {
+                LatticeLegendChrome(width: reading == nil ? Self.width : Self.widthWithReading, minimized: $minimized,
+                                    info: "Tap anywhere on the part to read its stress there. Tap empty space to clear it.") {
+                    HStack(alignment: .center, spacing: DS.Space.s) {
+                        VStack(alignment: .trailing, spacing: 0) {
+                            ForEach(Array(ticks.enumerated()), id: \.offset) { i, t in
+                                Text(t).font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                                    .foregroundStyle(DS.Color.textSecondary.color)
+                                if i < ticks.count - 1 { Spacer(minLength: 0) }
+                            }
+                        }
+                        .frame(width: 40, height: Self.barH + 14)
+                        LinearGradient(colors: Self.ramp.reversed(), startPoint: .top, endPoint: .bottom)
+                            .frame(width: 22, height: Self.barH)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .overlay(alignment: .top) { arrow }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("MPa").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                            Text("von Mises").font(.system(size: 10)).foregroundStyle(DS.Color.textTertiary.color)
+                        }
+                        .frame(width: 58, alignment: .leading)
+                        if let r = reading {
+                            LatticeLegendReading(value: String(format: "%.2f", r), unit: "MPa", caption: "where you tapped")
+                                .frame(width: 88)
+                        }
+                    }
+                    Text(caption).font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, DS.Space.s)
+                }
+            }
+        }
+        .background(ResultsChrome.publish("resultsStressKey"))
+        .accessibilityIdentifier("results-stress-key")
+    }
+
+    static var ramp: [Color] { (0...4).map { ResultsModel.stressColor(fraction: Double($0) / 4).color } }
+
+    private var ticks: [String] {
+        (0..<5).map { String(format: peakMPa >= 10 ? "%.0f" : "%.1f", peakMPa * (1 - Double($0) / 4)) }
+    }
+
+    /// The arrow at the reading's place on the bar (hot end up), like the Lattice key's.
+    @ViewBuilder private var arrow: some View {
+        if let r = reading, peakMPa > 0 {
+            let t = 1 - min(1, max(0, r / peakMPa))
+            HStack(spacing: 0) {
+                Rectangle().fill(DS.Color.accent.color).frame(width: 22, height: 2)
+                Image(systemName: "arrowtriangle.left.fill").font(.system(size: 16)).foregroundStyle(DS.Color.accent.color)
+                    .shadow(color: .black.opacity(0.8), radius: 1)
+            }
+            .offset(x: 11, y: CGFloat(t) * Self.barH - 8)
+        }
+    }
 }
