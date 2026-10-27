@@ -36,6 +36,11 @@
 
 import SwiftUI
 import TopOptDesign
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// The list's and the chip's words (copied from FlexibleSelectionsCopy at b472880b, unchanged).
 public enum SelectionsCopy {
@@ -152,6 +157,8 @@ public struct SelectionsList: View {
     /// ★ Folders (nil: the plain list), a control at the end of a group's line (nil: none), and a footer PINNED under the
     /// scroll — never scrolled away — while the list is open (reviewer 2026-10-26 13:22: "+ Add a load scenario").
     var folders: [SelectionsFolder]? = nil
+    /// ★ his iPad 2026-10-27 (note 5): the groups that belong to no folder (keep clear, plain groups), listed after them.
+    var looseGroups: [SelectionGroup] = []
     var lineAccessory: (SelectionGroup) -> AnyView? = { _ in nil }
     var footer: AnyView? = nil
     /// ★ his iPad 14:13: an open/close button on each group's line; an open group shows its rows without being picked.
@@ -180,10 +187,10 @@ public struct SelectionsList: View {
     }
 
     /// The same list with folders, a line accessory and a pinned footer (load scenarios on Topology).
-    func scenarioHooks(folders: [SelectionsFolder]?, lineAccessory: @escaping (SelectionGroup) -> AnyView?,
+    func scenarioHooks(folders: [SelectionsFolder]?, loose: [SelectionGroup] = [], lineAccessory: @escaping (SelectionGroup) -> AnyView?,
                        footer: AnyView?) -> SelectionsList {
         var copy = self
-        copy.folders = folders; copy.lineAccessory = lineAccessory; copy.footer = footer
+        copy.folders = folders; copy.looseGroups = loose; copy.lineAccessory = lineAccessory; copy.footer = footer
         return copy
     }
 
@@ -249,6 +256,7 @@ public struct SelectionsList: View {
                                             .padding(.leading, Self.folderIndent / 2 + 6).padding(.vertical, 4)
                                     }
                                 }
+                                ForEach(looseGroups) { g in section(g) }
                             } else {
                                 ForEach(groups) { g in section(g) }
                             }
@@ -268,7 +276,7 @@ public struct SelectionsList: View {
                 }
             }
         }
-        .frame(width: collapsed ? nil : PageChrome.panelWidth, alignment: .leading)
+        .frame(width: collapsed ? nil : listWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
@@ -343,8 +351,9 @@ public struct SelectionsList: View {
             Button { pick(g.id) } label: {
                 HStack(spacing: DS.Space.s) {
                     RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 12, height: 12)
+                    // ★ his iPad 2026-10-27 (note 2): a name is never cut off — the panel widens for it (listWidth)
                     Text(g.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                        .lineLimit(1).layoutPriority(1)
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false).layoutPriority(2)
                     RoleGlyphs(project: project, group: g.id, readsLattice: readsLattice(g.id), size: 13)
                     if let w = loadWeight(g.id) {
                         Text(w).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
@@ -413,10 +422,40 @@ public struct SelectionsList: View {
         Swift.max(maxListHeight, canvasHeight - 2 * PageChrome.noteTop - 2 * PageChrome.edge - lineHeight - 2 - footerReserve)
     }
 
-    /// As tall as its rows, up to the screen (or to the height he dragged it to).
+    /// As tall as its rows, up to the screen — or exactly the height he dragged it to (★ his iPad 2026-10-27, note 2: the
+    /// grip "does not work": a drag past the rows did nothing, the list never grew taller than what it held).
     private var listHeight: CGFloat {
-        let cap = max(Self.lineHeight, min(chosenHeight?.wrappedValue ?? maxHeight, maxHeight))
-        return min(cap, max(contentHeight, Self.lineHeight))
+        if let chosen = chosenHeight?.wrappedValue { return max(Self.lineHeight * 2, min(chosen, maxHeight)) }
+        return min(maxHeight, max(contentHeight, Self.lineHeight))
+    }
+
+    /// ★ his iPad 2026-10-27 (note 2): "the Group names are being cut off … make the selections window wider". Wide enough for
+    /// the longest line — its name and load weight plus the line's fixed parts — never under today's 348 pt, never past 640.
+    var listWidth: CGFloat {
+        let indent: CGFloat = folders == nil ? 0 : Self.folderIndent
+        let widest = groups.map { g -> CGFloat in
+            // the summary (or, in its place, the scenario switch, 52 pt): whichever is wider
+            let tail = max(52, Self.textWidth(summary?(g) ?? SelectionsSummary.summary(project: project, group: g), size: 12.5))
+            return Self.textWidth(g.name, size: 14, bold: true) + tail
+                + (loadWeight(g.id).map { Self.textWidth($0, size: 12.5) + DS.Space.s } ?? 0)
+        }.max() ?? 0
+        return Self.panelWidth(widestText: widest, indent: indent)
+    }
+
+    /// The line's fixed parts: open chevron 22, swatch 12, the role glyphs (up to 3 × 17), eye 44, trash 44, the gaps (8 × 8)
+    /// and the edges.
+    static let lineChromeWidth: CGFloat = 22 + 12 + 51 + 44 + 44 + 8 * 8 + 12
+    static func panelWidth(widestText: CGFloat, indent: CGFloat) -> CGFloat {
+        min(640, max(PageChrome.panelWidth, ceil(widestText + lineChromeWidth + indent)))
+    }
+
+    static func textWidth(_ s: String, size: CGFloat, bold: Bool = false) -> CGFloat {
+        #if canImport(UIKit)
+        let f = UIFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+        #else
+        let f = NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+        #endif
+        return ceil((s as NSString).size(withAttributes: [.font: f]).width)
     }
 
     /// ★ his ask (14:3x): "make it resizeable" — a grip under the list; drag it down for more rows, up for fewer. The panel
@@ -424,7 +463,9 @@ public struct SelectionsList: View {
     private var grip: some View {
         Capsule().fill(DS.Color.textTertiary.color).frame(width: 36, height: 5)
             .frame(maxWidth: .infinity).frame(height: 22).contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 2)
+            // ★ his iPad 2026-10-27 (note 2): GLOBAL translation (the grip moves as the panel grows, so a local one fought the
+            // finger) and HIGH priority (the canvas's orbit drag under the panel took the touch)
+            .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { v in
                     let from = dragFrom ?? listHeight
                     if dragFrom == nil { dragFrom = from }

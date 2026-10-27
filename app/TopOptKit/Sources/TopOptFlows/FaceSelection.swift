@@ -258,7 +258,46 @@ public enum FaceTopology {
         guard simd_length(axisDir) > 1e-6 else { return false }
         let m = boreAxisMetrics(face, in: mesh, axisPoint: SIMD3<Float>(geo.axisPoint),
                                 axisDir: simd_normalize(axisDir))
-        return m.concave && m.wrapDeg >= wrapMinDeg
+        guard m.concave else { return false }
+        if m.wrapDeg >= wrapMinDeg { return true }
+        // ★ his iPad 2026-10-27 (note 3: "primitives not automatically being made when a hole is selected"): STEP files
+        // often split a round hole into two half-cylinder faces, each wrapping ~180°, so neither half passed. A hole is
+        // judged by ALL its pieces — the concave faces on the same axis with the same radius — wrapping together. A
+        // lone half (a U-slot's end, a fillet) still wraps ≤ 198° and stays out.
+        let parts = borePartners(face, in: mesh)
+        guard parts.count > 1 else { return false }
+        return boreAxisMetrics(faces: parts, in: mesh, axisPoint: SIMD3<Float>(geo.axisPoint),
+                               axisDir: simd_normalize(axisDir)).wrapDeg >= wrapMinDeg
+    }
+
+    /// The concave cylinder faces on `face`'s axis with its radius, `face` included, in id order (the pieces of one round
+    /// hole). Cached per mesh.
+    public static func borePartners(_ face: FaceID, in mesh: ViewerMesh) -> [FaceID] {
+        BorePartnerCache.shared.partners(face, mesh: mesh) {
+            guard let g = mesh.faceGeometry(face), g.isCylinder, simd_length(g.axisDir) > 1e-9 else { return [face] }
+            let e = simd_normalize(g.axisDir)
+            return (0..<Int32(mesh.faceGeometry.count)).filter { o in
+                if o == face { return true }
+                guard let h = mesh.faceGeometry(o), h.isCylinder, abs(h.cylinderRadiusMM - g.cylinderRadiusMM) < 0.01,
+                      simd_length(h.axisDir) > 1e-9, abs(simd_dot(simd_normalize(h.axisDir), e)) > 0.9999 else { return false }
+                let d = h.axisPoint - g.axisPoint
+                guard simd_length(d - e * simd_dot(d, e)) < 0.01 else { return false }
+                return boreAxisMetrics(o, in: mesh, axisPoint: SIMD3<Float>(g.axisPoint), axisDir: SIMD3<Float>(e)).concave
+            }
+        }
+    }
+
+    /// The face that stands for its hole in `faces` (a group): a bore piece whose lower-id partner is also in the group is
+    /// drawn and sent once, by that partner (core sweeps the full cylinder from either half's axis and radius).
+    public static func isBoreRepresentative(_ face: FaceID, among faces: [FaceID], in mesh: ViewerMesh) -> Bool {
+        let set = Set(faces)
+        return !borePartners(face, in: mesh).contains { $0 < face && set.contains($0) }
+    }
+
+    /// The same WRAP over several faces' triangles together (one hole's pieces).
+    static func boreAxisMetrics(faces: [FaceID], in mesh: ViewerMesh,
+                                axisPoint: SIMD3<Float>, axisDir: SIMD3<Float>) -> (wrapDeg: Float, concave: Bool) {
+        boreAxisMetrics(trianglesOf: Set(faces), in: mesh, axisPoint: axisPoint, axisDir: axisDir)
     }
 
     /// The angular WRAP (degrees, 0…360) a face's triangles cover about the axis ray
@@ -269,6 +308,12 @@ public enum FaceTopology {
     static func boreAxisMetrics(_ face: FaceID, in mesh: ViewerMesh,
                                 axisPoint: SIMD3<Float>, axisDir: SIMD3<Float>)
         -> (wrapDeg: Float, concave: Bool) {
+        boreAxisMetrics(trianglesOf: [face], in: mesh, axisPoint: axisPoint, axisDir: axisDir)
+    }
+
+    private static func boreAxisMetrics(trianglesOf faces: Set<FaceID>, in mesh: ViewerMesh,
+                                        axisPoint: SIMD3<Float>, axisDir: SIMD3<Float>)
+        -> (wrapDeg: Float, concave: Bool) {
         // A stable (u, v) basis spanning the plane perpendicular to the axis.
         let seed = abs(axisDir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
         var u = seed - axisDir * simd_dot(seed, axisDir)
@@ -278,7 +323,7 @@ public enum FaceTopology {
         let idx = mesh.indices
         var angles: [Float] = []
         var concave = 0, convex = 0
-        for t in triangles(ofFace: face, in: mesh) {
+        for (t, f) in mesh.faceIDs.enumerated() where faces.contains(f) {
             let i = t * 3
             guard i + 2 < idx.count else { continue }
             let p0 = position(idx[i], mesh), p1 = position(idx[i + 1], mesh), p2 = position(idx[i + 2], mesh)
@@ -390,5 +435,23 @@ public enum FaceTopology {
     private static func position(_ idx: UInt32, _ mesh: ViewerMesh) -> SIMD3<Float> {
         let b = Int(idx) * 3
         return SIMD3<Float>(mesh.positions[b], mesh.positions[b + 1], mesh.positions[b + 2])
+    }
+}
+
+
+/// `FaceTopology.borePartners`, kept for the last mesh seen (the render asks per face, per frame).
+final class BorePartnerCache: @unchecked Sendable {
+    static let shared = BorePartnerCache()
+    private let lock = NSLock()
+    private var key: ViewerMeshSignature?
+    private var map: [FaceID: [FaceID]] = [:]
+    func partners(_ face: FaceID, mesh: ViewerMesh, compute: () -> [FaceID]) -> [FaceID] {
+        lock.lock()
+        if key != mesh.signature { key = mesh.signature; map = [:] }
+        if let hit = map[face] { lock.unlock(); return hit }
+        lock.unlock()
+        let v = compute()
+        lock.lock(); if key == mesh.signature { map[face] = v }; lock.unlock()
+        return v
     }
 }

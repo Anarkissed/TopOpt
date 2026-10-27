@@ -194,7 +194,9 @@ public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
         allCases.filter {
             switch $0 {
             case .protectSkin: return protectCount > 0
-            case .cadFaces: return isStep
+            // ★ HIDDEN (his ruling 2026-10-26 23:44): Protect exports holes and flat faces exact now; the run always
+            // sends project_cad_faces = true (AppModel), so there is nothing left to switch.
+            case .cadFaces: return false
             case .designBox: return designBoxDrawn
             default: return true
             }

@@ -223,7 +223,8 @@ final class TopologyStageTests: XCTestCase {
         XCTAssertEqual(TopologySetupRow.visible(protectCount: 0, isStep: false, designBoxDrawn: true).map(\.title),
                        ["Quality", "Plate", "Gravity", "Runs on", "Units", "Plastic", "Design primitives", "Print parameters"])
         XCTAssertTrue(TopologySetupRow.visible(protectCount: 1, isStep: true, designBoxDrawn: true).contains(.protectSkin))
-        XCTAssertTrue(TopologySetupRow.visible(protectCount: 1, isStep: true, designBoxDrawn: true).contains(.cadFaces))
+        XCTAssertFalse(TopologySetupRow.visible(protectCount: 1, isStep: true, designBoxDrawn: true).contains(.cadFaces),
+                       "★ CAD surfaces hidden (ruling 2026-10-26 23:44)")
     }
 
     static func workspaceSource() throws -> String {

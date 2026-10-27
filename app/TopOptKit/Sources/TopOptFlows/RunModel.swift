@@ -48,6 +48,8 @@ public struct RunRequest: Equatable, Sendable {
     public var scenarios: [LoadScenarioWire] = []
     /// ★ THE SAFETY MARGIN (SafetyMargin.swift): sent under TO-core's key once it is named, and only when not 150 %.
     public var safetyMargin: Double = SafetyMargin.defaultValue
+    /// ★ EXACT PROTECT (job `keep_regions`, ProtectKeepRegions): the protected holes' and flat faces' regions. Empty ⇒ omitted.
+    public var keepRegions: [KeepRegionSpec] = []
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool
