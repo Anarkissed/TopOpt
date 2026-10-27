@@ -2431,6 +2431,16 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME keep_oriented COMMAND test_keep_oriented)
+
+    # KEEP regions on a GROWTH run (ruling 2026-10-27 02:13): material grown onto a
+    # protected face is kept, joined to the exact face; only the part's skin is cut.
+    add_executable(test_keep_growth tests/validation/test_keep_growth.cpp)
+    target_link_libraries(test_keep_growth PRIVATE topopt)
+    target_compile_definitions(test_keep_growth PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep_growth COMMAND test_keep_growth)
   endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-

@@ -572,8 +572,14 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // (measured 0.29 mm over a 30-degree face at 1.1 mm voxels). So a region meant to make
 // a face exact reaches at least one voxel out past it, into the air, where the part
 // has nothing to restore (test_keep_oriented).
+// GROWTH there stays (ruling 2026-10-27 02:13): on a growth run (Redesign to
+// strengthen, a design box) the optimizer can print material right onto that face, and
+// cutting it would export a design nobody certified, the growth off the face or a
+// piece of its own. So the cut spares the `spared` boxes (keep_spared_growth): only the
+// part's own voxel skin goes (test_keep_growth).
 TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
-                                const std::vector<KeepRegion>& keeps) {
+                                const std::vector<KeepRegion>& keeps,
+                                const std::vector<DesignBox>& spared) {
   if (keeps.empty()) return exported;
 #ifdef TOPOPT_HAVE_MANIFOLD
   auto to_manifold = [](const TriangleMesh& m) {
@@ -629,6 +635,15 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
     K = K + region(k, 0.0);
     K_part = K_part + region(k, kFuse);
   }
+  if (!spared.empty()) {
+    std::vector<manifold::Manifold> boxes;
+    boxes.reserve(spared.size());
+    for (const DesignBox& b : spared)
+      boxes.push_back(manifold::Manifold::Cube({b.max.x - b.min.x, b.max.y - b.min.y,
+                                                b.max.z - b.min.z})
+                          .Translate({b.min.x, b.min.y, b.min.z}));
+    K = K - manifold::Manifold::BatchBoolean(boxes, manifold::OpType::Add);
+  }
   // The voxel surface is NUDGED 1 um along a slanted direction first. A part face on
   // a voxel plane (his flat bottom at z = 0) is otherwise exactly where the voxel
   // surface is, and in the kFuse overlap the two coplanar sheets left edges on four
@@ -663,12 +678,67 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
   return out;
 #else
   (void)part;
+  (void)spared;
   std::fprintf(stderr,
                "WARNING: KEEP regions: this build has no Manifold, so the kept "
                "regions are exported from the voxels, not exactly (they are still "
                "frozen).\n");
   return exported;
 #endif
+}
+
+// The growth a keep region's cut spares (ruling 2026-10-27 02:13): every printed voxel
+// near a region whose centre lies OUTSIDE the part (the part voxelized onto the solve
+// grid by the run's own centre rule), as a box of +-1.25 voxels about its centre, the
+// voxels of one row merged. 1.25 holds the export's own surface around the voxel (it
+// sits up to half a voxel past the cell) and the part voxel under it, which joins it
+// to the exact face with some overlap; a face with no growth within about a voxel is
+// cut as before. A run that grows nothing (every reduction run) spares nothing, and its
+// export is unchanged. (The solve grid's own tags cannot tell: a design box's voxels
+// are tagged Interior there, expand_design_domain.)
+std::vector<DesignBox> keep_spared_growth(const VoxelGrid& sg, const std::vector<double>& rho,
+                                          double printed_iso, const TriangleMesh& part,
+                                          const std::vector<KeepRegion>& keeps) {
+  constexpr double kSpare = 1.25;  // voxels about a grown voxel's centre
+  std::vector<DesignBox> out;
+  if (rho.size() != sg.voxel_count() || sg.spacing <= 0.0) return out;
+  const double h = sg.spacing, w = kSpare * h;
+  std::vector<char> near(rho.size(), 0);
+  bool any = false;
+  auto lo_index = [h](double v, double o) { return static_cast<int>(std::floor((v - o) / h - 0.5)); };
+  auto hi_index = [h](double v, double o) { return static_cast<int>(std::ceil((v - o) / h - 0.5)); };
+  for (const KeepRegion& kr : keeps) {
+    const int i0 = std::max(0, lo_index(kr.min.x - w, sg.origin.x));
+    const int i1 = std::min(sg.nx - 1, hi_index(kr.max.x + w, sg.origin.x));
+    const int j0 = std::max(0, lo_index(kr.min.y - w, sg.origin.y));
+    const int j1 = std::min(sg.ny - 1, hi_index(kr.max.y + w, sg.origin.y));
+    const int k0 = std::max(0, lo_index(kr.min.z - w, sg.origin.z));
+    const int k1 = std::min(sg.nz - 1, hi_index(kr.max.z + w, sg.origin.z));
+    for (int k = k0; k <= k1; ++k)
+      for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i) {
+          const std::size_t idx = sg.index(i, j, k);
+          if (rho[idx] < printed_iso) continue;
+          near[idx] = 1;
+          any = true;
+        }
+  }
+  if (!any) return out;
+  const VoxelGrid inside = voxelize_onto_grid(part, sg);
+  for (int k = 0; k < sg.nz; ++k)
+    for (int j = 0; j < sg.ny; ++j)
+      for (int i = 0; i < sg.nx; ++i) {
+        auto grown = [&](int ii) {
+          return ii < sg.nx && near[sg.index(ii, j, k)] && !inside.solid(ii, j, k);
+        };
+        if (!grown(i)) continue;
+        int e = i;
+        while (grown(e + 1)) ++e;
+        const Vec3 a = sg.voxel_center(i, j, k), b = sg.voxel_center(e, j, k);
+        out.push_back({Vec3{a.x - w, a.y - w, a.z - w}, Vec3{b.x + w, b.y + w, b.z + w}});
+        i = e;
+      }
+  return out;
 }
 
 TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
@@ -678,8 +748,9 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        const std::vector<KeepRegion>& keeps = {}) {
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
-        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
-        keeps);
+        variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh, keeps,
+        keep_spared_growth(sg, variant.optimization.physical_density, printed_iso,
+                           cad->mesh, keeps));
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
