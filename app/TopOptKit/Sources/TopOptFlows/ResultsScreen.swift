@@ -77,8 +77,23 @@ public struct ResultsScreen: View {
     /// chip opens SmoothingPanel, whose numbers are the RE-ANALYSED ones (the honesty
     /// rule lives in SmoothingModel, unit-tested).
     var smoothing: SmoothingModel?
+    /// ★ Results redesign (2026-10-27): the app's undo / redo at the top left, as on every page.
+    var undo: (() -> Void)?
+    var redo: (() -> Void)?
+    var canUndo: () -> Bool = { false }
+    var canRedo: () -> Bool = { false }
+    /// ★ Each load scenario's loads (point + unit direction) and anchors, drawn on the model when he picks it.
+    var scenarioMarks: [String: ResultsScenarioMarks] = [:]
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // ★ Results redesign state (his mockup, 2026-10-27)
+    @State private var versionsOpen = true
+    @State private var checksOpen = true
+    @State private var detailsOpen = false
+    @State private var detailsTab: ResultsDetailsTab = .strength
+    @State private var viewMode: ResultsViewMode = .stress
+    @State private var scenarioPick: String?
+    @State private var compare: ResultsCompareSession?
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
@@ -128,6 +143,9 @@ public struct ResultsScreen: View {
                 smoothEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 latticeEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 smoothing: SmoothingModel? = nil,
+                undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
+                canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
+                scenarioMarks: [String: ResultsScenarioMarks] = [:],
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -153,6 +171,8 @@ public struct ResultsScreen: View {
         self.smoothEntry = smoothEntry
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
+        self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
+        self.scenarioMarks = scenarioMarks
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -197,30 +217,37 @@ public struct ResultsScreen: View {
                           bodyAlpha: bodyAlpha)
                 .ignoresSafeArea()
 
+            // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
+            // the scenario + view buttons + checks + Details (right column) and Export float and fold. The old banners
+            // (voxel size, LAN fields, keep clear), the strengthen cards and the captions live behind Details now.
             topBar
-            resolutionNote                            // 083: honest voxel-size note
-            remoteComputeNote                         // 097: LAN-run unavailable fields
-            clearanceNote                             // 100: "Keep clear" applied-to honesty
-            // The viz toggles (Stress / Flex / Load path / Failure) and their
-            // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
-            // drawer open to the LEFT rather than dropping a big panel over the model.
-            // The cluster sits just above the orientation cube (see `cubeClearance`).
-            vizRail
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
-            failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
-            savingsTabs
+            scenarioMarksOverlay.ignoresSafeArea()    // ★ the picked scenario's loads, anchors and worst point
+            versionsColumn
+            rightColumn
             // The optimization-history playbar exists ONLY when the variant carries real
             // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
             // finished mesh bottom-to-top — a fake "layer sweep" that is NOT optimization
             // history — which is a reject-class honesty violation for a remote run (the
             // worker never serialises keyframes, 097). No keyframes → no playbar.
             if model.hasHistory { mediaPlayer }
-            orientationCorner
+            if viewMode == .stress, model.hasStress, !model.hasHistory {
+                VStack { Spacer(); ResultsStressKey() }.padding(.bottom, PageChrome.edge + 4)
+            }
             orientationGizmo
+            if compare != nil {
+                ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
+                                   close: { compare = nil },
+                                   use: { tab in model.select(tab); compare = nil })
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
+        .animation(DS.Motion.sheetIn, value: compare != nil)
+        .onChange(of: viewMode) { applyViewMode($0) }
         .onReceive(ticker) { _ in
             // Signpost only the ticks that DO work (advance an animation). A quiet run
             // of "playback_tick" events here while the screen looks idle means a timer
@@ -242,9 +269,7 @@ public struct ResultsScreen: View {
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
             // reduced-motion (system OR the drawer toggle), which freezes the arrows
             // mid-path with clean heads (no advance → the static presentation).
-            if model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion) {
-                model.advanceFlowClock(1.0 / 30.0)
-            }
+            // ★ (his note 2026-10-27) the load-path flow never wiggles: its clock is never advanced (a still view).
         }
         .onChange(of: mergeTrigger) { trigger in
             // A variant streamed in (or the final outcome landed) — merge it. Merge
@@ -260,6 +285,9 @@ public struct ResultsScreen: View {
             // longer knows — in which case the latticed variant still shows its
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
+            model.flowReducedStatic = true            // ★ still load paths, never moving
+            viewMode = model.hasStress ? .stress : .solid
+            applyViewMode(viewMode)
         }
         .sheet(isPresented: Binding(
             get: { if case .ready = videoExport.state { return true } else { return false } },
@@ -602,7 +630,7 @@ public struct ResultsScreen: View {
 
     /// The body opacity for the current flow body mode (x-ray/stress translucent,
     /// solid opaque); 1 when the overlay is off (the normal opaque draw).
-    private var bodyAlpha: Float { loadPathActive ? model.flowBodyMode.bodyAlpha : 1 }
+    private var bodyAlpha: Float { viewMode == .xray ? 0.3 : loadPathActive ? model.flowBodyMode.bodyAlpha : 1 }
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -1090,34 +1118,15 @@ public struct ResultsScreen: View {
                 // pressure its name truncates (lineLimit 1) while the fixed-size
                 // buttons keep their full width, so nothing overlaps.
 
-                // ★ B3: "Original" is an icon-only view like the others (it shuts the Results page).
-                Button(action: onSeeOriginal) {
-                    Image(systemName: "cube.transparent").font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 42, height: 42)
-                    .background(Capsule().fill(DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                // ★ Results redesign (2026-10-27): undo / redo here, as on every page. Original is the capsule's Setup;
+                // Smooth is gone; Export sits at the bottom right.
+                if let undo {
+                    topIcon("arrow.uturn.backward", label: "Undo", enabled: canUndo(), action: undo)
+                        .accessibilityIdentifier("results-undo")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Original")
-                .accessibilityIdentifier("results-view-original")
-
-                // Export sits NEXT TO "See Original" (design-overhaul round 2, item 4), not
-                // pushed to the far right — the absolute top-right corner now belongs to the
-                // orientation gizmo alone.
-                exportButton
-
-                // Per-variant lattice entry (handoff 2026-07-30-lattice-page): opens
-                // the lattice page with the SELECTED variant's field as the demand
-                // field. Hidden when the caller wired nothing.
-                // Per-variant SMOOTHING entry (handoff 2026-08-02-smoothing-page).
-                // Placed BEFORE Lattice because the pipeline order is
-                // smooth-then-lattice: a smoothed variant may go on to the lattice
-                // page, and smoothing a latticed export would round the struts.
-                if let onSmooth {
-                    entryControl(icon: "scribble.variable",
-                                 verdict: smoothVerdict,
-                                 action: { onSmooth(model.selectedVariantIndex) })
+                if let redo {
+                    topIcon("arrow.uturn.forward", label: "Redo", enabled: canRedo(), action: redo)
+                        .accessibilityIdentifier("results-redo")
                 }
 
                 if let onLattice {
@@ -1131,6 +1140,122 @@ public struct ResultsScreen: View {
             Spacer()
         }
         .padding(DS.Space.xl3)
+    }
+
+    private func topIcon(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle((enabled ? DS.Color.textPrimary : DS.Color.textQuaternary).color)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(DS.Surface.bar.color).overlay(Circle().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - ★ the redesign's panels (his mockup, approved 2026-10-27)
+
+    var versionRows: [ResultsVersionRow] {
+        ResultsVersions.rows(tabs: model.tabs, blocks: model.reportBlocks, requestedVF: { model.requestedVolumeFraction(of: $0) })
+    }
+
+    private var selectedRow: ResultsVersionRow? { versionRows.first { $0.tabIndex == model.selectedIndex } }
+
+    /// The checks for the selected version (one line + one sub-line each).
+    var checks: [ResultsCheck] {
+        let blocks = model.reportBlocks
+        let thin: Int = {
+            guard let b = blocks, let t = model.selected, let vf = model.requestedVolumeFraction(of: t) else { return 0 }
+            return b.rows.first { $0.accepted && abs($0.volumeFraction - vf) < 1e-6 }?.fragileJoints ?? 0
+        }()
+        return ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
+                                    required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
+                                    safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
+                                    thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false)
+    }
+
+    /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
+    private var versionsColumn: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            Spacer()
+            streamingChip
+            if model.selectedLattice != nil { latticeDetailCaption }
+            let rows = versionRows
+            ResultsVersionsPanel(rows: rows, selectedTab: model.selectedIndex, open: $versionsOpen,
+                                 pick: { model.select($0) },
+                                 compare: rows.filter { $0.tabIndex != nil }.count >= 2 ? {
+                                     compare = ResultsCompareSession(candidates: rows.compactMap(\.tabIndex))
+                                 } : nil)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .padding(PageChrome.edge)
+    }
+
+    /// The right column, under the view cube: "Scenario" + its menu, the view buttons, the checks and Details, Export.
+    private var rightColumn: some View {
+        VStack(alignment: .trailing, spacing: DS.Space.m) {
+            let sc = model.scenarios(for: model.selected)
+            if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
+            ResultsViewModePicker(modes: viewModes, mode: $viewMode)
+            ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, detailsOpen: $detailsOpen, tab: $detailsTab,
+                                    versionTitle: selectedRow?.title ?? "",
+                                    rows: { model.detailRows($0, version: selectedRow) })
+            exportButton
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, PageChrome.gizmoClearance)
+        .padding([.trailing, .bottom], PageChrome.edge)
+    }
+
+    private var viewModes: [ResultsViewMode] {
+        (model.hasStress ? [.stress] : []) + [.solid, .xray] + (model.hasLoadPath ? [.loadPaths] : [])
+    }
+
+    /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths still (never moving).
+    private func applyViewMode(_ m: ResultsViewMode) {
+        model.flexOn = false
+        model.failureOn = false
+        model.stressOn = m == .stress
+        if (m == .loadPaths) != model.loadPathOn { model.toggleLoadPath() }
+        model.flowReducedStatic = true
+    }
+
+    /// The picked scenario on the model: its loads (arrows), its anchors (dots) and its own worst point with its stress.
+    @ViewBuilder private var scenarioMarksOverlay: some View {
+        if let name = scenarioPick, let proj = projection {
+            let marks = scenarioMarks[name]
+            let peak = model.scenarios(for: model.selected).first { $0.name == name }
+            ZStack {
+                Canvas { ctx, _ in
+                    for l in marks?.loads ?? [] {
+                        guard let a = proj.project(l.point), let b = proj.project(l.point + l.direction * 12) else { continue }
+                        var path = Path(); path.move(to: a); path.addLine(to: b)
+                        ctx.stroke(path, with: .color(DS.Color.accent.color), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        ctx.fill(Path(ellipseIn: CGRect(x: b.x - 6, y: b.y - 6, width: 12, height: 12)), with: .color(DS.Color.accent.color))
+                    }
+                    for p in marks?.anchors ?? [] {
+                        guard let a = proj.project(p) else { continue }
+                        ctx.fill(Path(ellipseIn: CGRect(x: a.x - 5, y: a.y - 5, width: 10, height: 10)), with: .color(DS.Color.okGreen.color))
+                    }
+                }
+                .allowsHitTesting(false)
+                if let pk = peak, let pm = pk.peakMM, let a = proj.project(SIMD3<Float>(Float(pm.x), Float(pm.y), Float(pm.z))) {
+                    VStack(spacing: 2) {
+                        Text(name + "’s worst point").font(.system(size: 11, weight: .bold))
+                        Text((pk.peakMPa.map { String(format: "%.1f MPa", $0) } ?? "") + (pk.margin.map { " · " + ResultsVersions.x($0) } ?? ""))
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, DS.Space.s).padding(.vertical, DS.Space.xs)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(DS.Surface.bar.color))
+                    .overlay(alignment: .bottom) { Circle().strokeBorder(RGBA(255, 70, 50).color, lineWidth: 2).frame(width: 22, height: 22).offset(y: 30) }
+                    .position(x: a.x, y: a.y - 34)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("results-scenario-peak")
+                }
+            }
+        }
     }
 
     // MARK: - Bottom-right rail: slide-open visualization chips
@@ -1277,12 +1402,11 @@ public struct ResultsScreen: View {
         return Button(action: exportSTL) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
-                Text("Export .stl").dsStyle(DS.TypeScale.bodyStrong)
+                Text("Export " + (selectedRow.map { $0.title.components(separatedBy: " · ").first ?? $0.title } ?? "") + " (.stl)")
+                    .dsStyle(DS.TypeScale.bodyStrong).lineLimit(1)
             }
-            .fixedSize()
             .foregroundStyle(.white)
-            .padding(.vertical, DS.Space.m)
-            .padding(.horizontal, DS.Space.xl4)
+            .frame(width: ResultsChrome.columnWidth, height: 56)
             .background(Capsule().fill(enabled ? DS.Color.accent.color : DS.Color.textTertiary.color))
             .dsShadow(enabled ? .accentGlow : .panel)
         }
@@ -1290,6 +1414,7 @@ public struct ResultsScreen: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.55)
         .accessibilityLabel(enabled ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
+        .background(ResultsChrome.publish("resultsExport"))
     }
 
     // MARK: - Bottom-left: savings tabs

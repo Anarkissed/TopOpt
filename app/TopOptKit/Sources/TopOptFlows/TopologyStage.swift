@@ -42,11 +42,13 @@ public enum TopologyPage: String, Equatable, Sendable, CaseIterable {
 
     /// ★ B8 (his answer 2026-10-24): Results and Smooth are HIDDEN while the project has no results — not greyed. They
     /// appear when a run lands, or on reopening a project that has results.
-    public static func shown(hasResults: Bool) -> [TopologyPage] { hasResults ? allCases : [.setup] }
+    public static func shown(hasResults: Bool) -> [TopologyPage] { hasResults ? [.setup, .results] : [.setup] }
 
     /// The capsule's segments to hide (Results = secondary, Smooth = tertiary). The greyed ✂ is not a page: it stays.
+    /// ★ His note 2026-10-27: the Smooth page is gone from the app (part of its mechanism moves into core) — its segment
+    /// is always hidden.
     public static func hiddenSegments(hasResults: Bool) -> Set<StageCapsule.Page> {
-        hasResults ? [] : [.secondary, .tertiary]
+        hasResults ? [.tertiary] : [.secondary, .tertiary]
     }
 
     /// The variant Smooth opens on: the recommendation — "the last accepted rung" (ResultsModel.isRecommended's one rule).

@@ -1638,7 +1638,11 @@ public struct WorkspacePlaceholder: View {
                               // page can be reached, and each blocked one carries its
                               // own reason on the disabled control.
                               smoothEntry: { smoothEntry($0) },
-                              latticeEntry: { latticeEntry($0) })
+                              latticeEntry: { latticeEntry($0) },
+                              // ★ Results redesign (2026-10-27): undo / redo at the top left, and each scenario's marks
+                              undo: { project.performUndo() }, redo: { project.performRedo() },
+                              canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
+                              scenarioMarks: resultsScenarioMarks)
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -2609,6 +2613,26 @@ public struct WorkspacePlaceholder: View {
     /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
     /// grid/variant, so a centroid here lines up with the derived stress field there.
     private var loadFlowSeeds: [SIMD3<Float>] { loadFlowPairs.map(\.seed) }
+
+    /// ★ Results redesign (2026-10-27): each load scenario's loads and ON anchors, by name, for the Scenario menu.
+    private var resultsScenarioMarks: [String: ResultsScenarioMarks] {
+        guard force.hasScenarios, let mesh = viewerMesh else { return [:] }
+        var out: [String: ResultsScenarioMarks] = [:]
+        for s in force.scenarioList {
+            var loads: [ResultsScenarioMarks.Load] = [], anchors: [SIMD3<Float>] = []
+            for g in selection.groups where force.group(g.id, isIn: s.id) {
+                if force.kind(for: g.id).isLoad, let c = groupCentroidModel(g) {
+                    var d = SIMD3<Float>.zero
+                    if case .vector(let f)? = project.loadDirection(for: g.id), simd_length(f) > 1e-6 { d = simd_normalize(f) }
+                    loads.append(.init(point: c, direction: d))
+                } else if force.kind(for: g.id).isAnchor, force.anchorIsOn(g.id, in: s.id) {
+                    for f in groupTintedFaces(g) { if let c = mesh.faceCentroid(f) { anchors.append(c) } }
+                }
+            }
+            out[s.name] = ResultsScenarioMarks(loads: loads, anchors: anchors)
+        }
+        return out
+    }
 
     /// The per-load unit force directions d̂ (model frame), INDEX-ALIGNED with
     /// `loadFlowSeeds` — the `.anchor` flux-streamline direction for each load (M7.viz.5).

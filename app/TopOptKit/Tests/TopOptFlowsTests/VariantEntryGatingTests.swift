@@ -344,7 +344,8 @@ final class VariantEntryGatingTests: XCTestCase {
     /// firing unconditionally, as they did before this task.
     func testTheResultsEntryControlsAreGated() throws {
         let rs = try String(contentsOf: sourceURL("ResultsScreen.swift"), encoding: .utf8)
-        XCTAssertTrue(rs.contains("verdict: smoothVerdict"))
+        // ★ the Smooth entry is GONE from Results (his note 2026-10-27: "remove the Smooth area"); Lattice stays gated
+        XCTAssertFalse(rs.contains("verdict: smoothVerdict"), "no Smooth button on Results")
         XCTAssertTrue(rs.contains("verdict: latticeVerdict"))
         XCTAssertTrue(rs.contains(".disabled(!verdict.enabled)"),
                       "AJ2: the control is DISABLED, not merely dimmed")

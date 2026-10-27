@@ -1283,6 +1283,42 @@ public final class ResultsModel: ObservableObject {
     /// FIELD, not on whichever of its two meshes is on screen — so those entries
     /// mean the same thing from either tab, and neither is disabled by the other.
     public var selectedVariantIndex: Int { selected?.variantIndex ?? 0 }
+    // MARK: - ★ the Results redesign (his mockup, approved 2026-10-27)
+
+    /// The solid variant behind a tab (nil for a latticed object: its geometry is never on hand for a side-by-side).
+    func variant(for tab: ResultVariantVM) -> OptimizeVariant? {
+        tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) ? accepted[tab.variantIndex] : nil
+    }
+
+    /// The core volume fraction a tab's variant was asked for — what a strengthen version's `volume_fraction` names.
+    public func requestedVolumeFraction(of tab: ResultVariantVM) -> Double? { variant(for: tab)?.requestedVolumeFraction }
+
+    private var compareMeshCache: [Int: ViewerMesh] = [:]
+    /// Compare's viewer mesh for a tab (cached per tab; the same smooth-shaded surface the main viewer draws).
+    public func compareMesh(_ tab: ResultVariantVM) -> ViewerMesh? {
+        if tab.index == selectedIndex { return selectedMesh }
+        if let m = compareMeshCache[tab.index] { return m }
+        guard let v = variant(for: tab), !v.meshVertices.isEmpty else { return nil }
+        let m = ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [], smoothShaded: true)
+        compareMeshCache[tab.index] = m
+        return m
+    }
+
+    /// Compare's stress colours for a tab, on the SAME scale as the main viewer (`stressScaleMaxMPa`); nil without a field.
+    public func compareStressTints(_ tab: ResultVariantVM) -> [SIMD4<Float>]? {
+        guard let v = variant(for: tab), let mesh = compareMesh(tab) else { return nil }
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+        return f.isEmpty ? nil : stressTints(for: mesh, field: f)
+    }
+
+    /// A tab's own scenario results: its strengthen version's (each version is certified per scenario), else the run's.
+    public func scenarios(for tab: ResultVariantVM?) -> [ScenarioResult] {
+        if let tab, let s = reportBlocks?.strengthen, let vf = requestedVolumeFraction(of: tab),
+           let v = s.versions.first(where: { $0.status != "unreachable" && abs(StrengthenText.lineVersion(of: $0, in: s).volumeFraction - vf) < 1e-6 }),
+           !v.scenarios.isEmpty { return v.scenarios }
+        return scenarioResults
+    }
+
     public func isBridged(_ tab: ResultVariantVM) -> Bool { tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) && reportBlocks.map { StrengthenText.isBridged(printedFraction: accepted[tab.variantIndex].printedFraction, in: $0) } == true }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — bodies.bridges > 0
 
     // MARK: - the latticed object's geometry (task 2026-08-07-lattice-variants-on-screen)
