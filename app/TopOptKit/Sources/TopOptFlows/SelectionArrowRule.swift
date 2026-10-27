@@ -28,6 +28,14 @@ public enum SelectionArrowRule {
     }
 
     /// One piece's clearance arrows (and mm chip): its group must be selected, and when a piece is selected, only that piece.
+    /// ★ THE APP-WIDE CHIP RULE (his iPad 2026-10-27: "only show the chips upon tapping the 3d object or selecting them in
+    /// the selections modal. Any other time, do NOT show their chips"): a primitive's chips — its drag knobs, its value
+    /// pills, its move knob — draw ONLY for the one piece he picked (tapped in 3D or picked on its row). A selected group
+    /// alone shows none.
+    public static func chipsShow(group: UUID, piece: Int, selectedGroup: UUID?, selectedPiece: Int?) -> Bool {
+        group == selectedGroup && selectedPiece == piece
+    }
+
     public static func pieceShows(group: UUID, piece: Int, selectedGroup: UUID?, selectedPiece: Int?) -> Bool {
         guard groupShows(group, selectedGroup: selectedGroup) else { return false }
         return selectedPiece == nil || selectedPiece == piece

@@ -213,6 +213,19 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// off. Snapshots written before v2 decode with this nil; the pre-v2 `.clearance`
     /// ROLE is migrated into this map by the decoder.
     private var keepClear: [UUID: KeepClearAffix]? = nil
+    /// ★ "Auto keep clear", per group (his iPad 2026-10-27): every fastener bore in the group gets its keep-clear cylinder
+    /// by itself. Absent = the old rule (on for an Anchor, off otherwise). Optional key: old projects decode unchanged.
+    private var autoKeepClear: [UUID: Bool]? = nil
+
+    /// Whether the group's bores clear by themselves: his switch, else on for an Anchor.
+    public func autoKeepClearIsOn(_ id: UUID) -> Bool { autoKeepClear?[id] ?? kind(for: id).isAnchor }
+    /// Whether he set the switch himself (vs the Anchor default).
+    public func autoKeepClearIsSet(_ id: UUID) -> Bool { autoKeepClear?[id] != nil }
+    public mutating func setAutoKeepClear(_ id: UUID, _ on: Bool) {
+        var m = autoKeepClear ?? [:]
+        m[id] = on
+        autoKeepClear = m
+    }
 
     /// Per-GROUP clearance SYNC flag (device round 4, item 3 — corrects round-3's CROSS-group
     /// membership to WITHIN-group scope). A group's several keep-clear bores share margin/axial
@@ -600,6 +613,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
             let pruned = map.filter { live.contains($0.key) }
             keepClear = pruned.isEmpty ? nil : pruned
         }
+        if let map = autoKeepClear {
+            let pruned = map.filter { live.contains($0.key) }
+            autoKeepClear = pruned.isEmpty ? nil : pruned
+        }
         if let map = faceProtect {
             let pruned = map.filter { live.contains($0.key) }
             faceProtect = pruned.isEmpty ? nil : pruned
@@ -901,6 +918,7 @@ extension ForceModel {
         case gravityBaseModel       // purely-visual arrow base (gravity round 2, optional)
         case scenarios              // load scenarios (2026-10-26, optional)
         case safetyMargin           // the safety margin (2026-10-26, optional; nil = 150 %)
+        case autoKeepClear          // "Auto keep clear" per group (2026-10-27, optional; nil = on for anchors)
     }
 
     public init(from decoder: Decoder) throws {
@@ -949,6 +967,7 @@ extension ForceModel {
         gravityBaseModel = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravityBaseModel)
         scenarios = try c.decodeIfPresent(LoadScenarioSet.self, forKey: .scenarios)
         safetyMargin = try c.decodeIfPresent(Double.self, forKey: .safetyMargin)
+        autoKeepClear = try c.decodeIfPresent([UUID: Bool].self, forKey: .autoKeepClear)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -962,6 +981,7 @@ extension ForceModel {
         try c.encodeIfPresent(syncExcluded, forKey: .syncExcluded)
         try c.encodeIfPresent(clearanceBoreOverrides, forKey: .clearanceBoreOverrides)
         try c.encodeIfPresent(keepClear, forKey: .keepClear)
+        try c.encodeIfPresent(autoKeepClear, forKey: .autoKeepClear)
         // Handoff 124 — only emit protection state when it deviates from the default,
         // so a protection-free project's snapshot is byte-identical to a pre-124 one.
         try c.encodeIfPresent(faceProtect, forKey: .faceProtect)

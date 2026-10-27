@@ -211,6 +211,11 @@ public struct WorkspacePlaceholder: View {
     @State private var safetyInfoOpen = false
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
+    /// The piece whose transform gizmo is up (it counts as picked: its chips show with it).
+    private var gizmoPieceKey: Int? {
+        guard let t = gizmoTarget, t.group == selection.activeGroupID else { return nil }
+        return ProjectModel.manualFaceKey(t.id)
+    }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
     @State private var regionsOpen = false
@@ -876,6 +881,8 @@ public struct WorkspacePlaceholder: View {
                               // THE PIECE. Its pieces are independent selections —
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
+                              // ★ app-wide chip rule (10-27): a tap on a primitive's own volume picks it (its chips show)
+                              if stage == .topology, let pt, pickManualPrimitive(at: pt) { return true }
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           },
                           // ★ Only while drilled in — the PRESENCE of this closure is
@@ -2729,6 +2736,36 @@ public struct WorkspacePlaceholder: View {
     /// misses the gizmo's (fat) pick zones — the SAME shape the gizmo grabs with (`TransformGizmo.pick`),
     /// so a clearance knob is only seated where it won't sit on the gizmo OR steal its touches. Nil
     /// when no manual-primitive gizmo is up.
+    /// ★ App-wide chip rule (his iPad 10-27): a tap that lands inside a user-placed primitive's own volume picks that
+    /// primitive — its group selected, its row picked, its chips shown. The active group's primitives first, then any
+    /// group's; the smallest volume wins where two overlap. Returns false (the tap selects faces as before) on a miss.
+    private func pickManualPrimitive(at p: SIMD3<Float>) -> Bool {
+        let order = selection.groups.sorted { a, _ in a.id == selection.activeGroupID }
+        var best: (group: UUID, id: UUID, size: Double)?
+        for g in order where project.groupView.canEdit(g.id) && !project.groupView.isHidden(g.id) {
+            for mp in project.manualPrimitives(in: g.id) {
+                let d = SIMD3<Double>(p) - mp.center
+                let n = simd_length(mp.axis) > 1e-9 ? simd_normalize(mp.axis) : SIMD3<Double>(0, 0, 1)
+                let t = simd_dot(d, n), radial = simd_length(d - n * t)
+                let inside: Bool, size: Double
+                if mp.kind == .bolt {
+                    let r = mp.radiusMM + mp.resolvedMarginMM, h = mp.halfLengthMM + mp.resolvedAxialMM
+                    inside = radial <= r + 0.5 && abs(t) <= h + 0.5; size = r * r * h
+                } else {
+                    let half = (mp.halfUMM * mp.halfUMM + mp.halfWMM * mp.halfWMM).squareRoot()
+                    inside = abs(t) <= mp.resolvedDepthMM + 0.5 && radial <= half; size = mp.halfUMM * mp.halfWMM * mp.resolvedDepthMM
+                }
+                if inside, best.map({ size < $0.size }) ?? true { best = (g.id, mp.id, size) }
+            }
+            if best != nil, g.id == selection.activeGroupID { break }
+        }
+        guard let b = best else { return false }
+        if selection.activeGroupID != b.group { selection.setActive(b.group) }
+        selectedPiece = SelectionArrowRule.PieceRef(group: b.group, key: ProjectModel.manualFaceKey(b.id))
+        chipsRevealedGroup = b.group
+        return true
+    }
+
     private func gizmoClearInfo(_ proj: CameraProjection) -> (centre: CGPoint, isClear: (CGPoint) -> Bool)? {
         guard force.phase == .edit, let gid = selection.activeGroupID else { return nil }
         for mp in project.manualPrimitives(in: gid)
@@ -2807,6 +2844,24 @@ public struct WorkspacePlaceholder: View {
             // gizmo's own pick shape says is clear — using the real arms/gaps, not a circle. If the
             // whole boundary is inside the gizmo it falls back to the tight radial ring.
             let gizmo = gizmoClearInfo(proj)
+
+            // ── RIGID: the picked primitive's move knob, and the gizmo's COPY / dismiss cluster (his iPad 10-27: the
+            // Copy button sat under other chips — every chip now has to clear it, with the app-wide gap). ──
+            if let gid = selection.activeGroupID {
+                for mp in project.manualPrimitives(in: gid) {
+                    guard let c = proj.project(settledWorld(SIMD3<Float>(mp.center))) else { continue }
+                    if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+                        elements.append(KeepOutElement(id: "gizmo.cluster", anchor: CGPoint(x: c.x, y: c.y - Self.gizmoBoxSize / 2 - 4),
+                                                       bounds: CGSize(width: 96, height: 44), touch: CGSize(width: 96, height: 44),
+                                                       priority: .gizmo, rigid: true))
+                    } else if SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id),
+                                                           selectedGroup: gid, selectedPiece: selectedPieceKey) {
+                        elements.append(KeepOutElement(id: "gizmo.moveKnob.\(mp.id.uuidString)", anchor: c,
+                                                       bounds: CGSize(width: 64, height: 64), touch: CGSize(width: 64, height: 64),
+                                                       priority: .gizmo, rigid: true))
+                    }
+                }
+            }
 
             // ── MOVABLE (handle): each clearance knob, shape-aware around the gizmo. ──
             for item in clearanceHandleItems {
@@ -6936,8 +6991,8 @@ public struct WorkspacePlaceholder: View {
         var items: [ClearanceHandleItem] = []
         for entry in project.groupView.showing(project.clearanceHandles(), group: { $0.groupID }) {   // Flexible (PR #362) H49b: a hidden group's clearance knobs + value chips are not drawn, so they stop catching taps (GroupEyeHides)
             // ★ his iPad 10-26 (2)(3): only the selected group's, and only the selected piece's when one is picked
-            guard SelectionArrowRule.pieceShows(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
-                                                selectedPiece: selectedPieceKey),
+            guard SelectionArrowRule.chipsShow(group: entry.groupID, piece: entry.faceID, selectedGroup: selection.activeGroupID,
+                                               selectedPiece: gizmoPieceKey ?? selectedPieceKey),   // ★ app-wide chip rule (10-27)
                   SelectionArrowRule.pieceDrawn(group: entry.groupID, piece: entry.faceID, hidden: hiddenPieces),
                   force.scenarioDraw(entry.groupID, applies: scenariosApply) == .shown else { continue }   // ★ no knobs off the open scenario
             for h in entry.handles {
@@ -9036,7 +9091,9 @@ public struct WorkspacePlaceholder: View {
                 ForEach(project.manualPrimitives(in: gid)) { mp in
                     if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
                         gizmoHandles(proj, group: gid, mp: mp)
-                    } else if let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
+                    } else if SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id),
+                                                           selectedGroup: selection.activeGroupID, selectedPiece: selectedPieceKey),
+                              let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {   // ★ app-wide chip rule (10-27)
                         // Round-2 T6: the move knob is the ONLY way to grab a
                         // primitive — enlarged (26 → 40 pt glass, ~64 pt hit
                         // target with the knob's −12 pt inset) so it is easy to hit.
@@ -13091,6 +13148,7 @@ extension WorkspacePlaceholder {
     /// its faces, each with an (i).
     private func topologyGroupRows(_ g: SelectionGroup) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
+            autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
             groupRow(g, inList: true)
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {
@@ -13106,6 +13164,26 @@ extension WorkspacePlaceholder {
             .padding(.horizontal, DS.Space.l)
         }
         .padding(.bottom, DS.Space.s)
+    }
+
+    /// ★ "Auto keep clear" (his iPad 2026-10-27), one line per group: every bolt hole in the group gets its keep-clear
+    /// cylinder by itself. On by default for an Anchor. Turning it on also brings back any hole whose cylinder was deleted.
+    @ViewBuilder private func autoKeepClearRow(_ g: SelectionGroup) -> some View {
+        let on = force.autoKeepClearIsOn(g.id)
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: "nosign").font(.system(size: 12, weight: .bold)).foregroundStyle(Self.clearanceTint)
+            Text("Auto keep clear").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+            InfoPopoverButton(text: "Every bolt hole in this group gets a keep-clear cylinder by itself, so nothing grows into it. "
+                                  + "On for anchors to start. Turning it on also brings back any hole whose cylinder was deleted.",
+                              id: "autoKeepClearInfo-\(g.id.uuidString)", label: "About Auto keep clear")
+            Spacer(minLength: DS.Space.s)
+            GlassToggle(isOn: on) { project.setAutoKeepClear(g, on: !on) }
+                .disabled(!project.groupView.canEdit(g.id))
+                .accessibilityLabel(on ? "Auto keep clear on" : "Auto keep clear off")
+                .accessibilityIdentifier("auto-keep-clear-\(g.id.uuidString)")
+                .background(CornerPairStyle.publish("autoKeepClear-\(g.id.uuidString)"))
+        }
+        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.m)
     }
 
     private func confirmTopologyTrash() {
