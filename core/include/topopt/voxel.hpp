@@ -162,15 +162,38 @@ struct DesignBox {
 // 2026-10-25 03:58; item 7's primitive form, model space, mm). A box is its min/max;
 // a cylinder is the one inscribed in that box along `axis` (0 = X, 1 = Y, 2 = Z): its
 // cross-section must be square (the app's convention).
+//
+// The ORIENTED form (ruling 2026-10-26 23:48, so tilted holes and slanted faces are
+// kept exactly too): `axes` is a right-handed orthonormal frame about `center`. A box
+// is center + s*axes[0] + t*axes[1] + q*axes[2] with |s|, |t|, |q| <= half.x, half.y,
+// half.z; a cylinder runs along axes[2], radius half.x, |q| <= half.z. `min`/`max`
+// then hold its bounding box (a fast reject only) and `axis` is unused.
 struct KeepRegion {
   bool cylinder = false;
   Vec3 min{0.0, 0.0, 0.0};
   Vec3 max{0.0, 0.0, 0.0};
   int axis = 2;
+  bool oriented = false;
+  Vec3 center{0.0, 0.0, 0.0};
+  Vec3 axes[3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+  Vec3 half{0.0, 0.0, 0.0};
   bool contains(const Vec3& p) const {
     if (p.x < min.x || p.x > max.x || p.y < min.y || p.y > max.y || p.z < min.z ||
         p.z > max.z)
       return false;
+    if (oriented) {
+      const double dx = p.x - center.x, dy = p.y - center.y, dz = p.z - center.z;
+      const Vec3& w = axes[2];
+      const double q = dx * w.x + dy * w.y + dz * w.z;
+      if (q < -half.z || q > half.z) return false;
+      if (cylinder) {
+        const double rx = dx - q * w.x, ry = dy - q * w.y, rz = dz - q * w.z;
+        return rx * rx + ry * ry + rz * rz <= half.x * half.x;
+      }
+      const double s = dx * axes[0].x + dy * axes[0].y + dz * axes[0].z;
+      const double t = dx * axes[1].x + dy * axes[1].y + dz * axes[1].z;
+      return s >= -half.x && s <= half.x && t >= -half.y && t <= half.y;
+    }
     if (!cylinder) return true;
     const double c[3] = {0.5 * (min.x + max.x), 0.5 * (min.y + max.y), 0.5 * (min.z + max.z)};
     const double q[3] = {p.x, p.y, p.z};
