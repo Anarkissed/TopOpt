@@ -54,3 +54,9 @@ Same strengthen job (q40, design box, 206 keep regions). 3 versions written and 
 V3's loose pieces (pieces.py): each ≈ 14.7 × 14.7 × 30 mm, centred at (±51.6, 43.1 / 66.0, 121), i.e. 16.2 mm out from each cup's
 axis at 45°, spanning exactly z 106–136 (between the Protected rings). report.json carries no `bodies` / `fragile_joints` for
 any version, so nothing flagged them. The bar's "one piece per version" FAILS on V3; holes, faces and rings pass everywhere.
+
+**CORRECTION (TO-core's diagnosis 05:43, re-checked here with shells.py — signed volume per shell):** V3 is ONE body
+(+226,034 mm³) with 4 SEALED internal voids (−3,020 / −3,020 / −3,021 / −3,021 mm³), not 4 loose pieces. V1 and V2: one body,
+no voids. pieces.py counted shells, not bodies. So every version is one piece; the bar is MET. The voids are the cups' own CAD
+air at 45° (z 106–136), sealed by V3's growth just outside the Ø32.5 bore's keep cylinder (r 19.25) — outside every Protect reach.
+Open question for him: may strengthen seal a CAD air pocket into an enclosed void?
