@@ -210,14 +210,24 @@ public struct ScenarioResult: Equatable, Sendable {
     public let margin: Double?
     public let governs: Bool
     public let unheld: Bool
+    /// ★ Results redesign: the scenario's own worst point (report `peak_mpa`, `peak_mm`) — marked on the model when he
+    /// picks the scenario. nil on an older report.
+    public var peakMPa: Double? = nil
+    public var peakMM: SIMD3<Double>? = nil
 
     public static func parse(_ report: [String: Any]) -> [ScenarioResult] {
-        (report["scenarios"] as? [[String: Any]] ?? []).map {
-            ScenarioResult(name: $0["name"] as? String ?? "",
-                           margin: ($0["margin"] as? NSNumber)?.doubleValue,
-                           governs: $0["governs"] as? Bool ?? false,
-                           unheld: $0["unheld"] as? Bool ?? false)
-        }
+        (report["scenarios"] as? [[String: Any]] ?? []).map(one)
+    }
+
+    /// One `scenarios[]` entry (the run's, or a strengthen version's).
+    static func one(_ o: [String: Any]) -> ScenarioResult {
+        let p = (o["peak_mm"] as? [NSNumber])?.map(\.doubleValue)
+        return ScenarioResult(name: o["name"] as? String ?? "",
+                              margin: (o["margin"] as? NSNumber)?.doubleValue,
+                              governs: o["governs"] as? Bool ?? false,
+                              unheld: o["unheld"] as? Bool ?? false,
+                              peakMPa: (o["peak_mpa"] as? NSNumber)?.doubleValue,
+                              peakMM: p.flatMap { $0.count == 3 ? SIMD3($0[0], $0[1], $0[2]) : nil })
     }
 
     /// "Worst case: <name> · N×" for the governing scenario, or nil (fewer than two scenarios, or none governs).

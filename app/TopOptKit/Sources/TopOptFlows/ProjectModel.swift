@@ -714,6 +714,8 @@ public final class ProjectModel: ObservableObject {
             for f in g.faces {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
+                // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
+                if bore, !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh) { continue }
                 // The "−" on an auto primitive's row DELETES it: a suppressed face's
                 // keep-out is dropped from the run (handoff group-editing, BAR B3). The
                 // face stays in the group (it may still anchor); only its clearance goes.
@@ -754,21 +756,37 @@ public final class ProjectModel: ObservableObject {
     /// slab reached 24.15 mm, and the optimizer emptied up to 25 voxels of that last 4.15 mm.
     public func faceProtectionSpecs()
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
-            regionIDs: [RegionID], regionDepthsMM: [Double]) {
+            regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]) {
         faceProtectionSpecs(emission: latticeJobRegions())
+    }
+
+    /// ★ EXACT PROTECT (ruling 2026-10-26 23:44): the protected faces' keep regions (ProtectKeepRegions), each at the
+    /// SAME depth its protection freezes. The slab (and an open hole's end) reaches 1.5 voxels over the air past its face
+    /// (the run's grid: the part's longest side over `resolution`), never less than 1 mm.
+    public func protectKeepRegions(_ protections: (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
+                                                   regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]),
+                                   resolution: Int, growth: Bool = false) -> [KeepRegionSpec] {
+        guard let mesh = viewerMesh, !mesh.faceGeometry.isEmpty, !protections.viewerFaceIDs.isEmpty else { return [] }
+        let faces = zip(protections.viewerFaceIDs, protections.depthsMM).map { ProtectKeepRegions.Face(id: $0.0, depthMM: $0.1) }
+        let e = mesh.bounds.max - mesh.bounds.min
+        let voxel = Double(Swift.max(e.x, e.y, e.z)) / Double(Swift.max(resolution, 1))
+        // TO-core 2026-10-27: at least one voxel (plus a little) out past the surface, into the air — but FLUSH on a growth
+        // run, where that band may hold grown material the export must keep (the face keeps ≤ ½ voxel of bump there)
+        return ProtectKeepRegions.regions(faces, in: mesh, outwardMM: growth ? 0 : Swift.max(1.0, 1.5 * voxel))
     }
 
     /// The same, reading the given emission — the one the job's lattice regions come from.
     public func faceProtectionSpecs(emission: LatticeRegionEmission.Result)
         -> (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
-            regionIDs: [RegionID], regionDepthsMM: [Double]) {
+            regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]) {
         guard viewerMesh != nil else {
-            return ([], force.faceProtectDepthMM, [], [], [])
+            return ([], force.faceProtectDepthMM, [], [], [], [])
         }
         var ids: [Int] = []
         var depths: [Double] = []
         var regionIDs: [RegionID] = []
         var regionDepths: [Double] = []
+        var viewerFaces: [FaceID] = []   // aligned with `ids`: the face as the viewer mesh knows it (exact Protect)
         var seen = Set<FaceID>()
         var seenRegions = Set<RegionID>()
         for g in selection.groups where force.isProtected(g.id) {
@@ -792,6 +810,7 @@ public final class ProjectModel: ObservableObject {
                     : force.faceProtectDepthMM)
                 ids.append(run)
                 depths.append(d)
+                viewerFaces.append(f)
             }
             // ★ EACH REGION CARRIES ITS OWN DEPTH — which is what makes a grid
             // split a hand-authored grading mechanism (PR 331 §6): ten sectors
@@ -836,7 +855,7 @@ public final class ProjectModel: ObservableObject {
                 regionDepths.append(d)
             }
         }
-        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths)
+        return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths, viewerFaces)
     }
 
     /// The lattice region depth for `group`, in mm — the ONE number, read through
@@ -2206,6 +2225,8 @@ public final class ProjectModel: ObservableObject {
             for f in g.faces {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
+                // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
+                if bore, !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh) { continue }
                 if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
@@ -2517,7 +2538,9 @@ public final class ProjectModel: ObservableObject {
         guard let mesh = viewerMesh, keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
         return g.faces.filter { f in
-            (FaceTopology.isFastenerBore(f, in: mesh) || explicit)
+            let bore = FaceTopology.isFastenerBore(f, in: mesh)
+            return (bore || explicit)
+                && !(bore && !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh))   // one row per split hole
                 && !force.isClearanceFaceSuppressed(f)
                 && mesh.faceGeometry(f) != nil
         }
@@ -3063,9 +3086,11 @@ public final class ProjectModel: ObservableObject {
     /// value type the copy shares NO storage — editing it never touches the original (G6).
     /// Arms undo + refreshes the sidecar. Returns the new id (nil if the source is gone).
     @discardableResult
-    public func copyManualPrimitive(id: UUID, in group: UUID) -> UUID? {
+    /// `nudge: false` (Copy mode, his iPad 2026-10-27): the copy stays exactly where the primitive is, and the primitive
+    /// itself is the one that moves on.
+    public func copyManualPrimitive(id: UUID, in group: UUID, nudge: Bool = true) -> UUID? {
         guard let src = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return nil }
-        let copy = ManualPrimitive(id: UUID(), kind: src.kind, center: src.center + copyOffset(for: src),
+        let copy = ManualPrimitive(id: UUID(), kind: src.kind, center: src.center + (nudge ? copyOffset(for: src) : .zero),
                                    axis: src.axis, radiusMM: src.radiusMM, halfLengthMM: src.halfLengthMM,
                                    halfUMM: src.halfUMM, halfWMM: src.halfWMM, override: src.override)
         let newID = force.addManualPrimitive(copy, to: group)

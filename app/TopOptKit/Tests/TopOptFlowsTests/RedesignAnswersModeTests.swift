@@ -67,11 +67,11 @@ final class RedesignAnswersModeTests: XCTestCase {
         XCTAssertEqual(TopologyPage.hiddenSegments(hasResults: false), [.secondary, .tertiary])
         XCTAssertEqual(StageCapsule.drawnPages(hasTertiary: true, hidden: TopologyPage.hiddenSegments(hasResults: false)),
                        [.primary], "Results AND Smooth hidden")
-        // results (a run landed, or a project reopened with them): all three
-        XCTAssertEqual(TopologyPage.shown(hasResults: true), [.setup, .results, .smooth])
-        XCTAssertEqual(TopologyPage.hiddenSegments(hasResults: true), [])
+        // results (a run landed, or a project reopened with them): Setup and Results — ★ Smooth is gone (his note 2026-10-27)
+        XCTAssertEqual(TopologyPage.shown(hasResults: true), [.setup, .results])
+        XCTAssertEqual(TopologyPage.hiddenSegments(hasResults: true), [.tertiary])
         XCTAssertEqual(StageCapsule.drawnPages(hasTertiary: true, hidden: TopologyPage.hiddenSegments(hasResults: true)),
-                       [.primary, .secondary, .tertiary], "Results AND Smooth shown")
+                       [.primary, .secondary], "Results shown, Smooth never")
         // the lattice stage's two-page capsule hides nothing
         XCTAssertEqual(StageCapsule.drawnPages(hasTertiary: false, hidden: []), [.primary, .secondary])
 

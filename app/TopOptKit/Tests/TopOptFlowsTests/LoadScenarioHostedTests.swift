@@ -305,8 +305,13 @@ final class LoadScenarioHostedTests: XCTestCase {
                      size: size)
         pump(2)
         XCTAssertEqual(rm.scenarioResults.count, 2)
-        let f = try XCTUnwrap(h.frames.all["scenarioResults"], "★ the Worst case line is not on the Results screen")
+        // ★ Results redesign (2026-10-27): the worst case is the Scenario menu's first choice and a line in Checks
+        let f = try XCTUnwrap(h.frames.all["resultsScenario"], "★ the Scenario menu is not on the Results screen")
         XCTAssertTrue(CGRect(origin: .zero, size: h.size).contains(f), "inside the window: \(f)")
+        XCTAssertNotNil(h.frames.all["resultsChecks"])
+        let checks = ResultsChecks.checks(tab: rm.selected, margin: 1.31, required: 1, safetyMargin: nil,
+                                          scenarios: rm.scenarios(for: rm.selected), thinJoints: 0, bridged: false)
+        XCTAssertTrue(checks.contains { $0.detail == "Worst case: Left plate off" }, "\(checks)")
     }
 }
 #endif

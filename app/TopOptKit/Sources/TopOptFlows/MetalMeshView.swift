@@ -5614,6 +5614,9 @@ struct MeshViewInputs {
     /// ★ his iPad 10-26 (5): a tap that hit no face, AFTER `onMiss`: the workspace clears the selection app-wide. A tap
     /// recognizer, so an orbit drag never reaches it.
     var onEmptyTap: (() -> Void)? = nil
+    /// ★ Results' tap-to-explore key (his note 2026-10-27): a tap reports the SURFACE point under the finger (nil = empty
+    /// space) and nothing else — an optimized result has no faces to pick.
+    var onSurfacePoint: ((SIMD3<Float>?) -> Void)? = nil
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
     /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
@@ -6231,6 +6234,7 @@ extension MetalMeshView {
         private var onLatticeProbeExit: (() -> Void)?
         private var onMiss: (() -> Void)?
         private var onEmptyTap: (() -> Void)?
+        private var onSurfacePoint: ((SIMD3<Float>?) -> Void)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
         private var onRedo: (() -> Void)?
@@ -6277,6 +6281,7 @@ extension MetalMeshView {
             renderer.onLatticeCellsBaked = inputs.onLatticeCellsBaked
             onMiss = inputs.onMiss
             onEmptyTap = inputs.onEmptyTap
+            onSurfacePoint = inputs.onSurfacePoint
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
@@ -6897,6 +6902,7 @@ extension MetalMeshView {
                 deliver(faceID, surfaceHit?.point)
                 return
             }
+            if let onSurfacePoint { onSurfacePoint(surfaceHit?.point); return }   // ★ Results: read the stress there
             if let faceID {
                 // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
                 // that can tell two pieces of one face apart.
@@ -7246,6 +7252,17 @@ public struct DetentPulse: Equatable, Sendable {
 #endif
 
 extension MetalMeshView {
+    /// ★ Results' tap-to-explore key: report the tapped SURFACE point (model frame; nil = empty space) instead of picking.
+    public func onSurfacePoint(_ action: @escaping (SIMD3<Float>?) -> Void) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onSurfacePoint = action
+        return copy
+#else
+        self
+#endif
+    }
+
     /// ★ his iPad 10-26 (5): run `action` on a tap that hit empty space (after `onMiss`).
     public func onEmptyTap(_ action: @escaping () -> Void) -> MetalMeshView {
 #if canImport(MetalKit)

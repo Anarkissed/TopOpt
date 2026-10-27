@@ -1070,6 +1070,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             }
         }
         job["loads"] = loads
+        // ★ EXACT PROTECT (ruling 2026-10-26 23:44): core's keep_regions, at the job's top level. Empty ⇒ omitted.
+        if !request.keepRegions.isEmpty { job["keep_regions"] = request.keepRegions.map(\.json) }
         return try JSONSerialization.data(withJSONObject: job)
     }
 

@@ -166,6 +166,8 @@ public struct WorkspacePlaceholder: View {
     /// stage opens on Setup — and no run opens it: a run that lands puts a dot on the capsule's
     /// Results segment and a message with Open Results (`topoNotice`). Only he opens it.
     @State private var viewOriginal = true
+    /// ★ Results' Full screen (his note 2026-10-27): the capsule over Results steps aside too.
+    @State private var resultsFullScreen = false
     /// B3: the Results dot + message (TopologyResultsNotice — it can never open a page).
     @State private var topoNotice = TopologyResultsNotice()
     /// B3: the corner pair's Setup panel is open.
@@ -398,6 +400,9 @@ public struct WorkspacePlaceholder: View {
     // removed the crosshair toggle, not the snapping); `gizmoSnapLabels` surfaces what the last
     // drag frame snapped to.
     @State private var gizmoTarget: GizmoTarget?
+    /// ★ his iPad 2026-10-27 (note 4): Copy is a MODE on the primitive it was pressed for — it stays lit, and every move
+    /// of that primitive while it is lit leaves a copy where it started. Off when tapped again or another primitive is edited.
+    @State private var gizmoCopyFor: UUID?
     @State private var gizmoDrag: PrimitiveGizmo.Drag?
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
@@ -1635,7 +1640,12 @@ public struct WorkspacePlaceholder: View {
                               // page can be reached, and each blocked one carries its
                               // own reason on the disabled control.
                               smoothEntry: { smoothEntry($0) },
-                              latticeEntry: { latticeEntry($0) })
+                              latticeEntry: { latticeEntry($0) },
+                              // ★ Results redesign (2026-10-27): undo / redo at the top left, and each scenario's marks
+                              undo: { project.performUndo() }, redo: { project.performRedo() },
+                              canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
+                              scenarioMarks: resultsScenarioMarks,
+                              onFullScreen: { resultsFullScreen = $0 })
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -1646,7 +1656,7 @@ public struct WorkspacePlaceholder: View {
             if !fullScreenPageUp, seeResultsShown { seeResultsChip }
             // ★ B3: on Topology the capsule rides over its Results page too (the way back to Setup, on to Smooth),
             // and a landed run says so here — it never opens Results by itself.
-            if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp { topologyCapsuleOverlay }
+            if stage == .topology, !fullScreenPageUp, viewerMesh != nil, topologyResultsPageUp, !resultsFullScreen { topologyCapsuleOverlay }
             if stage == .topology, !editFaces.isEditing, !fullScreenPageUp, let msg = topoNotice.message { topologyResultsMessage(msg) }
             })   // Flexible (PR #362) H58
         }
@@ -2606,6 +2616,26 @@ public struct WorkspacePlaceholder: View {
     /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
     /// grid/variant, so a centroid here lines up with the derived stress field there.
     private var loadFlowSeeds: [SIMD3<Float>] { loadFlowPairs.map(\.seed) }
+
+    /// ★ Results redesign (2026-10-27): each load scenario's loads and ON anchors, by name, for the Scenario menu.
+    private var resultsScenarioMarks: [String: ResultsScenarioMarks] {
+        guard force.hasScenarios, let mesh = viewerMesh else { return [:] }
+        var out: [String: ResultsScenarioMarks] = [:]
+        for s in force.scenarioList {
+            var loads: [ResultsScenarioMarks.Load] = [], anchors: [SIMD3<Float>] = []
+            for g in selection.groups where force.group(g.id, isIn: s.id) {
+                if force.kind(for: g.id).isLoad, let c = groupCentroidModel(g) {
+                    var d = SIMD3<Float>.zero
+                    if case .vector(let f)? = project.loadDirection(for: g.id), simd_length(f) > 1e-6 { d = simd_normalize(f) }
+                    loads.append(.init(point: c, direction: d))
+                } else if force.kind(for: g.id).isAnchor, force.anchorIsOn(g.id, in: s.id) {
+                    for f in groupTintedFaces(g) { if let c = mesh.faceCentroid(f) { anchors.append(c) } }
+                }
+            }
+            out[s.name] = ResultsScenarioMarks(loads: loads, anchors: anchors)
+        }
+        return out
+    }
 
     /// The per-load unit force directions d̂ (model frame), INDEX-ALIGNED with
     /// `loadFlowSeeds` — the `.anchor` flux-streamline direction for each load (M7.viz.5).
@@ -5967,7 +5997,8 @@ public struct WorkspacePlaceholder: View {
     private var bottomRightControls: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             Spacer()
-            ForEach(BottomChipOrder.sorted(visibleSettingsChips, widths: settingsChipWidths), id: \.self) { id in
+            // ★ CAD surfaces hidden (ruling 2026-10-26 23:44 + his note 2026-10-27: "useless now"): exact Protect replaces it
+            ForEach(BottomChipOrder.sorted(visibleSettingsChips.filter { $0 != .cadFaces }, widths: settingsChipWidths), id: \.self) { id in
                 settingsChipRow(id)
                     .latticeBandChipKeepOut()   // ★ no band chip under a settings chip
             }
@@ -9148,7 +9179,10 @@ public struct WorkspacePlaceholder: View {
                                                      rotation: gizmoRotation * orient),
                        let ray = modelRay(proj, at: v.location) {
                         gizmoActiveId = gizmoActiveIdValue(hit)
-                        gizmoDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit, orientation: orient),
+                        let handle = gizmoHandle(for: hit, orientation: orient)
+                        // ★ note 4: Copy lit → this move leaves a copy where the primitive started
+                        if gizmoCopyFor == mp.id, !handle.isRotate { project.copyManualPrimitive(id: mp.id, in: gid, nudge: false) }
+                        gizmoDrag = PrimitiveGizmo.Drag(handle: handle,
                                                         startCenter: mp.center, startAxis: mp.axis,
                                                         grab: ray, viewDir: ray.dir)
                         gizmoRotTickStep = 0
@@ -9296,16 +9330,18 @@ public struct WorkspacePlaceholder: View {
     /// COPY (duplicate, G6), the snap OVERRIDE toggle (the magnet), and dismiss.
     @ViewBuilder private func gizmoActionCluster(group gid: UUID, mp: ManualPrimitive) -> some View {
         HStack(spacing: DS.Space.s) {
+            // ★ his iPad 2026-10-27 (note 4): Copy is a mode, lit until tapped again — each move then leaves a copy behind
+            let copying = gizmoCopyFor == mp.id
             Button {
-                if let new = project.copyManualPrimitive(id: mp.id, in: gid) {
-                    gizmoTarget = GizmoTarget(group: gid, id: new)   // edit the fresh copy
-                }
+                gizmoCopyFor = copying ? nil : mp.id
+                model.toast = copying ? "Copy off" : "Copy on — each move leaves a copy behind"
             } label: {
-                gizmoCircleKnob(active: false, size: 26) {
+                gizmoCircleKnob(active: copying, size: 26) {
                     Image(systemName: "plus.square.on.square").font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
                 }
-            }.buttonStyle(.plain).accessibilityLabel("Copy primitive")
+            }.buttonStyle(.plain).accessibilityLabel(copying ? "Copy on: each move leaves a copy" : "Copy primitive")
+                .accessibilityAddTraits(copying ? .isSelected : [])
 
             // (Round 3 removed the `scope` crosshair toggle here: it read as an aiming/re-centre
             // control and confused the maintainer. Magnetic detents are UNCHANGED — they stay ON
@@ -9928,6 +9964,9 @@ public struct WorkspacePlaceholder: View {
         let tint = force.tint(for: g)
         return VStack(alignment: .trailing, spacing: 5) {
           HStack(alignment: .top, spacing: DS.Space.s) {
+            // ★ his iPad 2026-10-27: in the Selections list the group's line above already shows its swatch and name — never
+            // name it twice; this row is the line's taller lower half (role, Keep clear, Protect, + primitive)
+            if !inList {
             // Tap the swatch to recolor the group — a row of colour swatches.
             Button { recoloringGroup = g.id } label: {
                 RoundedRectangle(cornerRadius: 4).fill(tint.color)
@@ -9950,8 +9989,9 @@ public struct WorkspacePlaceholder: View {
                 }
                 .padding(DS.Space.ml)
             }
+            }
             VStack(alignment: .leading, spacing: 3) {
-                groupNameControl(g)
+                if !inList { groupNameControl(g) }
                 HStack(spacing: DS.Space.s) {
                     Text(force.panelKindLabel(for: g.id))
                         .dsStyle(DS.TypeScale.footnote)
@@ -11378,10 +11418,18 @@ public struct WorkspacePlaceholder: View {
             }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)) : nil
             return SelectionsFolder(id: s.id, header: AnyView(scenarioFolderHeader(s, index: i, open: isOpen)),
-                                    groups: shown ? selection.groups.filter { force.group($0.id, isIn: s.id) } : [],
+                                    groups: shown ? selection.groups.filter { scenarioOwned($0.id) && force.group($0.id, isIn: s.id) } : [],
                                     tail: shown ? tail : nil,
                                     accessory: { scenarioLineSwitch($0, in: s.id) })
         }
+    }
+
+    /// ★ his iPad 2026-10-27 (note 5): a scenario folder holds ONLY its loads and anchors; every other group (keep clear,
+    /// a plain group) is listed once, after the folders.
+    func scenarioOwned(_ id: UUID) -> Bool { let k = force.kind(for: id); return k.isLoad || k.isAnchor }
+    var scenarioLooseGroups: [SelectionGroup] {
+        guard scenariosApply, force.hasScenarios else { return [] }
+        return selection.groups.filter { !scenarioOwned($0.id) }
     }
 
     /// A shared anchor's on/off switch for the OPEN scenario, at the end of its line in the list.
@@ -11772,6 +11820,7 @@ public struct WorkspacePlaceholder: View {
                             on ? Color.clear : DS.Color.strokeSubtle.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("protectAffix-\(g.id.uuidString)"))   // ★ exact Protect: found on his screen (hosted)
             // Task 2026-08-04-protect-freeze-vs-solidity: Protect is a FREEZE and
             // nothing else. The old copy ("preserves this face's own material")
             // read as a promise of SOLIDITY, which it never was — whether the
@@ -12814,7 +12863,12 @@ extension WorkspacePlaceholder {
         case .compute: ComputeLocationControl(compute: compute)
         case .units: unitToggle
         case .minimizePlastic: minimizePlasticChip
-        case .protectSkin: faceProtectDepthChip
+        case .protectSkin:   // ★ exact Protect (ruling 2026-10-26 23:44): the (i) says which faces come out exact
+            HStack(spacing: 0) {
+                faceProtectDepthChip
+                InfoPopoverButton(text: ProtectKeepRegions.info, id: "protectInfo", label: "About Protect")
+                    .background(CornerPairStyle.publish("protectInfo"))
+            }
         case .cadFaces: cadFacesChip
         case .designBox:   // ★ B6: the row's control is its count; the list sits under it
             Text(DesignPrimitivesCopy.count(project.designBox.primitives.count)).dsStyle(DS.TypeScale.footnote)
@@ -12993,7 +13047,7 @@ extension WorkspacePlaceholder {
                            isHidden: { project.groupView.isHidden($0) },
                            toggleEye: { toggleTopologyEye($0) },
                            ask: TopologySelectionsCopy.deleteAsk)
-                .scenarioHooks(folders: scenarioFolders, lineAccessory: { scenarioLineSwitch($0) }, footer: selectionsFooter)   // ★ load scenarios (reviewer 2026-10-26 13:22)
+                .scenarioHooks(folders: scenarioFolders, loose: scenarioLooseGroups, lineAccessory: { scenarioLineSwitch($0) }, footer: selectionsFooter)   // ★ load scenarios (reviewer 2026-10-26 13:22)
                 .openAndResize(isOpen: { openGroups.contains($0) },
                                toggleOpen: { id in if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) } },
                                height: $selectionsHeight)   // ★ his iPad 2026-10-26: open buttons, resizable
@@ -13270,6 +13324,7 @@ extension WorkspacePlaceholder {
 private struct InfoPopoverButton: View {
     let text: String
     let id: String
+    var label = "About this face"
     @State private var shown = false
     var body: some View {
         Button { shown = true } label: {
@@ -13278,7 +13333,7 @@ private struct InfoPopoverButton: View {
                 .frame(width: 44, height: 36).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("About this face")
+        .accessibilityLabel(label)
         .accessibilityIdentifier(id)
         .popover(isPresented: $shown) {
             Text(text).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textPrimary.color)

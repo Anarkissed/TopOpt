@@ -344,9 +344,12 @@ public final class AppModel: ObservableObject {
                           // (task 2026-08-06-arm-projection-and-void-check).
                           // Defaults true on the project, so an untouched project
                           // asks for the armed posture explicitly.
-                          projectCADFaces: project.projectCADFaces)
+                          projectCADFaces: true)   // ★ always (ruling 2026-10-26 23:44): the chip is hidden, a stored OFF can't strand a project
         request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
         request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
+        // ★ exact Protect: always reaching past the face — core 139a5411 (ruling 06:13, fix 2) cuts only the part's own skin
+        // in that band and keeps grown material, so growth runs no longer need flush regions
+        request.keepRegions = project.protectKeepRegions(protections, resolution: request.resolution)
         return request
     }
 
