@@ -46,9 +46,10 @@ public enum ProtectKeepRegions {
 
     /// The Protect (i), in plain words.
     public static var info: String {
+        // ★ the ruling of 2026-10-27 03:57: Protect = the exact CAD AND nothing grows within its reach (his words below)
         orientedAvailable
-            ? "Protected flat faces and round holes come out exactly as drawn in your CAD, at any angle. Curved faces keep the printed-grid surface."
-            : "Protected flat faces and round holes come out exactly as drawn in your CAD when they line up with the part's X, Y or Z. Tilted and curved faces keep the printed-grid surface."
+            ? "Protected faces and holes come out exactly as your CAD, and nothing is added onto them or into them."
+            : "Protected faces and holes come out exactly as your CAD when they line up with the part's X, Y or Z, and nothing is added onto them or into them."
     }
 
     /// A direction is "lined up" when it is within ~0.1° of a world axis.

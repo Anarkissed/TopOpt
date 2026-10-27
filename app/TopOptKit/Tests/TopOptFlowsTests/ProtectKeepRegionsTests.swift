@@ -167,6 +167,9 @@ final class ProtectKeepRegionsTests: XCTestCase {
         XCTAssertEqual(radius, 5, accuracy: 1e-9); XCTAssertEqual(halfLen, 5, accuracy: 1e-4)
         XCTAssertEqual(abs(simd_dot(dir, d)), 1, accuracy: 1e-9)
         XCTAssertFalse(ProtectKeepRegions.info.contains("X, Y or Z"), "★ the (i)'s X/Y/Z line goes")
+        XCTAssertEqual(ProtectKeepRegions.info,
+                       "Protected faces and holes come out exactly as your CAD, and nothing is added onto them or into them.",
+                       "★ the reviewer's sentence, 2026-10-27 03:57")
     }
 
     func testTheJobCarriesKeepRegionsAndOmitsThemWhenEmpty() throws {
