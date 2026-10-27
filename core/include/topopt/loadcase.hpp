@@ -478,6 +478,10 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
 // `reports` (optional) receives one entry per clearance ACTUALLY rasterized, in
 // declaration order. Same rasterizer, same precedence guard, same skips (an
 // out-of-range AUTO face id contributes nothing) as the production build.
+// `keeps` (PROTECT, ruling 2026-10-27 03:57): every solved-grid element whose centre
+// is inside a keep region and outside the part joins the overlay, never skipped (a
+// protected hole stays open whatever the counterfactual); `keep_air_voxels` gets how
+// many it added.
 // THE PRE-FLIGHT REFUSAL, in words a person can act on (task 2026-08-03-
 // preflight-feasibility-and-divergence, bar P2). Call it when
 // `preflight_load_path(domain, options).walk` came back DECIDABLE and NOT
@@ -506,6 +510,7 @@ DesignMask build_clearance_overlay(
     const VoxelGrid& solved_grid,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
     int skip_index,
-    std::vector<ProductionRunSetup::ClearanceReport>* reports);
+    std::vector<ProductionRunSetup::ClearanceReport>* reports,
+    const std::vector<KeepRegion>& keeps = {}, long long* keep_air_voxels = nullptr);
 
 }  // namespace topopt

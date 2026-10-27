@@ -2431,6 +2431,16 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME keep_oriented COMMAND test_keep_oriented)
+
+    # PROTECT on a growth run (ruling 2026-10-27 03:57): nothing grows inside a
+    # protected hole or in front of a protected face; the bore and face stay exact.
+    add_executable(test_keep_strengthen tests/validation/test_keep_strengthen.cpp)
+    target_link_libraries(test_keep_strengthen PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_keep_strengthen PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME keep_strengthen COMMAND test_keep_strengthen)
   endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-

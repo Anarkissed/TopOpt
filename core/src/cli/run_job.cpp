@@ -12941,6 +12941,20 @@ MinimizePlasticResult strengthen_versions(
     out.mg_levels = best.mg_levels;
     out.mg_hierarchy_ever_built = best.mg_hierarchy_ever_built;
     out.growth_ladder = false;
+    // A version accepted on its VERIFIED export margin (strengthen_accept.hpp: the
+    // in-loop margin never refuses it) is that version's design even when its in-loop
+    // margin sat under the gate: it is written and listed with the accepted variants, at
+    // the margin it was accepted on. Without this a version was "verified" with no file
+    // (test_keep_strengthen: in loop 1.32, verified 2.43, target 1.5).
+    MinimizePlasticVariant& shown = best.evaluated.front();
+    if (!shown.accepted) {
+      shown.accepted = true;
+      shown.report.accepted = true;
+      shown.report.margin_effective = vr.verified_margin;
+      shown.report.rejection_reason.clear();
+      best.report.rejected.clear();  // a version's run is one rung
+      best.report.variants = {shown.report};
+    }
     append_rung(out, std::move(best));
   }
   if (out.evaluated.empty()) out.solved_grid = domain.grid;
