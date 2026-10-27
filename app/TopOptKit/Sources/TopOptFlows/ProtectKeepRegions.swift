@@ -40,9 +40,9 @@ public enum KeepRegionSpec: Equatable, Sendable {
 }
 
 public enum ProtectKeepRegions {
-    /// Whether the core in this release takes the oriented form (TO-core's job, 2026-10-26 23:48). Off ⇒ tilted holes and
-    /// faces send nothing, and the Protect (i) keeps its X/Y/Z line.
-    public static var orientedAvailable = false
+    /// Whether the core in this release takes the oriented form: ON — TO-core af6d19d9 (2026-10-27) ships with this app half.
+    /// Off ⇒ tilted holes and faces send nothing, and the Protect (i) keeps its X/Y/Z line.
+    public static var orientedAvailable = true
 
     /// The Protect (i), in plain words.
     public static var info: String {

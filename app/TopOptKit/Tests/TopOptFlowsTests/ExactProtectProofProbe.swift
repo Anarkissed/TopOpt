@@ -14,6 +14,8 @@ final class ExactProtectProofProbe: XCTestCase {
         guard let dir = ProcessInfo.processInfo.environment["EXACT_PROTECT_JOB"] else { throw XCTSkip("EXACT_PROTECT_JOB not set") }
         let out = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["EXACT_PROTECT_OUT"]))
         let res = Int(ProcessInfo.processInfo.environment["EXACT_PROTECT_RES"] ?? "40") ?? 40
+        ProtectKeepRegions.orientedAvailable = true   // the release core (TO-core af6d19d9) takes the oriented form
+        defer { ProtectKeepRegions.orientedAvailable = false }
         let src = URL(fileURLWithPath: dir)
         var job = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: src.appendingPathComponent("job.json"))) as? [String: Any])
         let p = try FlexiblePressFixtures.project(path: src.appendingPathComponent("model.step").path, name: "Carriage Arms")

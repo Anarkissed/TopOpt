@@ -138,6 +138,35 @@ final class ProtectKeepRegionsTests: XCTestCase {
         let m = mesh([([[q(0, 0), q(20, 0), q(20, 10)], [q(0, 0), q(20, 10), q(0, 10)]], plane(n, .zero))])
         XCTAssertTrue(ProtectKeepRegions.regions([.init(id: 0, depthMM: 2)], in: m, outwardMM: 1).isEmpty)
         XCTAssertTrue(ProtectKeepRegions.info.contains("X, Y or Z"), "the (i) keeps its X/Y/Z line")
+        ProtectKeepRegions.orientedAvailable = true
+    }
+
+    /// With TO-core's oriented keep (af6d19d9): a 30° face is one oriented box on its own plane, depth in and a little out;
+    /// a 30° bore is one oriented cylinder of bore + depth.
+    func testTiltedFacesAndHolesGoOutInTheOrientedForm() throws {
+        ProtectKeepRegions.orientedAvailable = true
+        let c = cos(Double.pi / 6), s = sin(Double.pi / 6)
+        let n = SIMD3(0, -s, c), u = SIMD3(1.0, 0, 0), v = SIMD3(0, c, s)
+        let q = { (a: Double, b: Double) in u * a + v * b }
+        let m = mesh([([[q(0, 0), q(20, 0), q(20, 10)], [q(0, 0), q(20, 10), q(0, 10)]], plane(n, .zero))])
+        let r = ProtectKeepRegions.regions([.init(id: 0, depthMM: 2)], in: m, outwardMM: 1)
+        XCTAssertEqual(r.count, 1)
+        guard case let .orientedBox(center, axes, half) = try XCTUnwrap(r.first) else { return XCTFail("\(r)") }
+        XCTAssertEqual(abs(simd_dot(axes[2], n)), 1, accuracy: 1e-9, "the third axis is the face's normal")
+        XCTAssertEqual(half.x * half.y * 4, 200, accuracy: 1, "the whole 20 × 10 face")
+        XCTAssertEqual(half.z, 1.5, accuracy: 1e-9, "(2 in + 1 out) / 2")
+        XCTAssertEqual(simd_dot(center, n), -0.5, accuracy: 1e-9, "centred half-way between 2 in and 1 out")
+        let j = r[0].json
+        XCTAssertNotNil(j["center"]); XCTAssertNotNil(j["axes"]); XCTAssertNotNil(j["half_extents_mm"]); XCTAssertNil(j["min"])
+        // a bore tilted 30° about X
+        let d = SIMD3(0, -s, c)
+        let tilted = bore(r: 3, z0: 0, z1: 10).map { $0.map { p in u * p.x + v * p.y + d * p.z } }
+        let g = StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 3, axisPoint: .zero, axisDir: d)
+        let rb = ProtectKeepRegions.regions([.init(id: 0, depthMM: 2)], in: mesh([(tilted, g)]), outwardMM: 0)
+        guard case let .orientedCylinder(_, dir, radius, halfLen) = try XCTUnwrap(rb.first) else { return XCTFail("\(rb)") }
+        XCTAssertEqual(radius, 5, accuracy: 1e-9); XCTAssertEqual(halfLen, 5, accuracy: 1e-4)
+        XCTAssertEqual(abs(simd_dot(dir, d)), 1, accuracy: 1e-9)
+        XCTAssertFalse(ProtectKeepRegions.info.contains("X, Y or Z"), "★ the (i)'s X/Y/Z line goes")
     }
 
     func testTheJobCarriesKeepRegionsAndOmitsThemWhenEmpty() throws {
