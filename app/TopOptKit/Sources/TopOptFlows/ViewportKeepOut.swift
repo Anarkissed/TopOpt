@@ -143,8 +143,10 @@ public enum KeepOutSolver {
     /// smaller is treated at 44 pt (never silently shrunk — requirement 5). If 44 pt
     /// cannot be placed clear, the element is hidden (no-room), not squeezed.
     public static let minTouch: CGFloat = 44
-    /// A gap kept between two touch rects so they don't merely kiss.
-    public static let separation: CGFloat = 4
+    /// ★ THE APP-WIDE CHIP BOUNDARY (his iPad 2026-10-27: chips "must never overlap and they must ALWAYS have a boundary
+    /// around them with enough space between them so chips don't even come close enough to accidentally be tapped"):
+    /// the clear gap kept between any two touch rects (each already ≥ 44 pt). Was 4 pt — kissing.
+    public static let separation: CGFloat = 16
     /// A displaced element gets a leader line once its centre sits more than this far
     /// from its anchor (requirement 3). Chosen at the HIG tap radius (44/2 ≈ 22) plus a
     /// margin, so the leader appears exactly when the element clears its own anchor's

@@ -56,7 +56,32 @@ public final class ProjectModel: ObservableObject {
     /// The working state that used to live in WorkspacePlaceholder. `@Published`
     /// value types: the workspace mutates them in place (via computed forwarders),
     /// which republishes and re-renders exactly as the old `@State` did.
-    @Published public var selection = SelectionModel()
+    @Published public var selection = SelectionModel() {
+        // ★ his iPad 2026-10-27 ("I tried unselecting and reselecting and it didn't work"): a deleted auto keep-clear
+        // (or one turned into a moved primitive) was remembered for the FACE forever, so taking the hole out of every
+        // group and picking it again never brought its keep-clear back. Leaving every group now forgets it.
+        didSet { forgetClearanceSuppressionsOutsideGroups() }
+    }
+
+    /// ★ His "Auto keep clear" switch for a group (2026-10-27). ON also forgets every "deleted" mark on the group's own
+    /// faces, so each of its holes clears again — the one-tap way back.
+    public func setAutoKeepClear(_ g: SelectionGroup, on: Bool) {
+        force.setAutoKeepClear(g.id, on)
+        if on {
+            for f in g.faces where force.isClearanceFaceSuppressed(f) { force.unsuppressClearanceFace(f) }
+            persistClearances()
+        }
+        objectWillChange.send()
+    }
+
+    /// Drop the "auto keep-clear deleted" mark of every face no group holds any more (and save the sidecar if any went).
+    func forgetClearanceSuppressionsOutsideGroups() {
+        let held = Set(selection.groups.flatMap(\.faces))
+        let stale = force.suppressedClearanceFaceList.filter { !held.contains($0) }
+        guard !stale.isEmpty else { return }
+        for f in stale { force.unsuppressClearanceFace(f) }
+        persistClearances()
+    }
     /// ★ HIDE / LOCK, PER GROUP (maintainer, 2026-08-18) — an ATTRIBUTE over the
     /// one `SelectionModel`, never a second group store. The groups themselves
     /// stay in `selection`; an entry whose group is gone is inert, and
@@ -2128,7 +2153,7 @@ public final class ProjectModel: ObservableObject {
     /// curved faces are pocket corners / fillets / a boss no longer auto-clears
     /// (handoff 2026-07-29).
     public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
-        guard force.kind(for: g.id).isAnchor else { return false }
+        guard force.autoKeepClearIsOn(g.id) else { return false }   // ★ his per-group switch; default: on for an Anchor
         return g.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) }
     }
 

@@ -270,18 +270,26 @@ public enum FaceTopology {
                                axisDir: simd_normalize(axisDir)).wrapDeg >= wrapMinDeg
     }
 
-    /// The concave cylinder faces on `face`'s axis with its radius, `face` included, in id order (the pieces of one round
-    /// hole). Cached per mesh.
+    /// The concave cylinder faces on `face`'s axis with its radius AND over the same stretch of that axis, `face` included,
+    /// in id order (the pieces of one round hole). Cached per mesh.
     public static func borePartners(_ face: FaceID, in mesh: ViewerMesh) -> [FaceID] {
         BorePartnerCache.shared.partners(face, mesh: mesh) {
             guard let g = mesh.faceGeometry(face), g.isCylinder, simd_length(g.axisDir) > 1e-9 else { return [face] }
             let e = simd_normalize(g.axisDir)
+            let mine = mesh.faceAxialSpan(face, axisPoint: SIMD3<Float>(g.axisPoint), axisDir: SIMD3<Float>(e))
             return (0..<Int32(mesh.faceGeometry.count)).filter { o in
                 if o == face { return true }
                 guard let h = mesh.faceGeometry(o), h.isCylinder, abs(h.cylinderRadiusMM - g.cylinderRadiusMM) < 0.01,
                       simd_length(h.axisDir) > 1e-9, abs(simd_dot(simd_normalize(h.axisDir), e)) > 0.9999 else { return false }
                 let d = h.axisPoint - g.axisPoint
                 guard simd_length(d - e * simd_dot(d, e)) < 0.01 else { return false }
+                // ★ his iPad 2026-10-27: the SAME STRETCH of the axis too. Lined-up holes in two parallel plates share an
+                // axis and a radius but not a span — they are two holes, each with its own keep-clear (16 of his Carriage
+                // Arms' 42 bore faces lost theirs to this). A hole's two halves cover the same span.
+                guard let a = mine, let b = mesh.faceAxialSpan(o, axisPoint: SIMD3<Float>(g.axisPoint), axisDir: SIMD3<Float>(e))
+                else { return false }
+                let overlap = min(a.hi, b.hi) - max(a.lo, b.lo)
+                guard overlap > 0.5 * min(a.hi - a.lo, b.hi - b.lo) else { return false }
                 return boreAxisMetrics(o, in: mesh, axisPoint: SIMD3<Float>(g.axisPoint), axisDir: SIMD3<Float>(e)).concave
             }
         }
