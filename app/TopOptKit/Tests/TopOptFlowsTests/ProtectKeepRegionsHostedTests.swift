@@ -85,6 +85,12 @@ final class ProtectKeepRegionsHostedTests: XCTestCase {
         _ = try protectFromTheList(h, p, [flat], "the flat face")
 
         let req = try XCTUnwrap(app.makeRunRequest())
+        // ★ a growth run keeps the regions flush (TO-core 05:18); a plain reduction run reaches out past the face
+        let growth = !req.minimizePlastic || req.designBox != nil
+        let flush = p.protectKeepRegions(p.faceProtectionSpecs(), resolution: req.resolution, growth: true)
+        let out = p.protectKeepRegions(p.faceProtectionSpecs(), resolution: req.resolution, growth: false)
+        XCTAssertEqual(req.keepRegions, growth ? flush : out, "the request follows the run's growth")
+        XCTAssertNotEqual(flush, out, "flush and outward differ")
         let job = try XCTUnwrap(JSONSerialization.jsonObject(with: RemoteRun.buildJobJSON(req)) as? [String: Any])
         let keeps = try XCTUnwrap(job["keep_regions"] as? [[String: Any]], "★ the job carries keep_regions")
         let depth = p.force.faceProtectDepthMM

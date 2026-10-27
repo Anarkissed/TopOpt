@@ -347,7 +347,10 @@ public final class AppModel: ObservableObject {
                           projectCADFaces: true)   // ★ always (ruling 2026-10-26 23:44): the chip is hidden, a stored OFF can't strand a project
         request.scenarios = project.scenarioWires()   // ★ load scenarios (overnight release 2026-10-26): 2+ only
         request.safetyMargin = project.force.safetyMarginValue   // ★ the safety margin (ruling 2026-10-26 13:12)
-        request.keepRegions = project.protectKeepRegions(protections, resolution: request.resolution)   // ★ exact Protect
+        // ★ exact Protect. A GROWTH run (no Minimize plastic, or a design box) keeps the regions FLUSH: core cuts the export
+        // inside a region's outward band, which would cut material grown onto a Protected face (TO-core 2026-10-27 05:18, fix 1)
+        request.keepRegions = project.protectKeepRegions(protections, resolution: request.resolution,
+                                                         growth: !request.minimizePlastic || request.designBox != nil)
         return request
     }
 

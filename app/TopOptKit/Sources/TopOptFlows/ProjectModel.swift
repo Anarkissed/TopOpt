@@ -765,13 +765,14 @@ public final class ProjectModel: ObservableObject {
     /// (the run's grid: the part's longest side over `resolution`), never less than 1 mm.
     public func protectKeepRegions(_ protections: (faceIDs: [Int], depthMM: Double, depthsMM: [Double],
                                                    regionIDs: [RegionID], regionDepthsMM: [Double], viewerFaceIDs: [FaceID]),
-                                   resolution: Int) -> [KeepRegionSpec] {
+                                   resolution: Int, growth: Bool = false) -> [KeepRegionSpec] {
         guard let mesh = viewerMesh, !mesh.faceGeometry.isEmpty, !protections.viewerFaceIDs.isEmpty else { return [] }
         let faces = zip(protections.viewerFaceIDs, protections.depthsMM).map { ProtectKeepRegions.Face(id: $0.0, depthMM: $0.1) }
         let e = mesh.bounds.max - mesh.bounds.min
         let voxel = Double(Swift.max(e.x, e.y, e.z)) / Double(Swift.max(resolution, 1))
-        // TO-core 2026-10-27: at least one voxel (plus a little) out past the surface, into the air
-        return ProtectKeepRegions.regions(faces, in: mesh, outwardMM: Swift.max(1.0, 1.5 * voxel))
+        // TO-core 2026-10-27: at least one voxel (plus a little) out past the surface, into the air — but FLUSH on a growth
+        // run, where that band may hold grown material the export must keep (the face keeps ≤ ½ voxel of bump there)
+        return ProtectKeepRegions.regions(faces, in: mesh, outwardMM: growth ? 0 : Swift.max(1.0, 1.5 * voxel))
     }
 
     /// The same, reading the given emission — the one the job's lattice regions come from.
