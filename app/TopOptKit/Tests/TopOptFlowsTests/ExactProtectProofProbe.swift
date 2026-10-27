@@ -45,7 +45,8 @@ final class ExactProtectProofProbe: XCTestCase {
         }
         job["keep_regions"] = regions.map(\.json)
         job["resolution"] = res
-        loads.removeValue(forKey: "redesign")   // one conservative variant: minutes, not his two-hour strengthen loop
+        // one conservative variant (minutes) — unless the proof IS the growth case (ruling 06:13: re-run on a strengthen job)
+        if ProcessInfo.processInfo.environment["EXACT_PROTECT_KEEP_REDESIGN"] != "1" { loads.removeValue(forKey: "redesign") }
         job["loads"] = loads
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: src.appendingPathComponent("model.step"), to: out.appendingPathComponent("model.step"))
