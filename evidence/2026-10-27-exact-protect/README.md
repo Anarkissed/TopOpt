@@ -22,3 +22,21 @@ Ring faces: a flat ring is filled by rectangles inside its outline (≤ 16); on 
 between two Protected bores, whose cylinders (bore + 3 mm) cover them fully.
 
 Scripts: measure2.py (bores), flat3.py (faces), ring.py, comp.py, render.py → cup_today_vs_exact.png.
+
+## Re-run on a STRENGTHEN (growth) job — core 139a5411 (d67204ade10f), 2026-10-27 03:11 (ruling 06:13)
+
+His same job WITH redesign=strengthen and its design box, quality 40, the same 206 keep regions (now reaching past every
+face). 1,473 s, rc 0. Version 1 (vf 0.2023, 8.95×) and Version 2 (vf 0.4731, 11.04×) verified; Version 3 unreachable.
+Both files ONE piece. **The bar is NOT met:**
+
+| | Version 1 | Version 2 | his own v2 (bcb45454, no keep, q64) |
+|---|---|---|---|
+| 8 Ø3.3 bores (also keep-clear) | 4 exact, 4 off by ≤ 0.06 mm, out-of-round ≤ 1.4 | 5 exact, 3 rough (oor ≤ 5.2) | open, ≈ Ø3.35 |
+| Ø9.28 / Ø12 / Ø32.5 bores (not keep-clear) | open but rough: Ø9.58–10.0, oor 1.4–3.5 | **PLUGGED**: Ø9.28 → Ø1.58 (5/5 axis points solid); 3 bores have no wall left; Ø12 → 10.29 | all open (Ø9.65, 11.05, 32.58 …) |
+| Protected flat faces | 2 faces 0.674 mm off; others 0.0000 | 0.674 and 1.44 mm off | — |
+| counterbore rings | 2.24 / 1.06 mm | — | — |
+
+Reading: 139a5411 keeps every printed voxel whose centre is outside the original part inside the band. That cannot tell
+GROWTH from the voxel skin poking past a CAD surface, nor from growth INTO a Protected hole's own air — so the bumps come back
+on bores and faces, and strengthen's growth inside a Protected hole is kept (the 03:11 run plugs four holes his own run kept
+open). The first proof (af6d19d9, no redesign) met the bar on every face and bore.
