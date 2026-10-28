@@ -32,8 +32,9 @@ public struct LoadScenarioSet: Equatable, Sendable, Codable {
 }
 
 public enum LoadScenarioRule {
-    /// The (i) beside "+ Add a load scenario" — his sentence, verbatim.
-    public static let info = "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together."
+    /// The (i) beside "+ Add a load scenario" — his sentence, verbatim, then (his yes 2026-10-28, with TO-core's weighting)
+    /// how much each scenario shapes the design.
+    public static let info = "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together. Each scenario shapes the part in proportion to its load: a light one adds only a light connection."
     /// The inline refusal when the last anchor on would be switched off.
     public static let lastAnchorRefusal = "A scenario needs at least one anchor on."
     /// ★ OPTIMIZE'S PRE-FLIGHT (362's ruling 2026-10-26 06:54): the same words core refuses with, before anything is sent.
