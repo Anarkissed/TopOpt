@@ -407,10 +407,23 @@ std::string scenario_too_light_reason(
   const double floor_n = kScenarioMinLoadShare * top;
   for (const auto& [name, load] : name_and_load_n) {
     if (!(load < floor_n * (1.0 - 1e-9))) continue;  // exactly at the line runs
+    // kg to 3 significant figures, plain decimals (never an exponent: 1534 kg is
+    // "1530 kg"), '.' as the point, no grouping, trailing zeros dropped. The app
+    // (LoadScenarioRule.tooLightLine) prints the same characters.
     auto kg = [](double n) {
-      char b[32];
-      std::snprintf(b, sizeof b, "%.3g kg", n / 9.80665);
-      return std::string(b);
+      const double x = n / 9.80665;
+      int decimals = 0;
+      if (x > 0.0) decimals = std::max(0, 2 - static_cast<int>(std::floor(std::log10(x))));
+      const double step = std::pow(10.0, 2 - static_cast<int>(std::floor(std::log10(x > 0.0 ? x : 1.0))));
+      const double rounded = x > 0.0 ? std::round(x * step) / step : 0.0;
+      char b[64];
+      std::snprintf(b, sizeof b, "%.*f", decimals, rounded);
+      std::string s = b;
+      if (s.find('.') != std::string::npos) {
+        while (!s.empty() && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+      }
+      return s + " kg";
     };
     char pct[16];
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * kScenarioMinLoadShare);

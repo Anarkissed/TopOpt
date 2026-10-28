@@ -365,6 +365,12 @@ int main() {
   CHECK(refusal(job_json("[" + both + ", " + scenario_json("Twist", {{b_top, -2.4}}, {a_bot}) +
                              "]", a_bot, b_bot, a_top, b_top)).empty(),
         "(d) a scenario at exactly 3 % of the heaviest parses");
+  // The kg are plain decimals, never an exponent (the app prints the same characters).
+  const std::string big = scenario_too_light_reason({{"Main", 15043.0}, {"Tiny", 9.80665}});
+  CHECK(big.find("(1 kg) is too small next to Scenario \xE2\x80\x9C" "Main\xE2\x80\x9D "
+                 "(1530 kg)") != std::string::npos &&
+            big.find("(46 kg here)") != std::string::npos,
+        "(d) the line's kg: 3 significant figures, plain decimals");
   std::printf("[scen+str] refusals: \"%s\" / \"%s\" / \"%s\" / \"%s\" / \"%s\"\n",
               no_anchor.c_str(), no_load.c_str(), bearing.c_str(), low.c_str(), light.c_str());
 

@@ -1101,7 +1101,8 @@ inline constexpr double kScenarioWeakSpringMinScale =
 // load, else the plain line for the first that does not: "Scenario “2”'s load (0.5 kg)
 // is too small next to Scenario “1” (51 kg): a scenario needs at least 3% of the
 // heaviest one's load (1.53 kg here). Raise it or remove the scenario." Loads in N
-// (each scenario: the sum of its groups' force sizes), named in kg (/ 9.80665).
+// (each scenario: the sum of its groups' force sizes), named in kg (/ 9.80665) to 3
+// significant figures in plain decimals, trailing zeros dropped (1534 kg -> "1530").
 std::string scenario_too_light_reason(
     const std::vector<std::pair<std::string, double>>& name_and_load_n);
 // The plain wording he reads: "Scenario “<name>”'s load has no path to its anchors".
