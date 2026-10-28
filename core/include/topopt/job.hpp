@@ -1346,6 +1346,10 @@ struct RunJobResult {
   // topopt/fields.hpp for the format. Empty only if the run produced no output dir.
   std::string fields_path;             // <out_dir>/fields.bin
   int fields_variant_count = 0;        // accepted-variant blocks written
+  // LOAD SCENARIOS: every scenario's own fields (topopt/fields.hpp), beside
+  // fields.bin. Empty (and no file) on a run without 2+ scenarios.
+  std::string scenario_fields_path;    // <out_dir>/scenario_fields.bin
+  int scenario_fields_variant_count = 0;
   // Task 2026-08-02-lattice-a-variant — the per-variant DESIGN container
   // (<out_dir>/design.bin): each evaluated variant's own density field, so a
   // finished variant can be latticed later WITHOUT re-running the ladder and

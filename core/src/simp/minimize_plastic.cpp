@@ -408,7 +408,8 @@ std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
 ScenarioCertification certify_scenarios(
     const VoxelGrid& G, const std::vector<SimpScenario>& scenarios,
     const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
-                                            const std::vector<NodalLoad>&)>& certify) {
+                                            const std::vector<NodalLoad>&)>& certify,
+    bool keep_fields) {
   ScenarioCertification out;
   if (scenarios.empty()) return out;
   std::size_t worst = 0;
@@ -448,6 +449,12 @@ ScenarioCertification certify_scenarios(
     r.unheld = r.weak_share > kScenarioUnheldShare;
     if (r.unheld && out.unheld.empty()) out.unheld = sc.name;
     out.reports.push_back(r);
+    if (keep_fields)
+      out.fields.push_back({sc.name,
+                            std::vector<float>(a.von_mises_field.begin(),
+                                               a.von_mises_field.end()),
+                            std::vector<float>(a.displacement_field.begin(),
+                                               a.displacement_field.end())});
     const auto worse = [](const FixedDesignAnalysis& x, const FixedDesignAnalysis& y) {
       if (x.non_convergent != y.non_convergent) return x.non_convergent;
       return x.margin_effective < y.margin_effective;
@@ -2889,14 +2896,17 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // whose weak springs (its OFF anchors) carry more than kScenarioUnheldShare of its
     // load is unheld: no path to its anchors, the rung is not accepted.
     std::vector<ScenarioReport> scenario_reports;
+    std::vector<ScenarioFields> scenario_fields;  // every scenario's own (the views)
     std::string unheld_scenario;
     FixedDesignAnalysis fda;
     if (run_scenarios.empty()) {
       fda = certify(B, loads);
     } else {
-      ScenarioCertification sc = certify_scenarios(G, run_scenarios, certify);
+      ScenarioCertification sc =
+          certify_scenarios(G, run_scenarios, certify, /*keep_fields=*/true);
       fda = std::move(sc.governing);
       scenario_reports = std::move(sc.reports);
+      scenario_fields = std::move(sc.fields);
       unheld_scenario = std::move(sc.unheld);
     }
 
@@ -2961,6 +2971,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     variant.von_mises_field = std::move(fda.von_mises_field);
     variant.stress_tensor_field = std::move(fda.stress_tensor_field);
     variant.displacement_field = std::move(fda.displacement_field);
+    variant.scenario_fields = std::move(scenario_fields);
     variant.mass_grams = fda.mass_grams;
     variant.support_volume_voxels = fda.support_volume_voxels;
     // The orientation RANKING for this rung (empty unless armed). Carried onto
