@@ -3305,11 +3305,25 @@ public enum TopOptKit {
         return out
     }
 
+    /// ★ LOAD SCENARIOS: the bridge's flattened per-scenario fields back into one set per scenario (an on-device run, the
+    /// counterpart of RemoteScenarioFields for a worker run). Empty when the slices do not add up.
+    private static func scenarioFields(_ v: topoptbridge.OptimizeVariant) -> [ScenarioFieldSet] {
+        let names = v.scenario_names.map { String($0) }
+        let vm = Array(v.scenario_von_mises), disp = Array(v.scenario_displacement)
+        let nv = v.von_mises_field.size(), nd = v.displacement_field.size()
+        guard !names.isEmpty, nv > 0, nd > 0, vm.count == names.count * nv, disp.count == names.count * nd else { return [] }
+        return names.indices.map { k in
+            ScenarioFieldSet(name: names[k], vonMises: Array(vm[(k * nv)..<((k + 1) * nv)]),
+                             displacement: Array(disp[(k * nd)..<((k + 1) * nd)]))
+        }
+    }
+
     /// Map the bridge's OptimizeResult to the Swift outcome (shared by both run
     /// entry points — mirrors the C++ `to_optimize_result` helper).
     private static func convertOutcome(_ raw: topoptbridge.OptimizeResult) -> OptimizeOutcome {
         var variants: [OptimizeVariant] = []
         for v in raw.variants {
+            defer { variants[variants.count - 1].scenarioFields = scenarioFields(v) }   // ★ each load scenario's own views
             variants.append(OptimizeVariant(
                 requestedVolumeFraction: v.requested_volume_fraction,
                 achievedVolumeFraction: v.achieved_volume_fraction,

@@ -327,6 +327,13 @@ struct OptimizeVariant {
   // von_mises_field). M7.viz.3's flex animation moves mesh vertices by this;
   // empty for a cancelled rung.
   std::vector<float> displacement_field;
+  // ★ LOAD SCENARIOS (core dcd4c31f, his "the scenario selector changes the views"): every scenario's own fields on this
+  // design, in report scenarios[] order, flattened so only scalar vectors cross the importer: scenario k's name is
+  // scenario_names[k]; its von Mises is the k-th voxel_count slice of scenario_von_mises and its displacement the k-th
+  // 3*node_count slice of scenario_displacement (the layouts of the two fields above). Empty without scenarios.
+  std::vector<std::string> scenario_names;
+  std::vector<float> scenario_von_mises;
+  std::vector<float> scenario_displacement;
   // Optimization-history keyframes for playback (M7): the isosurface at snapshots
   // from ~solid to optimized. Flattened so only scalar vectors cross the importer:
   // for keyframe f, its vertices are the `keyframe_vertex_counts[f]` xyz triples of
