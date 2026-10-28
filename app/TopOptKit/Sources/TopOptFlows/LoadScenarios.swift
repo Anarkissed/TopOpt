@@ -43,9 +43,9 @@ public enum LoadScenarioRule {
     public static func noLoadLine(_ name: String) -> String { "Scenario “\(name)” has no load" }
 
     /// ★ HIS DECISION (TO-core, 2026-10-28): a scenario too light to shape the part fails with a notice. Its load is the SUM
-    /// of its groups' force sizes (a twist of two opposite pushes is not zero); under 3% of the heaviest scenario's load it is
-    /// refused — exactly 3% runs. Core's kScenarioMinLoadShare and its words, verbatim (kg = N / 9.80665, 3 significant figures).
-    public static let minLoadShare = 0.03   // ★ core's kScenarioMinLoadShare — the ONE number the notice and the (i) read
+    /// of its groups' force sizes (a twist of two opposite pushes is not zero); under the share of the heaviest scenario's load it is
+    /// refused — exactly at it runs. Core's kScenarioMinLoadShare and its words, verbatim (kg = N / 9.80665, 3 significant figures).
+    public static let minLoadShare = 0.10   // ★ his decision 2026-10-28: an even 10% — core's kScenarioMinLoadShare — the ONE number the notice and the (i) read
     static var minLoadSharePercent: String { kg(minLoadShare * 100) }
     public static let newtonsPerKg = 9.80665
     /// Core's kg, character for character (TO-core 2026-10-28): 3 significant figures in plain decimals, never an exponent;
@@ -63,9 +63,8 @@ public enum LoadScenarioRule {
         return t
     }
     public static func tooLightLine(_ name: String, kg load: Double, heaviest: String, heaviestKg: Double) -> String {
-        "Scenario “\(name)”'s load (\(kg(load)) kg) is too small next to Scenario “\(heaviest)” (\(kg(heaviestKg)) kg): "
-            + "a scenario needs at least \(minLoadSharePercent)% of the heaviest one's load (\(kg(heaviestKg * minLoadShare)) kg here). "
-            + "Raise it or remove the scenario."
+        "Scenario “\(name)” is too light: its load is \(kg(load)) kg, but it needs at least \(kg(heaviestKg * minLoadShare)) kg "
+            + "(\(minLoadSharePercent)% of Scenario “\(heaviest)”'s \(kg(heaviestKg)) kg). Raise it or remove the scenario."
     }
     /// The first scenario under the line, as core words it — from (name, kg) pairs in scenario order. Nil when none is, or
     /// with fewer than two scenarios.

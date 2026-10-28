@@ -253,7 +253,7 @@ final class LoadScenarioTests: XCTestCase {
     }
 
     func testTheInfoIsHisSentence() {
-        XCTAssertEqual(LoadScenarioRule.info, "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together. Each scenario shapes the part in proportion to its load: a light one adds only a light connection, and one under 3% of the heaviest can't shape the part and is refused.")
+        XCTAssertEqual(LoadScenarioRule.info, "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together. Each scenario shapes the part in proportion to its load: a light one adds only a light connection, and one under 10% of the heaviest can't shape the part and is refused.")
     }
 
     // MARK: Optimize's pre-flight (362's ruling 2026-10-26): core's own words, before the send
