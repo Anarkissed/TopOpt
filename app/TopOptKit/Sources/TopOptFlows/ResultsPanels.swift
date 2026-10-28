@@ -65,7 +65,8 @@ public enum ResultsVersions {
                 let ofOriginal = v.massFractionOfOriginal > 0
                     ? String(format: "%.0f%% of the original", v.massFractionOfOriginal * 100) : tab.headlineLabel
                 out.append(row(tab, title: title, margin: v.verifiedMargin > 0 ? v.verifiedMargin : tab.worstCaseMargin,
-                               headline: ofOriginal))
+                               headline: ofOriginal,
+                               pieces: StrengthenText.piecesFlag(volumeFraction: own.volumeFraction, in: b)?.pieces))
             }
         }
         var k = out.count
@@ -77,10 +78,12 @@ public enum ResultsVersions {
         return out
     }
 
-    static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil) -> ResultsVersionRow {
+    static func row(_ tab: ResultVariantVM, title: String, margin: Double, headline: String? = nil,
+                    pieces: Int? = nil) -> ResultsVersionRow {
         let verdict = tab.latticeAccepted == false ? "not certified" : x(margin) + " ✓"
         return ResultsVersionRow(id: "t\(tab.index)", title: title,
-                                 subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict,
+                                 subtitle: (tab.isRecommended ? "Recommended · " : "") + tab.massLabel + " · " + verdict
+                                     + (pieces.map { " · in \($0) pieces" } ?? ""),
                                  recommended: tab.isRecommended, tabIndex: tab.index, margin: margin,
                                  massLabel: tab.massLabel, headline: headline ?? tab.headlineLabel)
     }
@@ -99,7 +102,8 @@ public struct ResultsCheck: Equatable, Sendable, Identifiable {
 public enum ResultsChecks {
     /// One line + one sub-line each, in his order: strength, scenarios, layers, how to print, thin spots.
     public static func checks(tab: ResultVariantVM?, margin: Double?, required: Double, safetyMargin: Double?,
-                              scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool) -> [ResultsCheck] {
+                              scenarios: [ScenarioResult], thinJoints: Int, bridged: Bool,
+                              pieces: StrengthenText.PiecesFlag? = nil) -> [ResultsCheck] {
         guard let tab else { return [] }
         var out: [ResultsCheck] = []
         if let m = margin, m > 0 {
@@ -130,7 +134,10 @@ public enum ResultsChecks {
         if thinJoints > 0 {
             out.append(ResultsCheck(kind: .warn, title: "Thin joints", detail: "\(thinJoints) held by an edge or corner only"))
         }
-        if bridged {
+        // ★ his ruling 2026-10-28: a version in pieces is accepted WITH A FLAG — never "joined into one part"
+        if let p = pieces {
+            out.append(ResultsCheck(kind: .warn, title: p.title, detail: p.lines.joined(separator: " ")))
+        } else if bridged {
             out.append(ResultsCheck(kind: .info, title: "Joined by a bridge", detail: "Two pieces were joined into one part"))
         }
         return out
@@ -177,7 +184,8 @@ extension ResultsModel {
             if let b = reportBlocks {
                 add("Strongest possible", StrengthenText.capLine(b).map { $0 + (s.map { " (" + ResultsVersions.x($0.ceilingMargin) + " ceiling)" } ?? "") })
                 for l in StrengthenText.rejectionLines(b) { add("Note", l) }
-                if let tab, isBridged(tab) { add("Split joined", "Two pieces were joined by a bridge") }
+                if let tab, let p = piecesFlag(tab) { add("Pieces", ([p.title] + p.lines).joined(separator: " · ")) }
+                else if let tab, isBridged(tab) { add("Split joined", "Two pieces were joined by a bridge") }
             }
             add("Built for", reportBlocks?.safetyMargin.map(SafetyMargin.builtForLine))
         case .scenarios:
@@ -454,6 +462,7 @@ struct ResultsCheckLine: View {
         }
         .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
         .accessibilityElement(children: .combine)
+        .background(ResultsChrome.publish("resultsCheck-" + c.title))
     }
 }
 

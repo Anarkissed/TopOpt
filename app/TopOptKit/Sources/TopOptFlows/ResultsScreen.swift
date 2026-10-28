@@ -1183,7 +1183,8 @@ public struct ResultsScreen: View {
         return ResultsChecks.checks(tab: model.selected, margin: selectedRow?.margin,
                                     required: blocks?.safetyMargin ?? blocks?.strengthen?.marginRequired ?? 1,
                                     safetyMargin: blocks?.safetyMargin, scenarios: model.scenarios(for: model.selected),
-                                    thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false)
+                                    thinJoints: thin, bridged: model.selected.map { model.isBridged($0) } ?? false,
+                                    pieces: model.selected.flatMap { model.piecesFlag($0) })
     }
 
     /// Bottom left: the streaming pill, a latticed version's mesh state, then the Versions panel.
