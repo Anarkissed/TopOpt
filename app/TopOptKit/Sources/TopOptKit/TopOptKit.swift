@@ -432,6 +432,16 @@ public struct AddedMaterial: Equatable, Sendable {
 }
 
 /// One evaluated volume-fraction rung of a minimize_plastic run.
+/// One load scenario's own fields on a variant's design (same grid and layouts as the variant's plain fields).
+public struct ScenarioFieldSet: Equatable, Sendable {
+    public let name: String
+    public let vonMises: [Float]
+    public let displacement: [Float]
+    public init(name: String, vonMises: [Float], displacement: [Float]) {
+        self.name = name; self.vonMises = vonMises; self.displacement = displacement
+    }
+}
+
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
     /// The PRINTED/count-basis volume fraction (#{ρ>0.5}/part_solid); savings is its
@@ -488,6 +498,10 @@ public struct OptimizeVariant {
     /// the app can integrate load→anchor flux streamlines (`F = σ·d̂`). Zero on
     /// non-printed voxels (companion to `vonMisesField`); empty for a cancelled rung.
     public let stressTensorField: [Float]
+    /// ★ LOAD SCENARIOS (core scenario_fields.bin v1, his ask 2026-10-27 "the scenario selector changes the views"): each
+    /// scenario's OWN von Mises + displacement on this design, in report order. Empty on a one-scenario run or an older
+    /// core; the plain fields above stay the GOVERNING scenario's.
+    public var scenarioFields: [ScenarioFieldSet] = []
     /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
     /// to optimized (last). Empty when playback capture is off.
     public let keyframeMeshes: [KeyframeMesh]
@@ -3291,11 +3305,25 @@ public enum TopOptKit {
         return out
     }
 
+    /// ★ LOAD SCENARIOS: the bridge's flattened per-scenario fields back into one set per scenario (an on-device run, the
+    /// counterpart of RemoteScenarioFields for a worker run). Empty when the slices do not add up.
+    private static func scenarioFields(_ v: topoptbridge.OptimizeVariant) -> [ScenarioFieldSet] {
+        let names = v.scenario_names.map { String($0) }
+        let vm = Array(v.scenario_von_mises), disp = Array(v.scenario_displacement)
+        let nv = v.von_mises_field.size(), nd = v.displacement_field.size()
+        guard !names.isEmpty, nv > 0, nd > 0, vm.count == names.count * nv, disp.count == names.count * nd else { return [] }
+        return names.indices.map { k in
+            ScenarioFieldSet(name: names[k], vonMises: Array(vm[(k * nv)..<((k + 1) * nv)]),
+                             displacement: Array(disp[(k * nd)..<((k + 1) * nd)]))
+        }
+    }
+
     /// Map the bridge's OptimizeResult to the Swift outcome (shared by both run
     /// entry points — mirrors the C++ `to_optimize_result` helper).
     private static func convertOutcome(_ raw: topoptbridge.OptimizeResult) -> OptimizeOutcome {
         var variants: [OptimizeVariant] = []
         for v in raw.variants {
+            defer { variants[variants.count - 1].scenarioFields = scenarioFields(v) }   // ★ each load scenario's own views
             variants.append(OptimizeVariant(
                 requestedVolumeFraction: v.requested_volume_fraction,
                 achievedVolumeFraction: v.achieved_volume_fraction,

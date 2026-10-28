@@ -84,6 +84,8 @@ public struct ResultsScreen: View {
     var canRedo: () -> Bool = { false }
     /// ★ Full screen (his note 2026-10-27) — the workspace hides its own capsule over Results while it is on.
     var onFullScreen: ((Bool) -> Void)?
+    /// ★ Each load scenario's loads (indices + total kg), so a picked scenario's views start at its own loads.
+    var scenarioLoads = ResultsScenarioLoads()
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // ★ Results redesign state (his mockup, 2026-10-27)
@@ -159,6 +161,7 @@ public struct ResultsScreen: View {
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
                 canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
                 onFullScreen: ((Bool) -> Void)? = nil,
+                scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -186,6 +189,7 @@ public struct ResultsScreen: View {
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
         self.onFullScreen = onFullScreen
+        self.scenarioLoads = scenarioLoads
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -277,6 +281,8 @@ public struct ResultsScreen: View {
         .animation(DS.Motion.sheetIn, value: compare != nil)
         .onChange(of: viewMode) { applyViewMode($0); stressProbe = nil }
         .onChange(of: model.selectedIndex) { _ in applyViewMode(viewMode) }   // a new version's views start from rest
+        // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
+        .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyViewMode(viewMode) }
         .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
         // ★ one at a time: opening the key folds Checks and closes Details; opening either minimises the key
         .onChange(of: stressKeyMinimized) { m in
@@ -339,6 +345,8 @@ public struct ResultsScreen: View {
             // longer knows — in which case the latticed variant still shows its
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
+            model.scenarioLoads = scenarioLoads       // ★ each scenario's own loads
+            model.viewScenario = scenarioPick
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
             viewMode = model.hasStress ? .stress : .solid
@@ -1200,7 +1208,8 @@ public struct ResultsScreen: View {
         VStack(alignment: .trailing, spacing: DS.Space.m) {
             let sc = model.scenarios(for: model.selected)
             if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
-            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc) {
+            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc,
+                                                    ownFields: model.showsOwnFields(of: scenarioPick)) {
                 Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
                     .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
                     .accessibilityIdentifier("results-scenario-views-note")

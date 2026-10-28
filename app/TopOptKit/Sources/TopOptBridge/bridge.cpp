@@ -427,6 +427,15 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v,
   // (double -> float narrowing for the Metal vertex animation, M7.viz.3).
   ov.displacement_field.assign(v.displacement_field.begin(),
                                v.displacement_field.end());
+  // ★ LOAD SCENARIOS: each scenario's own fields, flattened (see the header). A scenario whose arrays are not the
+  // run's sizes is dropped whole, so a slice never straddles two scenarios.
+  for (const topopt::ScenarioFields& sf : v.scenario_fields) {
+    if (sf.von_mises.size() != v.von_mises_field.size() ||
+        sf.displacement.size() != v.displacement_field.size()) continue;
+    ov.scenario_names.push_back(sf.name);
+    ov.scenario_von_mises.insert(ov.scenario_von_mises.end(), sf.von_mises.begin(), sf.von_mises.end());
+    ov.scenario_displacement.insert(ov.scenario_displacement.end(), sf.displacement.begin(), sf.displacement.end());
+  }
   // Playback keyframes, flattened (scalar vectors only).
   for (const topopt::TriangleMesh& km : v.keyframe_meshes) {
     ov.keyframe_vertex_counts.push_back(static_cast<int32_t>(km.vertices.size()));

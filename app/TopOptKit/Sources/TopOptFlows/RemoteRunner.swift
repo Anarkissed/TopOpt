@@ -1192,6 +1192,27 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return container
     }
 
+    /// ★ LOAD SCENARIOS: fetch out/scenario_fields.bin (core v1, beside fields.bin) — each scenario's own fields, so the
+    /// Results Scenario menu swaps the views. Enrichment like fields.bin: a 404 (a one-scenario run, an older core) or a bad
+    /// body returns nil and the menu says which scenario the views show. Dropped when its grid is not fields.bin's.
+    private func fetchScenarioFields(matching fields: RemoteFieldsContainer?) -> RemoteScenarioFields? {
+        guard let id = jobID, let fields else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("scenario_fields.bin")
+        guard let (data, resp) = try? syncGET(url) else {
+            diag("remote scenario_fields.bin fetch failed (transport) — the views stay the worst case's"); return nil
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { return nil }   // 404: no scenarios, or a core before scenario_fields
+        guard let sf = RemoteScenarioFields.parse(data),
+              sf.gridNx == fields.gridNx, sf.gridNy == fields.gridNy, sf.gridNz == fields.gridNz else {
+            diag("remote scenario_fields.bin unreadable (\(data.count) bytes) — the views stay the worst case's"); return nil
+        }
+        diag("remote scenario_fields.bin fetched: \(sf.names.count) scenarios × \(sf.blocks.count) block(s)")
+        return sf
+    }
+
     /// Fetch the run's `design.bin` — the per-variant DENSITY FIELDS core writes
     /// beside `fields.bin` (PR 274's design store), served by the SAME
     /// `/files/{name}` route the meshes use. Returns nil on any failure, and says
@@ -1840,6 +1861,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // the next morning fetches exactly the same fields.bin, with the same presence
         // gate and the same graceful degradation (handoff 134, item 2).
         let fields = fetchFields()
+        let scenarioFields = fetchScenarioFields(matching: fields)   // ★ each load scenario's own views
         // The worker's own duration record (handoff 134, item 1) — never the client's
         // wall clock, which on a re-attach measures when someone looked, not the run.
         let timing = fetchTiming()
@@ -1902,10 +1924,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
         if !accepted.isEmpty {
             let variants = accepted.map { s in
-                makeVariant(streamed: s,
-                            report: reportVariant(forAchieved: s.achievedVF),
-                            fields: fields?.variant(forRequestedVF: s.requestedVF),
-                            lattice: latticeAlternatives[s.requestedVF])
+                var v = makeVariant(streamed: s,
+                                    report: reportVariant(forAchieved: s.achievedVF),
+                                    fields: fields?.variant(forRequestedVF: s.requestedVF),
+                                    lattice: latticeAlternatives[s.requestedVF])
+                v.scenarioFields = scenarioFields?.sets(forRequestedVF: s.requestedVF) ?? []
+                return v
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
                                  fields: fields, timing: timing, latticeReport: latticeReport,
