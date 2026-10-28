@@ -77,10 +77,19 @@ public final class ProjectModel: ObservableObject {
     /// ★ His iPad 2026-10-28 (holes with no keep-clear, third report): EVERY face a group holds — its plain faces, then the
     /// faces its regions cover (a hole isolated or cut on the Surface stage is held as a region, and the keep-clear rules
     /// read only `g.faces`, so such a hole never got one). The ONE list the keep-clear rules, rows, volumes and run read.
+    /// ★ ONLY WHOLE FACES: a CUT piece is part of a face, and a keep-clear sent for it would clear the whole CAD face (core's
+    /// clearance takes a face id only — EditFacesStageTests). A union or isolate of whole faces (a hole among them) counts.
     public func keepClearFaces(_ g: SelectionGroup) -> [FaceID] {
-        guard !g.regionIDs.isEmpty else { return g.faces }
+        guard !g.regionIDs.isEmpty, let mesh = viewerMesh else { return g.faces }
+        var whole: Set<FaceID> = []
+        for r in surfaceEffectiveRegions(of: g) {
+            for leaf in faceRegions.resolvedLeaves(r) {
+                guard let region = faceRegions.region(leaf), !region.isCut else { continue }
+                whole.formUnion(FaceRegionGeometry.members(of: region, in: mesh))
+            }
+        }
         let own = Set(g.faces)
-        return g.faces + latticeRegionCoveredFaces(g).filter { !own.contains($0) }.sorted()
+        return g.faces + whole.filter { !own.contains($0) }.sorted()
     }
 
     /// Drop every "auto keep-clear deleted" mark whose face its group no longer holds (and save the sidecar if any went):
@@ -371,6 +380,9 @@ public final class ProjectModel: ObservableObject {
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
         // must never happen is absorbing a change silently.
         refreshFaceRegionDrift()
+        // ★ 10-28: an older project's per-face "deleted" marks are sorted into groups NOW — the property observers that do it
+        // do not fire inside an initializer, so without this a reopened project kept the old marks until his first tap.
+        forgetClearanceSuppressionsOutsideGroups()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
