@@ -613,19 +613,33 @@ struct ResultsScenarioPicker: View {
 struct ResultsViewModePicker: View {
     var modes: [ResultsViewMode] = ResultsViewMode.allCases
     var available: Set<ResultsViewMode> = Set(ResultsViewMode.allCases)
-    @Binding var mode: ResultsViewMode
+    /// ★ His iPad 2026-10-28: the buttons are LAYERS + one MOTION — several can be lit at once. `isOn` says which are,
+    /// `tap` toggles one (the caller holds the rules).
+    let isOn: (ResultsViewMode) -> Bool
+    let tap: (ResultsViewMode) -> Void
     var fullScreen: Binding<Bool>? = nil
+
+    /// One view at a time (Compare): a plain binding.
+    init(modes: [ResultsViewMode] = ResultsViewMode.allCases, available: Set<ResultsViewMode> = Set(ResultsViewMode.allCases),
+         mode: Binding<ResultsViewMode>, fullScreen: Binding<Bool>? = nil) {
+        self.modes = modes; self.available = available; self.fullScreen = fullScreen
+        self.isOn = { $0 == mode.wrappedValue }; self.tap = { mode.wrappedValue = $0 }
+    }
+    init(modes: [ResultsViewMode], available: Set<ResultsViewMode> = Set(ResultsViewMode.allCases),
+         isOn: @escaping (ResultsViewMode) -> Bool, tap: @escaping (ResultsViewMode) -> Void, fullScreen: Binding<Bool>? = nil) {
+        self.modes = modes; self.available = available; self.isOn = isOn; self.tap = tap; self.fullScreen = fullScreen
+    }
 
     var body: some View {
         HStack(spacing: DS.Space.s) {
             ForEach(modes, id: \.self) { m in
                 let ok = available.contains(m)
-                Button { mode = m } label: { icon(m).frame(width: 44, height: 44).background(chip(on: m == mode)) }
+                Button { tap(m) } label: { icon(m).frame(width: 44, height: 44).background(chip(on: isOn(m))) }
                     .buttonStyle(.plain)
                     .disabled(!ok)
                     .opacity(ok ? 1 : 0.35)
                     .accessibilityLabel(ok ? m.rawValue : m.rawValue + " — not in this run")
-                    .accessibilityAddTraits(m == mode ? .isSelected : [])
+                    .accessibilityAddTraits(isOn(m) ? .isSelected : [])
                     .accessibilityIdentifier("results-view-\(m.rawValue)")
                     .background(ResultsChrome.publish("resultsView-\(m.rawValue)"))
             }
@@ -673,6 +687,39 @@ enum ResultsScenarioViews {
     }
 }
 
+/// ★ His iPad 2026-10-28: "The Stress/Solid/X-ray views should be add-on views … Stress and xray can combine … Otherwise,
+/// solid is the usual grey." One MOTION at a time (Load paths / Bend / Break, or none) under LAYERS: the colouring (Stress
+/// or Solid grey) and X-ray (see-through, with either). Bend and Break turn Stress on; Load paths turns X-ray on, and Stress
+/// can be added (the light then takes the stress colours).
+public struct ResultsLayers: Equatable, Sendable {
+    public var motion: ResultsViewMode? = nil
+    public var stress = true
+    public var xray = false
+    public init(stress: Bool = true) { self.stress = stress }
+
+    public func isOn(_ m: ResultsViewMode) -> Bool {
+        switch m {
+        case .stress: return stress
+        case .solid: return !stress
+        case .xray: return xray
+        case .loadPaths, .bend, .breakIt: return motion == m
+        }
+    }
+    /// A tap: Stress / Solid choose the colouring; X-ray toggles; a motion starts (or stops when tapped again).
+    public mutating func tap(_ m: ResultsViewMode, hasStress: Bool) {
+        switch m {
+        case .stress: stress = hasStress
+        case .solid: stress = false
+        case .xray: xray.toggle()
+        case .loadPaths, .bend, .breakIt:
+            motion = motion == m ? nil : m
+            // ★ his iPad 2026-10-28: Bend and Break turn Stress on; Load paths turns X-ray on (Stress can be added)
+            if motion == .bend || motion == .breakIt { stress = hasStress }
+            if motion == .loadPaths { xray = true }
+        }
+    }
+}
+
 /// ★ His iPad 2026-10-27 ("Ensure that everything can pause and slide through manually"): a moving view's Play / Pause and
 /// its slider, under the view buttons. Dragging the slider pauses the view where the finger leaves it.
 struct ResultsMotionBar: View {
@@ -683,6 +730,14 @@ struct ResultsMotionBar: View {
     @Binding var playing: Bool
     let position: Double
     let scrub: (Double) -> Void
+    /// ★ 10-28: Bend / Break's Exaggeration slider ("to make it bend more visually"); nil hides it.
+    var exaggeration: Binding<Double>? = nil
+
+    init(title: String, readout: String, alarm: Bool, playing: Binding<Bool>, position: Double,
+         scrub: @escaping (Double) -> Void, exaggeration: Binding<Double>? = nil) {
+        self.title = title; self.readout = readout; self.alarm = alarm; self._playing = playing
+        self.exaggeration = exaggeration; self.position = position; self.scrub = scrub
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
@@ -711,6 +766,18 @@ struct ResultsMotionBar: View {
                 .accessibilityLabel("\(title) position")
                 .accessibilityIdentifier("results-motion-slider")
                 .background(ResultsChrome.publish("resultsMotionSlider"))
+            if let ex = exaggeration {
+                HStack(spacing: DS.Space.s) {
+                    Text("Exaggeration").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                    Slider(value: ex, in: Double(FlexAnimation.minExaggeration)...Double(FlexAnimation.maxExaggeration))
+                        .tint(DS.Color.accent.color)
+                        .accessibilityLabel("Bend exaggeration")
+                        .accessibilityIdentifier("results-exaggeration-slider")
+                        .background(ResultsChrome.publish("resultsExaggeration"))
+                    Text("\(Int(ex.wrappedValue))×").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(DS.Color.textPrimary.color).frame(width: 40, alignment: .trailing)
+                }
+            }
         }
         .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
         .frame(width: ResultsChrome.columnWidth)
@@ -726,13 +793,26 @@ struct ResultsMotionBar: View {
 /// (LatticeLegendChrome, LatticeLegendReading): a vertical scale, hot end up, an arrow on the bar at the tapped value, and the
 /// value in the accent squircle beside it. Minimised it is one line; tapping that line opens it again.
 struct ResultsStressExplore: View {
+    /// One tapped value: which version it is (Compare names each; Results leaves it nil) and its stress.
+    struct Reading: Equatable { let label: String?; let value: Double? }
     /// The top of the scale (MPa) — the SAME number the model's colours are divided by (`stressScaleMaxMPa`).
     let peakMPa: Double
     /// What the scale is keyed to ("PA12_CF · scaled to 21 MPa yield at 50% gyroid").
     let caption: String
-    /// The stress where he tapped, or nil before a tap.
-    let reading: Double?
+    /// ★ 10-28: what the colours show right now while the part moves ("at 63% of your load · bend shown 60× exaggerated").
+    var note: String? = nil
+    /// The stress where he tapped — one per version shown (Compare), empty before a tap.
+    let readings: [Reading]
     @Binding var minimized: Bool
+
+    init(peakMPa: Double, caption: String, note: String? = nil, reading: Double?, minimized: Binding<Bool>) {
+        self.init(peakMPa: peakMPa, caption: caption, note: note,
+                  readings: reading.map { [Reading(label: nil, value: $0)] } ?? [], minimized: minimized)
+    }
+    init(peakMPa: Double, caption: String, note: String? = nil, readings: [Reading], minimized: Binding<Bool>) {
+        self.peakMPa = peakMPa; self.caption = caption; self.note = note; self.readings = readings; self._minimized = minimized
+    }
+    private var reading: Double? { readings.count == 1 ? readings[0].value : nil }
 
     static let barH: CGFloat = 150
     /// ★ his note 2026-10-27: no empty space on the right — the box hugs the scale, and widens only for a reading.
@@ -758,7 +838,7 @@ struct ResultsStressExplore: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open the stress key")
             } else {
-                LatticeLegendChrome(width: reading == nil ? Self.width : Self.widthWithReading, minimized: $minimized,
+                LatticeLegendChrome(width: readings.isEmpty ? Self.width : Self.widthWithReading, minimized: $minimized,
                                     info: "Tap any spot on the part to read its stress there. Double-tap anywhere to come back.") {
                     HStack(alignment: .center, spacing: DS.Space.s) {
                         VStack(alignment: .trailing, spacing: 0) {
@@ -772,16 +852,36 @@ struct ResultsStressExplore: View {
                         LinearGradient(colors: Self.ramp.reversed(), startPoint: .top, endPoint: .bottom)
                             .frame(width: 22, height: Self.barH)
                             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .overlay(alignment: .top) { arrow }
+                            .overlay(alignment: .top) { arrows }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("MPa").font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
                             Text("von Mises").font(.system(size: 10)).foregroundStyle(DS.Color.textTertiary.color)
                         }
                         .frame(width: 58, alignment: .leading)
-                        if let r = reading {
+                        if readings.count == 1, let r = readings[0].value {
                             LatticeLegendReading(value: String(format: "%.2f", r), unit: "MPa", caption: "where you tapped")
                                 .frame(width: 88)
+                        } else if readings.count > 1 {
+                            // ★ Compare: every version's value at the same spot
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(readings.enumerated()), id: \.offset) { _, r in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(r.label ?? "").font(.system(size: 10, weight: .semibold))
+                                            .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                                        Text(r.value.map { String(format: "%.2f MPa", $0) } ?? "no material")
+                                            .font(.system(size: 14, weight: .semibold)).monospacedDigit()
+                                            .foregroundStyle((r.value == nil ? DS.Color.textTertiary : DS.Color.accent).color)
+                                    }
+                                }
+                            }
+                            .frame(width: 88, alignment: .leading)
+                            .accessibilityIdentifier("results-stress-readings")
                         }
+                    }
+                    if let note {
+                        Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textSecondary.color)
+                            .fixedSize(horizontal: false, vertical: true).padding(.top, DS.Space.s)
+                            .accessibilityIdentifier("results-stress-key-note")
                     }
                     Text(caption).font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
                         .fixedSize(horizontal: false, vertical: true).padding(.top, DS.Space.s)
@@ -798,16 +898,20 @@ struct ResultsStressExplore: View {
         (0..<5).map { String(format: peakMPa >= 10 ? "%.0f" : "%.1f", peakMPa * (1 - Double($0) / 4)) }
     }
 
-    /// The arrow at the reading's place on the bar (hot end up), like the Lattice key's.
-    @ViewBuilder private var arrow: some View {
-        if let r = reading, peakMPa > 0 {
-            let t = 1 - min(1, max(0, r / peakMPa))
-            HStack(spacing: 0) {
-                Rectangle().fill(DS.Color.accent.color).frame(width: 22, height: 2)
-                Image(systemName: "arrowtriangle.left.fill").font(.system(size: 16)).foregroundStyle(DS.Color.accent.color)
-                    .shadow(color: .black.opacity(0.8), radius: 1)
+    /// An arrow at each reading's place on the bar (hot end up), like the Lattice key's.
+    @ViewBuilder private var arrows: some View {
+        ZStack(alignment: .top) {
+            ForEach(Array(readings.enumerated()), id: \.offset) { _, rd in
+                if let r = rd.value, peakMPa > 0 {
+                    let t = 1 - min(1, max(0, r / peakMPa))
+                    HStack(spacing: 0) {
+                        Rectangle().fill(DS.Color.accent.color).frame(width: 22, height: 2)
+                        Image(systemName: "arrowtriangle.left.fill").font(.system(size: 16)).foregroundStyle(DS.Color.accent.color)
+                            .shadow(color: .black.opacity(0.8), radius: 1)
+                    }
+                    .offset(x: 11, y: CGFloat(t) * Self.barH - 8)
+                }
             }
-            .offset(x: 11, y: CGFloat(t) * Self.barH - 8)
         }
     }
 }

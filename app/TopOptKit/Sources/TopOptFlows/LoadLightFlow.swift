@@ -109,9 +109,11 @@ public struct LoadLightFlow: Sendable {
         return max(head, trail)
     }
 
-    /// The per-flat-vertex colours at `phase` — the dark body, lit where the light is passing.
-    public func tints(phase p: Float) -> [SIMD4<Float>] {
+    /// The per-flat-vertex colours at `phase` — the dark body, lit where the light is passing. ★ 10-28: with `lightColours`
+    /// (the Stress add-on: each vertex's stress colour) the light IS the stress it passes through.
+    public func tints(phase p: Float, lightColours: [SIMD4<Float>]? = nil) -> [SIMD4<Float>] {
         let body = SIMD4(Self.body, 1), light = SIMD4(Self.light, 1)
+        let lc = lightColours.flatMap { $0.count == arrival.count ? $0 : nil }
         var out = [SIMD4<Float>](repeating: body, count: arrival.count)
         // tight loop over raw buffers: it runs every frame on ~200k vertices
         let lo = p - Self.trailLength, hi = p + Self.headWidth   // lit: just reached (trail) or about to be (head)
@@ -122,7 +124,7 @@ public struct LoadLightFlow: Sendable {
                         let av = a[v]
                         guard av >= 0, av > lo - 1e-6, av < hi else { continue }   // only the band and its trail are lit
                         let g = min(1, Self.glow(arrival: av, phase: p) * (0.55 + 0.45 * st[v]) * 1.25)
-                        if g > 0 { o[v] = body + (light - body) * g }
+                        if g > 0 { o[v] = body + ((lc?[v] ?? light) - body) * g }
                     }
                 }
             }

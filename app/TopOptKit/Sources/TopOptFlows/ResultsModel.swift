@@ -241,8 +241,9 @@ public struct DisplacementField: Sendable {
 public enum FlexAnimation {
     /// Exaggeration band the design calls for (50–100×). The default sits at the low
     /// end so the deflection reads on a phone screen without tearing the mesh apart.
-    public static let minExaggeration: Float = 50
-    public static let maxExaggeration: Float = 100
+    /// ★ His iPad 2026-10-28: an Exaggeration slider "to make it bend more visually" — a wide band.
+    public static let minExaggeration: Float = 10
+    public static let maxExaggeration: Float = 300
     public static let defaultExaggeration: Float = 60
 
     /// Clamp a user-chosen exaggeration into the [min, max] band.
@@ -1345,6 +1346,18 @@ public final class ResultsModel: ObservableObject {
         let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
                             values: own?.vonMises ?? v.vonMisesField)
         return f.isEmpty ? nil : stressTints(for: mesh, field: f)
+    }
+
+    /// ★ Compare's key (his iPad 2026-10-28): one version's stress at a model point — from the SAME field its colours are
+    /// painted from (the picked scenario's when the run sent it); nil where that version has no material.
+    public func compareStress(_ tab: ResultVariantVM, at p: SIMD3<Float>) -> Double? {
+        guard let v = variant(for: tab) else { return nil }
+        let own = viewScenario.flatMap { n in v.scenarioFields.first { $0.name == n } }
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
+                            values: own?.vonMises ?? v.vonMisesField)
+        guard !f.isEmpty else { return nil }
+        let x = f.value(at: p)
+        return x > 0 ? Double(x) : nil
     }
 
     /// A tab's own scenario results: its strengthen version's (each version is certified per scenario), else the run's.

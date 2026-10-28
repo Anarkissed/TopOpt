@@ -87,4 +87,37 @@ final class ResultsMotionTests: XCTestCase {
         XCTAssertEqual(ResultsScenarioViews.note(pick: "Scenario 3", scenarios: sc),
                        "The views show Scenario 1, the worst case — this run sent its fields only.")
     }
+
+    /// ★ His iPad 2026-10-28: Stress / Solid / X-ray are LAYERS on any motion; Bend and Break turn Stress on; Load paths
+    /// turns X-ray on and Stress can be added; Stress and X-ray combine; Solid is the plain grey.
+    func testTheViewsAreLayersOnOneMotion() {
+        var l = ResultsLayers(stress: false)
+        l.tap(.bend, hasStress: true)
+        XCTAssertTrue(l.isOn(.bend) && l.isOn(.stress), "★ Bend turns Stress on")
+        l.tap(.xray, hasStress: true)
+        XCTAssertTrue(l.isOn(.stress) && l.isOn(.xray) && l.isOn(.bend), "★ Stress + X-ray on top of Bend")
+        l.tap(.solid, hasStress: true)
+        XCTAssertTrue(l.isOn(.solid) && !l.isOn(.stress) && l.isOn(.xray), "Solid replaces Stress; X-ray stays")
+        l.tap(.breakIt, hasStress: true)
+        XCTAssertTrue(l.isOn(.breakIt) && !l.isOn(.bend) && l.isOn(.stress), "★ one motion at a time; Break turns Stress on")
+        l.tap(.solid, hasStress: true); l.xray = false
+        l.tap(.loadPaths, hasStress: true)
+        XCTAssertTrue(l.isOn(.loadPaths) && l.isOn(.xray) && l.isOn(.solid), "★ Load paths turns X-ray on, not Stress")
+        l.tap(.stress, hasStress: true)
+        XCTAssertTrue(l.isOn(.stress) && l.isOn(.loadPaths), "Stress can be added to Load paths")
+        l.tap(.loadPaths, hasStress: true)
+        XCTAssertNil(l.motion, "tapped again: no motion")
+        var none = ResultsLayers(stress: false); none.tap(.bend, hasStress: false)
+        XCTAssertFalse(none.isOn(.stress), "no stress field: no Stress to turn on")
+    }
+
+    /// ★ A tap on the BENT part finds the spot on the bent surface and the same spot of the real part.
+    func testATapOnTheBentPartFindsItsSpot() {
+        // one triangle in z = 0, bent up by 1 mm × scale 10 = z 10
+        let flat = ViewerMesh(vertices: [0, 0, 0, 10, 0, 0, 0, 10, 0], indices: [0, 1, 2], faceIDs: [0]).flat
+        let disp = [Float](repeating: 0, count: 9).enumerated().map { $0.offset % 3 == 2 ? 1 : 0 } as [Float]
+        let p = MetalMeshView.Coordinator.restPointOnBentSurface(flat, disp: disp, scale: 10, origin: SIMD3(2, 2, 50), dir: SIMD3(0, 0, -1))
+        XCTAssertEqual(p?.x ?? -1, 2, accuracy: 1e-4); XCTAssertEqual(p?.z ?? -1, 0, accuracy: 1e-4, "the real part's spot (z 0)")
+        XCTAssertNil(MetalMeshView.Coordinator.restPointOnBentSurface(flat, disp: disp, scale: 10, origin: SIMD3(20, 20, 50), dir: SIMD3(0, 0, -1)))
+    }
 }
