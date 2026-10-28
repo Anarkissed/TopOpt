@@ -18,9 +18,8 @@ final class ScenarioTooLightTests: XCTestCase {
                        (1533.96, "1530"), (9.996, "10"), (1534, "1530")] {
             XCTAssertEqual(LoadScenarioRule.kg(v), t, "kg(\(v))")
         }
-        XCTAssertTrue(LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("(1534 kg)") == false
-                      && LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("(1530 kg)"),
-                      "never an exponent: (1530 kg), like core's pinned test")
+        XCTAssertTrue(LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("'s 1530 kg)"),
+                      "never an exponent: 1530 kg, like core's pinned test")
         XCTAssertTrue(LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("at least 153 kg (10% of Scenario “A”'s 1530 kg)"))
     }
 
