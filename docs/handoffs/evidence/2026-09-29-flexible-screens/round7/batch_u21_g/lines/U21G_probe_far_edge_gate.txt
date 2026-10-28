@@ -1,0 +1,9 @@
+lattice none · top faces [1] · bottom faces [0] · part flat 49098
+Face 5 (nu 96 nv 20 pitch 1.042 · v extent 20.00 · u extent 100.00) · Top vertices on its edge 148: nil column at ×148 [u 0.00 w 20.00 t 0.000 → nil column at (0, 19) (iv 19 of 20)]
+  row v = nv−1: 0 of 96 columns · row v = 0: 96 of 96
+Face 3 (nu 96 nv 20 pitch 1.042 · v extent 20.00 · u extent 100.00) · Bottom vertices on its edge 192: nil column at ×192 [u 100.00 w 20.00 t 0.000 → nil column at (95, 19) (iv 19 of 20)]
+  row v = nv−1: 0 of 96 columns · row v = 0: 96 of 96
+Face 5 (nu 96 nv 20 pitch 1.042 · v extent 20.00 · u extent 100.00) · Bottom vertices on its edge 224: gives a value ×224 [u 100.00 w 0.00 t 0.000 → gives a value]
+  row v = nv−1: 0 of 96 columns · row v = 0: 96 of 96
+Face 3 (nu 96 nv 20 pitch 1.042 · v extent 20.00 · u extent 100.00) · Top vertices on its edge 224: gives a value ×224 [u 50.00 w 0.00 t 0.000 → gives a value]
+  row v = nv−1: 0 of 96 columns · row v = 0: 96 of 96

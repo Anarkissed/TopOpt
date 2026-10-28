@@ -1,0 +1,56 @@
+{
+  "bake_build_orientation" : "off",
+  "build_orientation_report" : true,
+  "loads" : {
+    "anchor_face_ids" : [
+      0
+    ],
+    "build_dir" : [
+      0,
+      1,
+      0
+    ],
+    "clearances" : [
+      {
+        "face_id" : 2,
+        "kind" : "face"
+      }
+    ],
+    "face_protection_depth_mm" : 5,
+    "face_protections" : [
+      2
+    ],
+    "groups" : [
+      {
+        "face_ids" : [
+          1
+        ],
+        "force" : [
+          0,
+          -19.613300323486328,
+          0
+        ]
+      }
+    ],
+    "infill_percent" : 20,
+    "layer_height_mm" : 0.20000000000000001,
+    "minimize_plastic" : true,
+    "wall_line_width_mm" : 0.45000000000000001,
+    "wall_line_width_outer_mm" : 0.41999999999999998,
+    "wall_loops" : 3
+  },
+  "material" : "PLA",
+  "mode" : "minimize_plastic",
+  "model" : "\/Users\/nadim\/dev\/TopOpt\/TopOpt\/.claude\/worktrees\/flexible-screens-track-9be87b\/core\/tests\/fixtures\/step\/cube.step",
+  "output" : {
+    "mesh_format" : "stl",
+    "mesh_prefix" : "variant",
+    "project_cad_faces" : true,
+    "report" : "report.json",
+    "smooth_factor" : 2
+  },
+  "plsm" : {
+    "enabled" : true
+  },
+  "resolution" : 64
+}

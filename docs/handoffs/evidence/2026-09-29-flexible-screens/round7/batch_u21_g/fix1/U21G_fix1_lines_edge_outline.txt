@@ -1,0 +1,3 @@
+Edge 12's stamp outline, 49 points, Bend on, no lattice (edge preview): the dent under them (nearest drawn vertex) up to 9.48 mm, mean 2.85 mm (26 points over 0.5 mm)
+now (on the pocket's floor): 22 points in the prism move 9.50 mm (the press's depth 9.50; worst off it 0.000 mm), up to 9.50 mm · worst spike 0.12 mm · mean gap to the nearest vertex's dent 2.22 mm (the dent is a step at the stamp's rim)
+RED controlNearestVertexEdges (fix 1's first try): worst spike 7.37 mm · RED controlEdgeOutlineAtRest (batch G): moves up to 0.00 mm

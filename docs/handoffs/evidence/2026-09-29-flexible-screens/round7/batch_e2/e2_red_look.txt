@@ -1,0 +1,8 @@
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-19 06:25:35.971.
+Test Suite 'Selected tests' passed at 2026-10-19 06:25:35.971.
+FlexibleR7E2Tests.swift:634: error: -[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale] : XCTAssertTrue failed - ★ designed at 190 °C, now 220 °C: stale
+FlexibleR7E2Tests.swift:636: error: -[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale] : XCTAssertTrue failed - ★ another family: stale
+FlexibleR7E2Tests.swift:648: error: -[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale] : XCTAssertTrue failed - ★ the main page never builds while core's designs are in flight
+Test Case '-[TopOptFlowsTests.FlexibleR7E2Tests testALatticeDesignedAtAnotherTemperatureIsStale]' failed (1.349 seconds).
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-19 06:25:37.572.
+Test Suite 'Selected tests' passed at 2026-10-19 06:25:37.572.

@@ -1,0 +1,11 @@
+Round 7 · MANUAL part M1 — runs (scratch /tmp/r7x20b-build), base 2ef88e43
+Classes: the 54 that touch or pin the files changed (designInputs, FlexibleLatticeBuilder, the panel/rail/More/group rows, normalise, FlexibleFERequest.build, source pins) + FlexibleM1ManualTests + FlexibleM1ManualFramesProbe.
+Run 1 (toggle on its own row): 314 passed, 4 failed — FlexibleRowCopyTests x2 (source pins: the removed id "flexible-mode" reused; the pinned face-warning line edited), FlexibleSettingsPageHostedTests 11l as opened, FlexibleSqueezeGroupsReviewUITests 11l group 2 header (both: the toggle row took the panel's height). Fixed: id renamed flexible-manual-mode, the pinned line kept verbatim, the toggle moved onto the header line.
+Run 2 (toggle on the header line, all 54 classes): 317 passed, 1 failed, 19 skipped. The 1 failure: FlexibleSettingsPageHostedTests.testTheSelectedFacesRowsAreOnThePanelOnHisProject 11l "as opened" (card 566-812 vs scroll 202-796). Re-run once: same. With the toggle hidden: still fails. With batch I's FlexibleHoldLine hidden: PASSES (card 550-796 in 207-796). Pre-existing since batch I (this class was not in batch I's runs); not M1.
+Final targeted re-run after the last UI tweak (empty Manual views kept out of the stacks in Auto): FlexibleM1ManualTests, FlexibleM1ManualFramesProbe, FlexibleRowCopyTests, FlexibleSqueezeGroupsReviewUITests, FlexibleSettingsRound4Tests, FlexibleRound5SettingsTests: 39 passed, 0 failed.
+Goldens (after run 1's build; no job/lattice code changed after it): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: stage_job_hashes_m1.txt cmp vs round7/batch_i/install/stage_job_hashes_iinst.txt (whole file): identical.
+FlexibleM1ManualTests lines:
+FLEX-M1 his pad seed: gyroid cell 9.00 mm density 0.1546 (Auto's mean 0.1517 over 126719 voxels, 789 densities)
+FLEX-M1 his pad Manual: densities [0.2, 0.3] · Group 1 voxels 117831 · others 2439 · wall 0.8733624 mm · sims 1
+FLEX-M1 his pad view line: 'Bend · what your lattice does at 5 lb'

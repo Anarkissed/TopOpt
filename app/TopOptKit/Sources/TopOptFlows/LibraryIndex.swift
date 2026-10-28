@@ -1,0 +1,257 @@
+// LibraryIndex.swift — the Library: Project → Part → Version (the approved Library mockup, 2026-10-25,
+// reviewer-inbox/2026-10-25-library-mockup/DATA-MODEL.md).
+//
+// ★ HIS WORDS: "Right now, I am creating copies of the project, updating each a little bit, and
+// comparing the results... it's just messy."
+//
+// The index FILES the project folders he already has. It never moves, copies or deletes one:
+// a VERSION IS A PROJECT FOLDER (today's `ProjectSnapshot` + its results, unchanged), and the index
+// only says which part it belongs to, its number, the version it came from, and his marks. Deleting
+// library.json (Ungroup) puts the Library back exactly as it was.
+//
+// What is NOT stored here, because the folder already says it: whether a version is a draft (its
+// snapshot has no results), its settings, and its results. One source of truth each.
+
+import Foundation
+
+/// The whole Library, written to `<projects root>/library.json`.
+public struct LibraryIndex: Codable, Equatable, Sendable {
+    /// Bump when the shape changes incompatibly; a newer file is never force-decoded.
+    public static let currentSchema = 1
+
+    public var schemaVersion: Int
+    /// The project folders, in Library order.
+    public var projects: [LibraryProject]
+    /// Every part. A part in no project's `partIDs` is Unfiled.
+    public var parts: [LibraryPart]
+
+    public init(schemaVersion: Int = LibraryIndex.currentSchema,
+                projects: [LibraryProject] = [], parts: [LibraryPart] = []) {
+        self.schemaVersion = schemaVersion
+        self.projects = projects
+        self.parts = parts
+    }
+
+    /// Every project folder the index files, once each.
+    public var folderIDs: [UUID] { parts.flatMap { $0.versions.map(\.folderID) } }
+
+    /// The part a project folder is a version of.
+    public func part(containing folderID: UUID) -> LibraryPart? {
+        parts.first { $0.versions.contains { $0.folderID == folderID } }
+    }
+
+    /// The parts no project holds.
+    public var unfiledParts: [LibraryPart] {
+        let filed = Set(projects.flatMap(\.partIDs))
+        return parts.filter { !filed.contains($0.id) }
+    }
+}
+
+/// A folder on the Library ("Squish Mechanism"). It holds parts.
+public struct LibraryProject: Codable, Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public var name: String
+    public var partIDs: [UUID]
+
+    public init(id: UUID = UUID(), name: String, partIDs: [UUID] = []) {
+        self.id = id
+        self.name = name
+        self.partIDs = partIDs
+    }
+}
+
+/// One model file ("Carriage Arms"). Same bytes = same part.
+public struct LibraryPart: Codable, Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public var name: String
+    /// SHA-256 of the model file's bytes, lowercase hex. nil when the model file was missing when
+    /// the part was made: such a folder is a part of its own, never merged by name.
+    public var modelHash: String?
+    /// In number order.
+    public var versions: [LibraryVersion]
+    /// The highest MAIN-LINE number this part ever gave, kept when that version's folder is deleted, so a
+    /// number is never given twice (nil = the highest listed). Audit 2026-10-25.
+    public var lastNumber: Int?
+    /// The same for branches (his decision 11): the highest branch given under each version ("4" → 2
+    /// once v4.2 existed). nil = the highest listed.
+    public var lastChild: [String: Int]?
+
+    public init(id: UUID = UUID(), name: String, modelHash: String?, versions: [LibraryVersion] = [],
+                lastNumber: Int? = nil, lastChild: [String: Int]? = nil) {
+        self.id = id
+        self.name = name
+        self.modelHash = modelHash
+        self.versions = versions
+        self.lastNumber = lastNumber
+        self.lastChild = lastChild
+    }
+
+    /// The next main-line number: never one given before.
+    public var nextNumber: VersionNumber { nextNumber(from: nil) }
+
+    public func version(number: VersionNumber) -> LibraryVersion? { versions.first { $0.number == number } }
+    public func version(folderID: UUID) -> LibraryVersion? { versions.first { $0.folderID == folderID } }
+}
+
+/// One Optimize: a project folder, plus what the Library knows about it.
+public struct LibraryVersion: Codable, Equatable, Sendable {
+    /// The project folder this version is (`ProjectSnapshot.id`).
+    public let folderID: UUID
+    /// v7 on the main line, v4.1 a branch from v4 (his decision 11).
+    public var number: VersionNumber
+    /// The version it came from; nil for a first version.
+    public var parentNumber: VersionNumber?
+    /// His own name; nil means the automatic one (`VersionChanges.autoName`). His decision 9
+    /// (2026-10-25): grouped copies DROP their old "copy N" names.
+    public var name: String?
+    /// What changed from the parent, worked out when the version was made.
+    public var changes: [VersionChange]
+    /// His marks, one entry per result that has any.
+    public var marks: [ResultMark]
+    /// The result he picked (an index into the run's variants: 0 = a). nil = the suggested one.
+    public var pickedResult: Int?
+    /// A few numbers per result, so a card never decodes the 20 MB results file. nil until known.
+    public var summary: [ResultSummary]?
+    /// Storage trimmed this version to the result he picked (its other results are gone; Re-run brings
+    /// them back). nil = never trimmed.
+    public var trimmed: Bool?
+    /// His switch on Storage: true keeps all results, false lets Trim take them; nil follows the rule.
+    public var keepAll: Bool?
+
+    public init(folderID: UUID, number: VersionNumber, parentNumber: VersionNumber? = nil, name: String? = nil,
+                changes: [VersionChange] = [], marks: [ResultMark] = [], pickedResult: Int? = nil,
+                summary: [ResultSummary]? = nil) {
+        self.folderID = folderID
+        self.number = number
+        self.parentNumber = parentNumber
+        self.name = name
+        self.changes = changes
+        self.marks = marks
+        self.pickedResult = pickedResult
+        self.summary = summary
+    }
+
+    /// The marks on one result (an empty mark when it has none).
+    public func mark(for result: Int) -> ResultMark {
+        marks.first { $0.result == result } ?? ResultMark(result: result)
+    }
+
+    /// Replace one result's marks; an empty mark is not kept.
+    public mutating func setMark(_ mark: ResultMark) {
+        marks.removeAll { $0.result == mark.result }
+        if !mark.isEmpty { marks.append(mark); marks.sort { $0.result < $1.result } }
+    }
+}
+
+/// His marks on one result. His decision 1 (2026-10-25): stars in half steps, Print this, Rejected;
+/// no Favourite.
+public struct ResultMark: Codable, Equatable, Sendable {
+    /// The result's index in the run's variants (0 = a, 1 = b, 2 = c).
+    public let result: Int
+    /// 0…5 in steps of 0.5; 0 = not rated.
+    public private(set) var stars: Double
+    public var printThis: Bool
+    public var rejected: Bool
+
+    public init(result: Int, stars: Double = 0, printThis: Bool = false, rejected: Bool = false) {
+        self.result = result
+        self.stars = ResultMark.clampStars(stars)
+        self.printThis = printThis
+        self.rejected = rejected
+    }
+
+    public mutating func setStars(_ value: Double) { stars = ResultMark.clampStars(value) }
+
+    /// Round to the nearest half star, inside 0…5.
+    public static func clampStars(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(5, max(0, (value * 2).rounded() / 2))
+    }
+
+    public var isEmpty: Bool { stars == 0 && !printThis && !rejected }
+    /// The result's letter on screen: a, b, c, … (past z: its number).
+    public static func letter(_ index: Int) -> String {
+        (0..<26).contains(index) ? String(UnicodeScalar(UInt8(97 + index))) : "\(index + 1)"
+    }
+}
+
+/// The numbers a card shows for one result, copied from its run's variant.
+public struct ResultSummary: Codable, Equatable, Sendable {
+    public var massGrams: Double
+    public var worstCaseMargin: Double
+    public var accepted: Bool
+    public var achievedVolumeFraction: Double
+
+    public init(massGrams: Double, worstCaseMargin: Double, accepted: Bool, achievedVolumeFraction: Double) {
+        self.massGrams = massGrams
+        self.worstCaseMargin = worstCaseMargin
+        self.accepted = accepted
+        self.achievedVolumeFraction = achievedVolumeFraction
+    }
+}
+
+// MARK: - on disk
+
+/// What is at `library.json`. "Missing" and "can't be read" are different: only a missing index may
+/// be created by grouping; an unreadable or newer one holds his marks and is never overwritten.
+public enum LibraryFileState: Equatable, Sendable {
+    case missing
+    case readable(LibraryIndex)
+    case unreadable(String)
+}
+
+extension ProjectStore {
+    /// `<projects root>/library.json`. `loadAll` lists only UUID-named folders, so this file is never
+    /// mistaken for a project.
+    public var libraryURL: URL { rootDir.appendingPathComponent("library.json") }
+
+    /// The index, or nil when there is none (never grouped, or Ungrouped) or it cannot be read.
+    /// Reading never writes; an unreadable or newer file is left exactly where it is.
+    public func loadLibrary() -> LibraryIndex? {
+        if case let .readable(index) = libraryState() { return index }
+        return nil
+    }
+
+    /// Missing, readable, or there but unreadable (corrupt, or saved by a newer TopOpt). Never writes.
+    public func libraryState() -> LibraryFileState {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: libraryURL.path) else { return .missing }
+        guard let data = try? Data(contentsOf: libraryURL) else { return .unreadable("library.json can’t be read") }
+        struct Peek: Decodable { let schemaVersion: Int? }
+        if let v = (try? JSONDecoder().decode(Peek.self, from: data))?.schemaVersion,
+           v > LibraryIndex.currentSchema { return .unreadable(ProjectReadFailure.newerSchema) }
+        do { return .readable(try JSONDecoder().decode(LibraryIndex.self, from: data)) }
+        catch { return .unreadable(ProjectReadFailure.reason(error)) }
+    }
+
+    /// Whether anything named after this project folder is still at the root. A folder that is there
+    /// but unreadable still counts: "Can't open" is not "gone".
+    public func folderExists(_ id: UUID) -> Bool {
+        FileManager.default.fileExists(atPath: rootDir.appendingPathComponent(id.uuidString).path)
+    }
+
+    /// The UUID-named entries at the root, or nil when the root cannot be listed at all.
+    public func folderIDsOnDisk() -> Set<UUID>? {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: rootDir.path) else { return nil }
+        return Set(names.compactMap { UUID(uuidString: $0) })
+    }
+
+    public func saveLibrary(_ index: LibraryIndex) throws {
+        try FileManager.default.createDirectory(at: rootDir, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        try encoder.encode(index).write(to: libraryURL, options: .atomic)
+    }
+
+    /// Ungroup: remove the index. Every project folder is untouched, so the Library is back exactly
+    /// as it was before grouping.
+    public func ungroupLibrary() {
+        try? FileManager.default.removeItem(at: libraryURL)
+    }
+
+    /// The fingerprint of a project's model file (SHA-256 of its bytes), or nil when it is missing.
+    public func modelHash(of snapshot: ProjectSnapshot) -> String? {
+        LibraryGrouping.sha256(fileAt: URL(fileURLWithPath: modelPath(id: snapshot.id,
+                                                                     fileName: snapshot.modelFileName)))
+    }
+}

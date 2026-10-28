@@ -1,0 +1,24 @@
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleSettings.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleSettings.swift
+index 432ac9ce..616dea0b 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleSettings.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleSettings.swift
+@@ -204,6 +204,7 @@ public struct FlexibleStageSettings: Codable, Equatable, Hashable, Sendable {
+     /// Surface root, I2's form — FlexibleSectorMigration reads it through). OPTIONAL, omitted when nil: old projects decode
+     /// and encode byte-identical. LABELS ONLY: never part of the lattice's key (`designInputs`).
+     public var sectors: FlexibleSectorStore?
++    public var latticeOnlyGroups: Set<UUID>?   // PROBE
+ 
+     public init(materialID: String? = nil, nozzleTempC: Double? = nil, topology: String = "auto",
+                 feel: String = "springy", beadsPerWall: Int = 1,
+diff --git a/app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift b/app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift
+index 09e3a621..307adcb8 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/ProjectModel.swift
+@@ -2530,6 +2530,7 @@ public final class ProjectModel: ObservableObject {
+                 kind: force.kind(for: id), protected: force.isProtected(id),
+                 // EXPLICIT only — see LatticeFaceRoleGate.block.
+                 keepClearOn: force.keepClearAffix(for: id) == .on)
++                || (lattice.flexible?.latticeOnlyGroups?.contains(id) == true && force.keepClearAffix(for: id) != .on)   // PROBE
+         }
+     }
+ 

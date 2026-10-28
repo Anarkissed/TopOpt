@@ -1,0 +1,136 @@
+Test Suite 'Selected tests' started at 2026-10-25 06:33:49.014.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-25 06:33:49.015.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-25 06:33:49.016.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 06:33:49.016.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' started at 2026-10-25 06:33:49.187.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-25 06:33:49.188.
+Test Suite 'GrowthLadderTests' started at 2026-10-25 06:33:49.188.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testAddedMaterialLineStatesHowMuchAndWhere]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testAddedMaterialLineStatesHowMuchAndWhere]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testBothModesAreNameableInOneLine]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testBothModesAreNameableInOneLine]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testGrowthExportFilename]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testGrowthExportFilename]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testGrowthHeadlineIsAddedNotNegativeSavings]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testGrowthHeadlineIsAddedNotNegativeSavings]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testOutcomeRoundTripKeepsGrowthFacts]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testOutcomeRoundTripKeepsGrowthFacts]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testReductionHeadlineIsUnchanged]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testReductionHeadlineIsUnchanged]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testReductionOutcomeRoundTripsAsReduction]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testReductionOutcomeRoundTripsAsReduction]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testResultsNamesTheLadderFromTheRun]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testResultsNamesTheLadderFromTheRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testSaturatedRungSaysSo]' started.
+Test Case '-[TopOptFlowsTests.GrowthLadderTests testSaturatedRungSaysSo]' passed (0.000 seconds).
+Test Suite 'GrowthLadderTests' passed at 2026-10-25 06:33:49.195.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+Test Suite 'JobJSONEquivalenceTests' started at 2026-10-25 06:33:49.195.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testSourceFormatEmittedOnlyForANormalisedPart]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testSourceFormatEmittedOnlyForANormalisedPart]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsAgreeAcrossBridgeAndCLI]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsAgreeAcrossBridgeAndCLI]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsDefaultToTheStatedFDMDefaults]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsDefaultToTheStatedFDMDefaults]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsAgreeAcrossBridgeAndCLI]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsAgreeAcrossBridgeAndCLI]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsDefaultsToTheFDMDefaultNotZero]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsDefaultsToTheFDMDefaultNotZero]' passed (0.000 seconds).
+Test Suite 'JobJSONEquivalenceTests' passed at 2026-10-25 06:33:49.198.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+Test Suite 'LatticeStaleTypeTests' started at 2026-10-25 06:33:49.198.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' started.
+2026-10-25 06:33:49.475 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 06:33:49.755 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' passed (0.559 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' passed (0.210 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' started.
+2026-10-25 06:33:50.471 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 06:33:50.740 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' passed (0.774 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' started.
+2026-10-25 06:33:51.009 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 06:33:51.283 xctest[11674:75831471] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' passed (0.544 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' passed (0.012 seconds).
+Test Suite 'LatticeStaleTypeTests' passed at 2026-10-25 06:33:51.299.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.101 (2.101) seconds
+Test Suite 'RedesignToStrengthenTests' started at 2026-10-25 06:33:51.299.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' passed (11.133 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAMergedVersionReadsBridgedFromThePreviousVersionsLine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAMergedVersionReadsBridgedFromThePreviousVersionsLine]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAMergedVersionReadsTheVersionJustBeforeItNotTheFirst]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAMergedVersionReadsTheVersionJustBeforeItNotTheFirst]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' passed (0.334 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenWithNoDesignBoxIsRefusedOnTheWorker]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenWithNoDesignBoxIsRefusedOnTheWorker]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheCapLineIsBuiltFromItsFlagsNeverItsNote]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheCapLineIsBuiltFromItsFlagsNeverItsNote]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' passed (0.000 seconds).
+Test Suite 'RedesignToStrengthenTests' passed at 2026-10-25 06:34:02.778.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 11.478 (11.479) seconds
+Test Suite 'SeveralRolesOnOneFaceTests' started at 2026-10-25 06:34:02.778.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists]' started.
+2026-10-25 06:34:02.886 xctest[11674:75831471] DIAG shellClip mode=OFF inFrame=false algo=- capsules=-1 capVerts=0 capPipeline=true capsulePipeline=true capsulesReplaceField=false bodyAlpha=1.0 initError=nil regionTex=false skinMM=-1.0 dims=SIMD4<Float>(1.0, 1.0, 1.0, 0.0) regions=[] open=[no census]
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInProtectAndKeepClearGoesOutInBothJobLists]' passed (0.115 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInTheActiveGroupStillDeselectsOnlyThere]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAFaceInTheActiveGroupStillDeselectsOnlyThere]' passed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAGateRemovedCopyGoesRed]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testAGateRemovedCopyGoesRed]' passed (11.267 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testCoreAcceptsAFaceInProtectAndClearances]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testCoreAcceptsAFaceInProtectAndClearances]' passed (0.370 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testEveryH55HookIsPinnedOnceWithItsGate]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testEveryH55HookIsPinnedOnceWithItsGate]' passed (0.376 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testHidingAGroupDoesNotBlockAddingItsFaceToAnotherGroup]' passed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testKeepClearOnAnAnchorOrLoadFaceAndProtectOnALoadFace]' passed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testLoadPlusAnchorOnOneFaceIsRefusedWithThePlainLine]' passed (0.009 seconds).
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testTheBadgeShowsEveryRoleAFaceHas]' started.
+Test Case '-[TopOptFlowsTests.SeveralRolesOnOneFaceTests testTheBadgeShowsEveryRoleAFaceHas]' passed (0.019 seconds).
+Test Suite 'SeveralRolesOnOneFaceTests' passed at 2026-10-25 06:34:14.967.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 12.188 (12.189) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-25 06:34:14.967.
+	 Executed 48 tests, with 0 failures (0 unexpected) in 25.775 (25.780) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 06:34:14.967.
+	 Executed 48 tests, with 0 failures (0 unexpected) in 25.775 (25.780) seconds
+Test Suite 'Selected tests' started at 2026-10-25 06:34:15.061.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-25 06:34:15.061.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-25 06:34:15.062.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 06:34:15.062.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

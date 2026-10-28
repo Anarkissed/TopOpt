@@ -1,0 +1,5 @@
+[Done] ["Edge 14", "Edge 16"]: stored · sent 0 · designed by core 0 · lines ["Shape only · core support comes later warn false", "Shape only · core support comes later warn false"]
+P01_13p_edges_group_shape_only_dashed.png: marks ["flatArrow-Edge 14", "flatDepthChip-Edge 14", "flatKnob-Edge 14", "flatPrism-Edge 14", "flatTiltBox-Edge 14", "flatTwistBox-Edge 14"] · solid ["Edge 16": false, "Edge 14": false] · toast -
+switch OFF: lattice true · error - · sent 0 · gyroid 220.0 °C
+E1's rule (presses stripped): lattice true · error - · sent 0 · gyroid 220.0 °C
+density field switch OFF vs E1's rule: 53248 voxels, 0 differ · owner differ 0

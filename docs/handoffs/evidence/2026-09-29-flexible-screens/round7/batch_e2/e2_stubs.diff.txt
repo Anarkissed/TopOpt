@@ -1,0 +1,665 @@
+diff --git a/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp b/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
+index 01d5f0a0..e4967793 100644
+--- a/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
++++ b/app/TopOptKit/Sources/TopOptBridge/flexible_bridge.cpp
+@@ -251,6 +251,62 @@ void copy_design(const fx::FaceDesign& d, FlexFaceDesign& o) {
+   o.sigma_max = d.sigma.max;
+ }
+ 
++// ★ R7-E2: core's Stack copied field for field — the frame, the columns, the linked other end, the footprint (one copy for the
++// scene's stacks and the run's A5 stacks, so the bit test compares like with like). The scene adds its own lattice run and sector
++// verdict (flexible_scene_stack).
++void fill_stack(const fx::Stack& st, FlexStack& o) {
++  const fx::FaceFrame& f = st.frame;
++  o.frame_valid = f.valid;
++  o.frame_reason = f.reason;
++  put3(o.load, f.load);
++  put3(o.x_axis, f.x_axis);
++  put3(o.y_axis, f.y_axis);
++  put3(o.centroid, f.centroid);
++  o.rotation_deg = f.rotation_deg;
++  o.u_min = f.u_min;
++  o.v_min = f.v_min;
++  o.u_extent_mm = f.u_extent_mm;
++  o.v_extent_mm = f.v_extent_mm;
++  o.area_mm2 = f.area_mm2;
++  o.projected_area_mm2 = f.projected_area_mm2;
++  o.normal_spread_deg = f.normal_spread_deg;
++  o.normal_spread_flag = f.normal_spread_flag;
++  o.build_angle_deg = f.build_angle_deg;
++  o.side = f.side;
++  o.principal_axis_tied = f.principal_axis_tied;
++  o.pitch_mm = st.pitch_mm;
++  o.nu = st.nu;
++  o.nv = st.nv;
++  o.cell.assign(st.cell.begin(), st.cell.end());
++  for (const fx::StackColumn& c : st.columns) {
++    o.col_iu.push_back(c.iu);
++    o.col_iv.push_back(c.iv);
++    o.col_u_mm.push_back(c.u_mm);
++    o.col_v_mm.push_back(c.v_mm);
++    o.col_area_mm2.push_back(c.area_mm2);
++    o.col_entry_t.push_back(c.entry_t);
++    o.col_exit_t.push_back(c.exit_t);
++    o.col_lattice_mm.push_back(c.lattice_mm);
++    o.col_exit_face.push_back(c.exit_face);
++  }
++  for (const fx::StackLink& l : st.exit_faces) {
++    o.exit_face_ids.push_back(l.id);
++    o.exit_face_fractions.push_back(l.area_fraction);
++  }
++  for (const fx::StackLink& l : st.exit_regions) {
++    o.exit_region_ids.push_back(l.id);
++    o.exit_region_fractions.push_back(l.area_fraction);
++  }
++  o.exit_unresolved_fraction = st.exit_unresolved_fraction;
++  o.footprint_area_mm2 = st.footprint_area_mm2;
++  o.latticed_columns = st.latticed_columns;
++  o.lattice_mm_min = st.lattice_mm_min;
++  o.lattice_mm_mean = st.lattice_mm_mean;
++  o.lattice_mm_max = st.lattice_mm_max;
++  o.stack_mm_max = st.stack_mm_max;
++  for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
++}
++
+ // The assembled field for these faces' last designs (cached on the scene). Caller holds s.mu.
+ const fx::DensityField& field_of(Scene& s, const std::vector<int32_t>& face_region_ids,
+                                  const std::vector<int32_t>& rotations, const FlexBuild& build) {
+@@ -590,55 +646,7 @@ FlexStack flexible_scene_stack(int64_t scene, int32_t face_region_id, int32_t ro
+     std::lock_guard<std::mutex> lock(s->mu);
+     const fx::Stack& st = stack_of(*s, face_region_id, rotation_deg);
+     const fx::FaceFrame& f = st.frame;
+-    o.frame_valid = f.valid;
+-    o.frame_reason = f.reason;
+-    put3(o.load, f.load);
+-    put3(o.x_axis, f.x_axis);
+-    put3(o.y_axis, f.y_axis);
+-    put3(o.centroid, f.centroid);
+-    o.rotation_deg = f.rotation_deg;
+-    o.u_min = f.u_min;
+-    o.v_min = f.v_min;
+-    o.u_extent_mm = f.u_extent_mm;
+-    o.v_extent_mm = f.v_extent_mm;
+-    o.area_mm2 = f.area_mm2;
+-    o.projected_area_mm2 = f.projected_area_mm2;
+-    o.normal_spread_deg = f.normal_spread_deg;
+-    o.normal_spread_flag = f.normal_spread_flag;
+-    o.build_angle_deg = f.build_angle_deg;
+-    o.side = f.side;
+-    o.principal_axis_tied = f.principal_axis_tied;
+-    o.pitch_mm = st.pitch_mm;
+-    o.nu = st.nu;
+-    o.nv = st.nv;
+-    o.cell.assign(st.cell.begin(), st.cell.end());
+-    for (const fx::StackColumn& c : st.columns) {
+-      o.col_iu.push_back(c.iu);
+-      o.col_iv.push_back(c.iv);
+-      o.col_u_mm.push_back(c.u_mm);
+-      o.col_v_mm.push_back(c.v_mm);
+-      o.col_area_mm2.push_back(c.area_mm2);
+-      o.col_entry_t.push_back(c.entry_t);
+-      o.col_exit_t.push_back(c.exit_t);
+-      o.col_lattice_mm.push_back(c.lattice_mm);
+-      o.col_exit_face.push_back(c.exit_face);
+-    }
+-    for (const fx::StackLink& l : st.exit_faces) {
+-      o.exit_face_ids.push_back(l.id);
+-      o.exit_face_fractions.push_back(l.area_fraction);
+-    }
+-    for (const fx::StackLink& l : st.exit_regions) {
+-      o.exit_region_ids.push_back(l.id);
+-      o.exit_region_fractions.push_back(l.area_fraction);
+-    }
+-    o.exit_unresolved_fraction = st.exit_unresolved_fraction;
+-    o.footprint_area_mm2 = st.footprint_area_mm2;
+-    o.latticed_columns = st.latticed_columns;
+-    o.lattice_mm_min = st.lattice_mm_min;
+-    o.lattice_mm_mean = st.lattice_mm_mean;
+-    o.lattice_mm_max = st.lattice_mm_max;
+-    o.stack_mm_max = st.stack_mm_max;
+-    for (int id : st.footprint_region_ids) o.footprint_region_ids.push_back(id);   // ★ R7-E1
++    fill_stack(st, o);   // ★ R7-E2: the one copy (the run's A5 stacks take it too)
+     // ★ R7-E1: a press's columns — the latticed run contiguous from each entry (core's own samples; FlexibleBridge.hpp).
+     // ★ R7-E1 REVIEW (the verifier: at Balanced his 20 mm pad is 19.2 voxels tall and core leaves the Top's surface layer Empty —
+     // its centres at z 20.31, above the part — so every column entering through the Top read 0 mm and [Done] was refused at
+@@ -1077,6 +1085,10 @@ FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError&
+       g.c_y = f.curve_c_y;
+       if (f.has_design_stamp) g.design_stamp = from_core(f.design_stamp);
+       g.skin_on = f.skin_on;
++      // ★ R7-E2: an edge or corner press's keys, as core parsed them
++      for (int id : f.footprint_region_ids) g.footprint_region_ids.push_back(id);
++      g.has_press_direction = f.has_press_direction;
++      if (f.has_press_direction) put3(g.press_direction, f.press_direction);
+       o.faces.push_back(std::move(g));
+     }
+     for (const topopt::JobFlexibleCheckStamp& c : b.check_stamps) {
+@@ -1108,6 +1120,23 @@ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& j
+     o.refusal_reason = r.refusal_reason;
+     o.receipt_json = r.receipt_json;
+     o.files = r.files;
++    // ★ R7-E2 — A5: the run's stacks (one per loaded entry, job order) and its field, as values
++    for (const fx::Stack& st : r.stacks) {
++      FlexStack fs;
++      fill_stack(st, fs);
++      o.stacks.push_back(std::move(fs));
++    }
++    if (!r.refused && !r.field.density.empty()) {
++      const fx::DensityField& f = r.field;
++      o.has_field = true;
++      o.field.nx = f.nx;
++      o.field.ny = f.ny;
++      o.field.nz = f.nz;
++      o.field.spacing = f.spacing;
++      put3(o.field.origin, f.origin);
++      o.field.density.assign(f.density.begin(), f.density.end());
++      o.field.owner.assign(f.owner.begin(), f.owner.end());
++    }
+   } catch (const std::exception& e) {
+     fail(err, e);
+     o = FlexRunResult{};
+diff --git a/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp b/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
+index 81b15856..dbed544f 100644
+--- a/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
++++ b/app/TopOptKit/Sources/TopOptBridge/include/FlexibleBridge.hpp
+@@ -463,6 +463,12 @@ struct FlexJobFace {
+   std::vector<double> x_x, x_y, y_x, y_y, c_x, c_y;
+   FlexStampGrid design_stamp;
+   bool skin_on = true;
++  // ★ R7-E2 (an edge or corner press — core's C1 addendum keys, read back through core's own parser): the regions pressed as one
++  // footprint (`face_region_ids`, in the job's order; empty for a single-region entry) and the stated direction (`press_direction`,
++  // as core parsed it — before press_unit) when `has_press_direction`.
++  std::vector<int32_t> footprint_region_ids;
++  bool has_press_direction = false;
++  double press_direction[3] = {0, 0, 0};
+ };
+ struct FlexJobBlock {
+   std::string material_id;
+@@ -487,12 +493,20 @@ FlexJobBlock flexible_parse_job_block(const std::string& job_json, BridgeError&
+ // `job_dir`, and every receipt, heat map and CSV written into `out_dir`. A stage refusal
+ // (calibrate-first filament, two loaded faces on one stack, …) comes back in the result with
+ // core's code and sentence; malformed input fills `err`.
++using FlexStacks = std::vector<FlexStack>;
+ struct FlexRunResult {
+   bool refused = false;
+   std::string refusal_code;
+   std::string refusal_reason;
+   std::string receipt_json;        // the `flexible` block of run_info.json
+   std::vector<std::string> files;  // written, relative to out_dir
++  // ★ R7-E2 — A5 (reviewer 2026-10-08): the run's own stacks, one per LOADED entry in job order (a press's built by core's
++  // build_press_stack from its face_region_ids + press_direction), copied field for field as flexible_scene_stack copies a
++  // scene's (frame, columns, links, footprint — no lattice run, no sector verdict: those are the scene's), and its density
++  // field (`has_field` false on a refusal) — what the receipt and the files were written from, for the app's bit test.
++  FlexStacks stacks;
++  bool has_field = false;
++  FlexField field;
+ };
+ FlexRunResult flexible_run_job(const std::string& job_json, const std::string& job_dir,
+                                const std::string& out_dir, const std::string& materials_path,
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreHold.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreHold.swift
+index 91754832..9a3b2e59 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreHold.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreHold.swift
+@@ -108,8 +108,10 @@ public struct FlexibleCoreHold: Equatable, Sendable {
+     /// What core CAN run instead, 1–3 buttons: each group alone (one end of any pinch inside it
+     /// resting), or — one group — each end of the pinch resting. Only a set that leaves no pinch
+     /// and at least one pressed face is offered.
++    /// ★ R7-E2: `pressMarker` — a press IN THE JOB by its first region (nil: not in it). A send that leaves a group out lists its
++    /// presses' markers among the resting regions: the job then leaves those presses out (a press is never a resting entry).
+     public static func sends(groups: [FlexibleSqueezeGroup], pinches: [(a: Int, b: Int)],
+-                             name: (Int) -> String) -> [FlexibleCoreFix] {
++                             name: (Int) -> String, pressMarker: ((UUID) -> Int?)? = nil) -> [FlexibleCoreFix] {
+         let pressed = groups.flatMap(\.regions)
+         func unique(_ xs: [Int]) -> [Int] { var seen = Set<Int>(); return xs.filter { seen.insert($0).inserted } }
+         func noPinchLeft(_ rest: Set<Int>) -> Bool { pinches.allSatisfy { rest.contains($0.a) || rest.contains($0.b) } }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreRun.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreRun.swift
+index 201cb737..6ee3967c 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreRun.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleCoreRun.swift
+@@ -78,6 +78,12 @@ public struct FlexibleCoreRunReport: Equatable, Sendable {
+         return "Core refused it: " + first
+     }
+ 
++    /// ★ R7-E2 — the reviewer's ruling (2026-10-10 19:40: "map shared_footprint to plain words, naming both presses/regions and the
++    /// overlap in mm²"): a refusal with core's region ids put in his names (`names`: a region id → "Edge 16" / "Face 3").
++    public static func refusalLine(_ r: FlexRefusal, names: (Int) -> String) -> String {
++        refusalLine(r)   // ★ R7-E2 STUB
++    }
++
+     /// Read core's answer: the refusal from the result, the choices from its receipt.
+     public static func of(_ r: FlexRunInfo, outDir: String, seconds: Double, scope: String? = nil) -> FlexibleCoreRunReport {
+         let receipt = (try? JSONSerialization.jsonObject(with: Data(r.receiptJSON.utf8))) as? [String: Any] ?? [:]
+@@ -113,6 +119,9 @@ public final class FlexibleCoreRun: ObservableObject {
+     @Published public private(set) var hold: FlexibleCoreHold?
+     /// The document the phase answers (the same job is not sent twice).
+     public private(set) var sentJob: String?
++    /// ★ R7-E2 (the ruling's item 5: "Show that in plain words"): the job sent carries a SIDE press — the Export caption says the
++    /// angled estimate in one line, the ruling's whole sentence behind its (i). nil otherwise.
++    @Published public internal(set) var pressNote: String?
+     /// The step's button that sent it (nil: the job Settings describes).
+     public private(set) var sentFix: FlexibleCoreFix?
+     /// ★ C2 VERIFICATION: a button of the step was tapped (the main stage acts on it — the model
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
+index 8dda22ad..c8269838 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleEdgePickViews.swift
+@@ -214,8 +214,9 @@ struct FlexibleEdgeGroupRows: View {
+                         .accessibilityIdentifier("flexible-flat-set-mm")
+                     }
+                 }
+-            } else {
+-                FlexCaption(text: FlexibleRowCopy.pressNotSent)
++            } else if let w = model.pressWarning(p.id) {
++                // ★ R7-E2: not in the job (its reason, 1–3 fixes) › twisted more than 2 % off › core's side label
++                pressWarningRow(p, w)
+             }
+             if let st = p.strip, let shown = FlexibleFlatPrismUI.shown(model: model, press: p.id) {
+                 flatRows(p, st, shown)
+@@ -238,6 +239,36 @@ struct FlexibleEdgeGroupRows: View {
+         .accessibilityIdentifier("flexible-edge-press-\(p.strip?.label ?? "")")
+     }
+ 
++    /// ★ R7-E2: the press's one warning line beyond core's refusal and a lattice stop, and its 1–3 fixes (each one undo step).
++    @ViewBuilder private func pressWarningRow(_ p: FlexiblePress, _ w: (line: String, fixes: [FlexiblePressFix])) -> some View {
++        let sent = model.sentPresses.contains(p.id)
++        VStack(alignment: .leading, spacing: 4) {
++            if sent {
++                FlexCaption(text: w.line).accessibilityIdentifier("flexible-edge-press-note")
++            } else {
++                FlexWarningLine(text: w.line, id: "flexible-edge-press-unsent")
++            }
++            if !w.fixes.isEmpty {
++                HStack(spacing: DS.Space.s) {
++                    ForEach(Array(w.fixes.prefix(3).enumerated()), id: \.offset) { i, f in
++                        Button {
++                            Task { @MainActor in if let why = await model.applyPressFix(f) { model.toast = why } }
++                        } label: {
++                            Text(f.title).font(.system(size: 13, weight: .semibold))
++                                .foregroundStyle(i == 0 ? FlexibleStageStyle.onAccent : DS.Color.textPrimary.color)
++                                .lineLimit(1).minimumScaleFactor(0.8)
++                                .padding(.horizontal, 12).frame(minHeight: 44)
++                                .background(Capsule().fill(i == 0 ? FlexibleStageStyle.accent : DS.Color.chipSolid.color))
++                                .overlay(FlexibleCornerPairStyle.secondaryEdge(i == 0))
++                        }
++                        .buttonStyle(.plain)
++                        .accessibilityIdentifier("flexible-press-fix-\(f.id)")
++                    }
++                }
++            }
++        }
++    }
++
+     /// ★ R7-E1: the flat prism's rows — the same numbers as the chip and the knob's boxes on the model (one store: the press).
+     @ViewBuilder private func flatRows(_ p: FlexiblePress, _ st: FlexibleStrip, _ shown: FlexibleFlatPrismUI.Shown) -> some View {
+         let corner = st.kind == .corner
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleExportRows.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleExportRows.swift
+index 63b13cd9..48a332ad 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleExportRows.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleExportRows.swift
+@@ -69,6 +69,17 @@ enum FlexibleExportRows {
+         }
+     }
+ 
++    /// ★ R7-E2 (the ruling's item 5 — "Show that in plain words"): the job sent carried a SIDE press — one line under core's line,
++    /// the ruling's whole sentence behind its (i).
++    struct PressNote: View {
++        @ObservedObject var run: FlexibleCoreRun
++        var size: CGFloat = 14
++
++        var body: some View {
++            EmptyView()   // ★ R7-E2 STUB
++        }
++    }
++
+     /// ★ C2 VERIFICATION: what core CAN run (or the filament with data), 1–3 big buttons.
+     struct FixRow: View {
+         @ObservedObject var run: FlexibleCoreRun
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
+index 7c5409c8..1c2f1fee 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleFlatPrismRender.swift
+@@ -148,6 +148,8 @@ enum FlexibleFlatPrismUI {
+ 
+     /// The last arrow the overlay drew, in the page's points (the hosted tests read it).
+     static var lastArrowEnds: (head: CGPoint, tail: CGPoint)?
++    /// ★ R7-E2: whether the overlay last drew each press's arrow SOLID (sent) or dashed (not sent), by its label (the hosted tests).
++    static var lastArrowSolid: [String: Bool] = [:]
+     /// ★ R7-E1 REVIEW, RED CONTROL only: the knob only at the arrow's true tail (off the screen in his working views: no knob).
+     static var controlKnobAtTailOnly = false
+ 
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleJob.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleJob.swift
+index 79f89534..3c754a6e 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleJob.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleJob.swift
+@@ -48,6 +48,10 @@ public enum FlexibleJob {
+         /// run job with any is refused HERE (core refuses one stack pressed from both ends), not
+         /// only in the model's wrapper — every caller that builds Inputs must fill it.
+         public var pinches: [[Int]] = []
++        /// ★ R7-E2: the edge and corner presses IN THE JOB (FlexiblePressSupport's gate), each written AFTER the face entries as one
++        /// loaded entry: face_region_ids (its pieces, member order) + press_direction (its stored bits). Empty ⇒ the job is
++        /// byte-identical to before (every face entry is).
++        public var presses: [PressEntry] = []
+ 
+         public init(modelPath: String, resolution: Int, beadWidthMM: Double, faceCount: Int,
+                     settings: FlexibleStageSettings, regions: [[String: Any]] = [],
+@@ -58,6 +62,25 @@ public enum FlexibleJob {
+         }
+     }
+ 
++    /// ★ R7-E2: one edge or corner press as the job states it (core's C1 addendum keys).
++    public struct PressEntry: Equatable, Sendable {
++        public let id: UUID
++        /// Its pieces, in member order (core names the press by the first).
++        public let regions: [Int]
++        /// press.direction, its stored bits (core normalises it once, press_unit).
++        public let direction: SIMD3<Double>
++        public let weightN: Double
++        /// The map core is sent (FlexiblePressShape.map — the same the design used): mode, curves, deepest squish.
++        public let map: FlexMap
++        public init(id: UUID, regions: [Int], direction: SIMD3<Double>, weightN: Double, map: FlexMap) {
++            self.id = id; self.regions = regions; self.direction = direction; self.weightN = weightN; self.map = map
++        }
++    }
++
++    /// ★ RED CONTROL only (FlexibleR7E2Tests): the press's pieces written as plain face entries (no face_region_ids, no
++    /// press_direction) — core would design each piece along its own normal.
++    nonisolated(unsafe) static var controlPressAsFaces = false
++
+     public enum EncodeError: Error, Equatable, CustomStringConvertible {
+         case noFilament
+         case noLoadedFace
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleReadiness.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleReadiness.swift
+index eb24d67d..c0071921 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleReadiness.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleReadiness.swift
+@@ -256,6 +256,9 @@ public struct FlexibleReadiness: Equatable, Sendable {
+         /// ★ ROUND 7, M1 VERIFY: the opened scene sets a face-prism (default true: the pure tests' readiness, and a scene still
+         /// opening). False: the top line is the no-face-prism line, never "Ready".
+         public var facePrisms = true
++        /// ★ R7-E2: edge and corner presses IN THE JOB (FlexiblePressSupport) — something IS pressed, so "no pressed face" does not
++        /// block an edges group sent on its own.
++        public var sentPresses = 0
+ 
+         public init(materialID: String?, materialName: String?, calibrateFirst: Bool,
+                     withData: (id: String, name: String)?, pressed: [Face],
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+index 4f5ede4b..b514504e 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy+Edges.swift
+@@ -118,4 +118,36 @@ extension FlexibleRowCopy {
+     public static let flatAngleStopsBoth = "Angle stops here \u{00B7} the lattice ends there"
+     /// A candidate member taken out of the Flexible setup — one line, whole ("Face 1 · lattice A is out of Flexible").
+     public static func outOfFlexible(_ name: String) -> String { fit("\(name) is out of Flexible") }
++
++    // MARK: ★ R7-E2 — sent to core (his rule: one line, ≤ 44; the reviewer's: shared_footprint in plain words)
++
++    /// Two entries share surface (core's A3): "Edge 16 and Face 3 share 85 mm²".
++    public static func sharedFootprint(_ a: String, _ b: String, mm2: Double) -> String {
++        let n = String(format: "%.0f", mm2.rounded())
++        let tail = " share \(n) mm\u{00B2}"
++        let room = maxChars - tail.count - " and ".count
++        return fit(fit(a, room / 2) + " and " + fit(b, room - Swift.min(a.count, room / 2)) + tail)
++    }
++    /// A press core is designing (its stack read, its design not in yet).
++    public static let pressDesigning = "Set up \u{00B7} core is designing it"
++    /// A press core would not design: "Not sent · no squish data for it".
++    public static func pressNotDesigned(_ why: String) -> String { fit("Not sent \u{00B7} \(why)") }
++    /// A region that would be in two entries.
++    public static func pressTwoEntries(_ name: String) -> String { fit("Not sent \u{00B7} \(name) is pressed twice") }
++    /// Two presses of one group pushing the same material along one axis (core's one_profile_per_stack).
++    public static func pressConflict(_ a: String, _ b: String) -> String { fit("\(fit(a, 16)) and \(fit(b, 16)) press one stack") }
++    /// Core's side label for a press sent along a side (core's FaceFrame.side — more than 15° off build Z).
++    public static let sidePress = "Side press \u{00B7} gyroid only \u{00B7} estimate"
++    /// ★ The ruling's sentence (2026-10-07, item 5), whole — the limits sheet, the Export caption's (i), the side label's (i).
++    public static let angledEstimateSentence = "Squish data were measured pressing straight down; angled presses are estimates until they're measured."
++    /// The same, in one line (the once-per-session pop-up and the Export caption).
++    public static let angledEstimateShort = "Angled presses are estimates until measured"
++    /// ★ HIS ANSWER (2026-10-18 ~16:50): the twist ships with its honest line — how far core's profile is off the flat prism.
++    public static func twistOff(_ percent: Double) -> String { fit("Twisted \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
++    /// A corner core's map cannot follow within 2 %.
++    public static func cornerOff(_ percent: Double) -> String { fit("Tipped \u{00B7} squish shape up to \(Int(percent.rounded()))% off") }
++    /// Step ② for an edges group: "Group 3 · 5 lb · 2 edges · bead 0.45 mm" (its weight, its edges and corners, the bead).
++    public static func edgesJobSummary(group: String, weight: String, edges: Int, corners: Int, beadMM: Double) -> String {
++        [group, weight, edgesDetail(edges: edges, corners: corners), String(format: "bead %.2f mm", beadMM)].joined(separator: " \u{00B7} ")
++    }
+ }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy.swift
+index 039219e7..794cb306 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleRowCopy.swift
+@@ -268,6 +268,12 @@ public enum FlexibleRowCopy {
+         if side { return "Side face · gyroid only · estimated" }
+         return nil
+     }
++    /// ★ R7-E2: the same, core's region ids in his names (`names`) — a shared_footprint refusal ("presses A and B share surface
++    /// (face region a and face region b overlap by N mm2)") reads "Edge 16 and Face 3 share 85 mm²".
++    public static func faceWarning(refusalCode: String?, refusalReason: String?, unreachedColumns: Int, side: Bool,
++                                   names: (Int) -> String) -> String? {
++        faceWarning(refusalCode: refusalCode, refusalReason: refusalReason, unreachedColumns: unreachedColumns, side: side)   // ★ R7-E2 STUB
++    }
+     /// The number pad's title when a face with no main-page load is pressed.
+     public static let askWeight = "How much weight presses here?"
+     /// [Rests] chosen here on a face a main-page Load group presses: said, never hidden.
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleSqueezeGroups.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleSqueezeGroups.swift
+index b765119b..e83e8d24 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleSqueezeGroups.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleSqueezeGroups.swift
+@@ -260,6 +260,13 @@ public enum FlexibleSqueezeGroups {
+         return out
+     }
+ 
++    /// ★ R7-E2: two PRESSES of one squeeze group that push the same material along one axis (core's stack conflict over their
++    /// press stacks — core names a press stack by its first region, so `pressOf` maps that region, and the press's synthetic key,
++    /// to the press). Core refuses one stack pressed twice in a job (one_profile_per_stack): each such press leaves the job, said.
++    public static func pressPinches(_ conflicts: [FlexConflictInfo], _ s: FlexibleStageSettings, pressOf: [Int: UUID]) -> [(a: UUID, b: UUID)] {
++        []   // ★ R7-E2 STUB
++    }
++
+     /// The faces each face is pinched with (both directions).
+     public static func partners(_ pinches: [(a: Int, b: Int)]) -> [Int: [Int]] {
+         var out: [Int: [Int]] = [:]
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+Presses.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+Presses.swift
+index 36338194..4173fd72 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+Presses.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel+Presses.swift
+@@ -13,9 +13,9 @@
+ // it is its OWN undo step; a direction that cannot be stored is refused (FlexiblePress.isAimable); and
+ // after the page's undo / redo a press card open on a press the history took away closes
+ // (`historyRestored`, called by FlexibleStagePage.history).
+-// ★ WHAT IS SENT. Nothing yet: `sentPresses` is empty until the bridge builds press stacks (AP9, through
+-// FlexiblePressSupport.inJob in AP6). The job's one-group rule, core's hold, the sims and the stress
+-// route read `sentSqueezeGroups`, so a press alone in a group never holds or breaks a face press's job.
++// ★ WHAT IS SENT. ★ R7-E2: `sentPresses` — the edge and corner presses FlexiblePressSupport's gate lets in (AP9). The job's
++// one-group rule, core's hold, the sims and the stress route read `sentSqueezeGroups`, so a press that is NOT sent never holds or
++// breaks a face press's job.
+ // ★ THE PICKING, THE ARROW, THE CARD AND THE CLASH FIXES are AP2–AP4; this file is the saved state only.
+ 
+ import Foundation
+@@ -29,10 +29,11 @@ extension FlexibleStageModel {
+ 
+     public func press(_ id: UUID) -> FlexiblePress? { settings.press(id) }
+ 
+-    /// The presses IN THE JOB. ★ Empty until AP9: core's schema accepts press_direction only after the
+-    /// #361 sync (S1), and the bridge does not build a press's stack before the seam (AP9) — so no press
+-    /// is ever sent, simulated or built into the lattice before then.
+-    public var sentPresses: Set<UUID> { [] }
++    /// The presses IN THE JOB. ★ R7-E2 (AP9's second half): every edge or corner press FlexiblePressSupport's gate lets in —
++    /// core's schema takes it, the bridge builds its stack, core's press API is 2, core stacked and designed it on the open scene,
++    /// no region in two entries, no shared surface, no same-axis stack in its group (FlexibleStageModel+PressSend). A tilted
++    /// single-face press (AP1, no flat prism) is never sent.
++    public var sentPresses: Set<UUID> { Set(pressSupport.compactMap { $0.value.inJob ? $0.key : nil }) }
+ 
+     /// The squeeze groups with something SENT (FlexibleSqueezeGroups.groups(_:sent:)).
+     public var sentSqueezeGroups: [FlexibleSqueezeGroup] { FlexibleSqueezeGroups.groups(settings, sent: sentPresses) }
+diff --git a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
+index 9463e9dd..6b5c0792 100644
+--- a/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
++++ b/app/TopOptKit/Sources/TopOptFlows/FlexibleStageModel.swift
+@@ -184,6 +184,13 @@ public final class FlexibleStageModel: ObservableObject {
+     @Published public internal(set) var pressRefusals: [UUID: String] = [:]
+     /// ★ R7-E1: M2's strips read through were said (once per session).
+     var legacyStripsSaid = false
++    /// ★ R7-E2: the ruling's angled-estimate sentence was popped (once per session, when a side press first goes into the job).
++    var sideSentenceSaid = false
++    /// ★ R7-E2: core's stack conflicts among the faces AND the registered presses (a press stack named by its first region) — the
++    /// presses' own (FlexibleSqueezeGroups.pressPinches); the faces' pinches keep reading `conflicts`, unchanged.
++    @Published public internal(set) var pressConflicts: [FlexConflictInfo] = []
++    /// ★ R7-E2: the gate's verdicts, memoised by what they are read from (the shared-surface pre-check clips triangles).
++    var pressSupportMemo: (key: String, value: [UUID: FlexiblePressSupport.Verdict])?
+     /// ★ R7-E1 REVIEW: core's exact lattice stop per press, found by a release (the arrow's bits, N, the lattice it was found on) —
+     /// the next drag's hard stop (flatDragCap).
+     var flatExactStops: [UUID: (bits: [UInt64], mm: Double, lattice: String)] = [:]
+diff --git a/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift b/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
+index 47f42402..bed1bd91 100644
+--- a/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
++++ b/app/TopOptKit/Sources/TopOptKit/FlexibleKit.swift
+@@ -235,6 +235,47 @@ public struct FlexStackInfo: Equatable, Sendable {
+     }
+ }
+ 
++extension FlexStackInfo {
++    /// ★ R7-E2: core's Stack as the bridge copied it (a scene's — flexible_scene_stack — or a run's A5 stack — flexible_run_job;
++    /// one conversion for both, so the bit test compares like with like).
++    init(bridge s: topoptbridge.FlexStack) {
++        // ★ hoist every vector once: a C++ member read through Swift interop COPIES the
++        // vector, so `s.col_u_mm[k]` in a loop copied 10,000 elements per column (3 s).
++        let iu = Array(s.col_iu), iv = Array(s.col_iv), cu = Array(s.col_u_mm), cv = Array(s.col_v_mm)
++        let ca = Array(s.col_area_mm2), ce = Array(s.col_entry_t), cx = Array(s.col_exit_t)
++        let cl = Array(s.col_lattice_mm), cf = Array(s.col_exit_face)
++        var cols: [FlexColumn] = []
++        cols.reserveCapacity(cu.count)
++        for k in 0..<cu.count {
++            cols.append(FlexColumn(iu: Int(iu[k]), iv: Int(iv[k]), uMM: cu[k], vMM: cv[k], areaMM2: ca[k],
++                                   entryT: ce[k], exitT: cx[k], latticeMM: cl[k], exitFace: Int(cf[k])))
++        }
++        let efi = Array(s.exit_face_ids), eff = Array(s.exit_face_fractions)
++        let eri = Array(s.exit_region_ids), erf = Array(s.exit_region_fractions)
++        let ef = (0..<efi.count).map { FlexLink(id: Int(efi[$0]), fraction: eff[$0]) }
++        let er = (0..<eri.count).map { FlexLink(id: Int(eri[$0]), fraction: erf[$0]) }
++        // ★ S1 (#361's 254cb137): a sector's ownership, core's verdict for every voxel of the grid
++        let sector: FlexSectorVerdict? = s.sector
++            ? FlexSectorVerdict(origin: FlexConv.v3(s.grid_origin), spacing: s.grid_spacing, nx: Int(s.grid_nx),
++                                ny: Int(s.grid_ny), nz: Int(s.grid_nz), refused: Set(Array(s.sector_refused).map { Int($0) }))
++            : nil
++        self.init(
++            frameValid: s.frame_valid, frameReason: String(s.frame_reason),
++            load: FlexConv.v3(s.load), xAxis: FlexConv.v3(s.x_axis), yAxis: FlexConv.v3(s.y_axis),
++            centroid: FlexConv.v3(s.centroid), rotationDeg: Int(s.rotation_deg),
++            uMin: s.u_min, vMin: s.v_min, uExtentMM: s.u_extent_mm, vExtentMM: s.v_extent_mm,
++            areaMM2: s.area_mm2, projectedAreaMM2: s.projected_area_mm2,
++            normalSpreadDeg: s.normal_spread_deg, normalSpreadFlag: s.normal_spread_flag,
++            buildAngleDeg: s.build_angle_deg, side: s.side, principalAxisTied: s.principal_axis_tied,
++            pitchMM: s.pitch_mm, nu: Int(s.nu), nv: Int(s.nv), cell: Array(s.cell).map { Int($0) },
++            columns: cols, exitFaces: ef, exitRegions: er,
++            exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
++            latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
++            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
++            sector: sector, footprintRegionIDs: Array(s.footprint_region_ids).map { Int($0) }, latticeRunMM: Array(s.col_lattice_run_mm))
++    }
++}
++
+ /// ★ S1 (#361's 254cb137 — the spec's V2): core's ownership of a SECTOR stack's voxels. Core's
+ /// `in_stack` keeps, of the voxels a sector's columns hold, only those `stack_owns_projection` owns:
+ /// the voxel's OWN ray cast back onto the footprint, tested against the cuts of the part it lands on
+@@ -422,6 +463,10 @@ public struct FlexJobFaceInfo: Equatable, Sendable {
+     public let map: FlexMap
+     public let designStamp: FlexStamp?
+     public let skinOn: Bool
++    /// ★ R7-E2 (an edge or corner press, core's C1 keys as core's own parser read them): the regions pressed as one footprint, in
++    /// the job's order (empty: a single-region entry), and the stated direction before core's press_unit (nil: none stated).
++    public var footprintRegionIDs: [Int] = []
++    public var pressDirection: SIMD3<Double>? = nil
+ }
+ 
+ public struct FlexJobBlockInfo: Equatable, Sendable {
+@@ -663,7 +708,9 @@ public enum FlexibleCore {
+                              y: FlexCurve(x: Array(f.y_x), y: Array(f.y_y)),
+                              centreEdge: FlexCurve(x: Array(f.c_x), y: Array(f.c_y)),
+                              deepestMM: f.deepest_squish_mm),
+-                designStamp: FlexConv.stamp(f.design_stamp), skinOn: f.skin_on)
++                designStamp: FlexConv.stamp(f.design_stamp), skinOn: f.skin_on,
++                footprintRegionIDs: Array(f.footprint_region_ids).map { Int($0) },
++                pressDirection: f.has_press_direction ? FlexConv.v3(f.press_direction) : nil)
+         }
+         var checks: [(face: Int, stamp: FlexStamp)] = []
+         for k in 0..<b.check_face_ids.count {
+@@ -724,40 +771,7 @@ public final class FlexibleScene: @unchecked Sendable {
+         var err = topoptbridge.BridgeError()
+         let s = topoptbridge.flexible_scene_stack(handle, Int32(face), Int32(rotation), &err)
+         try FlexConv.check(err)
+-        // ★ hoist every vector once: a C++ member read through Swift interop COPIES the
+-        // vector, so `s.col_u_mm[k]` in a loop copied 10,000 elements per column (3 s).
+-        let iu = Array(s.col_iu), iv = Array(s.col_iv), cu = Array(s.col_u_mm), cv = Array(s.col_v_mm)
+-        let ca = Array(s.col_area_mm2), ce = Array(s.col_entry_t), cx = Array(s.col_exit_t)
+-        let cl = Array(s.col_lattice_mm), cf = Array(s.col_exit_face)
+-        var cols: [FlexColumn] = []
+-        cols.reserveCapacity(cu.count)
+-        for k in 0..<cu.count {
+-            cols.append(FlexColumn(iu: Int(iu[k]), iv: Int(iv[k]), uMM: cu[k], vMM: cv[k], areaMM2: ca[k],
+-                                   entryT: ce[k], exitT: cx[k], latticeMM: cl[k], exitFace: Int(cf[k])))
+-        }
+-        let efi = Array(s.exit_face_ids), eff = Array(s.exit_face_fractions)
+-        let eri = Array(s.exit_region_ids), erf = Array(s.exit_region_fractions)
+-        let ef = (0..<efi.count).map { FlexLink(id: Int(efi[$0]), fraction: eff[$0]) }
+-        let er = (0..<eri.count).map { FlexLink(id: Int(eri[$0]), fraction: erf[$0]) }
+-        // ★ S1 (#361's 254cb137): a sector's ownership, core's verdict for every voxel of the grid
+-        let sector: FlexSectorVerdict? = s.sector
+-            ? FlexSectorVerdict(origin: FlexConv.v3(s.grid_origin), spacing: s.grid_spacing, nx: Int(s.grid_nx),
+-                                ny: Int(s.grid_ny), nz: Int(s.grid_nz), refused: Set(Array(s.sector_refused).map { Int($0) }))
+-            : nil
+-        return FlexStackInfo(
+-            frameValid: s.frame_valid, frameReason: String(s.frame_reason),
+-            load: FlexConv.v3(s.load), xAxis: FlexConv.v3(s.x_axis), yAxis: FlexConv.v3(s.y_axis),
+-            centroid: FlexConv.v3(s.centroid), rotationDeg: Int(s.rotation_deg),
+-            uMin: s.u_min, vMin: s.v_min, uExtentMM: s.u_extent_mm, vExtentMM: s.v_extent_mm,
+-            areaMM2: s.area_mm2, projectedAreaMM2: s.projected_area_mm2,
+-            normalSpreadDeg: s.normal_spread_deg, normalSpreadFlag: s.normal_spread_flag,
+-            buildAngleDeg: s.build_angle_deg, side: s.side, principalAxisTied: s.principal_axis_tied,
+-            pitchMM: s.pitch_mm, nu: Int(s.nu), nv: Int(s.nv), cell: Array(s.cell).map { Int($0) },
+-            columns: cols, exitFaces: ef, exitRegions: er,
+-            exitUnresolvedFraction: s.exit_unresolved_fraction, footprintAreaMM2: s.footprint_area_mm2,
+-            latticedColumns: Int(s.latticed_columns), latticeMMMin: s.lattice_mm_min,
+-            latticeMMMean: s.lattice_mm_mean, latticeMMMax: s.lattice_mm_max, stackMMMax: s.stack_mm_max,
+-            sector: sector, footprintRegionIDs: Array(s.footprint_region_ids).map { Int($0) }, latticeRunMM: Array(s.col_lattice_run_mm))
++        return FlexStackInfo(bridge: s)
+     }
+ 
+     /// Core's `FaceFrame::from_uv` for each (u, v) mm point.
+@@ -966,12 +980,20 @@ public struct FlexRunInfo: Equatable, Sendable {
+     public let refusal: FlexRefusal?
+     public let receiptJSON: String
+     public let files: [String]
+-    public init(refusal: FlexRefusal?, receiptJSON: String, files: [String]) {
+-        self.refusal = refusal; self.receiptJSON = receiptJSON; self.files = files
++    /// ★ R7-E2 — A5 (reviewer 2026-10-08): the run's own stacks, one per LOADED entry in job order (an edge or corner press's
++    /// built by core from its face_region_ids + press_direction), and its density field (nil on a refusal) — what the receipt and
++    /// the files were written from, for the bit test against the app's own.
++    public let stacks: [FlexStackInfo]
++    public let field: FlexDensityField?
++    public init(refusal: FlexRefusal?, receiptJSON: String, files: [String], stacks: [FlexStackInfo] = [], field: FlexDensityField? = nil) {
++        self.refusal = refusal; self.receiptJSON = receiptJSON; self.files = files; self.stacks = stacks; self.field = field
+     }
+ }
+ 
+ extension FlexibleCore {
++    /// ★ R7-E2 STUB SWITCH (tests only; the stub state of the red run): the run's stacks and field not read back.
++    nonisolated(unsafe) public static var controlNoRunStacks = false
++
+     /// Run a job document with a `flexible` block through core's Flexible runner. The other
+     /// sections' runner (`run_lattice_job` → `lattice_variant_job`) refuses such a job; this is
+     /// the entry point core gives it. Throws on malformed input (core's words).
+@@ -982,7 +1004,14 @@ extension FlexibleCore {
+                                               std.string(materialsPath), std.string(fingerprint), &err)
+         try FlexConv.check(err)
+         let files = Array(r.files).map { String($0) }
++        // ★ R7-E2 — A5: the run's stacks and field, as values
++        let stacks = Self.controlNoRunStacks ? [] : r.stacks.map { FlexStackInfo(bridge: $0) }
++        let field: FlexDensityField? = r.has_field && !Self.controlNoRunStacks
++            ? FlexDensityField(nx: Int(r.field.nx), ny: Int(r.field.ny), nz: Int(r.field.nz), spacing: r.field.spacing,
++                               origin: FlexConv.v3(r.field.origin), density: Array(r.field.density),
++                               owner: Array(r.field.owner).map { Int($0) })
++            : nil
+         return FlexRunInfo(refusal: r.refused ? FlexRefusal(code: String(r.refusal_code), reason: String(r.refusal_reason)) : nil,
+-                           receiptJSON: String(r.receipt_json), files: files)
++                           receiptJSON: String(r.receipt_json), files: files, stacks: stacks, field: field)
+     }
+ }

@@ -1,0 +1,52 @@
+# X20b runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — 597eca0c + the working tree (= the X20b commit, before the two re-pins and two comment edits)
+### runner.log
+start 19:56:02 597eca0c + working tree
+build exit 0 19:56:04
+golden det exit 0 19:56:19
+golden unseeded exit 0 19:56:36
+hashes exit 0 19:57:35
+hashes cmp vs e1r (non-comment lines): identical
+hashes cmp vs e1r (whole file): identical
+chunk_aa exit 0 20:13:46
+chunk_ab exit 0 20:19:35
+chunk_ac exit 0 20:20:20
+chunk_ad exit 0 20:30:06
+chunk_ae exit 1 20:45:37
+chunk_af exit 1 21:06:08
+chunk_ag exit 0 21:08:55
+chunk_ah exit 0 21:19:21
+ALLDONE 21:19:21
+### classes (94, chunks of 12)
+FlexibleBatchBReviewTests FlexibleBatchCVerifyTests FlexibleBatchMGroupTests FlexibleBatchMStressTests FlexibleBatchNRefineTests FlexibleBatchVHostedTests FlexibleC1Tests FlexibleCurveEditTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleFlatPrismEngineTests FlexibleFlatPrismHostedTests FlexibleFlatPrismTests FlexibleGroupPaletteHostedTests FlexibleLatticeIsProtectedTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMeetReviewTests FlexibleMeetTests FlexibleOverlaySeamTests FlexiblePressAimReviewTests FlexiblePressAimTests FlexiblePressCurveTests FlexiblePressFixturesTests FlexiblePressProbeTripwireTests FlexiblePressReframeTests FlexiblePressReviewTests FlexiblePressSaveTests FlexiblePressStampTests FlexibleR7E1FollowUpTests FlexibleR7E1ReviewHostedTests FlexibleR7E1ReviewTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7M1Tests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRound5SettingsHostedTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests FlexibleS1VerifyTests FlexibleSectorMigrationTests FlexibleSectorStoreTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCopyTests FlexibleSquishPlayAllTests FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleStageCapsuleTests FlexibleStageTests FlexibleTopLayerHostedTests FlexibleTopLayerTests FlexibleU1Tests FlexibleU2Tests FlexibleX20bTests LatticeStaleTypeTests OrganicPreviewParameterParityTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.806 (13.808) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 14.604 (14.607) seconds
+### chunks
+chunk_aa.log: Executed 81 tests, with 1 test skipped and 0 failures (0 unexpected) in 968.398 (968.409) seconds
+chunk_ab.log: Executed 71 tests, with 0 failures (0 unexpected) in 346.894 (346.903) seconds
+chunk_ac.log: Executed 71 tests, with 0 failures (0 unexpected) in 42.831 (42.839) seconds
+chunk_ad.log: Executed 66 tests, with 0 failures (0 unexpected) in 583.302 (583.311) seconds
+chunk_ae.log: Executed 66 tests, with 3 failures (0 unexpected) in 928.060 (928.071) seconds
+chunk_af.log: Executed 80 tests, with 2 failures (0 unexpected) in 1225.929 (1225.943) seconds
+chunk_ag.log: Executed 80 tests, with 0 failures (0 unexpected) in 164.247 (164.257) seconds
+chunk_ah.log: Executed 55 tests, with 0 failures (0 unexpected) in 623.914 (623.923) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage] : XCTAssertEqual failed: ("0.66812974") is not equal to ("0.0") - Face 3 is another group's: it stands still
+Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage] : XCTAssertEqual failed: ("1.0758785") is not equal to ("0.0") - Top A is another group's: it stands still
+Tests/TopOptFlowsTests/FlexibleRound5SquishExitTests.swift:63: error: -[TopOptFlowsTests.FlexibleRound5SquishExitTests testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage] : XCTAssertEqual failed: ("0.53793925") is not equal to ("0.0") - Top B is another group's: it stands still
+Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("22") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (22 px, idle 0)
+Tests/TopOptFlowsTests/FlexibleRound7ViewsTests.swift:435: error: -[TopOptFlowsTests.FlexibleRound7ViewsTests testTheBendViewHoldsTheWholeGroupAtFullDepth] : XCTAssertEqual failed: ("20.026781") is not equal to ("0.0") - another group's face stands still
+### signal lines: 0
+### re-pins (attributed to his answer of 2026-10-20 ~16:05), then re-run
+FlexibleRound5SquishExitTests.testOnlyTheSelectedFacesGroupSquishesOnTheSettingsPage: another group's map <= the playing group's deepest (it rides its ramp); round 5's rule kept as a control (controlOtherGroupStill: 0)
+FlexibleRound7ViewsTests.testTheBendViewHoldsTheWholeGroupAtFullDepth: face 1 (another group, over the pinch's lattice) <= max(face 4, face 2); control: 0
+re-run R5SquishExit + Round7Views + X20b: Executed 23 tests, with 0 failures (0 unexpected) in 492.674 (492.679) seconds
+### X20b prints (chunk run)
+FLEX-X20B-4 Face 3 plays: Face 3 2.96 · Face 5 0.00 · Top A 1.08 · Top B 0.54
+FLEX-X20B-1 core's design ["Edge 12": 5.578745774093602, "Edge 9": 3.32931066907384] · Play shows ["Edge 12": 5.578746795654297, "Edge 9": 3.32930326461792] · design depth true · true-fold cut 1.0 · gmax 1.0403075218200684 (×1: ½ bound false) · min det 0.33261242508888245 · chip '-'
+FLEX-X20B-1 RED (C1's hold): Play shows ["Edge 12": 2.6804099082946777, "Edge 9": 2.982192039489746] · scale 0.4007861106813797 asked 28.23775850732439 clamped true fold share 0.20039305534068985
+FLEX-X20B-2 face Face 5: 902 → 766 segments (per level [402, 264, 100]) · S 0.0035598450618833104…0.9996330304900427 of 1824 · Edge 12: 384 → 500 (per level [188, 168, 144])
+FLEX-R5 S2 column:
+  Top A selected: Face 3 0.67 · Face 5 2.96 · Top A 2.07 · Top B 2.99 | round 4: Face 3 2.96 · Face 5 2.96 · Top A 2.07 · Top B 2.99
+  Face 3 selected: Face 3 2.96 · Face 5 0.00 · Top A 1.08 · Top B 0.54 | round 4: Face 3 2.96 · Face 5 2.96 · Top A 2.07 · Top B 2.99
+### after the face Shape (i) copy edit (it said the curves were drawn on the face): FlexibleRowCopyTests + FlexibleSquishCopyTests + FlexibleSettingsRound4Tests: 20 tests, 0 failures

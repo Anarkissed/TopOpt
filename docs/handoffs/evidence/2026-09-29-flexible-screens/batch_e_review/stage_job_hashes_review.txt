@@ -1,0 +1,16 @@
+# Stage job bytes after the batch E review (f7026df0 + 10cf60e0), LatticeJobJSONDump, SWIFT_DETERMINISTIC_HASHING=1,
+# each project from a fresh copy (the same S0 set and script as batch_e/stage_job_hashes.txt; compare its 'final' rows).
+# 10 unsplit projects: identical to before/after/final. The split pad: only face_id removed from its piece prisms.
+review his 102117B9-DDD2-4597-9BDE-49DD47EBF393 exit 0 2c9e69a6984855d4 lattice regions emitted: 177 (include 177, skipped faces 0)
+review his 3418E167-8524-4831-A809-827B6B0742D0 exit 0 4cff9f3930104bea lattice regions emitted: 2 (include 2, skipped faces 0)
+review his 570B38E2-3C6E-46E0-BCF6-26BE1595D204 exit 0 fca6a9c0edb904d3 lattice regions emitted: 2 (include 2, skipped faces 0)
+review his 68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 exit 0 38913b3fe56f021f lattice regions emitted: 5 (include 5, skipped faces 0)
+review his 887AC498-5B5D-4475-B6CB-893DC69B5FD6 exit 0 cb7a8b73fddcccfc lattice regions emitted: 0 (include 0, skipped faces 0)
+review his 92A8016E-FCCD-421D-B19E-4A1EC81C98A5 exit 0 368ff5b4e53db9cc lattice regions emitted: 1 (include 1, skipped faces 0)
+review his A1000001-0000-4000-8000-000000000001 exit 0 dcecb0521f9b50f6 lattice regions emitted: 5 (include 5, skipped faces 0)
+review his A1000001-0000-4000-8000-000000000002 exit 0 a14b884ab0957597 lattice regions emitted: 0 (include 0, skipped faces 0)
+review his A1000001-0000-4000-8000-000000000003 exit 0 c5ad3c24e800fdde lattice regions emitted: 0 (include 0, skipped faces 0)
+review his A1000001-0000-4000-8000-000000000004 exit 0 b6a9c4fc28b81d94 lattice regions emitted: 2 (include 2, skipped faces 0)
+review his AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 exit 0 da9ddfb4ac5bd6b9 lattice regions emitted: 0 (include 0, skipped faces 0)
+review r3 A1000001-0000-4000-8000-000000000004 exit 0 8315833a7f2d2f6c lattice regions emitted: 1 (include 1, skipped faces 0)
+review r5 A1000001-0000-4000-8000-000000000004 exit 0 b6a9c4fc28b81d94 lattice regions emitted: 2 (include 2, skipped faces 0)

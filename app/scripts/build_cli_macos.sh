@@ -43,9 +43,23 @@ if [[ -z "$EIGEN_PREFIX" || ! -d "$EIGEN_PREFIX" ]]; then
   exit 1
 fi
 
+# --- Manifold (KEEP regions' exact export; TO-core 3fd9f17e) -----------------
+# TOPOPT_REQUIRE_DEPS=ON makes find_package(manifold) REQUIRED, so the configure
+# needs manifold_DIR. Provisioned by vcpkg (core/vcpkg-ports/manifold, triplet
+# arm64-osx). MANIFOLD_ROOT (env) overrides the default: a worktree's REPO_ROOT
+# has no .vcpkg, so point it at the main checkout's .vcpkg/installed-manifold.
+MANIFOLD_ROOT="${MANIFOLD_ROOT:-$REPO_ROOT/.vcpkg/installed-manifold}"
+MANIFOLD_DIR="$MANIFOLD_ROOT/arm64-osx/share/manifold"
+if [[ ! -f "$MANIFOLD_DIR/manifoldConfig.cmake" ]]; then
+  echo "error: Manifold not found at $MANIFOLD_DIR — set MANIFOLD_ROOT to an" >&2
+  echo "       .vcpkg/installed-manifold holding arm64-osx (core/vcpkg-ports/manifold)." >&2
+  exit 1
+fi
+
 echo "==> OCCT:   $OCCT_PREFIX"
 echo "==> Eigen:  $EIGEN_PREFIX"
 echo "==> lib3mf: $LIB3MF_PREFIX"
+echo "==> Manifold: $MANIFOLD_DIR"
 
 # --- configure + build (DEPS=ON: all three must be found, exactly like CI) ---
 # lib3mf_FOUND / TOPOPT_HAVE_3MF are decided at CONFIGURE time and CACHED. A
@@ -68,6 +82,7 @@ cmake -S "$CORE_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=Release \
   -DTOPOPT_REQUIRE_DEPS=ON \
   -Dlib3mf_DIR="$LIB3MF_PREFIX/share/lib3mf" \
+  -Dmanifold_DIR="$MANIFOLD_DIR" \
   -DCMAKE_PREFIX_PATH="$OCCT_PREFIX;$EIGEN_PREFIX;$LIB3MF_PREFIX"
 
 echo "==> building topopt-cli"

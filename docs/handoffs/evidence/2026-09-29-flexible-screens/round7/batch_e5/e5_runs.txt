@@ -1,0 +1,113 @@
+# R7-E5 runs (app/TopOptKit, --scratch-path /tmp/r7ev-build) — at c5a65af1 + the working tree
+### runner.log
+start 18:17:13 c5a65af1 + working tree
+build exit 0 18:17:25
+new exit 0 18:17:56
+probe exit 0 18:19:07
+chunk1 exit 0 18:24:09
+chunk2 exit 0 18:35:36
+chunk3 exit 0 18:54:58
+golden det exit 0 18:55:15
+golden unseeded exit 0 18:55:31
+hashes exit 0 18:56:34
+hashes cmp vs e1r: identical
+ALLDONE 18:56:34
+### rerun.log (facing judged along the line of sight — E5_01 still had no handles in the first probe)
+rerun start 18:57:03 (facing along the line of sight)
+build exit 0 18:57:32
+new exit 1 18:58:04
+probe exit 0 18:59:14
+flat exit 0 19:06:14
+ALLDONE 19:06:14
+### the new class (final)
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testAnEdgesGroupSquishesWhereHeDrewWearsHeatAndShowsItsBend]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testAnEdgesGroupSquishesWhereHeDrewWearsHeatAndShowsItsBend]' passed (22.983 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testThePushFollowsTheDrawnCurveAndTheStamp]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testThePushFollowsTheDrawnCurveAndTheStamp]' passed (2.135 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testTheStampTurnReadsFromItsLongSide]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testTheStampTurnReadsFromItsLongSide]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testTheTopViewKeepsTheFlatPrismsHandles]' started.
+Test Case '-[TopOptFlowsTests.FlexibleR7E5Tests testTheTopViewKeepsTheFlatPrismsHandles]' passed (2.073 seconds).
+	 Executed 4 tests, with 0 failures (0 unexpected) in 27.191 (27.192) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 27.191 (27.192) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 27.191 (27.193) seconds
+FLEX-E5-1 heat: 1350/1350 footprint vertices painted · 0 off their column's colour · 8 shades · top 3.6652348440605587 mm
+FLEX-E5-2 X-ray prism: 251 corners · deepest 4.011553764343262 mm · along/|w| 0.9479290874489309
+FLEX-E5-3 sim: drawn (first face 0.15 out to a quarter) moves [2.476498099238071, 3.3032179455754225] ratio 0.7497228884201473 · RED CONTROL even push [4.759182031336661, 4.828286361764744] ratio 0.9856876073102622
+FLEX-E5-3 Edge 16 across [1, 0.2, 1, 1, 1]: mean weight first face 0.5671874999999975 · second 1.0
+FLEX-E5-3 stamp Fingertip 10.800000000000002 × 14.400000000000004: 523 of 1089 samples under it
+FLEX-E5-5 Edge 16 from [Top]: members' inward·ray [0.03534039855003357, 0.03534037992358208] · |edge·ray| 0.9987502098083496
+FLEX-E5-5 RED CONTROL: the ray through the anchor at (516.0, 2659.2236328125) — inward·ray [-0.517292320728302, -0.517289936542511]
+### chunk1
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-19 18:19:45.679.
+Test Suite 'FlexibleFlatPrismEngineTests' passed at 2026-10-19 18:20:33.046.
+Test Suite 'FlexibleFlatPrismTests' passed at 2026-10-19 18:20:40.169.
+Test Suite 'FlexiblePressCurveTests' passed at 2026-10-19 18:20:48.573.
+Test Suite 'FlexiblePressStampTests' passed at 2026-10-19 18:20:54.539.
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-19 18:21:22.931.
+Test Suite 'FlexibleR7E2ParkTests' passed at 2026-10-19 18:21:28.069.
+Test Suite 'FlexibleR7E2Tests' passed at 2026-10-19 18:22:16.490.
+Test Suite 'FlexibleR7E3Tests' passed at 2026-10-19 18:22:41.255.
+Test Suite 'FlexibleR7FTests' passed at 2026-10-19 18:23:05.087.
+Test Suite 'FlexibleR7MergeTests' passed at 2026-10-19 18:23:30.774.
+Test Suite 'FlexibleR7RTests' passed at 2026-10-19 18:24:08.759.
+Test Suite 'FlexibleSquishCopyTests' passed at 2026-10-19 18:24:08.788.
+### chunk2
+Test Suite 'FlexibleBatchBReviewUXTests' passed at 2026-10-19 18:24:12.815.
+Test Suite 'FlexibleBatchCVerifyTests' passed at 2026-10-19 18:24:33.492.
+Test Suite 'FlexibleCurveEditTests' passed at 2026-10-19 18:24:33.501.
+Test Suite 'FlexibleDepthPrismTests' passed at 2026-10-19 18:24:34.272.
+Test Suite 'FlexibleLegendPlacementTests' passed at 2026-10-19 18:24:34.282.
+Test Suite 'FlexibleR7X1Tests' passed at 2026-10-19 18:25:51.737.
+Test Suite 'FlexibleR7X1VerifyTests' passed at 2026-10-19 18:28:02.977.
+Test Suite 'FlexibleRound6Tests' passed at 2026-10-19 18:28:37.773.
+Test Suite 'FlexibleRound7ScreenHookTests' passed at 2026-10-19 18:28:49.813.
+Test Suite 'FlexibleRound7ViewsTests' passed at 2026-10-19 18:35:24.084.
+Test Suite 'FlexibleSettingsRound4Tests' passed at 2026-10-19 18:35:29.959.
+Test Suite 'FlexibleSettingsVerifyD1Tests' passed at 2026-10-19 18:35:32.194.
+Test Suite 'FlexibleShownValuesTests' passed at 2026-10-19 18:35:33.212.
+Test Suite 'FlexibleSquishTests' passed at 2026-10-19 18:35:35.959.
+### chunk3
+Test Suite 'FlexibleBatchCHookTests' passed at 2026-10-19 18:35:39.708.
+Test Suite 'FlexibleBatchVHostedTests' passed at 2026-10-19 18:40:33.596.
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-19 18:40:39.624.
+Test Suite 'FlexibleFlatPrismHostedTests' passed at 2026-10-19 18:41:45.351.
+Test Suite 'FlexibleMainPageHookTests' passed at 2026-10-19 18:41:45.586.
+Test Suite 'FlexibleOverlayClipTests' passed at 2026-10-19 18:41:46.403.
+Test Suite 'FlexibleR7E1ReviewHostedTests' passed at 2026-10-19 18:46:19.975.
+Test Suite 'FlexibleRound6HostedTests' passed at 2026-10-19 18:50:15.657.
+Test Suite 'FlexibleRound7ViewsHostedTests' passed at 2026-10-19 18:54:57.232.
+### flat2 (after the rerun)
+	 Executed 30 tests, with 1 test skipped and 0 failures (0 unexpected) in 416.875 (416.880) seconds
+	 Executed 30 tests, with 1 test skipped and 0 failures (0 unexpected) in 416.875 (416.881) seconds
+Test Suite 'FlexibleEdgeGroupsHostedTests' passed at 2026-10-19 18:59:22.732.
+Test Suite 'FlexibleEdgeGroupsTests' passed at 2026-10-19 18:59:58.689.
+Test Suite 'FlexibleFlatPrismHostedTests' passed at 2026-10-19 19:01:05.449.
+Test Suite 'FlexibleFlatPrismTests' passed at 2026-10-19 19:01:12.685.
+Test Suite 'FlexibleR7E1ReviewHostedTests' passed at 2026-10-19 19:05:47.296.
+Test Suite 'FlexibleR7E1bTests' passed at 2026-10-19 19:06:13.505.
+### goldens
+   2 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.847 (13.848) seconds
+   1 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.847 (13.849) seconds
+   2 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.965 (13.967) seconds
+   1 	 Executed 13 tests, with 0 failures (0 unexpected) in 13.965 (13.968) seconds
+   2 FLEX-AP A1_0002: 19 loaded key(s), core refused 9 stack(s) [27, 41, 42, 43, 44, 45, 46, 47, 75]
+   2 FLEX-AP A1_0002: 2 send(s) ["Send with Face 1, Face 22, Face 25 resting resting [1, 22, 25]", "Send with Face 2 resting resting [2]"]
+   2 FLEX-AP A1_0002: no face-prism — opened as before ruling 6
+   2 FLEX-AP A1_0003: 3 send(s) ["Send Group 1 only resting [4, 2, 3, 5]", "Send Group 2 only, Face 2 resting resting [1, 3, 5, 2]", "Send Group 3 only, Face 5 resting resting [1, 4, 2, 5]"]
+   2 FLEX-AP A1_0003: 5 loaded key(s), core refused 0 stack(s) []
+   2 FLEX-AP A1_0003: no face-prism — opened as before ruling 6
+   2 FLEX-AP A1_0004: 2 send(s) ["Send Group 1 only resting [3, 5]", "Send Group 2 only, Face 5 resting resting [1000104, 1000103, 5]"]
+   2 FLEX-AP A1_0004: 4 loaded key(s), core refused 0 stack(s) []
+   2 FLEX-AP GOLDEN A1_0002_scene_job.json: identical (9092 bytes)
+   2 FLEX-AP GOLDEN A1_0002_send1_run_job.json: identical (19800 bytes)
+   2 FLEX-AP GOLDEN A1_0002_send2_run_job.json: identical (20927 bytes)
+   2 FLEX-AP GOLDEN A1_0003_scene_job.json: identical (1543 bytes)
+   2 FLEX-AP GOLDEN A1_0003_send1_run_job.json: identical (102625 bytes)
+   2 FLEX-AP GOLDEN A1_0003_send2_run_job.json: identical (28611 bytes)
+   2 FLEX-AP GOLDEN A1_0003_send3_run_job.json: identical (12474 bytes)
+   2 FLEX-AP GOLDEN A1_0004_scene_job.json: identical (4051 bytes)
+### hashes
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/docs/handoffs/evidence/2026-09-29-flexible-screens/round7/batch_e5/stage_job_hashes_e5.txt
+golden_det identical 38 DIFFERS 0 PART-SKIP 0
+golden_unseeded identical 32 DIFFERS 0 PART-SKIP 1

@@ -25,43 +25,56 @@
 // on its own, because nothing would then resolve to what it did before.
 //
 // So the snapshot is exactly the two things surface edits touch, taken together
-// and restored together.
+// and restored together — and since 2026-10-08 the second is the WHOLE group layer (below).
 
 import Foundation
 import TopOptKit
 
 /// The model state a Surface session can throw away.
+///
+/// ★★ THE WHOLE GROUP LAYER SINCE 2026-10-08 (the Regions task ruling: "The Surface scratchpad
+/// carries groups, so Dissolve reverts cleanly"). It held only each group's REGION list, on the
+/// premise that no surface tool touches a group's faces. Two do: Dissolve hands faces back to their
+/// group, and Isolate takes them out of every group — and any add or drop can SWEEP a group left
+/// empty, which also drops its role, load and protection from the force model. So the snapshot is
+/// now every group as it was (faces, regions, name, colour, order), the active group, and the force
+/// model, from which a group the session swept gets its entries back.
 public struct SurfaceScratch: Equatable, Sendable {
 
     /// LAYER 2 in full — every region, its cuts, its parts, its edges.
     public var regions: FaceRegionModel
-    /// Which regions each group held, by group id. Faces are NOT captured: no
-    /// surface tool adds or removes a raw face from a group, so restoring them
-    /// would overwrite Topology-page work done in another tab of the same session.
-    public var groupRegions: [UUID: [RegionID]]
+    /// Every group as it was: faces AND regions, name, colour, order.
+    public var groups: [SelectionGroup]
+    /// The group that was active.
+    public var activeGroupID: UUID?
+    /// The force model as it was — only a group the session SWEPT takes its entries back from it, so
+    /// a live group's role or load is never overwritten by the revert.
+    public var force: ForceModel
 
-    public init(regions: FaceRegionModel, groupRegions: [UUID: [RegionID]]) {
+    /// Which regions each group held, by group id (the pre-2026-10-08 view of the snapshot).
+    public var groupRegions: [UUID: [RegionID]] {
+        Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.regionIDs) })
+    }
+
+    public init(regions: FaceRegionModel, groups: [SelectionGroup], activeGroupID: UUID?, force: ForceModel) {
         self.regions = regions
-        self.groupRegions = groupRegions
+        self.groups = groups
+        self.activeGroupID = activeGroupID
+        self.force = force
     }
 
     /// Take the snapshot. Called on ENTERING the stage and again after each save,
     /// so "since when" is always "since the last point the user committed to".
-    public static func capture(regions: FaceRegionModel,
-                               groups: [SelectionGroup]) -> SurfaceScratch {
-        var byGroup: [UUID: [RegionID]] = [:]
-        for g in groups { byGroup[g.id] = g.regionIDs }
-        return SurfaceScratch(regions: regions, groupRegions: byGroup)
+    public static func capture(regions: FaceRegionModel, selection: SelectionModel,
+                               force: ForceModel) -> SurfaceScratch {
+        SurfaceScratch(regions: regions, groups: selection.groups,
+                       activeGroupID: selection.activeGroupID, force: force)
     }
 
     /// Whether anything this snapshot covers has changed since it was taken. Used
     /// for the Save button's enabled state, so "Save" is never offered for nothing
     /// and never withheld when there is something.
-    public func differs(regions other: FaceRegionModel,
-                        groups: [SelectionGroup]) -> Bool {
-        if regions != other { return true }
-        if groups.count != groupRegions.count { return true }
-        for g in groups where groupRegions[g.id] != g.regionIDs { return true }
-        return false
+    public func differs(regions other: FaceRegionModel, groups now: [SelectionGroup]) -> Bool {
+        regions != other || groups != now
     }
 }

@@ -1,0 +1,6 @@
+FLEX-REVIEW new region: latticeVoxels 26624 → 29120 · generation 1 → 2 · pill 'Little lattice under Top B'
+E-REVIEW r3 as saved: pill 'No lattice under Top B' tone preview tap send
+E-REVIEW r5 as saved: Face 3 192/832 · Face 5 192/832 · line 'Ready · Little lattice under Face 3'
+FLEX-READY his project as saved (no taps): 0 blocking — Ready · No lattice under Top B
+E-REVIEW face 2 top edge — only A [(x0: 0.0, x1: 50.0, seam: false), (x0: 50.0, x1: 100.0, seam: true)] · both [(x0: 0.0, x1: 50.0, seam: true), (x0: 50.0, x1: 100.0, seam: true)] · none [(x0: 0.0, x1: 100.0, seam: false)]
+E-REVIEW preview 0.5 mm under face 2's top edge: under B -0.5 · under A -19.5 · top off -0.5

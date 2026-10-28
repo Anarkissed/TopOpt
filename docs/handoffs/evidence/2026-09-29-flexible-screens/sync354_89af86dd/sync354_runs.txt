@@ -1,0 +1,60 @@
+# Sync #354 (89af86dd) into #362: the P1 runs. Build: swift build --build-tests --scratch-path /tmp/r7x20b-build (app/TopOptKit);
+# vendored core b21c5d9a8311 unchanged (no core/ file in the merge; build_core.sh not run; no CLI built or swapped).
+
+## run 1 — merged tree before the commit (= 2949a032), 03:10-03:21
+hook pins (19 classes, 92 tests): 11 failures before re-pins
+  FlexibleH39HotfixHookTests.swift:93: error: -[TopOptFlowsTests.FlexibleH39HotfixHookTests testNothingOnTheFlexibleStageCanSetRegionsOpen]
+  FlexibleR7M1Tests.swift:114: error: -[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]
+  FlexibleR7U21HookTests.swift:104: error: -[TopOptFlowsTests.FlexibleR7U21HookTests testEveryHookIsPinnedOnceAtItsAnchorWithItsGate]
+  FlexibleRound7ScreenHookTests.swift:154: error: -[TopOptFlowsTests.FlexibleRound7ScreenHookTests testEachHookIsOnceAtItsAnchorWithItsGateAndTodaysElse]
+  FlexibleRound7ScreenHookTests.swift:197: error: -[TopOptFlowsTests.FlexibleRound7ScreenHookTests testOffTheFlexibleStageTodaysExportStepAndChipColumn]
+  FlexibleRound7SelectionsHookTests.swift:83: error: -[TopOptFlowsTests.FlexibleRound7SelectionsHookTests testEachHookOnceAtItsAnchorWithItsGateAndRemovingAGateGoesRed]
+  FlexibleRound9HookTests.swift:198: error: -[TopOptFlowsTests.FlexibleRound9HookTests testCancelChangesNothing]
+  FlexibleRound9HookTests.swift:96: error: -[TopOptFlowsTests.FlexibleRound9HookTests testEveryHookIsPinnedOnceWithItsGate]
+  FlexibleSurfaceNavTests.swift:16: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheHookIsInPlace]
+  FlexibleSurfaceNavTests.swift:19: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheHookIsInPlace]
+  FlexibleSurfaceNavTests.swift:41: error: -[TopOptFlowsTests.FlexibleSurfaceNavTests testTheSurfaceButtonSitsBesideTopologyAndSurfaceComesBackToFlexible]
+LatticeStaleTypeTests 6/6; FlexibleI2AttachTests 18/18; TopologyStageTests 11/11 (#354's; includes the re-run card source check)
+FlexibleStageCapsuleTests 5 tests, 1 red (2 assertions; compile fix, P5); LatticeStageTests.testPickingStructuralOrAestheticClearsAnyOtherType red (B4's side of P4)
+goldens det: identical 37 DIFFERS 2 PART-SKIP 0
+  FLEX-AP SUBTREE lattice_subtree_102117B9.json canonical: DIFFERS — 61 line(s); first: ["line 73: now \'  \"topologyID\" : \"octet\"\' was \'  \"topologyID\" : \"octet\",\'", "line 74: now \'}\' was 
+  FLEX-AP GOLDEN lattice_subtree_102117B9.json: DIFFERS — 1 line(s); first: 
+goldens unseeded: identical 32 DIFFERS 1 PART-SKIP 1
+  FLEX-AP SUBTREE lattice_subtree_102117B9.json canonical: DIFFERS — 61 line(s); first: ["line 73: now \'  \"topologyID\" : \"octet\"\' was \'  \"topologyID\" : \"octet\",\'", "line 74: now \'}\' was 
+stage-job hashes vs round8_step_h47/stage_job_hashes_r8.txt: 11 of 16 rows moved, 5 unchanged (887AC498, AA4C7953, A1_0002, A1_0003, r3);
+  control- = base r5 and control+ != base r5, as before. Each moved row diffed against its pre-merge job: job_diff_vs_45903e89.txt
+  (the pre-merge tree 45903e89, rebuilt in a side worktree, reproduces stage_job_hashes_r8.txt byte for byte).
+
+## run 2 — after the re-pins (f7cccb5a), 03:34-03:44: 103 tests (19 hook classes + LatticeStaleTypeTests + FlexibleStageCapsuleTests)
+  FlexibleBatchCHookTests passed 4 tests 0 failures
+  FlexibleBatchMXrayTests passed 2 tests 0 failures
+  FlexibleChromeLayoutTests passed 1 tests 0 failures
+  FlexibleH39HotfixHookTests passed 4 tests 0 failures
+  FlexibleMainPageHookTests passed 3 tests 0 failures
+  FlexibleMainPageRound4Tests passed 1 tests 0 failures
+  FlexibleR7M1Tests passed 9 tests 0 failures
+  FlexibleR7U21HookTests passed 2 tests 0 failures
+  FlexibleRound6HostedTests passed 17 tests 0 failures
+  FlexibleRound6Tests passed 11 tests 0 failures
+  FlexibleRound7ScreenHookTests failed 4 tests 1 failures
+  FlexibleRound7SelectionsHookTests passed 4 tests 0 failures
+  FlexibleRound9HookTests failed 10 tests 1 failures
+  FlexibleS1VerifyTests passed 3 tests 0 failures
+  FlexibleSelectionsListTests passed 3 tests 0 failures
+  FlexibleSettingsRound4Tests passed 1 tests 0 failures
+  FlexibleSquishPlayerTests passed 7 tests 0 failures
+  FlexibleStageCapsuleTests failed 5 tests 2 failures
+  FlexibleStepRepairHookTests passed 3 tests 0 failures
+  FlexibleSurfaceNavTests failed 3 tests 3 failures
+  LatticeStaleTypeTests passed 6 tests 0 failures
+  (FlexibleRound7ScreenHookTests' one red was the filter re-pin reading the comment-stripped source; fixed in f7cccb5a, then 4/4)
+  still red: FlexibleRound9HookTests.testEveryHookIsPinnedOnceWithItsGate (H50d-lattice, B4 + R8), FlexibleSurfaceNavTests x2 (H9 gone, B5;
+  compile fix), FlexibleStageCapsuleTests.testEachMenuRowDoesOneThingAndFoldsTheCards (compile fix) — P5 / the reviewer
+
+## re-record — RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=2949a032 into a scratch copy: 10 tests, 0 failures;
+only lattice_subtree_102117B9.json differs among the goldens (copied); MANIFEST.txt / probe_answers.json: labels only (kept).
+
+## after the re-record (working tree = the commit that carries this file): FlexibleAngledGoldenTests
+  det: identical 38 DIFFERS 0 PART-SKIP 0; Executed 13 tests, with 0 failures (0 unexpected) in 14.718 (14.721) seconds
+  unseeded: identical 32 DIFFERS 0 PART-SKIP 1; Executed 13 tests, with 0 failures (0 unexpected) in 14.699 (14.700) seconds
+  THE POST-SYNC BASE: det 38 / unseeded 32 + 1 PART-SKIP, 0 DIFFERS; stage-job hashes = stage_job_hashes_sync354.txt (replaces round8_step_h47/stage_job_hashes_r8.txt).

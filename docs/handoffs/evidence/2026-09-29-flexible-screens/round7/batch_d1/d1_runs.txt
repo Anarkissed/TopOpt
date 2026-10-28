@@ -1,0 +1,138 @@
+# R7-D1 — the raw runs (swift test --skip-build --scratch-path /tmp/r7d-build; one process per chunk of ~12 classes, detached)
+# counts are the Test Case lines of each log (passed / skipped / failed); 'signal' counts exit-by-signal lines
+
+## 1. RED run, be30a031 (the tests against stubs; class by class after a stub crash) — full text: d1_red_run.txt
+d1_red_run.log: 14 tests · 2 passed · 0 skipped · 12 failed · signal 1 · failed: FlexibleChromeLayoutTests.testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow FlexibleChromeLayoutTests.testTheCapsuleSitsUnderTheNameClearOfTheGizmo FlexibleChromeLayoutTests.testTheCapsuleTopIsStageNavPlacementsFormula FlexibleChromeLayoutTests.testTheMinimisedSelectionsPillKeepsTwelveFromTheSetupChip FlexibleChromeLayoutTests.testThePairSitsOnTheCornerTwelveApart FlexibleChromeLayoutTests.testTheViewsRowIsSixFortyFourPointIconsEightApart FlexibleChromeStateTests.testAModelTapAStageChangeAndTheSquishPageFoldTheCards FlexibleChromeStateTests.testThePanelsNeverChangeTheBarsMeasuredHeight FlexibleCornerPairTests.testReadySendsOncePreviewAndTheCaretNeverSend FlexibleCornerPairTests.testShowLooksWithoutSending FlexibleCornerPairTests.testTheCalloutPopsOncePerNewIssueAndNeverForAnAdvisory FlexibleCornerPairTests.testTheCalloutsButtonsApplyFixesOrSendHimToSquish 
+d1_red_run2.log: 28 tests · 4 passed · 1 skipped · 23 failed · signal 2 · failed: FlexibleRound7ScreenHookTests.testEachHookIsOnceAtItsAnchorWithItsGateAndTodaysElse FlexibleRound7ScreenHookTests.testOffTheFlexibleStageTodaysExportStepAndChipColumn FlexibleChromeLayoutTests.testPanelsAreRightAlignedAboveThePairAndNeverRiseAboveTheViewsRow FlexibleChromeLayoutTests.testTheCapsuleSitsUnderTheNameClearOfTheGizmo FlexibleChromeLayoutTests.testTheCapsuleTopIsStageNavPlacementsFormula FlexibleChromeLayoutTests.testTheMinimisedSelectionsPillKeepsTwelveFromTheSetupChip FlexibleChromeLayoutTests.testThePairSitsOnTheCornerTwelveApart FlexibleChromeLayoutTests.testTheViewsRowIsSixFortyFourPointIconsEightApart FlexibleStageCapsuleTests.testEachMenuRowDoesOneThingAndFoldsTheCards FlexibleStageCapsuleTests.testLeavingTheSquishPageRunsSaveAndExitsCheckFirst FlexibleStageCapsuleTests.testTheAmberDotIsAFixOnTheSquishPageAndTheWhiteDotUnsavedChanges FlexibleCornerPairTests.testReadySendsOncePreviewAndTheCaretNeverSend FlexibleCornerPairTests.testShowLooksWithoutSending FlexibleCornerPairTests.testTheCalloutPopsOncePerNewIssueAndNeverForAnAdvisory FlexibleCornerPairTests.testTheCalloutsButtonsApplyFixesOrSendHimToSquish FlexibleChromeStateTests.testAModelTapAStageChangeAndTheSquishPageFoldTheCards FlexibleChromeStateTests.testThePanelsNeverChangeTheBarsMeasuredHeight FlexibleSquishCopyTests.testNoUserFacingSettingsNamesTheFlexiblePage FlexibleRound7CardMessagesTests.testEveryMessageOfTheFullScreenStepReachesTheCornerCard FlexibleRound7CardMessagesTests.testTheInfoBehindTheCardsCoreLineIsCoresWholeSentence FlexibleRound7ScreenHostedTests.testOnTheSquishPageTheNoticeBandAndThePanelClearTheCapsule FlexibleRound7ScreenHostedTests.testTheFlexibleStageWearsTheCapsuleTheViewsAndTheCornerPair FlexibleRound7ScreenHostedTests.testTheViewsRowIsHeatStressXrayLatticePrismsPlay 
+
+## 2. first green, ae90a2fb (the new classes, then the source pins of the touched files, then the hosted screen)
+green1.log: 34 tests · 32 passed · 0 skipped · 2 failed · signal 0 · failed: FlexibleCornerPairTests.testTheSplitButtonsTable FlexibleCornerPairTests.testTheTraysRowsDoOneThingEach 
+green2.log: 20 tests · 20 passed · 0 skipped · 0 failed · signal 0 
+pins1.log: 106 tests · 100 passed · 0 skipped · 6 failed · signal 0 · failed: FlexibleBatchCHookTests.testTheWorkspaceHooksAreInPlace FlexibleMainPageHookTests.testTheExitButtonAndThePageConsultTheReadiness FlexibleMainPageHookTests.testTheWorkspaceHooksAreInPlace FlexibleMainPageRound4Tests.testTheExportStepSaysTheExportsWaitOnCoreInOneLine FlexibleMainPageRound4Tests.testTheHooksAreInPlace FlexibleMainPageRound4Tests.testTheNoteBandIsReservedBesideTheViewRow 
+pins2.log: 19 tests · 18 passed · 0 skipped · 1 failed · signal 0 · failed: FlexibleMainPageHookTests.testTheExitButtonAndThePageConsultTheReadiness 
+hosted1.log: 3 tests · 2 passed · 0 skipped · 1 failed · signal 0 · failed: FlexibleRound7ScreenHostedTests.testTheFlexibleStageWearsTheCapsuleTheViewsAndTheCornerPair 
+hosted2.log: 1 tests · 1 passed · 0 skipped · 0 failed · signal 0 
+
+## 3. THE TARGETED SUITE, once, ae90a2fb — 205 classes (suite_classes.txt below), 18 chunks
+chunk 001 start 07:47:11 … ALL DONE 09:21:02
+chunk_001.log: 83 tests · 70 passed · 13 skipped · 0 failed · signal 0 
+chunk_002.log: 52 tests · 38 passed · 13 skipped · 1 failed · signal 0 · failed: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker 
+chunk_003.log: 71 tests · 69 passed · 2 skipped · 0 failed · signal 0 
+chunk_004.log: 51 tests · 47 passed · 4 skipped · 0 failed · signal 0 
+chunk_005.log: 87 tests · 81 passed · 0 skipped · 6 failed · signal 0 · failed: FlexibleLegendPlacementTests.testThePagesUseThePlacement FlexibleMainPageHookTests.testTheExitButtonAndThePageConsultTheReadiness FlexibleMainPageRound4HostedTests.testClickingLatticeOpensSettingsOrShowsAndHides FlexibleMainPageRound4HostedTests.testTheRowAndTheNoteSitSideBySideInTheirFrames FlexibleMainPageRound4VerifyTests.testTheExportStepSaysTheWaitOnceAndUsesDSTokens FlexibleMainPageRound4VerifyTests.testTheNoteSitsBesideTheRowAndCostsTheLegendsNothing 
+chunk_006.log: 68 tests · 68 passed · 0 skipped · 0 failed · signal 0 
+chunk_007.log: 50 tests · 41 passed · 9 skipped · 0 failed · signal 0 
+chunk_008.log: 57 tests · 52 passed · 5 skipped · 0 failed · signal 0 
+chunk_009.log: 84 tests · 68 passed · 12 skipped · 4 failed · signal 0 · failed: FlexibleRound6HostedTests.testTheFourMainButtonsClearTheNoteLegendAndPlayer FlexibleRound6HostedTests.testThePrismsButtonIsTheFourthAndShowsEveryPrism FlexibleRound7ViewsHostedTests.testEveryViewRowIsIconsOnlyAndEachPageHasOneLegendCard FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff 
+chunk_010.log: 71 tests · 70 passed · 1 skipped · 0 failed · signal 0 
+chunk_011.log: 56 tests · 51 passed · 5 skipped · 0 failed · signal 0 
+chunk_012.log: 89 tests · 89 passed · 0 skipped · 0 failed · signal 0 
+chunk_013.log: 85 tests · 84 passed · 1 skipped · 0 failed · signal 0 
+chunk_014.log: 98 tests · 97 passed · 0 skipped · 1 failed · signal 0 · failed: LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds 
+chunk_015.log: 81 tests · 80 passed · 1 skipped · 0 failed · signal 0 
+chunk_016.log: 159 tests · 157 passed · 2 skipped · 0 failed · signal 0 
+chunk_017.log: 95 tests · 95 passed · 0 skipped · 0 failed · signal 0 
+chunk_018.log: 33 tests · 33 passed · 0 skipped · 0 failed · signal 0 
+TOTAL: 1370 tests · 1290 passed · 68 skipped · 12 failed
+
+## 4. re-run after the suite's re-pins, 973c0467 (every D1 class + the nine re-pinned)
+rerun1.log: 96 tests · 96 passed · 0 skipped · 0 failed · signal 0 
+
+## 5. after looking (8f8d6af4 / 6bd54919): the touched classes, then pass 2 (64 classes reading FlexibleStagePage, FlexibleLegendPlacement, FlexibleCornerPair or FlexibleLatticeButton)
+rerun2.log: 39 tests · 39 passed · 0 skipped · 0 failed · signal 0 
+chunk_001.log: 75 tests · 65 passed · 9 skipped · 1 failed · signal 0 · failed: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker 
+chunk_002.log: 52 tests · 47 passed · 5 skipped · 0 failed · signal 0 
+chunk_003.log: 74 tests · 72 passed · 2 skipped · 0 failed · signal 0 
+chunk_004.log: 71 tests · 63 passed · 8 skipped · 0 failed · signal 0 
+chunk_005.log: 78 tests · 75 passed · 3 skipped · 0 failed · signal 0 
+chunk_006.log: 19 tests · 19 passed · 0 skipped · 0 failed · signal 0 
+PASS 2 TOTAL: 369 tests · 341 passed · 27 skipped · 1 failed
+
+## 6. look-and-fix 3, 184927ab (the mini's words; its commit message says 370 / 355: that count missed two end lines a print had run into — these are the right ones): the new fit test + the layout pins, then pass 3 (59 classes: pass 2's, less the env-gated probes, plus every class reading the files fix 3 touched)
+fit4.log: 9 tests · 9 passed · 0 skipped · 0 failed · signal 0 
+FLEX-R7D1-FIT button
+mini 260 pt: 14 lines whole
+11p 260 pt: 14 lines whole
+13p 260 pt: 14 lines whole
+RED (the first drawing's main zone, a 232 split): cut ["\'Preview · core runs one group at a time\' drawn 170 of 172"]
+FLEX-R7D1-FIT card
+mini 336 pt: 15 scenarios, 112 measured, none cut
+13p 420 pt: 15 scenarios, 112 measured, none cut
+RED (the body beside the titles at 336): cut ["\'Export G-code\' drawn 97 of 98", "\'Send Group 2 only, Face 2 resting\' drawn 201 of 206", "\'Send Group 3 only, Face 5 resting\' drawn 202 of 206"]
+FLEX-R7D1-FIT tray
+mini 336 pt (rows 308 wide): 19 measured, cut 0, spilling 0 · Gravity needs 192, Plate up needs 266, Print parameters needs 267, Quality needs 283
+13p 420 pt (rows 392 wide): 19 measured, cut 0, spilling 0 · Gravity needs 249, Plate up needs 317, Print parameters needs 267, Quality needs 353
+RED (the first drawing at 336): cut [] · spilling ["\'Setup row · Gravity\' drawn 353 in 308", "\'Setup row · Plate up\' drawn 353 in 308", "\'Setup row · Print parameters\' drawn 353 in 308", "\'Setup row · Quality\' drawn 353 in 308"]
+chunk_001.log: 75 tests · 65 passed · 9 skipped · 1 failed · signal 0 · failed: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker 
+chunk_002.log: 65 tests · 62 passed · 3 skipped · 0 failed · signal 0 
+chunk_003.log: 78 tests · 77 passed · 1 skipped · 0 failed · signal 0 
+chunk_004.log: 77 tests · 77 passed · 0 skipped · 0 failed · signal 0 
+chunk_005.log: 77 tests · 76 passed · 1 skipped · 0 failed · signal 0 
+PASS 3 TOTAL: 372 tests · 357 passed · 14 skipped · 1 failed
+
+## 7. goldens (FlexibleAngledGoldenTests), both modes
+goldens_det: GOLDEN identical 38 · GOLDEN DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.393 (13.395) seconds
+goldens_unseeded: GOLDEN identical 32 · GOLDEN DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.356 (13.358) seconds
+goldens_det2: GOLDEN identical 38 · GOLDEN DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.521 (13.522) seconds
+goldens_unseeded2: GOLDEN identical 32 · GOLDEN DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.331 (13.333) seconds
+goldens_det3: GOLDEN identical 38 · GOLDEN DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.439 (13.440) seconds
+goldens_unseeded3: GOLDEN identical 32 · GOLDEN DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.335 (13.336) seconds
+(det = SWIFT_DETERMINISTIC_HASHING=1; goldens_*: 973c0467, *2: 6bd54919, *3: 184927ab, look-and-fix 3)
+
+## 8. the 16 stage-job hashes (973c0467): stage_job_hashes_d1.txt vs review_fix/stage_job_hashes_r7r.txt
+byte-identical (cmp exit 0)
+
+## the targeted suite's classes (205)
+BottomBarMeasurementTests FlexibleAngledGoldenRecorder FlexibleAngledGoldenTests FlexibleBatchBReviewTests FlexibleBatchBReviewUXTests Flexi
+bleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Probe FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleBatchMDentTests Fl
+exibleBatchMGroupTests FlexibleBatchMLegendTests FlexibleBatchMProbe FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchMXrayT
+ests FlexibleBatchNEvidenceProbe FlexibleBatchNProbe FlexibleBatchNRefineTests FlexibleBatchNVerifyTests FlexibleBatchVEvidenceProbe Flexibl
+eBatchVHostedTests FlexibleChromeLayoutTests FlexibleChromeStateTests FlexibleCoreClaimTests FlexibleCornerPairTests FlexibleCurveEditTests 
+FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassPerfTests FlexibleFEPassTes
+ts FlexibleFEVerifyGTests FlexibleGeometryOnlyLatticeTests FlexibleGroupFieldPerfTests FlexibleGroupPaletteEvidenceProbe FlexibleGroupPalett
+eHostedTests FlexibleGroupPaletteTests FlexibleInPassCompositeTests FlexibleLatticeEvidenceProbe FlexibleLatticeFieldTests FlexibleLatticeGr
+adingTests FlexibleLatticePassPerfTests FlexibleLatticePassTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLat
+ticeUnderReviewTests FlexibleLatticeUnderTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMai
+nPageRound4HostedTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainStageTests FlexibleMainViewsTests FlexibleM
+eetReviewTests FlexibleMeetTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePinchTests FlexiblePressAi
+mReviewTests FlexiblePressAimTests FlexiblePressFixturesTests FlexiblePressProbeTripwireTests FlexiblePressReframeTests FlexiblePressReviewT
+ests FlexiblePressSaveTests FlexibleR7FTests FlexibleR7M1EvidenceProbe FlexibleR7M1Tests FlexibleR7M1VerifyEvidenceProbe FlexibleR7M1VerifyT
+ests FlexibleR7M2EvidenceProbe FlexibleR7MergeTests FlexibleR7REvidenceProbe FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsEvide
+nce FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1EvidenceProbe FlexibleR7X1HostedTests FlexibleR7X1Tests FlexibleR7X1Ve
+rifyEvidenceProbe FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests FlexibleRound5EvidencePr
+obe FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRo
+und6EvidenceProbe FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CardMessagesTests FlexibleRound7OtherStagesProbe FlexibleRound
+7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsEvidenceProbe FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests Fl
+exibleRowCopyTests FlexibleS1VerifyTests FlexibleS1bMainTagsTests FlexibleSectorMigrationTests FlexibleSectorStoreTests FlexibleSettingsMigr
+ationTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueez
+eGroupsModelTests FlexibleSqueezeGroupsPressTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsR
+eviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCoarsenTests FlexibleSquishCopyTests FlexibleSquishEviden
+ceProbe FlexibleSquishPerfProbe FlexibleSquishPlayAllTests FlexibleSquishPlayerTests FlexibleSquishSolverTests FlexibleSquishTests FlexibleS
+quishVerifyGTests FlexibleStageCapsuleTests FlexibleStageTests FlexibleSurfaceNavTests FrozenRegionAsMaterialTests GroupViewEnforcementTests
+ GroupViewStateTests LatticeAutoDensityIsDerivedTests LatticeBandChipsTests LatticeBarrierModelTests LatticeBeamNetworkFactTests LatticeDefa
+ultGradePlanSwitchTests LatticeDefaultGradePlanTests LatticeDepthIsOneValueTests LatticeDrawerCellIsTheBakesTests LatticeDrawerCellsAcrossSo
+urceTests LatticeE1PrintableFloorTests LatticeGradingWiringTests LatticeIncludeGateTests LatticeLegendColourTests LatticeNamedNoOctetFallbac
+kTests LatticeOldRetainedRunTests LatticePageRound2Tests LatticePlanNotSentLineTests LatticePreviewBodyAlphaTests LatticePreviewNoticeCaptio
+nTests LatticeProbeSamplingTests LatticeProtectionFollowsSlabTests LatticeRunSpecSharedTests LatticeSectorOutlineTests LatticeSeparationTest
+s LatticeSettingsPersistTests LatticeSimSolveTriggerTests LatticeStageRepairEvidence LatticeStaleTypeTests LatticeStressTintTests LatticeStr
+ucturalPrismProbe LatticeStructuralSteppedGateTests LatticeStructuralViewStateTests LatticeTypeNoBandTests LatticeVariantFaceWallsTests Latt
+iceVariantTests OrganicAutoGradeAndFreezeTests OrganicDeadWallParityTests OrganicForecastRouteTests OrganicLookAndVisibilityTests OrganicPre
+viewBakeInputsTests OrganicPreviewMatchesTheJobTests OrganicPreviewParameterParityTests OrganicPreviewSpeedAndRimTests OrganicSolidRimTests 
+OrganicSyntheticStressTests OrganicWalk0907EveningTests ProjectStoreTests ProtectFreezeVsSolidityTests SmoothingPageRound2Tests SmoothingPag
+eTests SmoothingPreviewGateTests SmoothingRound3Tests SmoothingRound4Tests StrutLineWidthTests SurfaceCutDetentTests SurfaceInputDisciplineT
+ests SurfacePencilToggleExemptionTests SurfaceRegionToolTests SurfaceStageNoRegressionTests SurfaceTapMeaningTests SurfaceUnionDefectControl
+Tests ThreeStageVisibilityTests UndoHistoryTests VariantEntryGatingTests VariantRetentionTests ViewerTests 
+
+## pass 3's classes (59)
+FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Probe FlexibleBatchMDentTests FlexibleBatchMPro
+be FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleBatchNVerifyTests FlexibleBatchVHostedTests FlexibleChromeLayoutTests FlexibleC
+hromeStateTests FlexibleCornerPairTests FlexibleCurveEditTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleFEPassPerfTests
+ FlexibleGroupPaletteHostedTests FlexibleInPassCompositeTests FlexibleLatticePassPerfTests FlexibleLatticeSectionsHostedTests FlexibleLegend
+PlacementTests FlexibleMainPageHookTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainViewsTests FlexibleOverla
+yClipTests FlexiblePressReviewTests FlexibleR7FTests FlexibleR7M1VerifyTests FlexibleR7MergeTests FlexibleR7RHostedTests FlexibleR7RTests Fl
+exibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleRound5Setti
+ngsHostedTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CalloutHostedTests FlexibleRoun
+d7CardMessagesTests FlexibleRound7FitHostedTests FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7ViewsHostedTest
+s FlexibleRound7ViewsTests FlexibleS1bMainTagsTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Test
+s FlexibleShownValuesTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsUITests FlexibleSquishCo
+pyTests FlexibleSquishTests 

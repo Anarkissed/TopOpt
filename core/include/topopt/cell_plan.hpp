@@ -198,6 +198,11 @@ struct CellPlanParams {
 
   // The STATED minimum extrudable strut width (mm) — the printability bound.
   double min_extrudable_width_mm = 0.0;
+  // ★ D1: THE JOB'S DENSITY CAP. The swept plan's per-cell predicate asks "does the
+  // densest density print at this cell?", and the densest density is the JOB'S, not the
+  // band's. Without it the plan admitted rungs whose struts the job can never reach --
+  // the same uncapped floor D1 found on four other paths. 0 = not sent.
+  double max_relative_density = 0.0;
   // The local-member-thickness EDT radius cap (voxels), mirroring grading.hpp.
   int thickness_cap_voxels = 32;
 
@@ -330,7 +335,8 @@ int cell_plan_max_level(double min_cell_size_mm, double max_cell_size_mm);
 double cell_plan_finest_printable_cell_mm(LatticeTopology topo,
                                           double min_cell_size_mm,
                                           double max_cell_size_mm,
-                                          double min_extrudable_width_mm);
+                                          double min_extrudable_width_mm,
+                                          double max_relative_density = 0.0);
 
 }  // namespace topopt
 

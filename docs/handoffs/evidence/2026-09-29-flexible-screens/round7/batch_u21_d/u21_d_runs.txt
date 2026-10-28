@@ -1,0 +1,78 @@
+# U21 batch D runs (app/TopOptKit, --scratch-path /tmp/r7x20b-build) — eff5a922 + the working tree
+### runner.log
+start 16:07:24 eff5a922 + working tree
+build exit 0 16:08:32
+golden det exit 0 16:08:51
+golden unseeded exit 0 16:09:07
+hashes exit 0 16:10:11
+hashes cmp vs x20b (non-comment lines): identical
+hashes cmp vs x20b (whole file): identical
+chunk_aa exit 1 16:28:21
+chunk_ab exit 0 16:36:43
+chunk_ac exit 0 16:47:25
+chunk_ad exit 1 17:10:38
+chunk_ae exit 0 17:14:14
+ALLDONE 17:14:14
+### classes (60, chunks of 12)
+FlexibleU21DeleteUndoTests FlexibleU2Tests FlexibleRound7SelectionsHostedTests FlexibleR7FTests FlexibleR7RHostedTests FlexibleR7D2ReviewHostedTests FlexibleRound5SettingsHostedTests FlexibleR7SettingsHostedTests FlexibleSqueezeGroupsUITests FlexibleSqueezeGroupsReviewUITests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleBatchBReviewUXTests FlexibleBatchVHostedTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFaceCommitTests FlexibleFlatPrismHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleMainPageLoadsTests FlexiblePressAimTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7E1ReviewHostedTests FlexibleR7E1bTests FlexibleR7E2HostedTests FlexibleR7E2ParkTests FlexibleR7E2Tests FlexibleR7E3Tests FlexibleR7E5Tests FlexibleR7EveningAnswersTests FlexibleR7MergeTests FlexibleR7RTests FlexibleR7SettingsTests FlexibleR7X1Tests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7D1ReviewTests FlexibleRound7DesignIntegrationTests FlexibleRound7ViewsHostedTests FlexibleRound7ViewsReviewHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSelectionsListTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUXTests FlexibleU1Tests FlexibleX20bHostedTests FlexibleStageTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 15.230 (15.233) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.925 (13.928) seconds
+### chunks
+chunk_aa.log: Executed 58 tests, with 11 failures (0 unexpected) in 1087.834 (1087.847) seconds
+chunk_ab.log: Executed 100 tests, with 1 test skipped and 0 failures (0 unexpected) in 500.608 (500.621) seconds
+chunk_ac.log: Executed 63 tests, with 0 failures (0 unexpected) in 639.185 (639.194) seconds
+chunk_ad.log: Executed 106 tests, with 1 failure (0 unexpected) in 1390.960 (1390.978) seconds
+chunk_ae.log: Executed 78 tests, with 0 failures (0 unexpected) in 212.962 (212.971) seconds
+### failures (all chunks)
+Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("18") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (18 px, idle 0)
+Tests/TopOptFlowsTests/FlexibleR7RHostedTests.swift:187: error: -[TopOptFlowsTests.FlexibleR7RHostedTests testFsNewControlsAreFingerTargets] : XCTAssertLessThan failed: ("44.0") is not less than ("43.5") - control: F's Reset under 44 pt
+Tests/TopOptFlowsTests/FlexibleR7RHostedTests.swift:187: error: -[TopOptFlowsTests.FlexibleR7RHostedTests testFsNewControlsAreFingerTargets] : XCTAssertLessThan failed: ("44.0") is not less than ("43.5") - control: F's Delete under 44 pt
+Tests/TopOptFlowsTests/FlexibleR7RHostedTests.swift:187: error: -[TopOptFlowsTests.FlexibleR7RHostedTests testFsNewControlsAreFingerTargets] : XCTAssertLessThan failed: ("44.0") is not less than ("43.5") - control: F's Keep under 44 pt
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:163: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 10.0, deepestMM: 3.0, mode: "both", curve
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:169: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertEqual failed: ("Optional("Exit")") is not equal to ("Optional("Save & Exit")") - 11l: after a change
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:163: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 10.0, deepestMM: 3.0, mode: "both", curve
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:169: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertEqual failed: ("Optional("Exit")") is not equal to ("Optional("Save & Exit")") - 11p: after a change
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:163: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 10.0, deepestMM: 3.0, mode: "both", curve
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:169: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertEqual failed: ("Optional("Exit")") is not equal to ("Optional("Save & Exit")") - 13p: after a change
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:163: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertNil failed: "FlexibleFaceSettings(faceRegionID: 1000103, role: "loaded", rotationDeg: 0, weightKg: 10.0, deepestMM: 3.0, mode: "both", curve
+Tests/TopOptFlowsTests/FlexibleRound5SettingsHostedTests.swift:169: error: -[TopOptFlowsTests.FlexibleRound5SettingsHostedTests testTheRailTheBoxesTheTrashAndTheExitOnHisProject] : XCTAssertEqual failed: ("Optional("Exit")") is not equal to ("Optional("Save & Exit")") - 13l: after a change
+### signal lines: 0
+### fixes, then re-runs
+FlexibleR7RHostedTests.testFsNewControlsAreFingerTargets: its RED control (F's 32 pt) — the in-place confirm now reads FlexibleTargets.least / side(32) like the rest (no re-pin)
+FlexibleRound5SettingsHostedTests.testTheRailTheBoxesTheTrashAndTheExitOnHisProject: RE-PINNED (his 10-21 Img13 + ruling E(2)): the take-out asks; [Take out] deletes top A
+after the look (the ask's line hid the row's name only by a backdrop): dot/name/chips/title hidden while asking, no backdrop
+re-run 1 (R7RHosted, R5SettingsHosted, U21DeleteUndo, SquishCopy, U2/testU21): Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+re-run 2 (R7RHosted, R5SettingsHosted, SqueezeGroupsUI, SqueezeGroupsReviewUI, R7SettingsHosted, SquishCopy, U2/testU21): Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+re-run 3 (U21DeleteUndo, Round7SelectionsHosted, final binary): Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+### the batch's prints (re-run 3)
+FLEX-U21-D6 RED (old) trash (322.0, 811.0, 44.0, 45.0) · cancel -
+FLEX-U21-D6 trash (322.0, 811.0, 44.0, 45.0) · cancel (312.0, 811.0, 64.0, 45.0) · delete (36.0, 672.0, 66.0, 45.0)
+FLEX-U21-D6 chip trash (691.0, 114.0, 45.0, 45.0) · cancel (681.0, 114.0, 65.0, 45.0) · delete (411.0, 166.0, 67.0, 45.0)
+FLEX-U21-D3 RED (today) after trash: rail group(1) · selected nil · playing Group 1 · working nil · faces [2000021, 2000020]
+  after Undo + re-open: rail group(2) · selected nil · playing Group 2 · working nil · faces [5, 3, 2000021, 2000020]
+FLEX-U21-D3 after trash: rail group(1) · selected nil · playing Group 1 · working nil · faces [2000021, 2000020]
+  after Undo + re-open: rail group(1) · selected 5 · playing Group 1 · working 5 · faces [5, 3, 2000021, 2000020]
+FLEX-U21-F12 RED (today) Trash(name: "Group C", facesBefore: [5, 3, 2000021, 2000020], facesAfterTrash: [5, 3, 2000021, 2000020, 2000065, 2000066, 2000067], facesAfterUndo: [5, 3, 2000021, 2000020], back: false, stepsBefore: 0, stepsAfter: 1)
+FLEX-U21-F12 Trash(name: "Group C", facesBefore: [5, 3, 2000021, 2000020], facesAfterTrash: [5, 3, 2000021, 2000020, 2000065, 2000066, 2000067], facesAfterUndo: [5, 3, 2000021, 2000020], back: true, stepsBefore: 0, stepsAfter: 0)
+FLEX-U21-D4 RED (today) after Reset all: rail newGroup · selected nil · playing nil · working nil · faces [] · undo steps 2
+  after Undo: rail newGroup · selected nil · playing nil · working nil · faces []
+FLEX-U21-D4 after Reset all: rail newGroup · selected nil · playing nil · working nil · faces [] · undo steps 1
+  after Undo: rail group(1) · selected 5 · playing Group 1 · working 5 · faces [5, 3, 2000021, 2000020]
+FLEX-U21-D5 RED (today) after one Undo [3: 7.0, 5: 5.5] · after two [3: 7.0, 5: 5.5]
+FLEX-U21-D5 after one Undo [3: 7.0] · after two [3: 7.0, 5: 9.0]
+FLEX-U21-D1 RED (today) after ⊖: rail newGroup · selected nil · playing nil · working nil · faces []
+  after Undo: rail newGroup · selected nil · playing Group 1 · working nil · faces [2000008]
+FLEX-U21-D1 after ⊖: rail newGroup · selected nil · playing nil · working nil · faces []
+  after Undo: rail group(1) · selected 2000008 · playing Group 1 · working 2000008 · faces [2000008]
+FLEX-U21-D1 after Redo: rail newGroup · selected nil · playing nil · working nil · faces []
+FLEX-U21-D2 RED (today) after take-out: rail group(1) · selected 3 · playing Group 1 · working 3 · faces [3, 2000021, 2000020]
+  after Undo: rail group(1) · selected 3 · playing Group 1 · working 3 · faces [5, 3, 2000021, 2000020]
+FLEX-U21-D2 after take-out: rail group(1) · selected 3 · playing Group 1 · working 3 · faces [3, 2000021, 2000020]
+  after Undo: rail group(1) · selected 5 · playing Group 1 · working 5 · faces [5, 3, 2000021, 2000020]
+### the hosted lines (re-run 2)
+face ⊖: control (386.0, 748.0, 44.0, 44.0) · keep (376.0, 748.0, 64.0, 44.0) · red (274.0, 748.0, 78.0, 44.0) · on spot true · ≥24 pt clear true
+group trash: control (394.0, 565.0, 44.0, 44.0) · keep (384.0, 565.0, 64.0, 44.0) · red (295.0, 565.0, 65.0, 44.0) · on spot true · ≥24 pt clear true
+Reset all: control (369.0, 509.0, 71.0, 44.0) · keep (372.0, 509.0, 65.0, 44.0) · red (288.0, 509.0, 61.0, 44.0) · on spot true · ≥24 pt clear true
+edge trash: control (434.0, 564.0, 44.0, 44.0) · keep (424.0, 564.0, 64.0, 44.0) · red (325.0, 564.0, 75.0, 44.0) · on spot true · ≥24 pt clear true
+RED old placement (face ⊖): control (386.0, 1165.0, 44.0, 44.0) · keep (312.0, 1165.0, 64.0, 44.0) · red (226.0, 1165.0, 78.0, 44.0) · on spot false · ≥24 pt clear false

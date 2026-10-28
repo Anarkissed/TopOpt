@@ -1,0 +1,3 @@
+PROBE-U21-D before ⊖: rail group(1) · selected 2000008 · playing Group 1 · working 2000008 · faces [2000008]
+PROBE-U21-D after ⊖: rail newGroup · selected nil · playing nil · working nil · faces []
+PROBE-U21-D after Undo: rail newGroup · selected nil · playing Group 1 · working nil · faces [2000008]

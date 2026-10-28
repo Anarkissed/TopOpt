@@ -1,0 +1,21 @@
+# Round 7 batch M1 — the evidence probe's log (FlexibleR7M1EvidenceProbe, FLEX_R7M1_EVIDENCE_DIR set), 2026-10-14. Offscreen frames, not device screenshots.
+Test Case '-[TopOptFlowsTests.FlexibleR7M1EvidenceProbe testTheExportStep]' passed (21.708 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1EvidenceProbe testTheMainPageOnHisPad]' passed (173.459 seconds).
+FLEX-R7M1-EVIDENCE export
+  R7M1_export_no_face_prism_stated_reason_13p.png: line 'Set a face to Lattice in Selections first' · note '-' · buttons [] · runs 0
+  R7M1_export_edges_beside_said_first_13p.png: line 'This export makes Group 1 only.' · note 'Edges and faces go in separate exports for now.' · buttons ["Send Group 1 only"] · runs 0
+  R7M1_export_edges_beside_said_first_11l.png: line 'This export makes Group 1 only.' · note 'Edges and faces go in separate exports for now.' · buttons ["Send Group 1 only"] · runs 0
+FLEX-R7M1-EVIDENCE main
+  R7M1_no_face_prism_plain_model_img1_13p.png: prisms [] · xray false · walls hidden true · dents false · pill 'Set a face to Lattice in Selections first' · legend row false
+  R7M1_no_face_prism_plain_model_img1_11l.png: prisms [] · xray false · walls hidden true · dents false · pill 'Set a face to Lattice in Selections first' · legend row false
+  R7M1_no_face_prism_CONTROL_whole_part_lattice_img1_13p.png: prisms [] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_live_lattice_nothing_picked_img1_13p.png: prisms [] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  Group C picked — the Selections modal's rows: Face 3 row 25.0 mm, Face 5 row 25.0 mm
+  R7M1_live_lattice_groupC_picked_img1_xray_13p.png: prisms [Face 3 25.0 mm, Face 5 25.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_live_lattice_groupC_picked_img1_xray_11l.png: prisms [Face 3 25.0 mm, Face 5 25.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_live_lattice_groupC_picked_img1_xray_off_13p.png: prisms [Face 3 25.0 mm, Face 5 25.0 mm] · xray false · walls hidden true · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_live_lattice_groupC_CONTROL_squish_prisms_img1_13p.png: prisms [Face 1 12.0 mm, Face 4 22.5 mm, Face 2 19.0 mm, Face 3 24.5 mm, Face 5 19.5 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row true
+  R7M1_live_lattice_groupC_prisms_view_img1_13p.png: prisms [Face 3 25.0 mm, Face 5 25.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row true
+  R7M1_img2_front_top_picked_no_12mm_13p.png: prisms [] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_img2_front_top_picked_CONTROL_squish_prism_13p.png: prisms [Face 1 12.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false
+  R7M1_img2_front_groupC_picked_13p.png: prisms [Face 3 25.0 mm, Face 5 25.0 mm] · xray true · walls hidden false · dents true · pill 'Preview · core runs one group at a time' · legend row false

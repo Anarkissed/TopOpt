@@ -1,0 +1,9 @@
+13p 3D yaw 45°: view 610×941 · drawn x 106…504 y 262…641 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 0°: view 610×941 · drawn x 99…463 y 215…682 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 90°: view 610×941 · drawn x 147…511 y 215…682 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 135°: view 610×941 · drawn x 229…387 y 213…747 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 180°: view 610×941 · drawn x 139…495 y 255…743 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 225°: view 610×941 · drawn x 93…517 y 297…672 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 270°: view 610×941 · drawn x 115…471 y 255…743 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+13p 3D sweep yaw 315°: view 610×941 · drawn x 223…381 y 213…747 · gizmo (474.0, 0.0, 136.0, 136.0) · inside yes clear yes
+RED no aspect fit yaw 45°: view 610×941 · drawn x -2…612 y 149…734 · gizmo (474.0, 0.0, 136.0, 136.0) · inside NO clear yes

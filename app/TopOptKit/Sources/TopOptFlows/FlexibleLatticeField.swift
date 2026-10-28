@@ -1,0 +1,979 @@
+// FlexibleLatticeField — THE Flexible lattice's geometry, defined once (task
+// 2026-09-29-flexible-screens, overnight round).
+//
+// ★ THE APP IS THE SOURCE OF TRUTH FOR THIS GEOMETRY (maintainer, 2026-09-29: "there is
+// no core yet for Flexibles, so your preview will be the source of truth"). C2 (core's
+// lattice recipe) does not exist; until it does, the preview evaluates the function
+// written here. It has TWO copies, held together by tests:
+//   * this Swift reference (`FlexibleLatticeField.lattice(at:)`),
+//   * the Metal G-buffer march (FlexibleLatticeShader's MSL `flx_field`, drawn by
+//     FlexibleLatticePass inside MeshRenderer's passes).
+// A change here must be made in both; FlexibleLatticePassTests samples them at the same
+// points and fails if they disagree by more than 5e-3 mm (the GPU's half-float SDF and its
+// own sin/cos).
+// FlexibleLatticeFieldTests pins what the field means on C1's pad. (Exports wait on core —
+// maintainer, 2026-09-29 — so the app's STL exporter and its C++ copy were removed; they
+// are recoverable at 85b1bdc0.)
+//
+// ── THE FIELD (all lengths mm, model space; negative = inside) ─────────────────────────
+// Grids use the VOXEL-CENTRE convention: value i sits at c0 + i·spacing, sampled with
+// trilinear interpolation of the continuous index u = (p − c0)/spacing, clamped to
+// [0, n−1] per axis.
+//   ρ(p)      = clamp(trilinear(rho), 0.05, 0.9)        — core's density, gaps filled
+//   m(p)      = trilinear(mask)                          — 1 lattice voxel, 0 not (★ round 7: core's lattice voxels AND
+//               each voxel core left Empty next to one — the region reaches the part's surface; the builder)
+//   dRegion   = (0.5 − m(p)) · 2 · rhoSpacing            — ≤ 0 inside the lattice region
+//   dPart     = trilinear(partSDF)                        — part surface, − inside; BEYOND the
+//               grid's box, max(that, |p − box|) (the grid has no margin — batch B review)
+//   dSkin     = skinMM − trilinear(skinDist)             — ≤ 0 deeper than the skin
+//   GYROID:     L = clamp(3.0915·t/ρ, Lmin, Lmax)
+//               THE LADDER: j = 4·log2(L/Lmin), j0 = floor(j), La = Lmin·2^(j0/4),
+//               Lb = Lmin·2^((j0+1)/4), w = smoothstep(¼, ¾, j − j0)
+//               per rung (k = 2π/L_rung, ONE k, q = k·p):
+//                 g = sin qx cos qy + sin qy cos qz + sin qz cos qx
+//                 ∇ = k·(cos qx cos qy − sin qz sin qx, cos qy cos qz − sin qx sin qy,
+//                        cos qz cos qx − sin qy sin qz)
+//               G = (1−w)·gA + w·gB, ∇G = (1−w)·∇A + w·∇B, k̄ = (1−w)·kA + w·kB
+//               wall = |G| / max(|∇G|, 0.05·k̄) − t/2
+//   HONEYCOMB:  e1, e2 ⟂ buildDir (e1 = normalize(buildDir × (|b.x| < 0.9 ? X : Y)),
+//               e2 = buildDir × e1), v = (p·e1, p·e2), d = honeycombCellMM (across flats)
+//               r = (d, √3·d), h = r/2, A = mod(v, r) − h, B = mod(v − h, r) − h,
+//               q = |A|² < |B|² ? A : B,
+//               n = max(|q.x|, |0.5 q.x + 0.8660254 q.y|, |−0.5 q.x + 0.8660254 q.y|)
+//               wall = |d/2 − n| − t/2           (mod(x, y) = x − y·floor(x/y))
+//   LATTICE:    F = max(wall, dRegion, dPart, dSkin)          — the preview draws F
+//
+// ★ GRADING. Walls stay whole beads (R1); the gyroid's cell follows ρ (03-generators §3:
+// L = 3.0915 t/ρ) on a LADDER of true gyroids 19 % apart, blended between neighbouring
+// rungs over the middle half of each step (03 §3(a)). It was q = k(p)·p — §3(b)'s naive
+// form, whose cells shrink or swell with the distance from the ORIGIN (3× on his pad's far
+// end; FlexibleLatticeGradingTests). Continuous either way; in a blend it is a hybrid of
+// two gyroids, elsewhere exactly one.
+// Honeycomb uses ONE cell for the whole part (03 §4: uniform d in v1), d = 2t/ρ̄.
+// ★ SKIN. Faces with skin ON keep `skinMM` of solid under them (M15); `skinDist` is the
+// distance to the triangles of every face EXCEPT the loaded faces whose skin is off, so
+// the lattice runs to the surface only there. ★ ROUND 4 (D1): the model-wide FINISH decides
+// (FlexibleFinish): Covered is this grid; None, Rim and Skin bring their own skinDist and
+// thickness through the same dSkin — so this field and its MSL twin are unchanged.
+
+import Foundation
+import simd
+import TopOptKit
+
+/// A scalar field on a regular grid (voxel-centre convention, x fastest).
+public struct FlexGrid: Equatable, Sendable {
+    public let nx: Int, ny: Int, nz: Int
+    public let c0: SIMD3<Float>      // centre of voxel (0,0,0)
+    public let spacing: Float
+    public var values: [Float]
+
+    public init(nx: Int, ny: Int, nz: Int, c0: SIMD3<Float>, spacing: Float, values: [Float]) {
+        self.nx = nx; self.ny = ny; self.nz = nz; self.c0 = c0; self.spacing = spacing; self.values = values
+    }
+
+    @inline(__always) func at(_ i: Int, _ j: Int, _ k: Int) -> Float { values[(k * ny + j) * nx + i] }
+
+    /// Trilinear at a model point (the one sampling rule both copies use).
+    public func sample(_ p: SIMD3<Float>) -> Float {
+        let u = (p - c0) / spacing
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let c00 = at(i0, j0, k0) * (1 - fx) + at(i1, j0, k0) * fx
+        let c10 = at(i0, j1, k0) * (1 - fx) + at(i1, j1, k0) * fx
+        let c01 = at(i0, j0, k1) * (1 - fx) + at(i1, j0, k1) * fx
+        let c11 = at(i0, j1, k1) * (1 - fx) + at(i1, j1, k1) * fx
+        let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
+        return c0v * (1 - fz) + c1v * fz
+    }
+
+    /// How far `p` lies OUTSIDE the grid's box (its first and last voxel centres), 0 inside.
+    /// ★ THE PART'S SDF IS CLAMPED AT ITS GRID'S EDGE, and the preview's grid has no margin
+    /// (its last texel lies ON a face): beyond it the part's distance is at least this far
+    /// (batch B review — the shader's flx_part_distance, the twin).
+    public func outsideDistance(_ p: SIMD3<Float>) -> Float {
+        let lo = c0, hi = c0 + SIMD3<Float>(Float(nx - 1), Float(ny - 1), Float(nz - 1)) * spacing
+        return simd_length(simd_max(simd_max(lo - p, p - hi), .zero))
+    }
+}
+
+/// Everything the lattice needs, prepared once when the user presses Generate.
+public struct FlexibleLatticeInputs: Equatable, Sendable {
+    public enum Topology: Int32, Sendable { case gyroid = 0, honeycomb = 1 }
+    public var topology: Topology
+    public var wallMM: Float          // t = beads × bead width
+    public var lMinMM: Float          // gyroid cell clamp
+    public var lMaxMM: Float
+    public var honeycombCellMM: Float // uniform d (honeycomb only)
+    public var buildDir: SIMD3<Float>
+    public var skinMM: Float
+    public var rho: FlexGrid          // filled ρ (> 0 everywhere)
+    public var mask: FlexGrid         // 1 lattice / 0 not
+    public var partSDF: FlexGrid      // mm, − inside
+    public var skinDist: FlexGrid     // mm, unsigned distance to the skinned surfaces
+    public var boundsMin: SIMD3<Float>
+    public var boundsMax: SIMD3<Float>
+    /// ★ R7-E1 (the top-lid fix's check): the mask voxels whose centre core's own rule (`coreEncloses`, voxelize.cpp's +Z
+    /// winding) puts OUTSIDE the part — exactly the voxels the mask-to-surface fill added (core's own lattice voxels are inside
+    /// by construction). The (i) skips them (FlexibleFaceStats.rows). Not sampled by the shader.
+    public var coreOutside: Set<Int> = []
+    /// ★ U1: how many voxels core left out between lattice of one region the builder put back (the "rods"' holes).
+    public var seamFilled: Int = 0
+    /// ★ R7-U21 H (EDGE-LOOK, his Img3): at a press's flat-prism plane, the OTHER side's ρ carried across it (= ρ where a
+    /// voxel holds no seam) and the press side's share by the plane's true position (FlexibleGroupField.pressSeam). nil:
+    /// no press seam — the field is exactly the ladder as before. Same grid as `rho`.
+    public var rhoAcross: FlexGrid? = nil
+    public var pressSide: FlexGrid? = nil
+    /// ★ ROUND 7 · MANUAL P1 (his decisions of 2026-10-23: a lattice TYPE and WALLS per group, "a clean seam where types meet"): per
+    /// voxel the wall t (mm, whole beads × the bead width) and the type share (0 gyroid, 1 honeycomb), on ρ's grid. nil (Auto, and
+    /// Manual's red control): one type and one t for the part — the field exactly as before.
+    public var manualWall: FlexGrid? = nil
+    public var manualType: FlexGrid? = nil
+    /// ★ ROUND 7 · MANUAL P2 (the drawing matches the settings): per voxel the PIECE code (8 · piece + 4 · stepped band (T2) +
+    /// 2 · graded + type,
+    /// FlexibleManualField.Built.code), the neighbouring OTHER piece's ρ carried onto this voxel and that piece's code (= this
+    /// voxel's ρ and code away from a seam). Where two pieces meet — two types, two walls, two Stepped bands, two groups — each
+    /// side draws its own lattice from its own same-side values and the two join at the seam's true position
+    /// (`manualPieceWall`). nil: P1's field (its red control).
+    public var manualPiece: FlexGrid? = nil
+    public var manualAcross: FlexGrid? = nil
+    public var manualOther: FlexGrid? = nil
+}
+
+public enum FlexibleLatticeField {
+    /// The default skin under a skin-on face: four 0.2 mm layers (Iacob's specimens
+    /// carried 4 + 4 layers of 0.2 mm). A default, recorded in the handoff for a ruling.
+    public static let defaultSkinMM: Float = 0.8
+
+    @inline(__always) static func fmod(_ x: Float, _ y: Float) -> Float { x - y * (x / y).rounded(.down) }
+
+    /// Rungs per doubling of the gyroid's cell: Lmin·2^(j/4), 19 % apart (03 §3: ≤ 20 % per step).
+    public static let ladderStepsPerOctave: Float = 4
+    /// The share of each rung-to-rung interval (in log L) that BLENDS; the rest is a pure rung.
+    public static let blendLo: Float = 0.25, blendHi: Float = 0.75
+
+    /// The gyroid g and ∇g at ONE constant wavenumber k (a true gyroid, cell 2π/k).
+    @inline(__always) static func gyroid(_ p: SIMD3<Float>, k: Float) -> (g: Float, grad: SIMD3<Float>) {
+        let q = p * k
+        let s = SIMD3<Float>(sin(q.x), sin(q.y), sin(q.z))
+        let c = SIMD3<Float>(cos(q.x), cos(q.y), cos(q.z))
+        let g = s.x * c.y + s.y * c.z + s.z * c.x
+        let grad = k * SIMD3<Float>(c.x * c.y - s.z * s.x, c.y * c.z - s.x * s.y, c.z * c.x - s.y * s.z)
+        return (g, grad)
+    }
+
+    /// The two bracketing rungs of the ladder for the intended cell L, the blend weight of
+    /// the upper one (0 = the lower rung alone, 1 = the upper alone), and dw/dj.
+    public static func rungs(L: Float, lMin: Float) -> (La: Float, Lb: Float, w: Float, dwdj: Float, j: Float) {
+        let j = Swift.max(0, ladderStepsPerOctave * log2(L / lMin))
+        let j0 = j.rounded(.down), fr = j - j0
+        let x = Swift.min(Swift.max((fr - blendLo) / (blendHi - blendLo), 0), 1)
+        let w = x * x * (3 - 2 * x)   // MSL smoothstep
+        return (lMin * exp2(j0 / ladderStepsPerOctave), lMin * exp2((j0 + 1) / ladderStepsPerOctave), w,
+                6 * x * (1 - x) / (blendHi - blendLo), j)
+    }
+
+    /// `FlexGrid.sample` AND its gradient (mm⁻¹): the trilinear's own, from the same eight
+    /// values, 0 along an axis where p is clamped to the grid.
+    public static func sampleWithGradient(_ g: FlexGrid, _ p: SIMD3<Float>) -> (value: Float, grad: SIMD3<Float>) {
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let c000 = g.at(i0, j0, k0), c100 = g.at(i1, j0, k0), c010 = g.at(i0, j1, k0), c110 = g.at(i1, j1, k0)
+        let c001 = g.at(i0, j0, k1), c101 = g.at(i1, j0, k1), c011 = g.at(i0, j1, k1), c111 = g.at(i1, j1, k1)
+        let c00 = c000 * (1 - fx) + c100 * fx, c10 = c010 * (1 - fx) + c110 * fx
+        let c01 = c001 * (1 - fx) + c101 * fx, c11 = c011 * (1 - fx) + c111 * fx
+        let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
+        let value = c0v * (1 - fz) + c1v * fz
+        var gx = ((c100 - c000) * (1 - fy) + (c110 - c010) * fy) * (1 - fz) + ((c101 - c001) * (1 - fy) + (c111 - c011) * fy) * fz
+        var gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz
+        var gz = c1v - c0v
+        if u.x < 0 || u.x > Float(nx - 1) { gx = 0 }
+        if u.y < 0 || u.y > Float(ny - 1) { gy = 0 }
+        if u.z < 0 || u.z > Float(nz - 1) { gz = 0 }
+        return (value, SIMD3(gx, gy, gz) / g.spacing)
+    }
+
+    /// The blended SHEET function G at p, its gradient, the blended wavenumber and the blend
+    /// weight — from the SAMPLED ρ and its gradient (the MSL `flx_wall`).
+    /// ★ A LADDER OF TRUE GYROIDS, NOT q = k(p)·p. A varying k times ABSOLUTE p has the local
+    /// wavenumber k + p·∇k (03 §3(b)): on his mirror-symmetric pad the far end drew cells 3×
+    /// finer than the near end at the same ρ (FlexibleLatticeGradingTests). Each rung has ONE
+    /// k, so its cell is its cell everywhere; between two rungs the sheet functions blend
+    /// (03 §3(a)), G = (1−w)·gA + w·gB, and ∇G is the WHOLE gradient — including
+    /// (gB − gA)·∇w, the blend weight's own gradient through ρ, without which the walls inside
+    /// a blend are drawn off t (`blendGradient: false` is only a test's red control).
+    public static func gyroidSheet(_ p: SIMD3<Float>, rhoRaw: Float, gradRho: SIMD3<Float>, _ f: FlexibleLatticeInputs,
+                                   blendGradient: Bool = true, t tIn: Float? = nil) -> (G: Float, grad: SIMD3<Float>, k: Float, w: Float) {
+        let t = tIn ?? f.wallMM
+        let rhoIn = rhoRaw > 0.05 && rhoRaw < 0.9
+        let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+        let Lraw = 3.0915 * t / rho
+        let L = Swift.min(Swift.max(Lraw, f.lMinMM), f.lMaxMM)
+        let r = rungs(L: L, lMin: f.lMinMM)
+        let ka = 2 * Float.pi / r.La, kb = 2 * Float.pi / r.Lb
+        var g: Float = 0, grad = SIMD3<Float>.zero
+        var gA: Float = 0, gB: Float = 0
+        if r.w < 1 { let a = gyroid(p, k: ka); gA = a.g; g += (1 - r.w) * a.g; grad += (1 - r.w) * a.grad }
+        if r.w > 0 { let b = gyroid(p, k: kb); gB = b.g; g += r.w * b.g; grad += r.w * b.grad }
+        if blendGradient, r.w > 0, r.w < 1, rhoIn, Lraw > f.lMinMM, Lraw < f.lMaxMM, r.j > 0 {
+            // ∇j = 4/ln2 · ∇L/L, ∇L = −L/ρ·∇ρ (zero wherever a clamp holds)
+            let gradJ = -(ladderStepsPerOctave / Float(M_LN2)) * gradRho / rho
+            grad += (gB - gA) * r.dwdj * gradJ
+        }
+        return (g, grad, (1 - r.w) * ka + r.w * kb, r.w)
+    }
+
+    /// The gyroid wall: the gradient-normalised sheet, t thick.
+    static func gyroidWall(_ p: SIMD3<Float>, rhoRaw: Float, gradRho: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        let s = gyroidSheet(p, rhoRaw: rhoRaw, gradRho: gradRho, f)
+        return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * f.wallMM
+    }
+
+    /// ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great"): THE SEAM AT A PRESS'S PLANE.
+    /// In a cell with a press seam (a corner whose `rhoAcross` differs from ρ) the field no longer ladder-blends ACROSS the
+    /// jump: each side keeps its own gyroid, from its OWN same-side interpolation — the press side's ρ (ρ at the press's
+    /// voxels, the press's value carried across at the voxels past the plane) and the face side's (the reverse), each a
+    /// trilinear of continuous values with its own ∇ρ (so each is exactly the ladder its side draws next door). The two
+    /// sheets meet at the plane's TRUE position — σ = smoothstep of the trilinear side share, ½ on the plane, not the voxel
+    /// staircase — with the whole gradient (incl. (G_press − G_face)·∇σ), so walls run on across the seam instead of
+    /// ending in slivers. nil: no seam in this cell (the ladder exactly as before). The MSL's `flx_wall_seam` is the twin.
+    public static func seamSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, t: Float? = nil) -> (G: Float, grad: SIMD3<Float>, k: Float)? {
+        guard !controlLadderAcrossCliffs, let ac = f.rhoAcross, let sd = f.pressSide else { return nil }
+        let g = f.rho
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let idx = [(i0, j0, k0), (i1, j0, k0), (i0, j1, k0), (i1, j1, k0), (i0, j0, k1), (i1, j0, k1), (i0, j1, k1), (i1, j1, k1)]
+        var inC = [Float](repeating: 0, count: 8), outC = inC, phiC = inC
+        var seam = false
+        for (c, (i, j, k)) in idx.enumerated() {
+            let r = g.at(i, j, k), a = ac.at(i, j, k), s = sd.at(i, j, k)
+            if a != r { seam = true }
+            inC[c] = s >= 0.5 ? r : a; outC[c] = s >= 0.5 ? a : r; phiC[c] = s
+        }
+        guard seam else { return nil }
+        let inn = trilinear(inC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let out = trilinear(outC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let phi = trilinear(phiC, fx, fy, fz, u, nx, ny, nz, g.spacing)
+        let x = Swift.min(Swift.max(phi.value, 0), 1)
+        let sigma = x * x * (3 - 2 * x)
+        let dSigma = (x > 0 && x < 1 ? 6 * x * (1 - x) : 0) * phi.grad
+        if sigma <= 0 { let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f, t: t); return (a.G, a.grad, a.k) }
+        if sigma >= 1 { let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f, t: t); return (b.G, b.grad, b.k) }
+        let a = gyroidSheet(p, rhoRaw: out.value, gradRho: out.grad, f, t: t)
+        let b = gyroidSheet(p, rhoRaw: inn.value, gradRho: inn.grad, f, t: t)
+        return ((1 - sigma) * a.G + sigma * b.G, (1 - sigma) * a.grad + sigma * b.grad + (b.G - a.G) * dSigma,
+                (1 - sigma) * a.k + sigma * b.k)
+    }
+    /// The trilinear of eight corner values (x fastest: 000, 100, 010, 110, 001, …) and its gradient (mm⁻¹), 0 along a
+    /// clamped axis — `sampleWithGradient`'s arithmetic.
+    static func trilinear(_ c: [Float], _ fx: Float, _ fy: Float, _ fz: Float, _ u: SIMD3<Float>, _ nx: Int, _ ny: Int, _ nz: Int,
+                          _ h: Float) -> (value: Float, grad: SIMD3<Float>) {
+        let c00 = c[0] * (1 - fx) + c[1] * fx, c10 = c[2] * (1 - fx) + c[3] * fx
+        let c01 = c[4] * (1 - fx) + c[5] * fx, c11 = c[6] * (1 - fx) + c[7] * fx
+        let c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy
+        var gx = ((c[1] - c[0]) * (1 - fy) + (c[3] - c[2]) * fy) * (1 - fz) + ((c[5] - c[4]) * (1 - fy) + (c[7] - c[6]) * fy) * fz
+        var gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz
+        var gz = c1v - c0v
+        if u.x < 0 || u.x > Float(nx - 1) { gx = 0 }
+        if u.y < 0 || u.y > Float(ny - 1) { gy = 0 }
+        if u.z < 0 || u.z > Float(nz - 1) { gz = 0 }
+        return (c0v * (1 - fz) + c1v * fz, SIMD3(gx, gy, gz) / h)
+    }
+    /// ★ RED CONTROL only (FlexibleR7U21EdgeLookTests, FlexibleLatticePassTests): the ladder blended ACROSS the press's
+    /// cliff, as before EDGE-LOOK (the seam grids ignored; the pass uploads without them).
+    nonisolated(unsafe) public static var controlLadderAcrossCliffs = false
+
+    /// The sheet the gyroid wall is drawn from at p: the seam's where a cell holds one, else the ladder's.
+    public static func sheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (G: Float, grad: SIMD3<Float>, k: Float) {
+        if let s = seamSheet(p, f) { return s }
+        let r = sampleWithGradient(f.rho, p)
+        let s = gyroidSheet(p, rhoRaw: r.value, gradRho: r.grad, f)
+        return (s.G, s.grad, s.k)
+    }
+
+    public static func wall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        if let mw = f.manualWall, let mt = f.manualType {
+            if !controlP1Manual, let pc = f.manualPiece, let ac = f.manualAcross, let ot = f.manualOther {
+                return manualPieceWall(p, f, mw, pc, ac, ot).d
+            }
+            return manualWall(p, f, mw, mt)
+        }
+        let t = f.wallMM
+        switch f.topology {
+        case .gyroid:
+            if let s = seamSheet(p, f) { return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t }
+            let s = sampleWithGradient(f.rho, p)
+            return gyroidWall(p, rhoRaw: s.value, gradRho: s.grad, f)
+        case .honeycomb:
+            let b = simd_normalize(f.buildDir)
+            let ref: SIMD3<Float> = abs(b.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+            let e1 = simd_normalize(simd_cross(b, ref)), e2 = simd_cross(b, e1)
+            let v = SIMD2<Float>(simd_dot(p, e1), simd_dot(p, e2))
+            let d = f.honeycombCellMM
+            let r = SIMD2<Float>(d, 1.7320508 * d), h = r * 0.5
+            let A = SIMD2<Float>(fmod(v.x, r.x), fmod(v.y, r.y)) - h
+            let B = SIMD2<Float>(fmod(v.x - h.x, r.x), fmod(v.y - h.y, r.y)) - h
+            let q = simd_length_squared(A) < simd_length_squared(B) ? A : B
+            let n = Swift.max(abs(q.x), Swift.max(abs(0.5 * q.x + 0.8660254 * q.y), abs(-0.5 * q.x + 0.8660254 * q.y)))
+            return abs(0.5 * d - n) - 0.5 * t
+        }
+    }
+
+    /// One honeycomb of cell `d` (across flats) and wall `t` at p (the `.honeycomb` case's arithmetic).
+    static func honeycombWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, d: Float, t: Float) -> Float {
+        let b = simd_normalize(f.buildDir)
+        let ref: SIMD3<Float> = abs(b.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+        let e1 = simd_normalize(simd_cross(b, ref)), e2 = simd_cross(b, e1)
+        let v = SIMD2<Float>(simd_dot(p, e1), simd_dot(p, e2))
+        let r = SIMD2<Float>(d, 1.7320508 * d), h = r * 0.5
+        let A = SIMD2<Float>(fmod(v.x, r.x), fmod(v.y, r.y)) - h
+        let B = SIMD2<Float>(fmod(v.x - h.x, r.x), fmod(v.y - h.y, r.y)) - h
+        let q = simd_length_squared(A) < simd_length_squared(B) ? A : B
+        let n = Swift.max(abs(q.x), Swift.max(abs(0.5 * q.x + 0.8660254 * q.y), abs(-0.5 * q.x + 0.8660254 * q.y)))
+        return abs(0.5 * d - n) - 0.5 * t
+    }
+
+    /// ★ ROUND 7 · MANUAL P1 — A TYPE AND WALLS PER GROUP (the MSL's `flx_wall_manual`, the twin). t = the wall grid's trilinear (his
+    /// whole beads; constant inside a group). The type grid's trilinear share decides the side: < ½ a gyroid of wall t on the ladder
+    /// (the press seam's where a cell holds one), ≥ ½ a honeycomb of wall t whose cell follows ρ, d = 2t/ρ, on the SAME ladder of rungs
+    /// 19 % apart (dMin = 2·tMin/0.9), neighbouring rungs blended — one exact honeycomb wherever ρ is one value (a group without a
+    /// grade). Where the types meet the switch is at the share's ½: each lattice runs to that seam, the clean seam he asked for.
+    /// |∇ρ| (mm⁻¹) under which a cell holds ONE density (its eight corners equal: exactly 0 on both copies).
+    public static let uniformGradient: Float = 1e-5
+    static func manualWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, _ mw: FlexGrid, _ mt: FlexGrid) -> Float {
+        let t = Swift.max(mw.sample(p), 1e-3)
+        let r0 = sampleWithGradient(f.rho, p)
+        // ★ ONE DENSITY HERE (∇ρ = 0: a group without a grade): the EXACT cell — one true gyroid / honeycomb at his cell, never a
+        // ladder rung — so what is drawn is the cell on his card. A grade (∇ρ ≠ 0) draws on the ladder (within one rung, 19 %).
+        let uniform = simd_length(r0.grad) < uniformGradient
+        if mt.sample(p) < 0.5 {
+            if let s = seamSheet(p, f, t: t) { return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t }
+            if uniform {
+                let rho = Swift.min(Swift.max(r0.value, 0.05), 0.9)
+                let L = Swift.min(Swift.max(3.0915 * t / rho, f.lMinMM), f.lMaxMM), k = 2 * Float.pi / L
+                let g = gyroid(p, k: k)
+                return abs(g.g) / Swift.max(simd_length(g.grad), 0.05 * k) - 0.5 * t
+            }
+            let s = gyroidSheet(p, rhoRaw: r0.value, gradRho: r0.grad, f, t: t)
+            return abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t
+        }
+        let rho = Swift.min(Swift.max(r0.value, 0.05), 0.9)
+        let dMin = f.lMinMM * 2 / 3.0915, dMax = f.lMaxMM * 2 / 3.0915
+        let d = Swift.min(Swift.max(2 * t / rho, dMin), dMax)
+        if uniform { return honeycombWall(p, f, d: d, t: t) }
+        let r = rungs(L: d, lMin: dMin)
+        if r.w <= 0 { return honeycombWall(p, f, d: r.La, t: t) }
+        if r.w >= 1 { return honeycombWall(p, f, d: r.Lb, t: t) }
+        return (1 - r.w) * honeycombWall(p, f, d: r.La, t: t) + r.w * honeycombWall(p, f, d: r.Lb, t: t)
+    }
+
+    // MARK: ★ ROUND 7 · MANUAL P2 — THE DRAWING MATCHES THE SETTINGS (the MSL's `flx_wall_pieces`, the twin)
+
+    /// ★ RED CONTROL only (FlexibleManualP2Tests): P1's manual field (one trilinear type share, ρ ladder-blended across every
+    /// group edge and Stepped band) — the piece grids ignored.
+    nonisolated(unsafe) public static var controlP1Manual = false
+
+    /// ★ RED CONTROL only (FlexibleManualT2Tests): a Stepped band edge drawn with the gyroid sheet blend (P2's, before T2).
+    nonisolated(unsafe) public static var controlBandSheetBlend = false
+    /// ★ RED CONTROL only (FlexibleManualT2Tests): the region's and the part's clips at the point (before T2) — a wall cut obliquely
+    /// ends in a wedge.
+    nonisolated(unsafe) public static var controlClipAtThePoint = false
+
+    /// A piece code's type (0 gyroid, 1 honeycomb), whether its lattice is graded smoothly (drawn on the ladder) and (T2) whether
+    /// it is one Stepped band.
+    @inline(__always) static func pieceBits(_ c: Float) -> (type: Int, graded: Bool, stepped: Bool) {
+        let i = Int(c + 0.5)
+        return (i & 1, (i >> 1) & 1 == 1, (i >> 2) & 1 == 1)
+    }
+
+    /// One piece's wall at p from ITS values: a gyroid / honeycomb of wall t; one density (graded false) at the EXACT cell (his
+    /// card's), a Default grade on the ladder (rungs 19 % apart, neighbours blended). Also its sheet (gyroid) and the cell drawn.
+    static func pieceSheet(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho rhoRaw: Float, grad: SIMD3<Float>, t: Float,
+                           graded: Bool) -> (G: Float, grad: SIMD3<Float>, k: Float) {
+        if !graded {
+            let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+            let L = Swift.min(Swift.max(3.0915 * t / rho, f.lMinMM), f.lMaxMM), k = 2 * Float.pi / L
+            let g = gyroid(p, k: k)
+            return (g.g, g.grad, k)
+        }
+        let s = gyroidSheet(p, rhoRaw: rhoRaw, gradRho: grad, f, t: t)
+        return (s.G, s.grad, s.k)
+    }
+    static func pieceHoney(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho rhoRaw: Float, t: Float, graded: Bool) -> (d: Float, cell: Float) {
+        let rho = Swift.min(Swift.max(rhoRaw, 0.05), 0.9)
+        let dMin = f.lMinMM * 2 / 3.0915, dMax = f.lMaxMM * 2 / 3.0915
+        let d = Swift.min(Swift.max(2 * t / rho, dMin), dMax)
+        if !graded { return (honeycombWall(p, f, d: d, t: t), d) }
+        let r = rungs(L: d, lMin: dMin)
+        if r.w <= 0 { return (honeycombWall(p, f, d: r.La, t: t), r.La) }
+        if r.w >= 1 { return (honeycombWall(p, f, d: r.Lb, t: t), r.Lb) }
+        return ((1 - r.w) * honeycombWall(p, f, d: r.La, t: t) + r.w * honeycombWall(p, f, d: r.Lb, t: t), (1 - r.w) * r.La + r.w * r.Lb)
+    }
+    static func pieceDistance(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, rho: Float, grad: SIMD3<Float>, t: Float,
+                              code: Float) -> (d: Float, cell: Float) {
+        let b = pieceBits(code)
+        if b.type == 1 { return pieceHoney(p, f, rho: rho, t: t, graded: b.graded) }
+        let s = pieceSheet(p, f, rho: rho, grad: grad, t: t, graded: b.graded)
+        return (abs(s.G) / Swift.max(simd_length(s.grad), 0.05 * s.k) - 0.5 * t, 2 * Float.pi / s.k)
+    }
+
+    /// What the manual field draws at p: the wall distance, the cell (mm: the gyroid's 2π/k̄, the honeycomb's d), the type and
+    /// wall of the piece drawn there, and whether p lies in a SEAM cell (two pieces among its eight corners).
+    public struct ManualPoint: Equatable {
+        public let d: Float; public let cell: Float; public let type: Int; public let t: Float; public let seam: Bool
+        /// (T2) the piece drawn there is smoothly graded (on the ladder); false in a seam cell.
+        public var graded: Bool = false
+    }
+
+    /// ★ P2 — EVERY PIECE DRAWS ITS OWN LATTICE; PIECES JOIN CLEANLY. In a cell whose eight corners are one piece: that piece's
+    /// lattice (its type, its whole-bead wall t, its exact cell — or the ladder under a Default grade). In a SEAM cell (batch H's
+    /// idea, generalised from a press plane to any piece edge): per piece P present, φ_P = the trilinear of "this corner is P"
+    /// and P's SAME-SIDE ρ (its own corners, and at the others the ρ of P carried across — `manualAcross` — so it is
+    /// continuous from cell to cell); A = the piece with the largest φ at p, B the next. Two GYROIDS: each side's sheet, blended
+    /// by σ = smoothstep(φ_A / (φ_A + φ_B)) — ½ on the seam's true position — with the whole gradient and t blended, so the
+    /// walls run on across it (H's fix). Any other pair (a honeycomb on either side; ★ T2: a Stepped band on either side): A's own
+    /// wall, joined to B's by a SEAM WALL on φ_A = φ_B, the thinner side's t thick — every wall of either side ends ON it, never in
+    /// a sliver.
+    public static func manualPieceWall(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, _ mw: FlexGrid, _ pc: FlexGrid, _ ac: FlexGrid,
+                                       _ ot: FlexGrid) -> ManualPoint {
+        let g = f.rho
+        let u = (p - g.c0) / g.spacing
+        let nx = g.nx, ny = g.ny, nz = g.nz
+        let ux = Swift.min(Swift.max(u.x, 0), Float(nx - 1))
+        let uy = Swift.min(Swift.max(u.y, 0), Float(ny - 1))
+        let uz = Swift.min(Swift.max(u.z, 0), Float(nz - 1))
+        let i0 = Swift.min(Int(ux), Swift.max(0, nx - 2)), j0 = Swift.min(Int(uy), Swift.max(0, ny - 2))
+        let k0 = Swift.min(Int(uz), Swift.max(0, nz - 2))
+        let i1 = Swift.min(i0 + 1, nx - 1), j1 = Swift.min(j0 + 1, ny - 1), k1 = Swift.min(k0 + 1, nz - 1)
+        let fx = ux - Float(i0), fy = uy - Float(j0), fz = uz - Float(k0)
+        let vs = [(i0, j0, k0), (i1, j0, k0), (i0, j1, k0), (i1, j1, k0), (i0, j0, k1), (i1, j0, k1), (i0, j1, k1), (i1, j1, k1)]
+            .map { ($0.2 * ny + $0.1) * nx + $0.0 }
+        var code = [Float](repeating: 0, count: 8)
+        var seam = false
+        for q in 0..<8 { code[q] = pc.values[vs[q]]; if code[q] != code[0] { seam = true } }
+        if !seam {
+            let t = Swift.max(mw.values[vs[0]], 1e-3)
+            let r = sampleWithGradient(g, p)
+            let a = pieceDistance(p, f, rho: r.value, grad: r.grad, t: t, code: code[0])
+            return ManualPoint(d: a.d, cell: a.cell, type: pieceBits(code[0]).type, t: t, seam: false, graded: pieceBits(code[0]).graded)
+        }
+        // the pieces present (first appearance, corner order) and their shares at p
+        var best = -1, second = -1
+        var phiBest: (value: Float, grad: SIMD3<Float>) = (-1, .zero), phiSecond: (value: Float, grad: SIMD3<Float>) = (-1, .zero)
+        for q in 0..<8 {
+            if (0..<q).contains(where: { code[$0] == code[q] }) { continue }
+            let ind = code.map { $0 == code[q] ? Float(1) : 0 }
+            let phi = trilinear(ind, fx, fy, fz, u, nx, ny, nz, g.spacing)
+            if phi.value > phiBest.value { second = best; phiSecond = phiBest; best = q; phiBest = phi }
+            else if phi.value > phiSecond.value { second = q; phiSecond = phi }
+        }
+        func side(_ q: Int) -> (rho: Float, grad: SIMD3<Float>, t: Float) {
+            let P = code[q]
+            var c = [Float](repeating: 0, count: 8)
+            var t: Float = 0
+            // ★ T2: a piece of ONE density (not smoothly graded: a Stepped band, an ungraded lattice) reads that density at a corner
+            // that carries ANOTHER piece's ρ — `manualAcross` carries one neighbour per voxel, so where three pieces share a voxel
+            // (a band edge meeting the group's edge) the third piece's ρ leaked into this side, warped its gyroid's cell inside the
+            // cell and left the fragments there
+            var own: Float = 0, nOwn: Float = 0
+            for r in 0..<8 where code[r] == P { own += g.values[vs[r]]; nOwn += 1 }
+            let oneDensity = !pieceBits(P).graded && !controlBandSheetBlend
+            for r in 0..<8 {
+                let v = vs[r]
+                if code[r] == P { c[r] = g.values[v]; if t == 0 { t = mw.values[v] } }
+                else { c[r] = ot.values[v] == P ? ac.values[v] : (oneDensity ? own / nOwn : g.values[v]) }
+            }
+            let s = trilinear(c, fx, fy, fz, u, nx, ny, nz, g.spacing)
+            return (s.value, s.grad, Swift.max(t, 1e-3))
+        }
+        let A = side(best), B = side(second)
+        let cA = code[best], cB = code[second]
+        let bA = pieceBits(cA), bB = pieceBits(cB)
+        // ★ T2: a Stepped BAND on either side (a band edge, or a Stepped lattice's own edge) — the seam wall below (a clean line),
+        // never the sheet blend: two cells up to 3 × apart blended shredded the band edge (0.1275 fragments /mm against 0.0231
+        // away on his pad). Either side, not both: where a band edge meets the group's edge (three pieces in one voxel) a blend
+        // pair and a seam-wall pair would swap as the second piece changes — a jump in the field that left the fragments there;
+        // two seam-wall pairs meet continuously (each seam is at φ_A − φ_second).
+        let bandEdge = (bA.stepped || bB.stepped) && !controlBandSheetBlend
+        if bA.type == 0 && bB.type == 0 && !bandEdge {
+            let sA = pieceSheet(p, f, rho: A.rho, grad: A.grad, t: A.t, graded: bA.graded)
+            let sB = pieceSheet(p, f, rho: B.rho, grad: B.grad, t: B.t, graded: bB.graded)
+            let S = phiBest.value + phiSecond.value
+            let x = Swift.min(Swift.max(phiBest.value / S, 0), 1)
+            let dx = (phiBest.grad * S - phiBest.value * (phiBest.grad + phiSecond.grad)) / (S * S)
+            let sigma = x * x * (3 - 2 * x)
+            let dSigma = 6 * x * (1 - x) * dx
+            let G = sigma * sA.G + (1 - sigma) * sB.G
+            let grad = sigma * sA.grad + (1 - sigma) * sB.grad + (sA.G - sB.G) * dSigma
+            let k = sigma * sA.k + (1 - sigma) * sB.k
+            let t = sigma * A.t + (1 - sigma) * B.t
+            return ManualPoint(d: abs(G) / Swift.max(simd_length(grad), 0.05 * k) - 0.5 * t, cell: 2 * Float.pi / k, type: 0, t: A.t, seam: true)
+        }
+        let a = pieceDistance(p, f, rho: A.rho, grad: A.grad, t: A.t, code: cA)
+        let delta = phiBest.value - phiSecond.value
+        let gd = simd_length(phiBest.grad - phiSecond.grad)
+        let sheet = abs(delta) / Swift.max(gd, 0.1 / g.spacing) - 0.5 * Swift.min(A.t, B.t)
+        return ManualPoint(d: Swift.min(a.d, sheet), cell: a.cell, type: bA.type, t: A.t, seam: true)
+    }
+
+    /// ★ P2: what the manual field draws at p (nil: not a P2 manual field) — the tests' reporter of type, wall and cell.
+    public static func manualPoint(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> ManualPoint? {
+        guard let mw = f.manualWall, let pc = f.manualPiece, let ac = f.manualAcross, let ot = f.manualOther else { return nil }
+        return manualPieceWall(p, f, mw, pc, ac, ot)
+    }
+
+    public static func dRegion(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        (0.5 - f.mask.sample(p)) * 2 * f.mask.spacing
+    }
+    public static func dSkin(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        f.skinMM - f.skinDist.sample(p)
+    }
+
+    // MARK: ★ ROUND 7 · T2 — THE CLIP ENDS A WALL SQUARE (the MSL's `flx_square_clip`, the twin)
+
+    /// The uniform honeycomb drawn at p, if one is (Auto's honeycomb; a Manual honeycomb piece of one density, off its seams):
+    /// its cell d and wall t.
+    static func uniformHoneycomb(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (d: Float, t: Float)? {
+        guard f.manualWall != nil else { return f.topology == .honeycomb ? (f.honeycombCellMM, f.wallMM) : nil }
+        guard !controlP1Manual, let mp = manualPoint(p, f), !mp.seam, mp.type == 1, !mp.graded else { return nil }
+        return (mp.cell, mp.t)
+    }
+    /// The honeycomb's walls through p (the `.honeycomb` case's arithmetic, per wall family): each one's outward normal and wall
+    /// distance w_i = |½d − n_i| − ½t. At a junction p lies in two or three of them.
+    static func honeycombWalls(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, d: Float, t: Float) -> [(n: SIMD3<Float>, w: Float)] {
+        let b = simd_normalize(f.buildDir)
+        let ref: SIMD3<Float> = abs(b.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)
+        let e1 = simd_normalize(simd_cross(b, ref)), e2 = simd_cross(b, e1)
+        let v = SIMD2<Float>(simd_dot(p, e1), simd_dot(p, e2))
+        let r = SIMD2<Float>(d, 1.7320508 * d), h = r * 0.5
+        let A = SIMD2<Float>(fmod(v.x, r.x), fmod(v.y, r.y)) - h
+        let B = SIMD2<Float>(fmod(v.x - h.x, r.x), fmod(v.y - h.y, r.y)) - h
+        let q = simd_length_squared(A) < simd_length_squared(B) ? A : B
+        return [SIMD2<Float>(1, 0), SIMD2<Float>(0.5, 0.8660254), SIMD2<Float>(-0.5, 0.8660254)].map { a in
+            let dq = simd_dot(q, a), ni = abs(dq)
+            let g = ((ni > 0.5 * d) == (dq >= 0) ? Float(1) : -1) * a
+            return (g.x * e1 + g.y * e2, abs(0.5 * d - ni) - 0.5 * t)
+        }
+    }
+    /// ★ T2 (his pad's lower right: honeycomb walls hung as SLIVERS where the lattice is cut): the region's and the part's clips
+    /// (max(dRegion, dPart)), SQUARED to a honeycomb's walls. Cut at the point, a wall crossing a clip obliquely ended in a
+    /// knife-edge wedge and a wall running beside it was shaved thin. Here a wall's cross-section is kept only where BOTH its faces
+    /// are inside: the near face p − n·w and the far face p − n·(w + t), per wall family through p (its own normal n) — so every
+    /// cut wall ends square, whole thickness, and never reaches past the old clip (the value is ≥ max(dRegion, dPart): the march's
+    /// bounds hold); at a junction p is kept if ANY wall through it is whole (a kept wall keeps its junction). A uniform honeycomb
+    /// only (Auto's; a Manual piece of one density off its seams) — a gyroid is cut at the point as before (squaring it changed his
+    /// open tops and the march's depth). Only on or beside a wall (w < ½ t, fading to the plain clip at ½ t so the field stays
+    /// continuous) and only where a clip can reach the wall's faces (the part's SDF within 1.5 t; the region's mask below 1 at a
+    /// corner of the cube p ± 1.5 t); the plain clips exactly everywhere else. Drawing only, both modes.
+    public static func squareClip(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs, wall w: Float) -> Float {
+        let r = dRegion(p, f), pa = dPart(p, f)
+        let base = Swift.max(r, pa)
+        if controlClipAtThePoint { return base }
+        guard let hc = uniformHoneycomb(p, f) else { return base }
+        let t = hc.t
+        guard w < 0.5 * t else { return base }
+        let R = 1.5 * t
+        var near = pa > -R - 0.01
+        if !near {
+            for c in 0..<8 where f.mask.sample(p + SIMD3<Float>(c & 1 == 0 ? -R : R, c & 2 == 0 ? -R : R, c & 4 == 0 ? -R : R)) < 0.99999 {
+                near = true; break
+            }
+        }
+        guard near else { return base }
+        var sq: Float = 1e30
+        for x in honeycombWalls(p, f, d: hc.d, t: t) where x.w <= Swift.max(w, 0) + 1e-6 {
+            let a = p - x.n * x.w, b = p - x.n * (x.w + t)
+            sq = Swift.min(sq, Swift.max(Swift.max(dRegion(a, f), dRegion(b, f)), Swift.max(dPart(a, f), dPart(b, f))))
+        }
+        guard sq <= 1e29 else { return base }
+        let s: Float = w <= 0 ? 1 : 1 - w / (0.5 * t)
+        return base + s * Swift.max(sq - base, 0)
+    }
+
+    /// The lattice walls (what the preview draws). Negative inside.
+    public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        let w = wall(p, f)
+        return Swift.max(Swift.max(w, squareClip(p, f, wall: w)), dSkin(p, f))
+    }
+
+    /// ★ ROUND 7, X1 — THE PRINTED SOLID (the MSL's `flx_printed_solid`, the twin): what the print keeps solid around the
+    /// walls — inside the part AND (inside the region within the finish's skin, OR outside the region: the pocket's own
+    /// wall and floor). His words (2026-10-14): "If lattice is on without x-ray view, we see the lattice plus the solid."
+    public static func printedSolid(dRegion: Float, dPart: Float, dSkin: Float) -> Float {
+        Swift.max(dPart, Swift.min(Swift.max(dRegion, -dSkin), -dRegion))
+    }
+
+    /// The walls and the printed solid at `p` (the MSL's `flx_terms`).
+    public static func terms(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> (walls: Float, printed: Float) {
+        let r = dRegion(p, f), pa = dPart(p, f), sk = dSkin(p, f)
+        let w = wall(p, f)
+        return (Swift.max(Swift.max(w, squareClip(p, f, wall: w)), sk), printedSolid(dRegion: r, dPart: pa, dSkin: sk))
+    }
+
+    /// ★ X1: the field with the PRINTED view's gate (the MSL's `flx_field` under `shape2.w`) — min(F, S) with X-ray off and
+    /// a finish that leaves the lattice open; exactly `lattice(at:)` otherwise.
+    public static func lattice(at p: SIMD3<Float>, _ f: FlexibleLatticeInputs, printed: Bool) -> Float {
+        guard printed else { return lattice(at: p, f) }
+        let t = terms(at: p, f)
+        return Swift.min(t.walls, t.printed)
+    }
+    /// The part's distance: the SDF — and beyond its grid's box never less than the distance
+    /// to that box. Inside the box the SDF stands as it is (a max with 0 would erase every wall).
+    public static func dPart(_ p: SIMD3<Float>, _ f: FlexibleLatticeInputs) -> Float {
+        let sdf = f.partSDF.sample(p), out = f.partSDF.outsideDistance(p)
+        return out > 0 ? Swift.max(sdf, out) : sdf
+    }
+}
+
+// MARK: - building the inputs
+
+public enum FlexibleLatticeBuilder {
+
+    public struct Refusal: Error, Equatable, CustomStringConvertible {
+        public let description: String
+    }
+
+    /// The part's SKINNED surface — every part of a face that keeps its skin (M15) — as
+    /// positions + indices for the skin's distance field. `allSkinned` when nothing is
+    /// skin-off (the part's own distance is reused then).
+    /// ★ ROUND 3, ITEM 2: a triangle a skin-off sector's cut crosses is CUT along it
+    /// (FlexibleFacePieces) and only its pieces outside the sector stay skinned — by
+    /// centroid, skin-off on 'top A' took the skin off half of 'top B' as well.
+    public static func skinnedTriangles(part: ViewerMesh, skinOffFaces: [(face: Int, cuts: [RegionCut])])
+        -> (positions: [Float], indices: [UInt32], allSkinned: Bool) {
+        let indices = part.indices
+        guard !skinOffFaces.isEmpty else { return (part.positions, indices, true) }
+        var positions = part.positions
+        var skinnedIdx: [UInt32] = []
+        skinnedIdx.reserveCapacity(indices.count)
+        var planes: [Int: [RegionCut]] = [:]
+        for s in skinOffFaces { for c in s.cuts { FlexibleFacePieces.add(c, to: &planes[s.face, default: []]) } }
+        let fids = part.faceIDs
+        func v(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(part.positions[b]), Double(part.positions[b + 1]), Double(part.positions[b + 2]))
+        }
+        var allSkinned = true
+        for t in 0..<(indices.count / 3) {
+            let fid = t < fids.count ? Int(fids[t]) : -1
+            let off = skinOffFaces.filter { $0.face == fid }
+            let i0 = indices[3 * t], i1 = indices[3 * t + 1], i2 = indices[3 * t + 2]
+            guard !off.isEmpty else { skinnedIdx += [i0, i1, i2]; continue }
+            allSkinned = false
+            if off.contains(where: { $0.cuts.isEmpty }) { continue }       // the whole face
+            for piece in FlexibleFacePieces.pieces(v(i0), v(i1), v(i2), planes: planes[fid] ?? []) {
+                if off.contains(where: { FaceRegionGeometry.inside(piece.centroid, $0.cuts) }) { continue }
+                if piece.whole { skinnedIdx += [i0, i1, i2]; continue }
+                let base = UInt32(positions.count / 3)
+                for p in piece.points { positions += [Float(p.x), Float(p.y), Float(p.z)] }
+                for (a, b, c) in FlexibleFacePieces.fan(piece.points.count) {
+                    skinnedIdx += [base + UInt32(a), base + UInt32(b), base + UInt32(c)]
+                }
+            }
+        }
+        return (positions, skinnedIdx, allSkinned)
+    }
+
+    /// ★ ROUND 7: CORE'S OWN INSIDE RULE (voxelize.cpp `voxelize_fill`, the same arithmetic in Double): for each voxel `cells`
+    /// names on core's grid (x fastest; corner `origin`, spacing `h`), whether the part encloses its centre — the signed
+    /// sum of the +Z ray's crossings strictly above the centre is non-zero (a triangle edge-on to the ray is skipped; the
+    /// point-in-triangle test is boundary-inclusive; a crossing at the centre's height counts as below). Only the columns
+    /// the cells stand in are crossed.
+    static func coreEncloses(_ cells: [Int], part: ViewerMesh, nx: Int, ny: Int, origin: SIMD3<Double>, h: Double) -> [Bool] {
+        guard !cells.isEmpty else { return [] }
+        var wanted = [Bool](repeating: false, count: nx * ny)
+        for v in cells { wanted[v % (nx * ny)] = true }
+        var crossings: [Int: [(z: Double, sign: Int)]] = [:]
+        let pos = part.positions, idx = part.indices
+        func vertex(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3(Double(pos[b]), Double(pos[b + 1]), Double(pos[b + 2]))
+        }
+        for t in 0..<(idx.count / 3) {
+            let a = vertex(idx[3 * t]), b = vertex(idx[3 * t + 1]), c = vertex(idx[3 * t + 2])
+            let area2 = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+            if Swift.abs(area2) < 1e-18 { continue }
+            let sign = area2 > 0 ? 1 : -1
+            let i0 = Swift.max(Int(((Swift.min(a.x, b.x, c.x) - origin.x) / h - 0.5).rounded(.down)), 0)
+            let i1 = Swift.min(Int(((Swift.max(a.x, b.x, c.x) - origin.x) / h - 0.5).rounded(.up)), nx - 1)
+            let j0 = Swift.max(Int(((Swift.min(a.y, b.y, c.y) - origin.y) / h - 0.5).rounded(.down)), 0)
+            let j1 = Swift.min(Int(((Swift.max(a.y, b.y, c.y) - origin.y) / h - 0.5).rounded(.up)), ny - 1)
+            guard i0 <= i1, j0 <= j1 else { continue }
+            for j in j0...j1 {
+                let py = origin.y + (Double(j) + 0.5) * h
+                for i in i0...i1 where wanted[j * nx + i] {
+                    let px = origin.x + (Double(i) + 0.5) * h
+                    let e0 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)
+                    let e1 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)
+                    let e2 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)
+                    guard (e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0) else { continue }
+                    crossings[j * nx + i, default: []].append(((e1 * a.z + e2 * b.z + e0 * c.z) / area2, sign))
+                }
+            }
+        }
+        return cells.map { v in
+            let cz = origin.z + (Double(v / (nx * ny)) + 0.5) * h
+            var above = 0
+            for x in crossings[v % (nx * ny)] ?? [] where x.z > cz { above += x.sign }
+            return above != 0
+        }
+    }
+
+    /// ★ MANUAL P2: per voxel, the OTHER piece most of its 26 neighbours belong to (ties: the lower code) and that piece's ρ
+    /// carried here (the mean over those neighbours) — so a seam cell reads each side's ρ continuously from cell to cell. A voxel
+    /// with no other piece around: its own code and ρ.
+    static func manualAcross(rho: [Float], code: [Float], nx: Int, ny: Int, nz: Int) -> (across: [Float], other: [Float]) {
+        var across = rho, other = code
+        for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+            let v = (k * ny + j) * nx + i
+            let c = code[v]
+            var differs = false
+            for dk in -1...1 where !differs { for dj in -1...1 where !differs { for di in -1...1 {
+                let a = i + di, b = j + dj, e = k + dk
+                guard a >= 0, b >= 0, e >= 0, a < nx, b < ny, e < nz else { continue }
+                if code[(e * ny + b) * nx + a] != c { differs = true; break }
+            } } }
+            guard differs else { continue }
+            var tally: [Float: (n: Int, sum: Float)] = [:]
+            for dk in -1...1 { for dj in -1...1 { for di in -1...1 {
+                let a = i + di, b = j + dj, e = k + dk
+                guard a >= 0, b >= 0, e >= 0, a < nx, b < ny, e < nz else { continue }
+                let w = (e * ny + b) * nx + a
+                guard code[w] != c else { continue }
+                let o = tally[code[w]] ?? (0, 0)
+                tally[code[w]] = (o.n + 1, o.sum + rho[w])
+            } } }
+            guard let pick = tally.max(by: { $0.value.n != $1.value.n ? $0.value.n < $1.value.n : $0.key > $1.key }) else { continue }
+            other[v] = pick.key
+            across[v] = pick.value.sum / Float(pick.value.n)
+        } } }
+        return (across, other)
+    }
+
+    /// Prepare the grids from core's density field and the part (off the main thread).
+    /// `skinOffFaces` are the B-rep/pseudo face ids whose skin is off (M15);
+    /// each entry's `cuts` narrow a split sector to its own half-spaces (the face is cut
+    /// along them, `skinnedTriangles`).
+    /// ★ ROUND 4 (D1): `finish` — the whole model's finish (FlexibleFinish). Covered keeps the
+    /// grid below (the distance to every skinned surface, `skinOffFaces` honoured); None, Rim
+    /// and Skin replace it with their own skin-distance grid and thickness.
+    /// ★ ROUND 7 (his report of 2026-10-18, the Top solid over the pockets at Balanced): the lattice mask reaches the part's
+    /// SURFACE (below). `maskToSurface: false` is a test's RED CONTROL only — the mask as core gives it.
+    /// ★ R7-E1 (the top-lid fix's check): `cornerRule` — an outside voxel with a SOLID, non-lattice face-neighbour is not added
+    /// (an inside corner); `false` is a test's RED CONTROL only (the fill as 0d8ae925 made it).
+    /// ★ R7-U21 H (EDGE-LOOK): `pressCuts` — the presses' flat-prism planes by owner key (FlexibleGroupField.pressSeam).
+    public static func inputs(field: FlexDensityField, part: ViewerMesh, topology: String,
+                              beadsPerWall: Int, beadWidthMM: Double, wallMM: Double? = nil, buildDir: SIMD3<Double>,
+                              pressCuts: [Int: FlexibleFlatPrism.Cut] = [:],
+                              manualWall: [Float]? = nil,
+                              manualType: [Float]? = nil,
+                              manualPiece: [Float]? = nil,
+                              skinOffFaces: [(face: Int, cuts: [RegionCut])],
+                              finish: FlexibleFinish = .covered,
+                              skinMM: Float = FlexibleLatticeField.defaultSkinMM,
+                              sdfMaxDim: Int = 128,
+                              maskToSurface: Bool = true,
+                              cornerRule: Bool = true,
+                              seamFill: Bool = true) throws -> FlexibleLatticeInputs {
+        guard field.nx > 1, field.ny > 1, field.nz > 1, field.density.count == field.nx * field.ny * field.nz
+        else { throw Refusal(description: "The density field is empty — design a face first.") }
+        let n = field.density.count
+        // ρ with its gaps filled: every non-positive voxel takes the value of the nearest
+        // assigned voxel (breadth-first over the 6-neighbourhood), so trilinear filtering
+        // never pulls a sentinel into the lattice.
+        var rho = [Float](repeating: 0, count: n)
+        var mask = [Float](repeating: 0, count: n)
+        var queue: [Int] = []
+        queue.reserveCapacity(n)
+        var assignedSum: Double = 0, assignedN = 0
+        for i in 0..<n {
+            let d = field.density[i]
+            if d > -0.5 { mask[i] = 1 }
+            if d > 0 { rho[i] = d; queue.append(i); assignedSum += Double(d); assignedN += 1 }
+        }
+        guard assignedN > 0 else {
+            throw Refusal(description: "No lattice voxel has a density yet — design a loaded face first.")
+        }
+        var head = 0
+        let nx = field.nx, ny = field.ny, nz = field.nz
+        // ★ R7-U21 H (EDGE-LOOK): the owner follows ρ through the fills, so a filled voxel carrying a press's ρ is that
+        // press's voxel to the seam (FlexibleGroupField.pressSeam); read by nothing else
+        var own = field.owner.count == n ? field.owner : [Int](repeating: -1, count: n)
+        // ★ MANUAL P1: his per-voxel walls and type follow ρ through every fill (nil: Auto — nothing here runs)
+        let hasManual = manualWall?.count == n && manualType?.count == n
+        var mw = hasManual ? manualWall! : [], mt = hasManual ? manualType! : []
+        // ★ MANUAL P2: the piece codes follow ρ too
+        let hasPiece = hasManual && manualPiece?.count == n
+        var pcs = hasPiece ? manualPiece! : []
+        while head < queue.count {
+            let v = queue[head]; head += 1
+            let i = v % nx, j = (v / nx) % ny, k = v / (nx * ny)
+            for (di, dj, dk) in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                let a = i + di, b = j + dj, c = k + dk
+                guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
+                let w = (c * ny + b) * nx + a
+                if rho[w] <= 0 { rho[w] = rho[v]; own[w] = own[v]; if hasManual { mw[w] = mw[v]; mt[w] = mt[v]; if hasPiece { pcs[w] = pcs[v] } }; queue.append(w) }
+            }
+        }
+        // ★ ROUND 7 — THE MASK REACHES THE SURFACE (his report of 2026-10-18: "the top isn't being bent or removed when I
+        // have set the finish to 'none'"). Core voxelizes from the bounding box's corner at the quality's spacing and keeps a
+        // voxel only when the part encloses its CENTRE (voxelize.cpp's +Z winding fill). Where a face's last voxel centre
+        // falls OUTSIDE the part — his 20 mm pad at Balanced is 19.2 voxels tall, its top layer's centre at z = 20.31 — that
+        // layer is Empty, the mask's trilinear sample crosses ½ half a voxel inside the surface (z = 19.79), and the printed
+        // solid S = max(dPart, −dRegion) drew a 0.21 mm sheet over every pocket (the walls stopped there too). So each voxel
+        // core left Empty — its centre outside the part by core's own rule, `coreEncloses` — that has a lattice voxel as a
+        // 6-neighbour joins the mask, with that neighbour's (flood-filled) ρ, so the legend's span is unchanged. The region
+        // then runs out past the surface and dPart clips it there, as at every face whose last voxel centre lies inside;
+        // dSkin still decides the finish. Data only: the MSL twin samples the same mask. (Not the app's SDF: it is made on
+        // voxels and reads part of the outermost texel near an edge as outside — on his pad at Fine it called four voxels
+        // under the Top's edge outside that core had kept, and would have widened the region there.)
+        // ★ R7-E1 (the top-lid fix's check): at an INSIDE corner the voxel to add can also touch, face to face, a voxel that is
+        // SOLID (inside the part by core's rule) and not lattice — an unselected wall. Its mask 1 beside that 0 put the ½
+        // crossing up to half a voxel INSIDE the wall: a groove cut into a face no face-prism names (a synthetic L: 640 of 7,056
+        // wall points within a voxel of the corner). Such a voxel is not added (the lattice face keeps core's half-voxel there,
+        // one voxel wide, as before the fill); every other fill voxel is added as before (his pad: all 4,604, unchanged).
+        // ★ ROUND 7, U1 (his notes of 2026-10-20, img_1020_10: "Why are there rods in the middle of the lattice structure?"):
+        // core's field leaves whole voxel COLUMNS Empty inside the part where a voxel centre lies exactly on an edge two of
+        // the part's triangles share (his pad's top and bottom are each two triangles split along x = y; at Balanced six
+        // columns on that diagonal, every layer, came back Empty — owner −1 — between lattice voxels of ONE face-prism).
+        // Each such column cut a 1 mm hole straight through the lattice; the walls ended at it with their violet cut faces:
+        // the "rods". A voxel core left out whose two face-neighbours along one axis are lattice of the SAME region, and
+        // whose centre the part encloses by core's own rule (`coreEncloses`, the rule core meant to apply), joins the mask
+        // (its ρ is already flood-filled). A one-voxel wall between two DIFFERENT regions, or outside the part, is kept.
+        // `seamFill: false` is a test's RED CONTROL only (the holes as core gives them).
+        var seamFilled = 0
+        if seamFill, field.owner.count == n {
+            var cand: [Int] = []
+            for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+                let v = (k * ny + j) * nx + i
+                guard mask[v] < 0.5 else { continue }
+                func between(_ a: Int?, _ b: Int?) -> Bool {
+                    guard let a, let b, mask[a] >= 0.5, mask[b] >= 0.5 else { return false }
+                    return field.owner[a] >= 0 && field.owner[a] == field.owner[b]
+                }
+                let xs = between(i > 0 ? v - 1 : nil, i < nx - 1 ? v + 1 : nil)
+                let ys = between(j > 0 ? v - nx : nil, j < ny - 1 ? v + nx : nil)
+                let zs = between(k > 0 ? v - nx * ny : nil, k < nz - 1 ? v + nx * ny : nil)
+                if xs || ys || zs { cand.append(v) }
+            } } }
+            let inside = coreEncloses(cand, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
+            for (c, v) in cand.enumerated() where inside[c] { mask[v] = 1; seamFilled += 1 }
+        }
+        var added = Set<Int>()
+        if maskToSurface {
+            var cand: [(v: Int, from: Int, solid: [Int])] = []
+            let six = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+            for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
+                let v = (k * ny + j) * nx + i
+                guard mask[v] < 0.5 else { continue }
+                var from = -1
+                var others: [Int] = []
+                for (di, dj, dk) in six {
+                    let a = i + di, b = j + dj, c = k + dk
+                    guard a >= 0, b >= 0, c >= 0, a < nx, b < ny, c < nz else { continue }
+                    let w = (c * ny + b) * nx + a
+                    if mask[w] >= 0.5 { if from < 0 { from = w } } else { others.append(w) }
+                }
+                if from >= 0 { cand.append((v, from, others)) }
+            } } }
+            // one call over every voxel asked: the candidates, and (the corner rule) their non-lattice face-neighbours
+            var asked = cand.map(\.v)
+            var at: [Int: Int] = [:]
+            for (n, v) in asked.enumerated() { at[v] = n }
+            if cornerRule {
+                for c in cand { for w in c.solid where at[w] == nil { at[w] = asked.count; asked.append(w) } }
+            }
+            let inside = coreEncloses(asked, part: part, nx: nx, ny: ny, origin: field.origin, h: field.spacing)
+            for (n, c) in cand.enumerated() where !inside[n] {
+                if cornerRule, c.solid.contains(where: { inside[at[$0]!] }) { continue }   // a solid, non-lattice neighbour
+                mask[c.v] = 1; rho[c.v] = rho[c.from]; own[c.v] = own[c.from]; added.insert(c.v)
+                if hasManual { mw[c.v] = mw[c.from]; mt[c.v] = mt[c.from]; if hasPiece { pcs[c.v] = pcs[c.from] } }   // decided on core's mask alone
+            }
+        }
+        let sp = Float(field.spacing)
+        let c0 = SIMD3<Float>(field.origin) + SIMD3<Float>(repeating: 0.5 * sp)   // core's origin is the CORNER
+        let rhoGrid = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: rho)
+        let maskGrid = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mask)
+        // ★ R7-U21 H (EDGE-LOOK): the presses' seams, on ρ as filled (ρ itself unchanged)
+        let seam = FlexibleGroupField.pressSeam(rho: rho, owner: own, nx: nx, ny: ny, nz: nz, origin: field.origin,
+                                                spacing: field.spacing, cuts: pressCuts)
+
+        // The part's signed distance and the skinned surfaces' distance, on the preview's
+        // own occupancy grid (LatticePreviewOccupancy — the same code the octet preview uses).
+        let indices = part.indices
+        let occ = LatticePreviewOccupancy.occupancy(positions: part.positions, indices: indices,
+                                                    bounds: part.bounds, maxDim: sdfMaxDim)
+        let band = 6
+        let sdf = LatticePreviewOccupancy.signedDistance(positions: part.positions, indices: indices,
+                                                         like: occ, bandVoxels: band)
+        let skinGrid: FlexGrid
+        var skinThickness = skinMM
+        if let f = FlexibleFinish.skin(finish, part: part, sdf: sdf, bandVoxels: band) {
+            skinGrid = f.grid
+            skinThickness = f.skinMM
+        } else {
+            let skinned = skinnedTriangles(part: part, skinOffFaces: skinOffFaces)
+            if skinned.allSkinned {
+                skinGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
+                                    values: sdf.values.map { abs($0) })
+            } else {
+                let sd = LatticePreviewOccupancy.signedDistance(positions: skinned.positions, indices: skinned.indices,
+                                                                like: occ, bandVoxels: band)
+                skinGrid = FlexGrid(nx: sd.nx, ny: sd.ny, nz: sd.nz, c0: sd.origin, spacing: sd.spacing.x,
+                                    values: sd.values.map { abs($0) })
+            }
+        }
+        let sdfGrid = FlexGrid(nx: sdf.nx, ny: sdf.ny, nz: sdf.nz, c0: sdf.origin, spacing: sdf.spacing.x,
+                               values: sdf.values)
+        // ★ MANUAL (M1): `wallMM` — his walls (beads × the bead width, a fraction allowed: his type + cell + density decide it), so
+        // the gyroid's L = 3.0915·t/ρ and the honeycomb's d = 2t/ρ̄ come out at HIS cell; nil: whole beads, as before
+        var t = Float(wallMM ?? Double(beadsPerWall) * beadWidthMM)
+        var tMax = t
+        if hasManual {
+            // ★ MANUAL P1: the ladder spans every wall in play (its rungs start at the thinnest wall's densest cell)
+            var lo = Float.infinity, hi: Float = 0
+            for v in 0..<n where mask[v] >= 0.5 && mw[v] > 0 { lo = Swift.min(lo, mw[v]); hi = Swift.max(hi, mw[v]) }
+            if lo.isFinite { t = lo; tMax = hi }
+        }
+        let meanRho = Float(assignedSum / Double(assignedN))
+        let topo: FlexibleLatticeInputs.Topology = topology == "honeycomb" ? .honeycomb : .gyroid
+        var out = FlexibleLatticeInputs(
+            topology: topo, wallMM: t,
+            lMinMM: 3.0915 * t / 0.9, lMaxMM: 3.0915 * tMax / 0.05,
+            honeycombCellMM: 2 * t / Swift.max(meanRho, 0.05),
+            buildDir: SIMD3<Float>(simd_normalize(buildDir)), skinMM: skinThickness,
+            rho: rhoGrid, mask: maskGrid, partSDF: sdfGrid, skinDist: skinGrid,
+            boundsMin: part.bounds.min, boundsMax: part.bounds.max, coreOutside: added, seamFilled: seamFilled,
+            rhoAcross: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.across) },
+            pressSide: seam.map { FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: $0.side) })
+        if hasManual {
+            out.manualWall = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mw)
+            out.manualType = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: mt)
+        }
+        if hasPiece {
+            let x = manualAcross(rho: rho, code: pcs, nx: nx, ny: ny, nz: nz)
+            out.manualPiece = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: pcs)
+            out.manualAcross = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: x.across)
+            out.manualOther = FlexGrid(nx: nx, ny: ny, nz: nz, c0: c0, spacing: sp, values: x.other)
+        }
+        return out
+    }
+}

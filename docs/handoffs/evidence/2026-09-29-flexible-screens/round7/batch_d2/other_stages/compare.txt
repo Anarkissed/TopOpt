@@ -1,0 +1,24 @@
+# Topology / Structural / Aesthetic / Surface chrome (FlexibleRound7OtherStagesProbe, 13 frames: the whole app page hosted, each stage by its own navigation), ONE environment, back to back (2026-10-18 00:45–01:05):
+#   BEFORE = 1c9ecdad with WorkspacePlaceholder.swift as at f43f56ef (D2's five hooks out); AFTER = 1c9ecdad as committed.
+
+## before vs after
+11l_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+11l_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+11l_structural3418_lattice.png: IDENTICAL (0 px differ)
+11l_structural3418_surface.png: IDENTICAL (0 px differ)
+11l_structural3418_topology.png: IDENTICAL (0 px differ)
+13p_aesthetic68BF_lattice.png: IDENTICAL (0 px differ)
+13p_aesthetic68BF_topology.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_surface.png: IDENTICAL (0 px differ)
+13p_flexiblePad0003_topology.png: IDENTICAL (0 px differ)
+13p_plain887A_topology.png: IDENTICAL (0 px differ)
+13p_structural3418_lattice.png: IDENTICAL (0 px differ)
+13p_structural3418_surface.png: IDENTICAL (0 px differ)
+13p_structural3418_topology.png: DIFFERS (10 px differ, bbox (1103, 1503, 1127, 1621))
+13 images, 1 differ
+
+## the structural Topology frame (13p), the load arrow's box — run-to-run flicker of the SAME code (as R7-D1 and H39 recorded):
+  before vs after  : 10 px (1103,1503)-(1127,1621)
+  after vs after2  : 9 px (1118,1503)-(1127,1608)   (the same build, run again)
+  after2 vs after3 : 9 px (1118,1503)-(1127,1608)
+  before vs after2 : 1 px (1103,1620)-(1104,1621)

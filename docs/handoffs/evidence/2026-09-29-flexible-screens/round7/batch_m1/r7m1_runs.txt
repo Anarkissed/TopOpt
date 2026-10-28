@@ -1,0 +1,105 @@
+# Round 7 batch M1 — raw runs, 2026-10-14. Worktree flexible-screens-track-9be87b, branch claude/flexible-screens (main worktree).
+# swift test --skip-build --scratch-path /tmp/r7m-build, 12 classes per run, unseeded unless said. 192 targeted classes:
+# every Flexible* class + every class that source-pins a touched file (grep -lF over Tests) + the goldens + LatticeStaleTypeTests,
+# ProjectStoreTests, UndoHistoryTests, LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests, LatticeSimSolveTriggerTests,
+# BottomBarMeasurementTests, LatticeIncludeGateTests (and the R7 merge's 153).
+
+## Tests first: c444cb7d against stubs — see r7m1_red_run.txt (9 tests, 48 failures).
+
+## The new tests at the implementation (6c6e0d95 code, before the fixtures): 9 tests, 2 failures, then 0 — green_run1
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testAnEdgesGroupBesideAFaceGroupExportsOneGroupAndSaysSoFirst]' passed (6.509 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testExportIsDisabledWithAStatedReasonWhenNoFacePrismIsSet]' passed (3.279 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testH15PrimeAndH18AreStageSwitchesAtTheirAnchors]' passed (0.086 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testHisFacePrismsLatticeOnlyUnderThem]' passed (4.266 seconds).
+Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:232: error: -[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere] : XCTAssertFalse failed - no dent scale
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testNoFacePrismMeansNoLatticeAnywhere]' failed (6.898 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPickingTheTopDrawsNoPrismItsFaceIsOffInSelections]' passed (1.484 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testPrismsIsEveryFacePrismOfThePickedGroup]' passed (1.420 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testProtectAndMinimizePlasticAreOffTheFlexibleStageAndNothingElseIs]' passed (0.001 seconds).
+Tests/TopOptFlowsTests/FlexibleR7M1Tests.swift:148: error: -[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth] : XCTAssertNotNil failed - ★ RED CONTROL: the squish prism on Face 3
+Test Case '-[TopOptFlowsTests.FlexibleR7M1Tests testThePrismIsThePickedGroupsLatticeFacePrismAtTheListsDepth]' failed (1.414 seconds).
+
+## BLAST RADIUS (ruling 4's gate on, OLD fixtures) — stopped by hand after chunk 1 + part of chunk 2 (each failing test waits 180-400 s)
+blast start 13:59:23
+blast chunk 1 13:59:23: BottomBarMeasurementTests,ComputeLocationTests,CoreBuildIdentityTests,DeviceRunEntryGateTests,FlexibleAngledGoldenRecorder,FlexibleAngledGoldenTests,FlexibleBatchBReviewTests,F
+blast chunk 1 exit 1 14:11:15
+blast chunk 2 14:11:15: FlexibleBatchM2VerifyTests,FlexibleBatchMDentTests,FlexibleBatchMGroupTests,FlexibleBatchMLegendTests,FlexibleBatchMProbe,FlexibleBatchMStressTests,FlexibleBatchMVerifyTests,Fl
+blast STOPPED by hand 14:26:04 (pids 80433/81421/81437): each gated test waits 180-400 s
+{'passed': 81, 'failed': 3, 'skipped': 18, 'assertions': 8}
+signal 11 in: []
+  F FlexibleAngledGoldenTests testCoreFieldsAndDesignsAreTheGolden 1
+  F FlexibleBatchM2Tests testTheTwoPagesAgreeOnAFourFingertipStamp 1
+  F FlexibleBatchM2VerifyTests testAWholeFaceRigidPlateFollowsTheMainPagesSim 1
+
+## RUN 1 — the gate on, the NEW fixtures (6c6e0d95-era working tree, before the re-pins), 192 classes, 14:28 -> 15:58
+{'passed': 1297, 'failed': 18, 'skipped': 55, 'assertions': 46}
+signal 11 in: ['run1_chunk_4.log']
+  F FlexibleAngledGoldenTests testEveryExistingSendKeepsItsJobBytes 1
+  F FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker 1
+  F FlexibleBatchVHostedTests testAGroupsPrismShowsNothingOnOpenThenThePickedGroupsPrismAndNumber 1
+  F FlexibleFEFieldTests testASlenderAllLatticePartGetsItsField 1
+  F FlexibleFEFieldTests testExtensionOutsideTheSolid 1
+  F FlexibleMainPageRound4VerifyTests testAPartWithNoFileSaysSoNotPressAFace 1
+  F FlexiblePressSaveTests testAPendingPressNeverMakesTheLatticeStale 1
+  F FlexibleRound6HostedTests testSelectingAGroupOnTheMainPageShowsItsSquishAtOnce 1
+  F FlexibleRound6HostedTests testTheMainLegendCardCarriesThePrismsRowWhilePrismsIsOn 1
+  F FlexibleRound6HostedTests testTheMainPageDrawsTheActiveGroupsPrismsAndThePrismsView 1
+  F FlexibleRound6HostedTests testThePrismsButtonIsTheFourthAndShowsEveryPrism 1
+  F FlexibleRound7ViewsTests testNoSquishNumberOnTheMainPageAfterAPickOrUnderPrisms 1
+  F FlexibleS1bMainTagsTests testEveryMainPageTagIsJoinedToItsFace 1
+  F FlexibleS1bMainTagsTests testPickingAGroupUnderPrismsBrightensItsPrisms 1
+  F FlexibleS1bMainTagsTests testThePrismsViewShowsEveryNumberAtHisLayout 1
+  F FlexibleSqueezeGroupsPressTests testAGroupWithOnlyPressesIsATabButNotAJobGroup 1
+  F LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds 1
+  F LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses 1
+  (signal 11: run1_chunk_4 — after all 49 of its tests passed; the known exit crash)
+  Each failure, and what was done:
+   FlexibleAngledGoldenTests.testEveryExistingSendKeepsItsJobBytes — the A1_0003 send set took a1Project(3)'s new face-prism -> as saved (facePrism: false); bytes identical again
+   FlexibleBatchVHostedTests, FlexibleRound6HostedTests (3f, 3j, 3k), FlexibleRound7ViewsTests RV3 — re-pinned to the face-prisms (H15')
+   FlexibleRound6HostedTests 3l, FlexibleS1bMainTagsTests x3 — their squish tags sit on controlSquishPrismsOnMain now
+   FlexibleFEFieldTests x2 (M2 stand, cylinder: generated parts with no face-prism) — FlexibleSquishFixture.model lattices under every face (50 mm)
+   FlexiblePressSaveTests.testAPendingPressNeverMakesTheLatticeStale — the golden pad: built through controlWholePartWithoutPrism
+   FlexibleMainPageRound4VerifyTests.testAPartWithNoFileSaysSoNotPressAFace — a REAL ORDER BUG: the send gate spoke before 'no part' -> noFacePrismFirst keeps no part / filament / pressed face first
+   FlexibleSqueezeGroupsPressTests.testAGroupWithOnlyPressesIsATabButNotAJobGroup — ruling 4 reverses AP1's 'a press never holds' for an EDGES group -> re-pinned
+   FlexibleBatchNVerifyTests x8, LatticeSlotOriginTests x4, LatticeSimSolveTriggerTests x1 — known, pre-existing
+
+## RERUN of run 1's failed classes + FlexibleR7M1Tests + FlexibleRound6Tests (after the fixes): 111 tests, 1 skipped, 0 failures
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-10-14 16:25:19.973.
+	 Executed 111 tests, with 1 test skipped and 0 failures (0 unexpected) in 1473.066 (1473.084) seconds
+
+## Looking at the first pictures: no face-prism drew an empty dark X-ray ghost (xray true) -> xrayDefault off with no face-prism (1c0a27be)
+## FlexibleR7M1Tests + FlexibleRound7ViewsTests after it: 22 tests, 0 failures
+	 Executed 22 tests, with 0 failures (0 unexpected) in 469.654 (469.658) seconds
+
+## RUN 2 — the final code head 1c0a27be, 192 classes, 16:48 -> 18:11
+{'passed': 1311, 'failed': 4, 'skipped': 55, 'assertions': 14}
+signal 11 in: ['run2_chunk_4.log']
+  F FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker 1
+  F FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff 1
+  F LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds 1
+  F LatticeSlotOriginTests testTheAppWithholdsExactlyWhatCoreRefuses 1
+  (signal 11: run2_chunk_4 — after all 49 of its tests passed; the known exit crash)
+  Known, pre-existing: FlexibleBatchNVerifyTests x8 assertions (Xcode 27 text metrics), LatticeSlotOriginTests x4 (#354's), LatticeSimSolveTriggerTests x1.
+  NEW, NOT CAUSED BY M1: FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff (the turning ring counted 19-23 px, needs > 120).
+    It passed in run 1 (407 px) and in R7-V's runs (404 px). It fails the same at 6c6e0d95's FlexibleMainStage (rebuilt, 2 runs: 16, 19 px)
+    — the ring is a TimelineView(.animation) caught offscreen; the machine's state changed between the runs (evening, display likely asleep).
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff]' failed (3.055 seconds).
+FLEX-R7V-RH5 Play icon: working ring 23 px (idle 0) · failed dot 180 px (idle 0) · control ring 0 dot 0
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff]' failed (2.957 seconds).
+FLEX-R7V-RH5 Play icon: working ring 19 px (idle 0) · failed dot 180 px (idle 0) · control ring 0 dot 0
+Test Case '-[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff]' failed (2.940 seconds).
+FLEX-R7V-RH5 Play icon: working ring 20 px (idle 0) · failed dot 180 px (idle 0) · control ring 0 dot 0
+# at 6c6e0d95's FlexibleMainStage (before the xrayDefault change), same machine state, 2 runs:
+working ring 16 px / 19 px — failed both (run 1 at 6c6e0d95-era code: 407 px, passed; rerun2: 404 px)
+
+## GOLDENS (FlexibleAngledGoldenTests, 13/13 each) at 1c0a27be
+goldens_det: 13 passed 0 failed · identical 38 · DIFFERS 0 · PART-SKIP 0
+goldens_unseeded: 13 passed 0 failed · identical 32 · DIFFERS 0 · PART-SKIP 1
+  (deterministic = SWIFT_DETERMINISTIC_HASHING=1)
+
+## STAGE-JOB HASHES: stage_job_hashes_r7m1.txt (this folder) — diff against round7/merge/stage_job_hashes_r7merge.txt: IDENTICAL (the whole file: 16 rows exit 0 + controls)
+
+## iOS: xcodebuild … -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build -> BUILD SUCCEEDED (TopOpt.debug.dylib 79 359 456 B, Oct 14 18:17:14)
+   the dylib carries 'Set a face to Lattice in Selections first', 'This export makes ', 'Edges and faces go in separate exports for now.',
+   'Face-prism = where the lattice goes', 'flexible-legend-face-prisms-row', 'flexible-export-hold-note', FlexibleMainChips symbols (21).
+   NOT INSTALLED: TopOpt is running on 147E56A1 (launchctl: UIKitApplication:com.nadim.topopt, pid 84714) — install pending: the app is open.

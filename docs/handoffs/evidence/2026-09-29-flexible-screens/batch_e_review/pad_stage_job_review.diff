@@ -1,0 +1,8 @@
+# r3 (final = 7a9e0302 -> review): top A's prism loses face_id
+19d18
+<         "face_id" : 1,
+# r5 (final -> review): both halves lose face_id
+19d18
+<         "face_id" : 1,
+69d67
+<         "face_id" : 1,

@@ -1,0 +1,29 @@
+Rebuild 2 (2026-10-24/25): the cure fix + #358's outline fix + the tree-hash fingerprint, app core + CLI from ONE commit.
+Reviewer rulings 2026-10-24 21:35 (one rebuild, fingerprint approved) and 22:59 (cli_demo first).
+
+Commits on claude/flexible-screens:
+  b60a0bb7 Tests: FlexibleEdgeGroupsTests.length split (CI app-macos type-check timeout)
+  3712714a Merge core-solver-stall-fix 179589b0 (seeded fallback never worse than a cold start; root cause of CI core-linux cli_demo 12/80)
+  afa32089 Merge #358 d228514a (outline index ring walk bounded, distances off by one)
+  fd34340e Core fingerprint = tree hash of core/ + app/scripts/build_core.sh, dirty flag kept
+
+Fingerprint (tree hash at fd34340e): b21c5d9a8311
+  app CoreFingerprint.generated.swift: "b21c5d9a8311"
+  worker CLI --version: topopt-cli version=0.1.0 fingerprint=b21c5d9a8311 dirty=false
+  worker /health: b21c5d9a8311 active 0 queued 0
+  worker binary sha256: fd8afe02e0b097ed3b04e6b224380a157d11c9420e38328778c964fe26987384
+  old binary kept: topopt-cli.03ad2df57977-replaced-20261024 topopt-cli.0e86a323-replaced-20261024 topopt-cli.2597c39b-replaced-20261024 
+  CLI build dir: core/build-cli-b21c5d9a8311 (untracked); stable copy /Users/nadim/dev/TopOpt/worker-bin/b21c5d9a8311/
+
+Full suites (run after the swap; the reviewer's rule for next time: full suite + cli_demo BEFORE the swap):
+  core ctest (core/build-cli-b21c5d9a8311, started 2026-10-24 21:23): 153/153 passed (incl. cli_demo, build_fingerprint_rebuild, fea_mg_safe_retry).
+  app TopOptFlowsTests (Flexible* + Lattice*): 2283 executed, 160 skipped, 12 assertion failures in 6 tests:
+    known (APP LIST 3): LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses (4 assertions)
+    known (APP LIST 4): LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds
+    known pre-existing (#354's, handoff :13528): LatticeCellGradingTests.testGradingChangesTheRenderedLattice (fails alone too)
+    load/order flakes, all PASS when re-run alone at load ~7 (2026-10-25 02:53):
+      FlexibleFEFieldTests.testFiveFacePinchMovesEveryFace (34 s alone; under the 5-h loaded run its sliding solve hit the sim deadline, so the bonded retry ran)
+      FlexibleFlatPrismEngineTests.testHisStripsReadThroughWithTheSameReach (toast order)
+      FlexibleR7U21ImportSheetHostedTests.testFilamentAndResinWriteProcessAsToday (hosted click)
+  LatticeStaleTypeTests 6/6. Nothing points at b21c5d9a8311, so no swap-back.
+  Side effect undone: the run rewrote two tracked #354 evidence files (r4_preview_latency.txt, r6_sample_after.png); restored with git checkout.

@@ -1,0 +1,41 @@
+# U21 batch C · FIX ROUND 2 runs (app/TopOptKit, --scratch-path /tmp/r7u21-side-build) — 769f924c + the working tree (= the fix-round-2 commit)
+### runner.log
+start 17:20:06 769f924c + working tree
+build exit 0 17:20:23
+golden det exit 0 17:20:40
+golden unseeded exit 0 17:20:56
+hashes exit 0 17:21:58
+hashes cmp vs round7/batch_e1r/stage_job_hashes_e1r.txt (whole file): identical
+hashes cmp vs round7/batch_x20b/stage_job_hashes_x20b.txt (whole file): identical
+hashes cmp vs round7/batch_u21_c/stage_job_hashes_u21c_fix1.txt (whole file): identical
+chunk_aa exit 0 17:23:49
+chunk_ab exit 0 17:29:17
+chunk_ac exit 0 17:32:16
+chunk_ad exit 0 17:39:41
+ALLDONE 17:39:41
+### classes (19, chunks of 5)
+FlexibleR7U21CHandlesTests FlexibleR7U21CHandlesHostedTests FlexibleSquishCopyTests LatticeStaleTypeTests FlexibleFaceChipTests FlexibleFaceCommitTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedTests FlexibleMainPrismEqualityTests FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpTests FlexibleRound7DesignIntegrationTests FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleSelectionsListTests FlexibleRound7DesignIntegrationHostedTests FlexibleLatticeIsProtectedHostedTests FlexibleR7E1FollowUpHostedTests 
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 14.201 (14.203) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.884 (13.885) seconds
+### chunks
+chunk_aa.log: Executed 27 tests, with 0 failures (0 unexpected) in 109.133 (109.136) seconds
+chunk_ab.log: Executed 29 tests, with 0 failures (0 unexpected) in 325.049 (325.053) seconds
+chunk_ac.log: Executed 32 tests, with 0 failures (0 unexpected) in 177.110 (177.114) seconds
+chunk_ad.log: Executed 10 tests, with 0 failures (0 unexpected) in 443.115 (443.117) seconds
+### failures: 0 · skipped: 0 · signal lines: 0 · total 98 tests (95 before + testAKnobFarFromTheFloorIsStillDrawn + testAnExpandBeingDraggedIsNeverHidden + testTheGestureCallsTheDrawnClosures)
+### the batch's lines
+FLEX-U21C now: at the start true knob (424.0699768066406, 995.0325927734375) · 10 mm out (384.9484558105469, 995.0458984375) (39.1215232587958 pt) · drawn disc (396.0699784154307, 995.0420844665964) · drag (-39.99999768648881, 0.013604443747735158); at the last step true knob (411.2687072753906, 1028.8680419921875) · out (372.3602294921875, 1028.8819580078125) · drawn (399.26870803016465, 1028.8722981143117) → Expand -3.0 → 7.2805351723864895 mm (predicted: true knob 7.2805351723864895, drawn disc -1.0000000003564387)
+FLEX-U21C worst view: depth disc (445.10205078125, 973.0180053710938, 44.0, 44.0) box (497.10205078125, 979.0180053710938, 82.0, 32.0) · expand disc (374.0699784154307, 973.0420844665964, 44.0, 44.0) box (278.0699784154307, 979.0420844665964, 88.0, 32.0) · units' gap 27.032072365819317 pt
+FLEX-U21C-6 far sweep: 1616 layouts, every '+' drawn
+FLEX-U21C-1 Img6: expand disc (396.1, 995.0) · gap 27.0 pt · depth unit (445.1, 973.0, 134.0, 44.0) · expand unit (278.1, 973.0, 140.0, 44.0)
+FLEX-U21C-2 sweep: 6720 layouts · worst gap 24.0 pt · knob flipped 0 · today's rule under 24 pt in 3600
+  RED CONTROL drawn-disc wiring: at the start true knob (424.0699768066406, 995.0325927734375) · 10 mm out (384.9484558105469, 995.0458984375) (39.1215232587958 pt) · drawn disc (396.0699784154307, 995.0420844665964) · drag (-39.99999768648881, 0.013604443747735158); at the last step true knob (431.33258056640625, 1001.6441040039062) · out (392.2530517578125, 1001.657470703125) · drawn (395.3325826986889, 1001.6564944979998) → Expand -3.0 → -1.0000000005342162 mm (predicted: true knob 7.235537346428934, drawn disc -1.0000000005342162)
+  RED CONTROL today's drag: at the start true knob (424.0699768066406, 995.0325927734375) · 10 mm out (384.9484558105469, 995.0458984375) (39.1215232587958 pt) · drawn disc (396.0699784154307, 995.0420844665964) · drag (-39.99999768648881, 0.013604443747735158); at the last step true knob (416.7918701171875, 988.4071044921875) · out (377.6282043457031, 988.4202270507812) · drawn (396.7918712570211, 988.4138567764674) → Expand -3.0 → -4.99999988432444 mm (predicted: true knob 7.213547931762324, drawn disc -4.99999988432444)
+### mutation (made once in the source, then restored): round 1's push loop (tEnd = pushMax) and no drag guard, every control off
+	 Executed 2 tests, with 2 failures (0 unexpected) in 1.388 (1.389) seconds
+	 Executed 2 tests, with 2 failures (0 unexpected) in 1.388 (1.390) seconds
+FlexibleR7U21CHandlesTests.swift:207: error: -[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAKnobFarFromTheFloorIsStillDrawn] : XCTUnwrap failed: expected non-nil value of type "Unit" - ★ dir 0 r 244.0: the '+' is drawn
+FlexibleR7U21CHandlesTests.swift:244: error: -[TopOptFlowsTests.FlexibleR7U21CHandlesTests testAnExpandBeingDraggedIsNeverHidden] : XCTUnwrap failed: expected non-nil value of type "Unit" - ★ dragging: the '+' stays
+### dev run before the final run
+FlexibleR7U21CHandlesTests: Executed 11 tests, with 0 failures (0 unexpected) in 1.206 (1.207) seconds
