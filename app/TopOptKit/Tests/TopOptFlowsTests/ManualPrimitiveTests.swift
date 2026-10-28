@@ -87,9 +87,9 @@ final class ManualPrimitiveTests: XCTestCase {
     func testDeleteAutoClearanceDropsItFromTheRun() {
         let (p, boreID, _) = project()
         XCTAssertEqual(p.clearanceSpecs().count, 1, "the anchored bore auto-clears")
-        p.deleteAutoClearance(face: 1, in: boreID)          // the "−" on the auto bore's row
+        p.deleteAutoClearance(face: 1)          // the "−" on the auto bore's row
         XCTAssertTrue(p.clearanceSpecs().isEmpty, "a deleted auto clearance leaves the run")
-        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1, in: boreID))
+        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1))
         // The face STAYS in the group (it may still anchor) — only its clearance is gone.
         XCTAssertTrue(p.selection.groups.first { $0.id == boreID }!.faces.contains(1),
                       "delete suppresses the CLEARANCE, it does not remove the anchor face")
@@ -99,15 +99,15 @@ final class ManualPrimitiveTests: XCTestCase {
         // B3: the decision persists in the model (ForceModel), so re-deriving specs
         // — which is exactly what a re-detect / resolution change does — never
         // resurrects it. clearanceSpecs is resolution-independent by construction.
-        let (p, boreID, _) = project()
-        p.deleteAutoClearance(face: 1, in: boreID)
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
         for _ in 0..<3 { XCTAssertTrue(p.clearanceSpecs().isEmpty, "stays deleted across re-derive") }
     }
 
     func testRestoreAutoClearanceUndeletesIt() {
-        let (p, boreID, _) = project()
-        p.deleteAutoClearance(face: 1, in: boreID)
-        p.restoreAutoClearance(face: 1, in: boreID)
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
+        p.restoreAutoClearance(face: 1)
         XCTAssertEqual(p.clearanceSpecs().count, 1, "restoring the auto clearance brings it back")
     }
 
@@ -156,8 +156,8 @@ final class ManualPrimitiveTests: XCTestCase {
     }
 
     func testUndoCoversAutoDeletion() {
-        let (p, boreID, _) = project()
-        p.deleteAutoClearance(face: 1, in: boreID)
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
         XCTAssertTrue(p.clearanceSpecs().isEmpty)
         p.performUndo()
         XCTAssertEqual(p.clearanceSpecs().count, 1, "undo un-deletes an auto primitive too")
@@ -402,7 +402,7 @@ final class ManualPrimitiveTests: XCTestCase {
         let autoMargin = p.clearanceMetric(groupID: boreID, faceID: 1, role: .margin)!.resolved
 
         let id = try! XCTUnwrap(p.convertAutoClearanceToManual(face: 1, in: boreID))
-        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1, in: boreID), "the auto face no longer clears")
+        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1), "the auto face no longer clears")
         XCTAssertEqual(p.clearanceSpecs().count, 1, "still exactly one clearance — now manual")
         let mp = p.force.manualPrimitives(for: boreID).first { $0.id == id }!
         XCTAssertEqual(mp.kind, .bolt)

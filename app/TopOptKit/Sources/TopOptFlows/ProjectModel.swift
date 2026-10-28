@@ -68,65 +68,18 @@ public final class ProjectModel: ObservableObject {
     public func setAutoKeepClear(_ g: SelectionGroup, on: Bool) {
         force.setAutoKeepClear(g.id, on)
         if on {
-            for f in keepClearFaces(g) where force.isClearanceFaceSuppressed(f, in: g.id) { force.unsuppressClearanceFace(f, in: g.id) }
+            for f in g.faces where force.isClearanceFaceSuppressed(f) { force.unsuppressClearanceFace(f) }
             persistClearances()
         }
         objectWillChange.send()
     }
 
-    /// ★ His iPad 2026-10-28 (holes with no keep-clear, third report): EVERY face a group holds — its plain faces, then the
-    /// faces its regions cover (a hole isolated or cut on the Surface stage is held as a region, and the keep-clear rules
-    /// read only `g.faces`, so such a hole never got one). The ONE list the keep-clear rules, rows, volumes and run read.
-    /// ★ ONLY WHOLE FACES: a CUT piece is part of a face, and a keep-clear sent for it would clear the whole CAD face (core's
-    /// clearance takes a face id only — EditFacesStageTests). A union or isolate of whole faces (a hole among them) counts.
-    public func keepClearFaces(_ g: SelectionGroup) -> [FaceID] {
-        guard !g.regionIDs.isEmpty, let mesh = viewerMesh else { return g.faces }
-        var whole: Set<FaceID> = []
-        for r in surfaceEffectiveRegions(of: g) {
-            for leaf in faceRegions.resolvedLeaves(r) {
-                guard let region = faceRegions.region(leaf), !region.isCut else { continue }
-                whole.formUnion(FaceRegionGeometry.members(of: region, in: mesh))
-            }
-        }
-        let own = Set(g.faces)
-        return g.faces + whole.filter { !own.contains($0) }.sorted()
-    }
-
-    /// Drop every "auto keep-clear deleted" mark whose face its group no longer holds (and save the sidecar if any went):
-    /// taking a hole out of a group and picking it again brings its keep-clear back. ★ 10-28: per GROUP — a hole deleted in
-    /// one group never loses its keep-clear in another.
+    /// Drop the "auto keep-clear deleted" mark of every face no group holds any more (and save the sidecar if any went).
     func forgetClearanceSuppressionsOutsideGroups() {
-        migrateLegacyClearanceSuppressions()
-        var held: [UUID: Set<FaceID>] = [:]
-        for g in selection.groups { held[g.id] = Set(keepClearFaces(g)) }
-        if force.forgetSuppressions(held: held) { persistClearances() }
-    }
-
-    /// ★ His iPad 2026-10-28: an older project's per-face "deleted" marks (and an older sidecar's) are sorted into groups
-    /// once the geometry is here. A mark stays only in a group that CONVERTED that hole into a movable primitive (a manual
-    /// cylinder on the hole's own axis — keeping it there avoids two volumes for one hole); every other group's keep-clear
-    /// on that hole comes back.
-    func migrateLegacyClearanceSuppressions() {
-        // both the geometry and the groups must be here (a project opens its mesh and its selection in either order)
-        guard let mesh = viewerMesh, !selection.groups.isEmpty, !force.suppressedClearanceFaceList.isEmpty else { return }
-        let groups = selection.groups
-        force.migrateLegacySuppressions { f in
-            guard let geo = mesh.faceGeometry(f) else { return [] }
-            return groups.filter { g in
-                keepClearFaces(g).contains(f) && force.manualPrimitives(for: g.id).contains { mp in
-                    if geo.isCylinder {
-                        // on this hole's axis AND within this hole's stretch of it (lined-up holes in two plates share an axis)
-                        let e = simd_normalize(geo.axisDir), d = mp.center - geo.axisPoint, t = Float(simd_dot(d, e))
-                        guard mp.kind == .bolt, abs(mp.radiusMM - geo.cylinderRadiusMM) < 0.05,
-                              abs(abs(simd_dot(simd_normalize(mp.axis), e)) - 1) < 1e-3, simd_length(d - e * simd_dot(d, e)) < 0.05,
-                              let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint), axisDir: SIMD3<Float>(e))
-                        else { return false }
-                        return t >= span.lo - 0.5 && t <= span.hi + 0.5
-                    }
-                    return mp.kind == .face && geo.isPlane && abs(simd_dot(mp.center - geo.planeOrigin, simd_normalize(geo.planeNormal))) < 0.05
-                }
-            }.map(\.id)
-        }
+        let held = Set(selection.groups.flatMap(\.faces))
+        let stale = force.suppressedClearanceFaceList.filter { !held.contains($0) }
+        guard !stale.isEmpty else { return }
+        for f in stale { force.unsuppressClearanceFace(f) }
         persistClearances()
     }
     /// ★ HIDE / LOCK, PER GROUP (maintainer, 2026-08-18) — an ATTRIBUTE over the
@@ -136,9 +89,7 @@ public final class ProjectModel: ObservableObject {
     /// See `GroupViewState` for why hiding is session-scoped and locking is not.
     @Published public var groupView = GroupViewState()
     @Published public var force = ForceModel()
-    @Published public var viewerMesh: ViewerMesh? {
-        didSet { migrateLegacyClearanceSuppressions() }   // ★ 10-28: older per-face marks need the geometry to sort
-    }
+    @Published public var viewerMesh: ViewerMesh?
 
     /// ★ THE REGION LAYER (task 2026-08-14-face-regions §1) — the unions and the
     /// split cells over this part's faces. Default EMPTY: with no region edits the
@@ -380,9 +331,6 @@ public final class ProjectModel: ObservableObject {
         // add/remove list precisely so it CAN be re-evaluated; the one thing that
         // must never happen is absorbing a change silently.
         refreshFaceRegionDrift()
-        // ★ 10-28: an older project's per-face "deleted" marks are sorted into groups NOW — the property observers that do it
-        // do not fire inside an initializer, so without this a reopened project kept the old marks until his first tap.
-        forgetClearanceSuppressionsOutsideGroups()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
@@ -651,9 +599,7 @@ public final class ProjectModel: ObservableObject {
             ClearanceSidecar.GroupPrimitives(group: $0.group, primitives: $0.primitives)
         }
         let sidecar = ClearanceSidecar(suppressedAutoFaces: force.suppressedClearanceFaceList,
-                                       manual: manual,
-                                       suppressedByGroup: force.suppressedClearanceByGroupList.map {
-                                           ClearanceSidecar.GroupFaces(group: $0.group, faces: $0.faces) })
+                                       manual: manual)
         sidecar.write(forModelPath: path)
     }
 
@@ -664,10 +610,8 @@ public final class ProjectModel: ObservableObject {
     public func applyClearanceSidecar() {
         guard let path = importedFile?.path,
               let sidecar = ClearanceSidecar.read(forModelPath: path) else { return }
-        force.loadSuppressedClearanceFaces(sidecar.suppressedAutoFaces)   // legacy per-face marks: sorted into groups below
+        force.loadSuppressedClearanceFaces(sidecar.suppressedAutoFaces)
         let live = Set(selection.groups.map { $0.id })
-        force.loadSuppressedClearance((sidecar.suppressedByGroup ?? []).filter { live.contains($0.group) }.map { ($0.group, $0.faces) })
-        migrateLegacyClearanceSuppressions()
         for gp in sidecar.manual where live.contains(gp.group) {
             force.loadManualPrimitives(gp.primitives, for: gp.group)
         }
@@ -792,16 +736,15 @@ public final class ProjectModel: ObservableObject {
             // plane → slab); the auto default affixes ONLY the bore faces (fastener
             // holes), never a plane, exactly as handoff 100 shipped.
             let explicit = force.keepClearAffix(for: g.id) == .on
-            let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
-            for f in held {
+            for f in g.faces {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
                 // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
-                if bore, !FaceTopology.isBoreRepresentative(f, among: held, in: mesh) { continue }
+                if bore, !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh) { continue }
                 // The "−" on an auto primitive's row DELETES it: a suppressed face's
                 // keep-out is dropped from the run (handoff group-editing, BAR B3). The
                 // face stays in the group (it may still anchor); only its clearance goes.
-                if force.isClearanceFaceSuppressed(f, in: g.id) { continue }   // ★ deleted in THIS group (10-28)
+                if force.isClearanceFaceSuppressed(f) { continue }
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
@@ -2211,7 +2154,7 @@ public final class ProjectModel: ObservableObject {
     /// (handoff 2026-07-29).
     public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
         guard force.autoKeepClearIsOn(g.id) else { return false }   // ★ his per-group switch; default: on for an Anchor
-        return keepClearFaces(g).contains { FaceTopology.isFastenerBore($0, in: mesh) }   // ★ 10-28: region-held holes count
+        return g.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) }
     }
 
     /// Whether "Keep clear" is effectively on for a group given the current mesh —
@@ -2304,13 +2247,12 @@ public final class ProjectModel: ObservableObject {
             let auto = autoClearanceApplies(g, in: mesh)
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
             let explicit = force.keepClearAffix(for: g.id) == .on
-            let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
-            for f in held {
+            for f in g.faces {
                 let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
                 // ★ note 3 (2026-10-27): a hole split in halves is ONE cylinder — sent/drawn by its lowest piece in the group
-                if bore, !FaceTopology.isBoreRepresentative(f, among: held, in: mesh) { continue }
-                if force.isClearanceFaceSuppressed(f, in: g.id) { continue }  // deleted in THIS group (BAR B3, ★ 10-28)
+                if bore, !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh) { continue }
+                if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 if bore {
@@ -2620,12 +2562,11 @@ public final class ProjectModel: ObservableObject {
     public func listedClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
         guard let mesh = viewerMesh, keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
-        let held = keepClearFaces(g)   // ★ 10-28: region-held holes too
-        return held.filter { f in
+        return g.faces.filter { f in
             let bore = FaceTopology.isFastenerBore(f, in: mesh)
             return (bore || explicit)
-                && !(bore && !FaceTopology.isBoreRepresentative(f, among: held, in: mesh))   // one row per split hole
-                && !force.isClearanceFaceSuppressed(f, in: g.id)
+                && !(bore && !FaceTopology.isBoreRepresentative(f, among: g.faces, in: mesh))   // one row per split hole
+                && !force.isClearanceFaceSuppressed(f)
                 && mesh.faceGeometry(f) != nil
         }
     }
@@ -3225,7 +3166,7 @@ public final class ProjectModel: ObservableObject {
             return nil
         }
         let id = force.addManualPrimitive(mp, to: group)
-        force.suppressClearanceFace(f, in: group)   // the auto face no longer clears IN THIS GROUP (no double-count)
+        force.suppressClearanceFace(f)          // the auto face no longer clears (no double-count)
         persistClearances()
         return id
     }
@@ -3243,7 +3184,7 @@ public final class ProjectModel: ObservableObject {
             targets.append(.init(kind: .point, point: other.center, label: "primitive \(i) centre"))
         }
         if let mesh = viewerMesh, let g = selection.groups.first(where: { $0.id == group }) {
-            for f in keepClearFaces(g) where FaceTopology.isFastenerBore(f, in: mesh) {
+            for f in g.faces where FaceTopology.isFastenerBore(f, in: mesh) {
                 if let geo = mesh.faceGeometry(f) {   // isFastenerBore ⇒ a fitted cylinder
                     targets.append(.init(kind: .primitiveAxis, point: geo.axisPoint,
                                          direction: geo.axisDir, label: "bore axis"))
@@ -3308,14 +3249,14 @@ public final class ProjectModel: ObservableObject {
     /// suppress that face's keep-out. Works on auto-found primitives, which is the
     /// more frequently used half because the finder OVER-finds. Persisted to the
     /// sidecar so it stays deleted across re-detect / resolution / re-import (B3).
-    public func deleteAutoClearance(face: FaceID, in group: UUID) {
-        force.suppressClearanceFace(face, in: group)
+    public func deleteAutoClearance(face: FaceID) {
+        force.suppressClearanceFace(face)
         persistClearances()
     }
 
     /// Restore a deleted auto clearance (undo affordance).
-    public func restoreAutoClearance(face: FaceID, in group: UUID) {
-        force.unsuppressClearanceFace(face, in: group)
+    public func restoreAutoClearance(face: FaceID) {
+        force.unsuppressClearanceFace(face)
         persistClearances()
     }
 
@@ -3338,7 +3279,7 @@ public final class ProjectModel: ObservableObject {
     /// geometry (STL, or a non-cylindrical selection).
     public func clearanceBoreRadius(for g: SelectionGroup) -> Double? {
         guard let mesh = viewerMesh else { return nil }
-        for f in keepClearFaces(g) {
+        for f in g.faces {
             if let geo = mesh.faceGeometry(f), geo.isCylinder { return geo.cylinderRadiusMM }
         }
         return nil

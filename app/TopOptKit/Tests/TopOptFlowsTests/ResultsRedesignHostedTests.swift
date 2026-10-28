@@ -166,13 +166,9 @@ final class ResultsRedesignHostedTests: XCTestCase {
         // open Checks: the key minimises
         ui.click(h, CGPoint(x: folded.midX, y: folded.minY + 25))
         XCTAssertLessThan(try frame(h, "resultsStressKey").height, 60, "★ opening Checks minimises the key")
-        // ★ 10-28: X-ray is a layer ON TOP of Stress — the key stays; Solid (plain grey) takes it away
         let x = try frame(h, "resultsView-X-ray")
         ui.click(h, CGPoint(x: x.midX, y: x.midY))
-        XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ Stress + X-ray: the colours still mean something")
-        let solid = try frame(h, "resultsView-Solid")
-        ui.click(h, CGPoint(x: solid.midX, y: solid.midY))
-        XCTAssertNil(h.frames.all["resultsStressKey"], "Solid is the plain grey: no key")
+        XCTAssertNil(h.frames.all["resultsStressKey"], "only in the Stress view")
     }
 
     /// ★ His iPad 2026-10-27: Bend and Break are back beside the other views; each moving view plays on its own, the motion
@@ -202,15 +198,12 @@ final class ResultsRedesignHostedTests: XCTestCase {
             XCTAssertGreaterThan(rm.flexPhase, 0.55, "★ \(size): the slider moves it by hand (\(rm.flexPhase))")
             try ui.picture(h, "results_bend_\(Int(size.width)).png")
 
-            // ★ 10-28: Load paths is light travelling through the part (no arrows): it builds, then sweeps on its own
             let flow = try frame(h, "resultsView-Load paths")
             ui.click(h, CGPoint(x: flow.midX, y: flow.midY))
-            XCTAssertFalse(rm.loadPathOn, "★ the old arrows are retired")
-            for _ in 0..<40 where rm.lightFlow == nil { ui.pump(0.1) }
-            XCTAssertNotNil(rm.lightFlow, "★ \(size): the light flow was built")
-            let l0 = rm.lightPhase
+            XCTAssertTrue(rm.loadPathOn); XCTAssertEqual(rm.flowWiggle, 0, "★ never wiggling")
+            let c0 = rm.flowClock
             ui.pump(0.6)
-            XCTAssertGreaterThan(rm.lightPhase, l0, "★ \(size): the light TRAVELS (a new view starts playing)")
+            XCTAssertGreaterThan(rm.flowClock, c0, "★ \(size): the arrows TRAVEL (a new view starts playing)")
 
             let brk = try frame(h, "resultsView-Break")
             ui.click(h, CGPoint(x: brk.midX, y: brk.midY))
@@ -259,66 +252,6 @@ final class ResultsRedesignHostedTests: XCTestCase {
         if let m = v as? MTKView { return m }
         for s in v.subviews { if let m = metalView(in: s) { return m } }
         return nil
-    }
-
-    /// ★ His iPad 2026-10-28: "the legend disappears when the rest of the views are using colours that require it". Bend
-    /// turns Stress on and keeps the key, which names the true exaggeration; the Exaggeration slider changes it; Break the
-    /// same; Load paths turns X-ray on and keeps the colouring you had.
-    func testTheKeyStaysWhileThePartMovesAndNamesTheExaggeration() throws {
-        let (h, rm) = try screen(CGSize(width: 1376, height: 1032), loaded: true)
-        let solid = try frame(h, "resultsView-Solid")
-        ui.click(h, CGPoint(x: solid.midX, y: solid.midY))
-        XCTAssertNil(h.frames.all["resultsStressKey"], "premise: Solid, no key")
-        let bend = try frame(h, "resultsView-Bend")
-        ui.click(h, CGPoint(x: bend.midX, y: bend.midY))
-        let key = try frame(h, "resultsStressKey")
-        XCTAssertTrue(rm.stressOn, "★ Bend turned Stress on")
-        // open the key: its note names the exaggeration
-        ui.click(h, CGPoint(x: key.midX, y: key.midY))
-        XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ the key, open, while the part bends")
-        _ = try frame(h, "resultsExaggeration")
-        rm.setFlexExaggeration(150); ui.pump(0.5)
-        XCTAssertEqual(rm.flexExaggeration, 150)
-        try ui.picture(h, "results_bend_key.png")
-        let brk = try frame(h, "resultsView-Break")
-        ui.click(h, CGPoint(x: brk.midX, y: brk.midY))
-        XCTAssertNotNil(h.frames.all["resultsStressKey"], "★ Break: the key stays")
-        _ = try frame(h, "resultsExaggeration")
-        // Load paths: X-ray on, Stress as it was (on)
-        let flow = try frame(h, "resultsView-Load paths")
-        ui.click(h, CGPoint(x: flow.midX, y: flow.midY))
-        XCTAssertNotNil(h.frames.all["resultsStressKey"], "the light wears the stress colours: the key stays")
-    }
-
-    /// ★ His iPad 2026-10-28: Compare shows the key ONCE; a tap on any panel puts EVERY shown version's value on it.
-    func testCompareHasOneKeyWithEveryVersionsValue() throws {
-        let (h, _) = try screen(CGSize(width: 1376, height: 1032))
-        let c = try frame(h, "resultsCompare")
-        ui.click(h, CGPoint(x: c.midX, y: c.midY))
-        let st = try frame(h, "resultsView-Stress")
-        ui.click(h, CGPoint(x: st.midX, y: st.midY))
-        XCTAssertEqual(h.frames.all.keys.filter { $0 == "resultsStressKey" }.count, 1, "★ one key")
-        let key = try frame(h, "resultsStressKey")
-        ui.click(h, CGPoint(x: key.midX, y: key.midY))
-        let open = try frame(h, "resultsStressKey")
-        // a tap through a Compare panel's own viewer
-        var views: [MTKView] = []
-        func collect(_ v: NSView) { if let m = v as? MTKView { views.append(m) }; v.subviews.forEach(collect) }
-        collect(h.view)
-        var read = false
-        search: for mtk in views.reversed() {   // the panels sit above the Results viewer
-            guard let click = mtk.gestureRecognizers.first(where: { ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 1 }),
-                  let viewer = click.target as? MetalMeshView.Coordinator else { continue }
-            for dy in stride(from: -150.0, through: 150.0, by: 25) {
-                for dx in stride(from: -150.0, through: 150.0, by: 25) {
-                    viewer.pick(at: CGPoint(x: mtk.bounds.midX + dx, y: mtk.bounds.midY + dy), in: mtk); ui.pump(0.05)
-                    if let k = h.frames.all["resultsStressKey"], k.width > open.width + 20 { read = true; break search }
-                }
-            }
-        }
-        XCTAssertTrue(read, "★ a tap on a panel puts the versions' values on the one key")
-        XCTAssertEqual(h.frames.all.keys.filter { $0 == "resultsStressKey" }.count, 1, "still one key")
-        try ui.picture(h, "compare_one_key.png")
     }
 
     func testOnASmallIPadFoldedPanelsBecomePills() throws {

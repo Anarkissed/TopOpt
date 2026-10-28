@@ -86,8 +86,6 @@ public struct ResultsScreen: View {
     var onFullScreen: ((Bool) -> Void)?
     /// ★ Each load scenario's loads (indices + total kg), so a picked scenario's views start at its own loads.
     var scenarioLoads = ResultsScenarioLoads()
-    /// ★ Points on each load group's own faces (the light flow starts there), asked once when the screen opens.
-    var loadSurfacePoints: () -> [[SIMD3<Float>]] = { [] }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // ★ Results redesign state (his mockup, 2026-10-27)
@@ -95,11 +93,7 @@ public struct ResultsScreen: View {
     @State private var checksOpen = true
     @State private var detailsOpen = false
     @State private var detailsTab: ResultsDetailsTab = .strength
-    /// ★ His iPad 2026-10-28: the view buttons are LAYERS (Stress or Solid, X-ray) under one MOTION (Load paths / Bend /
-    /// Break, or none) — ResultsLayers holds the rules.
-    @State private var layers = ResultsLayers()
-    /// Stress colours mean something on the part right now (the legend shows whenever they do).
-    private var legendShown: Bool { layers.stress && model.hasStress }
+    @State private var viewMode: ResultsViewMode = .stress
     @State private var scenarioPick: String?
     @State private var compare: ResultsCompareSession?
     /// ★ only the model, the view cube and the view buttons (his note 2026-10-27)
@@ -167,7 +161,6 @@ public struct ResultsScreen: View {
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
                 canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
                 onFullScreen: ((Bool) -> Void)? = nil,
-                loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -197,7 +190,6 @@ public struct ResultsScreen: View {
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
-        self.loadSurfacePoints = loadSurfacePoints
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -252,10 +244,8 @@ public struct ResultsScreen: View {
             if fullScreen {
                 // ★ FULL SCREEN: the model, the view cube and the view buttons — nothing else
                 VStack(alignment: .trailing, spacing: DS.Space.m) {
-                    ResultsViewModePicker(modes: viewModes, isOn: { layers.isOn($0) },
-                                          tap: { layers.tap($0, hasStress: model.hasStress) }, fullScreen: $fullScreen)
+                    ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
                     motionBar
-                    stressKey   // ★ 10-28: the legend stays whenever the colours mean something — full screen too
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -264,8 +254,8 @@ public struct ResultsScreen: View {
             topBar
             // M7.viz.2: worst-point callout — in the Stress view, out of the way of an explore reading. (★ his iPad
             // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
-            if legendShown, layers.motion == nil, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
-            if layers.motion == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
+            if viewMode == .stress, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
+            if viewMode == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
             }
@@ -275,7 +265,7 @@ public struct ResultsScreen: View {
             // history — which is a reject-class honesty violation for a remote run (the
             // worker never serialises keyframes, 097). No keyframes → no playbar.
             if model.hasHistory, !fullScreen { mediaPlayer }
-            if legendShown { stressProbeCallout.ignoresSafeArea() }
+            if viewMode == .stress, model.hasStress, !fullScreen { stressProbeCallout.ignoresSafeArea() }
             orientationGizmo
             if compare != nil {
                 ResultsCompareView(model: model, rows: versionRows, session: $compare, scenarioPick: $scenarioPick,
@@ -289,11 +279,10 @@ public struct ResultsScreen: View {
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
-        .onChange(of: layers.motion) { applyMotion($0) }
-        .onChange(of: layers.stress) { on in model.stressOn = on; if !on { stressProbe = nil } }
-        .onChange(of: model.selectedIndex) { _ in stressProbe = nil; applyMotion(layers.motion) }   // a new version's views start from rest
+        .onChange(of: viewMode) { applyViewMode($0); stressProbe = nil }
+        .onChange(of: model.selectedIndex) { _ in applyViewMode(viewMode) }   // a new version's views start from rest
         // ★ his ask 2026-10-27: the Scenario menu changes the views — the picked scenario's own fields, from rest
-        .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyMotion(layers.motion) }
+        .onChange(of: scenarioPick) { p in model.viewScenario = p; stressProbe = nil; applyViewMode(viewMode) }
         .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
         // ★ one at a time: opening the key folds Checks and closes Details; opening either minimises the key
         .onChange(of: stressKeyMinimized) { m in
@@ -316,7 +305,7 @@ public struct ResultsScreen: View {
             // GizmoFrame track to localise the frame collapse (see the handoff).
             let animating = model.playing
                 || (motionPlaying && model.flexOn && !reduceMotion)
-                || (motionPlaying && layers.motion == .loadPaths && model.lightFlow != nil && !reduceMotion)
+                || (motionPlaying && model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
                 || (motionPlaying && model.pushActive && !reduceMotion)
             if animating {
                 os_signpost(.event, log: resultsSignpost, name: "playback_tick")
@@ -332,8 +321,8 @@ public struct ResultsScreen: View {
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
             // reduced-motion, which freezes the arrows mid-path with clean heads. The arrows travel; they never wiggle
             // (flowWiggle 0, his note 2026-10-27).
-            if motionPlaying, layers.motion == .loadPaths, model.lightFlow != nil, !reduceMotion {
-                model.advanceLightPhase(1.0 / 30.0)   // ★ 10-28: the light sweeps through the part
+            if motionPlaying, model.loadPathOn, !model.flowReduced(reduceMotion: reduceMotion) {
+                model.advanceFlowClock(1.0 / 30.0)
             }
             // Break: the load climbs to the one that breaks it, holds there, and climbs again.
             if motionPlaying, model.pushActive, !reduceMotion, let fp = model.failurePrediction {
@@ -357,13 +346,11 @@ public struct ResultsScreen: View {
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
             model.scenarioLoads = scenarioLoads       // ★ each scenario's own loads
-            model.loadSurfacePoints = loadSurfacePoints()   // ★ where the light starts: on the load faces themselves
             model.viewScenario = scenarioPick
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
-            layers = ResultsLayers(stress: model.hasStress)
-            model.stressOn = layers.stress
-            applyMotion(nil)
+            viewMode = model.hasStress ? .stress : .solid
+            applyViewMode(viewMode)
         }
         .sheet(isPresented: Binding(
             get: { if case .ready = videoExport.state { return true } else { return false } },
@@ -609,13 +596,6 @@ public struct ResultsScreen: View {
             let heads = model.flowHeadPositions(reduceMotion: reduceMotion)
             return model.flowStressTints(for: mesh, field: field, heads: heads)
         }
-        // ★ his iPad 2026-10-28: Load paths is light travelling through the part, painted on its own surface — and with the
-        // Stress layer on, the light is the stress it passes through
-        if layers.motion == .loadPaths {
-            guard let lf = model.lightFlow, let mesh = viewerMesh, lf.arrival.count == mesh.flat.vertexCount else { return nil }
-            let colours = legendShown ? model.selectedStressField.map { model.stressTints(for: mesh, field: $0) } : nil
-            return lf.tints(phase: Float(model.lightPhase), lightColours: colours)
-        }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
@@ -625,20 +605,12 @@ public struct ResultsScreen: View {
     /// when a deflection is animating (flex loop / failure push) so the part visibly
     /// flushes blue→red as it moves (M7.viz coupling). Sampled against `viewerMesh`,
     /// so during the history morph it colors whichever keyframe is on screen.
-    private var showStressColors: Bool { legendShown }   // ★ 10-28: the Stress layer decides — moving or not (Solid: grey)
+    private var showStressColors: Bool { model.stressOn || deflectionActive }
 
     /// The load multiple the stress field is colored at this frame (1× at rest, the
     /// flex amplitude while wobbling, the push scrub while driving to failure). Passed
     /// to the viewer so it re-uploads the recolored tints as the multiplier moves.
-    /// ★ 10-28: the TRUE load the colours show — the bend's share of the load (0…1 through the loop), the push's multiple
-    /// in Break, 1 at rest — so the legend's numbers are the part's (the old flex colours were boosted to hit red).
-    private var stressMultiplier: Double {
-        switch layers.motion {
-        case .bend: return model.flexAmplitude(reduceMotion: reduceMotion)
-        case .breakIt: return model.pushActive ? model.pushFactor : 1
-        default: return 1
-        }
-    }
+    private var stressMultiplier: Double { model.stressColorMultiplier(reduceMotion: reduceMotion) }
 
     /// The mesh the viewer shows. When the variant has an optimization history and
     /// stress is off, Play scrubs THROUGH the history keyframes (the real "watch it
@@ -721,7 +693,7 @@ public struct ResultsScreen: View {
 
     /// The body opacity for the current flow body mode (x-ray/stress translucent,
     /// solid opaque); 1 when the overlay is off (the normal opaque draw).
-    private var bodyAlpha: Float { layers.xray ? 0.3 : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
+    private var bodyAlpha: Float { viewMode == .xray ? 0.3 : loadPathActive ? model.flowBodyMode.bodyAlpha : 1 }
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -734,8 +706,7 @@ public struct ResultsScreen: View {
     /// amplitude (reduced-motion pins amplitude at 1); for the viz.6 push scrub it is
     /// the load-proportional push exaggeration (a static scrub — no loop).
     private var flexScale: Float {
-        // ★ 10-28: Break bends with the SAME exaggeration as Bend, at the pushed load (true shape × the slider)
-        if pushActive { return model.flexExaggeration * Float(model.pushFactor) }
+        if pushActive { return model.pushFlexScale() }
         return flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
     }
 
@@ -1244,12 +1215,13 @@ public struct ResultsScreen: View {
                     .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
                     .accessibilityIdentifier("results-scenario-views-note")
             }
-            ResultsViewModePicker(modes: viewModes, isOn: { layers.isOn($0) },
-                                  tap: { layers.tap($0, hasStress: model.hasStress) }, fullScreen: $fullScreen)
+            ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
             motionBar
-            // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it — and (10-28) it is
-            // there whenever the part wears stress colours: still, bending, breaking or carrying the light
-            stressKey
+            // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it
+            if viewMode == .stress, model.hasStress {
+                ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption,
+                                     reading: stressReading, minimized: $stressKeyMinimized)
+            }
             ResultsChecksAndDetails(checks: checks, checksOpen: $checksOpen, detailsOpen: $detailsOpen, tab: $detailsTab,
                                     versionTitle: selectedRow?.title ?? "",
                                     rows: { model.detailRows($0, version: selectedRow) }, pill: crowded)
@@ -1266,41 +1238,12 @@ public struct ResultsScreen: View {
     /// The stress at the tapped point — the SAME field value the colour there is painted from.
     private var stressReading: Double? {
         guard let p = stressProbe, let f = model.selectedStressField else { return nil }
-        return Double(f.value(at: p)) * stressMultiplier   // ★ 10-28: the value the colour there shows, at the shown load
-    }
-    /// ★ 10-28: where the tapped spot is ON SCREEN — on the bent part while it bends ("it should show the BENT part").
-    private var stressProbeShown: SIMD3<Float>? {
-        guard let p = stressProbe else { return nil }
-        guard deflectionActive, flexScale != 0, let d = model.selectedDisplacementField else { return p }
-        return p + d.displacement(at: p) * flexScale
-    }
-    /// ★ His iPad 2026-10-28: the Exaggeration slider (Bend and Break), straight onto the model's one value.
-    private var exaggerationBinding: Binding<Double> {
-        Binding(get: { Double(model.flexExaggeration) }, set: { model.setFlexExaggeration(Float($0)) })
-    }
-    /// What the colours show right now, for the key.
-    private var legendNote: String? {
-        switch layers.motion {
-        case .bend:
-            return "At \(Int((stressMultiplier * 100).rounded()))% of your load · bend shown \(Int(model.flexExaggeration))× exaggerated"
-        case .breakIt:
-            return String(format: "At %.1f× your load · bend shown %d× exaggerated", stressMultiplier, Int(model.flexExaggeration))
-        case .loadPaths:
-            return "The light takes the colour of the stress it passes through"
-        default:
-            return nil
-        }
-    }
-    @ViewBuilder private var stressKey: some View {
-        if legendShown {
-            ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption, note: legendNote,
-                                 reading: stressReading, minimized: $stressKeyMinimized)
-        }
+        return Double(f.value(at: p))
     }
 
     /// The tapped point on the model: an arrow and its value, re-projected every frame so it rides the part through an orbit.
     @ViewBuilder private var stressProbeCallout: some View {
-        if let p = stressProbeShown, let r = stressReading, let s = projection?.project(p) {
+        if let p = stressProbe, let r = stressReading, let s = projection?.project(p) {
             HStack(spacing: 5) {
                 Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
                 Text(String(format: "%.2f MPa", r)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
@@ -1323,13 +1266,11 @@ public struct ResultsScreen: View {
 
     /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
     /// 2026-10-27), each starting from rest and playing.
-    private func applyMotion(_ m: ResultsViewMode?) {
+    private func applyViewMode(_ m: ResultsViewMode) {
+        model.stressOn = m == .stress
         model.flexOn = m == .bend
         model.setFlexPhase(0)
-        // ★ 10-28: the old arrows (comets from the load groups' centres, through a direction field) are retired — the light
-        // flow below replaces them
-        if model.loadPathOn { model.toggleLoadPath() }
-        if m == .loadPaths { model.setLightPhasePosition(0); model.prepareLightFlow() }
+        if (m == .loadPaths) != model.loadPathOn { model.toggleLoadPath() }
         model.failureOn = m == .breakIt
         model.setPush(factor: 1)
         model.flowReducedStatic = false
@@ -1338,7 +1279,7 @@ public struct ResultsScreen: View {
     }
 
     /// The open key is exploring (the Lattice key's process).
-    private var exploring: Bool { legendShown && !stressKeyMinimized }
+    private var exploring: Bool { viewMode == .stress && model.hasStress && !stressKeyMinimized }
 
     /// The double tap's way out: the reading goes and the key folds back to its pill.
     private func leaveExplore() {
@@ -1348,17 +1289,15 @@ public struct ResultsScreen: View {
 
     /// ★ His iPad 2026-10-27: under the view buttons, the moving view's Play / Pause and its slider.
     @ViewBuilder private var motionBar: some View {
-        switch layers.motion {
+        switch viewMode {
         case .bend where model.flexOn:
             ResultsMotionBar(title: "Bend", readout: "\(Int(model.flexExaggeration))× exaggerated · not to scale",
                              alarm: false, playing: $motionPlaying, position: model.flexPhase,
-                             scrub: { model.setFlexPhase($0) }, exaggeration: exaggerationBinding)
-        case .loadPaths:
-            ResultsMotionBar(title: "Load flow",
-                             readout: model.lightFlow != nil ? "the load travelling through the part, as light"
-                                 : model.lightFlowBuilding ? "Tracing the load through the part…" : "This run has no load points to start from",
-                             alarm: false, playing: $motionPlaying, position: model.lightPhasePosition,
-                             scrub: { model.setLightPhasePosition($0) })
+                             scrub: { model.setFlexPhase($0) })
+        case .loadPaths where model.loadPathOn:
+            ResultsMotionBar(title: "Load flow", readout: "how the load travels through the part",
+                             alarm: false, playing: $motionPlaying, position: model.flowLoopPosition,
+                             scrub: { model.setFlowLoopPosition($0) })
         case .breakIt:
             if let fp = model.failurePrediction {
                 ResultsMotionBar(title: "Break", readout: model.pushReadout(prediction: fp), alarm: model.atFailure,
@@ -1367,7 +1306,7 @@ public struct ResultsScreen: View {
                                  scrub: { p in
                                      breakClock = p * ResultsMotion.breakRampSeconds
                                      model.setPush(factor: ResultsMotion.pushFactor(position: p, multiplier: fp.multiplier))
-                                 }, exaggeration: exaggerationBinding)
+                                 })
             }
         default:
             EmptyView()

@@ -241,9 +241,8 @@ public struct DisplacementField: Sendable {
 public enum FlexAnimation {
     /// Exaggeration band the design calls for (50–100×). The default sits at the low
     /// end so the deflection reads on a phone screen without tearing the mesh apart.
-    /// ★ His iPad 2026-10-28: an Exaggeration slider "to make it bend more visually" — a wide band.
-    public static let minExaggeration: Float = 10
-    public static let maxExaggeration: Float = 300
+    public static let minExaggeration: Float = 50
+    public static let maxExaggeration: Float = 100
     public static let defaultExaggeration: Float = 60
 
     /// Clamp a user-chosen exaggeration into the [min, max] band.
@@ -1348,18 +1347,6 @@ public final class ResultsModel: ObservableObject {
         return f.isEmpty ? nil : stressTints(for: mesh, field: f)
     }
 
-    /// ★ Compare's key (his iPad 2026-10-28): one version's stress at a model point — from the SAME field its colours are
-    /// painted from (the picked scenario's when the run sent it); nil where that version has no material.
-    public func compareStress(_ tab: ResultVariantVM, at p: SIMD3<Float>) -> Double? {
-        guard let v = variant(for: tab) else { return nil }
-        let own = viewScenario.flatMap { n in v.scenarioFields.first { $0.name == n } }
-        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
-                            values: own?.vonMises ?? v.vonMisesField)
-        guard !f.isEmpty else { return nil }
-        let x = f.value(at: p)
-        return x > 0 ? Double(x) : nil
-    }
-
     /// A tab's own scenario results: its strengthen version's (each version is certified per scenario), else the run's.
     public func scenarios(for tab: ResultVariantVM?) -> [ScenarioResult] {
         if let tab, let s = reportBlocks?.strengthen, let vf = requestedVolumeFraction(of: tab),
@@ -2250,55 +2237,6 @@ public final class ResultsModel: ObservableObject {
     public func setFlowSpeed(_ v: Float) { flowSpeed = Swift.min(2.5, Swift.max(0.2, v)) }
     /// Set the flow wiggle amount, clamped to the prototype's band.
     public func setFlowWiggle(_ v: Float) { flowWiggle = Swift.min(2, Swift.max(0, v)) }
-
-    // MARK: ★ the load path as light (his iPad 2026-10-28 — LoadLightFlow.swift)
-
-    /// The light flow for the shown version + scenario, once built (nil while building, or with no load to start from).
-    @Published public private(set) var lightFlow: LoadLightFlow?
-    /// Where the sweep is (0 … `LoadLightFlow.sweepEnd`).
-    @Published public private(set) var lightPhase: Double = 0
-    /// ★ Points on each load group's own faces, in the run's load order (`loadLocations`'s groups).
-    public var loadSurfacePoints: [[SIMD3<Float>]] = [] {
-        didSet { if oldValue != loadSurfacePoints { lightFlowKey = nil } }
-    }
-    /// Where the light starts: on the loaded faces of the scenario whose fields are shown — the picked one, else the worst
-    /// case — never a group's centre (that can be the air between two arms) and never every scenario's loads at once.
-    var lightFlowSeeds: [SIMD3<Float>] {
-        guard !loadSurfacePoints.isEmpty else { return flowLoadSeeds }
-        let shown = viewScenarioSet != nil ? viewScenario : scenarios(for: selected).first(where: \.governs)?.name
-        let groups = shown.flatMap { scenarioLoads.indices[$0] } ?? Array(loadSurfacePoints.indices)
-        let pts = groups.filter { loadSurfacePoints.indices.contains($0) }.flatMap { loadSurfacePoints[$0] }
-        return pts.isEmpty ? flowLoadSeeds : pts
-    }
-    /// True while a build is running (the motion bar says so).
-    @Published public private(set) var lightFlowBuilding = false
-    private var lightFlowKey: String?
-
-    /// Build the light flow for the shown version + scenario (once per pair, off the main thread).
-    public func prepareLightFlow() {
-        let key = "\(selectedIndex)|\(viewScenario ?? "")"
-        guard key != lightFlowKey else { return }
-        lightFlowKey = key
-        lightFlow = nil
-        guard let mesh = selectedMesh, let field = selectedStressField else { lightFlowBuilding = false; return }
-        let positions = mesh.flat.positions, seeds = lightFlowSeeds
-        lightFlowBuilding = true
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let built = LoadLightFlow.build(positions: positions, field: field, seeds: seeds)
-            DispatchQueue.main.async {
-                guard let self, self.lightFlowKey == key else { return }
-                self.lightFlow = built
-                self.lightFlowBuilding = false
-            }
-        }
-    }
-    public func advanceLightPhase(_ dt: Double, sweepSeconds: Double = 3.2) {
-        lightPhase = (lightPhase + dt * Double(LoadLightFlow.sweepEnd) / sweepSeconds)
-            .truncatingRemainder(dividingBy: Double(LoadLightFlow.sweepEnd))
-    }
-    /// The slider's 0…1 is one sweep.
-    public var lightPhasePosition: Double { lightPhase / Double(LoadLightFlow.sweepEnd) }
-    public func setLightPhasePosition(_ p: Double) { lightPhase = min(1, max(0, p)) * Double(LoadLightFlow.sweepEnd) }
 
     /// Advance the flow clock by `dt` seconds (called by the view's ticker while the
     /// overlay is on and motion is allowed). Monotonic — the comet math wraps travel

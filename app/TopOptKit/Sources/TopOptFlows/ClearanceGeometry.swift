@@ -186,46 +186,6 @@ public struct ClearanceVolume: Equatable, Sendable {
 
     public var isDegenerate: Bool { if case .degenerate = shape { return true }; return false }
 
-    /// ★ His iPad 2026-10-28 ("I can't seem to tap on a primitive to select it"): where a tap's ray (model space, `dir` unit)
-    /// first enters this volume — 0 when it starts inside — or nil on a miss. A cylinder is the finite swept tube, a slab its
-    /// outward box; a shell / degenerate volume is not tappable.
-    public func rayEntry(origin o: SIMD3<Float>, dir d: SIMD3<Float>) -> Float? {
-        switch shape {
-        case let .cylinder(p, a, r, lo, hi):
-            // Slab along the axis, then the infinite cylinder; the entry is the later of the two entries.
-            let w = o - p, da = simd_dot(d, a), wa = simd_dot(w, a)
-            var tMin: Float = 0, tMax = Float.greatestFiniteMagnitude
-            if abs(da) < 1e-7 { if wa < lo || wa > hi { return nil } }
-            else {
-                let t1 = (lo - wa) / da, t2 = (hi - wa) / da
-                tMin = Swift.max(tMin, Swift.min(t1, t2)); tMax = Swift.min(tMax, Swift.max(t1, t2))
-            }
-            let dp = d - a * da, wp = w - a * wa
-            let A = simd_dot(dp, dp), B = 2 * simd_dot(dp, wp), C = simd_dot(wp, wp) - r * r
-            if A < 1e-12 { if C > 0 { return nil } }
-            else {
-                let disc = B * B - 4 * A * C
-                guard disc >= 0 else { return nil }
-                let q = disc.squareRoot()
-                tMin = Swift.max(tMin, (-B - q) / (2 * A)); tMax = Swift.min(tMax, (-B + q) / (2 * A))
-            }
-            return tMin <= tMax ? tMin : nil
-        case let .slab(c, n, u, v, hu, hv, depth):
-            let mid = c + n * (depth / 2)
-            var tMin: Float = 0, tMax = Float.greatestFiniteMagnitude
-            for (axis, half) in [(u, hu), (v, hv), (n, Swift.max(depth / 2, 0.25))] {
-                let e = simd_dot(mid - o, axis), f = simd_dot(d, axis)
-                if abs(f) < 1e-7 { if abs(e) > half { return nil }; continue }
-                let t1 = (e - half) / f, t2 = (e + half) / f
-                tMin = Swift.max(tMin, Swift.min(t1, t2)); tMax = Swift.min(tMax, Swift.max(t1, t2))
-                if tMin > tMax { return nil }
-            }
-            return tMin
-        case .shell, .degenerate:
-            return nil
-        }
-    }
-
     /// A swept-cylinder bolt clearance from a bore's exact geometry. `axialSpan` is
     /// the bore's through-part extent along the axis (t=0 at `geometry.axisPoint`),
     /// from the SAME tessellation the core reads. `marginMM`/`axialMM` are the

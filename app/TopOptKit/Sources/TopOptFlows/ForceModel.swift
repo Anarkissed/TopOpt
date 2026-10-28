@@ -276,11 +276,6 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// stable across a resolution change and a re-import), so a phantom bore stays
     /// deleted (BAR B3). Optional + only-present-when-used → byte-identical default.
     private var suppressedClearanceFaces: Set<Int32>? = nil
-    /// ★ His iPad 2026-10-28 (third report: "selected, auto keep clear on, no primitive"): a deleted / converted keep-clear
-    /// belongs to the GROUP it was deleted in. The per-face set above killed the hole's keep-clear in EVERY group holding
-    /// it, and only forgot it once the hole left every group. Now `suppressedClearanceFaces` is only the LEGACY set read
-    /// from older projects until `migrateLegacySuppressions` sorts it into groups.
-    private var suppressedClearanceByGroup: [UUID: Set<Int32>]? = nil
 
     public init() {}
 
@@ -573,7 +568,6 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if var map = faceProtect { map[id] = nil; faceProtect = map.isEmpty ? nil : map }
         if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
         if var map = manualPrimitives { map[id] = nil; manualPrimitives = map.isEmpty ? nil : map }
-        if var map = suppressedClearanceByGroup { map[id] = nil; suppressedClearanceByGroup = map.isEmpty ? nil : map }
         pruneBoreOverrides { $0 != id }
     }
 
@@ -631,10 +625,6 @@ public struct ForceModel: Equatable, Sendable, Codable {
             let pruned = set.intersection(live)
             syncExcluded = pruned.isEmpty ? nil : pruned
         }
-        if let map = suppressedClearanceByGroup {   // ★ a deleted group's marks go with it
-            let pruned = map.filter { live.contains($0.key) }
-            suppressedClearanceByGroup = pruned.isEmpty ? nil : pruned
-        }
         if let map = manualPrimitives {
             let pruned = map.filter { live.contains($0.key) }
             manualPrimitives = pruned.isEmpty ? nil : pruned
@@ -677,70 +667,31 @@ public struct ForceModel: Equatable, Sendable, Codable {
         manualPrimitives = map.isEmpty ? nil : map
     }
 
-    /// Whether `group`'s AUTO clearance on `face` was deleted (its keep-out is suppressed in that group only). A legacy
-    /// (per-face) mark not yet migrated still counts.
-    public func isClearanceFaceSuppressed(_ face: FaceID, in group: UUID) -> Bool {
-        (suppressedClearanceByGroup?[group]?.contains(face) ?? false) || (suppressedClearanceFaces?.contains(face) ?? false)
+    /// Whether an AUTO clearance face was deleted (its keep-out is suppressed).
+    public func isClearanceFaceSuppressed(_ face: FaceID) -> Bool {
+        suppressedClearanceFaces?.contains(face) ?? false
     }
 
-    /// DELETE an auto-found clearance primitive (the "−" on an auto bore/plane row) IN ONE GROUP: suppress that face's
-    /// keep-out there. The face stays in the group (it may still be an anchor); only its clearance is dropped, and only
-    /// in this group. Persisted here AND in the working-copy sidecar (B3).
-    public mutating func suppressClearanceFace(_ face: FaceID, in group: UUID) {
-        var map = suppressedClearanceByGroup ?? [:]
-        map[group, default: []].insert(face)
-        suppressedClearanceByGroup = map
+    /// DELETE an auto-found clearance primitive (the "−" on an auto bore/plane row):
+    /// suppress that face's keep-out. The face stays in its group (it may still be an
+    /// anchor); only its clearance is dropped. Persisted here AND in the working-copy
+    /// sidecar, so it stays deleted across re-detect / resolution / re-import (B3).
+    public mutating func suppressClearanceFace(_ face: FaceID) {
+        var set = suppressedClearanceFaces ?? []
+        set.insert(face)
+        suppressedClearanceFaces = set
     }
 
-    /// Un-delete a suppressed auto face in one group (undo of a delete; Auto keep clear switched on). Clears a legacy
-    /// per-face mark too, so the face really clears again.
-    public mutating func unsuppressClearanceFace(_ face: FaceID, in group: UUID) {
-        if var map = suppressedClearanceByGroup, var set = map[group] {
-            set.remove(face)
-            map[group] = set.isEmpty ? nil : set
-            suppressedClearanceByGroup = map.isEmpty ? nil : map
-        }
-        if var legacy = suppressedClearanceFaces { legacy.remove(face); suppressedClearanceFaces = legacy.isEmpty ? nil : legacy }
+    /// Un-delete a previously suppressed auto face (undo of a delete).
+    public mutating func unsuppressClearanceFace(_ face: FaceID) {
+        guard var set = suppressedClearanceFaces else { return }
+        set.remove(face)
+        suppressedClearanceFaces = set.isEmpty ? nil : set
     }
 
-    /// A group's suppressed faces.
-    public func suppressedClearanceFaces(in group: UUID) -> [FaceID] {
-        suppressedClearanceByGroup?[group].map { $0.sorted() } ?? []
-    }
-    /// Every per-group mark (for the sidecar writer).
-    public var suppressedClearanceByGroupList: [(group: UUID, faces: [FaceID])] {
-        (suppressedClearanceByGroup ?? [:]).map { ($0.key, $0.value.sorted()) }.sorted { $0.group.uuidString < $1.group.uuidString }
-    }
-    /// The legacy per-face marks still waiting for `migrateLegacySuppressions` (the sidecar keeps them until then).
+    /// The full set of suppressed auto faces (for the sidecar writer).
     public var suppressedClearanceFaceList: [FaceID] {
         suppressedClearanceFaces.map { $0.sorted() } ?? []
-    }
-
-    /// Drop every mark whose face its group no longer holds — taking a hole out of a group and picking it again brings
-    /// its keep-clear back (his iPad 10-27/10-28). Returns whether anything went.
-    @discardableResult
-    public mutating func forgetSuppressions(held: [UUID: Set<FaceID>]) -> Bool {
-        guard let map = suppressedClearanceByGroup else { return false }
-        var out: [UUID: Set<Int32>] = [:]
-        for (g, set) in map { let kept = set.intersection(held[g] ?? []); if !kept.isEmpty { out[g] = kept } }
-        let changed = out != map
-        suppressedClearanceByGroup = out.isEmpty ? nil : out
-        return changed
-    }
-
-    /// Sort the legacy per-face marks into groups: `owners(face)` names the groups that really deleted (or converted) it.
-    /// Everything else is forgotten — a hole held by a group that never deleted its keep-clear clears again.
-    public mutating func migrateLegacySuppressions(owners: (FaceID) -> [UUID]) {
-        guard let legacy = suppressedClearanceFaces else { return }
-        for f in legacy { for g in owners(f) { suppressClearanceFace(f, in: g) } }
-        suppressedClearanceFaces = nil
-    }
-
-    /// Bulk-load the per-group marks (sidecar auto-apply on import; groups that no longer exist are skipped by the caller).
-    public mutating func loadSuppressedClearance(_ list: [(group: UUID, faces: [FaceID])]) {
-        var map: [UUID: Set<Int32>] = [:]
-        for e in list where !e.faces.isEmpty { map[e.group, default: []].formUnion(e.faces) }
-        suppressedClearanceByGroup = map.isEmpty ? nil : map
     }
 
     /// Every group's manual primitives, flattened with the owning group (sidecar).
@@ -748,7 +699,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
         (manualPrimitives ?? [:]).map { ($0.key, $0.value) }
     }
 
-    /// Bulk-load a LEGACY per-face deletion set (an older sidecar) — sorted into groups by `migrateLegacySuppressions`.
+    /// Bulk-load the deletion set (sidecar auto-apply on import).
     public mutating func loadSuppressedClearanceFaces(_ faces: [FaceID]) {
         let set = Set(faces)
         suppressedClearanceFaces = set.isEmpty ? nil : set
@@ -968,8 +919,7 @@ extension ForceModel {
         case faceProtect            // per-group Protect affix (handoff 124, optional)
         case faceProtectDepthMM     // ONE global preserve-depth in mm (handoff 124, optional)
         case manualPrimitives       // user-placed primitives (handoff group-editing, optional)
-        case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional) — LEGACY, per face
-        case suppressedClearanceByGroup   // ★ 10-28: the same, per group
+        case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional)
         case gravityBaseModel       // purely-visual arrow base (gravity round 2, optional)
         case scenarios              // load scenarios (2026-10-26, optional)
         case safetyMargin           // the safety margin (2026-10-26, optional; nil = 150 %)
@@ -1017,7 +967,6 @@ extension ForceModel {
                                                  forKey: .manualPrimitives)
         suppressedClearanceFaces = try c.decodeIfPresent(Set<Int32>.self,
                                                          forKey: .suppressedClearanceFaces)
-        suppressedClearanceByGroup = try c.decodeIfPresent([UUID: Set<Int32>].self, forKey: .suppressedClearanceByGroup)
         // Gravity round 2 — the purely-visual arrow base. Absent in pre-round-2 snapshots →
         // nil (draw from the mesh centre), so old projects load with gravity unchanged (V6).
         gravityBaseModel = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravityBaseModel)
@@ -1048,7 +997,6 @@ extension ForceModel {
         // manual primitives and no deletions is byte-identical to a pre-handoff one.
         try c.encodeIfPresent(manualPrimitives, forKey: .manualPrimitives)
         try c.encodeIfPresent(suppressedClearanceFaces, forKey: .suppressedClearanceFaces)
-        try c.encodeIfPresent(suppressedClearanceByGroup, forKey: .suppressedClearanceByGroup)
         // Gravity round 2 — only emit the arrow base when the user has placed one, so a
         // project that never touched it is byte-identical to a pre-round-2 snapshot (V6).
         try c.encodeIfPresent(gravityBaseModel, forKey: .gravityBaseModel)

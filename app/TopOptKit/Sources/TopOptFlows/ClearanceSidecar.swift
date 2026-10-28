@@ -37,35 +37,22 @@ public struct ClearanceSidecar: Equatable, Sendable, Codable {
         }
     }
 
-    /// ★ 10-28: one group's deleted auto faces.
-    public struct GroupFaces: Equatable, Sendable, Codable {
-        public var group: UUID
-        public var faces: [Int32]
-        public init(group: UUID, faces: [Int32]) { self.group = group; self.faces = faces.sorted() }
-    }
-
     public var version: Int
     /// Auto-found clearance faces the user deleted (the "−" on an auto row). This is
     /// the B3 payload: a phantom bore stays deleted because import re-applies this.
-    /// ★ 10-28: LEGACY per-face marks only (an older file); new deletions are per group in `suppressedByGroup`.
     public var suppressedAutoFaces: [Int32]
     public var manual: [GroupPrimitives]
-    /// ★ 10-28: each group's deleted auto faces (absent in an older sidecar).
-    public var suppressedByGroup: [GroupFaces]?
 
     public init(version: Int = 1, suppressedAutoFaces: [Int32] = [],
-                manual: [GroupPrimitives] = [], suppressedByGroup: [GroupFaces] = []) {
+                manual: [GroupPrimitives] = []) {
         self.version = version
         self.suppressedAutoFaces = suppressedAutoFaces.sorted()
         self.manual = manual
-        self.suppressedByGroup = suppressedByGroup.isEmpty ? nil : suppressedByGroup
     }
 
     /// Nothing to persist → the sidecar should be DELETED (so a project cleared back
     /// to defaults leaves no stale file, mirroring paint's empty-overlay delete).
-    public var isEmpty: Bool {
-        suppressedAutoFaces.isEmpty && manual.allSatisfy { $0.primitives.isEmpty } && (suppressedByGroup ?? []).allSatisfy { $0.faces.isEmpty }
-    }
+    public var isEmpty: Bool { suppressedAutoFaces.isEmpty && manual.allSatisfy { $0.primitives.isEmpty } }
 
     // ── File location + IO (best-effort). ────────────────────────────────────
     /// The sidecar path for a working-copy model at `modelPath`: `<modelPath>.clearances.json`

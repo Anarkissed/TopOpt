@@ -115,9 +115,7 @@ struct PieceRowPick: ViewModifier {
             .contentShape(Rectangle())
             .onTapGesture(perform: action)
             .background(GeometryReader { geo in
-                Color.clear.preference(key: ChromeKeepOutKey.self, value: picked
-                    ? ["piecePick-\(id)": geo.frame(in: .global), "piecePicked:\(id)": geo.frame(in: .global)]   // the picked one, for tests
-                    : ["piecePick-\(id)": geo.frame(in: .global)])
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["piecePick-\(id)": geo.frame(in: .global)])
             }.allowsHitTesting(false))
             .accessibilityAddTraits(picked ? [.isButton, .isSelected] : .isButton)
             .accessibilityIdentifier(id)

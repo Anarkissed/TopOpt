@@ -18,16 +18,9 @@ struct ResultsCompareView: View {
     let use: (Int) -> Void
 
     @StateObject private var camera = OrbitCameraModel()
-    /// ★ 10-28: the same layers as Results — Stress or Solid, with X-ray on top of either (no motion here).
-    @State private var layers = ResultsLayers(stress: false)
+    @State private var mode: ResultsViewMode = .solid
     @State private var detailsOpen = false
     @State private var detailsTab: ResultsDetailsTab = .strength
-    /// ★ His iPad 2026-10-28: ONE key for every panel; a tap on any panel reads EVERY shown version at that spot.
-    @State private var probe: SIMD3<Float>?
-    @State private var keyMinimized = true
-    @State private var projections: [Int: CameraProjection] = [:]
-    private var keyShown: Bool { layers.stress && model.hasStress }
-    private var exploring: Bool { keyShown && !keyMinimized }
     static let sheetHeight: CGFloat = 400
 
     var body: some View {
@@ -44,21 +37,6 @@ struct ResultsCompareView: View {
                     Color.clear.frame(height: detailsOpen ? Self.sheetHeight : 52)
                 }
                 .padding(.horizontal, PageChrome.edge).padding(.top, PageChrome.edge).padding(.bottom, PageChrome.edge)
-                if keyShown {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption,
-                                                 readings: probe.map { p in s.shown.map { tab in
-                                                     ResultsStressExplore.Reading(label: row(tab)?.title ?? "Version",
-                                                                                  value: tabVM(tab).flatMap { model.compareStress($0, at: p) })
-                                                 } } ?? [],
-                                                 minimized: $keyMinimized)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, PageChrome.edge + 44 + DS.Space.m + 56).padding(.trailing, PageChrome.edge + DS.Space.m)
-                }
                 if detailsOpen { detailsSheet(s).transition(.move(edge: .bottom)) }
                 VStack {
                     Spacer()
@@ -71,8 +49,6 @@ struct ResultsCompareView: View {
             }
         }
         .background(ResultsChrome.publish("compareScreen"))
-        .onChange(of: keyMinimized) { if $0 { probe = nil } }
-        .onChange(of: layers.stress) { if !$0 { probe = nil } }
         .animation(DS.Motion.sheetIn, value: detailsOpen)
     }
 
@@ -96,8 +72,7 @@ struct ResultsCompareView: View {
             Spacer()
             let sc = model.scenarios(for: model.selected)
             if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
-            ResultsViewModePicker(modes: model.hasStress ? [.stress, .solid, .xray] : [.solid, .xray],
-                                  isOn: { layers.isOn($0) }, tap: { layers.tap($0, hasStress: model.hasStress) })   // icons
+            ResultsViewModePicker(modes: model.hasStress ? [.stress, .solid, .xray] : [.solid, .xray], mode: $mode)   // icons
         }
     }
 
@@ -109,26 +84,9 @@ struct ResultsCompareView: View {
         let vm = tabVM(tab)
         ZStack(alignment: .top) {
             if let vm, let mesh = model.compareMesh(vm) {
-                MetalMeshView(mesh: mesh, camera: camera, onProjection: { projections[tab] = $0 },
-                              stressTints: keyShown ? model.compareStressTints(vm) : nil,
-                              bodyAlpha: layers.xray ? 0.3 : 1)
-                    // ★ 10-28: open key → a tap on this panel reads every version at that spot; a double tap leaves
-                    .onSurfacePoint { p in if exploring, let p { probe = p } }
-                    .onExploreExit(exploring ? { probe = nil; keyMinimized = true } : nil)
-                if keyShown, let p = probe, let s = projections[tab]?.project(p) {
-                    let v = model.compareStress(vm, at: p)
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrowtriangle.left.fill").font(.system(size: 11)).foregroundStyle(DS.Color.accent.color)
-                        Text(v.map { String(format: "%.2f MPa", $0) } ?? "no material").font(.system(size: 13, weight: .semibold))
-                            .monospacedDigit().foregroundStyle(DS.Color.textPrimary.color)
-                    }
-                    .padding(.horizontal, 9).padding(.vertical, 6)
-                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.95)).overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                    .fixedSize().offset(x: s.x + 8, y: s.y - 15)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("compare-stress-probe-\(slot)")
-                }
+                MetalMeshView(mesh: mesh, camera: camera,
+                              stressTints: mode == .stress ? model.compareStressTints(vm) : nil,
+                              bodyAlpha: mode == .xray ? 0.3 : 1)
             } else {
                 Text("This version’s shape isn’t on this device").font(.system(size: 14))
                     .foregroundStyle(DS.Color.textTertiary.color).frame(maxWidth: .infinity, maxHeight: .infinity)
