@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -394,6 +395,32 @@ FragileJoints fragile_joints(const VoxelGrid& g, const std::vector<double>& rho,
 
 std::string scenario_unheld_reason(const std::string& name) {
   return "Scenario \u201C" + name + "\u201D's load has no path to its anchors";
+}
+
+std::string scenario_too_light_reason(
+    const std::vector<std::pair<std::string, double>>& name_and_load_n) {
+  if (name_and_load_n.size() < 2) return "";
+  std::size_t heaviest = 0;
+  for (std::size_t s = 1; s < name_and_load_n.size(); ++s)
+    if (name_and_load_n[s].second > name_and_load_n[heaviest].second) heaviest = s;
+  const double top = name_and_load_n[heaviest].second;
+  const double floor_n = kScenarioMinLoadShare * top;
+  for (const auto& [name, load] : name_and_load_n) {
+    if (!(load < floor_n * (1.0 - 1e-9))) continue;  // exactly at the line runs
+    auto kg = [](double n) {
+      char b[32];
+      std::snprintf(b, sizeof b, "%.3g kg", n / 9.80665);
+      return std::string(b);
+    };
+    char pct[16];
+    std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * kScenarioMinLoadShare);
+    return "Scenario \u201C" + name + "\u201D's load (" + kg(load) +
+           ") is too small next to Scenario \u201C" + name_and_load_n[heaviest].first +
+           "\u201D (" + kg(top) + "): a scenario needs at least " + pct +
+           " of the heaviest one's load (" + kg(floor_n) +
+           " here). Raise it or remove the scenario.";
+  }
+  return "";
 }
 
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,

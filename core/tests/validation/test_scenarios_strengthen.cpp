@@ -14,7 +14,8 @@
 //       worst scenario's and at least its target;
 //   (c) a refused version's note names its reason;
 //   (d) the plain refusals: "Scenario “<name>” has no anchor switched on", "Scenario
-//       “<name>” has no load", "Load scenarios can't be combined with bolt bearings yet".
+//       “<name>” has no load", "Load scenarios can't be combined with bolt bearings yet",
+//       and a scenario under 3 % of the heaviest one's load (his decision 2026-10-28).
 // OCCT-free (a mesh part).
 
 #include "topopt/job.hpp"
@@ -350,8 +351,22 @@ int main() {
   CHECK(refusal(job_json("[" + both + ", " + free_b + "]", a_bot, b_bot, a_top, b_top,
                          "\"safety_margin\": 2.0, ")).empty(),
         "(d) a safety margin of 200 % parses");
-  std::printf("[scen+str] refusals: \"%s\" / \"%s\" / \"%s\" / \"%s\"\n", no_anchor.c_str(),
-              no_load.c_str(), bearing.c_str(), low.c_str());
+  // THE LIGHTEST SCENARIO (his decision of 2026-10-28): under 3 % of the heaviest one's
+  // load a scenario is refused with a plain line; exactly 3 % runs. Scenario 1 here
+  // pushes 40 N on each block (80 N in all), so 3 % is 2.4 N.
+  const std::string light =
+      refusal(job_json("[" + both + ", " + scenario_json("Twist", {{b_top, -2.39}}, {a_bot}) +
+                           "]", a_bot, b_bot, a_top, b_top));
+  CHECK(light.find("Scenario \xE2\x80\x9CTwist\xE2\x80\x9D's load (0.244 kg) is too small "
+                   "next to Scenario \xE2\x80\x9C" "Both anchored\xE2\x80\x9D (8.16 kg): a "
+                   "scenario needs at least 3% of the heaviest one's load (0.245 kg here). "
+                   "Raise it or remove the scenario.") != std::string::npos,
+        "(d) a scenario under 3 % of the heaviest: the plain line");
+  CHECK(refusal(job_json("[" + both + ", " + scenario_json("Twist", {{b_top, -2.4}}, {a_bot}) +
+                             "]", a_bot, b_bot, a_top, b_top)).empty(),
+        "(d) a scenario at exactly 3 % of the heaviest parses");
+  std::printf("[scen+str] refusals: \"%s\" / \"%s\" / \"%s\" / \"%s\" / \"%s\"\n",
+              no_anchor.c_str(), no_load.c_str(), bearing.c_str(), low.c_str(), light.c_str());
 
   if (g_failures == 0) {
     std::printf("scenarios + strengthen: all %d checks passed\n", g_checks);

@@ -7,6 +7,7 @@
 #include <optional>  // the optional design-volume box (M7.dom-core)
 #include <stdexcept>  // the driver throws std::invalid_argument (see below)
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "topopt/analyze.hpp"            // FixedDesignAnalysis (load scenarios)
@@ -1083,10 +1084,26 @@ inline constexpr double kScenarioUnheldShare = 0.05;
 // (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
 // the solve is never singular.
 inline constexpr double kScenarioWeakSpringRel = 1e-6;
+// THE LIGHTEST SCENARIO (his decision, 2026-10-28: "0.5 kg is too low ... make it fail
+// with a notice"; the line at 3 %). A scenario whose load (the sum of its groups' force
+// sizes) is under this share of the heaviest scenario's is REFUSED, with the plain line
+// scenario_too_light_reason. Under it a scenario cannot shape the part: on his Carriage
+// Arms a 0.5 kg twist (1 % of 51 kg) stalled multigrid on 9 solves with load-scaled
+// springs, and with springs held stiffer it was too faint to grow the connection (the
+// fallback bridge fired).
+inline constexpr double kScenarioMinLoadShare = 0.03;
 // ...times (F_s / F_max)^2 for scenario s, F the 2-norm of its nodal loads (his ask of
-// 2026-10-28: the springs follow the load), never below this (a 1 % load): the springs
-// stay >= 1e-10 E h, so a piece they alone hold still solves.
-inline constexpr double kScenarioWeakSpringMinScale = 1e-4;
+// 2026-10-28: the springs follow the load), never below this: the square of the lightest
+// load a scenario may have, so every scenario that runs has load-consistent springs.
+inline constexpr double kScenarioWeakSpringMinScale =
+    kScenarioMinLoadShare * kScenarioMinLoadShare;
+// "" when every scenario carries at least kScenarioMinLoadShare of the heaviest one's
+// load, else the plain line for the first that does not: "Scenario “2”'s load (0.5 kg)
+// is too small next to Scenario “1” (51 kg): a scenario needs at least 3% of the
+// heaviest one's load (1.53 kg here). Raise it or remove the scenario." Loads in N
+// (each scenario: the sum of its groups' force sizes), named in kg (/ 9.80665).
+std::string scenario_too_light_reason(
+    const std::vector<std::pair<std::string, double>>& name_and_load_n);
 // The plain wording he reads: "Scenario “<name>”'s load has no path to its anchors".
 std::string scenario_unheld_reason(const std::string& name);
 
