@@ -666,9 +666,9 @@ final class ResultsModelTests: XCTestCase {
     }
 
     func testFlexExaggerationClampAndDefaultInBand() {
-        XCTAssertEqual(FlexAnimation.clampExaggeration(10), 50)   // below → min
-        XCTAssertEqual(FlexAnimation.clampExaggeration(75), 75)   // inside → unchanged
-        XCTAssertEqual(FlexAnimation.clampExaggeration(999), 100) // above → max
+        XCTAssertEqual(FlexAnimation.clampExaggeration(1), 10)     // below → min (★ 10-28: 10×…300×, his slider)
+        XCTAssertEqual(FlexAnimation.clampExaggeration(75), 75)    // inside → unchanged
+        XCTAssertEqual(FlexAnimation.clampExaggeration(999), 300)  // above → max
         XCTAssertGreaterThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.minExaggeration)
         XCTAssertLessThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.maxExaggeration)
     }
@@ -720,8 +720,8 @@ final class ResultsModelTests: XCTestCase {
         let m = flexModel()
         XCTAssertFalse(m.flexOn)
         m.toggleFlex(); XCTAssertTrue(m.flexOn)
-        m.setFlexExaggeration(5);   XCTAssertEqual(m.flexExaggeration, 50)   // clamped up
-        m.setFlexExaggeration(500); XCTAssertEqual(m.flexExaggeration, 100)  // clamped down
+        m.setFlexExaggeration(5);   XCTAssertEqual(m.flexExaggeration, 10)   // clamped up (★ 10-28: his slider, 10×…300×)
+        m.setFlexExaggeration(500); XCTAssertEqual(m.flexExaggeration, 300)  // clamped down
         m.setFlexExaggeration(72);  XCTAssertEqual(m.flexExaggeration, 72)
         m.advanceFlex(0.3)
         XCTAssertEqual(m.flexPhase, 0.3, accuracy: 1e-9)
