@@ -86,6 +86,8 @@ public struct ResultsScreen: View {
     var onFullScreen: ((Bool) -> Void)?
     /// ★ Each load scenario's loads (indices + total kg), so a picked scenario's views start at its own loads.
     var scenarioLoads = ResultsScenarioLoads()
+    /// ★ Points on each load group's own faces (the light flow starts there), asked once when the screen opens.
+    var loadSurfacePoints: () -> [[SIMD3<Float>]] = { [] }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // ★ Results redesign state (his mockup, 2026-10-27)
@@ -161,6 +163,7 @@ public struct ResultsScreen: View {
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
                 canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
                 onFullScreen: ((Bool) -> Void)? = nil,
+                loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -190,6 +193,7 @@ public struct ResultsScreen: View {
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
+        self.loadSurfacePoints = loadSurfacePoints
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -305,7 +309,7 @@ public struct ResultsScreen: View {
             // GizmoFrame track to localise the frame collapse (see the handoff).
             let animating = model.playing
                 || (motionPlaying && model.flexOn && !reduceMotion)
-                || (motionPlaying && model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
+                || (motionPlaying && viewMode == .loadPaths && model.lightFlow != nil && !reduceMotion)
                 || (motionPlaying && model.pushActive && !reduceMotion)
             if animating {
                 os_signpost(.event, log: resultsSignpost, name: "playback_tick")
@@ -321,8 +325,8 @@ public struct ResultsScreen: View {
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
             // reduced-motion, which freezes the arrows mid-path with clean heads. The arrows travel; they never wiggle
             // (flowWiggle 0, his note 2026-10-27).
-            if motionPlaying, model.loadPathOn, !model.flowReduced(reduceMotion: reduceMotion) {
-                model.advanceFlowClock(1.0 / 30.0)
+            if motionPlaying, viewMode == .loadPaths, model.lightFlow != nil, !reduceMotion {
+                model.advanceLightPhase(1.0 / 30.0)   // ★ 10-28: the light sweeps through the part
             }
             // Break: the load climbs to the one that breaks it, holds there, and climbs again.
             if motionPlaying, model.pushActive, !reduceMotion, let fp = model.failurePrediction {
@@ -346,6 +350,7 @@ public struct ResultsScreen: View {
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
             model.scenarioLoads = scenarioLoads       // ★ each scenario's own loads
+            model.loadSurfacePoints = loadSurfacePoints()   // ★ where the light starts: on the load faces themselves
             model.viewScenario = scenarioPick
             model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
             model.setFlowWiggle(0)                    // … and never wiggle
@@ -595,6 +600,11 @@ public struct ResultsScreen: View {
                   let field = model.selectedStressField, !field.isEmpty else { return nil }
             let heads = model.flowHeadPositions(reduceMotion: reduceMotion)
             return model.flowStressTints(for: mesh, field: field, heads: heads)
+        }
+        // ★ his iPad 2026-10-28: Load paths is light travelling through the part, painted on its own surface
+        if viewMode == .loadPaths {
+            guard let lf = model.lightFlow, lf.arrival.count == (viewerMesh?.flat.vertexCount ?? -1) else { return nil }
+            return lf.tints(phase: Float(model.lightPhase))
         }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
@@ -1270,7 +1280,10 @@ public struct ResultsScreen: View {
         model.stressOn = m == .stress
         model.flexOn = m == .bend
         model.setFlexPhase(0)
-        if (m == .loadPaths) != model.loadPathOn { model.toggleLoadPath() }
+        // ★ 10-28: the old arrows (comets from the load groups' centres, through a direction field) are retired — the light
+        // flow below replaces them
+        if model.loadPathOn { model.toggleLoadPath() }
+        if m == .loadPaths { model.setLightPhasePosition(0); model.prepareLightFlow() }
         model.failureOn = m == .breakIt
         model.setPush(factor: 1)
         model.flowReducedStatic = false
@@ -1294,10 +1307,12 @@ public struct ResultsScreen: View {
             ResultsMotionBar(title: "Bend", readout: "\(Int(model.flexExaggeration))× exaggerated · not to scale",
                              alarm: false, playing: $motionPlaying, position: model.flexPhase,
                              scrub: { model.setFlexPhase($0) })
-        case .loadPaths where model.loadPathOn:
-            ResultsMotionBar(title: "Load flow", readout: "how the load travels through the part",
-                             alarm: false, playing: $motionPlaying, position: model.flowLoopPosition,
-                             scrub: { model.setFlowLoopPosition($0) })
+        case .loadPaths:
+            ResultsMotionBar(title: "Load flow",
+                             readout: model.lightFlow != nil ? "the load travelling through the part, as light"
+                                 : model.lightFlowBuilding ? "Tracing the load through the part…" : "This run has no load points to start from",
+                             alarm: false, playing: $motionPlaying, position: model.lightPhasePosition,
+                             scrub: { model.setLightPhasePosition($0) })
         case .breakIt:
             if let fp = model.failurePrediction {
                 ResultsMotionBar(title: "Break", readout: model.pushReadout(prediction: fp), alarm: model.atFailure,

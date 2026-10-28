@@ -249,7 +249,7 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
     static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
         (hasStress ? [.stress] : []) + [.solid, .xray]
-            + (hasDisplacement ? [.loadPaths, .bend] : []) + (canBreak ? [.breakIt] : [])
+            + (hasStress ? [.loadPaths] : []) + (hasDisplacement ? [.bend] : []) + (canBreak ? [.breakIt] : [])   // ★ 10-28: the light flow reads the stress
     }
 }
 

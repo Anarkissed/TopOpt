@@ -198,12 +198,15 @@ final class ResultsRedesignHostedTests: XCTestCase {
             XCTAssertGreaterThan(rm.flexPhase, 0.55, "★ \(size): the slider moves it by hand (\(rm.flexPhase))")
             try ui.picture(h, "results_bend_\(Int(size.width)).png")
 
+            // ★ 10-28: Load paths is light travelling through the part (no arrows): it builds, then sweeps on its own
             let flow = try frame(h, "resultsView-Load paths")
             ui.click(h, CGPoint(x: flow.midX, y: flow.midY))
-            XCTAssertTrue(rm.loadPathOn); XCTAssertEqual(rm.flowWiggle, 0, "★ never wiggling")
-            let c0 = rm.flowClock
+            XCTAssertFalse(rm.loadPathOn, "★ the old arrows are retired")
+            for _ in 0..<40 where rm.lightFlow == nil { ui.pump(0.1) }
+            XCTAssertNotNil(rm.lightFlow, "★ \(size): the light flow was built")
+            let l0 = rm.lightPhase
             ui.pump(0.6)
-            XCTAssertGreaterThan(rm.flowClock, c0, "★ \(size): the arrows TRAVEL (a new view starts playing)")
+            XCTAssertGreaterThan(rm.lightPhase, l0, "★ \(size): the light TRAVELS (a new view starts playing)")
 
             let brk = try frame(h, "resultsView-Break")
             ui.click(h, CGPoint(x: brk.midX, y: brk.midY))

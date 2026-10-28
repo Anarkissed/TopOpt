@@ -2238,6 +2238,55 @@ public final class ResultsModel: ObservableObject {
     /// Set the flow wiggle amount, clamped to the prototype's band.
     public func setFlowWiggle(_ v: Float) { flowWiggle = Swift.min(2, Swift.max(0, v)) }
 
+    // MARK: ★ the load path as light (his iPad 2026-10-28 — LoadLightFlow.swift)
+
+    /// The light flow for the shown version + scenario, once built (nil while building, or with no load to start from).
+    @Published public private(set) var lightFlow: LoadLightFlow?
+    /// Where the sweep is (0 … `LoadLightFlow.sweepEnd`).
+    @Published public private(set) var lightPhase: Double = 0
+    /// ★ Points on each load group's own faces, in the run's load order (`loadLocations`'s groups).
+    public var loadSurfacePoints: [[SIMD3<Float>]] = [] {
+        didSet { if oldValue != loadSurfacePoints { lightFlowKey = nil } }
+    }
+    /// Where the light starts: on the loaded faces of the scenario whose fields are shown — the picked one, else the worst
+    /// case — never a group's centre (that can be the air between two arms) and never every scenario's loads at once.
+    var lightFlowSeeds: [SIMD3<Float>] {
+        guard !loadSurfacePoints.isEmpty else { return flowLoadSeeds }
+        let shown = viewScenarioSet != nil ? viewScenario : scenarios(for: selected).first(where: \.governs)?.name
+        let groups = shown.flatMap { scenarioLoads.indices[$0] } ?? Array(loadSurfacePoints.indices)
+        let pts = groups.filter { loadSurfacePoints.indices.contains($0) }.flatMap { loadSurfacePoints[$0] }
+        return pts.isEmpty ? flowLoadSeeds : pts
+    }
+    /// True while a build is running (the motion bar says so).
+    @Published public private(set) var lightFlowBuilding = false
+    private var lightFlowKey: String?
+
+    /// Build the light flow for the shown version + scenario (once per pair, off the main thread).
+    public func prepareLightFlow() {
+        let key = "\(selectedIndex)|\(viewScenario ?? "")"
+        guard key != lightFlowKey else { return }
+        lightFlowKey = key
+        lightFlow = nil
+        guard let mesh = selectedMesh, let field = selectedStressField else { lightFlowBuilding = false; return }
+        let positions = mesh.flat.positions, seeds = lightFlowSeeds
+        lightFlowBuilding = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let built = LoadLightFlow.build(positions: positions, field: field, seeds: seeds)
+            DispatchQueue.main.async {
+                guard let self, self.lightFlowKey == key else { return }
+                self.lightFlow = built
+                self.lightFlowBuilding = false
+            }
+        }
+    }
+    public func advanceLightPhase(_ dt: Double, sweepSeconds: Double = 3.2) {
+        lightPhase = (lightPhase + dt * Double(LoadLightFlow.sweepEnd) / sweepSeconds)
+            .truncatingRemainder(dividingBy: Double(LoadLightFlow.sweepEnd))
+    }
+    /// The slider's 0…1 is one sweep.
+    public var lightPhasePosition: Double { lightPhase / Double(LoadLightFlow.sweepEnd) }
+    public func setLightPhasePosition(_ p: Double) { lightPhase = min(1, max(0, p)) * Double(LoadLightFlow.sweepEnd) }
+
     /// Advance the flow clock by `dt` seconds (called by the view's ticker while the
     /// overlay is on and motion is allowed). Monotonic — the comet math wraps travel
     /// internally, so the clock itself never needs to reset mid-run.
