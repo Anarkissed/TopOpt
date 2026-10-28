@@ -137,6 +137,11 @@ struct ResultsCompareView: View {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(DS.Color.okGreen.color)
                 }
                 Text(worst(tab)).font(.system(size: 13)).foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
+                // ★ his ruling 2026-10-28: a version in pieces carries its flag here too
+                if let p = tabVM(tab).flatMap({ model.piecesFlag($0) }) {
+                    Text(p.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(DS.Color.warning.color).lineLimit(1)
+                        .accessibilityIdentifier("compare-pieces-\(tab)")
+                }
             }
             Spacer(minLength: DS.Space.s)
             Button { useTapped(tab) } label: {

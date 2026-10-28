@@ -279,9 +279,10 @@ public enum StrengthenText {
             // best try names it in its own line instead — and an unheld one gets one line. Thin joints stay last.
             lines.append(contentsOf: ScenarioResult.lines(v.scenarios).filter { !(isBestTry(v) && $0.hasPrefix("Worst case")) })
             let own = lineVersion(of: v, in: s)   // Flexible (PR #362) H56k: redesign to strengthen (overnight plan 2026-10-25) — a merged version reads the line of the version it merged into
-            let bridged = own.status != "unreachable" && blocks.rows.contains {
-                abs($0.volumeFraction - own.volumeFraction) < 1e-6 && ($0.bodies?.bridges ?? 0) > 0
-            }
+            let ownRow = blocks.rows.first { abs($0.volumeFraction - own.volumeFraction) < 1e-6 }
+            let bridged = own.status != "unreachable" && (ownRow?.bodies.map(joined) ?? false)
+            // ★ in pieces: accepted, with the flag and why (his ruling 2026-10-28)
+            if own.status != "unreachable", let flag = piecesFlag(ownRow?.bodies) { lines.append(flag.title); lines += flag.lines }
             if own.status != "unreachable",
                let thin = blocks.rows.first(where: { abs($0.volumeFraction - own.volumeFraction) < 1e-6 })?.fragileJoints,
                thin > 0 {
@@ -345,11 +346,39 @@ public enum StrengthenText {
             ? [anchoredLetGoLine] : []
     }
 
-    /// Whether the accepted variant printed at `printedFraction` was bridged (bodies.bridges > 0).
+    /// Whether the accepted variant printed at `printedFraction` was JOINED by bridges: it has some, every one held, and it
+    /// exports as one body. (★ his iPad 2026-10-28: e40f618a's V1 had a bridge that did not hold and exported as 2 pieces,
+    /// yet said "Two pieces were joined into one part" — this used to ask only `bridges > 0`.)
     public static func isBridged(printedFraction: Double, in blocks: RunReportBlocks) -> Bool {
-        blocks.rows.contains {
-            $0.accepted && abs($0.printedFraction - printedFraction) < 1e-4 && ($0.bodies?.bridges ?? 0) > 0
+        blocks.rows.first { $0.accepted && abs($0.printedFraction - printedFraction) < 1e-4 }?.bodies.map(joined) ?? false
+    }
+    static func joined(_ b: VariantBodies) -> Bool { b.bridges > 0 && b.exported <= 1 && b.bridgeHolds.allSatisfy(\.held) }
+
+    // MARK: ★ a version that prints in pieces (his ruling 2026-10-28: "accepted with a flag")
+
+    /// A version core exported as 2+ bodies: how many, and the size of each bridge that couldn't hold (so was left out).
+    public struct PiecesFlag: Equatable, Sendable {
+        public let pieces: Int
+        public let droppedBridgesMM: [Double]
+        /// "Prints in 2 pieces" (N when more).
+        public var title: String { "Prints in \(pieces) pieces" }
+        /// One line per bridge that didn't hold; with none, each piece stands on its own anchors.
+        public var lines: [String] {
+            droppedBridgesMM.isEmpty ? ["Each piece holds on its own anchors."]
+                : droppedBridgesMM.map { "A \(Int($0.rounded())) mm bridge between them couldn’t hold its load, so it was left out." }
         }
+    }
+    static func piecesFlag(_ b: VariantBodies?) -> PiecesFlag? {
+        guard let b, b.exported >= 2 else { return nil }
+        return PiecesFlag(pieces: b.exported, droppedBridgesMM: b.bridgeHolds.filter { !$0.held }.map(\.sizeMM))
+    }
+    /// The flag for the accepted variant printed at `printedFraction`, or nil (one body).
+    public static func piecesFlag(printedFraction: Double, in blocks: RunReportBlocks) -> PiecesFlag? {
+        piecesFlag(blocks.rows.first { $0.accepted && abs($0.printedFraction - printedFraction) < 1e-4 }?.bodies)
+    }
+    /// The flag for a strengthen version's line (matched like the cards: by volume fraction).
+    public static func piecesFlag(volumeFraction vf: Double, in blocks: RunReportBlocks) -> PiecesFlag? {
+        piecesFlag(blocks.rows.first { abs($0.volumeFraction - vf) < 1e-6 }?.bodies)
     }
 }
 
