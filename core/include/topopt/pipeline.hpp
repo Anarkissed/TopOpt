@@ -1097,7 +1097,7 @@ inline constexpr double kScenarioMinLoadShare = 0.10;
 // Softer (1e-8 E h at a 10 % load) left an arm nearly floating on his Carriage Arms and
 // multigrid stalled (residual growing) at every share tried; today's fixed 1e-6 E h never
 // did. The value is the softest floor whose run on his arms went through clean.
-inline constexpr double kScenarioWeakSpringMinScale = 0.1;
+inline constexpr double kScenarioWeakSpringMinScale = 0.03;
 // "" when every scenario carries at least kScenarioMinLoadShare of the heaviest one's
 // load, else the plain line for the first that does not: "Scenario “4” is too light: its
 // load is 5 kg, but it needs at least 5.1 kg (10% of Scenario “1”'s 51 kg). Raise it or
