@@ -45,16 +45,26 @@ public enum LoadScenarioRule {
     /// ★ HIS DECISION (TO-core, 2026-10-28): a scenario too light to shape the part fails with a notice. Its load is the SUM
     /// of its groups' force sizes (a twist of two opposite pushes is not zero); under 3% of the heaviest scenario's load it is
     /// refused — exactly 3% runs. Core's kScenarioMinLoadShare and its words, verbatim (kg = N / 9.80665, 3 significant figures).
-    public static let minLoadShare = 0.03
+    public static let minLoadShare = 0.03   // ★ core's kScenarioMinLoadShare — the ONE number the notice and the (i) read
+    static var minLoadSharePercent: String { kg(minLoadShare * 100) }
     public static let newtonsPerKg = 9.80665
+    /// Core's kg, character for character (TO-core 2026-10-28): 3 significant figures in plain decimals, never an exponent;
+    /// '.' whatever the locale, no grouping; trailing zeros and a bare '.' dropped; half away from zero.
     static func kg(_ s: Double) -> String {
-        var t = String(format: "%.3g", s)
-        if t.contains("e") { t = String(format: "%.0f", s) }   // %.3g writes 1.53e+03; core writes plain digits
+        guard s.isFinite, s != 0 else { return "0" }
+        let d = Int(floor(log10(abs(s))))
+        let scale = pow(10, Double(2 - d))
+        var r = (abs(s) * scale).rounded(.toNearestOrAwayFromZero) / scale
+        var digits = max(0, 2 - d)
+        if r >= pow(10, Double(d + 1)) { digits = max(0, digits - 1) }   // 9.996 → 10: one digit fewer after the point
+        r = s < 0 ? -r : r
+        var t = String(format: "%.\(digits)f", locale: Locale(identifier: "en_US_POSIX"), r)
+        if t.contains(".") { while t.hasSuffix("0") { t.removeLast() }; if t.hasSuffix(".") { t.removeLast() } }
         return t
     }
     public static func tooLightLine(_ name: String, kg load: Double, heaviest: String, heaviestKg: Double) -> String {
         "Scenario “\(name)”'s load (\(kg(load)) kg) is too small next to Scenario “\(heaviest)” (\(kg(heaviestKg)) kg): "
-            + "a scenario needs at least 3% of the heaviest one's load (\(kg(heaviestKg * minLoadShare)) kg here). "
+            + "a scenario needs at least \(minLoadSharePercent)% of the heaviest one's load (\(kg(heaviestKg * minLoadShare)) kg here). "
             + "Raise it or remove the scenario."
     }
     /// The first scenario under the line, as core words it — from (name, kg) pairs in scenario order. Nil when none is, or

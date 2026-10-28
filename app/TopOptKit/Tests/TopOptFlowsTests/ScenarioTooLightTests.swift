@@ -13,7 +13,15 @@ final class ScenarioTooLightTests: XCTestCase {
         XCTAssertEqual(LoadScenarioRule.tooLightLine("Scenario 2", kg: 0.5, heaviest: "Scenario 1", heaviestKg: 51),
                        "Scenario “Scenario 2”'s load (0.5 kg) is too small next to Scenario “Scenario 1” (51 kg): a scenario needs at least 3% of the heaviest one's load (1.53 kg here). Raise it or remove the scenario.",
                        "★ TO-core's example, character for character")
-        XCTAssertEqual(LoadScenarioRule.kg(1234.5), "1234", "no exponent: plain digits like core")
+        // ★ core's kg, its examples character for character (TO-core 2026-10-28), plus his 1534 kg and 9.996 kg
+        for (v, t) in [(0.5, "0.5"), (1.53, "1.53"), (0.2437, "0.244"), (8.1577, "8.16"), (51.0, "51"), (46.02, "46"),
+                       (1533.96, "1530"), (9.996, "10"), (1534, "1530")] {
+            XCTAssertEqual(LoadScenarioRule.kg(v), t, "kg(\(v))")
+        }
+        XCTAssertTrue(LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("(1534 kg)") == false
+                      && LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("(1530 kg)"),
+                      "never an exponent: (1530 kg), like core's pinned test")
+        XCTAssertTrue(LoadScenarioRule.tooLightLine("B", kg: 1, heaviest: "A", heaviestKg: 1534).contains("(46 kg here)"))
     }
 
     func testTheThreePercentEdge() {
