@@ -1093,10 +1093,11 @@ inline constexpr double kScenarioWeakSpringRel = 1e-6;
 // 2 h+. Below it a light arm hangs on springs too soft for the solver.
 inline constexpr double kScenarioMinLoadShare = 0.10;
 // ...times (F_s / F_max)^2 for scenario s, F the 2-norm of its nodal loads (his ask of
-// 2026-10-28: the springs follow the load), never below this: the square of the lightest
-// load a scenario may have, so every scenario that runs has load-consistent springs.
-inline constexpr double kScenarioWeakSpringMinScale =
-    kScenarioMinLoadShare * kScenarioMinLoadShare;
+// 2026-10-28: the springs follow the load), never below this (springs >= this x 1e-6 E h).
+// Softer (1e-8 E h at a 10 % load) left an arm nearly floating on his Carriage Arms and
+// multigrid stalled (residual growing) at every share tried; today's fixed 1e-6 E h never
+// did. The value is the softest floor whose run on his arms went through clean.
+inline constexpr double kScenarioWeakSpringMinScale = 0.1;
 // "" when every scenario carries at least kScenarioMinLoadShare of the heaviest one's
 // load, else the plain line for the first that does not: "Scenario “4” is too light: its
 // load is 5 kg, but it needs at least 5.1 kg (10% of Scenario “1”'s 51 kg). Raise it or
