@@ -818,7 +818,21 @@ JobDescription parse_job(const std::string& json_text) {
         sc.anchor_face_ids = parse_int_array(av, "anchor_face_ids");
         scenarios.push_back(std::move(sc));
       }
-      if (scenarios.size() >= 2) job.loads.scenarios = std::move(scenarios);
+      if (scenarios.size() >= 2) {
+        // The lightest scenario (his decision, 2026-10-28): under 3 % of the heaviest
+        // one's load it cannot shape the part, so it is refused with a plain line.
+        std::vector<std::pair<std::string, double>> sizes;
+        for (const JobScenario& sc : scenarios) {
+          double n = 0.0;
+          for (const JobLoadGroup& g : sc.groups)
+            n += std::sqrt(g.force.x * g.force.x + g.force.y * g.force.y +
+                           g.force.z * g.force.z);
+          sizes.push_back({sc.name, n});
+        }
+        const std::string light = scenario_too_light_reason(sizes);
+        if (!light.empty()) schema_fail(light);
+        job.loads.scenarios = std::move(scenarios);
+      }
     }
     // clearances: optional "Keep clear" keep-out regions (handoff 100). Each is a
     // raw B-rep face id + a kind ("bolt"/"face") + the editable mm distances (the

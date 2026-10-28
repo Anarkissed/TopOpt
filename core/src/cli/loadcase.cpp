@@ -1010,6 +1010,17 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         visit(fea_node_index(grid, i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)));
     };
     opts.scenarios.clear();
+    {  // the lightest scenario (his decision, 2026-10-28): the same line as the job's
+      std::vector<std::pair<std::string, double>> sizes;
+      for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios) {
+        double n = 0.0;
+        for (const ProductionLoadCase::LoadGroup& g : sc.groups)
+          n += std::sqrt(g.force.x * g.force.x + g.force.y * g.force.y + g.force.z * g.force.z);
+        sizes.push_back({sc.name, n});
+      }
+      const std::string light = scenario_too_light_reason(sizes);
+      if (!light.empty()) throw std::invalid_argument(light);
+    }
     for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios) {
       for (const int f : sc.anchor_face_ids)
         validate_face_id(f, model, "load scenario \"" + sc.name + "\" anchor");

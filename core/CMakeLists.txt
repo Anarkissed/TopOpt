@@ -2417,6 +2417,13 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME scenarios COMMAND test_scenarios)
+  # LOAD SCENARIOS count in proportion to their load (his ask 2026-10-28).
+  add_executable(test_scenario_weights tests/validation/test_scenario_weights.cpp)
+  target_link_libraries(test_scenario_weights PRIVATE topopt)
+  target_compile_definitions(test_scenario_weights PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_weights COMMAND test_scenario_weights)
 
   # CORE LIST item KEEP: kept regions exported exactly (the part's own CAD geometry)
   # and merged into one closed shell. Needs Manifold (core/vcpkg-ports/manifold).

@@ -21,6 +21,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <cstdio>
 #include <utility>
 #include <vector>
 
@@ -396,12 +397,65 @@ std::string scenario_unheld_reason(const std::string& name) {
   return "Scenario \u201C" + name + "\u201D's load has no path to its anchors";
 }
 
+std::string scenario_too_light_reason(
+    const std::vector<std::pair<std::string, double>>& name_and_load_n) {
+  if (name_and_load_n.size() < 2) return "";
+  std::size_t heaviest = 0;
+  for (std::size_t s = 1; s < name_and_load_n.size(); ++s)
+    if (name_and_load_n[s].second > name_and_load_n[heaviest].second) heaviest = s;
+  const double top = name_and_load_n[heaviest].second;
+  const double floor_n = kScenarioMinLoadShare * top;
+  for (const auto& [name, load] : name_and_load_n) {
+    if (!(load < floor_n * (1.0 - 1e-9))) continue;  // exactly at the line runs
+    // kg to 3 significant figures, plain decimals (never an exponent: 1534 kg is
+    // "1530 kg"), '.' as the point, no grouping, trailing zeros dropped. The app
+    // (LoadScenarioRule.tooLightLine) prints the same characters.
+    auto kg = [](double n) {
+      const double x = n / 9.80665;
+      int decimals = 0;
+      if (x > 0.0) decimals = std::max(0, 2 - static_cast<int>(std::floor(std::log10(x))));
+      const double step = std::pow(10.0, 2 - static_cast<int>(std::floor(std::log10(x > 0.0 ? x : 1.0))));
+      const double rounded = x > 0.0 ? std::round(x * step) / step : 0.0;
+      char b[64];
+      std::snprintf(b, sizeof b, "%.*f", decimals, rounded);
+      std::string s = b;
+      if (s.find('.') != std::string::npos) {
+        while (!s.empty() && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+      }
+      return s + " kg";
+    };
+    char pct[16];
+    std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * kScenarioMinLoadShare);
+    return "Scenario \u201C" + name + "\u201D is too light: its load is " + kg(load) +
+           ", but it needs at least " + kg(floor_n) + " (" + pct + " of Scenario \u201C" +
+           name_and_load_n[heaviest].first + "\u201D's " + kg(top) +
+           "). Raise it or remove the scenario.";
+  }
+  return "";
+}
+
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
                                           double youngs_modulus_mpa, double spacing) {
-  for (SimpScenario& sc : scenarios)
-    for (DirichletBC& b : sc.bcs)
+  // The springs follow the scenario's load (his ask, 2026-10-28): (F_s / F_max)^2, F the
+  // 2-norm of its nodal loads. A 1 % twist on fixed springs sat on them cheaply, so the
+  // optimizer never joined the arms, and any connection sized for 1 % was softer than
+  // the springs ("unheld"). Scaled, an unconnected light arm costs what a full-load one
+  // does and the connection it needs follows the load; the weak share is load-consistent.
+  std::vector<double> f2(scenarios.size(), 0.0);
+  double f2_max = 0.0;
+  for (std::size_t s = 0; s < scenarios.size(); ++s) {
+    for (const NodalLoad& l : scenarios[s].loads) f2[s] += l.value * l.value;
+    f2_max = std::max(f2_max, f2[s]);
+  }
+  for (std::size_t s = 0; s < scenarios.size(); ++s) {
+    const double scale =
+        f2_max > 0.0 ? std::max(f2[s] / f2_max, kScenarioWeakSpringMinScale) : 1.0;
+    for (DirichletBC& b : scenarios[s].bcs)
       if (b.spring > 0.0 && !b.contact)
-        b.spring = b.spring_tangent = kScenarioWeakSpringRel * youngs_modulus_mpa * spacing;
+        b.spring = b.spring_tangent =
+            kScenarioWeakSpringRel * youngs_modulus_mpa * spacing * scale;
+  }
   return scenarios;
 }
 
