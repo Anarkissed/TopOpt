@@ -899,8 +899,6 @@ public struct WorkspacePlaceholder: View {
                               // THE PIECE. Its pieces are independent selections —
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
-                              // ★ app-wide chip rule (10-27): a tap on a primitive's own volume picks it (its chips show)
-                              if stage == .topology, let pt, pickManualPrimitive(at: pt) { return true }
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           },
                           // ★ Only while drilled in — the PRESENCE of this closure is
@@ -1246,6 +1244,7 @@ public struct WorkspacePlaceholder: View {
                               : nil,
                           flexibleLattice: flexibleMain.layer(project, stage: stage, pageUp: fullScreenPageUp))   // Flexible (PR #362) H3: the main page's lattice + its squish loop (FlexibleMainStage.swift)
                 .onEmptyTap { emptyTapClears() }   // ★ his iPad 10-26 (5): a tap on empty space clears the selection
+                .onTapRay(primitiveTapRay)   // ★ his iPad 10-28: a tap on a keep-clear volume picks it
                 .ignoresSafeArea()
                 // ★ §6(g) — THE PENCIL HOVER, ON THE MESH VIEW ITSELF.
                 //
@@ -1670,6 +1669,7 @@ public struct WorkspacePlaceholder: View {
                               undo: { project.performUndo() }, redo: { project.performRedo() },
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
                               onFullScreen: { resultsFullScreen = $0 },
+                              loadSurfacePoints: { loadFlowSurfacePoints() },
                               scenarioLoads: resultsScenarioLoads)
                     .ignoresSafeArea()
             }
@@ -2500,7 +2500,7 @@ public struct WorkspacePlaceholder: View {
         }
         let loop = project.surfaceLoopRespectingRegions(
                 FaceTopology.loop(fromFace: faceID, in: mesh), from: faceID)
-        if let line = WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force, hidden: project.groupView.hidden) { model.toast = line }   // Flexible (PR #362) H55e: several roles on one face (owner 2026-10-25) — a hidden group never claims the tap; Load + Anchor's line
+        if let line = WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force, hidden: unseenGroups) { model.toast = line }   // Flexible (PR #362) H55e: several roles on one face (owner 2026-10-25) — a hidden group never claims the tap; Load + Anchor's line · ★ 10-28: nor one outside the open scenario (unseenGroups)
         // Round-2 T2: primitive chips are reachable ONLY by tapping the primitive,
         // one of its faces, or its group row in the library — a tap that merely
         // grew a selection must NOT pop the chip editor open. Reveal only when
@@ -2637,6 +2637,27 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// ★ His iPad 2026-10-28 (the load path "starts in midair"): points ON each load group's own faces — a few triangle
+    /// centres per face — in `loadFlowPairs` order. A group's centroid averages faces that can sit on two arms, which put
+    /// the start in the air between them. Called once when Results opens, never per frame.
+    private func loadFlowSurfacePoints() -> [[SIMD3<Float>]] {
+        guard let mesh = viewerMesh else { return [] }
+        let groups = selection.groups.filter { force.kind(for: $0.id).isLoad && groupCentroidModel($0) != nil }
+        var faceOf: [FaceID: Int] = [:]
+        for (i, g) in groups.enumerated() { for f in groupTintedFaces(g) where faceOf[f] == nil { faceOf[f] = i } }
+        var out = [[SIMD3<Float>]](repeating: [], count: groups.count)
+        var seen: [FaceID: Int] = [:]
+        let idx = mesh.indices, pos = mesh.positions
+        func p(_ k: UInt32) -> SIMD3<Float> { let b = Int(k) * 3; return SIMD3(pos[b], pos[b + 1], pos[b + 2]) }
+        for (t, f) in mesh.faceIDs.enumerated() {
+            guard let gi = faceOf[f] else { continue }
+            let n = seen[f, default: 0]; seen[f] = n + 1
+            guard n % 4 == 0, n < 4 * 32, t * 3 + 2 < idx.count else { continue }   // up to 32 per face
+            out[gi].append((p(idx[t * 3]) + p(idx[t * 3 + 1]) + p(idx[t * 3 + 2])) / 3)
+        }
+        return out
+    }
+
     /// The model-space centroids of the tagged LOAD groups — the start points for the
     /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
     /// grid/variant, so a centroid here lines up with the derived stress field there.
@@ -2713,7 +2734,7 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func severalRolesBadges(_ proj: CameraProjection) -> [(roles: [SeveralRoles.Role], at: CGPoint)] {   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25) — a badge at the centre of each set of faces several groups hold
-        SeveralRoles.badges(selection: selection, force: force, hidden: project.groupView.hidden, keepClearOn: { project.keepClearIsOn($0) }).compactMap { b in SeveralRoles.centre(of: b.faces, in: viewerMesh).flatMap { proj.project(settledWorld($0)) }.map { (b.roles, $0) } }   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25)
+        SeveralRoles.badges(selection: selection, force: force, hidden: unseenGroups, keepClearOn: { project.keepClearIsOn($0) }).compactMap { b in SeveralRoles.centre(of: b.faces, in: viewerMesh).flatMap { proj.project(settledWorld($0)) }.map { (b.roles, $0) } }   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25)
     }   // Flexible (PR #362) H55j: several roles on one face (owner 2026-10-25) — (severalRolesBadges)
 
     // MARK: keep-out layout pass (handoff 2026-07-27)
@@ -2723,6 +2744,7 @@ public struct WorkspacePlaceholder: View {
     private static let clrPillSize   = CGSize(width: 64, height: 40)   // number-only value pill
     private static let clrKnobTouch  = CGSize(width: 46, height: 46)   // red clearance drag knob
     private static let loadPillSize  = CGSize(width: 96, height: 44)   // weight pill (+ snap row headroom)
+    private static let loadPillActiveSize = CGSize(width: 240, height: 92)   // the active pill + its Gravity/Push/Pull row
     private static let boxHandleTouch = CGSize(width: 44, height: 44)  // design-box grab circle
 
     /// How far a chip/pill may be nudged from its anchor before it stops (a slight nudge to
@@ -2748,36 +2770,35 @@ public struct WorkspacePlaceholder: View {
     /// misses the gizmo's (fat) pick zones — the SAME shape the gizmo grabs with (`TransformGizmo.pick`),
     /// so a clearance knob is only seated where it won't sit on the gizmo OR steal its touches. Nil
     /// when no manual-primitive gizmo is up.
-    /// ★ App-wide chip rule (his iPad 10-27): a tap that lands inside a user-placed primitive's own volume picks that
-    /// primitive — its group selected, its row picked, its chips shown. The active group's primitives first, then any
-    /// group's; the smallest volume wins where two overlap. Returns false (the tap selects faces as before) on a miss.
-    private func pickManualPrimitive(at p: SIMD3<Float>) -> Bool {
-        // the active group first (a strict ordering: the old `{ a, _ in a is active }` said active < active)
-        let active = selection.activeGroupID
-        let order = selection.groups.filter { $0.id == active } + selection.groups.filter { $0.id != active }
-        var best: (group: UUID, id: UUID, size: Double)?
-        for g in order where project.groupView.canEdit(g.id) && !project.groupView.isHidden(g.id) {
-            for mp in project.manualPrimitives(in: g.id) {
-                let d = SIMD3<Double>(p) - mp.center
-                let n = simd_length(mp.axis) > 1e-9 ? simd_normalize(mp.axis) : SIMD3<Double>(0, 0, 1)
-                let t = simd_dot(d, n), radial = simd_length(d - n * t)
-                let inside: Bool, size: Double
-                if mp.kind == .bolt {
-                    let r = mp.radiusMM + mp.resolvedMarginMM, h = mp.halfLengthMM + mp.resolvedAxialMM
-                    inside = radial <= r + 0.5 && abs(t) <= h + 0.5; size = r * r * h
-                } else {
-                    let half = (mp.halfUMM * mp.halfUMM + mp.halfWMM * mp.halfWMM).squareRoot()
-                    inside = abs(t) <= mp.resolvedDepthMM + 0.5 && radial <= half; size = mp.halfUMM * mp.halfWMM * mp.resolvedDepthMM
-                }
-                if inside, best.map({ size < $0.size }) ?? true { best = (g.id, mp.id, size) }
-            }
-            if best != nil, g.id == selection.activeGroupID { break }
+    /// ★ App-wide chip rule (his iPad 10-27) + "I can't seem to tap on a primitive to select it" (10-28): a tap whose ray
+    /// enters a keep-clear volume he can see — automatic or hand-placed, where it hangs in the air past the part too — picks
+    /// that primitive: its group selected, its row picked, its chips shown. The nearest volume in front of the part wins.
+    /// Not while a new selection is being built (a tap on a hole then joins it, as before), and Topology's edit phase only.
+    private func pickPrimitive(origin o: SIMD3<Float>, dir d: SIMD3<Float>, surface: Float?) -> Bool {
+        guard stage == .topology, force.phase == .edit, !visible.surfaceEditing, !editFaces.isEditing, !showLatticePage,
+              !flexibleMain.owns(project, stage) else { return false }
+        if let a = selection.activeGroupID, force.needsRole(a, latticeRoleGroups: latticeRoleGroupIDs) { return false }
+        // the viewer hands the ray in the MODEL frame already (its settle undone) — the frame the volumes live in
+        let origin = o, dir = d
+        let unseen = unseenGroups
+        var best: (group: UUID, key: Int, t: Float)?
+        for v in project.clearancePieceVolumes()
+        where !unseen.contains(v.groupID) && project.groupView.canEdit(v.groupID)
+            && !hiddenPieces.contains(SelectionArrowRule.PieceRef(group: v.groupID, key: v.piece)) {
+            guard let t = v.volume.rayEntry(origin: origin, dir: dir) else { continue }
+            if let s = surface, t > s + 0.5 { continue }   // behind the part: not what he tapped
+            if best.map({ t < $0.t }) ?? true { best = (v.groupID, v.piece, t) }
         }
         guard let b = best else { return false }
         if selection.activeGroupID != b.group { selection.setActive(b.group) }
-        setPickedPiece(SelectionArrowRule.PieceRef(group: b.group, key: ProjectModel.manualFaceKey(b.id)))
+        setPickedPiece(SelectionArrowRule.PieceRef(group: b.group, key: b.key))
         chipsRevealedGroup = b.group
         return true
+    }
+
+    /// The viewer's first look at a tap (Topology): a keep-clear volume under it is picked.
+    private var primitiveTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)? {
+        stage == .topology ? { o, d, t in pickPrimitive(origin: o, dir: d, surface: t) } : nil
     }
 
     private func gizmoClearInfo(_ proj: CameraProjection) -> (centre: CGPoint, isClear: (CGPoint) -> Bool)? {
@@ -2907,8 +2928,10 @@ public struct WorkspacePlaceholder: View {
                     if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                         let active = g.id == selection.activeGroupID
                         let anchor = CGPoint(x: arrow.tail.x, y: arrow.tail.y - (active ? 26 : 0))
+                        // ★ 10-28: the ACTIVE pill carries its Gravity / Push / Pull row under it — the whole stack is kept clear
+                        let size = active ? Self.loadPillActiveSize : Self.loadPillSize
                         elements.append(KeepOutElement(id: "load.\(g.id.uuidString)", anchor: anchor,
-                                                       bounds: Self.loadPillSize, touch: Self.loadPillSize,
+                                                       bounds: size, touch: size,
                                                        priority: .pill, maxShift: Self.keepOutMaxShift))
                     }
                 }
@@ -2975,6 +2998,15 @@ public struct WorkspacePlaceholder: View {
             for p in KeepOutSolver.resolve(occupiers + pass2, viewport: vp) where p.id.hasPrefix("clr.pill.") {
                 map[p.id] = p
             }
+        }
+        // ★ His iPad 2026-10-28 (bug 3): "When the weight chip is behind the selections group, the selections group should
+        // ABSOLUTELY win … NEVER cover the Selections modal." No chip stays on the panel: it moves just outside it, or —
+        // with no room — it is withdrawn (drawn faded, untappable) until the view or the panel moves.
+        if let panel = chromeGeometry.selectionsFrame {   // open or folded to its pill: the frame is whatever is drawn
+            var sizes: [String: CGSize] = [:]
+            for e in base where !e.rigid { sizes[e.id] = e.bounds }
+            for e in pass2 { sizes[e.id] = e.bounds }
+            map = SelectionsPanelKeepOut.clear(map, sizes: sizes, panel: panel, viewport: vp)
         }
         return map
     }
@@ -7053,6 +7085,7 @@ public struct WorkspacePlaceholder: View {
                         clearanceHandleKnob(role: item.handle.role, active: draggingHandleID == item.id)
                             .gesture(clearanceHandleDrag(item))
                             .position(knob)
+                            .withdrawn(placed[clrKnobID(item)]?.hidden == true)   // ★ never over the Selections panel
                             .animation(DS.Motion.emphasized, value: knob)
                     }
                 }
@@ -7248,8 +7281,15 @@ public struct WorkspacePlaceholder: View {
                                                          fallback: project.surfaceCutTarget(face: faceID))
         else { return false }
 
-        project.sealUndoStep()
         let owner = selection.groups.first { $0.regionIDs.contains(piece) }
+        // ★ bug 1: a piece belongs to ONE group, so a piece held by a group he can't see (eye-hidden, or another scenario's)
+        // is never quietly taken from it — he is told whose it is instead.
+        if let o = owner, unseenGroups.contains(o.id) {
+            let sc = force.scenarioID(of: o.id).flatMap { id in force.scenarioList.first { $0.id == id }?.name }
+            model.toast = "This piece belongs to \(o.name)" + (sc.map { " in \($0)" } ?? " (hidden)") + " — show it to change it."
+            return true
+        }
+        project.sealUndoStep()
         // ★ AND THE RAW FACES GO WITH IT. A group holds BOTH a `faces` list and a
         // `regionIDs` list, and `latticeRegionCoveredFaces` subtracts one from the
         // other — so dropping only the region leaves the bare face behind, still in
@@ -8943,6 +8983,7 @@ public struct WorkspacePlaceholder: View {
             if let center = placed[clrPillID(item)]?.center ?? fallback {
                 clearanceHandleChip(item).fixedSize()
                     .position(center)
+                    .withdrawn(placed[clrPillID(item)]?.hidden == true)   // ★ never over the Selections panel
                     .animation(DS.Motion.emphasized, value: center)
             }
         }
@@ -11386,7 +11427,7 @@ public struct WorkspacePlaceholder: View {
                           grab: selection.activeGroupID == g.id ? (id: "grab-auto-\(p.id)", action: {
                               selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
                           }) : nil,
-                          delete: { project.deleteAutoClearance(face: p.id) }) {
+                          delete: { project.deleteAutoClearance(face: p.id, in: g.id) }) {
                     clearancePrimitiveLine(g, p, showKind: false)
                 }
             }
@@ -11462,6 +11503,21 @@ public struct WorkspacePlaceholder: View {
     }
     /// Whether a group draws (arrow, chip, colour) in the open scenario.
     private func scenarioDraws(_ g: UUID) -> Bool { !scenariosApply || force.showsInActiveScenario(g) }
+    /// ★ The scenario under 3% of the heaviest one's load (his decision 2026-10-28), with core's words — or nil. Each
+    /// scenario's load is the sum of its load groups' weights, as core sums their force sizes.
+    private var scenarioTooLightLine: (name: String, line: String)? {
+        guard force.hasScenarios else { return nil }
+        let loads = force.scenarioList.map { s in
+            (name: s.name, kg: selection.groups.filter { force.kind(for: $0.id).isLoad && force.group($0.id, isIn: s.id) }
+                .reduce(0.0) { $0 + (force.kind(for: $1.id).weightKg ?? 0) })
+        }
+        return LoadScenarioRule.tooLightScenario(loads)
+    }
+    /// ★ His iPad 2026-10-28 (bug 1): the groups he CANNOT SEE right now — eye-hidden, or outside the open scenario. A tap
+    /// never selects one, grows one, or takes a face or piece from one: a face only they hold is free to start a new group.
+    private var unseenGroups: Set<UUID> {
+        project.groupView.hidden.union(selection.groups.lazy.filter { !scenarioDraws($0.id) }.map(\.id))
+    }
     /// A shared anchor switched off in the open scenario: drawn dimmed, never hidden.
     private func scenarioAnchorOff(_ g: UUID) -> Bool {
         scenariosApply && force.hasScenarios && force.kind(for: g).isAnchor && !force.anchorIsOn(g, in: force.activeScenarioID)
@@ -11473,13 +11529,24 @@ public struct WorkspacePlaceholder: View {
         guard scenariosApply, force.hasScenarios else { return nil }
         let open = force.activeScenarioID
         let order = selection.groups.map(\.id)
+        let tooLight = scenarioTooLightLine
         return force.scenarioList.enumerated().map { i, s in
             let isOpen = s.id == open
             let shown = folderShown(s.id)
             let noAnchor = force.anchorsOn(in: s.id, order: order).isEmpty
-            let tail: AnyView? = isOpen && (noAnchor || scenarioAnchorHint == s.id) ? AnyView(VStack(alignment: .leading, spacing: DS.Space.xs) {
+            // ★ his decision 2026-10-28: the scenario under 3% of the heaviest says so in its own folder, the moment it is
+            let light = tooLight.flatMap { $0.name == s.name ? $0.line : nil }
+            let tail: AnyView? = (isOpen && (noAnchor || scenarioAnchorHint == s.id)) || light != nil ? AnyView(VStack(alignment: .leading, spacing: DS.Space.xs) {
+                if let light {
+                    Text(light).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.warning.color).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("scenario-too-light")
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioTooLight": geo.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                }
                 // ★ the gap (an anchor group deleted, the rest switched off): said at once, with its one-tap fix
-                if noAnchor {
+                if isOpen, noAnchor {
                     HStack(spacing: DS.Space.s) {
                         Text(LoadScenarioRule.noAnchorLine(s.name)).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
                             .foregroundStyle(DS.Color.warning.color)
@@ -11490,7 +11557,7 @@ public struct WorkspacePlaceholder: View {
                         }
                     }
                 }
-                if scenarioAnchorHint == s.id {
+                if isOpen, scenarioAnchorHint == s.id {
                     Text("Tap the faces that hold in \(s.name), then choose Anchor.")
                         .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                 }
@@ -12108,6 +12175,7 @@ public struct WorkspacePlaceholder: View {
                             anchorLoadChip(g)
                         }
                             .position(placed["load.pendingchip"]?.center ?? fallback)
+                            .withdrawn(placed["load.pendingchip"]?.hidden == true)   // ★ never over the Selections panel
                     }
                     // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
                     ForEach((stage != .topology || topoForcesShown ? loadGroups : []).filter {
@@ -12118,6 +12186,7 @@ public struct WorkspacePlaceholder: View {
                             // nudged clear of neighbours. Fallback = the old tail anchor.
                             let anchor = CGPoint(x: arrow.tail.x, y: clamp(arrow.tail.y - (active ? 26 : 0), H))
                             let center = placed["load.\(g.id.uuidString)"]?.center ?? anchor
+                            let withdrawn = placed["load.\(g.id.uuidString)"]?.hidden == true   // ★ never over the Selections panel
                             Group {
                                 if active {
                                     VStack(spacing: DS.Space.xs) {
@@ -12129,6 +12198,7 @@ public struct WorkspacePlaceholder: View {
                                 }
                             }
                             .position(center)
+                            .withdrawn(withdrawn)
                         }
                     }
                 }

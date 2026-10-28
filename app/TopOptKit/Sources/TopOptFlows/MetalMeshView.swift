@@ -5626,6 +5626,10 @@ struct MeshViewInputs {
     /// ★ Results' tap-to-explore key (his note 2026-10-27): a tap reports the SURFACE point under the finger (nil = empty
     /// space) and nothing else — an optimized result has no faces to pick.
     var onSurfacePoint: ((SIMD3<Float>?) -> Void)? = nil
+    /// ★ His iPad 2026-10-28 ("I can't seem to tap on a primitive to select it"): a single tap's ray in MODEL space (origin,
+    /// unit direction) and how far along it the part's surface was hit (nil = the ray missed the part), asked FIRST — true
+    /// consumes the tap. A keep-clear volume sticks out past the part into the air, where no face is under the finger.
+    var onTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)? = nil
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
     /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
@@ -6203,6 +6207,32 @@ extension MetalMeshView {
         private var appliedReveal: Float = 1
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
+        /// ★ The nearest triangle of the BENT surface (rest + scale·disp per flat vertex) the ray hits, mapped back to the
+        /// same barycentric point on the rest surface — or nil on a miss.
+        static func restPointOnBentSurface(_ flat: FlatMesh, disp: [Float], scale: Float,
+                                           origin o: SIMD3<Float>, dir d: SIMD3<Float>) -> SIMD3<Float>? {
+            let n = flat.vertexCount, pos = flat.positions
+            guard n >= 3, disp.count == n * 3, pos.count >= n * 3 else { return nil }
+            func rest(_ i: Int) -> SIMD3<Float> { SIMD3(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]) }
+            func bent(_ i: Int) -> SIMD3<Float> { rest(i) + SIMD3(disp[3 * i], disp[3 * i + 1], disp[3 * i + 2]) * scale }
+            var best: (t: Float, i: Int, u: Float, v: Float)?
+            for t in 0..<(n / 3) {
+                let a = bent(3 * t), b = bent(3 * t + 1), c = bent(3 * t + 2)
+                let e1 = b - a, e2 = c - a, p = simd_cross(d, e2), det = simd_dot(e1, p)
+                guard abs(det) > 1e-12 else { continue }
+                let inv = 1 / det, s = o - a, u = simd_dot(s, p) * inv
+                guard u >= 0, u <= 1 else { continue }
+                let q = simd_cross(s, e1), v = simd_dot(d, q) * inv
+                guard v >= 0, u + v <= 1 else { continue }
+                let tt = simd_dot(e2, q) * inv
+                guard tt > 0, best.map({ tt < $0.t }) ?? true else { continue }
+                best = (tt, t, u, v)
+            }
+            guard let b = best else { return nil }
+            let r0 = rest(3 * b.i), r1 = rest(3 * b.i + 1), r2 = rest(3 * b.i + 2)
+            return r0 * (1 - b.u - b.v) + r1 * b.u + r2 * b.v
+        }
+
         private var appliedFlexArray: [Float]?   // Flexible (PR #362): the dent uploaded — a new dent on the same mesh re-uploads (Array == is O(1) on the same storage)
         private var appliedFlexScale: Float = 0
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
@@ -6244,6 +6274,7 @@ extension MetalMeshView {
         private var onMiss: (() -> Void)?
         private var onEmptyTap: (() -> Void)?
         private var onSurfacePoint: ((SIMD3<Float>?) -> Void)?
+        private var onTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
         private var onRedo: (() -> Void)?
@@ -6291,6 +6322,7 @@ extension MetalMeshView {
             onMiss = inputs.onMiss
             onEmptyTap = inputs.onEmptyTap
             onSurfacePoint = inputs.onSurfacePoint
+            onTapRay = inputs.onTapRay
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
@@ -6914,7 +6946,23 @@ extension MetalMeshView {
                 deliver(faceID, surfaceHit?.point)
                 return
             }
-            if let onSurfacePoint { onSurfacePoint(surfaceHit?.point); return }   // ★ Results: read the stress there
+            // ★ a tap on a keep-clear volume picks it, even where it hangs in the air past the part (his iPad 10-28)
+            if let onTapRay {
+                let dir = simd_normalize(modelRay.dir)
+                let along = surfaceHit.map { simd_dot($0.point - modelRay.origin, dir) }
+                if onTapRay(modelRay.origin, dir, along) { return }
+            }
+            // ★ Results: read the stress there. ★ 10-28: while the part is drawn BENT (Bend / Break), the tap hits the bent
+            // surface the eye sees and reports the matching point of the REAL part (where its stress is read).
+            if let onSurfacePoint {
+                if appliedFlex, appliedFlexScale != 0, let disp = appliedFlexArray, let m = renderer.mesh {
+                    onSurfacePoint(Self.restPointOnBentSurface(m.flat, disp: disp, scale: appliedFlexScale,
+                                                               origin: modelRay.origin, dir: modelRay.dir))
+                } else {
+                    onSurfacePoint(surfaceHit?.point)
+                }
+                return
+            }
             if let faceID {
                 // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
                 // that can tell two pieces of one face apart.
@@ -7270,6 +7318,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onSurfacePoint = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ A tap's model-space ray, asked before any face pick (true consumes it) — the keep-clear volumes' own pick.
+    public func onTapRay(_ action: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onTapRay = action
         return copy
 #else
         self

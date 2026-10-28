@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import SwiftUI
 import TopOptDesign
 import TopOptKit
@@ -32,13 +33,48 @@ public struct LoadScenarioSet: Equatable, Sendable, Codable {
 }
 
 public enum LoadScenarioRule {
-    /// The (i) beside "+ Add a load scenario" — his sentence, verbatim.
-    public static let info = "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together."
+    /// The (i) beside "+ Add a load scenario" — his sentence, verbatim, then (his yes 2026-10-28, with TO-core's weighting)
+    /// how much each scenario shapes the design.
+    public static var info: String { "Each scenario is checked on its own. Loads in different scenarios never act together; loads in the same scenario act together. Each scenario shapes the part in proportion to its load: a light one adds only a light connection, and one under \(minLoadSharePercent)% of the heaviest can't shape the part and is refused." }
     /// The inline refusal when the last anchor on would be switched off.
     public static let lastAnchorRefusal = "A scenario needs at least one anchor on."
     /// ★ OPTIMIZE'S PRE-FLIGHT (362's ruling 2026-10-26 06:54): the same words core refuses with, before anything is sent.
     public static func noAnchorLine(_ name: String) -> String { "Scenario “\(name)” has no anchor switched on" }
     public static func noLoadLine(_ name: String) -> String { "Scenario “\(name)” has no load" }
+
+    /// ★ HIS DECISION (TO-core, 2026-10-28): a scenario too light to shape the part fails with a notice. Its load is the SUM
+    /// of its groups' force sizes (a twist of two opposite pushes is not zero); under the share of the heaviest scenario's load it is
+    /// refused — exactly at it runs. Core's kScenarioMinLoadShare and its words, verbatim (kg = N / 9.80665, 3 significant figures).
+    public static let minLoadShare = 0.10   // ★ his decision 2026-10-28: an even 10% — core's kScenarioMinLoadShare — the ONE number the notice and the (i) read
+    static var minLoadSharePercent: String { kg(minLoadShare * 100) }
+    public static let newtonsPerKg = 9.80665
+    /// Core's kg, character for character (TO-core 2026-10-28): 3 significant figures in plain decimals, never an exponent;
+    /// '.' whatever the locale, no grouping; trailing zeros and a bare '.' dropped; half away from zero.
+    static func kg(_ s: Double) -> String {
+        guard s.isFinite, s != 0 else { return "0" }
+        let d = Int(floor(log10(abs(s))))
+        let scale = pow(10, Double(2 - d))
+        var r = (abs(s) * scale).rounded(.toNearestOrAwayFromZero) / scale
+        var digits = max(0, 2 - d)
+        if r >= pow(10, Double(d + 1)) { digits = max(0, digits - 1) }   // 9.996 → 10: one digit fewer after the point
+        r = s < 0 ? -r : r
+        var t = String(format: "%.\(digits)f", locale: Locale(identifier: "en_US_POSIX"), r)
+        if t.contains(".") { while t.hasSuffix("0") { t.removeLast() }; if t.hasSuffix(".") { t.removeLast() } }
+        return t
+    }
+    public static func tooLightLine(_ name: String, kg load: Double, heaviest: String, heaviestKg: Double) -> String {
+        "Scenario “\(name)” is too light: its load is \(kg(load)) kg, but it needs at least \(kg(heaviestKg * minLoadShare)) kg "
+            + "(\(minLoadSharePercent)% of Scenario “\(heaviest)”'s \(kg(heaviestKg)) kg). Raise it or remove the scenario."
+    }
+    /// The first scenario under the line, as core words it — from (name, kg) pairs in scenario order. Nil when none is, or
+    /// with fewer than two scenarios.
+    public static func tooLight(_ loads: [(name: String, kg: Double)]) -> String? { tooLightScenario(loads)?.line }
+    /// The same, with the scenario's name (its folder carries the line).
+    public static func tooLightScenario(_ loads: [(name: String, kg: Double)]) -> (name: String, line: String)? {
+        guard loads.count >= 2, let top = loads.max(by: { $0.kg < $1.kg }), top.kg > 0 else { return nil }
+        guard let light = loads.first(where: { $0.kg < top.kg * minLoadShare }) else { return nil }
+        return (light.name, tooLightLine(light.name, kg: light.kg, heaviest: top.name, heaviestKg: top.kg))
+    }
     /// The iPad's own solver reads one load case: a 2-scenario run there would check Scenario 1 alone, silently.
     public static let onDeviceLine = "Load scenarios run on the Mac worker only"
     /// The one-tap fix under a scenario left with every anchor off (an anchor group was deleted).
@@ -51,6 +87,9 @@ public enum LoadScenarioRule {
         guard request.scenarios.count >= 2 else { return nil }
         if let s = request.scenarios.first(where: { $0.anchorFaceIDs.isEmpty }) { return noAnchorLine(s.name) }
         if let s = request.scenarios.first(where: { $0.loadGroups.isEmpty }) { return noLoadLine(s.name) }
+        // ★ too light to shape the part (his decision 2026-10-28) — the same sum and the same words as core
+        if let line = tooLight(request.scenarios.map { s in
+            (s.name, s.loadGroups.reduce(0) { $0 + simd_length($1.force) } / newtonsPerKg) }) { return line }
         if !workerSelected { return onDeviceLine }
         return nil
     }
