@@ -11503,6 +11503,16 @@ public struct WorkspacePlaceholder: View {
     }
     /// Whether a group draws (arrow, chip, colour) in the open scenario.
     private func scenarioDraws(_ g: UUID) -> Bool { !scenariosApply || force.showsInActiveScenario(g) }
+    /// ★ The scenario under 3% of the heaviest one's load (his decision 2026-10-28), with core's words — or nil. Each
+    /// scenario's load is the sum of its load groups' weights, as core sums their force sizes.
+    private var scenarioTooLightLine: (name: String, line: String)? {
+        guard force.hasScenarios else { return nil }
+        let loads = force.scenarioList.map { s in
+            (name: s.name, kg: selection.groups.filter { force.kind(for: $0.id).isLoad && force.group($0.id, isIn: s.id) }
+                .reduce(0.0) { $0 + (force.kind(for: $1.id).weightKg ?? 0) })
+        }
+        return LoadScenarioRule.tooLightScenario(loads)
+    }
     /// ★ His iPad 2026-10-28 (bug 1): the groups he CANNOT SEE right now — eye-hidden, or outside the open scenario. A tap
     /// never selects one, grows one, or takes a face or piece from one: a face only they hold is free to start a new group.
     private var unseenGroups: Set<UUID> {
@@ -11519,13 +11529,24 @@ public struct WorkspacePlaceholder: View {
         guard scenariosApply, force.hasScenarios else { return nil }
         let open = force.activeScenarioID
         let order = selection.groups.map(\.id)
+        let tooLight = scenarioTooLightLine
         return force.scenarioList.enumerated().map { i, s in
             let isOpen = s.id == open
             let shown = folderShown(s.id)
             let noAnchor = force.anchorsOn(in: s.id, order: order).isEmpty
-            let tail: AnyView? = isOpen && (noAnchor || scenarioAnchorHint == s.id) ? AnyView(VStack(alignment: .leading, spacing: DS.Space.xs) {
+            // ★ his decision 2026-10-28: the scenario under 3% of the heaviest says so in its own folder, the moment it is
+            let light = tooLight.flatMap { $0.name == s.name ? $0.line : nil }
+            let tail: AnyView? = (isOpen && (noAnchor || scenarioAnchorHint == s.id)) || light != nil ? AnyView(VStack(alignment: .leading, spacing: DS.Space.xs) {
+                if let light {
+                    Text(light).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.warning.color).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("scenario-too-light")
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioTooLight": geo.frame(in: .global)])
+                        }.allowsHitTesting(false))
+                }
                 // ★ the gap (an anchor group deleted, the rest switched off): said at once, with its one-tap fix
-                if noAnchor {
+                if isOpen, noAnchor {
                     HStack(spacing: DS.Space.s) {
                         Text(LoadScenarioRule.noAnchorLine(s.name)).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
                             .foregroundStyle(DS.Color.warning.color)
@@ -11536,7 +11557,7 @@ public struct WorkspacePlaceholder: View {
                         }
                     }
                 }
-                if scenarioAnchorHint == s.id {
+                if isOpen, scenarioAnchorHint == s.id {
                     Text("Tap the faces that hold in \(s.name), then choose Anchor.")
                         .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                 }
