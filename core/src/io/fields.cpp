@@ -1,5 +1,6 @@
 #include "topopt/fields.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -133,6 +134,95 @@ int write_fields_file(const std::string& path,
   if (std::rename(tmp.c_str(), path.c_str()) != 0) {
     std::remove(tmp.c_str());
     throw FieldsError("failed publishing fields file: " + path);
+  }
+  return static_cast<int>(accepted.size());
+}
+
+int write_scenario_fields_file(const std::string& path,
+                               const MinimizePlasticResult& result,
+                               const VoxelGrid& solved_grid) {
+  std::vector<const MinimizePlasticVariant*> all;
+  all.reserve(result.evaluated.size());
+  for (const MinimizePlasticVariant& v : result.evaluated) all.push_back(&v);
+  return write_scenario_fields_file(path, all, solved_grid);
+}
+
+int write_scenario_fields_file(const std::string& path,
+                               const std::vector<const MinimizePlasticVariant*>& variants,
+                               const VoxelGrid& solved_grid) {
+  // fields.bin's blocks: the accepted variants, in order.
+  std::vector<const MinimizePlasticVariant*> accepted;
+  for (const MinimizePlasticVariant* v : variants)
+    if (v && v->accepted) accepted.push_back(v);
+  std::size_t scenarios = 0;
+  for (const MinimizePlasticVariant* v : accepted)
+    scenarios = std::max(scenarios, v->scenario_fields.size());
+  if (scenarios < 2 || accepted.empty()) return 0;
+  const std::size_t voxel_count = solved_grid.voxel_count();
+  const std::size_t node_count = static_cast<std::size_t>(solved_grid.nx + 1) *
+                                 static_cast<std::size_t>(solved_grid.ny + 1) *
+                                 static_cast<std::size_t>(solved_grid.nz + 1);
+  const std::vector<ScenarioFields>& names = accepted.front()->scenario_fields;
+  for (const MinimizePlasticVariant* v : accepted) {
+    if (v->scenario_fields.size() != scenarios)
+      throw FieldsError("scenario_fields.bin: an accepted variant carries " +
+                        std::to_string(v->scenario_fields.size()) + " scenarios, not " +
+                        std::to_string(scenarios));
+    for (std::size_t s = 0; s < scenarios; ++s) {
+      const ScenarioFields& f = v->scenario_fields[s];
+      if (f.name != names[s].name)
+        throw FieldsError("scenario_fields.bin: scenario " + std::to_string(s) +
+                          " is \"" + f.name + "\" on one variant, \"" + names[s].name +
+                          "\" on another");
+      if (f.von_mises.size() != voxel_count || f.displacement.size() != 3 * node_count)
+        throw FieldsError("scenario_fields.bin: scenario \"" + f.name +
+                          "\"'s fields do not match the grid");
+    }
+  }
+
+  LEWriter w;
+  w.u8(kScenarioFieldsFormatVersion);
+  w.pad(3);
+  w.i32(solved_grid.nx);
+  w.i32(solved_grid.ny);
+  w.i32(solved_grid.nz);
+  w.f64(solved_grid.origin.x);
+  w.f64(solved_grid.origin.y);
+  w.f64(solved_grid.origin.z);
+  w.f64(solved_grid.spacing);
+  w.i32(static_cast<std::int32_t>(scenarios));
+  w.i32(static_cast<std::int32_t>(accepted.size()));
+  for (const ScenarioFields& f : names) {
+    w.i32(static_cast<std::int32_t>(f.name.size()));
+    w.bytes.insert(w.bytes.end(), f.name.begin(), f.name.end());
+  }
+  for (const MinimizePlasticVariant* v : accepted) {
+    int governing = -1;
+    for (std::size_t s = 0; s < v->report.scenarios.size(); ++s)
+      if (v->report.scenarios[s].governs) governing = static_cast<int>(s);
+    w.f64(v->requested_volume_fraction);
+    w.i32(governing);
+    w.pad(4);
+    for (const ScenarioFields& f : v->scenario_fields) {
+      w.i64(static_cast<std::int64_t>(f.von_mises.size()));
+      w.i64(static_cast<std::int64_t>(f.displacement.size()));
+      for (const float x : f.von_mises) w.f32(x);
+      for (const float x : f.displacement) w.f32(x);
+    }
+  }
+
+  const std::string tmp = path + ".part";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out) throw FieldsError("cannot open scenario fields file for writing: " + tmp);
+    out.write(reinterpret_cast<const char*>(w.bytes.data()),
+              static_cast<std::streamsize>(w.bytes.size()));
+    out.flush();
+    if (!out) throw FieldsError("failed writing scenario fields file: " + tmp);
+  }
+  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+    std::remove(tmp.c_str());
+    throw FieldsError("failed publishing scenario fields file: " + path);
   }
   return static_cast<int>(accepted.size());
 }

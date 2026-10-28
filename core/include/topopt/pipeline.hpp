@@ -1092,15 +1092,28 @@ std::string scenario_unheld_reason(const std::string& name);
 // lowest margin_effective) governs and its analysis is returned; each scenario's
 // margin, peak and where, and the share of its load its weak springs carry (over
 // kScenarioUnheldShare = unheld: the governing analysis is then not accepted).
+// One scenario's OWN result fields on a design (his "the scenario selector changes the
+// views", 2026-10-27): the per-voxel von Mises (MPa, grid-indexed) and the per-node
+// displacement (mm, DOF-ordered) of that scenario's certification solve, in the
+// layout of MinimizePlasticVariant::von_mises_field / displacement_field, narrowed to
+// float32 as fields.bin narrows them (so a governing entry is fields.bin's bytes).
+struct ScenarioFields {
+  std::string name;
+  std::vector<float> von_mises;
+  std::vector<float> displacement;
+};
 struct ScenarioCertification {
   FixedDesignAnalysis governing;
   std::vector<ScenarioReport> reports;
   std::string unheld;  // the first unheld scenario's name; "" = every one is held
+  // Every scenario's own fields, in `reports` order: filled only when `keep_fields`.
+  std::vector<ScenarioFields> fields;
 };
 ScenarioCertification certify_scenarios(
     const VoxelGrid& grid, const std::vector<SimpScenario>& scenarios,
     const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
-                                            const std::vector<NodalLoad>&)>& certify);
+                                            const std::vector<NodalLoad>&)>& certify,
+    bool keep_fields = false);
 // The weak springs (an anchor OFF in a scenario) sized for the material and grid:
 // kScenarioWeakSpringRel x E x h per node, isotropic.
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
@@ -1397,6 +1410,10 @@ struct MinimizePlasticVariant {
   // which nodes/voxels are "printed". Empty for a cancelled rung (its analysis
   // is skipped, exactly like von_mises_field).
   std::vector<double> displacement_field;
+  // LOAD SCENARIOS: every scenario's own fields on this rung's design, in
+  // report.scenarios order (the governing one's are the two fields above, narrowed).
+  // Empty without scenarios, and for a rung whose certification never ran.
+  std::vector<ScenarioFields> scenario_fields;
 
   // (b) The extracted + cleaned variant isosurface, exposed for display. It is
   // ALREADY computed by check_v3 (stored in `v3.mesh`); this accessor exposes it

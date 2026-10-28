@@ -2373,6 +2373,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME scenarios_strengthen COMMAND test_scenarios_strengthen)
+  # LOAD SCENARIOS (his ask 2026-10-27): every scenario's own fields beside fields.bin.
+  add_executable(test_scenario_fields tests/validation/test_scenario_fields.cpp)
+  target_link_libraries(test_scenario_fields PRIVATE topopt)
+  target_compile_definitions(test_scenario_fields PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_fields COMMAND test_scenario_fields)
   # Item 50 acceptance (ruling 2026-10-26): specks are a note, not a refusal; a
   # refused version's note names the real reason.
   add_executable(test_strengthen_accept tests/unit/test_strengthen_accept.cpp)

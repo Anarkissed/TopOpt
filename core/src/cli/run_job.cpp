@@ -14899,6 +14899,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       write_fields_file(fields_stream_path, so_far, solved_grid);
     } catch (const std::exception&) {
     }
+    try {  // LOAD SCENARIOS: every scenario's own fields (none without 2+)
+      write_scenario_fields_file(join_path(out_dir, "scenario_fields.bin"), so_far,
+                                 solved_grid);
+    } catch (const std::exception&) {
+    }
   };
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
@@ -15587,6 +15592,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.fields_variant_count =
       write_fields_file(result.fields_path, result.pipeline,
                         result.pipeline.solved_grid);
+  // LOAD SCENARIOS — every scenario's own fields beside it (the Scenario menu's
+  // views); fields.bin stays the governing scenario's. No file without 2+ scenarios.
+  result.scenario_fields_variant_count = write_scenario_fields_file(
+      join_path(out_dir, "scenario_fields.bin"), result.pipeline, result.pipeline.solved_grid);
+  if (result.scenario_fields_variant_count > 0)
+    result.scenario_fields_path = join_path(out_dir, "scenario_fields.bin");
 
   // ──▶ the DESIGN container (task 2026-08-02-lattice-a-variant): each evaluated
   // variant's own density field, the thing "lattice this variant" needs and the
