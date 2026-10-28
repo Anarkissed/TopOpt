@@ -5626,6 +5626,10 @@ struct MeshViewInputs {
     /// ★ Results' tap-to-explore key (his note 2026-10-27): a tap reports the SURFACE point under the finger (nil = empty
     /// space) and nothing else — an optimized result has no faces to pick.
     var onSurfacePoint: ((SIMD3<Float>?) -> Void)? = nil
+    /// ★ His iPad 2026-10-28 ("I can't seem to tap on a primitive to select it"): a single tap's ray in MODEL space (origin,
+    /// unit direction) and how far along it the part's surface was hit (nil = the ray missed the part), asked FIRST — true
+    /// consumes the tap. A keep-clear volume sticks out past the part into the air, where no face is under the finger.
+    var onTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)? = nil
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
     /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
@@ -6244,6 +6248,7 @@ extension MetalMeshView {
         private var onMiss: (() -> Void)?
         private var onEmptyTap: (() -> Void)?
         private var onSurfacePoint: ((SIMD3<Float>?) -> Void)?
+        private var onTapRay: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)?
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
         private var onRedo: (() -> Void)?
@@ -6291,6 +6296,7 @@ extension MetalMeshView {
             onMiss = inputs.onMiss
             onEmptyTap = inputs.onEmptyTap
             onSurfacePoint = inputs.onSurfacePoint
+            onTapRay = inputs.onTapRay
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
@@ -6914,6 +6920,12 @@ extension MetalMeshView {
                 deliver(faceID, surfaceHit?.point)
                 return
             }
+            // ★ a tap on a keep-clear volume picks it, even where it hangs in the air past the part (his iPad 10-28)
+            if let onTapRay {
+                let dir = simd_normalize(modelRay.dir)
+                let along = surfaceHit.map { simd_dot($0.point - modelRay.origin, dir) }
+                if onTapRay(modelRay.origin, dir, along) { return }
+            }
             if let onSurfacePoint { onSurfacePoint(surfaceHit?.point); return }   // ★ Results: read the stress there
             if let faceID {
                 // ★ THE POINT-AWARE HANDLER GETS FIRST REFUSAL. It is the only one
@@ -7270,6 +7282,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onSurfacePoint = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ A tap's model-space ray, asked before any face pick (true consumes it) — the keep-clear volumes' own pick.
+    public func onTapRay(_ action: ((SIMD3<Float>, SIMD3<Float>, Float?) -> Bool)?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onTapRay = action
         return copy
 #else
         self
