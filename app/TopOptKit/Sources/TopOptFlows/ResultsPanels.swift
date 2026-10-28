@@ -219,6 +219,9 @@ extension ResultsModel {
 
 public enum ResultsViewMode: String, CaseIterable, Sendable {
     case stress = "Stress", solid = "Solid", xray = "X-ray", loadPaths = "Load paths"
+    /// ★ his iPad 2026-10-27: the old page's MOVING views are back — the part bending under its load, and the push
+    /// toward the load that breaks it.
+    case bend = "Bend", breakIt = "Break"
 
     /// ★ his note 2026-10-27: icons, like the rest of the app (the word is the accessibility label).
     var symbol: String {
@@ -227,12 +230,45 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
         case .solid: return "cube.fill"
         case .xray: return "cube.transparent"
         case .loadPaths: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .bend: return "arrow.down.to.line"
+        case .breakIt: return "bolt.fill"
         }
     }
 
-    /// Why a view is greyed (the run carries no field for it).
-    var unavailableReason: String {
-        self == .stress ? "Stress — this run sent no stress field" : "Load paths — this run sent no displacement field"
+    /// The views that MOVE: each plays on its own, pauses, and scrubs by hand.
+    var moves: Bool { self == .loadPaths || self == .bend || self == .breakIt }
+
+    /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
+    static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
+        (hasStress ? [.stress] : []) + [.solid, .xray]
+            + (hasDisplacement ? [.loadPaths, .bend] : []) + (canBreak ? [.breakIt] : [])
+    }
+}
+
+/// ★ His iPad 2026-10-27: "Ensure that everything can pause and slide through manually." One clock per moving view, a
+/// position in 0…1 the slider shows and sets.
+public enum ResultsMotion {
+    /// Seconds for one bend: rest → full deflection → rest.
+    public static let bendSeconds: Double = 2.5
+    /// Break: the load climbs from today's to the one that breaks it, then holds there a moment before the next push.
+    public static let breakRampSeconds: Double = 4
+    public static let breakHoldSeconds: Double = 1.2
+
+    /// Where a playing Break stands after `t` seconds (0 = today's load, 1 = the breaking load).
+    public static func breakPosition(time t: Double) -> Double {
+        let cycle = breakRampSeconds + breakHoldSeconds
+        let u = t.truncatingRemainder(dividingBy: cycle)
+        return min(1, max(0, (u < 0 ? u + cycle : u) / breakRampSeconds))
+    }
+
+    /// The push factor for a Break position: 1× (today's load) … the failure multiple.
+    public static func pushFactor(position: Double, multiplier: Double) -> Double {
+        1 + min(1, max(0, position)) * (max(1, multiplier) - 1)
+    }
+
+    /// A Break position back from a push factor.
+    public static func breakPosition(pushFactor: Double, multiplier: Double) -> Double {
+        multiplier > 1 ? min(1, max(0, (pushFactor - 1) / (multiplier - 1))) : 0
     }
 }
 
@@ -579,7 +615,7 @@ struct ResultsViewModePicker: View {
                     .buttonStyle(.plain)
                     .disabled(!ok)
                     .opacity(ok ? 1 : 0.35)
-                    .accessibilityLabel(ok ? m.rawValue : m.unavailableReason)
+                    .accessibilityLabel(ok ? m.rawValue : m.rawValue + " — not in this run")
                     .accessibilityAddTraits(m == mode ? .isSelected : [])
                     .accessibilityIdentifier("results-view-\(m.rawValue)")
                     .background(ResultsChrome.publish("resultsView-\(m.rawValue)"))
@@ -618,16 +654,62 @@ struct ResultsViewModePicker: View {
 }
 
 
-/// One load scenario's marks on the results model (model frame, mm): its loads (centroid + unit direction) and its anchors.
-public struct ResultsScenarioMarks: Equatable, Sendable {
-    public struct Load: Equatable, Sendable {
-        public let point: SIMD3<Float>
-        public let direction: SIMD3<Float>
-        public init(point: SIMD3<Float>, direction: SIMD3<Float>) { self.point = point; self.direction = direction }
+/// ★ The Scenario menu and the views (his iPad 2026-10-27: "Ensure that the scenario selector changes the views"). Core
+/// certifies every scenario on each version but sends the stress and displacement fields of the WORST one only — so until it
+/// sends each scenario's own, a pick of another scenario says plainly which scenario the views are showing.
+enum ResultsScenarioViews {
+    static func note(pick: String?, scenarios: [ScenarioResult]) -> String? {
+        guard let p = pick, let g = scenarios.first(where: \.governs), p != g.name else { return nil }
+        return "The views show \(g.name), the worst case — this run sent its fields only."
     }
-    public let loads: [Load]
-    public let anchors: [SIMD3<Float>]
-    public init(loads: [Load], anchors: [SIMD3<Float>]) { self.loads = loads; self.anchors = anchors }
+}
+
+/// ★ His iPad 2026-10-27 ("Ensure that everything can pause and slide through manually"): a moving view's Play / Pause and
+/// its slider, under the view buttons. Dragging the slider pauses the view where the finger leaves it.
+struct ResultsMotionBar: View {
+    let title: String
+    let readout: String
+    /// Break has reached the load that breaks it: the readout turns red.
+    let alarm: Bool
+    @Binding var playing: Bool
+    let position: Double
+    let scrub: (Double) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.s) {
+                Button { playing.toggle() } label: {
+                    Image(systemName: playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold)).foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(DS.Color.accent.opacity(0.28).color)
+                            .overlay(Circle().strokeBorder(DS.Color.accent.opacity(0.7).color, lineWidth: 1.5)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(playing ? "Pause \(title)" : "Play \(title)")
+                .accessibilityIdentifier("results-motion-play")
+                .background(ResultsChrome.publish("resultsMotionPlay"))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
+                    Text(readout).font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle((alarm ? DS.Color.danger : DS.Color.textSecondary).color)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            Slider(value: Binding(get: { position }, set: { playing = false; scrub($0) }), in: 0...1)
+                .tint(DS.Color.accent.color)
+                .accessibilityLabel("\(title) position")
+                .accessibilityIdentifier("results-motion-slider")
+                .background(ResultsChrome.publish("resultsMotionSlider"))
+        }
+        .padding(.horizontal, DS.Space.m).padding(.vertical, DS.Space.s)
+        .frame(width: ResultsChrome.columnWidth)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).fill(ResultsChrome.fill.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .background(ResultsChrome.publish("resultsMotionBar"))
+    }
 }
 
 /// ★ THE TAP-TO-EXPLORE STRESS KEY (his note 2026-10-27: "make the legend tappable … any area you tap on the model shows the
@@ -668,7 +750,7 @@ struct ResultsStressExplore: View {
                 .accessibilityLabel("Open the stress key")
             } else {
                 LatticeLegendChrome(width: reading == nil ? Self.width : Self.widthWithReading, minimized: $minimized,
-                                    info: "Tap anywhere on the part to read its stress there. Tap empty space to clear it.") {
+                                    info: "Tap any spot on the part to read its stress there. Double-tap anywhere to come back.") {
                     HStack(alignment: .center, spacing: DS.Space.s) {
                         VStack(alignment: .trailing, spacing: 0) {
                             ForEach(Array(ticks.enumerated()), id: \.offset) { i, t in

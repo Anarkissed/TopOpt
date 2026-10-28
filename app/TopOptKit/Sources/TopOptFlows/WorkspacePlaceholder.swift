@@ -212,9 +212,25 @@ public struct WorkspacePlaceholder: View {
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// The piece whose transform gizmo is up (it counts as picked: its chips show with it).
-    private var gizmoPieceKey: Int? {
-        guard let t = gizmoTarget, t.group == selection.activeGroupID else { return nil }
-        return ProjectModel.manualFaceKey(t.id)
+    private var gizmoPieceKey: Int? { liveGizmo.map { ProjectModel.manualFaceKey($0.id) } }
+    /// ★ His iPad 2026-10-27: the gizmo that is really up — its group open, its primitive still there, and it IS the picked
+    /// piece (picking another primitive or row left the old gizmo up, and ITS chips won over the picked one's). A stale
+    /// `gizmoTarget` also kept the Lattice page's region gizmo away for good.
+    private var liveGizmo: GizmoTarget? {
+        guard let t = gizmoTarget, t.group == selection.activeGroupID,
+              project.manualPrimitives(in: t.group).contains(where: { $0.id == t.id }),
+              selectedPieceKey.map({ $0 == ProjectModel.manualFaceKey(t.id) }) ?? true else { return nil }
+        return t
+    }
+    /// Raise (or drop, nil) the transform gizmo. Copy mode belongs to the primitive it was lit for: any other target ends it.
+    private func setGizmo(_ t: GizmoTarget?) {
+        if t?.id != gizmoCopyFor { gizmoCopyFor = nil }
+        gizmoTarget = t
+    }
+    /// Pick one piece (or none): a gizmo on any other piece goes, and its Copy mode with it.
+    private func setPickedPiece(_ ref: SelectionArrowRule.PieceRef?) {
+        if let t = gizmoTarget, ref.map({ $0.group != t.group || $0.key != ProjectModel.manualFaceKey(t.id) }) ?? true { setGizmo(nil) }
+        selectedPiece = ref
     }
     /// ★ The Regions surface (task 2026-08-14-face-regions). Opened from the
     /// Selections header; it is where a union, a filter and a split are made.
@@ -408,6 +424,8 @@ public struct WorkspacePlaceholder: View {
     /// ★ his iPad 2026-10-27 (note 4): Copy is a MODE on the primitive it was pressed for — it stays lit, and every move
     /// of that primitive while it is lit leaves a copy where it started. Off when tapped again or another primitive is edited.
     @State private var gizmoCopyFor: UUID?
+    /// This grab will leave a copy once it actually moves.
+    @State private var gizmoCopyArmed = false
     @State private var gizmoDrag: PrimitiveGizmo.Drag?
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
@@ -1648,10 +1666,9 @@ public struct WorkspacePlaceholder: View {
                               // own reason on the disabled control.
                               smoothEntry: { smoothEntry($0) },
                               latticeEntry: { latticeEntry($0) },
-                              // ★ Results redesign (2026-10-27): undo / redo at the top left, and each scenario's marks
+                              // ★ Results redesign (2026-10-27): undo / redo at the top left
                               undo: { project.performUndo() }, redo: { project.performRedo() },
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
-                              scenarioMarks: resultsScenarioMarks,
                               onFullScreen: { resultsFullScreen = $0 })
                     .ignoresSafeArea()
             }
@@ -2490,7 +2507,7 @@ public struct WorkspacePlaceholder: View {
         if let g = selection.activeGroup, groupClearanceFaces(g).contains(faceID) {
             chipsRevealedGroup = g.id
             // ★ his iPad 10-26 (3): tapping a piece in 3D picks that same row (its group is now the selection, expanded)
-            selectedPiece = SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID))
+            setPickedPiece(SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID)))
         } else if chipsRevealedGroup != selection.activeGroupID {
             chipsRevealedGroup = nil
         }
@@ -2624,26 +2641,6 @@ public struct WorkspacePlaceholder: View {
     /// grid/variant, so a centroid here lines up with the derived stress field there.
     private var loadFlowSeeds: [SIMD3<Float>] { loadFlowPairs.map(\.seed) }
 
-    /// ★ Results redesign (2026-10-27): each load scenario's loads and ON anchors, by name, for the Scenario menu.
-    private var resultsScenarioMarks: [String: ResultsScenarioMarks] {
-        guard force.hasScenarios, let mesh = viewerMesh else { return [:] }
-        var out: [String: ResultsScenarioMarks] = [:]
-        for s in force.scenarioList {
-            var loads: [ResultsScenarioMarks.Load] = [], anchors: [SIMD3<Float>] = []
-            for g in selection.groups where force.group(g.id, isIn: s.id) {
-                if force.kind(for: g.id).isLoad, let c = groupCentroidModel(g) {
-                    var d = SIMD3<Float>.zero
-                    if case .vector(let f)? = project.loadDirection(for: g.id), simd_length(f) > 1e-6 { d = simd_normalize(f) }
-                    loads.append(.init(point: c, direction: d))
-                } else if force.kind(for: g.id).isAnchor, force.anchorIsOn(g.id, in: s.id) {
-                    for f in groupTintedFaces(g) { if let c = mesh.faceCentroid(f) { anchors.append(c) } }
-                }
-            }
-            out[s.name] = ResultsScenarioMarks(loads: loads, anchors: anchors)
-        }
-        return out
-    }
-
     /// The per-load unit force directions d̂ (model frame), INDEX-ALIGNED with
     /// `loadFlowSeeds` — the `.anchor` flux-streamline direction for each load (M7.viz.5).
     private var loadFlowDirections: [SIMD3<Float>] { loadFlowPairs.map(\.dir) }
@@ -2740,7 +2737,9 @@ public struct WorkspacePlaceholder: View {
     /// primitive — its group selected, its row picked, its chips shown. The active group's primitives first, then any
     /// group's; the smallest volume wins where two overlap. Returns false (the tap selects faces as before) on a miss.
     private func pickManualPrimitive(at p: SIMD3<Float>) -> Bool {
-        let order = selection.groups.sorted { a, _ in a.id == selection.activeGroupID }
+        // the active group first (a strict ordering: the old `{ a, _ in a is active }` said active < active)
+        let active = selection.activeGroupID
+        let order = selection.groups.filter { $0.id == active } + selection.groups.filter { $0.id != active }
         var best: (group: UUID, id: UUID, size: Double)?
         for g in order where project.groupView.canEdit(g.id) && !project.groupView.isHidden(g.id) {
             for mp in project.manualPrimitives(in: g.id) {
@@ -2761,7 +2760,7 @@ public struct WorkspacePlaceholder: View {
         }
         guard let b = best else { return false }
         if selection.activeGroupID != b.group { selection.setActive(b.group) }
-        selectedPiece = SelectionArrowRule.PieceRef(group: b.group, key: ProjectModel.manualFaceKey(b.id))
+        setPickedPiece(SelectionArrowRule.PieceRef(group: b.group, key: ProjectModel.manualFaceKey(b.id)))
         chipsRevealedGroup = b.group
         return true
     }
@@ -2769,7 +2768,7 @@ public struct WorkspacePlaceholder: View {
     private func gizmoClearInfo(_ proj: CameraProjection) -> (centre: CGPoint, isClear: (CGPoint) -> Bool)? {
         guard force.phase == .edit, let gid = selection.activeGroupID else { return nil }
         for mp in project.manualPrimitives(in: gid)
-        where gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+        where liveGizmo == GizmoTarget(group: gid, id: mp.id) {
             guard let centre = proj.project(settledWorld(SIMD3<Float>(mp.center))) else { return nil }
             let box = Self.gizmoBoxSize
             let rot = gizmoRotation * primitiveOrientation(mp)
@@ -2850,7 +2849,7 @@ public struct WorkspacePlaceholder: View {
             if let gid = selection.activeGroupID {
                 for mp in project.manualPrimitives(in: gid) {
                     guard let c = proj.project(settledWorld(SIMD3<Float>(mp.center))) else { continue }
-                    if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+                    if liveGizmo == GizmoTarget(group: gid, id: mp.id) {
                         elements.append(KeepOutElement(id: "gizmo.cluster", anchor: CGPoint(x: c.x, y: c.y - Self.gizmoBoxSize / 2 - 4),
                                                        bounds: CGSize(width: 96, height: 44), touch: CGSize(width: 96, height: 44),
                                                        priority: .gizmo, rigid: true))
@@ -2878,7 +2877,7 @@ public struct WorkspacePlaceholder: View {
             }
 
             // ── MOVABLE (pill): the pending selection's Anchor/Load/Keep-clear action bar ──
-            if let g = activeGroup, force.kind(for: g.id).isPending,
+            if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs),
                let cm = groupCentroidModel(g), let c = proj.project(settledWorld(cm)) {
                 elements.append(KeepOutElement(id: "load.pendingchip",
                                                anchor: CGPoint(x: c.x, y: c.y - 60),
@@ -9089,7 +9088,7 @@ public struct WorkspacePlaceholder: View {
         if let proj = projection, let gid = selection.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c: a hidden active group draws no move knobs / gizmo (GroupEyeHides)
             ZStack(alignment: .topLeading) {
                 ForEach(project.manualPrimitives(in: gid)) { mp in
-                    if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+                    if liveGizmo == GizmoTarget(group: gid, id: mp.id) {
                         gizmoHandles(proj, group: gid, mp: mp)
                     } else if SelectionArrowRule.chipsShow(group: gid, piece: ProjectModel.manualFaceKey(mp.id),
                                                            selectedGroup: selection.activeGroupID, selectedPiece: selectedPieceKey),
@@ -9102,7 +9101,7 @@ public struct WorkspacePlaceholder: View {
                                 .foregroundStyle(.white)
                         }
                         .onTapGesture {
-                            gizmoTarget = GizmoTarget(group: gid, id: mp.id)
+                            setGizmo(GizmoTarget(group: gid, id: mp.id))
                             chipsRevealedGroup = gid   // T2: tapping the primitive reveals chips
                         }
                         .position(pt)
@@ -9237,8 +9236,9 @@ public struct WorkspacePlaceholder: View {
                        let ray = modelRay(proj, at: v.location) {
                         gizmoActiveId = gizmoActiveIdValue(hit)
                         let handle = gizmoHandle(for: hit, orientation: orient)
-                        // ★ note 4: Copy lit → this move leaves a copy where the primitive started
-                        if gizmoCopyFor == mp.id, !handle.isRotate { project.copyManualPrimitive(id: mp.id, in: gid, nudge: false) }
+                        // ★ note 4: Copy lit → this move leaves a copy where the primitive started — armed here, made on the
+                        // first real movement (his iPad 10-27: a bare touch on a handle stacked an unseen duplicate on it)
+                        gizmoCopyArmed = gizmoCopyFor == mp.id && !handle.isRotate
                         gizmoDrag = PrimitiveGizmo.Drag(handle: handle,
                                                         startCenter: mp.center, startAxis: mp.axis,
                                                         grab: ray, viewDir: ray.dir)
@@ -9256,6 +9256,10 @@ public struct WorkspacePlaceholder: View {
                     return
                 }
                 guard let drag = gizmoDrag, let ray = modelRay(proj, at: v.location) else { return }
+                if gizmoCopyArmed, hypot(v.translation.width, v.translation.height) > 4 {
+                    gizmoCopyArmed = false
+                    project.copyManualPrimitive(id: mp.id, in: gid, nudge: false)
+                }
                 let out = drag.resolve(currentRay: ray)
                 // A ribbon ROTATES (writes the axis, centre fixed); every other handle
                 // TRANSLATES (writes the centre, axis fixed). Same detent-magnet toggle both ways.
@@ -9284,6 +9288,7 @@ public struct WorkspacePlaceholder: View {
             .onEnded { _ in
                 let wasDragging = gizmoDrag != nil
                 gizmoDrag = nil
+                gizmoCopyArmed = false
                 gizmoBoxOrbiting = false
                 gizmoBoxDragLast = nil
                 gizmoActiveId = -1
@@ -9304,7 +9309,7 @@ public struct WorkspacePlaceholder: View {
         // Never while a force primitive is selected for transform (gizmoTarget != nil): that
         // is the only time the force gizmo draws its full 297pt box, so gating here means the
         // two gizmo boxes can never coincide or steal each other's taps (U5).
-        if showLatticePage, project.lattice.enabled, gizmoTarget == nil,
+        if showLatticePage, project.lattice.enabled, liveGizmo == nil,
            let region = project.lattice.region,
            let proj = projection,
            let center = proj.project(settledWorld(SIMD3<Float>(region.center))) {
@@ -9403,7 +9408,7 @@ public struct WorkspacePlaceholder: View {
             // (Round 3 removed the `scope` crosshair toggle here: it read as an aiming/re-centre
             // control and confused the maintainer. Magnetic detents are UNCHANGED — they stay ON
             // (`gizmoSnap` below), just without the misleading crosshair button.)
-            Button { gizmoTarget = nil } label: {
+            Button { setGizmo(nil) } label: {
                 gizmoCircleKnob(active: false, size: 26) {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                 }
@@ -9427,7 +9432,9 @@ public struct WorkspacePlaceholder: View {
     private func selectNewPrimitive(_ id: UUID?, in gid: UUID) {
         addingPrimitiveGroup = nil
         guard let id else { return }
-        gizmoTarget = GizmoTarget(group: gid, id: id)
+        selection.setActive(gid)
+        setPickedPiece(SelectionArrowRule.PieceRef(group: gid, key: ProjectModel.manualFaceKey(id)))   // ★ its row is the picked one
+        setGizmo(GizmoTarget(group: gid, id: id))
         chipsRevealedGroup = gid   // T2: an explicit primitive interaction reveals its chips
     }
 
@@ -11428,7 +11435,7 @@ public struct WorkspacePlaceholder: View {
     /// the Surface editor and Edit faces keep their own empty-tap rules.
     private func emptyTapClears() {
         guard !(flexibleMain.owns(project, stage) && !fullScreenPageUp), !visible.surfaceEditing, !editFaces.isEditing else { return }
-        selection.clearActive(); selectedPiece = nil; chipsRevealedGroup = nil
+        selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil
         force.sync(groups: selection.groups)
     }
 
@@ -11716,8 +11723,9 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func pickPiece(_ group: UUID, _ key: Int) {
+        let again = selection.activeGroupID == group && selectedPieceKey == key
         selection.setActive(group)
-        selectedPiece = selectedPieceKey == key ? nil : SelectionArrowRule.PieceRef(group: group, key: key)
+        setPickedPiece(again ? nil : SelectionArrowRule.PieceRef(group: group, key: key))
     }
 
     /// One MANUAL primitive's editable lines — the same "Margin/Axial/Depth" chips an
@@ -12065,7 +12073,8 @@ public struct WorkspacePlaceholder: View {
                 if force.phase == .edit, let mesh = viewerMesh, let proj = projection {
                     let placed = keepOutResolved(proj)
                     if stage == .topology { ForEach(Array(severalRolesBadges(proj).enumerated()), id: \.offset) { _, b in SeveralRolesBadge(roles: b.roles).position(b.at).allowsHitTesting(false) } }   // Flexible (PR #362) H55i: several roles on one face (owner 2026-10-25) — every role a face has, drawn
-                    if let g = activeGroup, force.kind(for: g.id).isPending {
+                    // ★ his iPad 10-27: only a group that still NEEDS a role — a Keep clear / Protect group picked again is done
+                    if let g = activeGroup, force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) {
                         let pt = groupScreen(g)
                         // Keep-out pass owns placement (handoff 2026-07-27): the action bar is
                         // nudged clear of the weight pills. Fallback = the old centroid-above anchor.
@@ -12337,7 +12346,7 @@ public struct WorkspacePlaceholder: View {
         if force.phase == .setup { return "Tap the face that points at the floor · drag to orbit" }
         if let g = activeGroup {
             let k = force.kind(for: g.id)
-            if k.isPending { return "Tap more faces to grow the selection, then choose Anchor or Load" }
+            if force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) { return "Tap more faces to grow the selection, then choose Anchor or Load" }
             if k.isLoad { return "Scrub the weight left–right · tap it to type · Push / Pull follow the face" }
         }
         return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"

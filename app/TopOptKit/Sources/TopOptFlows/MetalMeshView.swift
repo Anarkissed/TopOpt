@@ -3341,6 +3341,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         aspect = size.height > 0 ? Float(size.width / size.height) : 1
+        // ★ His iPad 2026-10-27: opening Details shrank the view and the model stayed SQUISHED until he touched it. The
+        // view draws on demand, so a new size kept the old frame stretched over it — draw again at the new size.
+        DispatchQueue.main.async { [weak view] in
+            #if os(iOS)
+            view?.setNeedsDisplay()
+            #else
+            view?.needsDisplay = true
+            #endif
+        }
     }
 
     func draw(in view: MTKView) {
@@ -6829,7 +6838,8 @@ extension MetalMeshView {
         /// `deliver` overrides where the answer goes — the double tap uses it so
         /// both taps resolve the face through the SAME ray, rather than a second
         /// hit-test that could disagree with the first about what was under them.
-        private func pick(at location: CGPoint, in view: MTKView,
+        // internal (not private) so a hosted test can hand it the tap a synthetic offscreen click never delivers
+        func pick(at location: CGPoint, in view: MTKView,
                           deliver: ((FaceID?, SIMD3<Float>?) -> Void)? = nil) {
             guard !paintActive, let renderer else { return }
             let size = view.bounds.size
@@ -6855,7 +6865,9 @@ extension MetalMeshView {
                     return
                 }
             }
-            guard faceToolActive else { return }
+            // ★ His iPad 2026-10-27 ("I am unable to tap to explore"): Results never turns the face tool on, so this guard
+            // dropped every tap before it reached the stress reader below.
+            guard faceToolActive || onSurfacePoint != nil else { return }
 
             // ★ ONE RAY, IN *MODEL* SPACE, FOR EVERYTHING BELOW.
             //
@@ -7158,6 +7170,7 @@ extension MetalMeshView {
 
         /// ★ §1(b) — the Mac's second click.
         @objc func handleDoubleClick(_ g: NSClickGestureRecognizer) {
+            if let onLatticeProbeExit { onLatticeProbeExit(); return }   // the key's way out, as on the iPad
             guard let view = g.view as? MTKView, let onPickDouble else { return }
             guard !gesture.armed else { return }
             guard inputDiscipline.admits(.finger, .edit) else { return }
@@ -7257,6 +7270,17 @@ extension MetalMeshView {
 #if canImport(MetalKit)
         var copy = self
         copy.inputs.onSurfacePoint = action
+        return copy
+#else
+        self
+#endif
+    }
+
+    /// ★ Results' explore key, the Lattice way: a double tap ANYWHERE leaves it (nil = no double tap).
+    public func onExploreExit(_ action: (() -> Void)?) -> MetalMeshView {
+#if canImport(MetalKit)
+        var copy = self
+        copy.inputs.onLatticeProbeExit = action
         return copy
 #else
         self

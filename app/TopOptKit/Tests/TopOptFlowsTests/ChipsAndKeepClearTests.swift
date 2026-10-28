@@ -88,6 +88,21 @@ final class ChipsAndKeepClearTests: XCTestCase {
         XCTAssertFalse(SelectionArrowRule.chipsShow(group: g, piece: 4, selectedGroup: g, selectedPiece: 3))
     }
 
+    /// ★ His iPad 2026-10-27: a Keep clear group picked again (its primitive tapped) put up the NEW selection's bar — "Add to
+    /// Group G as anchor" + Anchor | Load | Keep clear | Protect — and it never went away. A keep-clear / Protect group is done.
+    func testAKeepClearOrProtectGroupNeedsNoRole() {
+        var f = ForceModel()
+        let a = UUID(), b = UUID(), c = UUID()
+        f.setKeepClearAffix(a, .on)
+        f.setProtected(b, true)
+        XCTAssertFalse(f.needsRole(a), "★ keep clear: done")
+        XCTAssertFalse(f.needsRole(b), "★ Protect: done")
+        XCTAssertTrue(f.needsRole(c), "control: a bare new selection still needs Anchor or Load")
+        XCTAssertFalse(f.needsRole(c, latticeRoleGroups: [c]), "a lattice role is a declaration too")
+        f.makeAnchor(a)
+        XCTAssertFalse(f.needsRole(a))
+    }
+
     func testChipsNeverComeCloseEnoughToMisTap() {
         let a = KeepOutElement(id: "a", anchor: CGPoint(x: 200, y: 200), bounds: CGSize(width: 46, height: 46),
                                touch: CGSize(width: 46, height: 46), priority: .handle)
@@ -124,6 +139,25 @@ final class AutoKeepClearHostedTests: XCTestCase {
         ui.click(h, CGPoint(x: sw.midX, y: sw.midY))
         XCTAssertFalse(p.force.autoKeepClearIsOn(c.id), "★ the tap turns it off")
         XCTAssertTrue(p.force.autoKeepClearIsSet(c.id))
+    }
+
+    /// ★ His iPad 2026-10-27: picking a Keep clear group again must not put up "Add to … as anchor" (it never went away).
+    /// The control: a bare new selection still gets it.
+    func testAKeepClearGroupPickedAgainGetsNoNewSelectionBar() throws {
+        let r = try ui.project()
+        let p = r.project
+        let c = try XCTUnwrap(p.selection.groups.first { $0.name == "Group C" })
+        p.force.clearKind(c.id)                       // Group C: no role …
+        p.force.setKeepClearAffix(c.id, .on)                       // … and keep clear: a keep-clear-only group
+        p.selection.setActive(c.id)
+        let h = ui.host(WorkspacePlaceholder(model: r.app, project: p), size: CGSize(width: 1032, height: 1376))
+        ui.pump(3)
+        XCTAssertTrue(p.force.isKeepClearOnly(c.id), "premise")
+        XCTAssertNil(h.frames.all["chipJoin"], "★ no 'Add to … as anchor' for a Keep clear group")
+        // control: the same group as a bare selection gets the bar, on the same screen
+        p.force.setKeepClearAffix(c.id, nil)
+        ui.pump(1.5)
+        XCTAssertNotNil(h.frames.all["chipJoin"], "control: a selection with no role yet shows 'Add to … as anchor'")
     }
 }
 #endif

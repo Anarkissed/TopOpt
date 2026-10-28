@@ -51,7 +51,7 @@ final class SelectionArrowRuleTests: XCTestCase {
         XCTAssertTrue(src.contains("guard SelectionArrowRule.chipsShow(group: entry.groupID, piece: entry.faceID"), "clearance arrows + mm chips")
         XCTAssertTrue(src.contains("pieceCard(g, key: Int(p.id)"), "auto pieces are cards that pick (their taps found on screen in LoadScenarioHostedTests)")
         XCTAssertTrue(src.contains("pieceCard(g, key: ProjectModel.manualFaceKey(mp.id)"), "manual pieces too")
-        XCTAssertTrue(src.contains("selectedPiece = SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID))"), "a 3D tap picks the row")
-        XCTAssertTrue(src.contains("selection.clearActive(); selectedPiece = nil; chipsRevealedGroup = nil"), "an empty tap clears")
+        XCTAssertTrue(src.contains("setPickedPiece(SelectionArrowRule.PieceRef(group: g.id, key: Int(faceID)))"), "a 3D tap picks the row")
+        XCTAssertTrue(src.contains("selection.clearActive(); setPickedPiece(nil); chipsRevealedGroup = nil"), "an empty tap clears")
     }
 }
