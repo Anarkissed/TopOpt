@@ -5,6 +5,7 @@
 import XCTest
 import SwiftUI
 import AppKit
+import MetalKit
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -12,9 +13,10 @@ import AppKit
 final class ResultsRedesignHostedTests: XCTestCase {
     private let ui = LoadScenarioHostedTests()
 
-    func screen(_ size: CGSize) throws -> (LoadScenarioHostedTests.Host, ResultsModel) {
+    func screen(_ size: CGSize, loaded: Bool = false) throws -> (LoadScenarioHostedTests.Host, ResultsModel) {
         let o = try ResultsRedesignTests.strengthenOutcome()
-        let rm = ResultsModel(projectName: "CarriageArms", outcome: o)
+        let rm = loaded ? ResultsModel(projectName: "CarriageArms", outcome: o, yieldStrengthMPa: 21, appliedLoadKg: 5)
+                        : ResultsModel(projectName: "CarriageArms", outcome: o)
         let h = ui.host(ResultsScreen(projectName: "CarriageArms", outcome: o, undo: {}, redo: {}, resultsModel: rm)
                             .frame(width: size.width, height: size.height), size: size)
         ui.pump(2)
@@ -116,7 +118,10 @@ final class ResultsRedesignHostedTests: XCTestCase {
     func testIconViewsFullScreenAndFoldedPanels() throws {
         let (h, rm) = try screen(CGSize(width: 1376, height: 1032))
         XCTAssertTrue(rm.hasStress && rm.hasLoadPath, "premise: the run carries both fields")
-        for m in ResultsViewMode.allCases { let f = try frame(h, "resultsView-\(m.rawValue)"); XCTAssertEqual(f.width, 44, accuracy: 1) }
+        for m in ResultsViewMode.shown(hasStress: true, hasDisplacement: true, canBreak: false) {
+            let f = try frame(h, "resultsView-\(m.rawValue)"); XCTAssertEqual(f.width, 44, accuracy: 1)
+        }
+        XCTAssertNil(h.frames.all["resultsView-Break"], "no load in this run: Break is hidden, not greyed")
         let fs = try frame(h, "resultsFullScreen")
         ui.click(h, CGPoint(x: fs.midX, y: fs.midY))
         for k in ["resultsVersions", "resultsChecks", "resultsScenario", "resultsExport", "resultsDetailsButton"] {
@@ -164,6 +169,89 @@ final class ResultsRedesignHostedTests: XCTestCase {
         let x = try frame(h, "resultsView-X-ray")
         ui.click(h, CGPoint(x: x.midX, y: x.midY))
         XCTAssertNil(h.frames.all["resultsStressKey"], "only in the Stress view")
+    }
+
+    /// ★ His iPad 2026-10-27: Bend and Break are back beside the other views; each moving view plays on its own, the motion
+    /// bar under the view buttons pauses it, and its slider moves it by hand.
+    func testTheMovingViewsPlayPauseAndScrub() throws {
+        for size in [CGSize(width: 1032, height: 1376), CGSize(width: 1376, height: 1032)] {
+            let (h, rm) = try screen(size, loaded: true)
+            XCTAssertTrue(rm.hasFlex && rm.hasFailurePrediction, "premise: a displacement field, a load and a yield")
+            for m in ResultsViewMode.allCases { _ = try frame(h, "resultsView-\(m.rawValue)") }
+            XCTAssertNil(h.frames.all["resultsMotionBar"], "Stress does not move: no motion bar")
+
+            let bend = try frame(h, "resultsView-Bend")
+            ui.click(h, CGPoint(x: bend.midX, y: bend.midY))
+            let bar = try frame(h, "resultsMotionBar"), views = try frame(h, "resultsViewModes")
+            XCTAssertGreaterThan(bar.minY, views.maxY - 1, "★ \(size): right under the view buttons")
+            XCTAssertTrue(rm.flexOn)
+            let p0 = rm.flexPhase
+            ui.pump(0.6)
+            XCTAssertNotEqual(rm.flexPhase, p0, "★ \(size): the part BENDS on its own")
+            let play = try frame(h, "resultsMotionPlay")
+            ui.click(h, CGPoint(x: play.midX, y: play.midY))
+            let paused = rm.flexPhase
+            ui.pump(0.6)
+            XCTAssertEqual(rm.flexPhase, paused, accuracy: 1e-9, "★ \(size): Pause holds it")
+            let slider = try frame(h, "resultsMotionSlider")
+            ui.click(h, CGPoint(x: slider.minX + slider.width * 0.75, y: slider.midY))
+            XCTAssertGreaterThan(rm.flexPhase, 0.55, "★ \(size): the slider moves it by hand (\(rm.flexPhase))")
+            try ui.picture(h, "results_bend_\(Int(size.width)).png")
+
+            let flow = try frame(h, "resultsView-Load paths")
+            ui.click(h, CGPoint(x: flow.midX, y: flow.midY))
+            XCTAssertTrue(rm.loadPathOn); XCTAssertEqual(rm.flowWiggle, 0, "★ never wiggling")
+            let c0 = rm.flowClock
+            ui.pump(0.6)
+            XCTAssertGreaterThan(rm.flowClock, c0, "★ \(size): the arrows TRAVEL (a new view starts playing)")
+
+            let brk = try frame(h, "resultsView-Break")
+            ui.click(h, CGPoint(x: brk.midX, y: brk.midY))
+            XCTAssertTrue(rm.pushActive)
+            ui.pump(1.2)
+            XCTAssertGreaterThan(rm.pushFactor, 1.05, "★ \(size): the load climbs toward the one that breaks it")
+            try ui.picture(h, "results_break_\(Int(size.width)).png")
+        }
+    }
+
+    /// ★ His iPad 2026-10-27: "I am unable to tap to explore." The Lattice key's process: open the key, tap the part, the key
+    /// shows the reading; a double tap anywhere leaves. The bug was in the viewer's tap path itself (Results never turns the
+    /// face tool on, and a guard for it dropped every tap), so the tap goes through the viewer's OWN tap handler — the one
+    /// his finger reaches. (A synthetic click never fires the recognizer offscreen, so the test hands the handler the tap.)
+    func testATapOnThePartReadsTheStressOnTheKey() throws {
+        let (h, rm) = try screen(CGSize(width: 1376, height: 1032))
+        XCTAssertTrue(rm.hasStress)
+        let mtk = try XCTUnwrap(Self.metalView(in: h.view), "the Results viewer")
+        let click = try XCTUnwrap(mtk.gestureRecognizers.first { ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 1 })
+        let viewer = try XCTUnwrap(click.target as? MetalMeshView.Coordinator)
+        func tapAcrossThePart() -> Bool {
+            for dy in stride(from: -200.0, through: 200.0, by: 25) {
+                for dx in stride(from: -300.0, through: 300.0, by: 25) {
+                    viewer.pick(at: CGPoint(x: mtk.bounds.midX + dx, y: mtk.bounds.midY + dy), in: mtk)
+                    ui.pump(0.05)
+                    if let k = h.frames.all["resultsStressKey"], k.width > ResultsStressExplore.width + 20 { return true }
+                }
+            }
+            return false
+        }
+        XCTAssertFalse(tapAcrossThePart(), "the key shut: a tap on the part reads nothing")
+        let pill = try frame(h, "resultsStressKey")
+        ui.click(h, CGPoint(x: pill.midX, y: pill.midY))
+        XCTAssertEqual(try frame(h, "resultsStressKey").width, ResultsStressExplore.width, accuracy: 2, "open, no reading yet")
+        XCTAssertTrue(tapAcrossThePart(), "★ the key open: a tap on the part puts its stress on the key")
+        try ui.picture(h, "results_explore_reading.png")
+        // the way out: a double tap anywhere
+        let double = try XCTUnwrap(mtk.gestureRecognizers.first { ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 2 })
+        XCTAssertTrue(double.isEnabled, "★ the double tap is armed while exploring")
+        viewer.handleDoubleClick(double as! NSClickGestureRecognizer)
+        ui.pump(0.8)
+        XCTAssertLessThan(try frame(h, "resultsStressKey").height, 60, "★ the double tap folds the key and ends exploring")
+    }
+
+    static func metalView(in v: NSView) -> MTKView? {
+        if let m = v as? MTKView { return m }
+        for s in v.subviews { if let m = metalView(in: s) { return m } }
+        return nil
     }
 
     func testOnASmallIPadFoldedPanelsBecomePills() throws {

@@ -769,8 +769,9 @@ public final class ResultsModel: ObservableObject {
     @Published public var flowBodyMode: FlowBodyMode = .xray
     /// Travel-speed multiplier (prototype 0.2–2.5×).
     @Published public private(set) var flowSpeed: Float = 1
-    /// Undulation-amount multiplier (prototype 0–2×).
-    @Published public private(set) var flowWiggle: Float = 1
+    /// Undulation-amount multiplier (prototype 0–2×). ★ 0 — the arrows travel the path straight, never wiggling (his
+    /// iPad 2026-10-27: "keep the animation but remove the wiggling").
+    @Published public private(set) var flowWiggle: Float = 0
     /// User "reduced motion (static)" toggle — freezes the arrows mid-path with clean
     /// heads. OR-ed with the system reduce-motion setting by the view.
     @Published public var flowReducedStatic: Bool = false
@@ -1860,6 +1861,11 @@ public final class ResultsModel: ObservableObject {
         flexExaggeration = FlexAnimation.clampExaggeration(v)
     }
 
+    /// ★ His iPad 2026-10-27: the bend scrubs by hand — its phase set straight from the slider (0 rest … 0.5 full … 1).
+    public func setFlexPhase(_ p: Double) {
+        flexPhase = min(1, max(0, p))
+    }
+
     /// Advance the flex loop by `dt` (phase units); wraps into [0, 1). No-op unless
     /// flexing (the view only calls this while `flexOn` and motion is allowed).
     public func advanceFlex(_ dt: Double) {
@@ -2195,6 +2201,15 @@ public final class ResultsModel: ObservableObject {
     public func advanceFlowClock(_ dt: Double) {
         guard loadPathOn else { return }
         flowClock += dt
+    }
+
+    /// ★ His iPad 2026-10-27: the flow scrubs by hand. The slider's 0…1 is one loop of the clock.
+    public var flowLoopPosition: Double {
+        let u = (flowClock / Self.flowLoopPeriod).truncatingRemainder(dividingBy: 1)
+        return u < 0 ? u + 1 : u
+    }
+    public func setFlowLoopPosition(_ p: Double) {
+        flowClock = min(1, max(0, p)) * Self.flowLoopPeriod
     }
 
     // MARK: - failure-load prediction (M7.viz.6)

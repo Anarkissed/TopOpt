@@ -812,10 +812,15 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// existing test is unchanged.
     public func hasPending(in groups: [SelectionGroup],
                            latticeRoleGroups: Set<UUID> = []) -> Bool {
-        groups.contains {
-            kind(for: $0.id).isPending && !isKeepClearOnly($0.id)
-                && !isProtectOnly($0.id) && !latticeRoleGroups.contains($0.id)
-        }
+        groups.contains { needsRole($0.id, latticeRoleGroups: latticeRoleGroups) }
+    }
+
+    /// ★ A group that still has to be given a role: pending AND not a complete keep-clear / Protect / lattice-role
+    /// declaration. His iPad 2026-10-27: a Keep clear group made active again (a primitive picked) showed the new
+    /// selection's "Anchor | Load | Keep clear | Protect" bar and "Add to … as anchor", and it never went away —
+    /// because the bar asked `isPending`, which a keep-clear-only group always is.
+    public func needsRole(_ id: UUID, latticeRoleGroups: Set<UUID> = []) -> Bool {
+        kind(for: id).isPending && !isKeepClearOnly(id) && !isProtectOnly(id) && !latticeRoleGroups.contains(id)
     }
 
     /// Whether a group is a lattice-role-ONLY selection: no anchor/load role, but

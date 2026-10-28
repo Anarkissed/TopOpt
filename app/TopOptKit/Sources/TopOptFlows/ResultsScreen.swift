@@ -82,8 +82,6 @@ public struct ResultsScreen: View {
     var redo: (() -> Void)?
     var canUndo: () -> Bool = { false }
     var canRedo: () -> Bool = { false }
-    /// ★ Each load scenario's loads (point + unit direction) and anchors, drawn on the model when he picks it.
-    var scenarioMarks: [String: ResultsScenarioMarks] = [:]
     /// ★ Full screen (his note 2026-10-27) — the workspace hides its own capsule over Results while it is on.
     var onFullScreen: ((Bool) -> Void)?
 
@@ -102,8 +100,13 @@ public struct ResultsScreen: View {
     @State private var screenWidth: CGFloat = 1376
     /// ★ tap-to-explore (his note 2026-10-27): the tapped surface point (model frame) and whether the key is minimised
     @State private var stressProbe: SIMD3<Float>?
-    /// ★ his note 2026-10-27: minimised to start; it and Checks/Details take turns (one open at a time)
+    /// ★ his note 2026-10-27: minimised to start; it and Checks/Details take turns (one open at a time). OPEN IS EXPLORING
+    /// (the Lattice key's process, his iPad 2026-10-27): a tap on the part reads it, a double tap anywhere leaves.
     @State private var stressKeyMinimized = true
+    /// ★ His iPad 2026-10-27: the moving views (Load paths, Bend, Break) play on their own, pause, and scrub by hand.
+    @State private var motionPlaying = true
+    /// Break's own clock while it plays (seconds into the push loop).
+    @State private var breakClock: Double = 0
     @State private var orientOpen = false
     /// The latest camera→screen projection the viewer publishes, so the hot-spot
     /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
@@ -155,7 +158,6 @@ public struct ResultsScreen: View {
                 smoothing: SmoothingModel? = nil,
                 undo: (() -> Void)? = nil, redo: (() -> Void)? = nil,
                 canUndo: @escaping () -> Bool = { false }, canRedo: @escaping () -> Bool = { false },
-                scenarioMarks: [String: ResultsScenarioMarks] = [:],
                 onFullScreen: ((Bool) -> Void)? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -183,7 +185,6 @@ public struct ResultsScreen: View {
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
-        self.scenarioMarks = scenarioMarks
         self.onFullScreen = onFullScreen
     }
 
@@ -227,8 +228,10 @@ public struct ResultsScreen: View {
                           loadFlowKey: loadFlowKey,
                           loadFlowGuides: loadFlowGuides,
                           bodyAlpha: bodyAlpha)
-                // ★ tap-to-explore: in the Stress view a tap reads the stress there; empty space clears it
-                .onSurfacePoint { p in stressProbe = viewMode == .stress && model.hasStress ? p : nil }
+                // ★ tap-to-explore, the Lattice key's process (his iPad 2026-10-27): while the key is open a tap on the
+                // part reads the stress there (an arrow on the part, an arrow on the key); a double tap anywhere leaves
+                .onSurfacePoint { p in if exploring, let p { stressProbe = p } }
+                .onExploreExit(exploring ? { leaveExplore() } : nil)
                 .ignoresSafeArea()
 
             // ★ RESULTS REDESIGN (his mockup, approved 2026-10-27): the model is the screen; the versions (bottom left),
@@ -236,16 +239,19 @@ public struct ResultsScreen: View {
             // (voxel size, LAN fields, keep clear), the strengthen cards and the captions live behind Details now.
             if fullScreen {
                 // ★ FULL SCREEN: the model, the view cube and the view buttons — nothing else
-                VStack(alignment: .trailing) {
+                VStack(alignment: .trailing, spacing: DS.Space.m) {
                     ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
+                    motionBar
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.top, PageChrome.gizmoClearance).padding(.trailing, PageChrome.edge)
             } else {
             topBar
-            hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
-            scenarioMarksOverlay.ignoresSafeArea()    // ★ the picked scenario's loads, anchors and worst point
+            // M7.viz.2: worst-point callout — in the Stress view, out of the way of an explore reading. (★ his iPad
+            // 2026-10-27: the scenario dots and rings "make no sense" — gone.)
+            if viewMode == .stress, stressProbe == nil { hotSpotMarker.ignoresSafeArea() }
+            if viewMode == .breakIt { failureMarker.ignoresSafeArea() }   // ★ Break: where it yields, and at what load
             versionsColumn
             rightColumn
             }
@@ -270,13 +276,19 @@ public struct ResultsScreen: View {
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .animation(DS.Motion.sheetIn, value: compare != nil)
         .onChange(of: viewMode) { applyViewMode($0); stressProbe = nil }
+        .onChange(of: model.selectedIndex) { _ in applyViewMode(viewMode) }   // a new version's views start from rest
         .onChange(of: model.selectedIndex) { _ in stressProbe = nil }
         // ★ one at a time: opening the key folds Checks and closes Details; opening either minimises the key
-        .onChange(of: stressKeyMinimized) { m in if !m { withAnimation(DS.Motion.sheetIn) { checksOpen = false; detailsOpen = false } } }
+        .onChange(of: stressKeyMinimized) { m in
+            if !m { withAnimation(DS.Motion.sheetIn) { checksOpen = false; detailsOpen = false } }
+            else { stressProbe = nil }   // closing the key ends exploring
+        }
         .onChange(of: checksOpen) { o in if o { stressKeyMinimized = true } }
         .onChange(of: detailsOpen) { o in if o { stressKeyMinimized = true } }
-        .onChange(of: fullScreen) { onFullScreen?($0) }
-        .onDisappear { if fullScreen { onFullScreen?(false) } }
+        // ★ his iPad 2026-10-27: Compare covers the page too, so the Topology | Setup | Results capsule hides under it
+        .onChange(of: fullScreen) { onFullScreen?($0 || compare != nil) }
+        .onChange(of: compare != nil) { onFullScreen?($0 || fullScreen) }
+        .onDisappear { if fullScreen || compare != nil { onFullScreen?(false) } }
         .background(GeometryReader { g in
             Color.clear.onAppear { screenWidth = g.size.width }.onChange(of: g.size.width) { screenWidth = $0 }
         })
@@ -286,22 +298,32 @@ public struct ResultsScreen: View {
             // is driving the whole view — the maintainer reads this against the
             // GizmoFrame track to localise the frame collapse (see the handoff).
             let animating = model.playing
-                || (model.flexOn && !reduceMotion)
-                || (model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
+                || (motionPlaying && model.flexOn && !reduceMotion)
+                || (motionPlaying && model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
+                || (motionPlaying && model.pushActive && !reduceMotion)
             if animating {
                 os_signpost(.event, log: resultsSignpost, name: "playback_tick")
             }
             if model.playing { model.advance((1.0 / 30.0) / Self.morphDuration) }
+            // ★ His iPad 2026-10-27: the moving views MOVE again — each only while playing (Pause and the slider stop it).
             // M7.viz.3: loop the flex while it's on — UNLESS reduced-motion, which
             // holds the static full-deflection frame (no advance → phase stays put,
             // and flexScale uses amplitude 1).
-            if model.flexOn && !reduceMotion {
-                model.advanceFlex((1.0 / 30.0) / Self.flexDuration)
+            if motionPlaying, model.flexOn, !reduceMotion {
+                model.advanceFlex((1.0 / 30.0) / ResultsMotion.bendSeconds)
             }
             // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
-            // reduced-motion (system OR the drawer toggle), which freezes the arrows
-            // mid-path with clean heads (no advance → the static presentation).
-            // ★ (his note 2026-10-27) the load-path flow never wiggles: its clock is never advanced (a still view).
+            // reduced-motion, which freezes the arrows mid-path with clean heads. The arrows travel; they never wiggle
+            // (flowWiggle 0, his note 2026-10-27).
+            if motionPlaying, model.loadPathOn, !model.flowReduced(reduceMotion: reduceMotion) {
+                model.advanceFlowClock(1.0 / 30.0)
+            }
+            // Break: the load climbs to the one that breaks it, holds there, and climbs again.
+            if motionPlaying, model.pushActive, !reduceMotion, let fp = model.failurePrediction {
+                breakClock += 1.0 / 30.0
+                model.setPush(factor: ResultsMotion.pushFactor(position: ResultsMotion.breakPosition(time: breakClock),
+                                                               multiplier: fp.multiplier))
+            }
         }
         .onChange(of: mergeTrigger) { trigger in
             // A variant streamed in (or the final outcome landed) — merge it. Merge
@@ -317,7 +339,8 @@ public struct ResultsScreen: View {
             // longer knows — in which case the latticed variant still shows its
             // mass and verdict and says plainly that its geometry is out of reach.
             model.latticeMeshTransfer = run?.latticeMeshSource
-            model.flowReducedStatic = true            // ★ still load paths, never moving
+            model.flowReducedStatic = false           // ★ the arrows MOVE (his iPad 2026-10-27) …
+            model.setFlowWiggle(0)                    // … and never wiggle
             viewMode = model.hasStress ? .stress : .solid
             applyViewMode(viewMode)
         }
@@ -813,14 +836,7 @@ public struct ResultsScreen: View {
                     .frame(width: 30, alignment: .trailing)
             }
 
-            drawerLabel("Wiggle")
-            HStack(spacing: DS.Space.s) {
-                Slider(value: Binding(get: { model.flowWiggle }, set: { model.setFlowWiggle($0) }),
-                       in: 0...2).tint(RGBA(255, 90, 72).color)
-                Text(String(format: "%.1f×", model.flowWiggle)).dsStyle(DS.TypeScale.caption)
-                    .monospacedDigit().foregroundStyle(DS.Color.textSecondary.color)
-                    .frame(width: 30, alignment: .trailing)
-            }
+            // ★ no Wiggle slider: the arrows never wiggle (his note 2026-10-27)
 
             Toggle(isOn: $model.flowReducedStatic) {
                 Text("Reduced motion (static)").dsStyle(DS.TypeScale.caption)
@@ -1044,48 +1060,6 @@ public struct ResultsScreen: View {
             ?? VariantEntryVerdict(label: "Smooth", enabled: true, reason: nil,
                                    allReasons: [])
     }
-    private var latticeVerdict: VariantEntryVerdict {
-        latticeEntry?(model.selectedVariantIndex)
-            ?? VariantEntryVerdict(label: "Lattice", enabled: true, reason: nil,
-                                   allReasons: [])
-    }
-
-    /// AJ2: ONE shape for both entries — enabled it is the chip it always was;
-    /// blocked it is DISABLED and carries the specific reason underneath, which is
-    /// the shape the lattice page's bottom bar already uses. It is never a plain
-    /// greyed-out control, and it never opens a page that then apologises.
-    @ViewBuilder
-    private func entryControl(icon: String, verdict: VariantEntryVerdict,
-                              action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Button(action: { if verdict.enabled { action() } }) {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(verdict.label).dsStyle(DS.TypeScale.callout)
-                }
-                .foregroundStyle((verdict.enabled ? DS.Color.textPrimary
-                                                  : DS.Color.textQuaternary).color)
-                .fixedSize()
-                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Surface.bar.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-            .disabled(!verdict.enabled)
-            if let why = verdict.reason {
-                Text(why)
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 260, alignment: .leading)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(verdict.accessibilityLabel)
-    }
-
     // MARK: - Top bar: back · project / Optimized ✓ · See Original · Export
 
     /// One flex row across the top: navigation + project on the left, Export on the
@@ -1161,11 +1135,8 @@ public struct ResultsScreen: View {
                         .accessibilityIdentifier("results-redo")
                 }
 
-                if let onLattice {
-                    entryControl(icon: "square.grid.3x3.fill",
-                                 verdict: latticeVerdict,
-                                 action: { onLattice(model.selectedVariantIndex) })
-                }
+                // ★ his iPad 2026-10-27: the old "Lattice" button (and its refusal text) is gone from Results — the
+                // Lattice stage is reached from the capsule's stage menu.
 
                 Spacer(minLength: DS.Space.m)
             }
@@ -1229,7 +1200,13 @@ public struct ResultsScreen: View {
         VStack(alignment: .trailing, spacing: DS.Space.m) {
             let sc = model.scenarios(for: model.selected)
             if sc.count >= 2 { ResultsScenarioPicker(scenarios: sc, pick: $scenarioPick) }
+            if let note = ResultsScenarioViews.note(pick: scenarioPick, scenarios: sc) {
+                Text(note).font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
+                    .multilineTextAlignment(.trailing).frame(width: ResultsChrome.columnWidth, alignment: .trailing)
+                    .accessibilityIdentifier("results-scenario-views-note")
+            }
             ResultsViewModePicker(modes: viewModes, mode: $viewMode, fullScreen: $fullScreen)
+            motionBar
             // ★ his note 2026-10-27: the tap-to-explore key sits above Checks, minimised until he opens it
             if viewMode == .stress, model.hasStress {
                 ResultsStressExplore(peakMPa: model.stressScaleMaxMPa, caption: model.stressLegend.caption,
@@ -1273,52 +1250,56 @@ public struct ResultsScreen: View {
     }
 
     private var viewModes: [ResultsViewMode] {
-        (model.hasStress ? [.stress] : []) + [.solid, .xray] + (model.hasLoadPath ? [.loadPaths] : [])
+        ResultsViewMode.shown(hasStress: model.hasStress, hasDisplacement: model.hasFlex,
+                              canBreak: model.hasFlex && model.hasFailurePrediction)
     }
 
-    /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths still (never moving).
+    /// One view at a time: Stress colours; Solid plain; X-ray see-through; Load paths, Bend and Break MOVE (his iPad
+    /// 2026-10-27), each starting from rest and playing.
     private func applyViewMode(_ m: ResultsViewMode) {
-        model.flexOn = false
-        model.failureOn = false
         model.stressOn = m == .stress
+        model.flexOn = m == .bend
+        model.setFlexPhase(0)
         if (m == .loadPaths) != model.loadPathOn { model.toggleLoadPath() }
-        model.flowReducedStatic = true
+        model.failureOn = m == .breakIt
+        model.setPush(factor: 1)
+        model.flowReducedStatic = false
+        breakClock = 0
+        motionPlaying = true
     }
 
-    /// The picked scenario on the model: its loads (arrows), its anchors (dots) and its own worst point with its stress.
-    @ViewBuilder private var scenarioMarksOverlay: some View {
-        if let name = scenarioPick, let proj = projection {
-            let marks = scenarioMarks[name]
-            let peak = model.scenarios(for: model.selected).first { $0.name == name }
-            ZStack {
-                Canvas { ctx, _ in
-                    for l in marks?.loads ?? [] {
-                        guard let a = proj.project(l.point), let b = proj.project(l.point + l.direction * 12) else { continue }
-                        var path = Path(); path.move(to: a); path.addLine(to: b)
-                        ctx.stroke(path, with: .color(DS.Color.accent.color), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        ctx.fill(Path(ellipseIn: CGRect(x: b.x - 6, y: b.y - 6, width: 12, height: 12)), with: .color(DS.Color.accent.color))
-                    }
-                    for p in marks?.anchors ?? [] {
-                        guard let a = proj.project(p) else { continue }
-                        ctx.fill(Path(ellipseIn: CGRect(x: a.x - 5, y: a.y - 5, width: 10, height: 10)), with: .color(DS.Color.okGreen.color))
-                    }
-                }
-                .allowsHitTesting(false)
-                if let pk = peak, let pm = pk.peakMM, let a = proj.project(SIMD3<Float>(Float(pm.x), Float(pm.y), Float(pm.z))) {
-                    VStack(spacing: 2) {
-                        Text(name + "’s worst point").font(.system(size: 11, weight: .bold))
-                        Text((pk.peakMPa.map { String(format: "%.1f MPa", $0) } ?? "") + (pk.margin.map { " · " + ResultsVersions.x($0) } ?? ""))
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.horizontal, DS.Space.s).padding(.vertical, DS.Space.xs)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(DS.Surface.bar.color))
-                    .overlay(alignment: .bottom) { Circle().strokeBorder(RGBA(255, 70, 50).color, lineWidth: 2).frame(width: 22, height: 22).offset(y: 30) }
-                    .position(x: a.x, y: a.y - 34)
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("results-scenario-peak")
-                }
+    /// The open key is exploring (the Lattice key's process).
+    private var exploring: Bool { viewMode == .stress && model.hasStress && !stressKeyMinimized }
+
+    /// The double tap's way out: the reading goes and the key folds back to its pill.
+    private func leaveExplore() {
+        stressProbe = nil
+        withAnimation(DS.Motion.sheetIn) { stressKeyMinimized = true }
+    }
+
+    /// ★ His iPad 2026-10-27: under the view buttons, the moving view's Play / Pause and its slider.
+    @ViewBuilder private var motionBar: some View {
+        switch viewMode {
+        case .bend where model.flexOn:
+            ResultsMotionBar(title: "Bend", readout: "\(Int(model.flexExaggeration))× exaggerated · not to scale",
+                             alarm: false, playing: $motionPlaying, position: model.flexPhase,
+                             scrub: { model.setFlexPhase($0) })
+        case .loadPaths where model.loadPathOn:
+            ResultsMotionBar(title: "Load flow", readout: "how the load travels through the part",
+                             alarm: false, playing: $motionPlaying, position: model.flowLoopPosition,
+                             scrub: { model.setFlowLoopPosition($0) })
+        case .breakIt:
+            if let fp = model.failurePrediction {
+                ResultsMotionBar(title: "Break", readout: model.pushReadout(prediction: fp), alarm: model.atFailure,
+                                 playing: $motionPlaying,
+                                 position: ResultsMotion.breakPosition(pushFactor: model.pushFactor, multiplier: fp.multiplier),
+                                 scrub: { p in
+                                     breakClock = p * ResultsMotion.breakRampSeconds
+                                     model.setPush(factor: ResultsMotion.pushFactor(position: p, multiplier: fp.multiplier))
+                                 })
             }
+        default:
+            EmptyView()
         }
     }
 
