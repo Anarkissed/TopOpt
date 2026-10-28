@@ -654,12 +654,12 @@ struct ResultsViewModePicker: View {
 }
 
 
-/// ★ The Scenario menu and the views (his iPad 2026-10-27: "Ensure that the scenario selector changes the views"). Core
-/// certifies every scenario on each version but sends the stress and displacement fields of the WORST one only — so until it
-/// sends each scenario's own, a pick of another scenario says plainly which scenario the views are showing.
+/// ★ The Scenario menu and the views (his iPad 2026-10-27: "Ensure that the scenario selector changes the views"). A run whose
+/// core sends each scenario's own fields (scenario_fields.bin) shows the picked scenario's views; a run without them (an
+/// older core) shows the worst case's, and a pick of another scenario says so plainly.
 enum ResultsScenarioViews {
-    static func note(pick: String?, scenarios: [ScenarioResult]) -> String? {
-        guard let p = pick, let g = scenarios.first(where: \.governs), p != g.name else { return nil }
+    static func note(pick: String?, scenarios: [ScenarioResult], ownFields: Bool = false) -> String? {
+        guard !ownFields, let p = pick, let g = scenarios.first(where: \.governs), p != g.name else { return nil }
         return "The views show \(g.name), the worst case — this run sent its fields only."
     }
 }

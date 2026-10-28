@@ -1267,6 +1267,39 @@ public final class ResultsModel: ObservableObject {
         return accepted[tab.variantIndex]
     }
 
+    // MARK: ★ LOAD SCENARIOS — the views show the picked scenario (his ask 2026-10-27)
+
+    /// The scenario the Results views show, by name; nil = the worst case (the variant's plain fields ARE its own).
+    @Published public var viewScenario: String? {
+        didSet { if oldValue != viewScenario { dropFieldCaches() } }
+    }
+    /// Each scenario's loads: indices into `loadLocations` (so the flow starts at THAT scenario's loads only) and its total
+    /// weight (so Break's breaking load is that scenario's, not every scenario's loads summed). Empty: every load.
+    public var scenarioLoads = ResultsScenarioLoads() {
+        didSet { if oldValue != scenarioLoads { dropFieldCaches() } }
+    }
+    /// The load the shown field was solved under: the picked scenario's, else the worst case's, else the run's.
+    private var shownLoadKg: Double {
+        let name = viewScenario ?? scenarios(for: selected).first(where: \.governs)?.name
+        return name.flatMap { scenarioLoads.kg[$0] } ?? appliedLoadKg
+    }
+    /// The picked scenario's own fields on the selected design, when the run sent them (core scenario_fields.bin).
+    private var viewScenarioSet: ScenarioFieldSet? {
+        guard let n = viewScenario else { return nil }
+        return selectedVariant?.scenarioFields.first { $0.name == n }
+    }
+    /// Whether the views can show `name`'s own fields on the selected version (the worst case always can).
+    public func showsOwnFields(of name: String?) -> Bool {
+        guard let name else { return true }
+        return selectedVariant?.scenarioFields.contains { $0.name == name } ?? false
+    }
+    /// Everything derived from the stress / displacement fields is rebuilt for the new scenario.
+    private func dropFieldCaches() {
+        flexCache = nil; loadPathCache = nil; loadPathSegmentCache = nil
+        flowCurveCache = nil; flowSeedCache = nil; failureCache = nil; peakToRedCache = nil
+        flowIsolate = nil
+    }
+
     /// The latticed alternative the user currently has selected, or nil when the
     /// selection is a solid variant. THE gate on every latticed-only behaviour
     /// below — masses, provenance, export, transfer.
@@ -1308,7 +1341,9 @@ public final class ResultsModel: ObservableObject {
     /// Compare's stress colours for a tab, on the SAME scale as the main viewer (`stressScaleMaxMPa`); nil without a field.
     public func compareStressTints(_ tab: ResultVariantVM) -> [SIMD4<Float>]? {
         guard let v = variant(for: tab), let mesh = compareMesh(tab) else { return nil }
-        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+        let own = viewScenario.flatMap { n in v.scenarioFields.first { $0.name == n } }   // ★ Compare follows the Scenario menu
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2, origin: gridOrigin, spacing: spacing,
+                            values: own?.vonMises ?? v.vonMisesField)
         return f.isEmpty ? nil : stressTints(for: mesh, field: f)
     }
 
@@ -1794,7 +1829,7 @@ public final class ResultsModel: ObservableObject {
     public var selectedStressField: StressField? {
         guard let v = selectedVariant else { return nil }
         let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+                            origin: gridOrigin, spacing: spacing, values: viewScenarioSet?.vonMises ?? v.vonMisesField)
         return f.isEmpty ? nil : f   // nil when there's nothing to show (no field / no grid)
     }
 
@@ -1817,7 +1852,8 @@ public final class ResultsModel: ObservableObject {
         // the wire in v1 (wire cost), so a remote variant's tensor stays empty and the
         // load→anchor flow sub-mode stays gated even when stress/flex/load-path light
         // up; a local run carries it as before.
-        guard let v = selectedVariant else { return nil }
+        // ★ the tensor is the worst case's only: another scenario's view has none (its load→anchor flow stays gated)
+        guard let v = selectedVariant, viewScenarioSet == nil else { return nil }
         let f = StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                                   origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
         return f.isEmpty ? nil : f   // nil when absent (v1 never sends the tensor over the wire)
@@ -1833,7 +1869,7 @@ public final class ResultsModel: ObservableObject {
         // from it) light up; a fetch failure leaves it empty and they stay hidden.
         guard let v = selectedVariant else { return nil }
         let f = DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                                  origin: gridOrigin, spacing: spacing, values: v.displacementField)
+                                  origin: gridOrigin, spacing: spacing, values: viewScenarioSet?.displacement ?? v.displacementField)
         return f.isEmpty ? nil : f   // nil when there's nothing to flex (no field / no grid)
     }
 
@@ -2017,7 +2053,9 @@ public final class ResultsModel: ObservableObject {
     public var flowLoadSeeds: [SIMD3<Float>] {
         if let c = flowSeedCache, c.index == selectedIndex { return c.seeds }
         let seeds: [SIMD3<Float>]
-        if !loadLocations.isEmpty {
+        if viewScenarioSet != nil, let n = viewScenario, let idx = scenarioLoads.indices[n] {
+            seeds = idx.filter { loadLocations.indices.contains($0) }.map { loadLocations[$0] }   // ★ THIS scenario's loads
+        } else if !loadLocations.isEmpty {
             seeds = loadLocations
         } else if let d = selectedDisplacementField, !d.isEmpty, let m = maxDisplacementPosition(d) {
             seeds = [m]
@@ -2233,17 +2271,17 @@ public final class ResultsModel: ObservableObject {
         // Measure against the EFFECTIVE yield of the printed part at this project's
         // fixed infill (M7.params infill-aware): one honest failure load, not a
         // solid-vs-infill pair. Solid (knockdown 1) reduces to the plain yield/peak.
-        guard appliedLoadKg > 0,
+        guard shownLoadKg > 0,
               let field = selectedStressField, let peak = field.peak(),
               let mult = FailureLoad.multiplier(peakMPa: Double(peak.valueMPa),
                                                 yieldMPa: effectiveYieldStrengthMPa)
         else { return nil }
-        let failKg = mult * appliedLoadKg
+        let failKg = mult * shownLoadKg
         let valueLbl = ResultsModel.loadLabel(kg: failKg, unit: loadUnit)
         let descriptor = ResultsModel.infillDescriptor(percent: infillPercent, pattern: infillPattern)
         return FailurePrediction(
             multiplier: mult,
-            appliedLoadKg: appliedLoadKg,
+            appliedLoadKg: shownLoadKg,
             failureLoadKg: failKg,
             unit: loadUnit,
             position: peak.position,
@@ -2846,4 +2884,13 @@ public final class ResultsModel: ObservableObject {
         let support = cm3 <= 0.05 ? "Minimal supports needed." : "Est. \(supportLabel) support under overhangs."
         return base + " " + support
     }
+}
+
+/// ★ Each load scenario's loads, by scenario name (the workspace fills it; Results reads it).
+public struct ResultsScenarioLoads: Equatable, Sendable {
+    /// Indices into the run's load list (`loadLocations` order).
+    public var indices: [String: [Int]] = [:]
+    /// The scenario's total load, kg.
+    public var kg: [String: Double] = [:]
+    public init(indices: [String: [Int]] = [:], kg: [String: Double] = [:]) { self.indices = indices; self.kg = kg }
 }

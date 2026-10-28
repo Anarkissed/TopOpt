@@ -1669,7 +1669,8 @@ public struct WorkspacePlaceholder: View {
                               // ★ Results redesign (2026-10-27): undo / redo at the top left
                               undo: { project.performUndo() }, redo: { project.performRedo() },
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
-                              onFullScreen: { resultsFullScreen = $0 })
+                              onFullScreen: { resultsFullScreen = $0 },
+                              scenarioLoads: resultsScenarioLoads)
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -2640,6 +2641,20 @@ public struct WorkspacePlaceholder: View {
     /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
     /// grid/variant, so a centroid here lines up with the derived stress field there.
     private var loadFlowSeeds: [SIMD3<Float>] { loadFlowPairs.map(\.seed) }
+
+    /// ★ Each load scenario's loads for Results, by name: indices into `loadFlowPairs` (the SAME filter, so they line up
+    /// with `loadFlowSeeds`) and the scenario's total weight.
+    private var resultsScenarioLoads: ResultsScenarioLoads {
+        guard force.hasScenarios else { return ResultsScenarioLoads() }
+        let loads = selection.groups.filter { force.kind(for: $0.id).isLoad && groupCentroidModel($0) != nil }
+        var out = ResultsScenarioLoads()
+        for s in force.scenarioList {
+            let mine = loads.indices.filter { force.group(loads[$0].id, isIn: s.id) }
+            out.indices[s.name] = mine
+            out.kg[s.name] = mine.reduce(0) { $0 + (force.kind(for: loads[$1].id).weightKg ?? 0) }
+        }
+        return out
+    }
 
     /// The per-load unit force directions d̂ (model frame), INDEX-ALIGNED with
     /// `loadFlowSeeds` — the `.anchor` flux-streamline direction for each load (M7.viz.5).

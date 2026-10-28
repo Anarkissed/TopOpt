@@ -432,6 +432,16 @@ public struct AddedMaterial: Equatable, Sendable {
 }
 
 /// One evaluated volume-fraction rung of a minimize_plastic run.
+/// One load scenario's own fields on a variant's design (same grid and layouts as the variant's plain fields).
+public struct ScenarioFieldSet: Equatable, Sendable {
+    public let name: String
+    public let vonMises: [Float]
+    public let displacement: [Float]
+    public init(name: String, vonMises: [Float], displacement: [Float]) {
+        self.name = name; self.vonMises = vonMises; self.displacement = displacement
+    }
+}
+
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
     /// The PRINTED/count-basis volume fraction (#{ρ>0.5}/part_solid); savings is its
@@ -488,6 +498,10 @@ public struct OptimizeVariant {
     /// the app can integrate load→anchor flux streamlines (`F = σ·d̂`). Zero on
     /// non-printed voxels (companion to `vonMisesField`); empty for a cancelled rung.
     public let stressTensorField: [Float]
+    /// ★ LOAD SCENARIOS (core scenario_fields.bin v1, his ask 2026-10-27 "the scenario selector changes the views"): each
+    /// scenario's OWN von Mises + displacement on this design, in report order. Empty on a one-scenario run or an older
+    /// core; the plain fields above stay the GOVERNING scenario's.
+    public var scenarioFields: [ScenarioFieldSet] = []
     /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
     /// to optimized (last). Empty when playback capture is off.
     public let keyframeMeshes: [KeyframeMesh]
