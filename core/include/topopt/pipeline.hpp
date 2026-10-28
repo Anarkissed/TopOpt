@@ -1083,6 +1083,10 @@ inline constexpr double kScenarioUnheldShare = 0.05;
 // (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
 // the solve is never singular.
 inline constexpr double kScenarioWeakSpringRel = 1e-6;
+// ...times (F_s / F_max)^2 for scenario s, F the 2-norm of its nodal loads (his ask of
+// 2026-10-28: the springs follow the load), never below this (a 1 % load): the springs
+// stay >= 1e-10 E h, so a piece they alone hold still solves.
+inline constexpr double kScenarioWeakSpringMinScale = 1e-4;
 // The plain wording he reads: "Scenario “<name>”'s load has no path to its anchors".
 std::string scenario_unheld_reason(const std::string& name);
 
@@ -1114,8 +1118,9 @@ ScenarioCertification certify_scenarios(
     const std::function<FixedDesignAnalysis(const std::vector<DirichletBC>&,
                                             const std::vector<NodalLoad>&)>& certify,
     bool keep_fields = false);
-// The weak springs (an anchor OFF in a scenario) sized for the material and grid:
-// kScenarioWeakSpringRel x E x h per node, isotropic.
+// The weak springs (an anchor OFF in a scenario) sized for the material, grid and load:
+// kScenarioWeakSpringRel x E x h x max((F_s / F_max)^2, kScenarioWeakSpringMinScale)
+// per node, isotropic.
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
                                           double youngs_modulus_mpa, double spacing);
 

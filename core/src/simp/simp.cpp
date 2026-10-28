@@ -1861,22 +1861,43 @@ SimpCompliance simp_scenarios_compliance(const VoxelGrid& grid, const SimpParams
     state.last[s] = cs[s].compliance;
     if (!(state.c0[s] > 0.0)) state.c0[s] = cs[s].compliance > 0.0 ? cs[s].compliance : 1.0;
   }
+  // ONE reference for every scenario (his ask, 2026-10-28): the first compliance of the
+  // scenario with the LARGEST load (the 2-norm of its nodal load vector; a tie takes the
+  // first). Compliance scales as load^2, so measured against its OWN first compliance a
+  // scenario's load cancelled and a 0.5 kg twist pulled as hard as his 51 kg case. Now
+  // each counts in proportion to its load: a light cross scenario still forces a
+  // connection (its arm on weak springs starts orders of magnitude over the reference),
+  // a thin one. Not the LARGEST first compliance: that is the unconnected cross scenario.
+  std::size_t ref = 0;
+  double ref_load = -1.0;
+  for (std::size_t s = 0; s < ns; ++s) {
+    double f2 = 0.0;
+    for (const NodalLoad& l : scenarios[s].loads) f2 += l.value * l.value;
+    if (f2 > ref_load) {
+      ref_load = f2;
+      ref = s;
+    }
+  }
+  const double c_ref = state.c0[ref];
   const double p = kScenarioPNorm;
-  double sum = 0.0;
   std::size_t worst = 0;
   std::vector<double> r(ns);
   for (std::size_t s = 0; s < ns; ++s) {
-    r[s] = cs[s].compliance / state.c0[s];
-    sum += std::pow(r[s], p);
+    r[s] = cs[s].compliance / c_ref;
     if (r[s] > r[worst]) worst = s;
   }
-  const double J = std::pow(sum, 1.0 / p);
+  // J = (sum_s r_s^p)^(1/p), taken as rmax (sum_s (r_s / rmax)^p)^(1/p): an unconnected
+  // cross scenario starts at r ~ 1e6 and more, and r^p must not overflow.
+  const double rmax = r[worst];
+  double sum = 0.0;
+  for (std::size_t s = 0; s < ns; ++s) sum += rmax > 0.0 ? std::pow(r[s] / rmax, p) : 0.0;
+  const double J = rmax > 0.0 ? rmax * std::pow(sum, 1.0 / p) : 0.0;
   SimpCompliance out;
   out.compliance = J;
   out.dcompliance.assign(density.size(), 0.0);
   out.cg.converged = true;
   for (std::size_t s = 0; s < ns; ++s) {
-    const double w = (J > 0.0 ? std::pow(r[s] / J, p - 1.0) : 0.0) / state.c0[s];
+    const double w = (J > 0.0 ? std::pow(r[s] / J, p - 1.0) : 0.0) / c_ref;
     for (std::size_t e = 0; e < out.dcompliance.size() && e < cs[s].dcompliance.size(); ++e)
       out.dcompliance[e] += w * cs[s].dcompliance[e];
     out.cg.iterations += cs[s].cg.iterations;

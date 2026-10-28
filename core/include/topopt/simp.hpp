@@ -1626,10 +1626,13 @@ struct SimpOptions {
   // DEFAULT) = one load case, the `bcs` / `loads` the optimizer is called with, byte
   // for byte. With two or more, every iteration solves every scenario (each warm-started
   // from its own last field) and the objective is a SMOOTH MAX of the normalised
-  // compliances, J = (sum_s (c_s / c_s0)^p)^(1/p), p = kScenarioPNorm, c_s0 = scenario
-  // s's compliance at the run's first iteration: the worst scenario governs, and the
-  // gradient is sum_s (r_s / J)^(p-1) / c_s0 x dc_s. Each scenario's supports and loads
-  // are on the optimizer's grid. See simp_scenarios_compliance.
+  // compliances, J = (sum_s (c_s / c_ref)^p)^(1/p), p = kScenarioPNorm, c_ref = the
+  // compliance at the run's first iteration of the scenario with the LARGEST load (ONE
+  // reference for all, so each scenario counts in proportion to its load: his ask of
+  // 2026-10-28; it was each scenario's own first compliance, and the load cancelled).
+  // The worst scenario governs, and the gradient is sum_s (r_s / J)^(p-1) / c_ref x
+  // dc_s. Each scenario's supports and loads are on the optimizer's grid. See
+  // simp_scenarios_compliance.
   std::vector<SimpScenario> scenarios;
 };
 
@@ -1642,7 +1645,8 @@ struct ScenarioSolveState {
   std::vector<double> last;
 };
 // Solves every scenario on `density` and returns the smooth max J (SimpOptions::
-// scenarios) as `compliance`, its gradient as `dcompliance`, the GOVERNING (largest
+// scenarios; `c0` holds each scenario's first compliance, the largest load's is the
+// reference) as `compliance`, its gradient as `dcompliance`, the GOVERNING (largest
 // r_s) scenario's field as `solution`, and the summed CG work / timings. `warm_start`
 // false = every solve cold (the final, certified-tolerance solve).
 SimpCompliance simp_scenarios_compliance(const VoxelGrid& grid, const SimpParams& params,

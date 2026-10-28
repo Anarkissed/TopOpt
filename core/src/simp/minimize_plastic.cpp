@@ -398,10 +398,25 @@ std::string scenario_unheld_reason(const std::string& name) {
 
 std::vector<SimpScenario> sized_scenarios(std::vector<SimpScenario> scenarios,
                                           double youngs_modulus_mpa, double spacing) {
-  for (SimpScenario& sc : scenarios)
-    for (DirichletBC& b : sc.bcs)
+  // The springs follow the scenario's load (his ask, 2026-10-28): (F_s / F_max)^2, F the
+  // 2-norm of its nodal loads. A 1 % twist on fixed springs sat on them cheaply, so the
+  // optimizer never joined the arms, and any connection sized for 1 % was softer than
+  // the springs ("unheld"). Scaled, an unconnected light arm costs what a full-load one
+  // does and the connection it needs follows the load; the weak share is load-consistent.
+  std::vector<double> f2(scenarios.size(), 0.0);
+  double f2_max = 0.0;
+  for (std::size_t s = 0; s < scenarios.size(); ++s) {
+    for (const NodalLoad& l : scenarios[s].loads) f2[s] += l.value * l.value;
+    f2_max = std::max(f2_max, f2[s]);
+  }
+  for (std::size_t s = 0; s < scenarios.size(); ++s) {
+    const double scale =
+        f2_max > 0.0 ? std::max(f2[s] / f2_max, kScenarioWeakSpringMinScale) : 1.0;
+    for (DirichletBC& b : scenarios[s].bcs)
       if (b.spring > 0.0 && !b.contact)
-        b.spring = b.spring_tangent = kScenarioWeakSpringRel * youngs_modulus_mpa * spacing;
+        b.spring = b.spring_tangent =
+            kScenarioWeakSpringRel * youngs_modulus_mpa * spacing * scale;
+  }
   return scenarios;
 }
 
