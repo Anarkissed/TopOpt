@@ -10,11 +10,11 @@
 // Two arms (6 x 4 x 12 voxels) 12 voxels apart in one free box, each held at its foot and
 // pushed down on its head (the main scenario); two CROSS scenarios each push one arm's
 // head with only the OTHER arm's foot held (the first arm's foot OFF, on weak springs),
-// at 3 % (exactly the line: kScenarioMinLoadShare) / 5 / 20 % of the main load. The
+// at 10 % (exactly the line: kScenarioMinLoadShare) / 15 / 20 % of the main load. The
 // connection is the material between the arms:
 //   (a) one scenario only, for context: the arms stay apart (two columns);
-//   (b) at 3 %, one carrying body and no fallback bridge;
-//   (c) the connection's material grows with the cross load, 3 % < 5 % < 20 %;
+//   (b) at 10 %, one carrying body and no fallback bridge;
+//   (c) the connection's material grows with the cross load, 10 % < 15 % < 20 %;
 //   (d) at every cross load each scenario is HELD (its connection, not the weak springs
 //       of its OFF anchor, carries it) and the design is accepted.
 // Eigen (minimize_plastic), OCCT-free.
@@ -191,7 +191,7 @@ int main() {
                 one.bodies, one.bridges, one.connection, one.connection_printed);
     CHECK(one.bodies + one.bridges >= 2, "(a) one load case alone leaves the arms apart");
 
-    const double crosses[] = {kScenarioMinLoadShare, 0.05, 0.20};
+    const double crosses[] = {kScenarioMinLoadShare, 0.15, 0.20};
     Outcome at[3];
     for (int c = 0; c < 3; ++c) {
       at[c] = run(crosses[c]);

@@ -1084,23 +1084,23 @@ inline constexpr double kScenarioUnheldShare = 0.05;
 // (E x h), isotropic. Weak enough to carry nothing a real path carries; never zero, so
 // the solve is never singular.
 inline constexpr double kScenarioWeakSpringRel = 1e-6;
-// THE LIGHTEST SCENARIO (his decision, 2026-10-28: "0.5 kg is too low ... make it fail
-// with a notice"; the line at 3 %). A scenario whose load (the sum of its groups' force
-// sizes) is under this share of the heaviest scenario's is REFUSED, with the plain line
-// scenario_too_light_reason. Under it a scenario cannot shape the part: on his Carriage
-// Arms a 0.5 kg twist (1 % of 51 kg) stalled multigrid on 9 solves with load-scaled
-// springs, and with springs held stiffer it was too faint to grow the connection (the
-// fallback bridge fired).
-inline constexpr double kScenarioMinLoadShare = 0.03;
+// THE LIGHTEST SCENARIO (his decisions, 2026-10-28: "make it fail with a notice", then
+// the line at 10 %: "Let it fail with a simple error note"). A scenario whose load (the
+// sum of its groups' force sizes) is under this share of the heaviest scenario's is
+// REFUSED, with the plain line scenario_too_light_reason. Measured on his Carriage Arms
+// (51 kg main, two twists): with load-scaled springs, multigrid stalled in version 1's
+// coarse search at 1, 3, 5, 7 and 9 % (each within its first 25 min); 9.8 % ran clean for
+// 2 h+. Below it a light arm hangs on springs too soft for the solver.
+inline constexpr double kScenarioMinLoadShare = 0.10;
 // ...times (F_s / F_max)^2 for scenario s, F the 2-norm of its nodal loads (his ask of
 // 2026-10-28: the springs follow the load), never below this: the square of the lightest
 // load a scenario may have, so every scenario that runs has load-consistent springs.
 inline constexpr double kScenarioWeakSpringMinScale =
     kScenarioMinLoadShare * kScenarioMinLoadShare;
 // "" when every scenario carries at least kScenarioMinLoadShare of the heaviest one's
-// load, else the plain line for the first that does not: "Scenario “2”'s load (0.5 kg)
-// is too small next to Scenario “1” (51 kg): a scenario needs at least 3% of the
-// heaviest one's load (1.53 kg here). Raise it or remove the scenario." Loads in N
+// load, else the plain line for the first that does not: "Scenario “4” is too light: its
+// load is 5 kg, but it needs at least 5.1 kg (10% of Scenario “1”'s 51 kg). Raise it or
+// remove the scenario." Loads in N
 // (each scenario: the sum of its groups' force sizes), named in kg (/ 9.80665) to 3
 // significant figures in plain decimals, trailing zeros dropped (1534 kg -> "1530").
 std::string scenario_too_light_reason(

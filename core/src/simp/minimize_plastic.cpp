@@ -427,11 +427,10 @@ std::string scenario_too_light_reason(
     };
     char pct[16];
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * kScenarioMinLoadShare);
-    return "Scenario \u201C" + name + "\u201D's load (" + kg(load) +
-           ") is too small next to Scenario \u201C" + name_and_load_n[heaviest].first +
-           "\u201D (" + kg(top) + "): a scenario needs at least " + pct +
-           " of the heaviest one's load (" + kg(floor_n) +
-           " here). Raise it or remove the scenario.";
+    return "Scenario \u201C" + name + "\u201D is too light: its load is " + kg(load) +
+           ", but it needs at least " + kg(floor_n) + " (" + pct + " of Scenario \u201C" +
+           name_and_load_n[heaviest].first + "\u201D's " + kg(top) +
+           "). Raise it or remove the scenario.";
   }
   return "";
 }
