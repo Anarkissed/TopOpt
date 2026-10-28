@@ -1355,6 +1355,11 @@ public final class ResultsModel: ObservableObject {
         return scenarioResults
     }
 
+    /// ★ his ruling 2026-10-28: the "Prints in N pieces" flag for a tab core exported as 2+ bodies, or nil.
+    public func piecesFlag(_ tab: ResultVariantVM) -> StrengthenText.PiecesFlag? {
+        guard tab.latticeAlternative == nil, accepted.indices.contains(tab.variantIndex), let b = reportBlocks else { return nil }
+        return StrengthenText.piecesFlag(printedFraction: accepted[tab.variantIndex].printedFraction, in: b)
+    }
     public func isBridged(_ tab: ResultVariantVM) -> Bool { tab.latticeAlternative == nil && accepted.indices.contains(tab.variantIndex) && reportBlocks.map { StrengthenText.isBridged(printedFraction: accepted[tab.variantIndex].printedFraction, in: $0) } == true }   // Flexible (PR #362) H56f: redesign to strengthen (overnight plan 2026-10-25) — bodies.bridges > 0
 
     // MARK: - the latticed object's geometry (task 2026-08-07-lattice-variants-on-screen)
