@@ -126,58 +126,22 @@ final class StepMeshRepairTests: XCTestCase {
 
     // MARK: - the refused parts: the diagnosis
 
-    /// Core's stock tessellation of the refused parts: not watertight. Each pole sliver is a welded
-    /// (a, a, b): zero area, a self-edge used once, an edge used four times; they sit on the fillet-corner
-    /// faces, one each, and are the whole defect on the block (T1 alone closes it). On the lipped plate a
-    /// broken face remains: at 0.1 mm its triangles cover MORE than the face (triangles over the air) and
-    /// leave edges open, with no error from the import; at 0.05 mm the same face has the face's area.
-    func testDiagnosisOfTheStockTessellation() throws {
+    /// Core's import closes the refused parts ITSELF since 2026-10-29 (core 53f96758 ported this repair
+    /// into step.cpp, so the worker accepts them too). The raw tessellation's defects (the pole slivers;
+    /// the lipped plate's broken face at 0.1 mm) are now pinned in core's test_step (a synthetic sphere).
+    /// Here: core's import comes back closed, consistently wound, sliver-free, with every face, and the
+    /// app's gate stays shut. The clean parts are the negative control, unchanged.
+    func testCoreImportClosesTheRefusedPartsItself() throws {
         for p in Self.refused {
-            let path = Self.path(p)
-            let m = try Self.stock(path)
-            XCTAssertFalse(m.watertight, p.name)
+            let m = try Self.stock(Self.path(p))
+            XCTAssertTrue(m.watertight, "core closes it itself: \(p.name)")
+            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.name)
             XCTAssertEqual(m.faceCount, p.faces, p.name)
-            XCTAssertEqual(StepMeshRepair.poleSliverCount(m), p.slivers, p.name)
-            let t1 = StepMeshRepair.droppingPoleSlivers(m).mesh
-            print("STEP-REPAIR-DIAG \(p.name) stockTris=\(m.triangleCount) "
-                + "slivers=\(StepMeshRepair.poleSliverCount(m)) t1Watertight=\(t1.watertight)")
-            XCTAssertEqual(t1.watertight, p.brokenFace == nil, p.name)
-
-            // The slivers: one per fillet-corner face; (a, a, b) with zero area.
-            var sliverFaces: [Int32] = []
-            for t in 0..<m.triangleCount {
-                let a = m.indices[3 * t], b = m.indices[3 * t + 1], c = m.indices[3 * t + 2]
-                guard a == b || b == c || a == c else { continue }
-                sliverFaces.append(m.faceIDs[t])
-                XCTAssertEqual(Self.area(m, t), 0, "a pole sliver has zero area: \(p.name)")
-            }
-            XCTAssertEqual(sliverFaces.sorted(), p.sliverFaces, p.name)
-            let uses = Self.edgeUses(m)
-            let selfEdges = uses.filter { $0.key.a == $0.key.b }
-            XCTAssertEqual(selfEdges.count, p.slivers, "one self-edge per sliver: \(p.name)")
-            XCTAssertTrue(selfEdges.values.allSatisfy { $0 == 1 }, "each self-edge is used once: \(p.name)")
-
-            if let f = p.brokenFace {
-                // The broken face, at core's 0.1 mm: more triangle area than the face, and open edges.
-                let stockArea = Self.faceArea(m, f)
-                let open = Self.openFaces(m)
-                print(String(format: "STEP-REPAIR-DIAG %@ face %d: %.3f mm² of triangles on a %.3f mm² face, open faces %@",
-                             p.name, f, stockArea, p.brokenFaceArea, "\(open.sorted())"))
-                XCTAssertGreaterThan(stockArea, p.brokenFaceArea + 1, "triangles over the air beside the lip: \(p.name)")
-                XCTAssertTrue(open.contains(f), "the broken face is open: \(p.name)")
-                XCTAssertFalse(Self.openFaces(t1).isEmpty, "T1 leaves it open: \(p.name)")
-                // At half the deflection the same face is whole.
-                let finer = try StepMeshRepair.stockImport(path: path, linearDeflectionMM: 0.05,
-                                                           faceGeometry: m.faceGeometry)
-                XCTAssertEqual(Self.faceArea(finer, f), p.brokenFaceArea, accuracy: 0.001 * p.brokenFaceArea, p.name)
-                XCTAssertFalse(Self.openFaces(finer).contains(f), p.name)
-            } else {
-                // The four-use edges: one per sliver, and nothing else is open.
-                XCTAssertEqual(uses.filter { $0.key.a != $0.key.b && $0.value == 4 }.count, p.slivers, p.name)
-                XCTAssertTrue(uses.allSatisfy { $0.key.a == $0.key.b || $0.value == 2 || $0.value == 4 }, p.name)
-            }
+            XCTAssertEqual(StepMeshRepair.poleSliverCount(m), 0, p.name)
+            XCTAssertEqual(Self.openFaces(m), [], p.name)
+            XCTAssertEqual(Set(m.faceIDs), Set((0..<Int32(p.faces)).map { $0 }), "every face has triangles: \(p.name)")
+            XCTAssertFalse(StepMeshRepair.needsRepair(path: Self.path(p), mesh: m), "the app's gate stays shut: \(p.name)")
         }
-        // The same checks' negative control: the clean parts show neither defect.
         for p in Self.accepted {
             let m = try Self.stock(Self.path(p))
             XCTAssertTrue(m.watertight, p.name)
@@ -188,38 +152,18 @@ final class StepMeshRepairTests: XCTestCase {
 
     // MARK: - the refused parts: the repair
 
-    /// Each comes back closed + consistently oriented, with the B-rep's face count and every face id the
-    /// stock import carried. The block closes at T1; the lipped plate at T2 (0.05 mm), whose own T1 then
-    /// drops its sliver.
-    func testRepairClosesTheRefusedPartsAndKeepsEveryFaceID() throws {
+    /// With core repairing, the app's repair is a no-op on the refused parts: the report says the gate was
+    /// closed, the mesh is core's own, and the full pipeline the hook runs gives the same mesh. (T1 and T2
+    /// themselves are covered on hand-built meshes above, with T2's re-import injected.)
+    func testAppRepairIsANoOpOnCoresClosedImport() throws {
         for p in Self.refused {
             let path = Self.path(p)
             let stock = try Self.stock(path)
             let (m, r) = Self.repairedWithReport(stock, path: path)
-            print("STEP-REPAIR \(p.name) pass=\(r.pass.rawValue) stockTris=\(r.stockTriangles) "
-                + "repairedTris=\(r.repairedTriangles) dropped=\(r.droppedSlivers) "
-                + "deflection=\(r.linearDeflectionMM.map { "\($0)" } ?? "0.1 (stock)") "
-                + "faces=\(m.faceCount)")
-            XCTAssertTrue(m.watertight, p.name)
-            XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.name)
-            XCTAssertEqual(m.faceCount, p.faces, p.name)
-            XCTAssertEqual(m.faceIDs.count, m.triangleCount, p.name)
-            XCTAssertEqual(Set(m.faceIDs), Set(stock.faceIDs), "every CAD face id kept: \(p.name)")
-            XCTAssertEqual(Set(m.faceIDs), Set((0..<Int32(p.faces)).map { $0 }), "every face has triangles: \(p.name)")
+            XCTAssertEqual(r.pass, .notNeeded, p.name)
+            XCTAssertEqual(Self.differences(stock, m), [], p.name)
             XCTAssertEqual(m.faceGeometry, stock.faceGeometry, p.name)
             XCTAssertFalse(m.pseudoFaces, p.name)
-            if p.brokenFace != nil {
-                XCTAssertEqual(r.pass, .retessellated, p.name)
-                XCTAssertEqual(r.linearDeflectionMM, 0.05, p.name)
-                XCTAssertEqual(r.droppedSlivers, p.slivers, "T2's own T1 drops the re-meshed slivers: \(p.name)")
-            } else {
-                XCTAssertEqual(r.pass, .poleSlivers, p.name)
-                XCTAssertEqual(r.droppedSlivers, p.slivers, p.name)
-                XCTAssertEqual(r.repairedTriangles, r.stockTriangles - p.slivers, p.name)
-                // T1 touches nothing else: same vertices, same order of the kept triangles.
-                XCTAssertEqual(m.vertices, stock.vertices, p.name)
-            }
-            // The full pipeline the hook runs gives the same mesh.
             let piped = try Self.pipelineImport(path)
             XCTAssertEqual(piped.indices, m.indices, p.name)
             XCTAssertEqual(piped.faceIDs, m.faceIDs, p.name)
@@ -307,7 +251,7 @@ final class StepMeshRepairTests: XCTestCase {
         for p in Self.refused {
             let path = Self.path(p)
             let stock = try Self.stock(path)
-            XCTAssertFalse(stock.watertight, "today's bridge import is still open: \(p.name)")
+            XCTAssertTrue(stock.watertight, "core closes it itself since 2026-10-29: \(p.name)")
             let m = try Self.hookedImport(path)
             XCTAssertTrue(m.watertight, p.name)
             XCTAssertTrue(StepMeshRepair.isClosedAndOriented(indices: m.indices), p.name)

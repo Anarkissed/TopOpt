@@ -87,11 +87,12 @@ final class FlexibleStepRepairHookTests: XCTestCase {
 
     // MARK: - the paint gate (ruling item 3)
 
-    /// A repaired part's paint is off; an unrepaired part's is on. Through the hooked import, as the
-    /// app imports: the refused parts (SyntheticStepParts.swift; his rig STEPs were removed on his order of
-    /// 2026-10-24) are repaired and off, the clean synthetic parts, the other STEP fixtures and an STL on.
+    /// The gate turns paint off only on a part the APP repaired (its mesh would not index core's). Since
+    /// 2026-10-29 core repairs the import itself (53f96758), so the refused parts (SyntheticStepParts.swift;
+    /// his rig STEPs were removed on his order of 2026-10-24) come back closed from core, the app never
+    /// repairs them, and their paint is ON like every other part's: the app's mesh IS core's mesh.
     /// Each refused part is a fresh copy, so its record comes from THIS import and no other test's.
-    func testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn() throws {
+    func testPaintIsOnEverywhereNowThatCoreRepairsTheImport() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("topopt-step-repair-paint-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -101,8 +102,8 @@ final class FlexibleStepRepairHookTests: XCTestCase {
             try FileManager.default.copyItem(atPath: StepMeshRepairTests.path(p), toPath: path)
             XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: path), "not imported yet: \(p.name)")
             _ = try StepMeshRepairTests.hookedImport(path)
-            XCTAssertTrue(StepMeshRepair.wasRepaired(path: path), p.name)
-            XCTAssertFalse(FlexibleRepairedStepPaint.paintAllowed(path: path), "paint OFF on repaired \(p.name)")
+            XCTAssertFalse(StepMeshRepair.wasRepaired(path: path), "core closed it, the app did not repair: \(p.name)")
+            XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: path), "paint ON on \(p.name)")
         }
         let clean = StepMeshRepairTests.accepted.map(StepMeshRepairTests.path) + StepMeshRepairTests.otherWatertightSteps
             + [StepMeshRepairTests.repoFile("core/tests/fixtures/stl/cube_10mm.stl")]
@@ -115,11 +116,10 @@ final class FlexibleStepRepairHookTests: XCTestCase {
         XCTAssertLessThanOrEqual(FlexibleRepairedStepPaint.line.count, 44)
     }
 
-    /// End to end through AppModel's own import: the filleted block is ACCEPTED now (it was refused, as
-    /// his Carriage Arms was) and its project's paint is off; the slot plate's is on. A file edited on disk
-    /// after the import starts clean (the record is keyed by size + modification date): no stale gate on a
-    /// different file.
-    func testAppModelImportGatesPaintOnTheRepairedPartOnly() throws {
+    /// End to end through AppModel's own import: the filleted block is ACCEPTED (it was refused, as his
+    /// Carriage Arms was) and, with core repairing it since 2026-10-29, its paint is ON, as is the slot
+    /// plate's. Re-importing a rewritten file keeps it on.
+    func testAppModelImportKeepsPaintOnTheCoreRepairedPart() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("topopt-step-repair-paint-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -138,7 +138,7 @@ final class FlexibleStepRepairHookTests: XCTestCase {
         XCTAssertTrue(imported, "the filleted block imports (refused before H47)")
         XCTAssertEqual(model.importedFile?.watertight, true)
         XCTAssertEqual(model.importedFile?.faceCount, refused.faces)
-        XCTAssertFalse(FlexibleRepairedStepPaint.paintAllowed(path: model.importedFile?.path))
+        XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: model.importedFile?.path))
 
         XCTAssertTrue(model.importFile(atPath: StepMeshRepairTests.path(SyntheticStepParts.slotPlate)))
         XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: model.importedFile?.path))
@@ -148,6 +148,6 @@ final class FlexibleStepRepairHookTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: later], ofItemAtPath: block.path)
         XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: block.path), "a changed file is not gated by a stale record")
         _ = try StepMeshRepairTests.hookedImport(block.path)
-        XCTAssertFalse(FlexibleRepairedStepPaint.paintAllowed(path: block.path), "re-imported: repaired again, off again")
+        XCTAssertTrue(FlexibleRepairedStepPaint.paintAllowed(path: block.path), "re-imported: core closes it, paint stays on")
     }
 }

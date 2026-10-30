@@ -1,0 +1,14 @@
+# Release 340f1156e40f — 2026-10-29 core STEP import repair (his go; app suite after the push, his OK)
+# Core 53f96758: the app's StepMeshRepair ported into core/src/io/step.cpp (T1 drop repeated-index slivers; T2 re-mesh 0.5x/0.25x then T1; the app's acceptance rule).
+#   Only a NOT-watertight import is touched: his Carriage Arms mesh is byte-identical; his 2040 stand closes (re-meshed at 0.05 mm, 2 slivers).
+# Gates:
+#   18:13 ctest rc=0: 100% tests passed out of 168
+#   18:18 17-test: 17/17 identical
+#   18:18 merged, fingerprint 340f1156e40f
+#   18:29 builds green (build_core, CLI dirty=false, 3MF 2/2, iPad)
+#   18:29 pushed 435ae781
+#   19:40 worker swapped: /health 340f1156e40f; old kept as topopt-cli.c3c8d4afcf6d-replaced-20261029
+#   21:27 app suite: 4390 11 AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd FlexibleStepRepairHookTests.testAppModelImportGatesPaintOnTheRepairedPartOnly FlexibleStepRepairHookTests.testRepairedPartsPaintIsOffUnrepairedPartsPaintIsOn LatticeCellGradingTests.testGradingChangesTheRenderedLattice OrganicSampleCubeTests.testThickerIsLiveAndNeverRetraces OrganicVariantCacheTests.testTheKeyIgnoresThicknessAndFollowsCoreAndTopology StepMeshRepairTests.testDiagnosisOfTheStockTessellation StepMeshRepairTests.testHookedImportMeshAcceptsTheRefusedParts StepMeshRepairTests.testRepairClosesTheRefusedPartsAndKeepsEveryFaceID
+#   The 5 new app failures were STEP-repair tests pinned to core's old cracked import; updated (StepMeshRepairTests, FlexibleStepRepairHookTests: 11/11).
+#   Paint is now ON on core-repaired parts: the app's mesh is core's mesh (the gate stays for an app-only repair).
+# Worker: /health 340f1156e40f; old kept as build-fix/topopt-cli.c3c8d4afcf6d-replaced-20261029.
