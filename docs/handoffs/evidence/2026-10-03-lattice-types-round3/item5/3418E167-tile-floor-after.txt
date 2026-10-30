@@ -1,0 +1,30 @@
+# anchor-footprint identical-bake proof (2026-10-03)
+project 3418E167-8524-4831-A809-827B6B0742D0 "M2 verticalStand THICK" algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.structural) step-halves false density sim cells auto field stage
+regions 2 (includes 2); cells 4.67,12.00
+
+arm control-1: setScene 28.7s (whole rebake, renderer included)
+  stats: pitch=2.33 kept=[12.00=5 9.60=18 9.00=2 8.00=12 7.20=6 6.00=31 4.80=21 4.67=686 4.00=140 3.00=103 2.40=1450 2.33=466] edge=3091 texels=13689 anchor=(7.5,0.0,7.5) in 2.2s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=309 r0/slab=1998 r1/kept=5 r1/outline=10 r1/slab=129] noLadder=[] t=21.45s walk=anchor:523224 place:16064 shifts=64 children=5 fp= unb= raster=3.3s place=8.2s cells=5042
+  sha256/16: field.values=2333944652935cc1 level=6eb5b4bbe3431859 steppedCellMM=6094c901e71ca1df steppedPhase=80cef350cc80b58c steppedOrigin=6480beb711fd59ab solidDepthMM=384c05c0de23199d steppedCells=f69957184a0b3c87 anchorBaseVolumes=ce1e4c5fcc1c0edb anchorChildVolumes=27453b68ed8c589d
+
+arm footprint: setScene 28.6s (whole rebake, renderer included)
+  stats: pitch=2.33 kept=[12.00=5 9.60=18 9.00=2 8.00=12 7.20=6 6.00=31 4.80=21 4.67=686 4.00=140 3.00=103 2.40=1450 2.33=466] edge=3091 texels=13689 anchor=(7.5,0.0,7.5) in 2.2s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=309 r0/slab=1998 r1/kept=5 r1/outline=10 r1/slab=129] noLadder=[] t=21.35s walk=anchor:523224 place:15782 shifts=64 children=5 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=8.2s cells=5042
+  sha256/16: field.values=2333944652935cc1 level=6eb5b4bbe3431859 steppedCellMM=6094c901e71ca1df steppedPhase=80cef350cc80b58c steppedOrigin=6480beb711fd59ab solidDepthMM=384c05c0de23199d steppedCells=f69957184a0b3c87 anchorBaseVolumes=ce1e4c5fcc1c0edb anchorChildVolumes=27453b68ed8c589d
+
+arm red-inset (inset 52.0 mm): setScene 21.8s (whole rebake, renderer included)
+  stats: pitch=2.33 kept=[12.00=3 9.60=13 9.00=1 8.00=2 7.20=6 6.00=13 4.80=8 4.67=209 4.00=49 3.00=94 2.40=1038 2.33=86] edge=1588 texels=5881 anchor=(0.0,0.0,6.0) in 0.8s drawnHi=0.0 why=[r0/kept=209 r0/occupancy=1 r0/outline=71 r0/slab=562 r1/kept=3 r1/outline=11 r1/slab=51] noLadder=[] t=14.50s walk=anchor:186280 place:5216 shifts=64 children=9 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=3.1s cells=2324
+  sha256/16: field.values=e829f95006263164 level=989a243ad9a03120 steppedCellMM=e3a5bc7a382af076 steppedPhase=70eb1a15183c6604 steppedOrigin=b1255763f21e7752 solidDepthMM=000e1579582e7738 steppedCells=a47deb1e8c6688fc anchorBaseVolumes=5b5ad32af16b0fc8 anchorChildVolumes=2cd3b6b029d71692
+
+verdict
+  A/A control-1 vs control-2: skipped (OCTREE_AA=0)
+  control-1 vs footprint: IDENTICAL (every array by bit pattern; 64 base volumes, 5 children volumes, anchor, plan of 5042 cells)
+  RED control-1 vs red-inset: DIFFER ["grid.dims", "grid.origin", "field.values", "level", "steppedCellMM", "steppedPhase", "solidDepthMM", "steppedOrigin", "steppedCells", "anchorBaseVolumes", "anchorChildVolumes", "anchorShiftMM", "slotsKept", "slotsCut", "texelsPainted", "why", "paintedByRegion", "cellsPlaced"]; 64 of 64 shift volumes moved
+  anchor search: walked 523224 -> 523224 slots (100.0%), 2.2s -> 2.2s
+  level-0 walk: 16064 -> 15782 slots (98.2%), 8.2s -> 8.2s
+  octree bake: 21.5s -> 21.4s; whole rebake (setScene) 28.7s -> 28.6s
+
+harness: exit 0, 184s wall, build debug
+Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+the renderer's own DIAG octree lines, in arm order:
+  DIAG octree pitch=2.33 kept=[12.00=5 9.60=18 9.00=2 8.00=12 7.20=6 6.00=31 4.80=21 4.67=686 4.00=140 3.00=103 2.40=1450 2.33=466] edge=3091 texels=13689 band=1.0 floor=2.25 solidBand=1.27 anchor=(7.5,0.0,7.5) in 2.2s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=309 r0/slab=1998 r1/kept=5 r1/outline=10 r1/slab=129] noLadder=[] t=21.45s walk=anchor:523224 place:16064 shifts=64 fp= unb= raster=3.3s place=8.2s
+  DIAG octree pitch=2.33 kept=[12.00=5 9.60=18 9.00=2 8.00=12 7.20=6 6.00=31 4.80=21 4.67=686 4.00=140 3.00=103 2.40=1450 2.33=466] edge=3091 texels=13689 band=1.0 floor=2.25 solidBand=1.27 anchor=(7.5,0.0,7.5) in 2.2s drawnHi=0.0 why=[r0/kept=686 r0/occupancy=4 r0/outline=309 r0/slab=1998 r1/kept=5 r1/outline=10 r1/slab=129] noLadder=[] t=21.35s walk=anchor:523224 place:15782 shifts=64 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=8.2s
+  DIAG octree pitch=2.33 kept=[12.00=3 9.60=13 9.00=1 8.00=2 7.20=6 6.00=13 4.80=8 4.67=209 4.00=49 3.00=94 2.40=1038 2.33=86] edge=1588 texels=5881 band=1.0 floor=2.25 solidBand=1.27 anchor=(0.0,0.0,6.0) in 0.8s drawnHi=0.0 why=[r0/kept=209 r0/occupancy=1 r0/outline=71 r0/slab=562 r1/kept=3 r1/outline=11 r1/slab=51] noLadder=[] t=14.50s walk=anchor:186280 place:5216 shifts=64 fp=anchor/outline=2,place/outline=2 unb= raster=3.3s place=3.1s

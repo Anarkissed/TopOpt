@@ -1,0 +1,43 @@
+# C1 runs (app/TopOptKit, --scratch-path /tmp/r7x20-build) — at c1ed202d (the E2-fix merge) + the working tree (= the C1 commit)
+### runner.log
+start 16:52:58 c1ed202d + working tree
+build exit 0 16:53:00
+golden det exit 0 16:53:18
+golden unseeded exit 0 16:53:33
+hashes exit 0 16:54:31
+hashes cmp vs e1r (non-comment lines): identical
+hashes cmp vs e1r (whole file): identical
+chunk_aa exit 0 17:07:46
+chunk_ab exit 0 17:15:12
+chunk_ac exit 0 17:22:28
+chunk_ad exit 0 17:36:33
+chunk_ae exit 0 17:40:40
+chunk_af exit 1 17:46:47
+ALLDONE 17:46:47
+### classes (66, chunks of 12)
+FlexibleBatchBReviewTests FlexibleC1Tests FlexibleBatchMGroupTests FlexibleBatchMStressTests FlexibleBatchNRefineTests FlexibleEdgeGroupsHostedTests FlexibleFlatPrismHostedTests FlexibleEdgeGroupsTests FlexibleFlatPrismTests FlexibleFEVerifyGTests FlexibleFlatPrismEngineTests FlexibleFEFieldTests FlexibleMainPageRound4VerifyTests FlexibleMainPageLoadsTests FlexibleMeetReviewTests FlexibleMeetTests FlexibleLatticeSectionsTests FlexiblePressReframeTests FlexiblePressAimReviewTests FlexibleMainPageRound4Tests FlexiblePressFixturesTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7E1ReviewHostedTests FlexiblePressAimTests FlexibleR7E2HostedTests FlexiblePressProbeTripwireTests FlexiblePressStampTests FlexibleR7E3Tests FlexibleR7E2Tests FlexibleR7E1bTests FlexibleR7E2ParkTests FlexibleR7E1ReviewTests FlexibleR7SettingsHostedTests FlexibleR7RTests FlexibleR7E5Tests FlexibleR7M1Tests FlexibleR7SettingsTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleR7X1VerifyHostedTests FlexibleRound5SettingsVerifyTests FlexibleS1VerifyTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleSqueezeGroupsPressTests FlexibleSectorMigrationTests FlexibleSqueezeGroupsTests FlexibleStageCapsuleTests FlexibleSqueezeGroupsReviewTests FlexibleU1Tests FlexibleSectorStoreTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsReviewUXTests FlexibleStageTests FlexibleU2Tests FlexibleTopLayerTests FlexibleSquishCopyTests FlexibleLatticeIsProtectedTests FlexibleBatchCVerifyTests FlexiblePressCurveTests FlexibleRound7ViewsHostedTests FlexibleR7E1FollowUpTests FlexibleSquishTests FlexibleSqueezeGroupsReviewUITests LatticeStaleTypeTests
+### goldens
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.749 (13.750) seconds
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.575 (13.576) seconds
+### chunks
+chunk_aa.log: Executed 65 tests, with 1 test skipped and 0 failures (0 unexpected) in 793.568 (793.577) seconds
+chunk_ab.log: Executed 91 tests, with 0 failures (0 unexpected) in 443.382 (443.392) seconds
+chunk_ac.log: Executed 66 tests, with 0 failures (0 unexpected) in 434.011 (434.020) seconds
+chunk_ad.log: Executed 80 tests, with 0 failures (0 unexpected) in 842.901 (842.911) seconds
+chunk_ae.log: Executed 77 tests, with 0 failures (0 unexpected) in 244.574 (244.582) seconds
+chunk_af.log: Executed 39 tests, with 1 failure (0 unexpected) in 365.110 (365.115) seconds
+### failures (all chunks)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleRound7ViewsReviewHostedTests.swift:323: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("21") is not greater than ("120") - ★ the sims running: an accent ring on the Play icon (21 px, idle 0)
+### signal lines: 0
+### C1 + E2-fix prints (chunk run)
+FLEX-C1 sends false: gate Edge 12 in job false 'Set up · core support pending' | Edge 9 in job false 'Set up · core support pending' · top line 'Ready: Exit builds the lattice'
+FLEX-C1 sends true: gate Edge 12 in job true 'Can't reach on 72 columns · twisted 29% off' | Edge 9 in job true 'Can't reach this squish on 66 columns' · top line 'Ready: Exit builds the lattice'
+FLEX-C1 lattice: voxels inside the two flat prisms 7104 · moved inside 2936 · moved past them 0
+FLEX-C1 Group 2 deepest along the arrow: interim (switch off) ["Edge 9": 1.8958145380020142, "Edge 12": 1.6837236881256104] scale 0.18053604385786773 uncalibrated true · C1 ["Edge 12": 2.6804099082946777, "Edge 9": 2.982192039489746] scale 0.4007861106813797 asked k 28.23775850732439 clamped true fold share 0.20039305534068985 · core's targets Edge 12: max 1.4699269688368102, Edge 9: max 0.0
+FLEX-C1 core's design Edge 12: h 9.5 mm · 480 columns · ok 408 soft 2 firm 0 beyond 70 · status ["ok": 408, "too_soft": 2, "beyond_data": 70] · buildable depth 0.7371608754087275…5.578745774093602 mm (480 cols) · lattice height 3.341011983231896…25.785273005557684 mm · column span 10.804009438057978…25.997029053877863 mm · ρ 0.1658870251232597…0.29800253319535935 · pressure 0.05978409850910062 MPa max
+FLEX-C1 core's design Edge 9: h 6.5 mm · 429 columns · ok 363 soft 66 firm 0 beyond 0 · status ["too_soft": 66, "ok": 363] · buildable depth 0.8884896424273047…3.32931066907384 mm (429 cols) · lattice height 14.81460826722555…32.225501830377645 mm · column span 16.114135308210248…32.48538490965488 mm · ρ 0.20859913447096531…0.2868263856102627 · pressure 0.06689129903116155 MPa max
+FLEX-E2F-3 corner 3 mm: off 53.76590571013585% · card 'Can't reach on 10 columns · shape 54% off'
+FLEX-E2F-3 Edge 16: unreached 52 of 52 · off 2.0724163126336256e-13% · card 'Can't reach this squish on 52 columns'
+FLEX-E2F-2 Edge 16 column 14: t past h by 137.5151062373095 mm · ρ whole 0.36200000000000004 · clipped -1.0
+FLEX-E2F-4 top line '1 thing to fix: Edge 14 overlaps Face 3's press (85 mm²)' · pill 'Fix: Edge 14 is left out' · fixes ["Face 3 rests", "Remove Edge 14"]
+FLEX-E2-7 FIX past the flat prism: press voxels 4043 · moved from E1 0 · E2 as built moved 4043

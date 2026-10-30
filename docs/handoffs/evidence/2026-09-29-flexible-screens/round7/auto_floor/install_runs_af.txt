@@ -1,0 +1,10 @@
+Installer run at 2b6849fb (Auto floor + shape fallback + Manual along Shape), 19 classes once, chunks of 5 (passed/failed/skipped):
+chunk_aa: FlexibleAutoFloorShapeTests FlexibleManualP1Tests FlexibleManualP2Tests FlexibleM1ManualTests FlexibleManualFollowUpTests -> 22/0/0
+chunk_ab: FlexibleMainViewsTests FlexibleRowCopyTests FlexibleSettingsRound4Tests FlexibleU21OneDepthNumberTests FlexibleR7EveningAnswersTests -> 45/0/0
+chunk_ac: FlexibleMainPageLoadsTests FlexibleReadinessTests FlexibleSqueezeGroupsReviewUXTests FlexibleSettingsVerifyD1Tests FlexibleRound6Tests -> 46/0/0
+chunk_ad: FlexibleGeometryOnlyLatticeTests FlexibleBatchMVerifyTests FlexibleChromeStateTests FlexibleSquishCopyTests -> 16/0/1
+Total 129 passed, 0 failed, 1 skipped (FlexibleBatchMVerifyTests.testHisImg6RowsAtTheDevicesPixelCount, needs FLEX_MV_DEVICE + FLEX_M_PROBE_DIR).
+Goldens (FlexibleAngledGoldenTests 13 tests): deterministic 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: 16, cmp-identical (whole file) to round7/manual_p2/stage_job_hashes_p2.txt (Auto's job bytes unchanged).
+xcodebuild Debug (flexA1, iPad Pro 13 Flexible-A1): BUILD SUCCEEDED at 2b6849fb; built TopOpt.debug.dylib sha256 530774ab72816fb2cd486e0499d80b8b32c0ded2d9d12aae83516bb5d403cb2f (98301008 bytes); strings 'softest tested lattice', 'not from data' present.
+pgrep -f TopOpt.app/TopOpt: pid 51427 (started Fri Oct 23 03:03:29) - the app WAS running; NOT terminated, NOT installed. The build is ready to install.

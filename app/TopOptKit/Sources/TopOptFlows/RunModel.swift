@@ -44,6 +44,12 @@ public struct RunRequest: Equatable, Sendable {
     /// face-id contract is shared, handoff 134 + the mesh-optimize work).
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// ★ LOAD SCENARIOS (job `loads.scenarios`): sent only with 2+; `anchorFaceIDs`/`loadGroups` then mirror Scenario 1.
+    public var scenarios: [LoadScenarioWire] = []
+    /// ★ THE SAFETY MARGIN (SafetyMargin.swift): sent under TO-core's key once it is named, and only when not 150 %.
+    public var safetyMargin: Double = SafetyMargin.defaultValue
+    /// ★ EXACT PROTECT (job `keep_regions`, ProtectKeepRegions): the protected holes' and flat faces' regions. Empty ⇒ omitted.
+    public var keepRegions: [KeepRegionSpec] = []
     /// "Minimize plastic": on → the material-reduction ladder; off → one
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool
@@ -182,6 +188,7 @@ public struct RunRequest: Equatable, Sendable {
     /// skeleton). Still part of the synthesized `==`, so switching modes
     /// invalidates a stale result rather than reusing it.
     public var jobMode: String
+    public var redesign: String = ""   // Flexible (PR #362) H56a: redesign to strengthen (overnight plan 2026-10-25) — loads.redesign; "" = no key (StrengthenRoute, RunRequest.forWorker)
 
     /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
     /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
@@ -1155,12 +1162,36 @@ public final class RunModel: ObservableObject {
             throw RemoteRunError(
                 "the lattice run produced no mesh — see the run's report for why")
         }
-        return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        do {
+            return try TopOptKit.latticeOutcome(meshPath: mesh, result: r)
+        } catch {
+            // ★★★ THE LATTICE STL IS A SOUP, AND THE SOLID IMPORTER MAY REFUSE IT
+            // (found 2026-08-24: two overlapping declared regions → the shared
+            // sheets are written once per region, and the repair correctly reports
+            // "an edge shared by more than two triangles remains" — measured 17,172
+            // duplicated triangles and 194 residual T-junction edges on his own
+            // part). That refusal is about making a SOLID; nothing here needs one.
+            // The certification already ran inside core, and the mesh is only the
+            // picture — so fall back to the same raw parse the RELATTICE path has
+            // always displayed the soup with (`RelatticeRunner` →
+            // `MeshExport.parseBinarySTL`). The LAN and on-device lattice runs now
+            // agree about what this file is.
+            let raw = MeshExport.parseBinarySTL(
+                try Data(contentsOf: URL(fileURLWithPath: mesh)))
+            guard !raw.indices.isEmpty else { throw error }
+            NSLog("DIAG latticeOutcome solid import refused (\(error)); "
+                  + "displaying the soup raw: \(raw.indices.count / 3) triangles")
+            return TopOptKit.latticeOutcome(result: r,
+                                            meshVertices: raw.vertices,
+                                            meshIndices: raw.indices)
+        }
     }
 
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool,
                                     _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
+        // ★ Core's receipts name the core this app links (#358): stated once, before a run.
+        CoreBuildIdentity.state()
         // ★ THE MODE DECIDES WHICH RUN THIS IS (maintainer, 2026-08-17). Routed
         // HERE, at the one on-device entry point every caller already goes
         // through, so a lattice request cannot reach the optimizer by taking a
@@ -1289,6 +1320,8 @@ public final class RunModel: ObservableObject {
         }
 
         scheduler.runInBackground { [weak self] in
+            let flexCore = remote ? nil : FlexibleCoreGate.claimForRun(); defer { flexCore?.leave() }   // Flexible (PR #362, batch G): a LOCAL run claims core's matrix-free pool (waits while a squish sim holds it; FlexibleCoreGate)
+            if (flexCore?.waitedS ?? 0) > 0.05 { scheduler.runOnMain { guard let s = self, s.token === token, s.watchdogCancel != nil else { return }; s.watchdogCancel?(); s.watchdogCancel = s.watchdog.arm { [weak s] in s?.watchdogFired(token) } } }   // Flexible (batch G): the wait never eats the stall watchdog's grace — re-armed after it
             let result: Result<OptimizeOutcome, Error>
             do {
                 let o = try runner(request, { rung, count, iter in
@@ -1415,10 +1448,15 @@ public final class RunModel: ObservableObject {
     /// and arm the completion notification. The workspace shows a re-open chip.
     public func runInBackground() {
         guard phase == .running else { return }
-        runningInBackground = true
         isMinimized = true
+        // ★ his iPad (2026-10-26): reopening the card and hiding it again must work every time; arm the notifier once
+        guard !runningInBackground else { return }
+        runningInBackground = true
         notifier.willRunInBackground()
     }
+
+    /// The card's "In Background" button is enabled whenever a run is going, including after he reopens the card.
+    public var canSendToBackground: Bool { phase == .running }
 
     /// Re-open the full progress card for a minimized in-flight run.
     public func restore() {

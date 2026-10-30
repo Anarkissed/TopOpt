@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -229,7 +230,21 @@ LoadcaseLogFn set_loadcase_log_sink(LoadcaseLogFn sink) {
 
 ProductionRunSetup build_production_loadcase(const StepModel& model,
                                              int resolution,
-                                             const ProductionLoadCase& lc) {
+                                             const ProductionLoadCase& lc_in) {
+  // LOAD SCENARIOS (the reviewer's overnight ruling of 2026-10-26 03:45): every
+  // scenario's load faces are tagged, padded and pre-flighted like one load case's
+  // (`lc` carries all their groups; its anchors are already their union), and each
+  // scenario's own supports and loads are built at the end. No scenarios: `lc` IS
+  // `lc_in`, byte for byte.
+  const bool scenarios = lc_in.scenarios.size() >= 2;
+  ProductionLoadCase lc_all;
+  if (scenarios) {
+    lc_all = lc_in;
+    lc_all.load_groups.clear();
+    for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios)
+      for (const ProductionLoadCase::LoadGroup& g : sc.groups) lc_all.load_groups.push_back(g);
+  }
+  const ProductionLoadCase& lc = scenarios ? lc_all : lc_in;
   ProductionRunSetup setup;
   VoxelGrid& grid = setup.grid;
   grid = voxelize(model.mesh, resolution);
@@ -318,6 +333,33 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // same condition tag_step_face would have thrown on, made legible.
   for (int fid : lc.anchor_face_ids)
     validate_face_id(fid, model, "load case anchor");
+  // CORE LIST item 47 — each anchor's OWN Fixture voxels, tagged on a scratch copy
+  // of the untagged grid, so a rung that lets an anchored piece go can name its
+  // faces (MinimizePlasticOptions::anchor_voxels; receipt only — the tags below
+  // are applied exactly as before).
+  std::vector<MinimizePlasticOptions::AnchorVoxels> anchor_voxels;
+  {
+    const VoxelGrid untagged = grid;
+    auto own_voxels = [&](const VoxelGrid& one) {
+      std::vector<std::size_t> v;
+      for (std::size_t idx = 0; idx < one.tags.size(); ++idx)
+        if (one.tags[idx] == VoxelTag::Fixture &&
+            untagged.tags[idx] != VoxelTag::Fixture)
+          v.push_back(idx);
+      return v;
+    };
+    for (int fid : lc.anchor_face_ids) {
+      VoxelGrid one = untagged;
+      tag_step_face(one, model, fid, VoxelTag::Fixture);
+      anchor_voxels.push_back({fid, -1, own_voxels(one)});
+    }
+    for (int rid : lc.anchor_region_ids) {
+      VoxelGrid one = untagged;
+      tag_step_region(one, model, region_or_throw(rid, "load case anchor"),
+                      VoxelTag::Fixture);
+      anchor_voxels.push_back({-1, rid, own_voxels(one)});
+    }
+  }
   for (int fid : lc.anchor_face_ids)
     tag_step_face(grid, model, fid, VoxelTag::Fixture);
   for (int rid : lc.anchor_region_ids)
@@ -408,16 +450,162 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     }
   };
   bool any_fixture = false;
-  for (int k = 0; k < grid.nz; ++k)
-    for (int j = 0; j < grid.ny; ++j)
-      for (int i = 0; i < grid.nx; ++i)
-        if (grid.tag(i, j, k) == VoxelTag::Fixture) {
-          any_fixture = true;
-          for (int dk = 0; dk <= 1; ++dk)
-            for (int dj = 0; dj <= 1; ++dj)
-              for (int di = 0; di <= 1; ++di)
-                clamp_node(fea_node_index(grid, i + di, j + dj, k + dk));
+  if (lc.anchor_bearing) {
+    // REAL BOLTS (job loads.anchor_model "bearing"; the reviewer's brief of 2026-10-25
+    // 20:10). Each anchor holds only where the part presses on it: one spring per node
+    // of the anchor's voxel surface, along the CAD normal turned out of the part. A
+    // Winkler support of steel, E 200 GPa acting through 1 mm: (E / L) per mm^2 of the
+    // face's true area (the per-node area is below). Fixed in mm, so it
+    // does not stiffen toward a clamp as the grid refines. Across the normal, a pressing
+    // node has 1e-4 of that per-area stiffness: near-frictionless (the reviewer's ruling
+    // of 2026-10-25 21:45), it holds only the sliding and spinning a frictionless
+    // support leaves free, and the certification reports how much of the reaction it
+    // carries (FixedDesignAnalysis::contact_tangent_share; over 5 %, the anchors cannot
+    // hold the load in some direction and the design is not accepted). A released node
+    // has nothing: any stiffness on the half pulling away acts as glue (the steel barely
+    // compresses, so that half moves ~50x further than the contact closes; measured on
+    // the plate, it put the peak there and grew it with resolution). A STICK spring
+    // (friction with no slip limit) makes the stuck / released boundary a new singular
+    // edge (the plate, 2026-10-25); Coulomb stick-slip is a later batch.
+    constexpr double kBearingSteelMpa = 200000.0;
+    constexpr double kBearingLengthMm = 1.0;
+    constexpr double kBearingTangentFraction = 1e-4;
+    const double h = grid.spacing;
+    const auto& V = model.mesh.vertices;
+    auto closest = [](const Vec3& p, const Vec3& a, const Vec3& b, const Vec3& c) {
+      // Ericson, Real-Time Collision Detection 5.1.5.
+      auto sub = [](const Vec3& u, const Vec3& v) { return Vec3{u.x - v.x, u.y - v.y, u.z - v.z}; };
+      auto dot = [](const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; };
+      auto at = [&](double v, double w) {
+        return Vec3{a.x + v * (b.x - a.x) + w * (c.x - a.x), a.y + v * (b.y - a.y) + w * (c.y - a.y),
+                    a.z + v * (b.z - a.z) + w * (c.z - a.z)};
+      };
+      const Vec3 ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+      const double d1 = dot(ab, ap), d2 = dot(ac, ap);
+      if (d1 <= 0.0 && d2 <= 0.0) return a;
+      const Vec3 bp = sub(p, b);
+      const double d3 = dot(ab, bp), d4 = dot(ac, bp);
+      if (d3 >= 0.0 && d4 <= d3) return b;
+      const double vc = d1 * d4 - d3 * d2;
+      if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) return at(d1 / (d1 - d3), 0.0);
+      const Vec3 cp = sub(p, c);
+      const double d5 = dot(ab, cp), d6 = dot(ac, cp);
+      if (d6 >= 0.0 && d5 <= d6) return c;
+      const double vb = d5 * d2 - d1 * d6;
+      if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) return at(0.0, d2 / (d2 - d6));
+      const double va = d3 * d6 - d5 * d4;
+      if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) {
+        const double w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return at(1.0 - w, w);
+      }
+      const double den = 1.0 / (va + vb + vc);
+      return at(vb * den, vc * den);
+    };
+    std::size_t n_springs = 0;
+    for (const MinimizePlasticOptions::AnchorVoxels& a : anchor_voxels) {
+      const std::vector<int> faces =
+          a.face_id >= 0 ? std::vector<int>{a.face_id}
+                         : region_or_throw(a.region_id, "load case anchor").member_faces;
+      std::vector<std::size_t> tris;
+      for (std::size_t t = 0; t < model.mesh.triangles.size(); ++t)
+        if (std::find(faces.begin(), faces.end(), model.triangle_face[t]) != faces.end())
+          tris.push_back(t);
+      if (tris.empty()) continue;
+      // Each EXPOSED voxel face of the anchor's own Fixture voxels that lies on the
+      // anchor (its centre within 0.75 h of the CAD triangles, facing along their
+      // normal) gives h^2 / 4 to each of its four corners. A node's spring is that area
+      // over the staircase factor |n|_1 (a surface of normal n is voxelised into
+      // |n_x| + |n_y| + |n_z| times its true area) times (E / L): the face's true area,
+      // spread as the voxel surface actually spreads it (an edge row gets half).
+      struct NodeArea { double area = 0.0; Vec3 n{0.0, 0.0, 0.0}; };
+      std::map<int, NodeArea> nodes;
+      static constexpr int kDir[6][3] = {{-1, 0, 0}, {1, 0, 0}, {0, -1, 0},
+                                         {0, 1, 0},  {0, 0, -1}, {0, 0, 1}};
+      for (const std::size_t v : a.part_voxels) {
+        if (grid.tags[v] != VoxelTag::Fixture) continue;  // a load over it wins
+        any_fixture = true;
+        const int i = static_cast<int>(v % static_cast<std::size_t>(grid.nx));
+        const int j = static_cast<int>((v / static_cast<std::size_t>(grid.nx)) %
+                                       static_cast<std::size_t>(grid.ny));
+        const int k = static_cast<int>(v / (static_cast<std::size_t>(grid.nx) *
+                                            static_cast<std::size_t>(grid.ny)));
+        const Vec3 centre = grid.voxel_center(i, j, k);
+        for (const auto& e : kDir) {
+          const int ni = i + e[0], nj = j + e[1], nk = k + e[2];
+          if (ni >= 0 && nj >= 0 && nk >= 0 && ni < grid.nx && nj < grid.ny && nk < grid.nz &&
+              grid.solid(ni, nj, nk))
+            continue;  // not on the part's surface
+          const Vec3 p{centre.x + 0.5 * h * e[0], centre.y + 0.5 * h * e[1],
+                       centre.z + 0.5 * h * e[2]};
+          double best = std::numeric_limits<double>::infinity();
+          Vec3 q{0.0, 0.0, 0.0};
+          std::size_t bt = 0;
+          for (const std::size_t t : tris) {
+            const auto& tri = model.mesh.triangles[t];
+            const Vec3 x = closest(p, V[static_cast<std::size_t>(tri[0])],
+                                   V[static_cast<std::size_t>(tri[1])],
+                                   V[static_cast<std::size_t>(tri[2])]);
+            const double d2 = (x.x - p.x) * (x.x - p.x) + (x.y - p.y) * (x.y - p.y) +
+                              (x.z - p.z) * (x.z - p.z);
+            if (d2 < best) { best = d2; q = x; bt = t; }
+          }
+          if (std::sqrt(best) > 0.75 * h) continue;  // another face's surface
+          const auto& tri = model.mesh.triangles[bt];
+          const Vec3& p0 = V[static_cast<std::size_t>(tri[0])];
+          const Vec3& p1 = V[static_cast<std::size_t>(tri[1])];
+          const Vec3& p2 = V[static_cast<std::size_t>(tri[2])];
+          const Vec3 u{p1.x - p0.x, p1.y - p0.y, p1.z - p0.z}, w{p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+          Vec3 nrm{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+          const double len = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+          if (!(len > 0.0)) continue;
+          nrm = Vec3{nrm.x / len, nrm.y / len, nrm.z / len};
+          // Out of the part: the voxel's centre (part material) is behind it.
+          if ((centre.x - q.x) * nrm.x + (centre.y - q.y) * nrm.y + (centre.z - q.z) * nrm.z > 0.0)
+            nrm = Vec3{-nrm.x, -nrm.y, -nrm.z};
+          if (nrm.x * e[0] + nrm.y * e[1] + nrm.z * e[2] < 0.3) continue;  // e.g. the top face
+          // The face's four corners: the two axes across `e`.
+          const int ax = e[0] != 0 ? 0 : e[1] != 0 ? 1 : 2;
+          const int base[3] = {i + (e[0] > 0), j + (e[1] > 0), k + (e[2] > 0)};
+          for (int c = 0; c < 4; ++c) {
+            int at[3] = {base[0], base[1], base[2]};
+            at[(ax + 1) % 3] += c & 1;
+            at[(ax + 2) % 3] += (c >> 1) & 1;
+            NodeArea& na = nodes[fea_node_index(grid, at[0], at[1], at[2])];
+            na.area += 0.25 * h * h;
+            na.n = Vec3{na.n.x + nrm.x, na.n.y + nrm.y, na.n.z + nrm.z};
+          }
         }
+      }
+      for (const auto& [n, na] : nodes) {
+        const double len = std::sqrt(na.n.x * na.n.x + na.n.y * na.n.y + na.n.z * na.n.z);
+        if (!(len > 0.0)) continue;
+        const Vec3 nrm{na.n.x / len, na.n.y / len, na.n.z / len};
+        const double l1 = std::fabs(nrm.x) + std::fabs(nrm.y) + std::fabs(nrm.z);
+        const double k_node = kBearingSteelMpa / kBearingLengthMm * na.area / l1;
+        DirichletBC b;
+        b.node = n;
+        b.spring = k_node;
+        b.spring_tangent = kBearingTangentFraction * k_node;
+        b.normal = nrm;
+        bcs.push_back(b);
+        ++n_springs;
+      }
+    }
+    std::printf("[loadcase] anchors: bearing, %zu springs on %zu anchors (steel 200 GPa "
+                "through 1 mm, compression-only, frictionless)\n",
+                n_springs, anchor_voxels.size());
+  } else {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.tag(i, j, k) == VoxelTag::Fixture) {
+            any_fixture = true;
+            for (int dk = 0; dk <= 1; ++dk)
+              for (int dj = 0; dj <= 1; ++dj)
+                for (int di = 0; di <= 1; ++di)
+                  clamp_node(fea_node_index(grid, i + di, j + dj, k + dk));
+          }
+  }
   if (!any_fixture) {
     // No anchors declared: fall back to clamping the min-x boundary so the
     // system is well-posed (mirrors the self-weight path).
@@ -440,6 +628,10 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Shared production solver config (matrix-free multigrid + Galerkin cache +
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
+  // THE USER'S SAFETY MARGIN (job loads.safety_margin, >= 1.5): the margin every design
+  // must reach. Not stated: the production default (1.5), byte for byte.
+  if (lc.safety_margin > 0.0) opts.margin_stop = lc.safety_margin;
+  opts.anchor_voxels = std::move(anchor_voxels);  // item 47: names, receipt only
   opts.external_loads = external;  // the user's load case; empty => self-weight
 
   // Warm-start production flip — LOAD-CASE MODE ONLY (handoff 114; evidence:
@@ -559,8 +751,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
   const bool want_protect = !lc.face_protection_face_ids.empty() ||
                             !lc.face_protection_region_ids.empty();
-  if (want_pad || want_protect) {
+  if (want_pad || want_protect || !lc.keep_regions.empty()) {
     DesignMask pad = make_active_mask(grid);
+    // CORE LIST item 40 — WHAT FROZE THE PART, each voxel once (pipeline.hpp
+    // frozen_mask_sources). A source is credited only with the voxels that neither
+    // the Load/Fixture skin (the driver's own first source) nor an earlier source
+    // froze, so the sources add up. Receipt only: the mask is unchanged.
+    auto bc_skin = [&](std::size_t idx) {
+      return grid.tags[idx] == VoxelTag::Load || grid.tags[idx] == VoxelTag::Fixture;
+    };
     if (want_pad) {
       for (int fid : lc.anchor_face_ids)
         mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
@@ -579,8 +778,13 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // COUNT THE PAD SEPARATELY (task 2026-08-12 §1f). Everything frozen so far
       // is the pad and only the pad — the protections below run after this.
       std::size_t pad_voxels = 0;
+      long long pad_beyond_skin = 0;
       for (std::size_t idx = 0; idx < pad.size(); ++idx)
-        if (pad[idx] == MaskValue::FrozenSolid) ++pad_voxels;
+        if (pad[idx] == MaskValue::FrozenSolid) {
+          ++pad_voxels;
+          if (!bc_skin(idx)) ++pad_beyond_skin;
+        }
+      opts.frozen_mask_sources.push_back({"anchor_pad", -1, -1, pad_beyond_skin});
       setup.anchor_pad_report = {
           true, kProductionAnchorPadDepthVoxels,
           lc.anchor_face_ids.size() + lc.anchor_region_ids.size(),
@@ -622,8 +826,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_face(
             grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this face alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", fid, -1, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {fid, -1, frozen, depth_vox, thin, requested_mm, effective_mm});
@@ -650,14 +861,38 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         DesignMask deeper = make_active_mask(grid);
         const std::size_t frozen_deeper = mask_step_region(
             grid, model, reg, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        long long first_frozen_here = 0;  // item 40: credited to this region alone
         for (std::size_t idx = 0; idx < pad.size(); ++idx)
-          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+          if (one[idx] == MaskValue::FrozenSolid) {
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx))
+              ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+        opts.frozen_mask_sources.push_back(
+            {"face_protection", -1, rid, first_frozen_here});
         const bool thin = frozen_deeper == frozen;
         setup.face_protection_reports.push_back(
             {-1, rid, frozen, depth_vox, thin, requested_mm, effective_mm});
         log_face_protection(-1, frozen, depth_vox, thin, requested_mm,
                             effective_mm, rid);
       }
+    }
+    // CORE LIST item KEEP: the part's own material inside each keep region is frozen
+    // solid, so the optimizer can neither cut it up nor dig into it; the export then
+    // carries the part's exact geometry there (run_job, Manifold).
+    for (std::size_t ki = 0; ki < lc.keep_regions.size(); ++ki) {
+      long long first_frozen_here = 0;
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          for (int i = 0; i < grid.nx; ++i) {
+            if (!grid.solid(i, j, k)) continue;
+            if (!lc.keep_regions[ki].contains(grid.voxel_center(i, j, k))) continue;
+            const std::size_t idx = grid.index(i, j, k);
+            if (pad[idx] != MaskValue::FrozenSolid && !bc_skin(idx)) ++first_frozen_here;
+            pad[idx] = MaskValue::FrozenSolid;
+          }
+      opts.frozen_mask_sources.push_back(
+          {"keep", -1, static_cast<int>(ki), first_frozen_here});
     }
     opts.design_mask = std::move(pad);
   }
@@ -714,6 +949,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // the driver runs, so the two never disagree. Needed up front to index a
   // progressive-variant stream a front-end registers before minimize_plastic
   // returns.
+  // CORE LIST item 50 — "Redesign to strengthen" rebuilds inside the box from what
+  // is frozen, and its fractions are of that domain (pipeline.hpp).
+  // CORE LIST item 42, option B — production keeps a part that was one piece as
+  // drawn in one piece (bridged, and said so).
+  opts.bridge_pieces = true;
+  if (lc.strengthen) {
+    opts.domain_box_only = true;
+    opts.volume_basis_domain = true;
+  }
   setup.solved_grid = minimize_plastic_solved_grid(grid, opts);
 
   // Handoff 100 — rasterize the declared "Keep clear" clearances onto the SOLVED
@@ -724,12 +968,124 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // side of the expanded grid grows, so this offset is exact; see voxel.hpp). The
   // rasterizer's precedence guard needs that offset to protect part material. No
   // clearance → the overlay stays empty and the run is byte-identical.
-  if (!lc.clearances.empty()) {
-    opts.clearance_void =
+  // PROTECT keeps its reach clear too (ruling 2026-10-27 03:57): the keep regions' air
+  // joins the overlay (build_clearance_overlay). A run that could grow none there (no
+  // design box: every reduction run) leaves the overlay empty, as before.
+  if (!lc.clearances.empty() || !lc.keep_regions.empty()) {
+    long long keep_air = 0;
+    DesignMask overlay =
         build_clearance_overlay(model, grid, setup.solved_grid, lc.clearances,
-                                -1, &setup.clearance_reports);
+                                -1, &setup.clearance_reports, lc.keep_regions, &keep_air);
+    if (!lc.clearances.empty() || keep_air > 0) opts.clearance_void = std::move(overlay);
     for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
       log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
+    if (keep_air > 0 && loadcase_sink())
+      loadcase_sink()("[loadcase] protect: " + std::to_string(keep_air) +
+                      " voxels kept clear (inside protected holes and in front of "
+                      "protected faces, " + std::to_string(lc.keep_regions.size()) +
+                      " keep regions)");
+  }
+
+  // LOAD SCENARIOS — each scenario's own supports and loads (part grid). An anchor ON
+  // in it is clamped as today (a region anchor is ON in every scenario: the key names
+  // face ids); an anchor OFF in it is NOT removed but held by weak non-contact springs,
+  // isotropic, sized by minimize_plastic (kScenarioWeakSpringRel of the part's own
+  // element stiffness: only the driver knows the material), so the solve is never
+  // singular and the push on that piece must travel through the part. Every load group
+  // gets its own traction, as one load case's do.
+  if (scenarios) {
+    if (lc_in.anchor_bearing)
+      throw std::invalid_argument("Load scenarios can't be combined with bolt bearings yet");
+    const double k_weak = 1.0;  // a placeholder: minimize_plastic sizes it
+    VoxelGrid no_load = grid;
+    for (VoxelTag& t : no_load.tags)
+      if (t == VoxelTag::Load) t = VoxelTag::Interior;
+    auto corners = [&](std::size_t v, auto&& visit) {
+      const int i = static_cast<int>(v % static_cast<std::size_t>(grid.nx));
+      const int j = static_cast<int>((v / static_cast<std::size_t>(grid.nx)) %
+                                     static_cast<std::size_t>(grid.ny));
+      const int k = static_cast<int>(v / (static_cast<std::size_t>(grid.nx) *
+                                          static_cast<std::size_t>(grid.ny)));
+      for (int c = 0; c < 8; ++c)
+        visit(fea_node_index(grid, i + (c & 1), j + ((c >> 1) & 1), k + ((c >> 2) & 1)));
+    };
+    opts.scenarios.clear();
+    {  // the lightest scenario (his decision, 2026-10-28): the same line as the job's
+      std::vector<std::pair<std::string, double>> sizes;
+      for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios) {
+        double n = 0.0;
+        for (const ProductionLoadCase::LoadGroup& g : sc.groups)
+          n += std::sqrt(g.force.x * g.force.x + g.force.y * g.force.y + g.force.z * g.force.z);
+        sizes.push_back({sc.name, n});
+      }
+      const std::string light = scenario_too_light_reason(sizes);
+      if (!light.empty()) throw std::invalid_argument(light);
+    }
+    for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios) {
+      for (const int f : sc.anchor_face_ids)
+        validate_face_id(f, model, "load scenario \"" + sc.name + "\" anchor");
+      SimpScenario s;
+      s.name = sc.name;
+      std::set<int> held, weak;
+      for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
+        const bool on = a.face_id < 0 || std::find(sc.anchor_face_ids.begin(),
+                                                   sc.anchor_face_ids.end(),
+                                                   a.face_id) != sc.anchor_face_ids.end();
+        if (!on) continue;
+        for (const std::size_t v : a.part_voxels)
+          if (grid.tags[v] == VoxelTag::Fixture)
+            corners(v, [&](int n) {
+              if (held.insert(n).second)
+                for (int c = 0; c < 3; ++c) s.bcs.push_back({n, c, 0.0});
+            });
+      }
+      if (held.empty())
+        throw std::invalid_argument("Scenario \u201C" + sc.name +
+                                    "\u201D has no anchor switched on");
+      for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
+        if (a.face_id < 0 || std::find(sc.anchor_face_ids.begin(), sc.anchor_face_ids.end(),
+                                       a.face_id) != sc.anchor_face_ids.end())
+          continue;
+        for (const std::size_t v : a.part_voxels)
+          if (grid.tags[v] == VoxelTag::Fixture)
+            corners(v, [&](int n) {
+              if (held.count(n) || !weak.insert(n).second) return;
+              DirichletBC b;
+              b.node = n;
+              b.spring = k_weak;
+              b.spring_tangent = k_weak;
+              b.normal = Vec3{1.0, 0.0, 0.0};
+              b.contact = false;
+              s.bcs.push_back(b);
+            });
+      }
+      for (const ProductionLoadCase::LoadGroup& g : sc.groups) {
+        if (!(std::fabs(g.force.x) + std::fabs(g.force.y) + std::fabs(g.force.z) > 0.0))
+          continue;
+        VoxelGrid gg = no_load;
+        for (const int fid : g.face_ids) {
+          validate_face_id(fid, model, "load scenario \"" + sc.name + "\" group");
+          tag_step_face(gg, model, fid, VoxelTag::Load);
+        }
+        for (const int rid : g.region_ids)
+          tag_step_region(gg, model, region_or_throw(rid, "load scenario group"),
+                          VoxelTag::Load);
+        if (count_tagged(gg, VoxelTag::Load) == 0) continue;
+        const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, g.force);
+        s.loads.insert(s.loads.end(), tl.begin(), tl.end());
+      }
+      if (s.loads.empty())
+        throw std::invalid_argument("Scenario \u201C" + sc.name +
+                                    "\u201D has no load: its load faces are too small for "
+                                    "this resolution");
+      std::printf("[loadcase] load scenario \"%s\": %zu clamped nodes, %zu weak-spring "
+                  "nodes (anchors OFF), %zu load entries\n",
+                  sc.name.c_str(), held.size(), weak.size(), s.loads.size());
+      opts.scenarios.push_back(std::move(s));
+    }
+    // The mirror: older readers (and the coarse warm-start seed) see scenario 1.
+    setup.bcs = opts.scenarios.front().bcs;
+    opts.external_loads = opts.scenarios.front().loads;
   }
 
   return setup;
@@ -740,7 +1096,8 @@ DesignMask build_clearance_overlay(
     const VoxelGrid& solved_grid,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
     int skip_index,
-    std::vector<ProductionRunSetup::ClearanceReport>* reports) {
+    std::vector<ProductionRunSetup::ClearanceReport>* reports,
+    const std::vector<KeepRegion>& keeps, long long* keep_air_voxels) {
   // The part sits inside the solved grid at a whole-voxel offset — 0 on the
   // no-box path (solved == part), (part.origin − solved.origin)/spacing on the
   // design-box path (only the HIGH side of the expanded grid grows, so this
@@ -776,6 +1133,39 @@ DesignMask build_clearance_overlay(
       reports->push_back(
           {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
   }
+  // PROTECT = the exact CAD AND nothing grows within its reach (ruling 2026-10-27
+  // 03:57). Every voxel the optimizer could fill (an element of the solved grid) whose
+  // centre is inside a keep region and OUTSIDE the part (its voxelization, at the
+  // offset above) is a Keep Clear: a protected hole's own air stays open, the band a
+  // region reaches past a protected face stays empty. The export's plain cut then only
+  // ever removes the voxel skin, so the file is the design that was certified. The
+  // part's own voxels inside are frozen solid (KEEP), never voided.
+  long long air = 0;
+  for (const KeepRegion& kr : keeps) {
+    auto first = [s](double v, double o, int n) {
+      return std::clamp(static_cast<int>(std::floor((v - o) / s - 0.5)), 0, n - 1);
+    };
+    auto last = [s](double v, double o, int n) {
+      return std::clamp(static_cast<int>(std::ceil((v - o) / s - 0.5)), 0, n - 1);
+    };
+    const VoxelGrid& g = solved_grid;
+    for (int k = first(kr.min.z, g.origin.z, g.nz); k <= last(kr.max.z, g.origin.z, g.nz); ++k)
+      for (int j = first(kr.min.y, g.origin.y, g.ny); j <= last(kr.max.y, g.origin.y, g.ny); ++j)
+        for (int i = first(kr.min.x, g.origin.x, g.nx); i <= last(kr.max.x, g.origin.x, g.nx);
+             ++i) {
+          if (!g.solid(i, j, k)) continue;  // no element: nothing can grow there
+          const int pi = i - oi, pj = j - oj, pk = k - ok;
+          if (pi >= 0 && pj >= 0 && pk >= 0 && pi < part_grid.nx && pj < part_grid.ny &&
+              pk < part_grid.nz && part_grid.solid(pi, pj, pk))
+            continue;  // the part's own material
+          if (!kr.contains(g.voxel_center(i, j, k))) continue;
+          const std::size_t idx = g.index(i, j, k);
+          if (clearance[idx] == MaskValue::FrozenVoid) continue;
+          clearance[idx] = MaskValue::FrozenVoid;
+          ++air;
+        }
+  }
+  if (keep_air_voxels) *keep_air_voxels = air;
   return clearance;
 }
 
@@ -809,10 +1199,10 @@ PreflightLoadPath preflight_with_clearances(
     const StepModel& model, const VoxelGrid& part_grid,
     const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
     const std::vector<ProductionLoadCase::Clearance>& clearances,
-    int skip_index) {
+    int skip_index, const std::vector<KeepRegion>& keeps) {
   MinimizePlasticOptions probe = options;
   probe.clearance_void = build_clearance_overlay(
-      model, part_grid, domain.grid, clearances, skip_index, nullptr);
+      model, part_grid, domain.grid, clearances, skip_index, nullptr, keeps);
   return preflight_load_path(domain, probe);
 }
 
@@ -824,12 +1214,13 @@ PreflightLoadPath preflight_with_clearances(
 double max_connected_axial_clearance_mm(
     const StepModel& model, const VoxelGrid& part_grid,
     const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
-    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci) {
+    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci,
+    const std::vector<KeepRegion>& keeps) {
   const double requested = clearances[ci].params.axial_clearance_mm;
   auto connected_at = [&](double mm) {
     clearances[ci].params.axial_clearance_mm = mm;
     return preflight_with_clearances(model, part_grid, domain, options,
-                                     clearances, -1)
+                                     clearances, -1, keeps)
         .walk.connected;
   };
   if (!connected_at(0.0)) return -1.0;
@@ -936,12 +1327,12 @@ std::string preflight_refusal_report(
     cf.index = static_cast<int>(ci);
     cf.removal_reconnects =
         preflight_with_clearances(model, part_grid, domain, options,
-                                  lc.clearances, static_cast<int>(ci))
+                                  lc.clearances, static_cast<int>(ci), lc.keep_regions)
             .walk.connected;
     if (cf.removal_reconnects &&
         lc.clearances[ci].params.kind == ClearanceKind::Bolt)
       cf.max_axial_clearance_mm = max_connected_axial_clearance_mm(
-          model, part_grid, domain, options, lc.clearances, ci);
+          model, part_grid, domain, options, lc.clearances, ci, lc.keep_regions);
     any_single = any_single || cf.removal_reconnects;
     cfs_out.push_back(cf);
   }
@@ -990,7 +1381,8 @@ std::string preflight_refusal_report(
     // "the clearances did it, jointly" from "the clearances are innocent":
     // remove ALL of them (an empty clearance list => an all-Active overlay).
     const bool none_at_all =
-        preflight_with_clearances(model, part_grid, domain, options, {}, -1)
+        preflight_with_clearances(model, part_grid, domain, options, {}, -1,
+                                  lc.keep_regions)
             .walk.connected;
     m += none_at_all
              ? "  VERIFIED CAUSE: no SINGLE clearance is responsible — removing "

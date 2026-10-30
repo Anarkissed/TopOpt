@@ -1,0 +1,35 @@
+NOZZLE GRADE run, 2026-10-23, at 726e6eb3 + working tree, scratch-path /tmp/r7x20b-build (run once)
+Classes (17, the ones that touch or pin the changed files):
+FlexibleNozzleGradeTests FlexibleManualP1Tests FlexibleM1ManualTests FlexibleManualFollowUpTests FlexibleM2PredictTests FlexibleAutoFloorShapeTests FlexibleRowCopyTests FlexibleSettingsRound4Tests FlexibleBatchBReviewUXTests FlexibleI3LinkSimTests FlexibleI2AttachTests FlexibleR7SettingsTests FlexibleManualP2Tests FlexibleSettingsPageHostedTests  + TopOptKitTests: FlexibleSquishModulusTests FlexibleSquishStepsTests FlexibleSquishFETests
+
+runner.log:
+start 04:02:48 726e6eb3 + working tree
+build exit 0 04:03:01
+chunk_aa exit 0 04:04:07
+chunk_ab exit 1 04:05:29
+chunk_ac exit 0 04:07:27
+chunk_ad exit 1 04:12:37
+chunk_kit exit 0 04:14:13
+renders exit 0 04:14:41
+golden det exit 0 04:14:59
+golden unseeded exit 0 04:15:16
+hashes exit 0 04:16:14
+hashes cmp vs auto_floor (whole file): identical
+ALLDONE 04:16:14
+
+Per chunk (executed / failed):
+chunk_aa 18 / 0   (FlexibleNozzleGradeTests 4/4 incl.)
+chunk_ab 27 / 2   FlexibleRowCopyTests:131 and FlexibleAutoFloorShapeTests:223 — two SOURCE PINS of P1/AF's "More's Nozzle row is
+                  Auto's only" (superseded by his words of 03:05); re-pinned to the one row; re-run of both classes: 12 / 0
+chunk_ac 43 / 0
+chunk_ad  6 / 1   FlexibleSettingsPageHostedTests 11" landscape (known failure)
+chunk_kit 20 / 0  (the C++ law: modulus, steps, FE)
+Total: 114 executed, 3 failed (2 re-pinned and green on re-run, 1 known), 0 skipped.
+
+Goldens (FlexibleAngledGoldenTests): det 38 identical / 0 DIFFERS; unseeded 32 identical / 0 DIFFERS / 1 PART-SKIP.
+Stage-job hashes: 16, cmp-identical (whole file) to round7/auto_floor/stage_job_hashes_af.txt (Auto's job bytes unchanged).
+
+Numbers (FlexibleNozzleGradeTests prints, his pad):
+FLEX-NG his pad Manual: deepest 1.689 mm at 190 °C → 3.366 mm graded 190→220 · E graded/flat bottom quarter 0.912 · top quarter 0.436 · bands [2 mm 0.94 | 5 mm 0.83 | 9 mm 0.72 | 12 mm 0.60 | 16 mm 0.49 | 19 mm 0.42] · lines ["190 °C at the bed → 220 °C at 20 mm", "+5 °C every 3.3 mm up the part"]
+FLEX-NG his pad Auto: grade Optional(TopOptFlows.FlexibleNozzleGrade(on: true, fromC: 190.0, toC: 240.0, stepped: true)) · lines ["190 °C to 6.7 mm · 215 °C to 13.3 mm", "240 °C", "Shown in the sim only · core\'s job: one °C"]
+FLEX-NG slicer lines: ["190 °C to 12 mm · 215 °C to 24 mm · 240 °C"] · ["180 °C to 30.9 mm · 207 °C to 61.7 mm", "233 °C to 92.6 mm · 260 °C"] · ["190 °C at the bed → 240 °C at 36 mm", "+5 °C every 3.6 mm up the part"]

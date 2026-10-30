@@ -1,0 +1,134 @@
+# R7-E1b runs (app/TopOptKit, --scratch-path /tmp/r7e-build)
+## 1. Targeted run at 4f735cff + the E1b working tree (first code)
+start 13:35:07 4f735cff
+chunk1 exit 1 13:41:58
+chunk2 exit 1 13:52:02
+chunk3 exit 0 13:52:30
+chunk4 exit 0 13:53:30
+golden det exit 0 13:53:47
+golden unseeded exit 0 13:54:04
+hashes exit 0 13:55:06
+hashes cmp vs e1r: identical
+ALLDONE 13:55:06
+### chunk1
+	 Executed 9 tests, with 0 failures (0 unexpected) in 36.195 (36.196) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleHisProject.swift:110: error: -[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords] : failed - timed out waiting for the part open again
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewTests.swift:291: error: -[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle] : XCTAssertEqual failed: ("Tilt stops at 1.9° · lattice ends") is not equal to ("Twist stops at 1.9° · lattice ends") - ★ said as an angle
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1bTests.swift:135: error: -[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords] : XCTUnwrap failed: expected non-nil value of type "Candidate"
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1bTests.swift:197: error: -[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix] : XCTUnwrap failed: expected non-nil value of type "FlexibleFlatStop" - ★ a red line says why
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle]' failed (9.389 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords]' failed (245.787 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix]' failed (3.410 seconds).
+### chunk2
+	 Executed 3 tests, with 2 failures (0 unexpected) in 64.041 (64.042) seconds
+	 Executed 37 tests, with 1 test skipped and 3 failures (0 unexpected) in 602.293 (602.298) seconds
+	 Executed 37 tests, with 1 test skipped and 3 failures (0 unexpected) in 602.293 (602.299) seconds
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleEdgeGroupsHostedTests.swift:113: error: -[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth] : XCTUnwrap failed: expected non-nil value of type "CGRect" - #1 has its row
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:180: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertLessThan failed: ("243.5566651520589") is not less than ("40.0") - ★ 13l: the chip at the head
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:180: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertLessThan failed: ("254.88490575259888") is not less than ("40.0") - ★ 11p: the chip at the head
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth]' failed (3.557 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow]' failed (58.769 seconds).
+### chunk3
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.231 (0.232) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.916 (0.916) seconds
+	 Executed 4 tests, with 0 failures (0 unexpected) in 1.015 (1.016) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.807 (0.807) seconds
+	 Executed 66 tests, with 0 failures (0 unexpected) in 24.771 (24.778) seconds
+	 Executed 66 tests, with 0 failures (0 unexpected) in 24.771 (24.779) seconds
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+### chunk4
+	 Executed 11 tests, with 0 failures (0 unexpected) in 2.770 (2.771) seconds
+	 Executed 11 tests, with 0 failures (0 unexpected) in 35.085 (35.086) seconds
+	 Executed 14 tests, with 0 failures (0 unexpected) in 5.712 (5.713) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.021 (0.022) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 7.460 (7.461) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 1.147 (1.147) seconds
+	 Executed 69 tests, with 0 failures (0 unexpected) in 58.128 (58.136) seconds
+	 Executed 69 tests, with 0 failures (0 unexpected) in 58.128 (58.137) seconds
+golden_det: identical 38 · DIFFERS 0 · PART-SKIP 0
+golden_unseeded: identical 32 · DIFFERS 0 · PART-SKIP 1
+## rerun1
+Test Case '-[TopOptFlowsTests.FlexibleEdgeGroupsHostedTests testThePickCardListsEveryCandidateWithFingerSizedRowsAndTheEdgesTabItsWidth]' passed (5.992 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleFlatPrismHostedTests.swift:189: error: -[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow] : XCTAssertTrue failed - ★ a tap on the chip opens the key
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow]' failed (59.703 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle]' passed (7.106 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords]' passed (11.575 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1bTests.swift:200: error: -[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix] : XCTUnwrap failed: expected non-nil value of type "FlexibleF
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix]' failed (3.435 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testHisLivePadOffersTheEdgesOfADeletedFace]' passed (1.189 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testOnlyThePressableAreDrawnAndAGreySpotSaysWhy]' passed (4.188 seconds).
+FLEX-E1b-6 depth 200 typed: why Edge 16 · its lattice is in two places · toast Held at 70.4 mm · Face 3 keeps the rest
+FLEX-E1b-1 his live pad: 24 candidates, 24 pressable · greyed 
+FLEX-E1b-1 RED CONTROL: 20 greyed 'out of Flexible', 4 pressable
+FLEX-E1b-2 grey spot #2: 'Corner 2 · In Group 4' · fix group 4
+## rerun2
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismHostedTests testTheHandlesAreOnTheArrow]' passed (61.006 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1bTests.swift:213: error: -[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix] : XCTAssertNotNil failed - ★ the fix: deepen the face-prism
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix]' failed (15.012 seconds).
+FLEX-E1b-6 depth 200 typed: why - · toast Held at 18.3 mm · its lattice is in two pla…
+FLEX-E1b-6 depth 200 → 18.26059856319123 mm · 'Held at 18.3 mm · its lattice is in two pla…' · fix prism -
+FLEX-E1b-6 RED CONTROL depth: core's first N 16.26059856319123 mm vs the furthest 18.26059856319123 mm
+FLEX-E1b-6 twist 80° → 1.030116905633164° (rule's furthest 65.92748196754587°) · 'Tilt stops at 1° · lattice ends' · fix -
+FLEX-E1b-6 tilt 85° → 34.63348247427008° · 'Held at 34.6° · Face 3 keeps the rest'
+## rerun3
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix]' passed (12.510 seconds).
+FLEX-E1b-6 depth 200 typed: why - · toast Max 18.3 mm · its lattice is in two places
+FLEX-E1b-6 depth 200 → 18.26059856319123 mm · 'Max 18.3 mm · its lattice is in two places' · fix prism -
+FLEX-E1b-6 RED CONTROL depth: core's first N 16.26059856319123 mm vs the furthest 18.26059856319123 mm
+FLEX-E1b-6 twist 80° → 1.030116905633164° (rule's furthest 65.92748196754587°) · 'Tilt stops at 1° · lattice ends' · fix -
+FLEX-E1b-6 tilt 85° → 34.63348247427008° · 'Held at 34.6° · Face 3 keeps the rest'
+## rerun4
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismEngineTests testARefusedReleaseStoresNothing]' passed (4.511 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismEngineTests testHisStripsReadThroughWithTheSameReach]' passed (11.703 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismEngineTests testOneDragIsOneEditOneUndoStepOneSceneOpen]' passed (14.771 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismEngineTests testOneStorePerNumber]' passed (12.264 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismEngineTests testTheHalfwayIsTheWholeFacesAndNeverReAimed]' passed (7.610 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testACornerIsOnePlaneATriangleOnEachFaceAndOneRest]' passed (0.130 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testACornerNeedsAllThreeEdgesCrossed]' passed (0.401 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testAnglesRoundTripAndSnapExactly]' passed (2.380 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testDeeperIsWiderOnEveryFace]' passed (0.128 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testInsideEdgesAreGreyed]' passed (0.130 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testOnePlaneCutsEveryMemberInItsOwnFace]' passed (0.120 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testTheInFaceCutMatchesCoresVoxelRule]' passed (0.125 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testTheLimitsStopAndSayWhy]' passed (2.388 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testTheWedgeIsTrueSizeAndEndsOnThePlane]' passed (0.409 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleFlatPrismTests testTiltLeansAndTwistDeepensOneEnd]' passed (2.462 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testACornersTurnedRestHasNoSawtooth]' passed (6.024 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewTests.swift:277: error: -[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle] : XCTAssertTrue failed - ★ RED CONTROL: E1 says a dept
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewTests.swift:278: error: -[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle] : XCTAssertNil failed: "SIMD3<Double>(-0.706736032965943
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle]' failed (11.191 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testANewPickStartsAtTheLatticeStop]' passed (2.342 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testEachFaceKeepsSomeOfItselfUnderTwoPresses]' passed (17.646 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testPlainWords]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheKnobDragIsPure]' passed (0.000 seconds).
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/FlexibleR7E1ReviewTests.swift:231: error: -[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheLatticeStopIsAHardStop] : XCTAssertEqual failed: ("18.40625") is not equal to ("3.0") - RED 
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheLatticeStopIsAHardStop]' failed (9.542 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheTopEdgeAndTheCornerStoreAtBalanced]' passed (19.035 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords]' passed (15.359 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testEachBoundHoldsAtTheFurthestInRedWithItsFix]' passed (15.710 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testHisLivePadOffersTheEdgesOfADeletedFace]' passed (1.312 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testOnlyThePressableAreDrawnAndAGreySpotSaysWhy]' passed (4.929 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheArrowIsSolidWhenSentAndDashedOtherwise]' passed (12.483 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheRulingsSentencePopsOncePerSession]' passed (5.381 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E2HostedTests testTheSideLabelLine]' passed (4.984 seconds).
+FLEX-E1b-6 depth 200 typed: why - · toast Max 18.3 mm · its lattice is in two places
+FLEX-E1b-6 depth 200 → 18.26059856319123 mm · 'Max 18.3 mm · its lattice is in two places' · fix prism -
+FLEX-E1b-6 RED CONTROL depth: core's first N 16.26059856319123 mm vs the furthest 18.26059856319123 mm
+FLEX-E1b-6 twist 80° → 1.030116905633164° (rule's furthest 65.92748196754587°) · 'Tilt stops at 1° · lattice ends' · fix -
+FLEX-E1b-6 tilt 85° → 34.63348247427008° · 'Held at 34.6° · Face 3 keeps the rest'
+FLEX-E1b-1 his live pad: 24 candidates, 24 pressable · greyed 
+FLEX-E1b-1 RED CONTROL: 20 greyed 'out of Flexible', 4 pressable
+FLEX-E1b-2 grey spot #2: 'Corner 2 · In Group 4' · fix group 4
+## rerun5
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testACornersTurnedRestHasNoSawtooth]' passed (5.386 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testAnAngleTheLatticeStopsIsSaidAsAnAngle]' passed (7.205 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testANewPickStartsAtTheLatticeStop]' passed (2.058 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testEachFaceKeepsSomeOfItselfUnderTwoPresses]' passed (13.764 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testPlainWords]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheKnobDragIsPure]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheLatticeStopIsAHardStop]' passed (7.991 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1ReviewTests testTheTopEdgeAndTheCornerStoreAtBalanced]' passed (17.669 seconds).
+## probe2
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bEvidenceProbe testA_LivePad]' passed (153.176 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleR7E1bTests testATapAddsToTheOpenGroupChipsMoveItPurpleAndWords]' passed (12.976 seconds).

@@ -1,0 +1,44 @@
+#if canImport(AppKit)
+import XCTest
+import SwiftUI
+import AppKit
+@testable import TopOptFlows
+
+private final class ZW: NSWindow { override var canBecomeKey: Bool { true }; override var canBecomeMain: Bool { true } }
+final class ZZDragBox { var changed = 0; var ended = 0 }
+@MainActor
+final class ZZTempDragProbe: XCTestCase {
+    func pump(_ s: Double) { let end = Date().addingTimeInterval(s); while Date() < end { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) } }
+    func testDrag() {
+        let box = ZZDragBox()
+        let v = Color.gray.frame(width: 300, height: 300).contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 4).onChanged { _ in box.changed += 1 }.onEnded { _ in box.ended += 1 })
+        let hv = NSHostingView(rootView: v)
+        hv.frame = CGRect(x: 0, y: 0, width: 300, height: 300)
+        _ = NSApplication.shared
+        let w = ZW(contentRect: CGRect(x: -20000, y: -20000, width: 300, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+        w.contentView = hv; w.setFrameOrigin(NSPoint(x: -20000, y: -20000)); w.orderFrontRegardless(); w.makeKey(); hv.layoutSubtreeIfNeeded()
+        pump(0.5)
+        func ev(_ t: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat) {
+            let e = NSEvent.mouseEvent(with: t, location: NSPoint(x: x, y: y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            w.sendEvent(e)
+        }
+        ev(.leftMouseDown, 100, 100); pump(0.05)
+        for i in 1...10 { ev(.leftMouseDragged, 100 + CGFloat(i * 5), 100); pump(0.03) }
+        ev(.leftMouseUp, 150, 100); pump(0.3)
+        print("ZZDRAG changed \(box.changed) ended \(box.ended)")
+        func ev2(_ t: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat) -> NSEvent {
+            NSEvent.mouseEvent(with: t, location: NSPoint(x: x, y: y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        let target = hv.hitTest(NSPoint(x: 100, y: 100)) ?? hv
+        target.mouseDown(with: ev2(.leftMouseDown, 100, 100)); pump(0.05)
+        for i in 1...10 { target.mouseDragged(with: ev2(.leftMouseDragged, 100 + CGFloat(i * 5), 100)); pump(0.03) }
+        target.mouseUp(with: ev2(.leftMouseUp, 150, 100)); pump(0.3)
+        print("ZZDRAG2 \(type(of: target)) changed \(box.changed) ended \(box.ended)")
+        // CGEvent route
+        w.orderOut(nil)
+    }
+}
+#endif

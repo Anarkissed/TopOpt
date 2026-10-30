@@ -10,27 +10,46 @@
 // binary is the repo's dev/CI driver, not an installed product).
 //
 // Exit codes: 0 success; 1 any job/pipeline failure (diagnostic on stderr);
-// 2 usage error.
+// 2 usage error; 4 the solver's safety net stopped the job ("stopped: the
+// solver did not converge" — report.json says so and names the job; no result).
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
+#include <vector>
 
+#include "topopt/fea.hpp"  // SolverStopped (the solver's safety net)
 #include "topopt/job.hpp"
+#include "topopt/flexible/run.hpp"  // `flexible` subcommand
 #include "topopt/materials.hpp"
 #include "topopt/part.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/version.hpp"
 
-// A build fingerprint (typically the core git commit SHA), injected by CMake. A
-// LAN worker exposes it via /health so the iPad app can REFUSE a worker whose
-// core differs from its own — the version-skew guard (handoff 093 STEP 3d): two
-// cores that differ silently produce different parts. Defaults to "dev" for an
-// un-instrumented local build.
+// A build fingerprint: the core's TREE hash at BUILD time (HEAD's core/ tree and
+// app/scripts/build_core.sh), "<tree12>" when both are clean and
+// "<tree12>-dirty-<diff8>" when tracked files under either differ from HEAD
+// (item 44; core/cmake/TopoptFingerprint.cmake, restamped on
+// every build by the topopt_fingerprint target). A LAN worker exposes it via
+// /health so the iPad app can REFUSE a worker whose core differs from its own —
+// the version-skew guard (handoff 093 STEP 3d): two cores that differ silently
+// produce different parts. Defaults to "dev" for an un-instrumented local build.
+#if defined(TOPOPT_HAVE_BUILD_FINGERPRINT_H)
+#include "topopt_build_fingerprint.h"
+#endif
 #ifndef TOPOPT_BUILD_FINGERPRINT
 #define TOPOPT_BUILD_FINGERPRINT "dev"
 #endif
+#ifndef TOPOPT_BUILD_DIRTY
+#define TOPOPT_BUILD_DIRTY -1  // unknown (no git at build time)
+#endif
+#define TOPOPT_BUILD_DIRTY_WORD \
+  (TOPOPT_BUILD_DIRTY == 1 ? "true" : TOPOPT_BUILD_DIRTY == 0 ? "false" : "unknown")
 
 namespace {
 
@@ -88,10 +107,74 @@ int usage(const char* argv0) {
                "  snapshots/*.f16    float16 density snapshots (opt-in "
                "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
                argv0, argv0, argv0, argv0, argv0);
+  std::fprintf(stderr,
+               "       %s flexible <job.json> [--out DIR] [--flexible-materials PATH]\n"
+               "         the FLEXIBLE stage's squish maths (a job with a \"flexible\"\n"
+               "         block): per loaded face, SVG heat maps + a CSV of columns, and\n"
+               "         run_info.json with the `flexible` receipt. Exit 0 = ran,\n"
+               "         3 = the stage REFUSED (reason printed and in the receipt).\n",
+               argv0);
   return 2;
 }
 
 std::string dirname_of(const std::string& path);  // defined below
+
+// THE SOLVER'S SAFETY NET STOPPED THE JOB (ruling 2026-10-25; fea.hpp
+// SolverStopped): a Jacobi-CG solve ran past its time limit or iteration cap.
+// The job STOPS — never hangs, never ships a result — and says so in the report
+// it was asked for and on stderr, naming the job: its folder (the worker's
+// per-job folder is the job id) and its file. Returns the exit code (4).
+std::string json_escape(const std::string& in) {
+  std::string out;
+  for (const char c : in) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char b[8];
+          std::snprintf(b, sizeof b, "\\u%04x", static_cast<unsigned>(c));
+          out += b;
+        } else {
+          out += c;
+        }
+    }
+  }
+  return out;
+}
+
+int report_solver_stopped(const topopt::SolverStopped& e, const std::string& job_path,
+                          const std::string& out_dir, const std::string& report_name,
+                          const std::string& model) {
+  std::error_code ec;
+  const std::filesystem::path abs = std::filesystem::absolute(job_path, ec);
+  const std::string job_id =
+      ec ? dirname_of(job_path) : abs.parent_path().filename().string();
+  std::fprintf(stderr, "topopt-cli: %s — job %s (%s, model %s): %s\n",
+               topopt::kSolverStoppedMessage, job_id.c_str(), job_path.c_str(),
+               model.c_str(), e.detail.c_str());
+  if (out_dir.empty()) return 4;  // a verb with no output directory (preflight)
+  std::filesystem::create_directories(out_dir, ec);
+  const std::string path =
+      out_dir + "/" + (report_name.empty() ? std::string("report.json") : report_name);
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (f) {
+    char nums[160];
+    std::snprintf(nums, sizeof nums,
+                  "\"iterations\": %d, \"relative_residual\": %.6g, "
+                  "\"elapsed_ms\": %.0f",
+                  e.iterations, e.residual, e.elapsed_ms);
+    f << "{\n  \"status\": \"stopped\",\n  \"error\": \""
+      << json_escape(topopt::kSolverStoppedMessage) << "\",\n  \"job\": \""
+      << json_escape(job_id) << "\",\n  \"job_file\": \"" << json_escape(job_path)
+      << "\",\n  \"model\": \"" << json_escape(model) << "\",\n  \"detail\": \""
+      << json_escape(e.detail) << "\",\n  \"solver\": {" << nums << "}\n}\n";
+    std::fprintf(stderr, "report: %s\n", path.c_str());
+  }
+  return 4;
+}
 
 // `analyze` subcommand — parse its flags and run analyze_job. Returns the process
 // exit code.
@@ -128,8 +211,10 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     }
   }
 
+  std::string stop_model;  // for a safety-net stop's report
   try {
     const topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_model = job.model;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =
@@ -168,6 +253,9 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     std::printf("provenance: %s\n", r.provenance_path.c_str());
     std::printf("fields: %s\n", r.fields_path.c_str());
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "analysis_report.json",
+                                 stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -229,6 +317,9 @@ int run_preflight(int argc, char** argv, const std::string& materials_default) {
       return 3;
     }
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    // preflight writes nothing (no --out): the stop is said on stderr, exit 4.
+    return report_solver_stopped(e, job_path, "", "", "");
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -259,8 +350,10 @@ int run_lattice_variant(int argc, char** argv,
     }
   }
 
+  std::string stop_model;  // for a safety-net stop's report
   try {
     const topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_model = job.model;
     const topopt::MaterialLibrary materials =
         topopt::load_materials_file(materials_path);
     const topopt::SettingsRules rules =
@@ -317,6 +410,9 @@ int run_lattice_variant(int argc, char** argv,
     std::printf("fields: %s\n", r.fields_path.c_str());
     std::printf("wall: %.2f s\n", r.wall_seconds);
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "lattice_variant_report.json",
+                                 stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;
@@ -332,22 +428,77 @@ std::string dirname_of(const std::string& path) {
 
 }  // namespace
 
+#ifndef TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS
+#define TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS "flexible_materials.json"
+#endif
+
+// `flexible` subcommand (task 2026-09-28-flexible-squish-maths): run a job's
+// flexible block. Exit 0 = ran, 3 = the stage refused, 1 = error, 2 = usage.
+static int run_flexible(int argc, char** argv) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  std::string flex_path = TOPOPT_CLI_DEFAULT_FLEXIBLE_MATERIALS;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out")
+      out_dir = argv[++i];
+    else if (arg == "--flexible-materials")
+      flex_path = argv[++i];
+    else
+      return usage(argv[0]);
+  }
+  try {
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    const topopt::FlexibleProvenance prov{topopt::version(), TOPOPT_BUILD_FINGERPRINT,
+                                          __DATE__ " " __TIME__};
+    const topopt::FlexibleRunResult r =
+        topopt::run_flexible_job(job, dirname_of(job_path), out_dir, flex_path, prov);
+    for (const std::string& f : r.files) std::printf("wrote %s\n", f.c_str());
+    if (r.refused) {
+      std::printf("flexible: REFUSED (%s): %s\n", r.refusal_code.c_str(),
+                  r.refusal_reason.c_str());
+      return 3;
+    }
+    std::printf("flexible: ran; receipt in %s/run_info.json\n", out_dir.c_str());
+    return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, "flexible_report.json", "");
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
+}
+
 int main(int argc, char** argv) {
   // ── ★★ SAY WHICH BINARY THIS IS, ON EVERY SUBCOMMAND ──────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time: it answers "which
-  // source era" and NOT "is this binary current", which is the failure that cost
+  // TOPOPT_BUILD_FINGERPRINT is the core's tree hash at BUILD time (+ a dirty
+  // marker; it was the SHA at CONFIGURE time until item 44, then the HEAD commit
+  // until its follow-up). It answers "which source"
+  // and still NOT "is this binary current", which is the failure that cost
   // time here. `cmake --build --target topopt topopt-cli` reported success without
   // relinking the CLI, so libtopopt.a carried a change topopt-cli did not — for 21
   // minutes and three runs that read as "the code path is never reached", with the
   // SHA correct throughout. __DATE__/__TIME__ are baked when THIS TU is compiled,
   // so a stale binary announces itself before it does any work.
-  std::fprintf(stderr, "topopt-cli: core %s, built %s %s\n",
-               TOPOPT_BUILD_FINGERPRINT, __DATE__, __TIME__);
-  // Version / build fingerprint, one parseable line, for the worker /health probe.
+  std::fprintf(stderr, "topopt-cli: core %s (dirty=%s), built %s %s\n",
+               TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD, __DATE__, __TIME__);
+  // ★ AND STATE IT TO THE LIBRARY, BEFORE ANY DISPATCH. `analyze` (below),
+  // `preflight` and `lattice-variant` all return before the RunObservability further
+  // down is built, and both `analyze_job` and `lattice_variant_job` used to construct
+  // a DEFAULT one for their receipt -- so their run_info.json said
+  // fingerprint "unknown" on every run. Stated here, once, so no receipt path has to
+  // remember it and there is no second copy of these two macros anywhere.
+  topopt::set_build_identity(TOPOPT_BUILD_FINGERPRINT, __DATE__ " " __TIME__);
+  // Version / build fingerprint, one parseable line of space-separated key=value
+  // tokens, for the worker /health probe (topopt_worker.py `_kv`). `dirty` is
+  // true when the binary was built from uncommitted core changes (the
+  // fingerprint then carries "-dirty-<diff8>"), unknown without git.
   if (argc >= 2 &&
       (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
-    std::printf("topopt-cli version=%s fingerprint=%s\n", topopt::version(),
-                TOPOPT_BUILD_FINGERPRINT);
+    std::printf("topopt-cli version=%s fingerprint=%s dirty=%s\n", topopt::version(),
+                TOPOPT_BUILD_FINGERPRINT, TOPOPT_BUILD_DIRTY_WORD);
     return 0;
   }
   // `analyze` — ONE analysis solve on a fixed design, no optimization.
@@ -362,6 +513,8 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "lattice-variant")
     return run_lattice_variant(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
                                TOPOPT_CLI_DEFAULT_RULES);
+  // `flexible` — the Flexible stage's squish maths (flexible/run.hpp).
+  if (argc >= 2 && std::string(argv[1]) == "flexible") return run_flexible(argc, argv);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
@@ -371,8 +524,9 @@ int main(int argc, char** argv) {
   // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
   // (announce moved to the top of main -- every subcommand, not just `run`)
   // ── ★★ SAY WHICH BINARY THIS IS, EVERY RUN ────────────────────────────────
-  // TOPOPT_BUILD_FINGERPRINT is the git SHA at CONFIGURE time. It answers "which
-  // source era" and it does NOT answer "is this binary current", which is the
+  // TOPOPT_BUILD_FINGERPRINT is the core's tree hash at BUILD time (+ dirty
+  // marker; configure time before item 44). It answers "which source" and it does NOT
+  // answer "is this binary current", which is the
   // failure that actually cost time: `cmake --build --target topopt topopt-cli`
   // reported success and did not relink the CLI, so libtopopt.a carried a change
   // that topopt-cli did not, for 21 minutes and three runs that read as "the code
@@ -383,8 +537,14 @@ int main(int argc, char** argv) {
   // the question "which core did that run use" is answered by the run itself rather
   // than by `strings` after the fact.
   topopt::RunObservability obs;
-  obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
-  obs.build_time = __DATE__ " " __TIME__;
+  // ★ ONE SOURCE (reviewer, 2026-10-02). These two lines used to restate
+  // TOPOPT_BUILD_FINGERPRINT and __DATE__/__TIME__ -- a SECOND route to the same two
+  // values, so `run` stamped its receipt from here while `analyze` and
+  // `lattice-variant` stamped theirs from `build_identity()`. Two routes to one fact
+  // is how they drift. The macros are now named in exactly one place, the
+  // set_build_identity() call above, and every receipt reads what that stated.
+  obs.fingerprint = topopt::build_identity().fingerprint;
+  obs.build_time = topopt::build_identity().build_time;
   // ★ --threads N: HOW MUCH OF THE MACHINE THIS RUN MAY TAKE. 0 (the DEFAULT)
   // leaves the production rule alone — production_matfree_thread_count(), the
   // performance-core pin. It is a PURE PERFORMANCE CONTROL and cannot move a
@@ -427,8 +587,11 @@ int main(int argc, char** argv) {
     }
   }
 
+  std::string stop_report = "report.json", stop_model;  // for a safety-net stop
   try {
     topopt::JobDescription job = topopt::load_job_file(job_path);
+    stop_report = job.output.report;
+    stop_model = job.model;
     // ── ★ THIS VERB RUNS THE PARAMETRIC LEVEL SET AND NOTHING ELSE ──────────
     // (task 2026-08-10-plsm-production; maintainer instruction, confirmed.)
     //
@@ -504,11 +667,20 @@ int main(int argc, char** argv) {
                       "plastic as possible to reach the required margin"
                     : "REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove "
                       "as much plastic as possible while holding it");
-    std::printf("variants: %zu evaluated, %zu accepted%s\n",
+    // CORE LIST item 40 — rungs not run because an earlier rung already made their
+    // design (report.json frozen_share.skipped_rungs). Empty on every other run, so
+    // this line is unchanged there.
+    const topopt::FrozenShareReport& frozen = result.pipeline.report.frozen_share;
+    std::printf("variants: %zu evaluated, %zu accepted%s%s\n",
                 result.pipeline.evaluated.size(), accepted_variants,
                 result.pipeline.stopped_on_margin
                     ? " (stopped on margin)"
-                    : "");
+                    : "",
+                frozen.skipped_rungs.empty()
+                    ? ""
+                    : (", " + std::to_string(frozen.skipped_rungs.size()) +
+                       " skipped (below the frozen share)")
+                          .c_str());
     for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated) {
       // Handoff 131 — an infeasible rung has NO measured margin (its analysis was
       // skipped), so printing one would be a fabricated number: print the reason.
@@ -529,7 +701,40 @@ int main(int argc, char** argv) {
       std::printf(
           "  vf %.2f: margin %.3g, %s\n", v.requested_volume_fraction,
           v.report.margin.worst_case,
-          v.accepted ? "accepted" : "rejected (below margin_stop)");
+          v.accepted ? "accepted"
+          : v.report.rejection_reason == topopt::kAnchorDetachedReason
+              ? "rejected (anchored piece detached: see the WARNING above)"
+              : "rejected (below margin_stop)");
+      // CORE LIST item 41 — a file carrying more than one body, or dropped specks.
+      if (v.report.bodies_reported && v.accepted)
+        std::printf("        %d bodies exported, %d loose speck(s) dropped "
+                    "(%lld voxels)%s\n",
+                    v.report.bodies_exported, v.report.specks_dropped,
+                    v.report.speck_voxels,
+                    v.report.bridges > 0
+                        ? ("; BRIDGED back into one piece (" +
+                           std::to_string(v.report.bridges) + " bridge(s), " +
+                           std::to_string(v.report.bridge_voxels) + " voxels)")
+                              .c_str()
+                        : "");
+      // REAL BOLTS: the bearing anchors' contact loop, and loudly when it did not settle.
+      if (v.report.contact_rounds > 0)
+        std::printf("        bearing anchors: %d contact solve(s), %d pressing / %d let go, "
+                    "the springs carry %.0f %% of the load, %.1f %% of it sliding%s%s%s\n",
+                    v.report.contact_rounds, v.report.contact_engaged,
+                    v.report.contact_released, 100.0 * v.report.contact_load_share,
+                    100.0 * v.report.contact_tangent_share,
+                    v.report.contact_settled ? "" : "; the contact set DID NOT SETTLE",
+                    v.report.contact_kept_last ? "; every anchor pulled away (last set kept)"
+                                               : "",
+                    v.report.contact_held_by_sliding
+                        ? "; THE ANCHORS CANNOT HOLD THE LOAD IN SOME DIRECTION: not a pass"
+                        : "");
+      // ...and how each bridge holds itself (item 42 B, 07:05).
+      for (const topopt::BridgeHoldReport& h : v.report.bridge_holds)
+        std::printf("        bridge %.1f mm: hold margin %.2f, %d thickening(s)%s\n",
+                    h.size_mm, h.hold_margin, h.thickenings,
+                    h.held ? "" : ", DID NOT HOLD (lifted)");
       // Task 2026-08-03-growth-ladder — on a growth run the accounting IS the
       // result: how much plastic this rung adds, and how much of the object you
       // are about to print was never in your model.
@@ -543,6 +748,41 @@ int main(int argc, char** argv) {
             v.report.growth_target_saturated
                 ? "  [SATURATED: the design box could not hold this rung's ask]"
                 : "");
+      // CORE LIST item 40 — the reduction mirror: this rung asked for less than
+      // the frozen material alone prints, so it printed the frozen share.
+      if (v.report.target_saturated)
+        std::printf(
+            "        [SATURATED: it asked for %.2f of the part, but the frozen "
+            "material alone is %.3g of it; it printed %.3g]\n",
+            v.requested_volume_fraction, frozen.share, v.report.printed_fraction);
+    }
+    if (frozen.evaluated) {
+      for (const topopt::SkippedRungReport& s : frozen.skipped_rungs)
+        std::printf("  vf %.2f: %s\n", s.requested_volume_fraction,
+                    s.reason.c_str());
+      // What froze it, largest first, so the line names what to release.
+      std::vector<topopt::FrozenSourceCount> by_size = frozen.sources;
+      std::stable_sort(by_size.begin(), by_size.end(),
+                       [](const topopt::FrozenSourceCount& a,
+                          const topopt::FrozenSourceCount& b) {
+                         return a.voxels > b.voxels;
+                       });
+      std::printf("frozen: %.3g of the part (%lld of %lld voxels) prints whatever "
+                  "the optimizer does:",
+                  frozen.share, frozen.frozen_voxels, frozen.part_solid_voxels);
+      std::size_t shown = 0;
+      for (const topopt::FrozenSourceCount& s : by_size) {
+        if (shown == 6) {
+          std::printf(" ...");
+          break;
+        }
+        std::printf("%s %s", shown == 0 ? "" : ",", s.source.c_str());
+        if (s.face_id >= 0) std::printf(" face %d", s.face_id);
+        if (s.region_id >= 0) std::printf(" region %d", s.region_id);
+        std::printf(" %lld", s.voxels);
+        ++shown;
+      }
+      std::printf(" (report.json frozen_share)\n");
     }
     // THE RECOMMENDATION, said out loud. The last accepted rung is the design the
     // user prints; on a growth ladder that is the SMALLEST addition that passed,
@@ -583,6 +823,8 @@ int main(int argc, char** argv) {
     if (result.snapshot_count > 0)
       std::printf("snapshots: %zu written\n", result.snapshot_count);
     return 0;
+  } catch (const topopt::SolverStopped& e) {
+    return report_solver_stopped(e, job_path, out_dir, stop_report, stop_model);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
     return 1;

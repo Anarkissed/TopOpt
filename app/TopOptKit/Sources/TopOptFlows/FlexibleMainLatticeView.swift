@@ -1,0 +1,263 @@
+// FlexibleMainLatticeView — the main Flexible page's Lattice VIEW button, its "ready" note and
+// what the big bottom Lattice button's tap does (task 2026-09-29-flexible-screens, round 4
+// batch C2). His words:
+//   img 5:    "there's a bit of a confusion regarding the xray and lattice view - they both seem
+//              to require one another. There is no point in that. Please remove the xray view
+//              selector if the lattice view is going to use the rendering anyways."
+//   img 6:    "When I clicked Lattice after already having a lattice preview, it brought me to
+//              the settings page and showed this screen. I don't understand why?"
+//   answer 2: "the large bottom buttons are for exports and starting the actual core process. So
+//              when Lattice Ready shows, tapping it should send to Core and the export path. The
+//              lattice VIEW button should show/hide the lattice and a notification should show
+//              up when it is ready - however, tapping it without setting up the settings should
+//              take you to the settings screen where exiting should automatically show the view."
+//
+// ★ ONE VIEW, NOT TWO. X-ray is the Lattice view's rendering (FlexibleMainStage.xray): shown,
+// the part is the ghost with the walls inside; hidden, the solid part. The row is Dent heat ·
+// Stress · Lattice.
+// ★ THE LATTICE BUTTON: with a lattice to show (drawn, or on its way without Settings) it shows /
+// hides it; with nothing that can come (nothing pressed, no filament, a failed build …) it opens
+// Settings, and that Settings' Save & Exit turns the view on.
+// ★ THE NOTE: once per build this page started, when it lands — "Lattice ready", with [Show]
+// when the view is hidden — ★ C2 VERIFICATION: on the view row's OWN line, left of the three
+// buttons (the band C2 reserved UNDER the row pushed two legends into a second column at 13"
+// landscape with his Gravity chip column, for a note that shows 4 s). The whole note is [Show]'s
+// target (it was the 13 pt word). It hides itself.
+// ★ THE BIG BUTTON: Ready → core and the Export step (FlexibleCoreRun); the one thing to fix →
+// Settings on its pop-up; building → nothing opens (the note says it is still building) —
+// ★ C2 VERIFICATION: on another stage it takes him to the Lattice stage (builds start only
+// there; C2's note was drawn only there, a dead tap on Topology).
+
+import Foundation
+import SwiftUI
+import TopOptDesign
+
+/// The Lattice view's rule, as values.
+public enum FlexibleLatticeView {
+    public enum Tap: Equatable, Sendable { case toggle, openSettings }
+
+    /// A lattice to show: one drawn (and current), a build in flight — or one that will come
+    /// without Settings: nothing blocks and no build failed on these settings.
+    public static func available(fresh: Bool, building: Bool, sceneFailed: Bool, blocked: Bool, buildFailed: Bool) -> Bool {
+        if fresh || building { return true }
+        return !(sceneFailed || blocked || buildFailed)
+    }
+
+    @MainActor
+    public static func available(model m: FlexibleStageModel) -> Bool {
+        let failed: Bool = { if case .failed = m.sceneState { return true } else { return false } }()
+        // ★ ROUND 7, M1 (1a): no face-prism — no lattice can come (the build refuses)
+        if m.sceneState == .ready, !m.facePrismsSet { return false }
+        let fresh = m.lattice != nil && !m.latticeIsStale
+        if fresh || m.latticeBuilding { return true }
+        if failed { return false }
+        return available(fresh: false, building: false, sceneFailed: false,
+                         blocked: !m.readiness.blocking.isEmpty, buildFailed: m.latticeFailure != nil)
+    }
+
+    public static func tap(available: Bool) -> Tap { available ? .toggle : .openSettings }
+}
+
+/// The one-line note under the view row (his "notification … when it is ready").
+@MainActor
+public final class FlexibleMainNote: ObservableObject {
+    /// ★ X1 VERIFY: `coveredHidesLattice` — the Lattice icon turned on under Covered with X-ray off (FlexibleRowCopy).
+    public enum Kind: Equatable, Sendable { case ready, building, coveredHidesLattice, opening }
+    @Published public private(set) var kind: Kind?
+    /// How many notes were posted (tests).
+    var posts = 0
+    /// How long a note stays (tests shorten or lengthen it).
+    var seconds: Double = 4
+    private var serial = 0
+
+    public init() {}
+
+    public func post(_ k: Kind) {
+        posts += 1
+        serial &+= 1
+        kind = k
+        let s = serial
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.serial == s else { return }   // a newer note keeps its own time
+            self.kind = nil
+        }
+    }
+
+    public func clear() {
+        serial &+= 1
+        if kind != nil { kind = nil }
+    }
+
+    public nonisolated static func line(_ k: Kind) -> String {
+        switch k {
+        case .ready: return "Lattice ready"
+        case .building: return "Still building \u{2014} it shows here when ready"
+        case .coveredHidesLattice: return FlexibleRowCopy.coveredHidesLattice
+        case .opening: return "Still opening the part"   // ★ R7-D1: the Lattice button's main zone while the part opens
+        }
+    }
+    /// The note's size: ★ C2 VERIFICATION — as tall as the row's buttons (the whole note is
+    /// [Show]'s target), at most 280 wide beside them (narrower where the left panel is near).
+    public static let height: CGFloat = 40
+    public static let width: CGFloat = 280
+    /// ★ S1b: the narrowest band the note keeps ("Lattice ready · Show", whole) — FlexibleMainPageRound4VerifyTests' 180.
+    public static let minWidth: CGFloat = 180
+}
+
+extension FlexibleMainStage {
+
+    /// The Lattice VIEW button (H5): show / hide the lattice — or, with nothing that can show,
+    /// open Settings; its Save & Exit then turns the view on (`didExitSettings`).
+    public func latticeButtonTapped(openSettings: () -> Void) {
+        if let m = model { latticeAvailable = FlexibleLatticeView.available(model: m) }
+        switch FlexibleLatticeView.tap(available: latticeAvailable) {
+        case .toggle:
+            toggleLatticeView()   // ★ X1: a plain show / hide (FlexibleMainStage+Play)
+        case .openSettings:
+            showLatticeOnExit = true
+            openSettings()
+        }
+    }
+
+    /// ★ X1 VERIFY: the Covered note's one tap — X-ray on (the lattice inside the skin), the note gone.
+    public func coveredNoteTapped() {
+        note.clear()
+        if !xrayOn { xrayOn = true }
+    }
+
+    /// The note's [Show]: the view on, the note gone.
+    public func showFromNote() {
+        showLatticeView()   // ★ X1: the view on (X-ray stays as he set it)
+        note.clear()
+    }
+
+    /// A build this stage started has landed (or failed): say it once.
+    func noteBuildLanded(_ m: FlexibleStageModel) {
+        guard awaitingReady, !m.latticeBuilding else { return }
+        if m.lattice != nil, !m.latticeIsStale {
+            awaitingReady = false
+            note.post(.ready)
+        } else if m.latticeFailure != nil {
+            awaitingReady = false   // the pill says the failure
+        }
+    }
+
+    /// The big bottom Lattice button (H10's pill): Ready → core and the Export step; the one
+    /// thing to fix → Settings on its pop-up; building → nothing opens (his img 6), the note says
+    /// it is still building. ★ C2 VERIFICATION: `goToLattice` (H10) — on another stage "Building…"
+    /// takes him to the Lattice stage (builds start only there), and so does a Ready whose
+    /// lattice his edits there have made stale (`sendToCore`).
+    public func pillTapped(_ s: FlexibleMainStatus, open: () -> Void, goToLattice: @escaping () -> Void = {}) {
+        self.goToLattice = goToLattice
+        if s.line == FlexibleMainStatus.deferred { showLatticeView(); return }   // ★ S9: saved with the view off — show it (it bakes)
+        switch s.tap {
+        case .send:
+            sendToCore()
+        case .openSettings:
+            if s.fix != nil { openFix() }
+            open()
+        case .wait:
+            if !visible { goToLattice() }
+            note.post(.building)
+        case .toSelections:
+            // ★ M1 VERIFY (no face-prism; ruling 4): the line says where — Selections, on the Lattice stage's main page. From
+            // another stage the tap goes there; on the main page the button is disabled (FlexibleMainStatusPill.disabled)
+            if !visible { goToLattice() }
+        }
+    }
+}
+
+extension FlexibleMainViewToggles {
+    /// The note's band: ★ C2 VERIFICATION — on the row's own line, left of the three buttons, clear
+    /// of the left panel (inside `frame`, which every legend and the player keep out of — and
+    /// which now ends where the row ends, so the note costs the legends nothing).
+    /// (★ R7-V: batch V's two worded view settings, which sat between it and the buttons in landscape, are gone.)
+    /// ★ R7-D3: the highest the open left panel's top ever reaches (PageLeftModal: padded noteTop, then a spacer of at least
+    /// noteTop above the panel).
+    public static var leftPanelHighestTop: CGFloat { 2 * PageChrome.noteTop }
+
+    public static func noteFrame(viewport: CGSize) -> CGRect {
+        let row = rowFrame(viewport: viewport)
+        let right = row.minX
+        let room = right - DS.Space.s - (FlexibleMainLegendLayout.leftStrip(viewport: viewport).maxX + DS.Space.s)
+        // ★ R7-D1: one line of six 44 pt icons leaves too little beside it on a narrow pad (11" portrait) — the note goes
+        // UNDER the row's right end there, whole, instead of squeezed beside it
+        // ★ ROUND 7, R7-D3 (the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at 11" portrait"
+        // — REQUIRED before D3 is done): the left panel's column is reserved its whole height above, yet the open panel never
+        // rises above PageLeftModal's 2 × noteTop (its top padding, then a spacer of at least noteTop) — on the row's line that
+        // column is empty. So the note stays BESIDE the icons there, over the column's empty top, whole; it goes under the row
+        // only where even that is too narrow. RED at 0e66bf47 (FlexibleRound7DesignIntegrationTests I5): under the row at 11".
+        if room < FlexibleMainNote.minWidth {
+            let open = right - DS.Space.s - PageChrome.edge
+            let y = row.midY - FlexibleMainNote.height / 2
+            if y + FlexibleMainNote.height < leftPanelHighestTop, open >= FlexibleMainNote.minWidth {
+                let w = min(FlexibleMainNote.width, open)
+                return CGRect(x: right - DS.Space.s - w, y: y, width: w, height: FlexibleMainNote.height)
+            }
+            let w = min(FlexibleMainNote.width, viewport.width - 2 * PageChrome.edge)
+            return CGRect(x: row.maxX - w, y: row.maxY + DS.Space.s, width: w, height: FlexibleMainNote.height)
+        }
+        let w = max(0, min(FlexibleMainNote.width, room))
+        return CGRect(x: right - DS.Space.s - w, y: row.midY - FlexibleMainNote.height / 2,
+                      width: w, height: FlexibleMainNote.height)
+    }
+}
+
+/// The note, drawn beside the view row. It observes only the note (and the stage's view flag).
+struct FlexibleMainNoteView: View {
+    @ObservedObject var note: FlexibleMainNote
+    @ObservedObject var main: FlexibleMainStage
+    /// Its band's width (FlexibleMainViewToggles.noteFrame).
+    var maxWidth: CGFloat = FlexibleMainNote.width
+
+    var body: some View {
+        if let k = note.kind {
+            let showable = k == .ready && !main.latticeIconLit   // ★ X1: [Show] while his Lattice view is off
+            Group {
+                if k == .coveredHidesLattice {
+                    // ★ X1 VERIFY: the whole note is the fix — X-ray
+                    Button { main.coveredNoteTapped() } label: { capsule(k, showable: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-main-note-xray")
+                } else if showable {
+                    // ★ C2 VERIFICATION: the WHOLE note is [Show] (the word alone was ~36 × 16 pt)
+                    Button { main.showFromNote() } label: { capsule(k, showable: true) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("flexible-main-note-show")
+                } else {
+                    capsule(k, showable: false)
+                }
+            }
+            .latticeBandChipKeepOut()
+            // ★ R7-D3: the note as drawn (the hosted tests and the evidence read it)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: FlexibleKeepOutKey.self, value: ["mainNote": g.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .frame(maxWidth: maxWidth, alignment: .trailing)
+            .transition(.opacity)
+        }
+    }
+
+    private func capsule(_ k: FlexibleMainNote.Kind, showable: Bool) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: k == .ready ? "checkmark.circle.fill" : (k == .coveredHidesLattice ? FlexibleMainViewToggles.xrayIcon : "hourglass"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle((k == .ready ? FlexibleStageStyle.accentToken : DS.Color.textSecondary).color)
+            Text(FlexibleMainNote.line(k))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("flexible-main-note")
+            if showable {
+                Text(k == .coveredHidesLattice ? FlexibleRowCopy.coveredHidesLatticeAction : "Show")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+            }
+        }
+        .padding(.horizontal, DS.Space.m)
+        .frame(height: FlexibleMainNote.height)
+        .background(Capsule().fill(DS.Surface.panel.color.opacity(0.94))
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .contentShape(Capsule())
+    }
+}

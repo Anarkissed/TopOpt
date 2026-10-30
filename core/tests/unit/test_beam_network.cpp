@@ -361,6 +361,98 @@ void test_a_mostly_hinged_mesh_is_REFUSED() {
   if (!r.refusal.empty()) std::printf("  refused: %s\n", r.refusal.c_str());
 }
 
+// ── ★ A REFUSAL MUST SAY WHY *AND* HOW TO FIX IT (maintainer, 2026-09-22) ─────
+// "I'd like for an error to call out the hole in the lattice should the lattice not
+// certify for that reason." The WHY was already there; a user reading it learnt that
+// their lattice was disconnected and nothing about what to do next.
+//
+// The two shapes need OPPOSITE fixes, so the message must tell them apart:
+//   A HOLE   -- a few LARGE pieces adrift. The lattice is sound; something cut a
+//               whole piece off the solid. Close the hole / give it something to
+//               land on. A smaller cell does not help.
+//   A FABRIC -- many SMALL pieces. The members never reached each other. A smaller
+//               cell or a denser band helps. There is no single hole to close.
+// This test builds both and asserts each is named and given ITS OWN remedy -- and
+// that neither is offered the other's, because advice that fits every case is
+// advice that helps in none.
+void test_the_refusal_names_the_hole_and_the_fix() {
+  const int nx = 12, ny = 12, nz = 6;
+  const double h = 1.7, E = 3500.0, nu = 0.35;
+  const topopt::VoxelGrid g = block_grid(nx, ny, nz, h);
+  std::vector<char> mask(g.voxel_count(), 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < 4; ++j)
+      for (int i = 0; i < 4; ++i) mask[g.index(i, j, k)] = 1;
+
+  const int NXn = nx + 1, NYn = ny + 1;
+  auto nod = [&](int i, int j, int k) {
+    return static_cast<int>((static_cast<std::size_t>(k) * NYn + j) * NXn + i); };
+  std::vector<topopt::DirichletBC> bcs;
+  std::vector<topopt::NodalLoad> lds;
+  for (int j = 0; j <= 4; ++j)
+    for (int i = 0; i <= 4; ++i) {
+      for (int c = 0; c < 3; ++c) bcs.push_back({nod(i, j, 0), c, 0.0});
+      lds.push_back({nod(i, j, nz), 2, 1.0 / 25.0});
+    }
+
+  auto refusal_for = [&](const std::vector<BeamSegment>& segs) {
+    const topopt::BeamNetwork net = topopt::build_beam_network(segs);
+    const topopt::CoupledLatticeSolve r = topopt::solve_coupled_lattice(
+        g, mask, net, bcs, lds, E, nu, 0.9, 1e-10, 2000);
+    return r.refusal; };
+
+  // ── A HOLE: one long chain of members, far from the solid, adrift as ONE piece
+  {
+    std::vector<BeamSegment> segs;
+    const double x0 = 8.0 * h, y0 = 8.0 * h, z0 = 3.0 * h;
+    for (int i = 0; i < 40; ++i)                       // 40 members, one component
+      segs.push_back({Vec3{x0 + 0.3 * i, y0, z0},
+                      Vec3{x0 + 0.3 * (i + 1), y0, z0}, 0.2});
+    const std::string ref = refusal_for(segs);
+    std::printf("  HOLE refusal:\n%s\n", ref.c_str());
+    CHECK(!ref.empty(), "hole: a lattice adrift from the solid is REFUSED");
+    CHECK(ref.find("HOLE") != std::string::npos,
+          "hole: the refusal NAMES it a hole, not just a percentage");
+    CHECK(ref.find("HOW TO FIX") != std::string::npos,
+          "hole: and it says how to fix it");
+    CHECK(ref.find("LARGE") != std::string::npos,
+          "hole: it says the pieces are large, which is what distinguishes it");
+    // ★ IT MUST NOT OFFER THE OTHER REMEDY. A smaller cell cannot reattach a piece
+    // that is already whole, and suggesting it sends the user the wrong way.
+    CHECK(ref.find("SMALLER cell") == std::string::npos,
+          "hole: it does NOT suggest a smaller cell -- the pieces are already healthy");
+    // ★ A HOLE HAPPENS IN EITHER ALGORITHM (maintainer, 2026-09-22: "these holes can
+    // be in either organic or octet truss! ties are not the only issue"). The first
+    // version of this message named organic-only keys, so an octet truss with a hole
+    // was told to raise a rim it does not have.
+    CHECK(ref.find("OCTET") != std::string::npos && ref.find("ORGANIC") != std::string::npos,
+          "hole: the remedy names BOTH algorithms -- an octet hole is not an organic one");
+  }
+
+  // ── A FABRIC: many tiny pieces that never reached each other
+  {
+    std::vector<BeamSegment> segs;
+    const double z0 = 3.0 * h;
+    for (int i = 0; i < 40; ++i) {                     // 40 separate 1-member pieces
+      const double x0 = 6.0 * h + 0.9 * (i % 8), y0 = 6.0 * h + 0.9 * (i / 8);
+      segs.push_back({Vec3{x0, y0, z0}, Vec3{x0 + 0.25, y0, z0}, 0.2});
+    }
+    const std::string ref = refusal_for(segs);
+    std::printf("  FABRIC refusal:\n%s\n", ref.c_str());
+    CHECK(!ref.empty(), "fabric: a lattice that never knitted is REFUSED");
+    CHECK(ref.find("never knitted") != std::string::npos,
+          "fabric: the refusal names it a fabric that never knitted");
+    CHECK(ref.find("SMALLER cell") != std::string::npos,
+          "fabric: and offers the remedy that fits -- a smaller cell");
+    CHECK(ref.find("HOLE") == std::string::npos,
+          "fabric: it does NOT call it a hole -- there is no single hole to close");
+    CHECK(ref.find("OCTET") != std::string::npos,
+          "fabric: and its remedy applies to the octet too, not only to organic");
+    CHECK(ref.find("ORGANIC only") != std::string::npos,
+          "fabric: with the organic-only lever MARKED as organic-only");
+  }
+}
+
 void test_partial_fill_scales_the_solid_exactly() {
   // ★ THE FIX FOR THE BINARY MASK. A uniformly half-filled block must extend exactly
   // TWICE as far as a full one: element stiffness is linear in the modulus, so a
@@ -1460,6 +1552,7 @@ int main() {
   test_coupled_solve_matches_the_closed_form();
   test_a_corner_hinged_island_is_dropped();
   test_a_mostly_hinged_mesh_is_REFUSED();
+  test_the_refusal_names_the_hole_and_the_fix();
   test_partial_fill_scales_the_solid_exactly();
   test_coupled_solve_REFUSES_a_mechanism();
   test_coupled_solve_REFUSES_untied_components_instantly();

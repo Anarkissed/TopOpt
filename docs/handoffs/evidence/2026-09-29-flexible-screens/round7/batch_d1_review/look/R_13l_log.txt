@@ -1,0 +1,30 @@
+[13l] the Squish page opened by itself: false (H37: never)
+settled true · status 'Preview · core runs one group at a time' tone preview · heat true · play false
+  R01: player none · legend (1104,292 248x124) · panel none · nothing touches
+wrote R_13l_R01_rest.png
+  tap the Setup chip [setupChip (860,960 220x48) at 970,984]
+  R02: player none · legend (1104,292 248x124) · panel setupTray (932,656 420x276) · nothing touches
+wrote R_13l_R02_setup.png
+  tap Plate up's [Change] [setupRow-plateUp (946,764 392x52) at 1302,790]
+  plate page: 6 buttons [+X 125x48, +Y 125x48, +Z 125x48, −X 125x48, −Y 125x48, −Z 125x48]
+  R03: player none · legend (1104,292 248x124) · panel setupTray (932,668 420x264) · nothing touches
+wrote R_13l_R03_plate.png
+  tap the ⌃ [latticeMore (1308,944 44x64) at 1330,976]
+  card: sent 0
+  R04: player none · legend (1104,292 248x124) · panel latticeCard (932,536 420x396) · nothing touches
+wrote R_13l_R04_card.png
+  Play true · the bar shown true
+  R05: player (518,886 340x46)+(518,855 264x24) · legend (1104,292 248x124) · panel latticeCard (932,536 420x396) · nothing touches
+wrote R_13l_R05_play_card.png
+  R06: player (518,886 340x46)+(518,855 264x24) · legend (1104,292 248x124) · panel setupTray (932,668 420x264) · nothing touches
+wrote R_13l_R06_play_setup.png
+  weight of Face 3 → 0: status 'Fix: the weight on Face 3' tone fix · chrome Optional(TopOptFlows.FlexibleChromeState.Card.callout)
+  R07: player none · legend none · panel callout (932,781 420x151) · nothing touches
+wrote R_13l_R07_callout.png
+  tap the ⌃ with the blocker [latticeMore (1308,944 44x64) at 1330,976]
+  R08: player none · legend none · panel latticeCard (932,652 420x280) · nothing touches
+wrote R_13l_R08_card_blocker.png
+  tap the capsule's Squish [capsuleSquish (212,76 70x44) at 247,98]
+  Squish page up true · panel 'Flexible · Squish'
+wrote R_13l_R09_squish.png
+touches: 0

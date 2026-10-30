@@ -1,0 +1,6 @@
+X20b faces seen (indent middle x): Face 5 273 · Face 3 839
+X20b face Face 3: [2D] (338.0, 1238.0, 44.0, 44.0) [3D] (386.0, 1238.0, 44.0, 44.0) · indent 902 segments · editors on the part []
+X20b face S 0.10396938313403013…0.9996977857853042 · extents 100.0×20.0 · curveX [0.2, 1.0, 0.2] curveY [0.3, 1.0, 0.3] mode both ce [0.3, 1.0] · 10% u -0.2…100.2 v -0.2…20.0 · 50% u 12.1…87.9 v 2.4…17.6 · 90% u 35.6…64.4 v 7.1…12.9
+X20b face window 2D: (206.0, 394.0, 620.0, 588.0) · X (222.0, 455.0, 588.0, 208.0) · Y (222.0, 675.0, 588.0, 208.0)
+X20b Edge 12: indent 410 segments
+X20b picture view: Front-Top-Right

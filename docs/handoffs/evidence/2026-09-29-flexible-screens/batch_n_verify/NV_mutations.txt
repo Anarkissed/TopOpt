@@ -1,0 +1,59 @@
+=== NV1_damped_stops: 14:31:58 building
+NV1_damped_stops: build exit 0
+NV1_damped_stops: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptKitTests/FlexibleSquishStepsTests.swift:286: error: -[TopOptKitTests.FlexibleSquishStepsTests testOnlyAnUndampedSolveStopsAnIncrement] : XCTAssertEqual failed: ("4") is not equal to ("0") - no increment stops on a damp
+app/TopOptKit/Tests/TopOptKitTests/FlexibleSquishStepsTests.swift:287: error: -[TopOptKitTests.FlexibleSquishStepsTests testOnlyAnUndampedSolveStopsAnIncrement] : XCTAssertLessThanOrEqual failed: ("0.06452741602183956") is greater than ("0.02")
+	 Executed 1 test, with 2 failures (0 unexpected) in 25.974 (25.974) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 25.974 (25.974) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 25.974 (25.975) seconds
+NV1_damped_stops: restored (identical)
+=== NV2_progress_at_end: 14:32:31 building
+NV2_progress_at_end: build exit 0
+NV2_progress_at_end: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:91: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testACancelIsHeardBetweenSolvesNotOnlyBetweenIncrements] : XCTAssertEqual failed: ("3") is not equal to ("1") - the can
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:92: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testACancelIsHeardBetweenSolvesNotOnlyBetweenIncrements] : XCTAssertEqual failed: ("5") is not equal to ("3") - a waiti
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.975 (26.975) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.975 (26.975) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.975 (26.976) seconds
+NV2_progress_at_end: restored (identical)
+=== NV3_no_claim_line: 14:33:12 building
+NV3_no_claim_line: build exit 0
+NV3_no_claim_line: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:174: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheRefineLineAppearsAtOnceNamesTheGroupAndCountsTheIncrementBeingSolved] : XCTAssertTrue failed - the line follows
+	 Executed 1 test, with 1 failure (0 unexpected) in 38.098 (38.098) seconds
+	 Executed 1 test, with 1 failure (0 unexpected) in 38.098 (38.098) seconds
+	 Executed 1 test, with 1 failure (0 unexpected) in 38.098 (38.099) seconds
+NV3_no_claim_line: restored (identical)
+=== NV4_legend_newest: 14:34:04 building
+NV4_legend_newest: build exit 0
+NV4_legend_newest: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:138: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertEqual failed: ("2.9687857627868652") is not equa
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:139: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertEqual failed: ("The colours and the shape are a 
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:141: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertLessThanOrEqual failed: ("0.03878218") is greate
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:150: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertFalse failed - control: after the swap the (i) s
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:151: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertEqual failed: ("2.9687857627868652") is not equa
+	 Executed 1 test, with 5 failures (0 unexpected) in 109.106 (109.106) seconds
+	 Executed 1 test, with 5 failures (0 unexpected) in 109.106 (109.106) seconds
+	 Executed 1 test, with 5 failures (0 unexpected) in 109.106 (109.107) seconds
+NV4_legend_newest: restored (identical)
+=== NV5_no_swap_refresh: 14:36:07 building
+NV5_no_swap_refresh: build exit 0
+NV5_no_swap_refresh: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:142: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertNotEqual failed: ("2.9198529720306396") is equal
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:143: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testTheLegendTheColoursAndTheInfoFollowTheVersionOnScreen] : XCTAssertTrue failed - …and the (i) says it
+	 Executed 1 test, with 2 failures (0 unexpected) in 118.936 (118.936) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 118.936 (118.936) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 118.936 (118.937) seconds
+NV5_no_swap_refresh: restored (identical)
+=== NV6_per_increment_poll: 14:38:20 building
+NV6_per_increment_poll: build exit 0
+NV6_per_increment_poll: test exit 1 (non-zero = RED)
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:91: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testACancelIsHeardBetweenSolvesNotOnlyBetweenIncrements] : XCTAssertEqual failed: ("3") is not equal to ("1") - the can
+app/TopOptKit/Tests/TopOptFlowsTests/FlexibleBatchNVerifyTests.swift:92: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testACancelIsHeardBetweenSolvesNotOnlyBetweenIncrements] : XCTAssertEqual failed: ("1") is not equal to ("3") - a waiti
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.563 (26.563) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.563 (26.563) seconds
+	 Executed 1 test, with 2 failures (0 unexpected) in 26.563 (26.564) seconds
+NV6_per_increment_poll: restored (identical)
+=== rebuild after restore: 14:39:00
+final build exit 0
+ALLDONE

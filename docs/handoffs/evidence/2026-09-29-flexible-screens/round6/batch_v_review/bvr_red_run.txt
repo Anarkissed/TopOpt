@@ -1,0 +1,50 @@
+# Batch V review — the RED RUN (tests first): the four fixes switched back to batch V's behaviour, one line each
+# (mutate.py apply, below), swift build --build-tests, then:
+#   swift test --skip-build --filter 'TopOptFlowsTests\.FlexibleBatchVHostedTests/(testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera|testAnUndoOrRedoIsNeverAPick|testAReadingsTagNeverReachesIntoTheChrome|testTheOverlayViewsKeepOutOfTheWholeChrome)'
+# then mutate.py revert, rebuilt. The mutations:
+#   M = [
+#       ("FlexibleMainStage+Views.swift", "let over = !controlRolesUnderMarks", "let over = false /*RED-RUN*/"),
+#       ("FlexibleMainViewSettings.swift", "if !controlUndoIsAPick { return }", "if false /*RED-RUN*/ { return }"),
+#       ("FlexibleStagePage.swift", "let shows = Self.controlPointOnly ||", "let shows = true /*RED-RUN*/ ||"),
+#       ("FlexibleStagePage.swift", "exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: clip ?? keepOut,",
+#        "exaggeration: FlexibleStageVolumes.prismK(dentExaggeration), keepOut: keepOut /*RED-RUN*/,"),
+#   ]
+
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick]' started.
+FlexibleBatchVReviewTests.swift:193: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertFalse failed - ★ an Undo re-writes the selection — never his pick
+FlexibleBatchVReviewTests.swift:194: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertEqual failed: ("[1]") is not equal to ("[]") - ★ …so no prism shows
+FlexibleBatchVReviewTests.swift:196: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertFalse failed - ★ nor a Redo
+FlexibleBatchVReviewTests.swift:197: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertEqual failed: ("[1]") is not equal to ("[]")
+FlexibleBatchVReviewTests.swift:199: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertFalse failed
+FlexibleBatchVReviewTests.swift:210: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick] : XCTAssertFalse failed
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAnUndoOrRedoIsNeverAPick]' failed (120.691 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAReadingsTagNeverReachesIntoTheChrome]' started.
+FlexibleBatchVReviewTests.swift:282: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testAReadingsTagNeverReachesIntoTheChrome] : XCTAssertEqual failed: ("12084") is not equal to ("0") - ★ the tag would reach into the legend: nothing of it shows there
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testAReadingsTagNeverReachesIntoTheChrome]' failed (5.028 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera]' started.
+FlexibleBatchVReviewTests.swift:120: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertGreaterThan failed: ("2366") is not greater than ("5000") - ★ model_heatOff, unticked: the Top wears the Top's colour where he looks
+FlexibleBatchVReviewTests.swift:121: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertGreaterThan failed: ("2278") is not greater than ("5000") - ★ model_heatOff: the tap changes what he sees
+FlexibleBatchVReviewTests.swift:123: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertLessThan failed: ("47320") is not less than ("2366") - ★ RED CONTROL (model_heatOff): batch V's unticked showed (next to) no Top colour on his pad
+FlexibleBatchVReviewTests.swift:120: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertGreaterThan failed: ("0") is not greater than ("5000") - ★ lattice_heatOff, unticked: the Top wears the Top's colour where he looks
+FlexibleBatchVReviewTests.swift:121: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertGreaterThan failed: ("0") is not greater than ("5000") - ★ lattice_heatOff: the tap changes what he sees
+FlexibleBatchVReviewTests.swift:123: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertLessThan failed: ("0") is not less than ("0") - ★ RED CONTROL (lattice_heatOff): batch V's unticked showed (next to) no Top colour on his pad
+FlexibleBatchVReviewTests.swift:139: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertEqual failed: ("[SIMD4<Float>(0.39215687, 0.8235294, 1.0, 0.25)]") is not equal to ("[SIMD4<Float>(0.1882353, 0.81960785, 0.34509805, 1.0)]") - ★ unticked: the Bottom wears the Anchor's colour, as #354 paints it (Flexible's cyan under it)
+FlexibleBatchVReviewTests.swift:167: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera] : XCTAssertGreaterThan failed: ("26062") is not greater than ("26062") - ★ r5: more than batch V's (the Protect hatch alone)
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testRoleColoursUntickedShowTheSelectionsColoursAtHisCamera]' failed (79.137 seconds).
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheOverlayViewsKeepOutOfTheWholeChrome]' started.
+FlexibleBatchVReviewTests.swift:316: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testTheOverlayViewsKeepOutOfTheWholeChrome] : XCTAssertTrue failed - the overlays' keep-out is the chrome clip
+Test Case '-[TopOptFlowsTests.FlexibleBatchVHostedTests testTheOverlayViewsKeepOutOfTheWholeChrome]' failed (0.006 seconds).
+	 Executed 4 tests, with 16 failures (0 unexpected) in 204.862 (204.863) seconds
+	 Executed 4 tests, with 16 failures (0 unexpected) in 204.862 (204.863) seconds
+	 Executed 4 tests, with 16 failures (0 unexpected) in 204.862 (204.864) seconds
+FLEX-BVR-2 undo/redo: picked false, prisms [] · control (batch V): picked true, prisms [1] · re-tap: picked true
+FLEX-BVR-3 reading 40 pt left of the legend: inside the legend 12084 px (control, point only: 12084) · no chrome 17782 px drawn · far legend 17782 px drawn, 0 inside
+FLEX-BVR-1 (his pad and his r5, his img1 camera, the shipping renderer)
+  model_heatOff: Top blue / Anchor green px — ticked 0 / 0 · unticked 2366 / 0 · control (batch V) 2366 / 0 · px that change on the tap: 2278 (control 2278)
+  lattice_heatOff: Top blue / Anchor green px — ticked 0 / 0 · unticked 0 / 0 · control (batch V) 0 / 0 · px that change on the tap: 0 (control 0)
+  lattice_heatOn: Top blue / Anchor green px — ticked 48721 / 17648 · unticked 48722 / 17648 · control (batch V) 48722 / 17648 · px that change on the tap: 0 (control 0)
+  r5 model_heatOff: px that change on the tap 26062 (control, batch V: 26062) · role colours 26082/0/0/26082
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds

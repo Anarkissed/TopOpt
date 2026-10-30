@@ -1,0 +1,270 @@
+# Angled presses (task 2026-10-07), batch AP2 REVIEW — the verifier's 13 findings on "which faces meet", confirmed and fixed,
+# and the raw runs at 131fc997 (the fixes), after 979d01f4 (tests first; ap2_review_red_runs.txt).
+#
+# FINDINGS (C = confirmed, F = fixed here, R = waits on a ruling, D = documentation only)
+#  1 major  core's face_adjacency fetched, never read ............ C F  a candidate's members must form one footprint through core's
+#           adjacency (core's build_press_stack rule), else listed with "X and Y share no edge in core's model";
+#           appOnlyFacePairs / coreOnlyFacePairs name any difference (none on any fixture).
+#  2 minor  closed-loop points and numbers follow the triangle order C F  canonical polylines (open: from the lower end; loop: from
+#           the lowest vertex, towards its lower neighbour; equal lengths by position). His r5, l bracket, M2: reversed order identical.
+#  3 minor  a filleted edge whose far side is not ≤ 1° flat: no row  C R  the blend END rule needs a ruling (data below).
+#  4 minor  removed regions not filtered ........................... C F  listed, never offered ("… was taken out of the Flexible
+#           setup"), so the numbers do not move. r6 §3 says "minus": greyed-not-dropped is my reading, for the ruling.
+#  5 minor  two spec deviations need a ruling ...................... C R  (a) the per-seam 15° reading and its pass-through
+#           (flexible_scene_triangle_loads), (b) STEP fillet cylinders greyed by core's spread flag.
+#  6 minor  the clip ignores RegionCut.strict ...................... C F  in another form: `strict` is core's VOXEL-centre sense; the
+#           real defect was a seam lying IN a cut plane passing the closed clip for BOTH sectors. Now it belongs only to the sector
+#           whose own area is beside it (the triangle holding it lies on the cut's inner side). The test's control shows the strict
+#           rule would hand it to the WRONG sector (L prism: the riser's cap).
+#  7 major  AP3 cannot get core's accept/refuse verdict (A4) ........ C F  new thin pass-through flexible_scene_press_verdict = core's
+#           build_press_stack on the open scene (its FlexibleError is the answer; any other throw crosses bridge.cpp's one guard), as
+#           FlexibleStageModel.pressVerdict(_:direction:), cached per scene. M2 [33, 34, 57] along build Z down: every member's
+#           load points in (0.7071 / 0.5985 / 0.0677), core refuses over face 57. CORRECTION to AP2's handoff: "AP3-ready … core's
+#           side verdict for a stated direction (regionFrame(member, direction:).side) … no Swift threshold" was wrong —
+#           face_frame_cut never refuses a direction; AP3 offers a snap only when pressVerdict accepts it. #361's standalone
+#           acceptance check is no longer needed (core's own press stack answers), only cheaper if it comes.
+#  8 minor  handles() at his img3 camera ........................... C D  a size helper only; reachability (visibility, keep-outs,
+#           overlap, the 24 pt corner push, repeat-tap cycling, the list) is item 2's overlay (doc on handles()).
+#  9 minor  flat vs curved by an app threshold; bogus blend #206 .... C F(part) R  a blend's curved member is exempt only while its
+#           spread ≤ the angle between the blend's flats: #206 [9, 41, 1, 42, 4, 31] is now listed with "face 4 curves further
+#           round than this edge turns"; the 9 real fillets stay offered. Classifying flat/curved by core's B-rep kind and an area
+#           floor for end flats: with the end-rule ruling (3).
+# 10 minor  the 15° rule clears M2's fillet seams by ~0.7° .......... C(part) F  REFUTED for the fillets: the offered blends rest on
+#           seams of at most 7.627° (18–62), a 7.4° margin; the 14° rule left all 10 blends. The stand's closest calls are 14.751°
+#           (58–60, two corner-fillet patches) smooth and 15.738° (1–47) creased. Pinned (testTheTangentRuleMarginOnTheM2): offered
+#           blends ≥ 0.5° under 15°, the two closest calls within 0.05° of their measured values; control: under 7.617° blend
+#           [15, 62, 18] breaks.
+# 11 minor  item 2's cuts renumber; stubs holding a pressed strip ... C D  numbers are stable while the regions are unchanged (doc);
+#           "In Group N" greying is item 2's filter on members.
+# 12 minor  core facts read from a stale scene after a cut .......... C F  every core read requires openedKey == currentSceneKey; after
+#           a cut, meetFacts / edgeCandidates / regionFrame / pressVerdict throw "The part's faces changed since it opened; core
+#           answers once it opens again." Re-opened: the split cube gives 14 edges + 8 corners, all offered.
+# 13 minor  FlexibleMeet built on the main actor .................... C F  meetOffMain() builds it in a detached task (off the main
+#           thread, recorded) and every later reader reuses it; meetFacts / edgeCandidates call it.
+#
+# RULINGS ASKED (decision rows, proposed):
+#   D-AP2R-1 the blend END rule (findings 3, 9): today a blend joins two FLATS (core's spread ≤ 1°, an app number) through curved
+#            pieces. M2: 18 ⌒ 58 ⌒ 23 (23 spreads 39.8°, flagged) and 8 chains between unflagged faces ≥ 15° apart
+#            (e.g. 18 ⌒ [60] ⌒ 56 at 29.0°) have NO row. Proposed: ends = core's B-rep PLANES on STEP (StepFaceGeometry.kind, core's)
+#            and spread ≤ 1° on STL; a chain reaching a non-plane end is LISTED, not offered, with one line ([Split on Surface] on STL).
+#   D-AP2R-2 per-seam 15° rule + its pass-through (finding 5a) — keep (a flat and its 90° fillet differ by 45° on average while
+#            the seam is tangent; the region-load rule would offer 203 "edges" on M2 including flat–fillet seams).
+#   D-AP2R-3 STEP fillet cylinders and core's spread flag (finding 5b): 69 of M2's 237 rows greyed "wraps round the edge"; the
+#            filleted edge itself is still offered once as a blend. Keep, or exempt curved B-rep faces as plain-edge members?
+#   D-AP2R-4 removed regions greyed, not dropped (finding 4) — keeps the numbers stable.
+#   D-AP2R-5 A4 vs core (finding 7 side note, the verifier's data, not re-measured here): on boxes core refuses a member's own normal
+#            for a multi-face press; on M2 core accepts it on most candidates. A4's ban stays the ruling's choice; with pressVerdict
+#            AP3 can instead offer exactly what core builds.
+#
+# HOOKS: none in #354/main files by this review (bridge.cpp untouched; AP2's +13 there is unchanged). Track files:
+#   flexible_bridge.cpp | after flexible_scene_triangle_loads | +43 -0 | flexible_scene_press_verdict (A4)
+#   include/FlexibleBridge.hpp | after FlexTriangleLoads' declaration | +23 -0 | FlexPressVerdict + declaration
+#   TopOptKit/FlexibleKit+Meet.swift | header, FlexPressVerdict, FlexibleScene.pressVerdict | +37 -2
+#   AP2's own files: FlexibleEdgeCandidates.swift +68 -15, FlexibleMeet.swift +65 -7, FlexibleStageModel+Meet.swift +104 -22
+#   New test class: FlexibleMeetReviewTests (9 tests).
+
+# (1) GREEN at 131fc997 (app/TopOptKit, swift build --build-tests, unseeded):
+#   swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleMeetReviewTests|FlexibleMeetTests)/'
+    Executed 9 tests, with 0 failures (0 unexpected) in 2.428 (2.429) seconds
+    Executed 10 tests, with 0 failures (0 unexpected) in 6.898 (6.899) seconds
+    Executed 19 tests, with 0 failures (0 unexpected) in 9.326 (9.328) seconds
+    EXIT 0
+    FLEX-AP2R BLEND #189 [29, 17, 66] edge 128.4° chain spreads ["124.9"] · offered
+    FLEX-AP2R BLEND #191 [71, 72, 77, 73] edge 79.1° chain spreads ["24.7", "57.5"] · offered
+    FLEX-AP2R BLEND #192 [68, 69, 70] edge 79.1° chain spreads ["77.7"] · offered
+    FLEX-AP2R BLEND #206 [9, 41, 1, 42, 4, 31] edge 90.0° chain spreads ["77.8", "15.4", "53.7", "163.1"] · not offered: face 4 curves further round than this edge turns
+    FLEX-AP2R BLEND #208 [20, 21, 24] edge 90.0° chain spreads ["84.9"] · offered
+    FLEX-AP2R BLEND #228 [18, 63, 51] edge 90.0° chain spreads ["80.1"] · offered
+    FLEX-AP2R BLEND #229 [18, 64, 52] edge 90.0° chain spreads ["76.4"] · offered
+    FLEX-AP2R BLEND #235 [3, 65, 18] edge 90.0° chain spreads ["80.1"] · offered
+    FLEX-AP2R BLEND #236 [15, 62, 18] edge 90.0° chain spreads ["76.7"] · offered
+    FLEX-AP2R BLEND #237 [2, 61, 18] edge 90.0° chain spreads ["81.7"] · offered
+    FLEX-AP2R BLEND M2: 10 blends, 1 with a member that turns further
+    FLEX-AP2R REMOVED cube60, top taken out: offered 12 of 20 · #1 false 'face 1 was taken out of the Flexible setup' | #2 false 'face 1 was taken out of the Flexible setup' | #3 false 'face 1 was taken out of the Flexible setup' | #4 false 'face 1 was taken out of the Flexible setup' | #9 false 'face 1 was taken out of the Flexibl
+    FLEX-AP2R ONPLANE L prism: lower–floor wall 40.0000 · upper–floor wall 0.0000 · upper–riser 40.0000 · lower–riser 0.0000 mm
+    FLEX-AP2R ONPLANE control: strict rule — upper true lower false
+    FLEX-AP2R ADJ cube60 without core's top–x pair: #11 offered false why 'face 1 and face 5 share no edge in core's model' · app-only [1–5] core-only [] · offered 19
+    FLEX-AP2R STALE cube60 after a cut: ["The part\'s faces changed since it opened; core answers once it opens again.", "The part\'s faces changed since it opened; core answers once it opens again.", "The part\'s faces changed since it opened; core answers once it opens again.", "The part\'s faces changed since it opened; core answ
+    FLEX-AP2R STALE re-opened: 14 edges, 8 corners, offered 22; not offered: 
+    FLEX-AP2R VERDICT cube edge halfway: accepted true · 45.0000° / 45.0000° from the faces · build angle 45.0000 side true · 5824 columns
+    FLEX-AP2R VERDICT cube corner halfway: accepted true · 54.735610° / 54.735610° / 54.735610°
+    FLEX-AP2R VERDICT cube edge along the top's normal: accepted false · 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it'
+    FLEX-AP2R VERDICT cube edge along x's normal: accepted false · 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+    FLEX-AP2R VERDICT cube edge along build Z down: accepted false · 'press_direction does not point into the part over face region 5: part of it faces along the direction or edge-on to it'
+    FLEX-AP2R VERDICT cube edge along build Z up: accepted false · 'press_direction does not point into the part over face region 1: part of it faces along the direction or edge-on to it'
+    FLEX-AP2R VERDICT cube top + bottom: accepted false · 'face region 1 and face region 0 are not adjacent (no shared edge); an edge or corner press needs one connected footprint'
+    FLEX-AP2R VERDICT M2 face 33: load · down 0.7071, spread 0.0°
+    FLEX-AP2R VERDICT M2 face 34: load · down 0.5985, spread 0.0°
+    FLEX-AP2R VERDICT M2 face 57: load · down 0.0677, spread 29.0°
+    FLEX-AP2R VERDICT M2 [33, 34, 57] along build Z down: per-member check accepts · core accepted false 'press_direction does not point into the part over face region 57: part of it faces along the direction or edge-on to it'
+    FLEX-AP2R VERDICT STEP skips 0
+    FLEX-AP2R ORDER square loop: middle SIMD3<Double>(10.0, 10.0, 0.0) vs SIMD3<Double>(10.0, 10.0, 0.0) · polylines [[SIMD3<Double>(0.0, 0.0, 0.0), SIMD3<Double>(0.0, 10.0, 0.0), SIMD3<Double>(10.0, 10.0, 0.0), SIMD3<Double>(10.0, 0.0, 0.0), SIMD3<Double>(0.0, 0.0, 0.0)]] vs [[SIMD3<Double>(0.0, 0.0, 0.0), SIMD3<Double>(0.0, 10.0,
+    FLEX-AP2R ORDER equal lines: middle Optional(SIMD3<Double>(2.5, 0.0, 0.0)) vs Optional(SIMD3<Double>(2.5, 0.0, 0.0))
+    FLEX-AP2R ORDER his r5: 22 candidates · reversed order identical true
+    FLEX-AP2R ORDER l bracket: 34 candidates · reversed order identical true
+    FLEX-AP2R ORDER M2 stand: 237 candidates · reversed order identical true
+    FLEX-AP2R ORDER STEP skips 0
+    FLEX-AP2R MAIN cube60: built 1 time(s), on the main thread Optional(false)
+    FLEX-AP2R MARGIN M2: worst smooth seam 14.751° (58–60), mildest crease 15.738° (1–47) · margins 0.249° / 0.738° · worst seam an offered blend rests on 7.627° (18–62, blend #236), margin 7.373° · any blend 14.314° (4–42, #206) · segments per 2.5° from 10°: [10, 16, 10, 11, 12, 2, 7, 2]
+    FLEX-AP2R MARGIN control: at 7.617° blend [15, 62, 18] is gone (blends 10 → 7)
+
+# (2) TARGETED SUITE at 131fc997 (unseeded, chunked driver with resume-after-death; 132 classes = every Flexible* class in
+#     both bundles, every class pinning a touched file by name (only Flexible* ones: FlexibleMeetTests, FlexibleMeetReviewTests),
+#     every class that reads the Sources directory (incl. the 8 helper-based readers), the bridge.cpp pinners kept from AP2's
+#     list, and the named ones: FlexibleAngledGoldenTests, FlexiblePressProbeTripwireTests, LatticeStaleTypeTests, BridgeGuardTests).
+    TopOptFlowsTests: 124 classes, 812 tests, 40 skipped, 8 failures
+    TopOptKitTests: 8 classes, 47 tests, 2 skipped, 0 failures
+#   = every failure is the KNOWN FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (x8, Xcode 27
+#     text metrics, as at AP2 and S1b); no other error line in the raw log; no xctest death (DIED 0).
+#   LatticeStaleTypeTests 6/6 · BridgeGuardTests 6/6 · FlexibleMeetTests 10/10 · FlexibleMeetReviewTests 9/9.
+    PASSED TopOptFlowsTests.CoreBuildIdentityTests Executed 3 tests, with 0 failures (0 unexpected) in 1.506 (1.506) seconds
+    PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.004) seconds
+    PASSED TopOptFlowsTests.FlexibleAngledGoldenTests Executed 13 tests, with 0 failures (0 unexpected) in 13.549 (13.550) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchBReviewTests Executed 10 tests, with 0 failures (0 unexpected) in 83.091 (83.092) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests Executed 13 tests, with 0 failures (0 unexpected) in 0.634 (0.636) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchCHookTests Executed 4 tests, with 0 failures (0 unexpected) in 0.838 (0.838) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests Executed 14 tests, with 0 failures (0 unexpected) in 16.986 (16.988) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchM2Probe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchM2Tests Executed 2 tests, with 0 failures (0 unexpected) in 26.331 (26.331) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 42.362 (42.362) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMDentTests Executed 2 tests, with 0 failures (0 unexpected) in 45.746 (45.746) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMGroupTests Executed 1 test, with 0 failures (0 unexpected) in 47.116 (47.116) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMLegendTests Executed 2 tests, with 0 failures (0 unexpected) in 57.547 (57.548) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMProbe Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMStressTests Executed 4 tests, with 0 failures (0 unexpected) in 96.773 (96.773) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 541.686 (541.687) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchMXrayTests Executed 2 tests, with 0 failures (0 unexpected) in 164.152 (164.152) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchNProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.FlexibleBatchNRefineTests Executed 4 tests, with 0 failures (0 unexpected) in 249.327 (249.327) seconds
+    FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests Executed 4 tests, with 8 failures (0 unexpected) in 186.507 (186.507) seconds
+    PASSED TopOptFlowsTests.FlexibleCoreClaimTests Executed 4 tests, with 0 failures (0 unexpected) in 41.655 (41.656) seconds
+    PASSED TopOptFlowsTests.FlexibleCurveEditTests Executed 7 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+    PASSED TopOptFlowsTests.FlexibleDepthPrismTests Executed 11 tests, with 0 failures (0 unexpected) in 0.763 (0.764) seconds
+    PASSED TopOptFlowsTests.FlexibleFEFieldTests Executed 12 tests, with 0 failures (0 unexpected) in 153.237 (153.239) seconds
+    PASSED TopOptFlowsTests.FlexibleFEPassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.FlexibleFEPassTests Executed 5 tests, with 0 failures (0 unexpected) in 16.189 (16.189) seconds
+    PASSED TopOptFlowsTests.FlexibleFEVerifyGTests Executed 2 tests, with 0 failures (0 unexpected) in 37.038 (37.038) seconds
+    PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests Executed 3 tests, with 0 failures (0 unexpected) in 0.215 (0.215) seconds
+    PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 44.639 (44.639) seconds
+    PASSED TopOptFlowsTests.FlexibleGroupPaletteTests Executed 7 tests, with 0 failures (0 unexpected) in 0.230 (0.231) seconds
+    PASSED TopOptFlowsTests.FlexibleInPassCompositeTests Executed 10 tests, with 0 failures (0 unexpected) in 18.797 (18.798) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticeFieldTests Executed 4 tests, with 0 failures (0 unexpected) in 2.927 (2.927) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticeGradingTests Executed 2 tests, with 0 failures (0 unexpected) in 1.972 (1.973) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.035 (0.035) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticePassTests Executed 10 tests, with 0 failures (0 unexpected) in 13.581 (13.582) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests Executed 7 tests, with 0 failures (0 unexpected) in 11.914 (11.915) seconds
+    PASSED TopOptFlowsTests.FlexibleLatticeUnderTests Executed 3 tests, with 0 failures (0 unexpected) in 2.638 (2.638) seconds
+    PASSED TopOptFlowsTests.FlexibleLegendPlacementTests Executed 4 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+    PASSED TopOptFlowsTests.FlexibleMainPageHookTests Executed 3 tests, with 0 failures (0 unexpected) in 0.228 (0.228) seconds
+    PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests Executed 10 tests, with 0 failures (0 unexpected) in 2.755 (2.756) seconds
+    PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests Executed 2 tests, with 0 failures (0 unexpected) in 3.868 (3.868) seconds
+    PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests Executed 12 tests, with 0 failures (0 unexpected) in 26.762 (26.763) seconds
+    PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 81.301 (81.302) seconds
+    PASSED TopOptFlowsTests.FlexibleMainStageTests Executed 8 tests, with 0 failures (0 unexpected) in 21.262 (21.263) seconds
+    PASSED TopOptFlowsTests.FlexibleMainViewsTests Executed 10 tests, with 0 failures (0 unexpected) in 23.646 (23.647) seconds
+    PASSED TopOptFlowsTests.FlexibleMeetTests Executed 10 tests, with 0 failures (0 unexpected) in 7.306 (7.307) seconds
+    PASSED TopOptFlowsTests.FlexibleMergeR5SMTests Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    PASSED TopOptFlowsTests.FlexibleOverlayClipTests Executed 6 tests, with 0 failures (0 unexpected) in 0.701 (0.702) seconds
+    PASSED TopOptFlowsTests.FlexibleOverlaySeamTests Executed 2 tests, with 0 failures (0 unexpected) in 0.723 (0.723) seconds
+    PASSED TopOptFlowsTests.FlexiblePinchTests Executed 7 tests, with 0 failures (0 unexpected) in 5.842 (5.842) seconds
+    PASSED TopOptFlowsTests.FlexiblePressFixturesTests Executed 2 tests, with 0 failures (0 unexpected) in 0.270 (0.270) seconds
+    PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+    PASSED TopOptFlowsTests.FlexiblePressReframeTests Executed 2 tests, with 0 failures (0 unexpected) in 0.067 (0.067) seconds
+    PASSED TopOptFlowsTests.FlexiblePressReviewTests Executed 12 tests, with 0 failures (0 unexpected) in 1.005 (1.006) seconds
+    PASSED TopOptFlowsTests.FlexiblePressSaveTests Executed 8 tests, with 0 failures (0 unexpected) in 1.309 (1.309) seconds
+    PASSED TopOptFlowsTests.FlexibleReadinessTests Executed 10 tests, with 0 failures (0 unexpected) in 3.558 (3.559) seconds
+    PASSED TopOptFlowsTests.FlexibleRegionsTests Executed 3 tests, with 0 failures (0 unexpected) in 0.042 (0.042) seconds
+    PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests Executed 4 tests, with 0 failures (0 unexpected) in 84.524 (84.524) seconds
+    PASSED TopOptFlowsTests.FlexibleRound5SettingsTests Executed 11 tests, with 0 failures (0 unexpected) in 8.111 (8.112) seconds
+    PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 2.595 (2.596) seconds
+    PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests Executed 6 tests, with 0 failures (0 unexpected) in 46.013 (46.013) seconds
+    PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.003) seconds
+    PASSED TopOptFlowsTests.FlexibleRound6HostedTests Executed 17 tests, with 0 failures (0 unexpected) in 240.403 (240.405) seconds
+    PASSED TopOptFlowsTests.FlexibleRound6Tests Executed 11 tests, with 0 failures (0 unexpected) in 38.124 (38.125) seconds
+    PASSED TopOptFlowsTests.FlexibleRowCopyTests Executed 4 tests, with 0 failures (0 unexpected) in 0.323 (0.324) seconds
+    PASSED TopOptFlowsTests.FlexibleS1VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 2.305 (2.306) seconds
+    PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+    PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 88.369 (88.370) seconds
+    PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests Executed 14 tests, with 0 failures (0 unexpected) in 5.402 (5.404) seconds
+    PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests Executed 10 tests, with 0 failures (0 unexpected) in 1.928 (1.929) seconds
+    PASSED TopOptFlowsTests.FlexibleShownValuesTests Executed 6 tests, with 0 failures (0 unexpected) in 0.971 (0.972) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests Executed 7 tests, with 0 failures (0 unexpected) in 18.366 (18.367) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests Executed 4 tests, with 0 failures (0 unexpected) in 0.865 (0.865) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests Executed 8 tests, with 0 failures (0 unexpected) in 6.716 (6.717) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests Executed 2 tests, with 0 failures (0 unexpected) in 59.671 (59.671) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests Executed 5 tests, with 0 failures (0 unexpected) in 8.565 (8.566) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests Executed 8 tests, with 0 failures (0 unexpected) in 0.013 (0.013) seconds
+    PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests Executed 4 tests, with 0 failures (0 unexpected) in 35.199 (35.199) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests Executed 2 tests, with 0 failures (0 unexpected) in 0.476 (0.476) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishPerfProbe Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests Executed 5 tests, with 0 failures (0 unexpected) in 1.198 (1.199) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishPlayerTests Executed 6 tests, with 0 failures (0 unexpected) in 0.701 (0.702) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishSolverTests Executed 5 tests, with 0 failures (0 unexpected) in 116.893 (116.893) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishTests Executed 11 tests, with 0 failures (0 unexpected) in 2.938 (2.939) seconds
+    PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests Executed 5 tests, with 0 failures (0 unexpected) in 307.432 (307.432) seconds
+    PASSED TopOptFlowsTests.FlexibleStageTests Executed 15 tests, with 0 failures (0 unexpected) in 1.599 (1.600) seconds
+    PASSED TopOptFlowsTests.FlexibleSurfaceNavTests Executed 3 tests, with 0 failures (0 unexpected) in 0.093 (0.094) seconds
+    PASSED TopOptFlowsTests.LatticeAutoDensityIsDerivedTests Executed 10 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+    PASSED TopOptFlowsTests.LatticeDepthIsOneValueTests Executed 5 tests, with 0 failures (0 unexpected) in 0.312 (0.312) seconds
+    PASSED TopOptFlowsTests.LatticeE1PrintableFloorTests Executed 5 tests, with 0 failures (0 unexpected) in 0.020 (0.021) seconds
+    PASSED TopOptFlowsTests.LatticeIncludeGateTests Executed 8 tests, with 0 failures (0 unexpected) in 2.626 (2.627) seconds
+    PASSED TopOptFlowsTests.LatticeStageRepairEvidence Executed 3 tests, with 0 failures (0 unexpected) in 0.016 (0.016) seconds
+    PASSED TopOptFlowsTests.LatticeStaleTypeTests Executed 6 tests, with 0 failures (0 unexpected) in 2.137 (2.138) seconds
+    PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptFlowsTests.LatticeVariantFaceWallsTests Executed 8 tests, with 0 failures (0 unexpected) in 1.625 (1.626) seconds
+    PASSED TopOptFlowsTests.OrganicCapsuleEvidenceGen Executed 1 test, with 0 failures (0 unexpected) in 9.041 (9.041) seconds
+    PASSED TopOptFlowsTests.OrganicDeadWallParityTests Executed 7 tests, with 0 failures (0 unexpected) in 0.266 (0.266) seconds
+    PASSED TopOptFlowsTests.OrganicForecastRouteTests Executed 4 tests, with 0 failures (0 unexpected) in 0.191 (0.192) seconds
+    PASSED TopOptFlowsTests.OrganicLookAndVisibilityTests Executed 9 tests, with 0 failures (0 unexpected) in 3.383 (3.384) seconds
+    PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests Executed 5 tests, with 0 failures (0 unexpected) in 3.928 (3.929) seconds
+    PASSED TopOptFlowsTests.OrganicPreviewSpeedAndRimTests Executed 5 tests, with 0 failures (0 unexpected) in 250.579 (250.580) seconds
+    PASSED TopOptFlowsTests.OrganicVariantGeneratorTests Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+    PASSED TopOptFlowsTests.RunModelTests Executed 51 tests, with 0 failures (0 unexpected) in 82.633 (82.636) seconds
+    PASSED TopOptFlowsTests.SmoothingPageRound2Tests Executed 21 tests, with 0 failures (0 unexpected) in 0.307 (0.308) seconds
+    PASSED TopOptFlowsTests.SmoothingViewerTests Executed 12 tests, with 0 failures (0 unexpected) in 0.030 (0.031) seconds
+    PASSED TopOptFlowsTests.StrutLineWidthTests Executed 12 tests, with 0 failures (0 unexpected) in 0.548 (0.549) seconds
+    PASSED TopOptFlowsTests.UnifiedShadingTests Executed 11 tests, with 0 failures (0 unexpected) in 6.497 (6.498) seconds
+    PASSED TopOptFlowsTests.UnreadableProjectTests Executed 6 tests, with 1 test skipped and 0 failures (0 unexpected) in 2.778 (2.779) seconds
+    PASSED TopOptFlowsTests.VariantEntryGatingTests Executed 21 tests, with 0 failures (0 unexpected) in 0.235 (0.236) seconds
+    PASSED TopOptFlowsTests.FlexibleMeetReviewTests Executed 9 tests, with 0 failures (0 unexpected) in 2.489 (2.491) seconds
+    PASSED TopOptFlowsTests.LatticeGradeToSolidBandTests Executed 11 tests, with 0 failures (0 unexpected) in 8.349 (8.351) seconds
+    PASSED TopOptFlowsTests.LatticeModeTests Executed 17 tests, with 0 failures (0 unexpected) in 0.049 (0.050) seconds
+    PASSED TopOptFlowsTests.OrganicCapsuleImpostorTests Executed 4 tests, with 0 failures (0 unexpected) in 35.159 (35.160) seconds
+    PASSED TopOptFlowsTests.ProtectFreezeVsSolidityTests Executed 7 tests, with 0 failures (0 unexpected) in 0.071 (0.072) seconds
+    PASSED TopOptFlowsTests.LatticeStructuralViewStateTests Executed 8 tests, with 0 failures (0 unexpected) in 0.256 (0.257) seconds
+    PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests Executed 4 tests, with 0 failures (0 unexpected) in 0.043 (0.044) seconds
+    PASSED TopOptFlowsTests.LatticeTypeNoBandTests Executed 4 tests, with 0 failures (0 unexpected) in 0.027 (0.027) seconds
+    PASSED TopOptFlowsTests.LatticeDrawerCellIsTheBakesTests Executed 4 tests, with 0 failures (0 unexpected) in 0.035 (0.036) seconds
+    PASSED TopOptKitTests.BridgeGuardTests Executed 6 tests, with 0 failures (0 unexpected) in 0.145 (0.145) seconds
+    PASSED TopOptKitTests.FlexibleBridgeTests Executed 17 tests, with 0 failures (0 unexpected) in 0.685 (0.686) seconds
+    PASSED TopOptKitTests.FlexibleSliceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptKitTests.FlexibleSquishFETests Executed 12 tests, with 0 failures (0 unexpected) in 26.618 (26.619) seconds
+    PASSED TopOptKitTests.FlexibleSquishModulusTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+    PASSED TopOptKitTests.FlexibleSquishStepsTests Executed 6 tests, with 0 failures (0 unexpected) in 63.127 (63.128) seconds
+    PASSED TopOptKitTests.FlexibleTimingProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+    PASSED TopOptKitTests.FrozenLatticeNeverArmedBareTests Executed 2 tests, with 0 failures (0 unexpected) in 0.081 (0.081) seconds
+    SUITE DONE 18:20:19
+
+# (3) GOLDENS at 131fc997 (FlexibleAngledGoldenTests + FlexiblePressProbeTripwireTests, as AP2's goldens.sh):
+    goldens_det: Executed 14 tests, with 0 failures (0 unexpected) in 13.653 (13.655) seconds · identical 38 · DIFFERS 0 · PART-SKIP 0
+    goldens_unseeded: Executed 14 tests, with 0 failures (0 unexpected) in 13.677 (13.679) seconds · identical 32 · DIFFERS 0 · PART-SKIP 1
+#   = AP2's and S1b's (38 identical, 0 DIFFERS deterministic; 32 identical, 0 DIFFERS, 1 PART-SKIP unseeded — the raw subtree
+#     bytes need SWIFT_DETERMINISTIC_HASHING=1). Existing face presses keep their job bytes.
+
+# (4) STAGE-JOB HASHES (stage_job_hashes.sh, frozen inputs, none moved): stage_job_hashes_ap2_review.txt — all 16 rows identical
+#     to stage_job_hashes_s1b.txt (diff of label, project, exit, hash: empty).
+
+# (5) iOS BUILD at 131fc997 (this worktree's derived data flexA1ap; destination 147E56A1; NOT installed, never launched):
+    ** BUILD SUCCEEDED **
+    IOS EXIT 0
+    TopOpt.app/TopOpt.debug.dylib (17:18) holds the new code: strings 'flexible_scene_press_verdict' x3, "share no edge in core's model" x1,
+    'curves further round than this edge turns' x1, 'taken out of the Flexible setup' x1, 'faces changed since it opened' x1.
+
+# swift test rewrote evidence/2026-09-02-organic-on-device/…/v16_mac_capsules_shipped_{0,1}.png (OrganicCapsuleEvidenceGen); restored
+# with git checkout before committing.

@@ -1,0 +1,20 @@
+Edge 16 · halfway SIMD3<Double>(-0.7071067811865475, 0.7071067811865475, 0.0) · lattice cap 33.04987433831183 mm
+wrote E1_13p_Edge16_depth_3.0mm.png
+wrote E1_13p_Edge16_depth_10.6mm.png
+wrote E1_13p_Edge16_depth_17.0mm.png
+wrote E1_13p_Edge16_tilt_+15.png
+wrote E1_13p_Edge16_tilt_-15.png
+wrote E1_13p_Edge16_twist_+10.png
+wrote E1_11p_Edge16_depth_3.0mm.png
+wrote E1_11p_Edge16_depth_10.6mm.png
+wrote E1_11p_Edge16_depth_17.0mm.png
+wrote E1_11p_Edge16_tilt_+15.png
+wrote E1_11p_Edge16_tilt_-15.png
+wrote E1_11p_Edge16_twist_+10.png
+tilt + stops at 38.88° · Stops here · Face 3 keeps the rest
+tilt − stops at -38.88° · Stops here · Face 2 keeps the rest
+twist + stops at 32.01° · Stops here · the far end reaches 0 mm
+depth 0.50…33.05 mm · Stops at 33.0 mm · the lattice ends there
+a release at 20 mm: Stops at 18.5 mm · the lattice ends there · [Set 18.456253111953288 mm]
+wrote E1_13p_Edge16_lattice_stop_card.png
+camera on [Done]: Front-Right

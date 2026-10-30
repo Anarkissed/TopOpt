@@ -1,0 +1,24 @@
+# Release 2fe4173959ba (2026-10-26, overnight; the reviewer's OVERNIGHT RELEASE ruling 03:45 EDT, his "8 hours" 03:47).
+# Merge only (--no-ff), in the ruled order; nothing rebased, forced, amended or stashed.
+## Merges on claude/flexible-screens (from 7d7fdf9f)
+#   ccf612b5  #354 Job 1 8a1e6e34 (six selection/run fixes; narrow 583/0)
+#   c0b749a4  TO-core real bolts c3df7d81 (opt-in loads.anchor_model "bearing"; glued default; their 17-test 17/17, ctest 159/159)
+#   d76e10cb  claude/core-speck-fix 043f80ba (item 50 acceptance: specks a note, real refusal reasons, versions[].attempts; plain [mg-safe] wording)
+#   40c4439b  claude/flexible-redesign a1b9a132 (P3, H59, tap-empty deselect, P5 H60/H61, P4 H62, P2 adapters)
+#   0076a475  TO-core load scenarios ENGINE d088cdfe · 7534e8a9 #354 load scenarios APP d2e6b945 (shipped together)
+## Gates on the merged tree
+#   core gate (trial tree with the same core; fingerprint 2fe4173959ba): CLI build + full ctest 163/163 incl. cli_demo 2,119.6 s (06:44-07:28 EDT)
+#   build_core.sh: all slices 2fe4173959ba (07:29-07:34)
+#   17-test, shipped core 85cadb88 vs release: 17/17 IDENTICAL (glued byte-identical)
+#   iPad device build (Release, generic/platform=iOS, CODE_SIGNING_ALLOWED=NO): BUILD SUCCEEDED (07:46)
+#   full app suite (swift test --parallel, 4 workers) 07:47-09:37: 4,305 tests, 7 failed:
+#     6 KNOWN pre-existing (3 AppModel 3MF/no macOS lib3mf; LatticeCellGrading; OrganicSampleCube; OrganicVariantCache)
+#     1 LOAD FLAKE: FlexibleFlatPrismEngineTests.testHisStripsReadThroughWithTheSameReach (two toasts raced under load);
+#       re-run alone at load 2.8: 5/5 pass
+#   23 tracked evidence files rewritten by swift test were restored with git checkout.
+## Worker
+#   CLI = trial tree core/build-gate (same core tree), --version core 2fe4173959ba dirty=false,
+#   sha256 d8986bb34465178791290accdad826ddd56c4520b11838f7d32479c5d49066ea; swapped atomically while idle (09:4x);
+#   old kept: build-fix/topopt-cli.f2ca3eeb57ae-replaced-20261026. /health: 2fe4173959ba.
+## Known, shipped as is (next batch): scenarios + bearing / + strengthen / no anchor ON refusals use core's technical wording
+#   (TO-core rewords; #354 adds the pre-flight block). DEFERRED: coarse seeding 269ca010, cold first window 6cb055c9 (claude/core-loose-pieces).

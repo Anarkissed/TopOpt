@@ -1,0 +1,86 @@
+# Round 7 batch M1 VERIFY — the runs (scratch /tmp/r7m-build; machine shared with the X1 side tree's runs)
+
+## RED RUN (505c46fe, stubs): see r7m1v_red_run.txt — 8 tests, 27 failures
+
+## GREEN: FlexibleR7M1VerifyTests + FlexibleR7M1Tests after the fixes — 17 tests, 0 failures (twice: before and after the [Prisms] look change)
+
+## TARGETED SUITE run 1 (code as of the suite start; 183 classes = every Flexible* class + every class source-pinning a touched file, incl. WorkspacePlaceholder pins + the listed ones), 12 per chunk
+run1 start 20:25:58 (183 classes)
+run1 chunk 1 exit 0 20:30:39
+run1 chunk 2 exit 1 20:55:20
+run1 chunk 3 exit 0 20:59:57
+run1 chunk 4 exit 0 21:01:30
+run1 chunk 5 exit 0 21:04:40
+run1 chunk 6 exit 0 21:06:20
+run1 chunk 7 exit 1 21:16:58
+run1 chunk 8 exit 1 21:34:12
+run1 chunk 9 exit 0 21:36:41
+run1 chunk 10 exit 0 21:45:38
+run1 chunk 11 exit 0 21:45:44
+run1 chunk 12 exit 1 21:46:35
+run1 chunk 13 exit 0 21:46:45
+run1 chunk 14 exit 0 21:50:37
+run1 chunk 15 exit 0 21:50:40
+run1 chunk 16 exit 0 21:50:43
+run1 DONE 21:50:43
+totals: 1247 tests, 57 skipped, 13 failed assertions in 5 tests:
+  known: FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker x8 (Xcode 27 text metrics); LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds x1
+  known from M1 (environmental, TimelineView offscreen): FlexibleRound7ViewsHostedTests.testThePlayIconsRingAndDotAreSeenWithPlayOff x1 (ring 17 px)
+  CAUSED BY THIS BATCH, re-pinned (attributed in the tests):
+    FlexibleBatchVHostedTests.testTheMainPageModelShowsNoSelectionsColourAtHisCamera — its POSITIVE control (roles composed in) found 44 px (< 1000): with no lattice drawn the main page no longer dents by the drawn curve (finding 3), so the flat map hides the Top's part colour; the control now also sets controlDrawnCurveOnMain (the frame it was measured with)
+    FlexibleRound6HostedTests.testThePrismsButtonIsTheFourthAndShowsEveryPrism x2 (11l, 11p) — [Prisms] with no pick now hands every group's face-prisms ([1], the fixture's Top) instead of [] (finding 4)
+    raw: LatticeStressTintTests.swift:195: error: -[TopOptFlowsTests.LatticeSimSolveTriggerTests testTheTriggerRefusesOnAllThreeGrounds] : XCTAssertTrue failed - ★ …and otherwise it actually runs
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Simulating the squish…' is drawn whole (118.5 of 151.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 2… 8/8' is drawn whole (110.5 of 147.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refining Group 1… 3/8' is drawn whole (117.5 of 145.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine didn't settle' is drawn whole (117.5 of 128.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Refine took too long' is drawn whole (117.0 of 134.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p Play all live: 'Group 2's sim failed' is drawn whole (118.5 of 133.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Simulating the squish…' is drawn whole (145.5 of 151.0 pt)
+    raw: FlexibleBatchNVerifyTests.swift:241: error: -[TopOptFlowsTests.FlexibleBatchNVerifyTests testEveryRefineLineIsWholeBesideTheLivePlayAllPicker] : XCTAssertTrue failed - 11p a pick: 'Refining Group 2… 8/8' is drawn whole (144.0 of 147.0 pt)
+    raw: FlexibleBatchVReviewTests.swift:111: error: -[TopOptFlowsTests.FlexibleBatchVHostedTests testTheMainPageModelShowsNoSelectionsColourAtHisCamera] : XCTAssertGreaterThan failed: ("44") is not greater than ("1000") - ★ POSITIVE CONTROL: with the roles composed 
+    raw: FlexibleRound6HostedTests.swift:677: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsButtonIsTheFourthAndShowsEveryPrism] : XCTAssertEqual failed: ("[1]") is not equal to ("[]") - 11l: no group picked — no face-prism in the list H15' hands t
+    raw: FlexibleRound6HostedTests.swift:677: error: -[TopOptFlowsTests.FlexibleRound6HostedTests testThePrismsButtonIsTheFourthAndShowsEveryPrism] : XCTAssertEqual failed: ("[1]") is not equal to ("[]") - 11p: no group picked — no face-prism in the list H15' hands t
+    raw: FlexibleRound7ViewsReviewHostedTests.swift:307: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("17") is not greater than ("120") - ★ the sims running: an accent ring on t
+no xctest exit signal 11 in this run
+
+## RERUN after the two re-pins + the pill's legibility change (FlexibleBatchVHostedTests, FlexibleRound6HostedTests, FlexibleR7M1VerifyTests, FlexibleR7M1Tests + every class source-pinning FlexibleMainStatusPill.swift)
+  	 Executed 10 tests, with 0 failures (0 unexpected) in 294.688 (294.690) seconds
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 0.008 (0.008) seconds
+  	 Executed 12 tests, with 0 failures (0 unexpected) in 26.389 (26.390) seconds
+  	 Executed 9 tests, with 0 failures (0 unexpected) in 23.042 (23.043) seconds
+  	 Executed 8 tests, with 0 failures (0 unexpected) in 36.953 (36.954) seconds
+  	 Executed 17 tests, with 0 failures (0 unexpected) in 238.987 (238.988) seconds
+  FlexibleRound7ViewsReviewHostedTests.swift:307: error: -[TopOptFlowsTests.FlexibleRound7ViewsHostedTests testThePlayIconsRingAndDotAreSeenWithPlayOff] : XCTAssertGreaterThan failed: ("20") is not greater than ("120") - ★ the sims running: an accent ring on t
+  	 Executed 12 tests, with 1 failure (0 unexpected) in 283.443 (283.444) seconds
+  	 Executed 2 tests, with 0 failures (0 unexpected) in 54.724 (54.724) seconds
+  	 Executed 4 tests, with 0 failures (0 unexpected) in 31.657 (31.658) seconds
+  	 Executed 78 tests, with 1 failure (0 unexpected) in 989.890 (989.899) seconds
+  	 Executed 78 tests, with 1 failure (0 unexpected) in 989.890 (989.900) seconds
+
+## the named classes in run 1
+LatticeStaleTypeTests: Executed 6 tests, with 0 failures (0 unexpected) in 2.161 (2.161) seconds
+ProjectStoreTests: Executed 5 tests, with 0 failures (0 unexpected) in 0.069 (0.069) seconds
+UndoHistoryTests: Executed 10 tests, with 0 failures (0 unexpected) in 0.633 (0.633) seconds
+LatticeSettingsPersistTests: Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+ViewerTests: Executed 33 tests, with 0 failures (0 unexpected) in 0.342 (0.344) seconds
+SmoothingPageRound2Tests: Executed 21 tests, with 0 failures (0 unexpected) in 0.312 (0.313) seconds
+BottomBarMeasurementTests: Executed 8 tests, with 0 failures (0 unexpected) in 0.032 (0.033) seconds
+LatticeIncludeGateTests: Executed 8 tests, with 0 failures (0 unexpected) in 2.572 (2.573) seconds
+FlexibleMainPageHookTests: Executed 3 tests, with 0 failures (0 unexpected) in 0.233 (0.233) seconds
+FlexibleAngledGoldenTests: Executed 13 tests, with 0 failures (0 unexpected) in 13.720 (13.721) seconds
+FlexibleR7M1Tests: Executed 9 tests, with 0 failures (0 unexpected) in 23.059 (23.061) seconds
+FlexibleR7M1VerifyTests: Executed 8 tests, with 0 failures (0 unexpected) in 36.427 (36.428) seconds
+
+## GOLDENS at 32f9500e's code (FlexibleAngledGoldenTests, 13/13 each)
+goldens_det: Executed 13 tests, with 0 failures (0 unexpected) in 13.441  · identical 38 · DIFFERS 0 · PART-SKIP 0
+goldens_unseeded: Executed 13 tests, with 0 failures (0 unexpected) in 13.321  · identical 32 · DIFFERS 0 · PART-SKIP 1
+  (det = SWIFT_DETERMINISTIC_HASHING=1)
+
+## STAGE-JOB HASHES: stage_job_hashes_r7m1v.txt (this folder) vs round7/merge/stage_job_hashes_r7merge.txt: IDENTICAL (whole file; 16 rows exit 0)
+
+## iOS: xcodebuild … -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build -> BUILD SUCCEEDED (TopOpt.debug.dylib 79365168 B, Oct 14 22:11)
+   NOT INSTALLED: TopOpt running on 147E56A1 (launchctl: UIKitApplication:com.nadim.topopt[8454], pid 84714) — install pending: the app is open.
+
+## (after the run) V1 renamed testNoFacePrismDesignsNothingAndTheSquishPageSaysTheOneLine -> testNoFacePrismShowsNothingOfCoresDesignsAndTheSquishPageSaysTheOneLine (the designs are still asked); rerun below
+FlexibleR7M1VerifyTests after the rename: 8 tests, 0 failures

@@ -1,0 +1,83 @@
+// TEMPORARY SPIKE (X1, not committed): the printed view's body cut on his pad, the plan's solid-flag route.
+#if canImport(MetalKit) && canImport(AppKit)
+import XCTest
+import AppKit
+import MetalKit
+import simd
+import TopOptDesign
+@testable import TopOptFlows
+@testable import TopOptKit
+
+@MainActor
+final class FlexibleX1SpikeProbe: XCTestCase {
+    static var dir: URL? { ProcessInfo.processInfo.environment["FLEX_X1_SPIKE_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) } }
+    typealias Cam = FlexibleRound6Tests.Cam
+    static let img1 = Cam(name: "img1", azimuth: .pi / 4, elevation: 0.62, zoom: 1)
+    static let top = Cam(name: "top", azimuth: .pi / 9, elevation: 1.35, zoom: 1)
+
+    func write(_ px: [UInt8], n: Int, _ name: String) throws {
+        guard let dir = Self.dir else { return }
+        var rgba = px
+        for i in stride(from: 0, to: rgba.count, by: 4) { rgba.swapAt(i, i + 2); rgba[i + 3] = 255 }
+        let ctx = try XCTUnwrap(CGContext(data: &rgba, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let img = try XCTUnwrap(ctx.makeImage())
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(name)
+        let dest = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, img, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+        print("FLEX-X1-SPIKE wrote \(url.path)")
+    }
+
+    /// Per flat vertex: the surface over the lattice region (the mask, either side of the face, ≥ ½).
+    static func open(_ mesh: ViewerMesh, _ f: FlexibleLatticeInputs) -> [Bool] {
+        let n = mesh.flat.vertexCount
+        let d = 0.75 * f.mask.spacing
+        return (0..<n).map { v in
+            let p = SIMD3<Float>(mesh.flat.positions[3 * v], mesh.flat.positions[3 * v + 1], mesh.flat.positions[3 * v + 2])
+            let nn = SIMD3<Float>(mesh.flat.normals[3 * v], mesh.flat.normals[3 * v + 1], mesh.flat.normals[3 * v + 2])
+            return Swift.max(f.mask.sample(p - nn * d), f.mask.sample(p + nn * d)) >= 0.5
+        }
+    }
+
+    func testSpike() async throws {
+        guard Self.dir != nil else { throw XCTSkip("opt-in") }
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let (r, s, m) = try await FlexibleR7M1Fixtures.hisPad(self, live: true)
+        let p = r.project
+        s.didExitSettings()
+        s.apply(p, owned: true, pageUp: false)
+        try await FlexibleHisProject.waitFor(240, "the lattice") { m.lattice != nil && !m.latticeBuilding && !m.latticeIsStale }
+        try await FlexibleHisProject.waitFor(300, "the sims") { !m.squish.isEmpty && !m.squish.values.contains(.pending) }
+        for _ in 0..<40 { try await Task.sleep(nanoseconds: 10_000_000) }
+        s.xrayOn = false
+        s.refresh()
+        print("FLEX-X1-SPIKE finish \(m.settings.finishMode)")
+        let settle = p.force.settleRotation ?? simd_quatf(from: SIMD3<Float>(0, 0, -1), to: SIMD3<Float>(0, -1, 0))
+        let mesh = try XCTUnwrap(s.mesh(p, on: .lattice))
+        let base = try XCTUnwrap(s.tints(p, on: .lattice, roles: [:], stress: nil))
+        var layer = try XCTUnwrap(s.layer(p, stage: .lattice, pageUp: false))
+        layer.hidden = false
+        let open = Self.open(mesh, layer.lattice)
+        print("FLEX-X1-SPIKE open vertices \(open.filter { $0 }.count) of \(open.count)")
+        let n = 1200
+        func frame(_ mesh: ViewerMesh, tints: [Float], alpha: Float, cam: Cam, layer: FlexibleLatticeLayerInputs?) throws -> [UInt8] {
+            let mr = try FlexibleRound6EvidenceProbe().renderer(mesh: mesh, tints: tints, dents: s.dents(p, on: .lattice), scale: s.dentScale(p, on: .lattice),
+                                                                 bodyAlpha: alpha, settle: settle, cam: cam, device: device, items: [], layer: layer)
+            let bg = DS.Color.background
+            return try XCTUnwrap(mr.renderOffscreen(size: n, clear: MTLClearColor(red: bg.r, green: bg.g, blue: bg.b, alpha: 1)))
+        }
+        // (a) the plan's solid-flag route: every vertex solid except over the region; body alpha 0
+        var flagged = base
+        for v in 0..<open.count { flagged[v * 8 + 5] = open[v] ? 0 : 1; flagged[v * 8 + 6] = 0 }
+        for cam in [Self.img1, Self.top] {
+            try write(try frame(mesh, tints: base, alpha: 1, cam: cam, layer: layer), n: n, "spike_opaque_\(cam.name).png")
+            try write(try frame(mesh, tints: flagged, alpha: 0, cam: cam, layer: layer), n: n, "spike_a_solidflag_alpha0_\(cam.name).png")
+            try write(try frame(mesh, tints: flagged, alpha: 0.998, cam: cam, layer: layer), n: n, "spike_a_solidflag_alpha0998_\(cam.name).png")
+            var pl = layer; pl.printed = true
+            try write(try frame(mesh, tints: flagged, alpha: 0, cam: cam, layer: pl), n: n, "spike_b_printed_bodyInGBuffer_\(cam.name).png")
+        }
+    }
+}
+#endif

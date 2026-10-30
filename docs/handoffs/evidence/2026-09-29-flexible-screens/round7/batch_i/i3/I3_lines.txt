@@ -1,0 +1,4 @@
+NO LINK (as saved): bc anchor · walls [] · k 1.117 (kRef 1.705) · shown u_x Face 6 20.89 mm · Face 2 20.58 mm · max|u| 33.16 mm · line 'Held by Group A · fixed on Topology'
+I3_01_13p_lbracket_play_full_load_NO_LINK.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by Group A · fixed on Topology'
+4 LINKED WALLS: bc wall · walls [738, 594, 738, 594] · k 1.705 (kRef 1.705) · shown u_x Face 6 8.54 mm · Face 2 8.13 mm · max|u| 8.63 mm · line 'Held by 4 linked walls'
+I3_02_13p_lbracket_play_full_load_4_LINKED.png: playing Group 1 · ×1.0 · held 1.0 · line 'Held by 4 linked walls'

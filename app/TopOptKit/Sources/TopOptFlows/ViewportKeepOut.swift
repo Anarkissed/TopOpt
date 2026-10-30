@@ -43,6 +43,7 @@
 
 import Foundation
 import CoreGraphics
+import SwiftUI
 
 /// What yields to what when viewport space runs out. Higher `rank` wins space and
 /// displaces lower ranks; the lowest present rank is hidden first in the no-room case.
@@ -143,8 +144,10 @@ public enum KeepOutSolver {
     /// smaller is treated at 44 pt (never silently shrunk — requirement 5). If 44 pt
     /// cannot be placed clear, the element is hidden (no-room), not squeezed.
     public static let minTouch: CGFloat = 44
-    /// A gap kept between two touch rects so they don't merely kiss.
-    public static let separation: CGFloat = 4
+    /// ★ THE APP-WIDE CHIP BOUNDARY (his iPad 2026-10-27: chips "must never overlap and they must ALWAYS have a boundary
+    /// around them with enough space between them so chips don't even come close enough to accidentally be tapped"):
+    /// the clear gap kept between any two touch rects (each already ≥ 44 pt). Was 4 pt — kissing.
+    public static let separation: CGFloat = 16
     /// A displaced element gets a leader line once its centre sits more than this far
     /// from its anchor (requirement 3). Chosen at the HIG tap radius (44/2 ≈ 22) plus a
     /// margin, so the leader appears exactly when the element clears its own anchor's
@@ -444,5 +447,49 @@ public struct KeepOutStabilizer: Equatable, Sendable {
 
     private static func sortById(_ p: [KeepOutPlacement]) -> [KeepOutPlacement] {
         p.sorted { $0.id < $1.id }
+    }
+}
+
+// MARK: - ★ the Selections panel always wins (his iPad 2026-10-28)
+
+/// "When the weight chip is behind the selections group, the selections group should ABSOLUTELY win. Make the chip either
+/// move, or make it blurry. NEVER cover the Selections modal." A placed chip that touches the panel (with the app-wide gap)
+/// moves to the nearest clear spot just outside it — right, above or below — or, with none, is withdrawn.
+public enum SelectionsPanelKeepOut {
+    public static func clear(_ placed: [String: KeepOutPlacement], sizes: [String: CGSize], panel: CGRect,
+                             viewport: CGSize) -> [String: KeepOutPlacement] {
+        let guardRect = panel.insetBy(dx: -KeepOutSolver.separation, dy: -KeepOutSolver.separation)
+        let screen = CGRect(origin: .zero, size: viewport)
+        var out = placed
+        func rect(_ c: CGPoint, _ s: CGSize) -> CGRect { CGRect(x: c.x - s.width / 2, y: c.y - s.height / 2, width: s.width, height: s.height) }
+        for id in placed.keys.sorted() {
+            guard let p = out[id], !p.hidden, let size = sizes[id], rect(p.center, size).intersects(guardRect) else { continue }
+            let others = out.values.filter { $0.id != id && !$0.hidden }.compactMap { o in sizes[o.id].map { rect(o.center, $0) } }
+            let gap = KeepOutSolver.separation
+            let candidates = [CGPoint(x: guardRect.maxX + size.width / 2, y: p.center.y),
+                              CGPoint(x: p.center.x, y: guardRect.minY - size.height / 2),
+                              CGPoint(x: p.center.x, y: guardRect.maxY + size.height / 2)]
+                .filter { c in
+                    let r = rect(c, size)
+                    return screen.contains(r) && !r.intersects(guardRect)
+                        && !others.contains { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }
+                }
+                .sorted { hypot($0.x - p.center.x, $0.y - p.center.y) < hypot($1.x - p.center.x, $1.y - p.center.y) }
+            let anchor = CGPoint(x: p.center.x - p.displacement.dx, y: p.center.y - p.displacement.dy)
+            if let c = candidates.first {
+                out[id] = KeepOutPlacement(id: id, center: c, displacement: CGVector(dx: c.x - anchor.x, dy: c.y - anchor.y),
+                                           needsLeader: false, hidden: false)
+            } else {
+                out[id] = KeepOutPlacement(id: id, center: p.center, displacement: p.displacement, needsLeader: false, hidden: true)
+            }
+        }
+        return out
+    }
+}
+
+extension View {
+    /// A chip withdrawn by the keep-out (no room clear of the Selections panel): faint, blurred and untappable.
+    func withdrawn(_ on: Bool) -> some View {
+        self.opacity(on ? 0.12 : 1).blur(radius: on ? 3 : 0).allowsHitTesting(!on)
     }
 }

@@ -1,0 +1,5 @@
+(1) Auto: isManual false · manual nil · toggle frame (244.5, 892.5, 119.0, 33.0)
+(2) Manual: part gyroid · cell 9.00 mm · density 0.1546 · walls 1.000 beads (seeded from Auto's lattice)
+(3) Group 1 own: gyroid · cell 9.00 mm · density 0.3092 · walls 2.000 beads
+(4) Group 1 sim: bc rest · k 1.000 · max|u| 1.37 mm
+(4) view line: 'Bend · what your lattice does at 5 lb'

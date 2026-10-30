@@ -20,6 +20,7 @@
 #include <vector>
 
 namespace topopt {
+static std::string scenarios_json(const std::vector<ScenarioReport>& ss);  // LOAD SCENARIOS
 namespace {
 
 // --- Serialization --------------------------------------------------------
@@ -83,6 +84,15 @@ void emit_variant(std::string& out, const VariantReport& v,
   // (1) optimizer-achieved fraction, (2) printed/count basis (handoff 104).
   out += in2 + "\"volume_fraction\": " + num_json(v.volume_fraction) + ",\n";
   out += in2 + "\"printed_fraction\": " + num_json(v.printed_fraction) + ",\n";
+  // CORE LIST item 40 — the rung's ASK beside what it achieved, on a run where
+  // some rung's target clamped to the density floor (report.hpp). Every other
+  // document keeps its exact bytes.
+  if (v.request_reported) {
+    out += in2 + "\"requested_volume_fraction\": " +
+           num_json(v.requested_volume_fraction) + ",\n";
+    out += in2 + "\"target_saturated\": " +
+           std::string(v.target_saturated ? "true" : "false") + ",\n";
+  }
   // "Volume saved" is the material removed vs the original solid part, on the
   // PRINTED/count basis (handoff 094/104): savings% and mass then share one voxel
   // count and can never disagree.
@@ -142,6 +152,69 @@ void emit_variant(std::string& out, const VariantReport& v,
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
   out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
+  // Edge / corner-only joints (report.hpp fragile_joints), only when there are
+  // any (absent = none): {"count": N, "message": "...", "positions_mm":
+  // [[x, y, z], ...]} — at most kFragileJointPositionsMax positions.
+  if (v.fragile_joints > 0) {
+    out += ",\n" + in2 + "\"fragile_joints\": {\"count\": " +
+           std::to_string(v.fragile_joints) + ", \"message\": " +
+           str_json(std::to_string(v.fragile_joints) +
+                    (v.fragile_joints == 1 ? " place where" : " places where") +
+                    " the part holds together only along an edge or at a corner: "
+                    "fragile when printed") +
+           ", \"positions_mm\": [";
+    for (std::size_t q = 0; q < v.fragile_joint_positions_mm.size(); ++q) {
+      const Vec3& p = v.fragile_joint_positions_mm[q];
+      out += std::string(q ? ", " : "") + "[" + num_json(p.x) + ", " + num_json(p.y) +
+             ", " + num_json(p.z) + "]";
+    }
+    out += "]}";
+  }
+  // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
+  // more than one body, a speck or a lost anchor to report.
+  if (v.bodies_reported) {
+    auto ids = [](const std::vector<int>& xs) {
+      std::string s = "[";
+      for (std::size_t i = 0; i < xs.size(); ++i)
+        s += (i ? ", " : "") + std::to_string(xs[i]);
+      return s + "]";
+    };
+    out += ",\n" + in2 + "\"bodies\": {\"exported\": " +
+           std::to_string(v.bodies_exported) +
+           ", \"specks_dropped\": " + std::to_string(v.specks_dropped) +
+           ", \"speck_voxels\": " + std::to_string(v.speck_voxels) +
+           ", \"speck_volume_mm3\": " + num_json(v.speck_volume_mm3) +
+           ", \"anchored_pieces_lost\": " + std::to_string(v.anchored_pieces_lost) +
+           ", \"lost_anchor_voxels\": " + std::to_string(v.lost_anchor_voxels) +
+           ", \"lost_anchor_face_ids\": " + ids(v.lost_anchor_face_ids) +
+           ", \"lost_anchor_region_ids\": " + ids(v.lost_anchor_region_ids) +
+           ", \"bridges\": " + std::to_string(v.bridges) +
+           ", \"bridge_voxels\": " + std::to_string(v.bridge_voxels);
+    if (!v.bridge_holds.empty()) {
+      out += ", \"bridge_holds\": [";
+      for (std::size_t i = 0; i < v.bridge_holds.size(); ++i) {
+        const BridgeHoldReport& h = v.bridge_holds[i];
+        out += std::string(i ? ", " : "") + "{\"size_mm\": " + num_json(h.size_mm) +
+               ", \"hold_margin\": " + num_json(h.hold_margin) +
+               ", \"thickenings\": " + std::to_string(h.thickenings) +
+               ", \"held\": " + (h.held ? "true" : "false") + "}";
+      }
+      out += "]";
+    }
+    out += "}";
+  }
+  if (!v.scenarios.empty())  // LOAD SCENARIOS: every scenario's certification
+    out += ",\n" + in2 + "\"scenarios\": " + scenarios_json(v.scenarios);
+  if (v.contact_rounds > 0)  // REAL BOLTS: the bearing anchors' contact loop
+    out += ",\n" + in2 + "\"bearing\": {\"contact_rounds\": " +
+           std::to_string(v.contact_rounds) +
+           ", \"settled\": " + (v.contact_settled ? "true" : "false") +
+           ", \"engaged\": " + std::to_string(v.contact_engaged) +
+           ", \"released\": " + std::to_string(v.contact_released) +
+           ", \"load_share\": " + num_json(v.contact_load_share) +
+           ", \"sliding_share\": " + num_json(v.contact_tangent_share) +
+           ", \"held_by_sliding\": " + (v.contact_held_by_sliding ? "true" : "false") +
+           ", \"kept_last\": " + (v.contact_kept_last ? "true" : "false") + "}";
   // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
   // of a growth run, and the licence for the [0,1] fraction bounds to be read on
   // the growth scale (validate_variant_object below). Emitted ONLY when the run
@@ -509,6 +582,142 @@ static void emit_variant_array(std::string& out, const char* key,
   out += trailing_comma ? ",\n" : "\n";
 }
 
+// CORE LIST item 40 — the "frozen_share" member (report.hpp FrozenShareReport).
+static void emit_frozen_share(std::string& out, const FrozenShareReport& fs,
+                              bool trailing_comma) {
+  out += "  \"frozen_share\": {\n";
+  out += "    \"part_solid_voxels\": " + std::to_string(fs.part_solid_voxels) + ",\n";
+  out += "    \"frozen_voxels\": " + std::to_string(fs.frozen_voxels) + ",\n";
+  out += "    \"frozen_material_voxels\": " + num_json(fs.frozen_material_voxels) +
+         ",\n";
+  out += "    \"active_voxels\": " + std::to_string(fs.active_voxels) + ",\n";
+  out += "    \"share\": " + num_json(fs.share) + ",\n";
+  out += "    \"smallest_honoured_fraction\": " +
+         num_json(fs.smallest_honoured_fraction) + ",\n";
+  // The variant files keep the name of the rung's REQUEST (variant_068 is the 0.68
+  // rung whatever it printed): the requested fraction is the app's join key.
+  out += "    \"files_named_by\": \"requested_volume_fraction\",\n";
+  out += "    \"sources\": [";
+  for (std::size_t i = 0; i < fs.sources.size(); ++i) {
+    const FrozenSourceCount& s = fs.sources[i];
+    out += (i == 0 ? "\n" : ",\n");
+    out += "      {\"source\": " + str_json(s.source);
+    if (s.face_id >= 0) out += ", \"face_id\": " + std::to_string(s.face_id);
+    if (s.region_id >= 0) out += ", \"region_id\": " + std::to_string(s.region_id);
+    out += ", \"voxels\": " + std::to_string(s.voxels) + "}";
+  }
+  out += fs.sources.empty() ? "],\n" : "\n    ],\n";
+  out += "    \"skipped_rungs\": [";
+  for (std::size_t i = 0; i < fs.skipped_rungs.size(); ++i) {
+    const SkippedRungReport& s = fs.skipped_rungs[i];
+    out += (i == 0 ? "\n" : ",\n");
+    out += "      {\"requested_volume_fraction\": " +
+           num_json(s.requested_volume_fraction) +
+           ", \"same_design_as\": " + num_json(s.same_design_as) +
+           ", \"reason\": " + str_json(s.reason) + "}";
+  }
+  out += fs.skipped_rungs.empty() ? "]\n" : "\n    ]\n";
+  out += trailing_comma ? "  },\n" : "  }\n";
+}
+
+// CORE LIST item 50 — the "strengthen" member (report.hpp StrengthenReport).
+static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
+  out += "  \"strengthen\": {\n";
+  out += "    \"as_drawn_margin\": " + num_json(sr.as_drawn_margin) + ",\n";
+  if (!sr.as_drawn_unheld.empty())  // LOAD SCENARIOS
+    out += "    \"as_drawn_unheld\": " + str_json(sr.as_drawn_unheld) + ",\n";
+  if (!sr.ceiling_unheld.empty())
+    out += "    \"ceiling_unheld\": " + str_json(sr.ceiling_unheld) + ",\n";
+  out += "    \"margin_required\": " + num_json(sr.margin_required) + ",\n";
+  // The user's safety margin (his decision of 2026-10-26): the margin version 1 is
+  // built to, as a multiple of the load (1.5 = 150 %).
+  out += "    \"safety_margin\": " + num_json(sr.margin_required) + ",\n";
+  out += "    \"reference_margin\": " + num_json(sr.reference_margin) + ",\n";
+  out += "    \"ceiling_margin\": " + num_json(sr.ceiling_margin) + ",\n";
+  out += "    \"original_mass_grams\": " + num_json(sr.original_mass_grams) + ",\n";
+  out += "    \"frozen_outside_box_voxels\": " +
+         std::to_string(sr.frozen_outside_box_voxels) + ",\n";
+  out += "    \"coarse_resolution\": " + std::to_string(sr.coarse_resolution) + ",\n";
+  out += "    \"rule\": {\"delta\": " + num_json(sr.delta) + ", \"gamma\": " +
+         num_json(sr.gamma) + ", \"vf_step\": " + num_json(sr.vf_step) + "},\n";
+  out += "    \"cap\": {\"face_id\": " + std::to_string(sr.cap_face_id) +
+         ", \"point\": [" + num_json(sr.cap_point.x) + ", " + num_json(sr.cap_point.y) +
+         ", " + num_json(sr.cap_point.z) + "], \"at_anchor_face\": " +
+         (sr.cap_at_anchor_face ? "true" : "false") + ", \"at_load_face\": " +
+         (sr.cap_at_load_face ? "true" : "false") + ", \"note\": " +
+         str_json(sr.cap_note) + "},\n";
+  out += "    \"versions\": [";
+  for (std::size_t i = 0; i < sr.versions.size(); ++i) {
+    const StrengthenVersionReport& v = sr.versions[i];
+    out += (i == 0 ? "\n" : ",\n");
+    out += "      {\"version\": " + std::to_string(v.version) +
+           ", \"stress_cut\": " + num_json(v.stress_cut) +
+           ", \"target_margin\": " + num_json(v.target_margin) +
+           ", \"status\": " + str_json(v.status) +
+           ", \"volume_fraction\": " + num_json(v.volume_fraction) +
+           ", \"in_loop_margin\": " + num_json(v.in_loop_margin) +
+           ", \"verified_margin\": " + num_json(v.verified_margin) +
+           ", \"mass_grams\": " + num_json(v.mass_grams) +
+           ", \"mass_fraction_of_original\": " + num_json(v.mass_fraction_of_original) +
+           ", \"max_deflection_mm\": " + num_json(v.max_deflection_mm) +
+           ", \"iou_with_original\": " + num_json(v.iou_with_original) +
+           ", \"essentially_original\": " + (v.essentially_original ? "true" : "false") +
+           ", \"anchors_attached\": " + (v.anchors_attached ? "true" : "false") +
+           ", \"specks\": " + std::to_string(v.specks) +
+           ", \"keep_clear_voxels\": " + std::to_string(v.keep_clear_voxels) +
+           ", \"coarse_runs\": " + std::to_string(v.coarse_runs) +
+           ", \"coarse_seeded_runs\": " + std::to_string(v.coarse_seeded) +
+           ", \"repairs\": " + std::to_string(v.repairs) +
+           ", \"seconds\": " + num_json(v.seconds) +
+           ", \"note\": " + str_json(v.note) +
+           ", \"target_rule\": " + str_json(v.target_rule) +
+           (v.scenarios.empty() ? std::string() : ", \"scenarios\": " + scenarios_json(v.scenarios)) +
+           ", \"attempts\": [" +
+           [&v]() {
+             std::string a;
+             for (std::size_t q = 0; q < v.attempts.size(); ++q) {
+               const StrengthenAttemptReport& t = v.attempts[q];
+               a += std::string(q ? ", " : "") + "{\"attempt\": " +
+                    std::to_string(t.attempt) +
+                    ", \"verified_margin\": " + num_json(t.verified_margin) +
+                    ", \"specks\": " + std::to_string(t.specks) +
+                    ", \"speck_volume_mm3\": " + num_json(t.speck_volume_mm3) +
+                    ", \"keep_clear_voxels\": " + std::to_string(t.keep_clear_voxels) +
+                    ", \"anchors_attached\": " + (t.anchors_attached ? "true" : "false") +
+                    ", \"rejection_reason\": " + str_json(t.rejection_reason) + "}";
+             }
+             return a;
+           }() +
+           "]" +
+           ", \"fine_start\": {\"from\": " + str_json(v.fine_start) +
+           ", \"loose_pieces\": " + std::to_string(v.fine_start_loose) +
+           ", \"loose_voxels_removed\": " +
+           std::to_string(v.fine_start_loose_voxels_removed) +
+           ", \"loose_voxels_left\": " + std::to_string(v.fine_start_loose_left) +
+           ", \"frozen_loose_pieces\": " + std::to_string(v.fine_start_frozen_loose) +
+           "}}";
+  }
+  out += sr.versions.empty() ? "]\n" : "\n    ]\n";
+  out += "  }\n";
+}
+
+// LOAD SCENARIOS — the shared key (the reviewer's ruling of 2026-10-26 03:45):
+// [{"name", "margin", "peak_mpa", "peak_mm": [x, y, z], "governs", "unheld"}] (+ the
+// weak springs' share, "weak_share").
+static std::string scenarios_json(const std::vector<ScenarioReport>& ss) {
+  std::string out = "[";
+  for (std::size_t i = 0; i < ss.size(); ++i) {
+    const ScenarioReport& s = ss[i];
+    out += std::string(i ? ", " : "") + "{\"name\": " + str_json(s.name) +
+           ", \"margin\": " + num_json(s.margin) + ", \"peak_mpa\": " + num_json(s.peak_mpa) +
+           ", \"peak_mm\": [" + num_json(s.peak_mm.x) + ", " + num_json(s.peak_mm.y) + ", " +
+           num_json(s.peak_mm.z) + "], \"governs\": " + (s.governs ? "true" : "false") +
+           ", \"unheld\": " + (s.unheld ? "true" : "false") +
+           ", \"weak_share\": " + num_json(s.weak_share) + "}";
+  }
+  return out + "]";
+}
+
 std::string job_report_json(const JobReport& report) {
   std::string out = "{\n";
   out += "  \"material\": " + str_json(report.material) + ",\n";
@@ -516,8 +725,26 @@ std::string job_report_json(const JobReport& report) {
   // Evaluated-but-rejected rungs (the honesty rider): always emitted (as [] when
   // the whole ladder was accepted) so a report reader can trust the field's
   // presence and never mistake omission for "nothing was rejected".
+  const bool more = report.frozen_share.evaluated || report.strengthen.evaluated;
   emit_variant_array(out, "rejected_variants", report.rejected,
-                     /*trailing_comma=*/false);
+                     /*trailing_comma=*/more);
+  if (report.frozen_share.evaluated)
+    emit_frozen_share(out, report.frozen_share,
+                      /*trailing_comma=*/report.strengthen.evaluated);
+  if (report.strengthen.evaluated) emit_strengthen(out, report.strengthen);
+  // LOAD SCENARIOS, top level: the scenarios of the LAST accepted line (the lightest
+  // that passed), else of the last rejected line. Absent when the job has none.
+  const std::vector<ScenarioReport>* top = nullptr;
+  for (const VariantReport& v : report.variants)
+    if (!v.scenarios.empty()) top = &v.scenarios;
+  if (top == nullptr)
+    for (const VariantReport& v : report.rejected)
+      if (!v.scenarios.empty()) top = &v.scenarios;
+  if (top != nullptr) {
+    // The block before it ended with "\n": reopen it with a comma.
+    out.insert(out.size() - 1, ",");
+    out += "  \"scenarios\": " + scenarios_json(*top) + "\n";
+  }
   out += "}\n";
   return out;
 }
@@ -649,6 +876,81 @@ static void validate_variant_object(const JsonValue& v, const std::string& ctx) 
         throw ReportError(
             ctx + ": a non-empty rejection_reason requires accepted=false");
     }
+
+    // CORE LIST items 41 + 47 — the optional "bodies" block. A lost anchor is a
+    // rejection, so it may appear only on a line that declares accepted=false.
+    if (const JsonValue* bd = find_field(v, "bodies")) {
+      if (bd->type != JsonValue::Type::Object)
+        throw ReportError(ctx + ": bodies must be an object");
+      require_int(*bd, "exported", ctx + ".bodies");
+      require_int(*bd, "specks_dropped", ctx + ".bodies");
+      require_int(*bd, "anchored_pieces_lost", ctx + ".bodies");
+      require_array(*bd, "lost_anchor_face_ids", ctx + ".bodies");
+      require_array(*bd, "lost_anchor_region_ids", ctx + ".bodies");
+      if (require_number(*bd, "anchored_pieces_lost", ctx + ".bodies") > 0.0 &&
+          !(acc != nullptr && acc->type == JsonValue::Type::Bool && !acc->boolean))
+        throw ReportError(ctx + ": a line that lost an anchored piece must be "
+                                "rejected (accepted=false)");
+    }
+
+    // CORE LIST item 40 — a rung's request and whether its target clamped to the
+    // density floor. Optional (only a run where some rung saturated carries them),
+    // and always together: a request with no saturation verdict, or the reverse,
+    // would leave the line unreadable.
+    const JsonValue* rvf = find_field(v, "requested_volume_fraction");
+    const JsonValue* ts = find_field(v, "target_saturated");
+    if ((rvf == nullptr) != (ts == nullptr))
+      throw ReportError(ctx +
+                        ": requested_volume_fraction and target_saturated come "
+                        "together");
+    if (rvf != nullptr) {
+      if (rvf->type != JsonValue::Type::Number ||
+          !(rvf->num > 0.0 && rvf->num <= 1.0))
+        throw ReportError(ctx + ": requested_volume_fraction must be in (0, 1]");
+      if (ts->type != JsonValue::Type::Bool)
+        throw ReportError(ctx + ": target_saturated must be a boolean");
+    }
+  }
+}
+
+// CORE LIST item 40 — the optional "frozen_share" member. When present its sources
+// add up to frozen_voxels (each frozen voxel counted once), the share is the
+// frozen material over the part, and every skipped rung says why.
+static void validate_frozen_share(const JsonValue& fs) {
+  const std::string ctx = "report.frozen_share";
+  if (fs.type != JsonValue::Type::Object)
+    throw ReportError(ctx + ": must be an object");
+  require_int(fs, "part_solid_voxels", ctx);
+  require_int(fs, "frozen_voxels", ctx);
+  require_int(fs, "active_voxels", ctx);
+  const double part = require_number(fs, "part_solid_voxels", ctx);
+  const double frozen = require_number(fs, "frozen_voxels", ctx);
+  const double material = require_number(fs, "frozen_material_voxels", ctx);
+  const double share = require_number(fs, "share", ctx);
+  require_number(fs, "smallest_honoured_fraction", ctx);
+  require_string(fs, "files_named_by", ctx);
+  if (!(part > 0.0) || frozen < 0.0 || material < 0.0 || material > frozen + 1e-9)
+    throw ReportError(ctx + ": voxel counts out of range");
+  if (std::fabs(share - material / part) > 1e-9)
+    throw ReportError(ctx + ": share must equal frozen_material_voxels / "
+                            "part_solid_voxels");
+  const JsonValue& sources = require_array(fs, "sources", ctx);
+  double sum = 0.0;
+  for (std::size_t i = 0; i < sources.arr.size(); ++i) {
+    const std::string sc = ctx + ".sources[" + std::to_string(i) + "]";
+    require_string(sources.arr[i], "source", sc);
+    require_int(sources.arr[i], "voxels", sc);
+    sum += require_number(sources.arr[i], "voxels", sc);
+  }
+  if (std::fabs(sum - frozen) > 0.5)
+    throw ReportError(ctx + ": the sources must add up to frozen_voxels");
+  const JsonValue& skipped = require_array(fs, "skipped_rungs", ctx);
+  for (std::size_t i = 0; i < skipped.arr.size(); ++i) {
+    const std::string sc = ctx + ".skipped_rungs[" + std::to_string(i) + "]";
+    require_number(skipped.arr[i], "requested_volume_fraction", sc);
+    require_number(skipped.arr[i], "same_design_as", sc);
+    if (require_string(skipped.arr[i], "reason", sc).empty())
+      throw ReportError(sc + ": a skipped rung must say why");
   }
 }
 
@@ -689,6 +991,9 @@ void validate_job_report_json(const std::string& json_text) {
                           "rejection_reason");
     }
   }
+
+  if (const JsonValue* fs = find_field(root, "frozen_share"))
+    validate_frozen_share(*fs);
 }
 
 }  // namespace topopt

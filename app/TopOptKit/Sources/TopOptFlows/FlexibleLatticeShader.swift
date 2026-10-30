@@ -1,0 +1,1153 @@
+// FlexibleLatticeShader — the MSL of the Flexible lattice preview (task
+// 2026-09-29-flexible-screens, in-pass round). The field's SECOND copy (see
+// FlexibleLatticeField.swift): `flx_field` here is a line-for-line port of
+// `FlexibleLatticeField.lattice(at:)`, and FlexibleLatticePassTests samples both at the
+// same points and fails if they disagree by more than 5 µm (`parityMM`).
+//
+// ★ A THIRD G-BUFFER WRITER, NOT A LAYER. The maintainer: "look at the way App does the
+// lattice preview and build upon that". So this is drawn the way Structural and Aesthetic
+// are: `flx_gbuffer` writes MeshRenderer's G-buffer (eye-Z, eye normal, albedo + mask) in
+// the depth prepass, and #354's own `lsdf_shade` lights it — the same material, AO,
+// creases and depth fade, capped at the same 1152 px. Its OWN library (`gbufferSource`),
+// never interpolated into `unifiedLatticeShaderSource`.
+//
+// ★ A CHANGE TO THE FIELD IS MADE IN BOTH COPIES (Swift reference, this MSL). The app is
+// the source of truth for this geometry until core's Flexible lattice exists.
+//
+// Layout of what lives here:
+//   * FlxUniforms / FlxFace / FlxFrame — matched to `FlexibleLatticePass.Uniforms` /
+//     `.FaceUniforms` / `.Frame` BY BYTE OFFSET (all float4 / float4x4, same order).
+//     `flx_uniform_echo` / `flx_frame_echo` read every field back BY NAME, so a field
+//     added or reordered on one side fails a test instead of drawing nonsense.
+//   * flx_sample2 / flx_sample2g — FlexGrid.sample on the PACKED (ρ, mask) volume: one
+//     integer `read()` per corner returns both channels. The same clamp of u to [0, n−1]
+//     and i0 ≤ n−2 clamp — EXACT, because ρ picks the gyroid's rungs and a rounded cell
+//     once halved the octet's (2026-08-26). `flx_sample2g` also returns ∇ρ (the blend
+//     weight's gradient needs it).
+//   * flx_sample_ds — the (part SDF, skin distance) volume. ★ STAGE B (task in-pass round:
+//     the Release frame missed 16 ms): rg16Float, HARDWARE-filtered (linear, clamp to
+//     edge — the same clamp to [0, n−1]), the octet's own SDF format. One sample for the
+//     eight reads, on the fetch every march step makes first. Its cost: half rounding
+//     plus the filter's 8-bit weights (1/256 of a voxel) — parity with Swift loosens from
+//     2 µm to ≤ 5 µm, and the reference (`FlexibleLatticePass.referenceInputs`) holds the
+//     half-rounded grids the GPU reads.
+//   * flx_gyroid / flx_wall / flx_field — the gyroid on a LADDER of true gyroids (one k per
+//     rung, neighbouring rungs blended — FlexibleLatticeField.gyroidSheet), the honeycomb,
+//     dRegion, dPart, dSkin.
+//   * flx_pullback / flx_deformed — the SQUISH (02 §6), inverted.
+//   * flx_march, flx_vertex, flx_gbuffer — the full-screen sphere trace into the G-buffer.
+//   * flx_field_probe / flx_squish_probe / flx_uniform_echo / flx_frame_echo — test kernels.
+//   * ★ X1 VERIFY: flx_wall_heat — Heat on, a wall takes the squish of its column (FlexibleWallHeat, slots 7…10);
+//     flx_heat_probe (tests).
+//   * ★ BATCH G: flx_fe_u / flx_fe_pullback — the squish as ONE continuous 3D displacement field
+//     (FlexibleFEField): texture slot 6, rgba16Float, hardware-filtered, node-centred, clamped to
+//     the node box; deformed → rest by fixed-point iteration (a contraction: the page's ×k keeps
+//     s·gmax ≤ ½). `flx_pullback` dispatches to it when `feK.x` is set — the march, the bisection,
+//     the normal, the albedo's rest ρ and the probes all follow. flx_pullback_probe (tests).
+
+enum FlexibleLatticeShader {
+    /// Textures 0, 1 are the packed volumes; the four per-face column tables occupy 2…5
+    /// (an `array<texture2d<float>, 4>`).
+    static let columnSlot = 2
+    static let maxFaces = FlexibleSquishField.maxFaces
+    /// ★ BATCH G: the squish sim's displacement field (a 3D rgba16Float texture), after the columns.
+    static let feSlot = 6
+    /// ★ X1 VERIFY: the walls' heat tables (FlexibleWallHeat), one per face slot, after the FE field (7…10).
+    static let heatSlot = 7
+
+    /// The field, the squish and the march — everything but the entry points.
+    static let fieldSource = """
+    // ── uniforms (all float4; order is the contract with FlexibleLatticePass.Uniforms) ──
+    struct FlxFace {
+        float4 centroid;   // xyz frame centroid; w = the largest depth (0 = this face does not move)
+        float4 xAxis;      // xyz; w = uMin
+        float4 yAxis;      // xyz; w = vMin
+        float4 load;       // xyz unit, INTO the part; w = column pitch (mm)
+        float4 extent;     // x = nu, y = nv, z = min entryT, w = max exitT (the stack's t range)
+    };
+
+    struct FlxUniforms {
+        float4 boxMin, boxMax;        // the lattice region's AABB (dilated per frame by s·maxDepth)
+        float4 shape;                 // x = topology (0 gyroid, 1 honeycomb), y = t, z = Lmin, w = Lmax
+        float4 shape2;                // x = honeycomb d, y = skinMM, z = max steps, w = 1: THE PRINTED VIEW (X1)
+        float4 buildDir;              // xyz
+        float4 rmO, rmN;              // (ρ, mask) grid: xyz = voxel-(0,0,0) centre, w = spacing; dims xyz; ★ U21 H: rmN.w = 1:
+                                      // the volume is rgba (z = ρ across a press's plane, w = the press side's share)
+        float4 dsO, dsN;              // (part SDF, skin distance) grid
+        float4 squish;                // x = s (MeshRenderer.flexScale), y = face count, z = 1: column walls ignored
+        float4 march;                 // x = step factor, y = step cap in cells, z = min step mm, w = 1: early-out
+        FlxFace faces[4];
+        float4 feO;                   // ★ BATCH G: xyz = FE node (0,0,0), w = node spacing
+        float4 feN;                   // xyz = node counts, w = this frame's safe contraction max(0.2, 1 − s·gmax)
+        float4 feK;                   // x = 1: FE mode, y = max |u|, z = iterations, w = tolerance (mm)
+        float4 tail;                  // layout sentinel (echoed)
+    };
+
+    // per frame: the camera, the renderer's own matrices, the colour ramp
+    struct FlxFrame {
+        float4 eye, rayX, rayY, rayDir;   // MODEL space (the octet's camera basis, no inversion)
+        float4x4 clipFromModel;           // MeshRenderer's P·V·M (uniforms.mvp)
+        float4x4 eyeFromModel;            // V·M (uniforms.modelView)
+        float4x4 eyeNormalBasis;          // rotation of V·M (uniforms.normalMatrix)
+        float4 sparse, dense;             // LatticeStructureColour.pale / FlexibleLatticePass.denseWall
+        float4 rhoSpan;                   // x = lo, y = hi (the in-mask ρ span); ★ batch M: z = 1: the
+                                          // walls take the Stress rainbow, w = its gain (1: the FE texture's
+                                          // w is already von Mises / the field's own top); ★ X1 verify: z = 2:
+                                          // the walls take the HEAT of their column, w = 1 / the legend's top (mm)
+        float4 tail;
+    };
+
+    // ★ BATCH M (M3, M7): the FEA rainbow (ResultsModel.stressColor's five stops, FlexibleColours.depthStops)
+    static float3 flx_rainbow(float t) {
+        const float3 c[5] = { float3(28, 60, 170) / 255.0f, float3(0, 170, 220) / 255.0f, float3(60, 190, 110) / 255.0f,
+                              float3(250, 220, 60) / 255.0f, float3(255, 70, 50) / 255.0f };
+        float x = clamp(t, 0.0f, 1.0f) * 4.0f;
+        int i = min(3, int(x));
+        return mix(c[i], c[i + 1], x - float(i));
+    }
+
+    // ── FlexGrid.sample on a packed 2-channel volume, exactly ─────────────────────────────
+    static inline float2 flx_at(texture3d<float> T, int i, int j, int k) {
+        return T.read(uint3(uint(i), uint(j), uint(k))).rg;
+    }
+
+    static float2 flx_sample2(texture3d<float> T, float4 O, float4 N, float3 p) {
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        float2 c00 = flx_at(T, i0, j0, k0) * (1 - fx) + flx_at(T, i1, j0, k0) * fx;
+        float2 c10 = flx_at(T, i0, j1, k0) * (1 - fx) + flx_at(T, i1, j1, k0) * fx;
+        float2 c01 = flx_at(T, i0, j0, k1) * (1 - fx) + flx_at(T, i1, j0, k1) * fx;
+        float2 c11 = flx_at(T, i0, j1, k1) * (1 - fx) + flx_at(T, i1, j1, k1) * fx;
+        float2 c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+
+    // the same sample AND the gradient of channel x (ρ), from the same eight values; 0 along
+    // an axis where p is clamped (FlexibleLatticeField.sampleWithGradient)
+    static float2 flx_sample2g(texture3d<float> T, float4 O, float4 N, float3 p, thread float3& gx) {
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        float2 c000 = flx_at(T, i0, j0, k0), c100 = flx_at(T, i1, j0, k0);
+        float2 c010 = flx_at(T, i0, j1, k0), c110 = flx_at(T, i1, j1, k0);
+        float2 c001 = flx_at(T, i0, j0, k1), c101 = flx_at(T, i1, j0, k1);
+        float2 c011 = flx_at(T, i0, j1, k1), c111 = flx_at(T, i1, j1, k1);
+        float2 c00 = c000 * (1 - fx) + c100 * fx, c10 = c010 * (1 - fx) + c110 * fx;
+        float2 c01 = c001 * (1 - fx) + c101 * fx, c11 = c011 * (1 - fx) + c111 * fx;
+        float2 c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        float ddx = ((c100.x - c000.x) * (1 - fy) + (c110.x - c010.x) * fy) * (1 - fz)
+                  + ((c101.x - c001.x) * (1 - fy) + (c111.x - c011.x) * fy) * fz;
+        float ddy = (c10.x - c00.x) * (1 - fz) + (c11.x - c01.x) * fz;
+        float ddz = c1v.x - c0v.x;
+        if (u.x < 0.0f || u.x > float(nx - 1)) ddx = 0.0f;
+        if (u.y < 0.0f || u.y > float(ny - 1)) ddy = 0.0f;
+        if (u.z < 0.0f || u.z > float(nz - 1)) ddz = 0.0f;
+        gx = float3(ddx, ddy, ddz) / O.w;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+
+    static inline float2 flx_sample_ds(texture3d<float> T, float4 O, float4 N, float3 p) {
+        constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+        float3 uvw = ((p - O.xyz) / O.w + 0.5f) / N.xyz;
+        return T.sample(smp, uvw).rg;
+    }
+
+    // ★ OUTSIDE THE PART'S GRID IS OUTSIDE THE PART (batch B review). The (SDF, skin) volume
+    // is sampled clamp-to-edge, and the preview's occupancy grid has no margin: its last
+    // texel lies ON the part's face (his pad's x = 100), SDF ≈ 0 there. Beyond it the clamped
+    // SDF stayed 0, so with that face's skin off F = max(wall, …, 0) was 0 on every gyroid
+    // sheet, and the march — its box dilated by the squish — drew walls up to s·maxDepth
+    // OUTSIDE the part (12 mm on his face 3). The distance to the grid's box is a lower bound
+    // on the distance to the part, which lies inside it (FlexibleLatticeField.dPart, the twin).
+    // INSIDE the box the SDF stands as it is (a max with 0 there would erase every wall).
+    static inline float flx_part_distance(float sdf, float4 O, float4 N, float3 p) {
+        float3 lo = O.xyz, hi = O.xyz + (N.xyz - 1.0f) * O.w;
+        float out = length(max(max(lo - p, p - hi), 0.0f));
+        return out > 0.0f ? max(sdf, out) : sdf;
+    }
+
+    // mod(x, y) = x − y·floor(x/y) (the spec's, NOT C's fmod: it never goes negative)
+    static inline float flx_fmod(float x, float y) { return x - y * floor(x / y); }
+
+    // ── one TRUE gyroid at a constant k: g and ∇g (FlexibleLatticeField.gyroid) ────────
+    // ★ q REDUCED TO [−π, π] FIRST, Cody–Waite (2π = 6.28125 + C2; the first product is exact
+    // for |n| < 2^15, so the reduced argument carries ~1e-7 rad), then fast::sincos, which
+    // is accurate on that interval. precise:: was the frame's cost once the ladder called
+    // it for two rungs inside a blend, ~11× per hit pixel (bisection + normal): the Release
+    // frame went 11.5 → 21.6 ms. Measured in one session (GPU time, gyroid squished):
+    // precise on the raw q 24.6 ms, precise on the reduced q 30.8, fast on the reduced q
+    // 14.2. Parity with the Swift reference is unchanged (T4: ~1 µm, dominated by the
+    // half-float SDF); the march, its bisection, the normal and the probes share this trig.
+    static float flx_gyroid(float3 p, float k, thread float3& grad) {
+        float3 q = p * k;
+        float3 n = rint(q * (0.5f / M_PI_F));
+        float3 qr = fma(-n, float3(6.28125f), q);
+        qr = fma(-n, float3(0.0019353071795864769f), qr);
+        float3 c;
+        float3 s = fast::sincos(qr, c);
+        grad = k * float3(c.x * c.y - s.z * s.x, c.y * c.z - s.x * s.y, c.z * c.x - s.y * s.z);
+        return s.x * c.y + s.y * c.z + s.z * c.x;
+    }
+
+    // ── FlexibleLatticeField.wall; `rhoRaw` is the sampled ρ, `Lcur` the local cell ─────
+    // ★ MANUAL P1: the gyroid of wall `t` (flx_wall's gyroid branch, t a parameter) and the honeycomb of cell d, wall t.
+    static float flx_gyroid_wall(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p, thread float& Lcur, float t) {
+        {
+            bool rhoIn = rhoRaw > 0.05f && rhoRaw < 0.9f;
+            float rho = min(max(rhoRaw, 0.05f), 0.9f);
+            float Lraw = 3.0915f * t / rho;
+            float L = min(max(Lraw, U.shape.z), U.shape.w);
+            // ★ A LADDER OF TRUE GYROIDS (FlexibleLatticeField.gyroidWall): q = k(p)·p had the
+            // local wavenumber k + p·∇k, so cells shrank or swelled with the distance from
+            // the ORIGIN. Each rung has ONE k; neighbouring rungs blend their sheet functions,
+            // and ∇G carries the blend weight's own gradient (through ∇ρ).
+            float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(L / U.shape.z));
+            float j0 = floor(j);
+            float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+            float w = x * x * (3.0f - 2.0f * x);
+            float dwdj = 6.0f * x * (1.0f - x) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f);
+            float La = U.shape.z * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+            float Lb = U.shape.z * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+            float ka = 2 * M_PI_F / La, kb = 2 * M_PI_F / Lb;
+            // the step cap follows the FINEST rung in play
+            Lcur = w < 1.0f ? La : Lb;
+            float g = 0.0f, gA = 0.0f, gB = 0.0f;
+            float3 grad = float3(0.0f), gr;
+            if (w < 1.0f) { gA = flx_gyroid(p, ka, gr); g += (1.0f - w) * gA; grad += (1.0f - w) * gr; }
+            if (w > 0.0f) { gB = flx_gyroid(p, kb, gr); g += w * gB; grad += w * gr; }
+            if (w > 0.0f && w < 1.0f && rhoIn && Lraw > U.shape.z && Lraw < U.shape.w && j > 0.0f) {
+                // ∇j = 4/ln2 · ∇L/L, ∇L = −L/ρ·∇ρ
+                float3 gradJ = -(\(FlexibleLatticeField.ladderStepsPerOctave)f / M_LN2_F) * gradRho / rho;
+                grad += (gB - gA) * dwdj * gradJ;
+            }
+            float k = (1.0f - w) * ka + w * kb;
+            return abs(g) / max(length(grad), 0.05f * k) - 0.5f * t;
+        }
+    }
+    static float flx_honey_wall(constant FlxUniforms& U, float3 p, float d, float t) {
+        float3 b = normalize(U.buildDir.xyz);
+        float3 ref = abs(b.x) < 0.9f ? float3(1, 0, 0) : float3(0, 1, 0);
+        float3 e1 = normalize(cross(b, ref)), e2 = cross(b, e1);
+        float2 v = float2(dot(p, e1), dot(p, e2));
+        float2 r = float2(d, 1.7320508f * d), h = r * 0.5f;
+        float2 A = float2(flx_fmod(v.x, r.x), flx_fmod(v.y, r.y)) - h;
+        float2 B = float2(flx_fmod(v.x - h.x, r.x), flx_fmod(v.y - h.y, r.y)) - h;
+        float2 q = length_squared(A) < length_squared(B) ? A : B;
+        float n = max(abs(q.x), max(abs(0.5f * q.x + 0.8660254f * q.y), abs(-0.5f * q.x + 0.8660254f * q.y)));
+        return abs(0.5f * d - n) - 0.5f * t;
+    }
+    static float flx_wall(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p, thread float& Lcur) {
+        if (U.shape.x < 0.5f) return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, U.shape.y);
+        Lcur = U.shape2.x;
+        return flx_honey_wall(U, p, U.shape2.x, U.shape.y);
+    }
+
+    // ── ★ R7-U21 H, EDGE-LOOK (his Img3 of 2026-10-21: "Edges/corners don't look great") ─────────────────────────
+    // FlexibleLatticeField.seamSheet, the twin. A press's column is cut at its flat prism's plane by voxel centre, so ρ jumps
+    // up to 4.66 ladder rungs inside one voxel there and the ladder blended ACROSS the jump shredded a band along the plane.
+    // When the (ρ, mask) volume carries the seam (rmN.w = 1: z = ρ carried across the plane, w = the press side's share),
+    // a cell with a seam corner (z ≠ x) draws each side's OWN gyroid from its own same-side trilinear (each with its own
+    // ∇ρ), meeting at σ = smoothstep(trilinear share) — ½ on the plane's true position — with the whole gradient. Any
+    // other cell: flx_wall, exactly as before. The step cap follows the finer side in play.
+    static float flx_ladder_sheet(constant FlxUniforms& U, float rhoRaw, float3 gradRho, float3 p,
+                                  thread float3& grad, thread float& k, thread float& Lcur, float t) {
+        bool rhoIn = rhoRaw > 0.05f && rhoRaw < 0.9f;
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float Lraw = 3.0915f * t / rho;
+        float L = min(max(Lraw, U.shape.z), U.shape.w);
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(L / U.shape.z));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float dwdj = 6.0f * x * (1.0f - x) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f);
+        float La = U.shape.z * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = U.shape.z * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float ka = 2 * M_PI_F / La, kb = 2 * M_PI_F / Lb;
+        Lcur = w < 1.0f ? La : Lb;
+        float g = 0.0f, gA = 0.0f, gB = 0.0f;
+        float3 gr;
+        grad = float3(0.0f);
+        if (w < 1.0f) { gA = flx_gyroid(p, ka, gr); g += (1.0f - w) * gA; grad += (1.0f - w) * gr; }
+        if (w > 0.0f) { gB = flx_gyroid(p, kb, gr); g += w * gB; grad += w * gr; }
+        if (w > 0.0f && w < 1.0f && rhoIn && Lraw > U.shape.z && Lraw < U.shape.w && j > 0.0f) {
+            float3 gradJ = -(\(FlexibleLatticeField.ladderStepsPerOctave)f / M_LN2_F) * gradRho / rho;
+            grad += (gB - gA) * dwdj * gradJ;
+        }
+        k = (1.0f - w) * ka + w * kb;
+        return g;
+    }
+
+    // trilinear of 8 corners (x fastest) and its gradient, 0 along a clamped axis (FlexibleLatticeField.trilinear)
+    static float flx_tri8(thread const float* c, float fx, float fy, float fz, float3 u, float4 N, float h, thread float3& gr) {
+        float c00 = c[0] * (1 - fx) + c[1] * fx, c10 = c[2] * (1 - fx) + c[3] * fx;
+        float c01 = c[4] * (1 - fx) + c[5] * fx, c11 = c[6] * (1 - fx) + c[7] * fx;
+        float c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        float gx = ((c[1] - c[0]) * (1 - fy) + (c[3] - c[2]) * fy) * (1 - fz) + ((c[5] - c[4]) * (1 - fy) + (c[7] - c[6]) * fy) * fz;
+        float gy = (c10 - c00) * (1 - fz) + (c11 - c01) * fz;
+        float gz = c1v - c0v;
+        if (u.x < 0.0f || u.x > N.x - 1.0f) gx = 0.0f;
+        if (u.y < 0.0f || u.y > N.y - 1.0f) gy = 0.0f;
+        if (u.z < 0.0f || u.z > N.z - 1.0f) gz = 0.0f;
+        gr = float3(gx, gy, gz) / h;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+
+    static float flx_seam_gyroid(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur, float t) {
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        float4 c[8] = { T.read(uint3(uint(i0), uint(j0), uint(k0))), T.read(uint3(uint(i1), uint(j0), uint(k0))),
+                        T.read(uint3(uint(i0), uint(j1), uint(k0))), T.read(uint3(uint(i1), uint(j1), uint(k0))),
+                        T.read(uint3(uint(i0), uint(j0), uint(k1))), T.read(uint3(uint(i1), uint(j0), uint(k1))),
+                        T.read(uint3(uint(i0), uint(j1), uint(k1))), T.read(uint3(uint(i1), uint(j1), uint(k1))) };
+        bool seam = false;
+        float inC[8], outC[8], phC[8];
+        for (int q = 0; q < 8; q++) {
+            if (c[q].z != c[q].x) seam = true;
+            bool pressSide = c[q].w >= 0.5f;
+            inC[q] = pressSide ? c[q].x : c[q].z;
+            outC[q] = pressSide ? c[q].z : c[q].x;
+            phC[q] = c[q].w;
+        }
+        if (!seam) return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, t);
+        float3 gIn, gOut, gPh;
+        float rIn = flx_tri8(inC, fx, fy, fz, u, N, O.w, gIn);
+        float rOut = flx_tri8(outC, fx, fy, fz, u, N, O.w, gOut);
+        float ph = clamp(flx_tri8(phC, fx, fy, fz, u, N, O.w, gPh), 0.0f, 1.0f);
+        float sigma = ph * ph * (3.0f - 2.0f * ph);
+        float3 dSigma = (ph > 0.0f && ph < 1.0f ? 6.0f * ph * (1.0f - ph) : 0.0f) * gPh;
+        float3 grA, grB;
+        float kA, kB, LA, LB;
+        float G, k;
+        float3 grad;
+        if (sigma <= 0.0f) {
+            G = flx_ladder_sheet(U, rOut, gOut, p, grad, k, Lcur, t);
+        } else if (sigma >= 1.0f) {
+            G = flx_ladder_sheet(U, rIn, gIn, p, grad, k, Lcur, t);
+        } else {
+            float a = flx_ladder_sheet(U, rOut, gOut, p, grA, kA, LA, t);
+            float b = flx_ladder_sheet(U, rIn, gIn, p, grB, kB, LB, t);
+            G = (1.0f - sigma) * a + sigma * b;
+            grad = (1.0f - sigma) * grA + sigma * grB + (b - a) * dSigma;
+            k = (1.0f - sigma) * kA + sigma * kB;
+            Lcur = min(LA, LB);
+        }
+        return abs(G) / max(length(grad), 0.05f * k) - 0.5f * t;
+    }
+
+    // ── ★ ROUND 7 · MANUAL P1 — A TYPE AND WALLS PER GROUP (FlexibleLatticeField.manualWall, the twin) ─────────────────
+    // When buildDir.w = 1 the (ρ, mask) volume is TWICE as deep: slices nz … 2nz−1 hold (t mm, type share) per voxel. t and the
+    // share are trilinear (8 integer reads, as ρ's); share < ½: a gyroid of wall t (the press seam where a cell holds one), else a
+    // honeycomb of wall t, d = 2t/ρ on the ladder's rungs (dMin = 2·tMin/0.9 = shape.z·2/3.0915), neighbours blended.
+    static float2 flx_manual_tk(constant FlxUniforms& U, texture3d<float> T, float3 p) {
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        k0 += nz; k1 += nz;
+        float2 c00 = flx_at(T, i0, j0, k0) * (1 - fx) + flx_at(T, i1, j0, k0) * fx;
+        float2 c10 = flx_at(T, i0, j1, k0) * (1 - fx) + flx_at(T, i1, j1, k0) * fx;
+        float2 c01 = flx_at(T, i0, j0, k1) * (1 - fx) + flx_at(T, i1, j0, k1) * fx;
+        float2 c11 = flx_at(T, i0, j1, k1) * (1 - fx) + flx_at(T, i1, j1, k1) * fx;
+        float2 c0v = c00 * (1 - fy) + c10 * fy, c1v = c01 * (1 - fy) + c11 * fy;
+        return c0v * (1 - fz) + c1v * fz;
+    }
+    static float flx_wall_manual(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur) {
+        float2 tk = flx_manual_tk(U, T, p);
+        float t = max(tk.x, 1e-3f);
+        bool uniform = length(gradRho) < \(FlexibleLatticeField.uniformGradient)f;   // one density: the EXACT cell
+        if (tk.y < 0.5f) {
+            if (U.rmN.w > 0.5f) return flx_seam_gyroid(U, T, p, rhoRaw, gradRho, Lcur, t);
+            if (uniform) {
+                float rho = min(max(rhoRaw, 0.05f), 0.9f);
+                float L = min(max(3.0915f * t / rho, U.shape.z), U.shape.w), k = 2 * M_PI_F / L;
+                float3 gr;
+                float g = flx_gyroid(p, k, gr);
+                Lcur = L;
+                return abs(g) / max(length(gr), 0.05f * k) - 0.5f * t;
+            }
+            return flx_gyroid_wall(U, rhoRaw, gradRho, p, Lcur, t);
+        }
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float dMin = U.shape.z * 2.0f / 3.0915f, dMax = U.shape.w * 2.0f / 3.0915f;
+        float d = min(max(2.0f * t / rho, dMin), dMax);
+        if (uniform) { Lcur = d; return flx_honey_wall(U, p, d, t); }
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(d / dMin));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float La = dMin * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = dMin * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        Lcur = w < 1.0f ? La : Lb;
+        if (w <= 0.0f) return flx_honey_wall(U, p, La, t);
+        if (w >= 1.0f) return flx_honey_wall(U, p, Lb, t);
+        return (1.0f - w) * flx_honey_wall(U, p, La, t) + w * flx_honey_wall(U, p, Lb, t);
+    }
+
+    // ── ★ ROUND 7 · MANUAL P2 — THE DRAWING MATCHES THE SETTINGS (FlexibleLatticeField.manualPieceWall, the twin) ─────────
+    // When buildDir.w = 2 the (ρ, mask) volume is THREE times as deep: slices nz … 2nz−1 hold (t mm, piece code) and 2nz … 3nz−1
+    // (ρ of the other piece carried here, its code). Code = 8·piece + 4·stepped band (T2) + 2·graded + type. A cell of one piece: its lattice (exact
+    // cell, or the ladder under a Default grade). A SEAM cell: per piece its share φ and same-side ρ; two gyroids blend their
+    // sheets by σ = smoothstep(φA / (φA + φB)) with the whole gradient; any other pair (T2: a Stepped band on either side too): A's wall ∪ a seam wall on φA = φB.
+    static float flx_piece_sheet(constant FlxUniforms& U, float3 p, float rhoRaw, float3 gradRho, float t, bool graded,
+                                 thread float3& grad, thread float& k, thread float& Lcur) {
+        if (!graded) {
+            float rho = min(max(rhoRaw, 0.05f), 0.9f);
+            float L = min(max(3.0915f * t / rho, U.shape.z), U.shape.w);
+            k = 2 * M_PI_F / L;
+            Lcur = L;
+            return flx_gyroid(p, k, grad);
+        }
+        return flx_ladder_sheet(U, rhoRaw, gradRho, p, grad, k, Lcur, t);
+    }
+    static float flx_piece_honey(constant FlxUniforms& U, float3 p, float rhoRaw, float t, bool graded, thread float& Lcur) {
+        float rho = min(max(rhoRaw, 0.05f), 0.9f);
+        float dMin = U.shape.z * 2.0f / 3.0915f, dMax = U.shape.w * 2.0f / 3.0915f;
+        float d = min(max(2.0f * t / rho, dMin), dMax);
+        if (!graded) { Lcur = d; return flx_honey_wall(U, p, d, t); }
+        float j = max(0.0f, \(FlexibleLatticeField.ladderStepsPerOctave)f * log2(d / dMin));
+        float j0 = floor(j);
+        float x = clamp((j - j0 - \(FlexibleLatticeField.blendLo)f) / (\(FlexibleLatticeField.blendHi)f - \(FlexibleLatticeField.blendLo)f), 0.0f, 1.0f);
+        float w = x * x * (3.0f - 2.0f * x);
+        float La = dMin * exp2(j0 / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        float Lb = dMin * exp2((j0 + 1.0f) / \(FlexibleLatticeField.ladderStepsPerOctave)f);
+        Lcur = w < 1.0f ? La : Lb;
+        if (w <= 0.0f) return flx_honey_wall(U, p, La, t);
+        if (w >= 1.0f) return flx_honey_wall(U, p, Lb, t);
+        return (1.0f - w) * flx_honey_wall(U, p, La, t) + w * flx_honey_wall(U, p, Lb, t);
+    }
+    static float flx_piece_distance(constant FlxUniforms& U, float3 p, float rho, float3 gradRho, float t, float code,
+                                    thread float& Lcur) {
+        int ci = int(code + 0.5f);
+        bool graded = ((ci >> 1) & 1) == 1;
+        if ((ci & 1) == 1) return flx_piece_honey(U, p, rho, t, graded, Lcur);
+        float3 gr;
+        float k;
+        float G = flx_piece_sheet(U, p, rho, gradRho, t, graded, gr, k, Lcur);
+        return abs(G) / max(length(gr), 0.05f * k) - 0.5f * t;
+    }
+    static float flx_wall_pieces(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                                 thread float& Lcur) {
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1));
+        float uy = min(max(u.y, 0.0f), float(ny - 1));
+        float uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2));
+        int k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        float fx = ux - float(i0), fy = uy - float(j0), fz = uz - float(k0);
+        uint3 ix[8] = { uint3(i0, j0, k0), uint3(i1, j0, k0), uint3(i0, j1, k0), uint3(i1, j1, k0),
+                        uint3(i0, j0, k1), uint3(i1, j0, k1), uint3(i0, j1, k1), uint3(i1, j1, k1) };
+        uint3 h1 = uint3(0, 0, uint(nz)), h2 = uint3(0, 0, uint(2 * nz));
+        float cd[8], tt[8];
+        bool seam = false;
+        for (int q = 0; q < 8; q++) {
+            float2 v = T.read(ix[q] + h1).rg;
+            tt[q] = v.x; cd[q] = v.y;
+            if (cd[q] != cd[0]) seam = true;
+        }
+        if (!seam) return flx_piece_distance(U, p, rhoRaw, gradRho, max(tt[0], 1e-3f), cd[0], Lcur);
+        float rr[8], aa[8], oo[8];
+        for (int q = 0; q < 8; q++) {
+            rr[q] = T.read(ix[q]).x;
+            float2 w = T.read(ix[q] + h2).rg;
+            aa[q] = w.x; oo[q] = w.y;
+        }
+        int best = -1, second = -1;
+        float pb = -1.0f, ps = -1.0f;
+        float3 gb = float3(0.0f), gs = float3(0.0f);
+        for (int q = 0; q < 8; q++) {
+            bool dup = false;
+            for (int r = 0; r < q; r++) { if (cd[r] == cd[q]) dup = true; }
+            if (dup) continue;
+            float ind[8];
+            for (int r = 0; r < 8; r++) ind[r] = cd[r] == cd[q] ? 1.0f : 0.0f;
+            float3 gph;
+            float ph = flx_tri8(ind, fx, fy, fz, u, N, O.w, gph);
+            if (ph > pb) { second = best; ps = pb; gs = gb; best = q; pb = ph; gb = gph; }
+            else if (ph > ps) { second = q; ps = ph; gs = gph; }
+        }
+        float rA, rB, tA = 0.0f, tB = 0.0f;
+        float3 gA, gB;
+        {
+            float c[8], d[8];
+            float PA = cd[best], PB = cd[second];
+            // ★ T2: a piece of one density reads it where a corner carries a third piece's ρ (FlexibleLatticeField.manualPieceWall)
+            float sA = 0.0f, nA = 0.0f, sB = 0.0f, nB = 0.0f;
+            for (int r = 0; r < 8; r++) {
+                if (cd[r] == PA) { sA += rr[r]; nA += 1.0f; }
+                if (cd[r] == PB) { sB += rr[r]; nB += 1.0f; }
+            }
+            bool oneA = ((int(PA + 0.5f) >> 1) & 1) == 0, oneB = ((int(PB + 0.5f) >> 1) & 1) == 0;
+            for (int r = 0; r < 8; r++) {
+                if (cd[r] == PA) { c[r] = rr[r]; if (tA == 0.0f) tA = tt[r]; } else { c[r] = oo[r] == PA ? aa[r] : (oneA ? sA / nA : rr[r]); }
+                if (cd[r] == PB) { d[r] = rr[r]; if (tB == 0.0f) tB = tt[r]; } else { d[r] = oo[r] == PB ? aa[r] : (oneB ? sB / nB : rr[r]); }
+            }
+            rA = flx_tri8(c, fx, fy, fz, u, N, O.w, gA);
+            rB = flx_tri8(d, fx, fy, fz, u, N, O.w, gB);
+            tA = max(tA, 1e-3f); tB = max(tB, 1e-3f);
+        }
+        float cA = cd[best], cB = cd[second];
+        int iA = int(cA + 0.5f), iB = int(cB + 0.5f);
+        bool bandEdge = ((iA >> 2) & 1) == 1 || ((iB >> 2) & 1) == 1;   // ★ T2: a Stepped band either side → the seam wall below
+        if ((iA & 1) == 0 && (iB & 1) == 0 && !bandEdge) {
+            float3 grA, grB;
+            float kA, kB, LA, LB;
+            float GA = flx_piece_sheet(U, p, rA, gA, tA, ((iA >> 1) & 1) == 1, grA, kA, LA);
+            float GB = flx_piece_sheet(U, p, rB, gB, tB, ((iB >> 1) & 1) == 1, grB, kB, LB);
+            float S = pb + ps;
+            float x = clamp(pb / S, 0.0f, 1.0f);
+            float3 dx = (gb * S - pb * (gb + gs)) / (S * S);
+            float sigma = x * x * (3.0f - 2.0f * x);
+            float3 dSigma = 6.0f * x * (1.0f - x) * dx;
+            float G = sigma * GA + (1.0f - sigma) * GB;
+            float3 grad = sigma * grA + (1.0f - sigma) * grB + (GA - GB) * dSigma;
+            float k = sigma * kA + (1.0f - sigma) * kB;
+            float t = sigma * tA + (1.0f - sigma) * tB;
+            Lcur = min(LA, LB);
+            return abs(G) / max(length(grad), 0.05f * k) - 0.5f * t;
+        }
+        float a = flx_piece_distance(U, p, rA, gA, tA, cA, Lcur);
+        float delta = pb - ps;
+        float gd = length(gb - gs);
+        float sheet = abs(delta) / max(gd, 0.1f / O.w) - 0.5f * min(tA, tB);
+        return min(a, sheet);
+    }
+
+    static float flx_wall_seam(constant FlxUniforms& U, texture3d<float> T, float3 p, float rhoRaw, float3 gradRho,
+                               thread float& Lcur) {
+        if (U.buildDir.w > 1.5f) return flx_wall_pieces(U, T, p, rhoRaw, gradRho, Lcur);   // ★ MANUAL P2
+        if (U.buildDir.w > 0.5f) return flx_wall_manual(U, T, p, rhoRaw, gradRho, Lcur);
+        if (U.rmN.w < 0.5f || U.shape.x > 0.5f) return flx_wall(U, rhoRaw, gradRho, p, Lcur);
+        return flx_seam_gyroid(U, T, p, rhoRaw, gradRho, Lcur, U.shape.y);
+    }
+
+    // ── ★ ROUND 7, X1 — THE PRINTED SOLID (FlexibleLatticeField.printedSolid, the twin) ──────
+    // His words (2026-10-14): "The lattice should be visible without x-ray on as long as finish is set to something
+    // that isn't 'covered' … If lattice is on without x-ray view, we see the lattice plus the solid." With X-ray off the
+    // field also draws what the PRINT keeps solid around the walls: inside the part AND (inside the region within the
+    // finish's skin — Rim's bands, Skin's perforated sheet — OR outside the region: the pocket's own wall and floor).
+    // S = max(dPart, min(max(dRegion, −dSkin), −dRegion)); the field is min(F, S). Gated by shape2.w (0: X-ray and the
+    // Squish page — byte-identical).
+    static inline float flx_printed_solid(float dRegion, float dPart, float dSkin) {
+        return max(dPart, min(max(dRegion, -dSkin), -dRegion));
+    }
+
+    // ── ★ ROUND 7 · T2 — THE CLIPS END A HONEYCOMB WALL SQUARE (FlexibleLatticeField.squareClip, the twin) ─────────────
+    // A uniform honeycomb's wall cross-section is kept only where BOTH its faces (p − n·w and p − n·(w + t), per wall family
+    // through p) are inside the region and the part: every cut wall ends square and whole, never past the old clip (the value ≥
+    // the plain clip's — the march's bounds hold); at a junction any whole wall keeps it. Only on or beside a wall (w < ½ t,
+    // fading out at ½ t) and where a clip can reach (the SDF within 1.5 t; the mask below 1 at a corner of the cube p ± 1.5 t).
+    static float flx_dregion_at(constant FlxUniforms& U, texture3d<float> T, float3 q) {
+        return (0.5f - flx_sample2(T, U.rmO, U.rmN, q).y) * 2 * U.rmO.w;
+    }
+    static float flx_dpart_at(constant FlxUniforms& U, texture3d<float> dsT, float3 q) {
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, q);
+        return flx_part_distance(ds.x, U.dsO, U.dsN, q);
+    }
+    // the uniform honeycomb drawn at p (FlexibleLatticeField.uniformHoneycomb): Auto's; a Manual piece of one density off its seams
+    static bool flx_uniform_honey(constant FlxUniforms& U, texture3d<float> T, float3 p, float Lcur, thread float& d, thread float& t) {
+        if (U.buildDir.w < 0.5f) { d = U.shape2.x; t = U.shape.y; return U.shape.x > 0.5f; }
+        if (U.buildDir.w < 1.5f) return false;
+        float4 O = U.rmO, N = U.rmN;
+        float3 u = (p - O.xyz) / O.w;
+        int nx = int(N.x), ny = int(N.y), nz = int(N.z);
+        float ux = min(max(u.x, 0.0f), float(nx - 1)), uy = min(max(u.y, 0.0f), float(ny - 1)), uz = min(max(u.z, 0.0f), float(nz - 1));
+        int i0 = min(int(ux), max(0, nx - 2)), j0 = min(int(uy), max(0, ny - 2)), k0 = min(int(uz), max(0, nz - 2));
+        int i1 = min(i0 + 1, nx - 1), j1 = min(j0 + 1, ny - 1), k1 = min(k0 + 1, nz - 1);
+        uint3 h1 = uint3(0, 0, uint(nz));
+        float2 c0 = T.read(uint3(i0, j0, k0) + h1).rg;
+        uint3 ix[7] = { uint3(i1, j0, k0), uint3(i0, j1, k0), uint3(i1, j1, k0), uint3(i0, j0, k1), uint3(i1, j0, k1),
+                        uint3(i0, j1, k1), uint3(i1, j1, k1) };
+        for (int q = 0; q < 7; q++) { if (T.read(ix[q] + h1).g != c0.y) return false; }
+        int ci = int(c0.y + 0.5f);
+        if ((ci & 1) != 1 || ((ci >> 1) & 1) == 1) return false;
+        d = Lcur; t = max(c0.x, 1e-3f);
+        return true;
+    }
+    // returns max(dRegion, dPart), squared to a uniform honeycomb's walls (a gyroid: the plain clips)
+    static float flx_square_clip(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT, float3 p, float w, float Lcur,
+                                 float dRegion, float dPart) {
+        float base = max(dRegion, dPart);
+        float hd = 0.0f, t = 0.0f;
+        if (!flx_uniform_honey(U, rmT, p, Lcur, hd, t)) return base;
+        if (w >= 0.5f * t) return base;
+        float R = 1.5f * t;
+        bool near = dPart > -R - 0.01f;
+        for (int c = 0; c < 8 && !near; c++) {
+            float3 q = p + float3((c & 1) == 0 ? -R : R, (c & 2) == 0 ? -R : R, (c & 4) == 0 ? -R : R);
+            if (flx_sample2(rmT, U.rmO, U.rmN, q).y < 0.99999f) near = true;
+        }
+        if (!near) return base;
+        float3 b = normalize(U.buildDir.xyz);
+        float3 rf = abs(b.x) < 0.9f ? float3(1, 0, 0) : float3(0, 1, 0);
+        float3 e1 = normalize(cross(b, rf)), e2 = cross(b, e1);
+        float2 v = float2(dot(p, e1), dot(p, e2));
+        float2 r = float2(hd, 1.7320508f * hd), h = r * 0.5f;
+        float2 A = float2(flx_fmod(v.x, r.x), flx_fmod(v.y, r.y)) - h;
+        float2 B = float2(flx_fmod(v.x - h.x, r.x), flx_fmod(v.y - h.y, r.y)) - h;
+        float2 q = length_squared(A) < length_squared(B) ? A : B;
+        float2 ax[3] = { float2(1.0f, 0.0f), float2(0.5f, 0.8660254f), float2(-0.5f, 0.8660254f) };
+        float sq = 1e30f;
+        for (int i = 0; i < 3; i++) {
+            float dq = dot(q, ax[i]), ni = abs(dq);
+            float wi = abs(0.5f * hd - ni) - 0.5f * t;
+            if (wi > max(w, 0.0f) + 1e-6f) continue;
+            float2 g = (((ni > 0.5f * hd) == (dq >= 0.0f)) ? 1.0f : -1.0f) * ax[i];
+            float3 n = g.x * e1 + g.y * e2;
+            float3 fa = p - n * wi, fb = p - n * (wi + t);
+            sq = min(sq, max(max(flx_dregion_at(U, rmT, fa), flx_dregion_at(U, rmT, fb)), max(flx_dpart_at(U, dsT, fa), flx_dpart_at(U, dsT, fb))));
+        }
+        if (sq > 1e29f) return base;
+        float s = w <= 0.0f ? 1.0f : 1.0f - w / (0.5f * t);
+        return base + s * max(sq - base, 0.0f);
+    }
+
+    // ── FlexibleLatticeField.lattice: F = max(wall, dRegion, dPart, dSkin) ──────────────
+    // `S` (X1): the printed solid at p (FlexibleLatticeField.terms).
+    static float flx_terms(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                           float3 p, thread float& Lcur, thread float& S) {
+        float3 gRho;
+        float2 rm = flx_sample2g(rmT, U.rmO, U.rmN, p, gRho);
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
+        float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);   // ★ U21 H: the press seam (flx_wall elsewhere)
+        float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
+        float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
+        float dSkin = U.shape2.y - ds.y;
+        S = flx_printed_solid(dRegion, dPart, dSkin);
+        return max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin);   // ★ T2: the clips end a wall square
+    }
+
+    static float flx_field(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                           float3 p, thread float& Lcur) {
+        float S;
+        float F = flx_terms(U, rmT, dsT, p, Lcur, S);
+        return U.shape2.w > 0.5f ? min(F, S) : F;   // ★ X1: the printed view adds the printed solid
+    }
+
+    // ── the march's view of F: the SAME value, or a cheaper LOWER bound far from the walls ─
+    // ★ dPart and dSkin come from ONE fetch of the packed (SDF, skin) volume, and each is
+    // ≤ F; where one is clearly positive it is a safe step on its own and the (ρ, mask)
+    // fetch and the gyroid's trig are skipped. dRegion is not a distance, but it never
+    // exceeds one mask voxel, the step the full max takes there too. Near the walls the
+    // full expression runs in flx_field's order, so a hit is flx_field's zero.
+    // ★ X1, THE PRINTED VIEW: every term of S is ≥ dPart too, so the first early-out holds; dSkin and dRegion bound F
+    // but not S (the printed solid is negative IN the skin and OUTSIDE the region), so there the bound is
+    // min(max(dRegion, dPart, dSkin), S) — the same full expression near a surface (flx_field's min(F, S)).
+    static float flx_field_march(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                                 float3 p, thread float& Lcur) {
+        const float far = 0.25f;
+        float2 ds = flx_sample_ds(dsT, U.dsO, U.dsN, p);
+        float dPart = flx_part_distance(ds.x, U.dsO, U.dsN, p);
+        if (dPart > far) { Lcur = 1e30f; return dPart; }
+        float dSkin = U.shape2.y - ds.y;
+        bool printed = U.shape2.w > 0.5f;
+        if (!printed && dSkin > far) { Lcur = 1e30f; return max(dPart, dSkin); }
+        float3 gRho;
+        float2 rm = flx_sample2g(rmT, U.rmO, U.rmN, p, gRho);
+        float dRegion = (0.5f - rm.y) * 2 * U.rmO.w;
+        if (printed) {
+            float S = flx_printed_solid(dRegion, dPart, dSkin);
+            float lb = min(max(dRegion, max(dPart, dSkin)), S);
+            if (lb > far) { Lcur = 1e30f; return lb; }
+            float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
+            return min(max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin), S);   // ★ T2
+        }
+        if (dRegion > far) { Lcur = 1e30f; return max(dRegion, max(dPart, dSkin)); }
+        float wall = flx_wall_seam(U, rmT, p, rm.x, gRho, Lcur);
+        return max(max(wall, flx_square_clip(U, rmT, dsT, p, wall, Lcur, dRegion, dPart)), dSkin);   // ★ T2
+    }
+
+    // ── THE SQUISH, INVERTED (02 §6) ─────────────────────────────────────────────────────
+    // Forward: a rest point at t0 ∈ [entry, exit] of its column moves along +load by
+    // a·(exit − t0), a = s·d / (exit − entry) — the face the full s·d, the far end nothing.
+    // Inverse at a deformed point: t0 = (t − a·exit)/(1 − a); t < entry + a·span is the gap
+    // the face left (air). The rest→deformed map contracts the column by (1 − a) along the
+    // load, so a rest-space distance times (1 − a) is still a safe step (`scale`).
+    // ★ THE COLUMN WALLS. Neighbouring columns move by different amounts, so the deformed
+    // field JUMPS across a column wall, and a step sized in one column can land inside the
+    // other's shifted wall. The column table's alpha carries, per cell, the largest such
+    // jump at s = 1 (`FlexibleSquishFace.columnJumps`): past the wall the surface can be at
+    // most s·jump closer than F says. So a step may cross a wall only by that margin, and
+    // where neighbours move alike (every interior column of a uniform press) the walls cost
+    // nothing. Off the footprint the face's largest depth is the bound.
+    struct FlxStep { float L; float scale; float lateral; float jump; };
+    struct FlxPull { float3 p0; float scale; float lateral; float jump; float air; };
+
+    // ── ★ BATCH G: THE SQUISH AS ONE 3D FIELD (FlexibleFEField) ─────────────────────────────
+    // u at p: the node-centred field, hardware-trilinear, clamped to the node box (texel i's
+    // centre is node i; clamp_to_edge holds the edge nodes' value beyond them) — the Swift twin's
+    // `sample`.
+    static inline float3 flx_fe_u(texture3d<float> T, constant FlxUniforms& U, float3 p) {
+        constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+        return T.sample(smp, ((p - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).xyz;
+    }
+    // deformed → rest: p = x − s·u(p) by fixed-point iteration (a contraction: s·gmax ≤ ½ on the
+    // page), the Swift twin's `pullback` (same count, same early exit). No column walls (the
+    // field is continuous) and no air: a pulled-back point outside the part has dPart > 0. A rest
+    // distance × (1 − s·gmax) is a safe deformed step (`scale`).
+    static FlxPull flx_fe_pullback(constant FlxUniforms& U, texture3d<float> T, float3 x) {
+        FlxPull r;
+        r.p0 = x; r.scale = 1; r.lateral = 1e30f; r.jump = 0; r.air = -1;
+        float s = U.squish.x;
+        if (!(s > 0.0f)) return r;                       // rest: bit-identical to today
+        float3 p = x - s * flx_fe_u(T, U, x);
+        int n = int(U.feK.z);
+        for (int i = 1; i < n; ++i) {
+            float3 pn = x - s * flx_fe_u(T, U, p);
+            float d = length(pn - p);
+            p = pn;
+            if (d < U.feK.w) break;
+        }
+        r.p0 = p;
+        r.scale = U.feN.w;
+        return r;
+    }
+
+    static FlxPull flx_pullback(constant FlxUniforms& U, array<texture2d<float>, 4> cols, texture3d<float> feT, float3 p) {
+        if (U.feK.x > 0.5f) return flx_fe_pullback(U, feT, p);   // ★ BATCH G: the FE field
+        FlxPull r;
+        r.p0 = p; r.scale = 1; r.lateral = 1e30f; r.jump = 0; r.air = -1;
+        float s = U.squish.x;
+        int nf = int(U.squish.y);
+        if (!(s > 0.0f)) return r;              // s = 0: the rest lattice, untouched
+        for (int f = 0; f < 4; ++f) {
+            if (f >= nf) break;
+            FlxFace F = U.faces[f];
+            if (!(F.centroid.w > 0.0f)) continue;   // no column of this face moves
+            float3 d = r.p0 - F.centroid.xyz;
+            float t = dot(d, F.load.xyz);
+            if (t < F.extent.z || t > F.extent.w) continue;   // material moves only inside [tMin, tMax]
+            float pitch = F.load.w;
+            float u = dot(d, F.xAxis.xyz) - F.xAxis.w;
+            float v = dot(d, F.yAxis.xyz) - F.yAxis.w;
+            int iu = int(floor(u / pitch)), iv = int(floor(v / pitch));
+            if (iu < 0 || iv < 0 || iu >= int(F.extent.x) || iv >= int(F.extent.y)) {
+                float W = F.extent.x * pitch, H = F.extent.y * pitch;
+                float lat = length(max(max(float2(-u, -v), float2(u - W, v - H)), 0.0f));
+                r.lateral = min(r.lateral, lat); r.jump = max(r.jump, s * F.centroid.w);
+                continue;
+            }
+            // r depth, g entryT, b exitT, a = 1 + jump where a column exists, −jump where not
+            float4 c = cols[f].read(uint2(uint(iu), uint(iv)));
+            float jump = s * (c.a > 0.5f ? c.a - 1.0f : -c.a);
+            if (jump > 1e-4f && U.squish.z < 0.5f) {   // squish.z = 1: diagnosis, walls ignored
+                float fu = u - pitch * float(iu), fv = v - pitch * float(iv);
+                r.lateral = min(r.lateral, min(min(fu, pitch - fu), min(fv, pitch - fv)));
+                r.jump = max(r.jump, jump);
+            }
+            float span = c.b - c.g;
+            if (c.a < 0.5f || !(c.r > 0.0f) || !(span > 1e-6f)) continue;
+            if (t < c.g || t > c.b) continue;
+            float a = min(s * c.r / span, \(FlexibleSquishField.maxRatio)f);   // ONE constant with the Swift twin
+            float front = c.g + a * span;           // where the face now is
+            if (t < front) { r.air = max(r.air, front - t); continue; }
+            float t0 = (t - a * c.b) / (1 - a);
+            r.p0 += F.load.xyz * (t0 - t);
+            r.scale *= (1 - a);
+        }
+        return r;
+    }
+
+    static float flx_deformed(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                              array<texture2d<float>, 4> cols, texture3d<float> feT, float3 p, thread FlxStep& st,
+                              bool march = false) {
+        FlxPull pb = flx_pullback(U, cols, feT, p);
+        st.scale = pb.scale; st.lateral = pb.lateral; st.jump = pb.jump;
+        if (pb.air > 0) { st.L = 1e30f; return pb.air; }
+        return march ? flx_field_march(U, rmT, dsT, pb.p0, st.L)
+                     : flx_field(U, rmT, dsT, pb.p0, st.L);
+    }
+
+    // ── ★ ROUND 7, X1 VERIFY — THE HEAT ON THE WALLS (FlexibleWallHeat.value, the twin) ─────────
+    // His words (2026-10-14): "X-ray mode should show the inside of the SOLID showing the extent of the face prism/bend
+    // amount/heat map etc." A wall at REST point p takes the squish of the pressed face's COLUMN it stands in — the number
+    // the face's heat map is coloured by there — the largest over the faces whose column holds it; 0 under no column. The
+    // cell is found as the squish finds it (flx_pullback): (iu, iv) = floor((u, v) / pitch), a column where the table's
+    // alpha says one exists, t within its [entry, exit] (± the slack: a wall cut at the pressed face's own surface).
+    static float flx_wall_heat(constant FlxUniforms& U, array<texture2d<float>, 4> cols, array<texture2d<float>, 4> heats,
+                               float3 p) {
+        float h = 0.0f;
+        for (int f = 0; f < 4; ++f) {
+            FlxFace F = U.faces[f];
+            if (F.extent.x < 0.5f || F.extent.y < 0.5f || !(F.load.w > 0.0f)) continue;   // an empty slot
+            float3 d = p - F.centroid.xyz;
+            float t = dot(d, F.load.xyz);
+            float u = dot(d, F.xAxis.xyz) - F.xAxis.w;
+            float v = dot(d, F.yAxis.xyz) - F.yAxis.w;
+            int iu = int(floor(u / F.load.w)), iv = int(floor(v / F.load.w));
+            if (iu < 0 || iv < 0 || iu >= int(F.extent.x) || iv >= int(F.extent.y)) continue;
+            float4 c = cols[f].read(uint2(uint(iu), uint(iv)));
+            if (c.a < 0.5f) continue;   // (1 + jump where a column is, −jump where none)
+            if (t < c.g - \(FlexibleWallHeat.spanSlackMM)f || t > c.b + \(FlexibleWallHeat.spanSlackMM)f) continue;
+            h = max(h, heats[f].read(uint2(uint(iu), uint(iv))).r);
+        }
+        return h;
+    }
+
+    // ── the march ────────────────────────────────────────────────────────────────────────
+    // status: 0 = left the box (a true miss), 1 = hit, 2 = ran out of steps
+    struct FlxHit { int status; float3 p; };
+
+    static FlxHit flx_march(constant FlxUniforms& U, texture3d<float> rmT, texture3d<float> dsT,
+                            array<texture2d<float>, 4> cols, texture3d<float> feT, float3 ro, float3 rd) {
+        FlxHit h; h.status = 0; h.p = float3(0);
+        // ★ NOTHING LATTICED (FlexibleLatticePass.upload's min > max sentinel): the slab test
+        // below would read an inverted box as ALL of space and march every pixel for nothing
+        if (any(U.boxMin.xyz > U.boxMax.xyz)) return h;
+        float3 rdSafe = select(rd, copysign(float3(1e-8f), rd), abs(rd) < 1e-8f);
+        float3 inv = 1.0f / rdSafe;
+        float3 ta = (U.boxMin.xyz - ro) * inv, tb = (U.boxMax.xyz - ro) * inv;
+        float3 tmin = min(ta, tb), tmax = max(ta, tb);
+        float tn = max(max(tmin.x, tmin.y), max(tmin.z, 0.0f));
+        float tf = min(min(tmax.x, tmax.y), tmax.z);
+        if (!(tn < tf)) return h;                 // the lattice region's box: one test per ray outside it
+        bool early = U.march.w > 0.5f;
+        float t = tn;
+        FlxStep st;
+        float f = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * t, st, early);
+        if (f < 0) { h.status = 1; h.p = ro + rd * t; return h; }
+        int maxSteps = int(U.shape2.z);
+        for (int i = 0; i < maxSteps; ++i) {
+            // ★ step = factor·|F|, never past the topology's cap in cells (see
+            // FlexibleLatticePass.stepCap: the gyroid's |g|/|∇| over-reads between the
+            // sheets), times the column's contraction; across a column wall only by the jump.
+            float step = clamp(U.march.x * abs(f), U.march.z, U.march.y * st.L) * st.scale;
+            step = max(min(step, st.lateral + 0.05f), step - st.jump);
+            float t2 = t + step;
+            if (t2 > tf) return h;
+            FlxStep st2;
+            float f2 = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * t2, st2, early);
+            if (f2 < 0) {
+                float a = t, b = t2, fa = f, fb = f2;
+                for (int k = 0; k < 4; ++k) {
+                    float m = 0.5f * (a + b);
+                    FlxStep sm;
+                    float fm = flx_deformed(U, rmT, dsT, cols, feT, ro + rd * m, sm);
+                    if (fm < 0) { b = m; fb = fm; } else { a = m; fa = fm; }
+                }
+                // ★ then ONE false-position step on the bracket the halvings left (free: both
+                // ends are already evaluated), so the normal is taken ON the wall.
+                float w = fa / max(fa - fb, 1e-12f);
+                h.status = 1; h.p = ro + rd * mix(a, b, clamp(w, 0.0f, 1.0f));
+                return h;
+            }
+            t = t2; f = f2; st = st2;
+        }
+        h.status = 2;
+        return h;
+    }
+    """
+
+    /// The pass's library: the field, the G-buffer entry points and the test kernels.
+    /// Built with a THROWING `try` (FlexibleLatticePass.init) — a `try?` would hide a dead
+    /// library behind an empty frame.
+    static let gbufferSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    \(fieldSource)
+
+    struct FlxVOut { float4 pos [[position]]; float2 uv; };
+
+    // one full-screen triangle at NDC z = 0, uv = NDC — exactly `lsdf_vertex`, so the ray
+    // does not depend on the (capped) G-buffer size
+    vertex FlxVOut flx_vertex(uint vid [[vertex_id]]) {
+        float2 p = float2(float((vid << 1) & 2), float(vid & 2));
+        FlxVOut o;
+        o.pos = float4(p * 2.0f - 1.0f, 0.0f, 1.0f);
+        o.uv = p * 2.0f - 1.0f;
+        return o;
+    }
+
+    // ── the G-buffer write (inside MeshRenderer's depth prepass) ─────────────────────────
+    // MeshRenderer's attachment layout: 0 = eye-Z (R32Float), 1 = eye-space normal
+    // (RGBA16Float), 2 = albedo with alpha as the "this pixel is lattice" mask (RGBA8Unorm).
+    // #354's `lsdf_shade` lights what lands here. The declared depth direction is true by
+    // construction: the triangle sits at NDC z = 0 and the written depth is clamped ≥ 0.
+    struct FlxGBuf {
+        float  eyeZ    [[color(0)]];
+        float4 enormal [[color(1)]];
+        float4 albedo  [[color(2)]];
+        float  depth   [[depth(greater)]];
+    };
+
+    fragment FlxGBuf flx_gbuffer(FlxVOut in [[stage_in]],
+                                 constant FlxUniforms& U [[buffer(0)]],
+                                 constant FlxFrame& F [[buffer(1)]],
+                                 constant float4& D [[buffer(2)]],   // ★ batch M verification: x = the depth bias (mm)
+                                 texture3d<float> rmT [[texture(0)]],
+                                 texture3d<float> dsT [[texture(1)]],
+                                 array<texture2d<float>, 4> cols [[texture(2)]],
+                                 texture3d<float> feT [[texture(6)]],
+                                 array<texture2d<float>, 4> heats [[texture(7)]]) {   // ★ X1 verify: the walls' heat
+        float3 ro = F.eye.xyz;
+        float3 rd = normalize(F.rayDir.xyz + F.rayX.xyz * in.uv.x + F.rayY.xyz * in.uv.y);
+        FlxHit h = flx_march(U, rmT, dsT, cols, feT, ro, rd);
+        if (h.status != 1) { discard_fragment(); }
+        // the normal: central differences of the (deformed) field, 0.05 mm
+        const float e = 0.05f;
+        FlxStep st;
+        float3 g = float3(
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(e, 0, 0), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(e, 0, 0), st),
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(0, e, 0), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(0, e, 0), st),
+            flx_deformed(U, rmT, dsT, cols, feT, h.p + float3(0, 0, e), st)
+          - flx_deformed(U, rmT, dsT, cols, feT, h.p - float3(0, 0, e), st));
+        float3 n = length_squared(g) > 1e-20f ? normalize(g) : -rd;
+        float3 eyeN = normalize((F.eyeNormalBasis * float4(n, 0.0f)).xyz);
+        // face the normal toward the eye (the AO hemisphere is built on the eye's side)
+        if (eyeN.z < 0.0f) { eyeN = -eyeN; }
+        // the colour: the octet's lightness-by-density ramp, at the REST point's ρ
+        float3 p0 = flx_pullback(U, cols, feT, h.p).p0;
+        float2 rmAt = flx_sample2(rmT, U.rmO, U.rmN, p0);
+        float rho = rmAt.x;
+        float span = F.rhoSpan.y - F.rhoSpan.x;
+        float frac = span > 1e-4f ? clamp((rho - F.rhoSpan.x) / span, 0.0f, 1.0f) : 0.0f;
+        FlxGBuf o;
+        o.eyeZ = -(F.eyeFromModel * float4(h.p, 1.0f)).z;   // eye looks down −Z → positive into the screen
+        o.enormal = float4(eyeN, 0.0f);
+        float3 albedo = mix(F.sparse.rgb, F.dense.rgb, clamp(0.25f + 0.75f * frac, 0.0f, 1.0f));
+        // ★ X1: a hit on the PRINTED SOLID (the finish's skin, the pocket's wall and floor) is the body's own clay
+        bool printedHit = false;
+        if (U.shape2.w > 0.5f) {
+            float Lx, S;
+            float Fw = flx_terms(U, rmT, dsT, p0, Lx, S);
+            printedHit = S < Fw;
+            if (printedHit) { albedo = float3(0.78f, 0.77f, 0.75f); }
+        }
+        // ★ BATCH M (M3): Stress on — the wall takes the group's von Mises at its REST point (the FE
+        // field's w: node stress as a fraction of ITS field's top — each Play-all turn on its own scale)
+        if (!printedHit && F.rhoSpan.z > 0.5f && U.feK.x > 0.5f) {
+            constexpr sampler smp(coord::normalized, filter::linear, address::clamp_to_edge);
+            float vm = feT.sample(smp, ((p0 - U.feO.xyz) / U.feO.w + 0.5f) / U.feN.xyz).w;
+            albedo = flx_rainbow(vm * F.rhoSpan.w);
+        }
+        // ★ ROUND 7, X1 VERIFY: Heat on — the wall takes the squish of its column (the dent's rainbow, the legend's scale);
+        // inside the region the printed finish too (Rim's bands, Skin's sheet squish with it); the pocket's own wall and
+        // floor stay the body's clay
+        if (F.rhoSpan.z > 1.5f && (!printedHit || rmAt.y >= 0.5f)) {
+            albedo = flx_rainbow(flx_wall_heat(U, cols, heats, p0) * F.rhoSpan.w);
+        }
+        o.albedo = float4(albedo, 1.0f);
+        // ★ BATCH M VERIFICATION: with the solid dent planes' depth in this buffer (flx_map_depth), a wall's
+        // DEPTH is tested D.x mm further along its ray, so the walls' cut faces at the part's surface —
+        // level with the 0.05 mm-lifted plane — lose to it instead of striping it in rows; its eye-Z (what
+        // the shade and the ghost read) is the true one
+        float4 clip = F.clipFromModel * float4(h.p + rd * D.x, 1.0f);
+        o.depth = clamp(clip.z / max(clip.w, 1e-6f), 0.0f, 1.0f);
+        return o;
+    }
+
+    // ── ★ BATCH M VERIFICATION: THE SOLID DENT PLANES' DEPTH, IN THE G-BUFFER ───────────────────
+    // The verifier: a FAR plane (a pressed face seen through the X-ray part) painted over every ghost
+    // wall in front of it — the ghost walls were drawn before the planes and wrote no depth. Now the
+    // planes' depth goes into the G-buffer BEFORE the march (MeshRenderer's vertex, flex and tint
+    // buffers — the same displaced map the body draws): a wall BEHIND a solid plane fails the depth
+    // test and is never marched into the buffer, a wall IN FRONT of one is. Depth only (no colour is
+    // written: the G-buffer's three attachments are declared with no write mask), only the solid
+    // fragments (the tint's flags.y — FlexibleOverlay's opaque map quads).
+    struct FlxMapU { float4x4 clipFromModel; float4 flex; };
+    struct FlxMapOut { float4 pos [[position]]; float solid [[flat]]; };
+
+    vertex FlxMapOut flx_map_vertex(uint vid [[vertex_id]],
+                                    const device float* verts [[buffer(0)]],   // pos.xyz + normal.xyz (stride 24)
+                                    constant FlxMapU& u [[buffer(1)]],
+                                    const device float* tints [[buffer(2)]],   // rgba + flags (stride 32)
+                                    const device packed_float3* disp [[buffer(3)]]) {
+        float3 p = float3(verts[vid * 6], verts[vid * 6 + 1], verts[vid * 6 + 2]) + u.flex.x * float3(disp[vid]);
+        FlxMapOut o;
+        o.pos = u.clipFromModel * float4(p, 1.0f);
+        o.solid = tints[vid * 8 + 5];
+        return o;
+    }
+
+    fragment void flx_map_depth(FlxMapOut in [[stage_in]]) {
+        if (in.solid < 0.5f) { discard_fragment(); }
+    }
+
+    // ── ★ ROUND 7, X1: THE PRINTED VIEW'S BODY, IN THE G-BUFFER ──────────────────────────────
+    // The plan's solid-flag route (the body see-through, its closed fragments flagged opaque) draws the body on the
+    // TRANSLUCENT route, which writes no depth: on his pad the far side face painted over the Top (the spike's pictures).
+    // So the closed fragments are ALSO written here, into the G-buffer — eye-Z, eye normal, albedo, the mask — pushed
+    // `eye.w` mm back along their rays: #354's lsdf_shade then lights them (the same material) AND writes their depth into
+    // the main pass's shared buffer, and the see-through body drawn after it (MeshRenderer's ghost-after-lattice order)
+    // keeps only its NEAREST closed fragment there (the front face is nearer than the pushed-back depth; a back face is
+    // behind it). The walls are marched against the same buffer, so a wall behind the closed body is never drawn.
+    struct FlxBodyU { float4x4 clipFromModel; float4x4 eyeFromModel; float4x4 eyeNormalBasis; float4 flex; float4 eye; };
+    struct FlxBodyOut { float4 pos [[position]]; float solid; float eyeZ; float3 eyeN; float4 tint; };
+    struct FlxBodyGBuf {
+        float  eyeZ    [[color(0)]];
+        float4 enormal [[color(1)]];
+        float4 albedo  [[color(2)]];
+    };
+
+    vertex FlxBodyOut flx_body_vertex(uint vid [[vertex_id]],
+                                      const device float* verts [[buffer(0)]],   // pos.xyz + normal.xyz (stride 24)
+                                      constant FlxBodyU& u [[buffer(1)]],
+                                      const device float* tints [[buffer(2)]],   // rgba + flags (stride 32)
+                                      const device packed_float3* disp [[buffer(3)]]) {
+        float3 p = float3(verts[vid * 6], verts[vid * 6 + 1], verts[vid * 6 + 2]) + u.flex.x * float3(disp[vid]);
+        float3 n = float3(verts[vid * 6 + 3], verts[vid * 6 + 4], verts[vid * 6 + 5]);
+        float3 pb = p + normalize(p - u.eye.xyz) * u.eye.w;
+        FlxBodyOut o;
+        o.pos = u.clipFromModel * float4(pb, 1.0f);
+        o.eyeZ = -(u.eyeFromModel * float4(pb, 1.0f)).z;
+        o.eyeN = (u.eyeNormalBasis * float4(n, 0.0f)).xyz;
+        o.solid = tints[vid * 8 + 5];
+        o.tint = float4(tints[vid * 8], tints[vid * 8 + 1], tints[vid * 8 + 2], tints[vid * 8 + 3]);
+        return o;
+    }
+
+    fragment FlxBodyGBuf flx_body_gbuffer(FlxBodyOut in [[stage_in]]) {
+        if (in.solid < 0.5f) { discard_fragment(); }
+        float3 n = length_squared(in.eyeN) > 1e-12f ? normalize(in.eyeN) : float3(0, 0, 1);
+        if (n.z < 0.0f) { n = -n; }
+        FlxBodyGBuf o;
+        o.eyeZ = in.eyeZ;
+        o.enormal = float4(n, 0.0f);
+        o.albedo = float4(mix(float3(0.78f, 0.77f, 0.75f), in.tint.rgb, clamp(in.tint.a, 0.0f, 1.0f)), 1.0f);
+        return o;
+    }
+
+    // ── ★ BATCH M (M6): THE WALLS AS A GHOST ─────────────────────────────────────────────
+    // His round-5 img 6: "When the dent view is selected, the xray view should also initiate …
+    // showing the lattice (if selected) as a ghost and the dents bending through the ghosts. Get
+    // rid of the stripes and make it solid." In the main colour pass, in place of #354's opaque
+    // lsdf_shade: each lattice pixel of the G-buffer (albedo.a = the mask) drawn like the body's
+    // ghost — faint face-on, lit at the silhouette, in the wall's own colour — blended, writing NO
+    // depth, so the solid dent planes drawn after it cover it wherever they are (the walls' cut
+    // faces at the part's surface no longer stripe the map).
+    struct FlxGhost {
+        float4 size;    // xy = the main target (px), zw = the G-buffer (px)
+        float4 look;    // x = face-on alpha, y = the silhouette's extra alpha
+    };
+
+    fragment float4 flx_ghost_walls(FlxVOut in [[stage_in]],
+                                    constant FlxGhost& G [[buffer(0)]],
+                                    texture2d<float> gNormal [[texture(0)]],
+                                    texture2d<float> gAlbedo [[texture(1)]]) {
+        float2 uv = in.pos.xy / max(G.size.xy, float2(1.0f));
+        uint2 px = uint2(clamp(uv * G.size.zw, float2(0.0f), G.size.zw - 1.0f));
+        float4 alb = gAlbedo.read(px);
+        if (alb.a < 0.5f) { discard_fragment(); }
+        float3 n = gNormal.read(px).xyz;
+        float gr = pow(1.0f - clamp(abs(n.z), 0.0f, 1.0f), 2.2f);
+        float3 rgb = clamp(alb.rgb * (0.35f + 0.9f * gr), 0.0f, 1.0f);
+        float a = clamp(G.look.x + G.look.y * gr, 0.0f, 1.0f);
+        return float4(rgb * a, a);   // premultiplied
+    }
+
+    // ── test kernels ─────────────────────────────────────────────────────────────────────
+    kernel void flx_field_probe(const device float4* pts [[buffer(0)]],
+                                device float* out [[buffer(1)]],
+                                constant FlxUniforms& U [[buffer(2)]],
+                                constant uint& count [[buffer(3)]],
+                                texture3d<float> rmT [[texture(0)]],
+                                texture3d<float> dsT [[texture(1)]],
+                                uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        float L;
+        out[id] = flx_field(U, rmT, dsT, pts[id].xyz, L);
+    }
+
+    kernel void flx_squish_probe(const device float4* pts [[buffer(0)]],
+                                 device float* out [[buffer(1)]],
+                                 constant FlxUniforms& U [[buffer(2)]],
+                                 constant uint& count [[buffer(3)]],
+                                 texture3d<float> rmT [[texture(0)]],
+                                 texture3d<float> dsT [[texture(1)]],
+                                 array<texture2d<float>, 4> cols [[texture(2)]],
+                                 texture3d<float> feT [[texture(6)]],
+                                 uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        FlxStep st;
+        out[id] = flx_deformed(U, rmT, dsT, cols, feT, pts[id].xyz, st);
+    }
+
+    // ★ X1 VERIFY: the walls' heat at each REST point (FlexibleWallHeat.value, the twin)
+    kernel void flx_heat_probe(const device float4* pts [[buffer(0)]],
+                               device float* out [[buffer(1)]],
+                               constant FlxUniforms& U [[buffer(2)]],
+                               constant uint& count [[buffer(3)]],
+                               array<texture2d<float>, 4> cols [[texture(2)]],
+                               array<texture2d<float>, 4> heats [[texture(7)]],
+                               uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        out[id] = flx_wall_heat(U, cols, heats, pts[id].xyz);
+    }
+
+    // ★ BATCH G: deformed → rest, the pulled-back point itself (xyz) and its step scale (w)
+    kernel void flx_pullback_probe(const device float4* pts [[buffer(0)]],
+                                   device float4* out [[buffer(1)]],
+                                   constant FlxUniforms& U [[buffer(2)]],
+                                   constant uint& count [[buffer(3)]],
+                                   array<texture2d<float>, 4> cols [[texture(2)]],
+                                   texture3d<float> feT [[texture(6)]],
+                                   uint id [[thread_position_in_grid]]) {
+        if (id >= count) return;
+        FlxPull pb = flx_pullback(U, cols, feT, pts[id].xyz);
+        out[id] = float4(pb.p0, pb.scale);
+    }
+
+    // every field BY NAME, in declaration order
+    kernel void flx_uniform_echo(constant FlxUniforms& U [[buffer(2)]],
+                                 device float4* out [[buffer(1)]],
+                                 uint id [[thread_position_in_grid]]) {
+        if (id != 0) return;
+        int k = 0;
+        out[k++] = U.boxMin; out[k++] = U.boxMax; out[k++] = U.shape; out[k++] = U.shape2;
+        out[k++] = U.buildDir; out[k++] = U.rmO; out[k++] = U.rmN; out[k++] = U.dsO; out[k++] = U.dsN;
+        out[k++] = U.squish; out[k++] = U.march;
+        for (int f = 0; f < 4; ++f) {
+            out[k++] = U.faces[f].centroid; out[k++] = U.faces[f].xAxis; out[k++] = U.faces[f].yAxis;
+            out[k++] = U.faces[f].load; out[k++] = U.faces[f].extent;
+        }
+        out[k++] = U.feO; out[k++] = U.feN; out[k++] = U.feK;
+        out[k++] = U.tail;
+    }
+
+    kernel void flx_frame_echo(constant FlxFrame& F [[buffer(2)]],
+                               device float4* out [[buffer(1)]],
+                               uint id [[thread_position_in_grid]]) {
+        if (id != 0) return;
+        int k = 0;
+        out[k++] = F.eye; out[k++] = F.rayX; out[k++] = F.rayY; out[k++] = F.rayDir;
+        for (int c = 0; c < 4; ++c) { out[k++] = F.clipFromModel[c]; }
+        for (int c = 0; c < 4; ++c) { out[k++] = F.eyeFromModel[c]; }
+        for (int c = 0; c < 4; ++c) { out[k++] = F.eyeNormalBasis[c]; }
+        out[k++] = F.sparse; out[k++] = F.dense; out[k++] = F.rhoSpan; out[k++] = F.tail;
+    }
+    """
+}

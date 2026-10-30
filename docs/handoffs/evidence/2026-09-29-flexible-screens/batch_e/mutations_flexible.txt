@@ -1,0 +1,8 @@
+F1-not-said RED ['Executed 3 tests, with 6 failures (0 unexpected) in 2.339 (2.341) seconds'] ['FlexibleLatticeUnderTests.testAFaceWithNoLatticeUnderItIsSaidNeverBlocking', 'FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt', 'FlexibleLatticeUnderTests.testTheFixturesTapsAreWhatThePageOffers']
+F2-never-pops RED ['Executed 3 tests, with 1 failure (0 unexpected) in 3.490 (3.491) seconds'] ['FlexibleLatticeUnderTests.testAFaceWithNoLatticeUnderItIsSaidNeverBlocking']
+F3-main-pill-silent RED ['Executed 3 tests, with 2 failures (0 unexpected) in 3.478 (3.479) seconds'] ['FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt']
+F4-no-one-tap RED ['Executed 3 tests, with 1 failure (0 unexpected) in 3.208 (3.210) seconds'] ['FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt']
+F5-group-not-protected RED ['Executed 3 tests, with 14 failures (0 unexpected) in 2.786 (2.788) seconds'] ['FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt', 'FlexibleLatticeUnderTests.testTheFixturesTapsAreWhatThePageOffers']
+F6-depth-not-the-part RED ['Executed 3 tests, with 3 failures (0 unexpected) in 3.275 (3.277) seconds'] ['FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt', 'FlexibleLatticeUnderTests.testTheFixturesTapsAreWhatThePageOffers']
+F7-old-member-rule RED ['Executed 3 tests, with 5 failures (0 unexpected) in 2.344 (2.346) seconds'] ['FlexibleLatticeUnderTests.testOnHisPadTopBIsSaidAndOneTapLatticesIt', 'FlexibleLatticeUnderTests.testTheFixturesTapsAreWhatThePageOffers']
+restored

@@ -1,0 +1,7 @@
+DG-PROJECT M2 verticalStand algorithm stepped stage Optional(TopOptFlows.LatticeStageMode.aesthetic) step-halves false density sim cells auto
+DG-PLAN stepped: 9588 cell(s) over 5 region(s) | 12.07=4 8.05=8 7.73=4 6.87=8 6.30=2 6.04=137 5.16=775 4.73=256 4.02=527 4.01=2511 3.44=212 3.15=460 2.58=4684
+DG-PLAN per region: r1=2511 r2=4995 r3=676 r4=718 r5=688
+DG-OVERLAPS 0 same-region pair(s)
+DG-REGIONS voxel=1.719 mm | r1 cells=2511 [4.01=2511] prism=156904 mm3 uncovered=8611 mm3 (5.49%) | r2 cells=4995 [5.16=768 2.58=4227] prism=186467 mm3 uncovered=8169 mm3 (4.38%) | r3 cells=676 [12.08=4 8.05=8 6.04=137 4.02=527] prism=43784 mm3 uncovered=4986 mm3 (11.39%) | r4 cells=718 [6.30=2 4.73=256 3.15=460] prism=9915 mm3 uncovered=569 mm3 (5.73%) | r5 cells=688 [7.73=4 6.87=8 5.16=7 3.44=212 2.58=457] prism=9458 mm3 uncovered=188 mm3 (1.99%)
+DG-SLOT-ORIGINS 5 region(s) carry slot_origin_mm
+DG-PLAN-BASES 5 region(s) carry plan_base_cell_mm | job region 1: 4.0103 mm; job region 2: 5.1561 mm; job region 3: 24.1500 mm; job region 4: 9.4529 mm; job region 5: 10.3122 mm

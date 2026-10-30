@@ -1,0 +1,81 @@
+Test Suite 'Selected tests' started at 2026-10-25 05:12:34.786.
+Test Suite 'TopOptKitTests.xctest' started at 2026-10-25 05:12:34.788.
+Test Suite 'TopOptKitTests.xctest' passed at 2026-10-25 05:12:34.788.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 05:12:34.788.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds
+Test Suite 'Selected tests' started at 2026-10-25 05:12:34.956.
+Test Suite 'TopOptFlowsTests.xctest' started at 2026-10-25 05:12:34.957.
+Test Suite 'LatticeStaleTypeTests' started at 2026-10-25 05:12:34.957.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' started.
+2026-10-25 05:12:35.237 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 05:12:35.519 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testAStaleTypeLosesTheLatticeAndTheGateNamesIt]' passed (0.564 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testBothButtonsRefuseAndTheTapOpensSettings]' passed (0.209 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheRefusalIsTheCatalogsReason]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' started.
+2026-10-25 05:12:36.237 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 05:12:36.510 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStageRefusesAStaleType]' passed (0.782 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' started.
+2026-10-25 05:12:36.785 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+2026-10-25 05:12:37.061 xctest[99269:74743356] DIAG seam occupancy: 128x128x128 in 0.27 s (once per mesh)
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheStaleTypePathAsksCoreNothing]' passed (0.551 seconds).
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' started.
+Test Case '-[TopOptFlowsTests.LatticeStaleTypeTests testTheTypeRowSaysItAtOnceAndTheOfferedChipFixesIt]' passed (0.013 seconds).
+Test Suite 'LatticeStaleTypeTests' passed at 2026-10-25 05:12:37.078.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 2.120 (2.120) seconds
+Test Suite 'RedesignToStrengthenTests' started at 2026-10-25 05:12:37.078.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAGateRemovedCopyGoesRed]' passed (7.927 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:149: error: -[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber] : XCTAssertEqual failed: ("[]") is not equal to ("["This version let go of an anchored bolt hole"]")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testAnAnchoredPieceDetachedReadsInPlainWordsWithNoFaceNumber]' failed (2.459 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:124: error: -[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged] : XCTAssertEqual failed: ("false") is not equal to ("true") - vf 0.3974276527
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:124: error: -[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged] : XCTAssertEqual failed: ("false") is not equal to ("true") - vf 0.391318328
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testBridgedHeldVariantsReadBridged]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:276: error: -[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate] : XCTAssertEqual failed: ("["H56b: the hook appears 0 times (must be exactly once)", "H56c-data: the hook appears 0 times (must be exactly once)", "H56c-accepted: the hook appears 0 times (must be exactly once)", "H56c-rejected: the hook appears 0 times (must be exactly once)", "H56d-sig: the hook appears 0 times (must be exactly once)", "H56d-growth: the hook appears 0 times (must be exactly once)", "H56d-pass: the hook appears 0 times (must be exactly once)", "H56f-apply: the hook appears 0 times (must be exactly once)", "H56g-cards: the hook appears 0 times (must be exactly once)", "H56g-badge: the hook appears 0 times (must be exactly once)", "H56h-blocks: the hook appears 0 times (must be exactly once)", "H56h-if: the hook appears 0 times (must be exactly once)", "H56h-end: the hook appears 0 times (must be exactly once)", "H56h-cards: the hook appears 0 times (must be exactly once)", "H56i: the hook appears 0 times (must be exactly once)", "H56j-line: the hook appears 0 times (must be exactly once)", "H56j-tap: the hook appears 0 times (must be exactly once)", "app/TopOptKit/Sources/TopOptFlows/ResultsModel.swift: 2 H56 lines, 3 pinned", "app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift: 0 H56 lines, 3 pinned", "app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift: 0 H56 lines, 7 pinned", "app/TopOptKit/Sources/TopOptFlows/ResultsScreen.swift: 0 H56 lines, 2 pinned", "app/TopOptKit/Sources/TopOptFlows/RunScreen.swift: 0 H56 lines, 4 pinned"]") is not equal to ("[]")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryH56HookIsPinnedOnceWithItsGate]' failed (0.296 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:75: error: -[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes] : XCTAssertEqual failed: ("519 bytes") is not equal to ("519 bytes") - strengthen without a box: byte-identical
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:75: error: -[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes] : XCTAssertEqual failed: ("518 bytes") is not equal to ("518 bytes") - minimize plastic, no box: byte-identical
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testEveryOtherRequestShipsNoRedesignKeyAndTheSameBytes]' failed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testNoFaceNumberReachesALine]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:171: error: -[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("Runs on your Mac")")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testOnDeviceTheStrengthenChoiceIsDisabledWithTheOneLine]' failed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' started.
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testRejectedOnMarginWithAHeldBridgeIsNotItem47]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:109: error: -[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards] : XCTAssertEqual failed: ("[]") is not equal to ("[TopOptFlows.StrengthenCard(title: "Version 1 · 25 % less worst stress", status: "Unreachable", lines: ["above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"], bridged: false), TopOptFlows.StrengthenCard(title: "Version 2 · 50 % less worst stress", status: "Unreachable", lines: ["above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"], bridged: false), TopOptFlows.StrengthenCard(title: "Version 3 · 75 % less worst stress", status: "Unreachable", lines: ["above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"], bridged: false)]")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenFailCards]' failed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:94: error: -[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards] : XCTAssertEqual failed: ("[]") is not equal to ("[TopOptFlows.StrengthenCard(title: "Version 1 · 25 % less worst stress", status: "Verified", lines: ["Margin 11.71×", "8.2 g · 166 % of the original"], bridged: false), TopOptFlows.StrengthenCard(title: "Version 2 · 50 % less worst stress", status: "Unreachable", lines: ["above 0.95 x the box filled solid (margin 11.95): unreachable in this design space"], bridged: false), TopOptFlows.StrengthenCard(title: "Version 3 · 75 % less worst stress", status: "Unreachable", lines: ["above 0.95 x the box filled solid (margin 11.95): unreachable in this design space"], bridged: false)]")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testStrengthenPassCards]' failed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:195: error: -[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(TopOptFlows.RunReportBlocks(strengthen: nil, rows: [TopOptFlows.RunReportBlocks.Row(volumeFraction: 0.6807073955, printedFraction: 0.6807073955, accepted: true, rejectionReason: "", bodies: nil), TopOptFlows.RunReportBlocks.Row(volumeFraction: 0.5202572347, printedFraction: 0.5202572347, accepted: true, rejectionReason: "", bodies: nil), TopOptFlows.RunReportBlocks.Row(volumeFraction: 0.3974276527, printedFraction: 0.3974276527, accepted: true, rejectionReason: "", bodies: Optional(TopOptFlows.VariantBodies(exported: 1, anchoredPiecesLost: 0, lostAnchorFaceIDs: [], bridges: 1, bridgeVoxels: 56, bridgeHolds: [TopOptFlows.BridgeHold(sizeMM: 3.75, holdMargin: 80.47723551, thickenings: 0, held: true)]))), TopOptFlows.RunReportBlocks.Row(volumeFraction: 0.391318328, printedFraction: 0.391318328, accepted: true, rejectionReason: "", bodies: Optional(TopOptFlows.VariantBodies(exported: 1, anchoredPiecesLost: 0, lostAnchorFaceIDs: [], bridges: 1, bridgeVoxels: 57, bridgeHolds: [TopOptFlows.BridgeHold(sizeMM: 3.75, holdMargin: 368.4175813, thickenings: 0, held: true)])))]))")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:196: error: -[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel] : XCTAssertEqual failed: ("[false, false]") is not equal to ("[false, true]")
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:200: error: -[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(3)")
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheOutcomeCarriesTheReportToTheResultsModel]' failed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/flexible-screens-track-9be87b/app/TopOptKit/Tests/TopOptFlowsTests/RedesignToStrengthenTests.swift:57: error: -[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("strengthen")") - the worker send asks core for the strengthen redesign
+Test Case '-[TopOptFlowsTests.RedesignToStrengthenTests testTheWorkerSendCarriesRedesignStrengthenAndTheDesignBox]' failed (0.001 seconds).
+Test Suite 'RedesignToStrengthenTests' failed at 2026-10-25 05:12:47.771.
+	 Executed 12 tests, with 13 failures (0 unexpected) in 10.693 (10.694) seconds
+Test Suite 'TopOptFlowsTests.xctest' failed at 2026-10-25 05:12:47.771.
+	 Executed 18 tests, with 13 failures (0 unexpected) in 12.812 (12.814) seconds
+Test Suite 'Selected tests' failed at 2026-10-25 05:12:47.772.
+	 Executed 18 tests, with 13 failures (0 unexpected) in 12.812 (12.815) seconds
+Test Suite 'Selected tests' started at 2026-10-25 05:12:47.878.
+Test Suite 'TopOptDesignTests.xctest' started at 2026-10-25 05:12:47.879.
+Test Suite 'TopOptDesignTests.xctest' passed at 2026-10-25 05:12:47.879.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 05:12:47.879.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Note: Some test targets reported failures:
+  - TopOptFlowsTests (XCTest)

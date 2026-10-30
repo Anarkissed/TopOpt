@@ -224,8 +224,20 @@ int main() {
     CgInfo icg, img, imf;
     FeaSolution scg = topopt::fea_solve_cg(g, ey, nu, bcs, loads, 1e-9, 0, &icg);
     FeaSolution smg = topopt::fea_solve_mgcg(g, ey, nu, bcs, loads, 1e-9, 0, &img);
+    // The SHIPPED fallback decision is what parity is about, so the matrix-free
+    // safe-smoother retry (which runs only AFTER the shipped MG stalls, and has
+    // no assembled counterpart) is switched off for this solve; the retry is
+    // then checked separately to land on the same exact field.
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    topopt::fea_matfree_set_mg_safe_retry(false);
     FeaSolution smf =
         topopt::fea_solve_mgcg_matfree(g, ey, nu, bcs, loads, 1e-9, 0, &imf);
+    topopt::fea_matfree_set_mg_safe_retry(true);
+    topopt::fea_matfree_reset_mg_stagnation_latch();
+    CgInfo isafe;
+    FeaSolution ssafe =
+        topopt::fea_solve_mgcg_matfree(g, ey, nu, bcs, loads, 1e-9, 0, &isafe);
+    topopt::fea_matfree_reset_mg_stagnation_latch();
 
     CHECK(icg.converged && imf.converged, "adversarial: both solvers converged");
     CHECK(imf.used_multigrid == img.used_multigrid,
@@ -234,6 +246,12 @@ int main() {
           "adversarial: matrix-free result matches the exact field (Jacobi-CG)");
     CHECK(max_rel_diff(smg, smf) <= 1e-6,
           "adversarial: matrix-free result matches assembled fea_solve_mgcg");
+    CHECK(isafe.converged && max_rel_diff(scg, ssafe) <= 1e-6,
+          "adversarial: the safe-smoother retry reaches the exact field too");
+    std::printf("matfree MG-CG adversarial random 32^3 with the safe retry: "
+                "used_mg=%d, %d safe cycles (of %d attempted)\n",
+                static_cast<int>(isafe.used_multigrid), isafe.iterations,
+                isafe.mg_cycles_attempted);
     std::printf(
         "matfree MG-CG adversarial random 32^3: used_mg=%d (assembled used_mg=%d), "
         "%d iters, residual %.3e\n",

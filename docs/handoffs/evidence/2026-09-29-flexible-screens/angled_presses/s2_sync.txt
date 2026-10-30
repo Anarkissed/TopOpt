@@ -1,0 +1,303 @@
+# Angled presses / round 6 (task 2026-09-29-flexible-screens), S2 — the sync after S1b: merge-only (git merge --no-ff),
+# never rebased, never forced, never pushed. Base e2e351c6 (round 6 items 1+3 incl. the main page, S1/S1b synced, core
+# 907df0816037). This Mac, Xcode 27, Debug. 2026-10-09.
+#
+# (1) THE MERGES (git fetch origin first; heads re-checked with git ls-remote before the evidence commit — unchanged):
+#   4c7bb64c  #358 origin/claude/raster-receipt-fields e8a01f7d — the three commits past the merged 26a37f64:
+#             1397473a D5: a plan cell's own rho is checked (the strut it builds must clear the bead; a rho over
+#                      max_relative_density is REFUSED, not clamped); the plan's BASE cell takes the tile floor and an
+#                      under-floor base is refused by name; the doubled tile floor is E1's
+#                      max(lattice_min_printable_cell_mm(topo, w, cap), stated) instead of the bead.
+#             25c6a551 K2: slot_origin_mm is a grid PHASE; depth is measured from the region's own plane
+#                      (SteppedPlanRegion::plane_origin); job.cpp's off-plane parse refusal is removed.
+#             e8a01f7d K6 part 1: ClearanceGeometry::declared_region_id — the run numbers every DECLARED include (valid
+#                      or not), stepped_region_owner returns that id, and the tie-break is on the id, not the position.
+#             core/ and docs/ only (9 files: clearance.hpp, stepped_plan.hpp, job.cpp, run_job.cpp, stepped_plan.cpp,
+#             slot_origin_off_plane.json, test_stepped_plan.cpp, test_slot_origin.cpp, the pr358 removed-symbols doc).
+#             No conflict. job.cpp and run_job.cpp auto-merged; their merged hunks are IDENTICAL to #358's own diff
+#             (git diff 26a37f64 e8a01f7d vs git diff HEAD --cached, per file). No app/ file, no Flexible hook line.
+#   origin/claude/flexible-squish-maths ea325c44 (#361), origin/claude/topopt-holes-quilting-298212 725dda46 (#354),
+#   origin/main f932266f — nothing newer: all three already contained (merge-base --is-ancestor), no merge commit.
+#   The final merge sha: 4c7bb64c.
+#
+# (2) CORE: app/scripts/build_core.sh at 4c7bb64c, exit 0, 17:28:08 -> 17:31:58.
+#   TopOptCore.xcframework  macos-arm64 17:29:25 (6 990 376 B) · ios-arm64-simulator 17:30:42 (7 084 488 B) · ios-arm64
+#   17:31:57 (7 000 608 B) — the slices were 2026-10-08 23:30-23:33 (907df081) before.
+#   Markers, strings per slice (every slice):
+#     D5 "builds a %.4g mm strut -- under the %.4g mm bead"  ("mm strut -- under the": 1)
+#     D5 "whose base cell is %.4g mm -- below "                ("whose base cell is": 1)
+#     K2 the REMOVED off-plane refusal "… mm along the region normal from \"origin\""  (0 in every slice; the
+#        907df081 Release lib in s1bfix/cli has 1 — the positive control for the absence)
+#     (K6 adds no string: an int field and a comparison.)
+#   CoreFingerprint.generated.swift regenerated 17:31:58, value "4c7bb64c9cf1" (was "907df0816037").
+#   swift build --build-tests: Build complete (20 s; TopOptBridge.o 17:32:20 recompiled against the new headers);
+#   TopOptFlowsTests binary 17:32:36 carries the D5 marker and "4c7bb64c9cf1", not "907df0816037", not the K2 text.
+#
+# (3) THE AP0/S1 GOLDENS AT THE MERGED HEAD, BEFORE ANY RE-RECORD
+#   SWIFT_DETERMINISTIC_HASHING=1 swift test --skip-build --filter 'TopOptFlowsTests\.(FlexibleAngledGoldenTests|FlexiblePressProbeTripwireTests)/'
+#     Executed 14 tests, with 0 failures (0 unexpected) in 13.684 (13.686) seconds — 38 "GOLDEN … identical", 0 DIFFERS
+#   the same unseeded (CI's mode):
+#     Executed 14 tests, with 0 failures (0 unexpected) in 13.647 (13.649) seconds — 32 identical, 0 DIFFERS, 1 PART-SKIP
+#     (the subtrees' RAW bytes need deterministic hashing; canonical subtrees and flexible blocks compared)
+#   FLEX-AP S1 tripwire · core 4c7bb64c9cf1: control accepted · tilt accepted · edge accepted
+#   FLEX-AP S1 tripwire control: press_directionX → job.json: flexible: flexible.faces[0]: unknown key "press_directionX"
+#   EVERY DIFFERENCE: NONE. Every Flexible run job and scene job (C1 pad, his 0004, his r5, A1_0002/3/4), every lattice
+#   subtree, every core frame (C1 pad, his 0004, r5, cube60, M2, the STEP cube, his l bracket) and every core field is
+#   byte-identical. Why none could move, read in the code, not assumed:
+#     - D5 and K2 live inside run_job.cpp's `if (!job.lattice.stepped_cells.empty())` (run_job.cpp:7013) and the
+#       validator it calls; K6 sets declared_region_id in lattice_role_regions_from_job (run_job.cpp:940-985).
+#     - None of the 14 golden sends carries a "lattice" block, "stepped_cells" or "slot_origin_mm" (grep over the
+#       fixtures: 0 files), so none reaches either path. The goldens never call run_flexible_job; S1b's topopt-cli run
+#       of the 14 sends (s1b_sync.txt (7)) was NOT repeated — nothing the three commits change is on that path.
+#
+# (4) THE STAGE-JOB HASHES (stage_job_hashes.sh, unchanged; inputs checked against s0_frozen/SHA256SUMS — none moved;
+#   SWIFT_DETERMINISTIC_HASHING=1, TOPOPT_JOB_REPEAT=3): stage_job_hashes_s2.txt — ALL 16 ROWS IDENTICAL to S1b's
+#   (diff of the non-comment lines: empty; the source sums identical). #358's stepped changes move NO #354 stage-job row:
+#     - the stage jobs are the APP's bytes (makeLatticeRunRequest); of what the three commits change, the app reaches
+#       only stepped_region_owner (bridge.cpp:3394 stepped_region_owners, which builds the includes itself and leaves
+#       declared_region_id 0 — the positional answer K6 keeps — in ascending order, so K6's id tie-break equals the old
+#       first-position one) and parse_job (K2 removed a refusal; the app's own slot-origin probe,
+#       TopOptKit.regionSlotOriginWired, sends an IN-plane point and is accepted before and after). The app never calls
+#       stepped_validate_plan (D5's new cap argument): grep over app/ 0. No app file changed.
+#     - none of the 16 dumped jobs carries "stepped_cells" or "slot_origin_mm" (0 of 16), so D5 and K2 cannot apply
+#       when core RUNS them either — #354's PlanWithheld (LatticeSettings.swift:619-682) still withholds an off-plane
+#       plan, so a tilted plan is never sent (see open issue a).
+#     - K6 at RUN time moves a region id only where an include fails to resolve. Scratch probe (s2 k6probe, linked
+#       against this core's macOS slice, mirroring the include build as bridge.cpp does): every stage job core parses
+#       has declared includes == resolving includes — 102117B9 177/177, 3418E167 2/2, 570B38E2 2/2, 68BF7B74 5/5,
+#       92A8016E 1/1, A1_0001 5/5, r3 1/1 — so K6 changes no id on them.
+#     - The same probe found 9 rows core REFUSES AT PARSE — identically on the pre-sync core (the 907df081 Release lib,
+#       probe compiled against 907df081's headers; verdicts diff empty), so NOT this sync: A1_0002, A1_0003, 887AC498,
+#       AA4C7953 (no lattice work: "mode lattice_part requires a lattice block" — 0 regions emitted, the app sends
+#       none), and A1_0004, r5, control+, control-, again-r5: "face region 105 declares neither a filter nor any "add"
+#       faces" (loads.face_regions[4] {"id":105,"name":"Union of 2"}, empty) — see open issue b.
+#
+# (5) RE-BASED (after (3) was reported above): RECORD=1 SWIFT_DETERMINISTIC_HASHING=1 FLEX_AP_BASE=4c7bb64c swift test
+#   --skip-build --filter 'TopOptFlowsTests\.FlexibleAngledGoldenRecorder/'
+#     Executed 10 tests, with 0 failures (0 unexpected) in 17.147 (17.150) seconds
+#   git diff afterwards: MANIFEST.txt (base 907df081 -> 4c7bb64c, core 907df0816037 -> 4c7bb64c9cf1) and probe_answers.json
+#   (base / core labels; control, tilt, edge still null = accepted); every other golden re-written byte-identical.
+#   probe_refusals_base.json kept (never overwritten). FlexibleAngledGoldenTests' header names the S2 base (2 comment lines).
+#   After the re-base (swift build --build-tests, then the same two runs as (3)):
+#     deterministic: Executed 14 tests, with 0 failures (0 unexpected) in 13.953 s — 38 identical, 0 DIFFERS
+#     unseeded:      Executed 14 tests, with 0 failures (0 unexpected) in 13.908 s — 32 identical, 0 DIFFERS, 1 PART-SKIP
+#     tripwire · core 4c7bb64c9cf1: control accepted · tilt accepted · edge accepted
+#
+# (6) THE TARGETED SUITE
+#   139 classes, chosen by rule (s2 suite_classes.txt): every Flexible* class in both bundles (93), every class in a test
+#   file that names a touched file or symbol (grep -lF over Tests for clearance.hpp, stepped_plan.hpp, job.cpp, run_job.cpp,
+#   stepped_plan.cpp, slot_origin_off_plane, test_stepped_plan, test_slot_origin, pr358-removed-symbols,
+#   stepped_region_owner, declared_region_id, stepped_validate_plan, slot_origin, plane_origin, CoreFingerprint: 39 files),
+#   the golden classes, and LatticeStaleTypeTests ProjectStoreTests UndoHistoryTests LatticeSettingsPersistTests ViewerTests
+#   SmoothingPageRound2Tests LatticeSimSolveTriggerTests. Unseeded (CI's mode), swift test --skip-build, detached driver,
+#   12 classes per run, 17:35:43 -> 18:36:37, NO xctest death (the side worktree's suite ran at the same time: load).
+#   TopOptFlowsTests 133 classes, 917 tests, 45 skipped, 13 failures in 3 tests · TopOptKitTests 6 classes, 39 tests,
+#   2 skipped, 0 failures.
+#   THE 13 FAILURES:
+#     FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker x8 — KNOWN (Xcode 27 text metrics).
+#     LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds x1 — KNOWN, pre-existing.
+#     ★ LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses x4 — NEW, a merge interaction CAUSED BY THIS SYNC:
+#       #358's 25c6a551 (K2) removed the off-plane refusal that #354's parity test pins (LatticeSlotOriginTests.swift:107-140:
+#       "the app withholds exactly the slot origins core refuses"). The four, each "core accepts" where it refused:
+#         :135 "2e-6 off": app withholds .offPlane(1, 2e-06), core accepts
+#         :135 "short normal, 2e-6 off (unit test, as core)": app withholds, core accepts
+#         :135 "tilted 18°, the bake's grid": app withholds .offPlane(1, 3.0246 mm), core accepts
+#         :139 XCTAssertNotNil "★ core refuses the tilted grid" — core no longer refuses it
+#       ("in plane", "5e-7 off" and "projected onto the plane" still agree.)
+#       CONTROL (s2 k2ctl, the scratch probe on a real stage job, 92A8016E's include face, slot_origin_mm = origin + d*n):
+#         d = 0     : new core parses · 907df081 core parses
+#         d = 2e-6  : new core parses · 907df081 core REFUSES "… "slot_origin_mm" must lie IN the face plane, and this one
+#                     stands 0.000002 mm along t[he region normal …]"
+#         d = 3 mm  : new core parses · 907df081 core REFUSES (3.000000 mm)
+#       NOT fixed here: the test and PlanWithheld are #354's (app/TopOptKit/Tests/TopOptFlowsTests/LatticeSlotOriginTests.swift,
+#       app/TopOptKit/Sources/TopOptFlows/LatticeSettings.swift); never loosened. #354 meets the same red when it syncs
+#       #358 past 26a37f64 (its head 725dda46 has only 26a37f64). See open issue a.
+#   Known load flakes did NOT fire this time: FlexibleBatchNRefineTests 4/4, FlexibleRound5SettingsHostedTests 4/4,
+#   FlexibleSqueezeGroupsUITests 4/4. LatticeStaleTypeTests 6/6. Every Flexible* class passed except the known refine line.
+#   #354's owner/plan classes against the new core: LatticeCoreOwnerTests 6/6, LatticeCorePlanRulesTests 3/3,
+#   LatticeStructuralSteppedGateTests 3/3 (LatticeCoreOwnerParityProof and LatticeDefaultGradePlanProof are env-gated: skipped).
+#   git status after the suite: clean (no evidence rewritten).
+#
+# (7) iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug -destination id=147E56A1-…
+#   -derivedDataPath …/DerivedData/flexA1 build at 4c7bb64c: ** BUILD SUCCEEDED ** (17:34:12 -> 17:34:29).
+#   xcrun simctl install 147E56A1 (Booted) exit 0 at 17:34:50 — NEVER launched. Installed TopOpt.debug.dylib
+#   17:34:29, 75 799 344 B, byte-identical to the build's (cmp); strings: the D5 marker 1, "4c7bb64c9cf1" 1, the K2
+#   removed text 0. (The evidence commits after it touch docs and the golden fixture labels only — no app source.)
+#
+# (8) OPEN ISSUES (none fixed here: app track, never core, and none of them in a file this track wrote)
+#   a. CAUSED BY THIS SYNC (K2 meeting #354's code): core takes an off-plane slot origin now, but #354's app still
+#      withholds that plan — LatticeSettings.swift PlanWithheld.offPlane / slotOrigins (:619-682) and the banner "region N's
+#      face is tilted off the grid these cells sit on, and core can't place them there yet" describe a refusal core no
+#      longer makes (job.cpp's off-plane check is gone in 25c6a551) — and #354's parity test pinning that refusal is RED
+#      here, LatticeSlotOriginTests.testTheAppWithholdsExactlyWhatCoreRefuses x4 (6). Lifting the withholding and
+#      re-pinning the test are #354's change; when it lands, the stage jobs that carry tilted plans (102117B9, 68BF7B74
+#      by #358's own count) are expected to move, and D5's new plan checks then apply to them.
+#   b. Pre-existing (907df081 core too): the dumped stage jobs of A1_0004 / his r5 carry face region 105 "Union of 2"
+#      with neither a filter nor "add" faces, which core's parse refuses. Not checked whether the app's live run of
+#      that project sends the same region (the dump harness may lack what fills it) — for #354 / the lead.
+#   c. K6 split the run from the bridge: run_job now numbers DECLARED includes (an invalid include keeps its number),
+#      while bridge.cpp stepped_region_owners (#354's file, :3394-3452) still compacts past an invalid include and
+#      leaves declared_region_id 0 — so the app's owner check and core's run disagree on ids past any include that
+#      fails to resolve. 0 of the 16 stage jobs has one (4). #354's bridge should set g.declared_region_id the way
+#      run_job.cpp:940-985 does.
+#
+# (9) RAW — the stage-job probe (s2 k6probe, scratch; source in s2_k6probe.cpp.txt beside this file), post-sync core:
+#   again_r5_his_project_0004_r5_A1000001-0000-4000-8000-000000000004 PARSE REFUSED: job.json: face region 105 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing
+#   base_A1_A1000001-0000-4000-8000-000000000001_A1000001-0000-4000-8000-000000000001 parsed: includes declared 5, resolve 5, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_A1_A1000001-0000-4000-8000-000000000002_A1000001-0000-4000-8000-000000000002 PARSE REFUSED: job.json: "mode": "lattice_part" requires a "lattice" block — it exists to lattice the imported part, and a job with no lattice work to do is a mistake rather than a no-op
+#   base_A1_A1000001-0000-4000-8000-000000000003_A1000001-0000-4000-8000-000000000003 PARSE REFUSED: job.json: "mode": "lattice_part" requires a "lattice" block — it exists to lattice the imported part, and a job with no lattice work to do is a mistake rather than a no-op
+#   base_A1_A1000001-0000-4000-8000-000000000004_A1000001-0000-4000-8000-000000000004 PARSE REFUSED: job.json: face region 105 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing
+#   base_his_102117B9-DDD2-4597-9BDE-49DD47EBF393_102117B9-DDD2-4597-9BDE-49DD47EBF393 parsed: includes declared 177, resolve 177, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_his_3418E167-8524-4831-A809-827B6B0742D0_3418E167-8524-4831-A809-827B6B0742D0 parsed: includes declared 2, resolve 2, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_his_570B38E2-3C6E-46E0-BCF6-26BE1595D204_570B38E2-3C6E-46E0-BCF6-26BE1595D204 parsed: includes declared 2, resolve 2, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_his_68BF7B74-3C2A-4ED6-A46D-AC040A9CA649_68BF7B74-3C2A-4ED6-A46D-AC040A9CA649 parsed: includes declared 5, resolve 5, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_his_887AC498-5B5D-4475-B6CB-893DC69B5FD6_887AC498-5B5D-4475-B6CB-893DC69B5FD6 PARSE REFUSED: job.json: "mode": "lattice_part" requires a "lattice" block — it exists to lattice the imported part, and a job with no lattice work to do is a mistake rather than a no-op
+#   base_his_92A8016E-FCCD-421D-B19E-4A1EC81C98A5_92A8016E-FCCD-421D-B19E-4A1EC81C98A5 parsed: includes declared 1, resolve 1, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_his_AA4C7953-3152-4123-BCB5-EF5F8A08ABA3_AA4C7953-3152-4123-BCB5-EF5F8A08ABA3 PARSE REFUSED: job.json: "mode": "lattice_part" requires a "lattice" block — it exists to lattice the imported part, and a job with no lattice work to do is a mistake rather than a no-op
+#   base_r3_his_project_0004_A1000001-0000-4000-8000-000000000004 parsed: includes declared 1, resolve 1, region-kind 0, frame_conflict 0, stepped_cells 0 -> K6 ids == positions (no change)
+#   base_r5_his_project_0004_r5_A1000001-0000-4000-8000-000000000004 PARSE REFUSED: job.json: face region 105 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing
+#   control+_r5_his_project_0004_r5_A1000001-0000-4000-8000-000000000004_depth PARSE REFUSED: job.json: face region 105 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing
+#   control-_r5_his_project_0004_r5_A1000001-0000-4000-8000-000000000004_flex PARSE REFUSED: job.json: face region 105 declares neither a filter nor any "add" faces — it would resolve to nothing and tag nothing
+#   (the same probe, compiled against 907df081's core/include and linked to the 907df081 Release lib: verdicts identical)
+#
+# (10) RAW — the targeted suite, per class (s2 suite_summary.txt):
+#   PASSED TopOptFlowsTests.ClearanceGeometryTests Executed 24 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+#   PASSED TopOptFlowsTests.ComputeLocationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.007 (0.007) seconds
+#   PASSED TopOptFlowsTests.CoreBuildIdentityTests Executed 3 tests, with 0 failures (0 unexpected) in 1.536 (1.536) seconds
+#   PASSED TopOptFlowsTests.DeviceRunEntryGateTests Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleAngledGoldenRecorder Executed 10 tests, with 10 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleAngledGoldenTests Executed 13 tests, with 0 failures (0 unexpected) in 13.732 (13.733) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchBReviewTests Executed 10 tests, with 0 failures (0 unexpected) in 85.519 (85.520) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchBReviewUXTests Executed 13 tests, with 0 failures (0 unexpected) in 0.633 (0.634) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchCHookTests Executed 4 tests, with 0 failures (0 unexpected) in 0.865 (0.865) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchCVerifyTests Executed 14 tests, with 0 failures (0 unexpected) in 17.757 (17.758) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2Probe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2Tests Executed 2 tests, with 0 failures (0 unexpected) in 27.167 (27.167) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchM2VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 44.344 (44.345) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMDentTests Executed 2 tests, with 0 failures (0 unexpected) in 47.712 (47.712) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMGroupTests Executed 1 test, with 0 failures (0 unexpected) in 48.996 (48.996) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMLegendTests Executed 2 tests, with 0 failures (0 unexpected) in 59.345 (59.345) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMProbe Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMStressTests Executed 4 tests, with 0 failures (0 unexpected) in 99.052 (99.052) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMVerifyTests Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 544.692 (544.693) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchMXrayTests Executed 2 tests, with 0 failures (0 unexpected) in 163.573 (163.573) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleBatchNRefineTests Executed 4 tests, with 0 failures (0 unexpected) in 247.395 (247.396) seconds
+#   FAILED TopOptFlowsTests.FlexibleBatchNVerifyTests Executed 4 tests, with 8 failures (0 unexpected) in 185.539 (185.540) seconds
+#   PASSED TopOptFlowsTests.FlexibleCoreClaimTests Executed 4 tests, with 0 failures (0 unexpected) in 41.712 (41.713) seconds
+#   PASSED TopOptFlowsTests.FlexibleCurveEditTests Executed 7 tests, with 0 failures (0 unexpected) in 0.007 (0.007) seconds
+#   PASSED TopOptFlowsTests.FlexibleDepthPrismTests Executed 11 tests, with 0 failures (0 unexpected) in 0.763 (0.764) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEFieldTests Executed 12 tests, with 0 failures (0 unexpected) in 153.051 (153.052) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEPassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEPassTests Executed 5 tests, with 0 failures (0 unexpected) in 16.255 (16.256) seconds
+#   PASSED TopOptFlowsTests.FlexibleFEVerifyGTests Executed 2 tests, with 0 failures (0 unexpected) in 36.742 (36.743) seconds
+#   PASSED TopOptFlowsTests.FlexibleGeometryOnlyLatticeTests Executed 3 tests, with 0 failures (0 unexpected) in 0.211 (0.211) seconds
+#   PASSED TopOptFlowsTests.FlexibleGroupFieldPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#   PASSED TopOptFlowsTests.FlexibleGroupPaletteEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#   PASSED TopOptFlowsTests.FlexibleGroupPaletteHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 44.339 (44.339) seconds
+#   PASSED TopOptFlowsTests.FlexibleGroupPaletteTests Executed 7 tests, with 0 failures (0 unexpected) in 0.231 (0.231) seconds
+#   PASSED TopOptFlowsTests.FlexibleInPassCompositeTests Executed 10 tests, with 0 failures (0 unexpected) in 19.091 (19.092) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeEvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeFieldTests Executed 4 tests, with 0 failures (0 unexpected) in 2.915 (2.916) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeGradingTests Executed 2 tests, with 0 failures (0 unexpected) in 1.978 (1.978) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticePassPerfTests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticePassTests Executed 10 tests, with 0 failures (0 unexpected) in 13.671 (13.672) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeUnderReviewTests Executed 7 tests, with 0 failures (0 unexpected) in 11.884 (11.885) seconds
+#   PASSED TopOptFlowsTests.FlexibleLatticeUnderTests Executed 3 tests, with 0 failures (0 unexpected) in 2.669 (2.669) seconds
+#   PASSED TopOptFlowsTests.FlexibleLegendPlacementTests Executed 4 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageHookTests Executed 3 tests, with 0 failures (0 unexpected) in 0.228 (0.228) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageLoadsTests Executed 10 tests, with 0 failures (0 unexpected) in 2.817 (2.818) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4HostedTests Executed 2 tests, with 0 failures (0 unexpected) in 3.815 (3.816) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4Tests Executed 12 tests, with 0 failures (0 unexpected) in 27.115 (27.116) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainPageRound4VerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 81.881 (81.882) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainStageTests Executed 8 tests, with 0 failures (0 unexpected) in 21.149 (21.150) seconds
+#   PASSED TopOptFlowsTests.FlexibleMainViewsTests Executed 10 tests, with 0 failures (0 unexpected) in 23.288 (23.289) seconds
+#   PASSED TopOptFlowsTests.FlexibleMergeR5SMTests Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+#   PASSED TopOptFlowsTests.FlexibleOverlayClipTests Executed 6 tests, with 0 failures (0 unexpected) in 0.714 (0.715) seconds
+#   PASSED TopOptFlowsTests.FlexibleOverlaySeamTests Executed 2 tests, with 0 failures (0 unexpected) in 0.712 (0.713) seconds
+#   PASSED TopOptFlowsTests.FlexiblePinchTests Executed 7 tests, with 0 failures (0 unexpected) in 5.745 (5.745) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressFixturesTests Executed 2 tests, with 0 failures (0 unexpected) in 0.272 (0.272) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressProbeTripwireTests Executed 1 test, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressReframeTests Executed 2 tests, with 0 failures (0 unexpected) in 0.072 (0.072) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressReviewTests Executed 12 tests, with 0 failures (0 unexpected) in 1.010 (1.011) seconds
+#   PASSED TopOptFlowsTests.FlexiblePressSaveTests Executed 8 tests, with 0 failures (0 unexpected) in 1.394 (1.395) seconds
+#   PASSED TopOptFlowsTests.FlexibleReadinessTests Executed 10 tests, with 0 failures (0 unexpected) in 3.581 (3.582) seconds
+#   PASSED TopOptFlowsTests.FlexibleRegionsTests Executed 3 tests, with 0 failures (0 unexpected) in 0.038 (0.038) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5EvidenceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SettingsHostedTests Executed 4 tests, with 0 failures (0 unexpected) in 87.952 (87.952) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SettingsTests Executed 11 tests, with 0 failures (0 unexpected) in 8.458 (8.460) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SettingsVerifyTests Executed 9 tests, with 0 failures (0 unexpected) in 2.658 (2.658) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound5SquishExitTests Executed 6 tests, with 0 failures (0 unexpected) in 156.969 (156.970) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6EvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.003 (0.003) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6HostedTests Executed 17 tests, with 0 failures (0 unexpected) in 252.865 (252.867) seconds
+#   PASSED TopOptFlowsTests.FlexibleRound6Tests Executed 11 tests, with 0 failures (0 unexpected) in 37.942 (37.943) seconds
+#   PASSED TopOptFlowsTests.FlexibleRowCopyTests Executed 4 tests, with 0 failures (0 unexpected) in 0.299 (0.299) seconds
+#   PASSED TopOptFlowsTests.FlexibleS1VerifyTests Executed 3 tests, with 0 failures (0 unexpected) in 2.298 (2.298) seconds
+#   PASSED TopOptFlowsTests.FlexibleS1bMainTagsTests Executed 5 tests, with 1 test skipped and 0 failures (0 unexpected) in 157.869 (157.870) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsMigrationTests Executed 5 tests, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsPageHostedTests Executed 2 tests, with 0 failures (0 unexpected) in 83.259 (83.259) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsRound4Tests Executed 14 tests, with 0 failures (0 unexpected) in 5.327 (5.328) seconds
+#   PASSED TopOptFlowsTests.FlexibleSettingsVerifyD1Tests Executed 10 tests, with 0 failures (0 unexpected) in 1.815 (1.816) seconds
+#   PASSED TopOptFlowsTests.FlexibleShownValuesTests Executed 6 tests, with 0 failures (0 unexpected) in 0.950 (0.950) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsModelTests Executed 7 tests, with 0 failures (0 unexpected) in 18.114 (18.114) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsPressTests Executed 4 tests, with 0 failures (0 unexpected) in 0.892 (0.892) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewTests Executed 8 tests, with 0 failures (0 unexpected) in 6.716 (6.716) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUITests Executed 2 tests, with 0 failures (0 unexpected) in 58.735 (58.735) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsReviewUXTests Executed 5 tests, with 0 failures (0 unexpected) in 8.424 (8.424) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsTests Executed 8 tests, with 0 failures (0 unexpected) in 0.055 (0.056) seconds
+#   PASSED TopOptFlowsTests.FlexibleSqueezeGroupsUITests Executed 4 tests, with 0 failures (0 unexpected) in 34.470 (34.471) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishCoarsenTests Executed 2 tests, with 0 failures (0 unexpected) in 0.457 (0.457) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishEvidenceProbe Executed 3 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishPerfProbe Executed 2 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishPlayAllTests Executed 5 tests, with 0 failures (0 unexpected) in 1.102 (1.103) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishPlayerTests Executed 6 tests, with 0 failures (0 unexpected) in 0.675 (0.676) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishSolverTests Executed 5 tests, with 0 failures (0 unexpected) in 112.540 (112.541) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishTests Executed 11 tests, with 0 failures (0 unexpected) in 2.818 (2.819) seconds
+#   PASSED TopOptFlowsTests.FlexibleSquishVerifyGTests Executed 5 tests, with 0 failures (0 unexpected) in 318.129 (318.130) seconds
+#   PASSED TopOptFlowsTests.FlexibleStageTests Executed 15 tests, with 0 failures (0 unexpected) in 1.638 (1.640) seconds
+#   PASSED TopOptFlowsTests.FlexibleSurfaceNavTests Executed 3 tests, with 0 failures (0 unexpected) in 0.094 (0.094) seconds
+#   PASSED TopOptFlowsTests.LatticeBeamNetworkFactTests Executed 4 tests, with 0 failures (0 unexpected) in 0.053 (0.054) seconds
+#   PASSED TopOptFlowsTests.LatticeCellFitModeTests Executed 13 tests, with 0 failures (0 unexpected) in 0.009 (0.010) seconds
+#   PASSED TopOptFlowsTests.LatticeCoreOwnerParityProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeCoreOwnerTests Executed 6 tests, with 0 failures (0 unexpected) in 29.912 (29.913) seconds
+#   PASSED TopOptFlowsTests.LatticeCorePlanRulesTests Executed 3 tests, with 0 failures (0 unexpected) in 1.775 (1.775) seconds
+#   PASSED TopOptFlowsTests.LatticeCoreProbeReportTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeDefaultGradePlanProof Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeOrganicSettingsTests Executed 7 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+#   PASSED TopOptFlowsTests.LatticePageRound2Tests Executed 15 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.061 (0.062) seconds
+#   PASSED TopOptFlowsTests.LatticePageTests Executed 25 tests, with 0 failures (0 unexpected) in 0.402 (0.404) seconds
+#   PASSED TopOptFlowsTests.LatticeRetentionControlTests Executed 45 tests, with 0 failures (0 unexpected) in 0.021 (0.024) seconds
+#   PASSED TopOptFlowsTests.LatticeSettingsPersistTests Executed 4 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+#   FAILED TopOptFlowsTests.LatticeSimSolveTriggerTests Executed 2 tests, with 1 failure (0 unexpected) in 0.126 (0.127) seconds
+#   FAILED TopOptFlowsTests.LatticeSlotOriginTests Executed 5 tests, with 4 failures (0 unexpected) in 3.286 (3.287) seconds
+#   PASSED TopOptFlowsTests.LatticeStaleTypeTests Executed 6 tests, with 0 failures (0 unexpected) in 2.344 (2.345) seconds
+#   PASSED TopOptFlowsTests.LatticeStructuralSteppedGateTests Executed 3 tests, with 0 failures (0 unexpected) in 1.028 (1.028) seconds
+#   PASSED TopOptFlowsTests.LatticeTypeReadinessFromCoreTests Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeVariantTests Executed 21 tests, with 0 failures (0 unexpected) in 2.177 (2.179) seconds
+#   PASSED TopOptFlowsTests.LatticeVariantsHisRunEvidence Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.LatticeVariantsOnScreenTests Executed 16 tests, with 0 failures (0 unexpected) in 0.372 (0.374) seconds
+#   PASSED TopOptFlowsTests.OrganicDeadWallParityTests Executed 7 tests, with 0 failures (0 unexpected) in 0.279 (0.280) seconds
+#   PASSED TopOptFlowsTests.OrganicForecastTests Executed 13 tests, with 0 failures (0 unexpected) in 0.149 (0.150) seconds
+#   PASSED TopOptFlowsTests.OrganicJobsCoreAcceptsTests Executed 2 tests, with 0 failures (0 unexpected) in 1.506 (1.506) seconds
+#   PASSED TopOptFlowsTests.OrganicMainWiringTests Executed 10 tests, with 0 failures (0 unexpected) in 0.068 (0.069) seconds
+#   PASSED TopOptFlowsTests.OrganicPreviewMatchesTheJobTests Executed 3 tests, with 0 failures (0 unexpected) in 2.495 (2.496) seconds
+#   PASSED TopOptFlowsTests.OrganicPreviewParameterParityTests Executed 5 tests, with 0 failures (0 unexpected) in 4.015 (4.015) seconds
+#   PASSED TopOptFlowsTests.OrganicShapeFitTests Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.OrganicSizeCheckTests Executed 11 tests, with 0 failures (0 unexpected) in 0.014 (0.014) seconds
+#   PASSED TopOptFlowsTests.OrganicSolidRimTests Executed 7 tests, with 0 failures (0 unexpected) in 0.036 (0.036) seconds
+#   PASSED TopOptFlowsTests.ProjectStoreTests Executed 5 tests, with 0 failures (0 unexpected) in 0.088 (0.088) seconds
+#   PASSED TopOptFlowsTests.RecommendThePrintedObjectTests Executed 8 tests, with 0 failures (0 unexpected) in 0.142 (0.142) seconds
+#   PASSED TopOptFlowsTests.RemoteRunnerE2ETests Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptFlowsTests.SmoothingPageRound2Tests Executed 21 tests, with 0 failures (0 unexpected) in 0.315 (0.316) seconds
+#   PASSED TopOptFlowsTests.UndoHistoryTests Executed 10 tests, with 0 failures (0 unexpected) in 0.615 (0.616) seconds
+#   PASSED TopOptFlowsTests.VariantEntryGatingTests Executed 21 tests, with 0 failures (0 unexpected) in 0.278 (0.279) seconds
+#   PASSED TopOptFlowsTests.VariantRetentionTests Executed 15 tests, with 0 failures (0 unexpected) in 0.065 (0.066) seconds
+#   PASSED TopOptFlowsTests.ViewerTests Executed 33 tests, with 0 failures (0 unexpected) in 0.317 (0.320) seconds
+#   PASSED TopOptKitTests.FlexibleBridgeTests Executed 17 tests, with 0 failures (0 unexpected) in 0.685 (0.687) seconds
+#   PASSED TopOptKitTests.FlexibleSliceProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptKitTests.FlexibleSquishFETests Executed 12 tests, with 0 failures (0 unexpected) in 27.796 (27.797) seconds
+#   PASSED TopOptKitTests.FlexibleSquishModulusTests Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+#   PASSED TopOptKitTests.FlexibleSquishStepsTests Executed 6 tests, with 0 failures (0 unexpected) in 72.866 (72.866) seconds
+#   PASSED TopOptKitTests.FlexibleTimingProbe Executed 1 test, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+#   SUITE DONE 18:36:37

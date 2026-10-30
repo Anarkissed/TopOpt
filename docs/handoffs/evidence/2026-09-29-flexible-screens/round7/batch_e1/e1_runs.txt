@@ -1,0 +1,87 @@
+# Round 7 · R7-E1 — the runs, raw counts. swift build --build-tests --scratch-path /tmp/r7e-build; swift test --skip-build --scratch-path /tmp/r7e-build; counts from the Test Case end lines.
+
+## 1. FOLLOW-UPS (Protect lock, the inside-corner groove, the (i)'s outside rule)
+RED at the stubs (9a4cef72): e1a_red_run.txt — 5 tests, every failure the fixes' own assertion; the RED CONTROLS passed (proved red: 0d8ae925's fill claims 640 of 7,056 unselected-wall points; the SDF rule reads 50 % / 15 %; Protect unlocked goes off).
+GREEN at e990de13: FlexibleR7E1FollowUpTests 4/4, FlexibleR7E1FollowUpHostedTests 1/1. One fixture fix in our new test before green (the synthetic L's lattice at centres inside the part only: x < 40).
+Classes reaching the touched files, at e990de13: FlexibleTopLayerTests FlexibleTopLayerHostedTests FlexibleR7D2ReviewTests FlexibleFaceCommitTests FlexibleLatticeIsProtectedTests FlexibleLatticeIsProtectedHostedTests FlexibleFaceChipTests FlexibleLatticeFieldTests FlexibleLatticePassTests FlexibleR7E1FollowUpHostedTests FlexibleRound7SelectionsHookTests — 59 cases, 0 failures.
+  FLEX-E1-CR the L's inside corner (7,056 points): claimed — fix 0 · control (0d8ae925's fill) 640 · core's own mask 0; voxels added: fix 608 · control 627 · skipped 19 (the corner column)
+  FLEX-E1-CR his live Balanced pad: added 4604 (control 4604) · mask identical · ρ identical
+  FLEX-E1-I (a) added voxels the SDF calls inside: core's rule 15 % · the SDF's 50 %; (b) core's voxels the SDF calls outside: core's rule 50 % · the SDF's 15 %
+
+## 2. THE FLAT PRISM
+RED at the stubs (e345e39e): e1b_red_run.txt (part 1 ended in a test-side crash at the stub — an unguarded index — fixed by guards in our new tests; part 2 re-ran the rest against the same stubs).
+GREEN at d5a47710 / 09d2b4a7 — corrections of OUR NEW tests after the first green run (each said inside its test):
+  - testTheDepthStopsWhereTheLatticeEnds: the cap of the press's CURRENT 3 mm stack is an upper bound (33.0 mm); the release's check at 20 mm is exact — N = 18.46 mm, 25/√2 = 17.68 within one 1.5625 mm pitch. (Core's whole-column lattice_mm would allow 68.4 mm: Edge 16's diagonal columns also cross Face 5's prism — hence the contiguous run, a judgment call asked of the reviewer.)
+  - testOneStorePerNumber: its typed 7.25 mm with a 6° twist reached past his 20 mm pad's Top at the deep end; core's columns stopped it at 4.9 mm — the engine was right; the typed edit is untwisted.
+  - testTheHalfwayIsTheWholeFacesAndNeverReAimed: its control ("the strips' halfway has other bits") does not hold on his box pad's Edge 14 (bit-equal there); replaced by a source check (no aimSet in the Flexible route). On the Top + Face 2 edge the two DO differ by one ulp (FLEX-I2-6 below).
+  - FlexibleFlatPrismHostedTests: made synchronous — an async test's page draws no overlay (no projection), as FlexibleR7SettingsHostedTests notes; and the page turns to a pending flat press on appear.
+  - a corner's row title (found by looking at the corner picture) — red first, then fixed (09d2b4a7).
+Engine fix found by the suite of our classes: with NO face-prism (only under the tests' ask-core control, ruling 6) the lattice stop is not read (M1: no lattice) — FlexibleEdgeGroupsTests' wedge control had been refused at 0.7 mm.
+
+Printed lines:
+FLEX-E1-C corner row: Corner 1 · Faces 1 + 2 + 4
+FLEX-E1-CR his live Balanced pad: added 4604 (control 4604) · mask identical true · ρ identical true
+FLEX-E1-CR the L's inside corner, the unselected wall within one voxel (7056 points): claimed by the region — fix 0 · control (0d8ae925's fill) 640 · core's own mask 0
+FLEX-E1-CR voxels the fill adds: fix 608 · control 627 · skipped 19
+FLEX-E1-E halfway whole faces SIMD3<Double>(-0.7071067811865475, 0.7071067811865475, 0.0) · on the strips SIMD3<Double>(-0.7071067811865475, 0.7071067811865475, 0.0) (bit-equal true)
+FLEX-E1-G1 member 0: flat 848.5281374238571 mm² · rest 2751.471862576143 · width route 600.0
+FLEX-E1-G1 member 1: flat 848.5281374238571 mm² · rest 2751.471862576143 · width route 600.0
+FLEX-E1-G2 member 0: trace 23.662015831524982 mm · in-face boundary 23.662015831524982 · 3D-cut boundary 22.65677821253613 · voxel 0.9375
+FLEX-E1-G2 member 1: trace 11.033779189624916 mm · in-face boundary 11.033779189624918 · 3D-cut boundary 10.815197474864764 · voxel 0.9375
+FLEX-E1-G4 θ +20° toward Face 2: reach 23.662015831524982 / 11.033779189624916 (h/sin25 23.662015831524986, h/cos25 11.033779189624918)
+FLEX-E1-G5 corner rests: ["rest:f1:1", "rest:f2:1", "rest:f4:1"]
+FLEX-E1-G6 the inside edge Edge 21: An inside edge · no flat prism
+FLEX-E1-H2 11l targets [(553.0, 395.0, 87.0, 44.0), (574.0, 339.0, 45.0, 44.0), (650.0, 291.0, 78.0, 44.0), (647.0, 339.0, 83.0, 44.0)] · chrome ["panel (24.0, 273.0, 480.0, 537.0)", "viewButtons (866.0, 235.0, 304.0, 45.0)", "legend (0.0, 0.0, 0.0, 0.0)", "exitRow (24.0, 24.0, 182.0, 44.0)", "capsule (24.0, 76.0, 263.0, 44.0)"]
+FLEX-E1-H2 11l: 86×44 44×44 76×44 82×44 · 11p: 86×44 44×44 76×44 82×44 · 13p: 86×44 44×44 76×44 82×44 · 13l: 86×44 44×44 76×44 82×44 · mini-p: 86×44 44×44 76×44 82×44
+FLEX-E1-H2 11p targets [(373.0, 575.0, 87.0, 44.0), (394.0, 519.0, 45.0, 44.0), (470.0, 471.0, 78.0, 44.0), (467.0, 519.0, 83.0, 44.0)] · chrome ["panel (24.0, 633.0, 480.0, 537.0)", "viewButtons (506.0, 235.0, 304.0, 45.0)", "legend (0.0, 0.0, 0.0, 0.0)", "exitRow (24.0, 24.0, 182.0, 44.0)", "capsule (24.0, 76.0, 263.0, 44.0)"]
+FLEX-E1-H2 13l targets [(644.0, 494.0, 87.0, 44.0), (665.0, 438.0, 45.0, 44.0), (741.0, 390.0, 78.0, 44.0), (738.0, 438.0, 83.0, 44.0)] · chrome ["panel (24.0, 471.0, 480.0, 537.0)", "viewButtons (1048.0, 235.0, 304.0, 45.0)", "legend (0.0, 0.0, 0.0, 0.0)", "exitRow (24.0, 24.0, 182.0, 44.0)", "capsule (24.0, 76.0, 263.0, 44.0)"]
+FLEX-E1-H2 13p targets [(472.0, 666.0, 87.0, 44.0), (493.0, 610.0, 45.0, 44.0), (569.0, 562.0, 78.0, 44.0), (566.0, 610.0, 83.0, 44.0)] · chrome ["panel (24.0, 815.0, 480.0, 537.0)", "viewButtons (704.0, 235.0, 304.0, 45.0)", "legend (0.0, 0.0, 0.0, 0.0)", "exitRow (24.0, 24.0, 182.0, 44.0)", "capsule (24.0, 76.0, 263.0, 44.0)"]
+FLEX-E1-H2 mini-p targets [(328.0, 526.0, 87.0, 45.0), (349.0, 470.0, 45.0, 45.0), (425.0, 422.0, 78.0, 45.0), (422.0, 470.0, 83.0, 45.0)] · chrome ["panel (24.0, 572.0, 480.0, 537.0)", "viewButtons (416.0, 235.0, 304.0, 45.0)", "legend (0.0, 0.0, 0.0, 0.0)", "exitRow (24.0, 24.0, 182.0, 44.0)", "capsule (24.0, 76.0, 263.0, 44.0)"]
+FLEX-E1-I (a) added voxels the SDF calls inside: core's rule 15% · the SDF's 50%
+FLEX-E1-I (b) core's voxels the SDF calls outside: core's rule 50% · the SDF's 15%
+FLEX-E1-L θ+ stops at 38.88069967147194° (want 38.88069967455871) · Stops here · Face 2 keeps the rest
+FLEX-E1-L θ+ with L3 lifted: 43.999999999999986° · Stops here · Face 3 would be edge-on
+FLEX-E1-L φ+ stops at 32.02776011719411° (asin(h/20) 32.027760113815) · Stops here · the far end reaches 0 mm
+FLEX-E1-PL control (Protect unlocked): ["the tap answered done, not .locked", "Protect went OFF (the lattice is exposed to Topology)", "the tap wrote something", "the tap added an undo step", "protectLocked is false on a Lattice group"]
+FLEX-E1-S cube: Edge 9 id -1050 · columns 384 · load SIMD3<Double>(0.0, 0.7071067811865476, -0.7071067811865476) · footprint [2000001, 2000002]
+FLEX-E1-S his live pad, Edge 16: release at 20 mm → Stops at 18.5 mm · the lattice ends there · N 18.456253111953288 (25/√2 = 17.677669529663685) · pitch 1.5625 · the 3 mm stack's cap 33.04987433831183 · with core's whole-column lattice_mm 68.37095486887229
+FLEX-E1-S his live pad: Edge 16's lattice cap 33.04987433831183 mm (25/√2 = 17.677669529663685) · pitch 1.5625
+FLEX-E1-S his pad: Edge 14 id -1059 · columns 52 · load SIMD3<Double>(-0.7071067811865476, 0.7071067811865476, 0.0) · footprint [2000001, 2000002]
+FLEX-E1-S release at 20 mm: Stops at 18.5 mm · the lattice ends there · fix 18.456253111953288
+FLEX-AP3 CAMERA r5 corner: D-AP-13 Top-Front-Right 0.0° off the arrow
+FLEX-I2-4 area: no width (none) · halfway SIMD3<Double>(0.0, 0.7071067811865475, -0.7071067811865475) · cap 10.0
+FLEX-I2-6 halfway over the whole faces [0, 4604544271217802188, 13827916308072577996] · on its strips [0, 4604544271217802188, 13827916308072577997]
+FLEX-I2-7 999 mm typed: stored · depth 13.788582226066607 · toast Held at 13.8 mm · Face 2 keeps the rest
+FLEX-I2-7 depth 3.0 → 6.0: regions [2000001, 2000002] → [2000001, 2000002]
+
+## 3. THE TARGETED SUITE at d5a47710 (19:05–20:53): 182 classes (e1_suite_classes.txt): every Flexible* class (174 — every pinner of a touched file is one of them; the goldens too) + LatticeStaleTypeTests ProjectStoreTests UndoHistoryTests LatticeSettingsPersistTests ViewerTests SmoothingPageRound2Tests BottomBarMeasurementTests LatticeIncludeGateTests; 16 chunks of 12.
+=== chunk 1 rc 0 passed 70 failed 0 skipped 13 signal-lines 0 start 19:05:21 end 19:09:27 classes BottomBarMeasurementTests FlexibleAngledGoldenRecorder FlexibleAngledGoldenTests FlexibleBatchBReviewTests FlexibleBatchBReviewUXTests FlexibleBatchCHookTests FlexibleBatchCVerifyTests FlexibleBatchM2Probe FlexibleBatchM2Tests FlexibleBatchM2VerifyTests FlexibleBatchMDentTests FlexibleBatchMGroupTests
+=== chunk 2 rc 1 passed 38 failed 1 skipped 13 signal-lines 0 start 19:09:27 end 19:33:26 classes FlexibleBatchMLegendTests FlexibleBatchMProbe FlexibleBatchMStressTests FlexibleBatchMVerifyTests FlexibleBatchMXrayTests FlexibleBatchNEvidenceProbe FlexibleBatchNProbe FlexibleBatchNRefineTests FlexibleBatchNVerifyTests FlexibleBatchVEvidenceProbe FlexibleBatchVHostedTests FlexibleChromeLayoutTests
+=== chunk 3 rc 0 passed 71 failed 0 skipped 2 signal-lines 0 start 19:33:26 end 19:38:05 classes FlexibleChromeStateTests FlexibleCoreClaimTests FlexibleCornerPairTests FlexibleCurveEditTests FlexibleDepthPrismTests FlexibleEdgeGroupsHostedTests FlexibleEdgeGroupsTests FlexibleFEFieldTests FlexibleFEPassPerfTests FlexibleFEPassTests FlexibleFEVerifyGTests FlexibleFaceChipTests
+=== chunk 4 rc 0 passed 48 failed 0 skipped 3 signal-lines 0 start 19:38:05 end 19:40:38 classes FlexibleFaceCommitTests FlexibleFacePickTests FlexibleFlatPrismEngineTests FlexibleFlatPrismEvidenceProbe FlexibleFlatPrismHostedTests FlexibleFlatPrismSeamTests FlexibleFlatPrismTests FlexibleGeometryOnlyLatticeTests FlexibleGroupFieldPerfTests FlexibleGroupPaletteEvidenceProbe FlexibleGroupPaletteHostedTests FlexibleGroupPaletteTests
+=== chunk 5 rc 0 passed 35 failed 0 skipped 3 signal-lines 0 start 19:40:38 end 19:42:44 classes FlexibleH39HostedTests FlexibleH39HotfixHookTests FlexibleH40OtherStagesDigestProbe FlexibleH40ShadowTests FlexibleInPassCompositeTests FlexibleLatticeEvidenceProbe FlexibleLatticeFieldTests FlexibleLatticeGradingTests FlexibleLatticeHandlesTests FlexibleLatticeIsProtectedHostedTests FlexibleLatticeIsProtectedTests FlexibleLatticePassPerfTests
+=== chunk 6 rc 0 passed 75 failed 0 skipped 0 signal-lines 0 start 19:42:44 end 19:45:42 classes FlexibleLatticePassTests FlexibleLatticeSectionsHostedTests FlexibleLatticeSectionsTests FlexibleLatticeUnderReviewTests FlexibleLatticeUnderTests FlexibleLegendPlacementTests FlexibleMainPageHookTests FlexibleMainPageLoadsTests FlexibleMainPageRound4HostedTests FlexibleMainPageRound4Tests FlexibleMainPageRound4VerifyTests FlexibleMainPrismEqualityTests
+=== chunk 7 rc 0 passed 75 failed 0 skipped 0 signal-lines 0 start 19:45:42 end 19:46:51 classes FlexibleMainStageTests FlexibleMainViewsTests FlexibleMeetReviewTests FlexibleMeetTests FlexibleMergeR5SMTests FlexibleOverlayClipTests FlexibleOverlaySeamTests FlexiblePinchTests FlexiblePressAimReviewTests FlexiblePressAimTests FlexiblePressFixturesTests FlexiblePressProbeTripwireTests
+=== chunk 8 rc 0 passed 67 failed 0 skipped 6 signal-lines 0 start 19:46:51 end 19:52:42 classes FlexiblePressReframeTests FlexiblePressReviewTests FlexiblePressSaveTests FlexibleR7D2ReviewEvidenceProbe FlexibleR7D2ReviewHostedTests FlexibleR7D2ReviewTests FlexibleR7E1FollowUpHostedTests FlexibleR7E1FollowUpTests FlexibleR7EveningAnswersTests FlexibleR7FTests FlexibleR7M1EvidenceProbe FlexibleR7M1Tests
+=== chunk 9 rc 0 passed 34 failed 0 skipped 9 signal-lines 0 start 19:52:42 end 20:01:36 classes FlexibleR7M1VerifyEvidenceProbe FlexibleR7M1VerifyTests FlexibleR7M2EvidenceProbe FlexibleR7MergeTests FlexibleR7REvidenceProbe FlexibleR7RHostedTests FlexibleR7RTests FlexibleR7SettingsEvidence FlexibleR7SettingsHostedTests FlexibleR7SettingsTests FlexibleR7X1EvidenceProbe FlexibleR7X1HostedTests
+=== chunk 10 rc 0 passed 56 failed 0 skipped 6 signal-lines 0 start 20:01:36 end 20:10:52 classes FlexibleR7X1Tests FlexibleR7X1VerifyEvidenceProbe FlexibleR7X1VerifyHostedTests FlexibleR7X1VerifyTests FlexibleReadinessTests FlexibleRegionsTests FlexibleRound5EvidenceProbe FlexibleRound5SettingsHostedTests FlexibleRound5SettingsTests FlexibleRound5SettingsVerifyTests FlexibleRound5SquishExitTests FlexibleRound6EvidenceProbe
+=== chunk 11 rc 0 passed 56 failed 0 skipped 16 signal-lines 0 start 20:10:52 end 20:23:26 classes FlexibleRound6HostedTests FlexibleRound6Tests FlexibleRound7CalloutHostedTests FlexibleRound7CardMessagesTests FlexibleRound7D1ResendTests FlexibleRound7D1ReviewEvidenceProbe FlexibleRound7D1ReviewHostedTests FlexibleRound7D1ReviewTests FlexibleRound7DesignEvidenceProbe FlexibleRound7DesignIntegrationHostedTests FlexibleRound7DesignIntegrationTests FlexibleRound7FitHostedTests
+=== chunk 12 rc 0 passed 49 failed 0 skipped 20 signal-lines 0 start 20:23:26 end 20:37:28 classes FlexibleRound7OtherStagesProbe FlexibleRound7ScreenEvidenceProbe FlexibleRound7ScreenHookTests FlexibleRound7ScreenHostedTests FlexibleRound7SelectionsEvidenceProbe FlexibleRound7SelectionsHookTests FlexibleRound7SelectionsHostedTests FlexibleRound7ViewsEvidenceProbe FlexibleRound7ViewsHostedTests FlexibleRound7ViewsTests FlexibleRowCopyTests FlexibleRuling6NoCoreTests
+=== chunk 13 rc 0 passed 65 failed 0 skipped 1 signal-lines 0 start 20:37:28 end 20:42:26 classes FlexibleS1VerifyTests FlexibleS1bMainTagsTests FlexibleSectorMigrationTests FlexibleSectorStoreTests FlexibleSelectionsListTests FlexibleSettingsMigrationTests FlexibleSettingsPageHostedTests FlexibleSettingsRound4Tests FlexibleSettingsVerifyD1Tests FlexibleShownValuesTests FlexibleSqueezeGroupsModelTests FlexibleSqueezeGroupsPressTests
+=== chunk 14 rc 0 passed 48 failed 0 skipped 5 signal-lines 0 start 20:42:26 end 20:46:09 classes FlexibleSqueezeGroupsReviewTests FlexibleSqueezeGroupsReviewUITests FlexibleSqueezeGroupsReviewUXTests FlexibleSqueezeGroupsTests FlexibleSqueezeGroupsUITests FlexibleSquishCoarsenTests FlexibleSquishCopyTests FlexibleSquishEvidenceProbe FlexibleSquishPerfProbe FlexibleSquishPlayAllTests FlexibleSquishPlayerTests FlexibleSquishSolverTests
+=== chunk 15 rc 0 passed 90 failed 0 skipped 0 signal-lines 0 start 20:46:09 end 20:53:40 classes FlexibleSquishTests FlexibleSquishVerifyGTests FlexibleStageCapsuleTests FlexibleStageTests FlexibleSurfaceNavTests FlexibleTopLayerHostedTests FlexibleTopLayerTests LatticeIncludeGateTests LatticeSettingsPersistTests LatticeStaleTypeTests ProjectStoreTests SmoothingPageRound2Tests
+=== chunk 16 rc 0 passed 43 failed 0 skipped 0 signal-lines 0 start 20:53:40 end 20:53:43 classes UndoHistoryTests ViewerTests
+DONE
+TOTAL 1,018 cases: 920 passed, 97 skipped (env-gated probes and recorders), 1 failed — FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker (the KNOWN refine-line ×8); no signal in any chunk; every class ran; LatticeStaleTypeTests 6/6; no tracked file rewritten.
+After 09d2b4a7 (the corner row title): FlexibleEdgeGroupsTests 9/9, FlexibleFlatPrismTests 10/10, FlexibleEdgeGroupsHostedTests 1 passed + 1 skipped (evidence), FlexibleR7SettingsHostedTests 3/3.
+
+## 4. GOLDENS (FlexibleAngledGoldenTests) at d5a47710
+r7e-golden-det identical 38 · DIFFERS 0 · PART-SKIP 0 · Executed 13 tests, with 0 failures (0 unexpected) in 13.591 (13.593) seconds
+r7e-golden-unseeded identical 32 · DIFFERS 0 · PART-SKIP 1 · Executed 13 tests, with 0 failures (0 unexpected) in 13.529 (13.530) seconds
+(det = SWIFT_DETERMINISTIC_HASHING=1; the counts of every round-7 step: 38 / 32 + 1 PART-SKIP)
+
+## 5. THE 16 STAGE-JOB HASHES (angled_presses/stage_job_hashes.sh, SWIFT_TEST_ARGS='--scratch-path /tmp/r7e-build') → stage_job_hashes_e1.txt: byte-identical (cmp, whole file) to round7/batch_tl/stage_job_hashes_tl.txt. Nothing reaches a job (E1 sends no press).
+
+## 6. iOS
+xcodebuild … -destination id=147E56A1-… -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build: BUILD SUCCEEDED (20:57, d5a47710) — the app WAS running (launchctl: UIKitApplication:com.nadim.topopt, PID 73620): simctl terminate rc 0 at 20:58:10, install rc 0 at 20:58:19, NOT launched.
+Rebuilt at 09d2b4a7: BUILD SUCCEEDED; the app not running (terminated above): install rc 0 at 21:06:45, NOT launched; not running after. Installed TopOpt.debug.dylib == built (cmp), 88 805 616 bytes, sha256 a2e9b30fad62fd58…; strings: 'Protect stays on while a face is Lattice', 'An inside edge', 'the lattice ends there', 'Edge strips are flat prisms now', ' Faces '; 'Strip width': 0; nm: flexible_scene_register_press present.

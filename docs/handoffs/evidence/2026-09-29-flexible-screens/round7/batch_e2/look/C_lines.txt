@@ -1,0 +1,17 @@
+[Done] ["Edge 14", "Edge 16"]: stored
+sent: ["Edge 14 in the job", "Edge 16 in the job"]
+E2 (sent): lattice true · error - · sent 2 · built with gyroid 220.0 °C · now gyroid 220.0 °C
+the Top's field ρ 0.143…0.16999088
+  the built E2 lattice vs firmer(the Top's field, the edges group's field) now: 0 voxels differ (0 outside the presses' bands)
+  at the pad's centre (50, 50, 10): the Top's field 0.16999088 · the built E2 lattice 0.362 · topology gyroid 220.0 °C
+  Edge 14 (key -1016) field ρ 0.362…0.362 over 4082 voxels
+  Edge 14 stack: 52 columns, entry→exit 136.5…140.1 mm, lattice 136.5…140.1 mm
+  Edge 14 design: ok 0 too firm 0 too soft 52 beyond 0 · ρ 0.3619999999999999…0.3620000000000001
+  Edge 16 (key -1017) field ρ 0.362…0.362 over 4082 voxels
+  Edge 16 stack: 52 columns, entry→exit 136.5…140.1 mm, lattice 136.5…140.1 mm
+  Edge 16 design: ok 0 too firm 0 too soft 52 beyond 0 · ρ 0.3619999999999999…0.3620000000000001
+E1 (presses stripped): lattice true · error - · sent 2 · built with gyroid 220.0 °C · now gyroid 220.0 °C
+E1: topology gyroid 220.0 °C · at the centre 0.16999088
+C03_density_slice_z10_E2: layer k 6 · ρ 0.14300000667572021…0.3619999885559082
+C04_density_slice_z10_E1: layer k 6 · ρ 0.14300000667572021…0.3619999885559082
+voxels whose density moved E1 → E2: 8008 of 53248 lattice voxels

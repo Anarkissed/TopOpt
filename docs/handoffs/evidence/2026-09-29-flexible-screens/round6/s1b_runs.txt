@@ -1,0 +1,104 @@
+# Round 6 item 3, the MAIN-PAGE half (S1b, 2026-10-08/09) — raw runs. Base: the S1b merges (final merge 907df081, see
+# ../angled_presses/s1b_sync.txt). Debug, this Mac (Xcode 27, macOS 27). Nothing pushed, merged into others, rebased or forced.
+#
+# COMMITS
+#   c52bc175  the goldens re-based at 907df081 (every difference reported first: none) + s1b_sync.txt
+#   1712a02c  tests first: R6-3g and R6-3i UN-GATED; R6-3j, R6-3k, R6-3l new; stubs; round-4 re-pins
+#   7fee1f4f  H15 + the fourth [Prisms] button + the card's Prisms row + the main page's mm tags (+ the evidence probe)
+#   7d4f562d  tests first: the narrow pad (iPad mini) — R6-3g asks the four to wrap two over two there
+#   c01a394e  the wrap
+#   1c658382  the renders (this folder, R6_S1b_*.png) and the probe's visibility measurement
+#
+# THE HOOK (the only line in a #354/main file):
+#   H15 | app/TopOptKit/Sources/TopOptFlows/WorkspacePlaceholder.swift | content anchor `? stageVolumeItems : [],` (line 1016 at
+#       907df081) | +1 -1 | `? stageVolumeItems + flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn) :
+#       flexibleMain.volumes(project, on: stage, drilledIn: legendDrilledIn),` — the main page's faint prisms (the active
+#       Selections group's pressed faces, or every pressed face with [Prisms]) join #354's clearance list whatever the
+#       surrounding condition; [] off the Flexible stage, under a full-screen page, while a legend reads. Anchor re-grepped
+#       before the edit (1 hit). `git diff --numstat` on the file: 1 1. No other #354/main file touched; no LatticeStageMode case.
+#
+# (1) RED — tests first (1712a02c, SWIFT_DETERMINISTIC_HASHING=1, the 10 named tests):
+#     Executed 9 tests, with 29 failures (0 unexpected) in 36.145 (36.147) seconds   [+ FlexibleLegendPlacementTests not in that run]
+#   R6-3g  :563 buttons ("3") is not equal to ("4"); :566 ×4 row width ("136.0") is not equal to ("184.0") at 11l 11p 13p 13l
+#   R6-3i  :567 H15 absent; :568 ("0") is not equal to ("1") one line; :569 the old `? stageVolumeItems : [],` still there;
+#          :570 ("0") is not equal to ("2") volumes( asked only on H15's line
+#   R6-3j  :606 no "flexible-main-view-prisms"; :607 no main.togglePrisms(); :621 ×2 [Prisms] not on after the trailing click
+#          (it was Lattice); :623 ×2 ("[3]") is not equal to ("[1, 2, 3, 5, 4]"); :627 ×2 the Lattice view toggled
+#   R6-3k  :645 no Prisms row in FlexibleMainLegends; :649 ("124.0") is not equal to ("146.0") the row adds no line;
+#          :663 legendPrismsRow false; :664 no card for the row with no scale
+#   R6-3l  :709 ×2 ("[]") is not equal to ("[1]") / ("[3]") no tag, at once, for Top / Group C; :711 ×2 no text;
+#          :724 ("0") is less than ("2") Prisms-view tags; :751 no "tag-1" on the hosted page
+#   FlexibleMainPageRound4Tests.testTheViewRowHasNoXRayButton (re-pinned to four): :59 ("3") is not equal to ("4"); :65 no id
+#   Green in the same run (as they should be): R6-3f, R6-3h, FlexibleMainPageRound4HostedTests' click (by index now)
+#
+# (2) GREEN — after 7fee1f4f (same 10 tests + FlexibleLegendPlacementTests.testThePagesUseThePlacement):
+#     Executed 10 tests, with 0 failures (0 unexpected) in 33.571 (33.574) seconds
+#   FLEX-R6-3l main groups: Bottom faces [0] · Top faces [1] · Group C faces [3]
+#   FLEX-R6-3l Top → face 1 12.0 mm at (449.04, 458.46) · Group C → face 3 24.5 mm at (547.27, 502.20) · Prisms view → face 1
+#     12.0 mm, face 2 19.0 mm, face 3 24.5 mm, face 4 22.5 mm, face 5 19.5 mm · hosted tag-1 (554.0, 402.0, 85.0, 45.0)
+#   FLEX-R6-3k 11l card (922, 375, 248, 84) row (934, 428, 162, 15) · 13p card (760, 646, 248, 84) row (772, 699, 162, 15)
+#   FLEX-R6-3j 11l row (986, 235, 184, 41) · 11p row (626, 235, 184, 41)
+#   The main-page classes then (18 classes): Executed 132 tests, with 1 failure — FlexibleMainPageRound4VerifyTests
+#     .testTheNoteSitsBesideTheRowAndCostsTheLegendsNothing :368 ("148.0") is less than ("180.0") - room for 'Lattice ready ·
+#     Show' at mini. OURS: the fourth button left the note 148 pt on the iPad mini (744 × 1133 portrait). → (3)
+#
+# (3) THE NARROW PAD
+#   RED (7d4f562d): Executed 2 tests, with 5 failures — R6-3g :576 ("4") is not equal to ("2") two over two; :577 ("184.0")
+#     is not equal to ("88.0"); :578 ("40.0") is not equal to ("88.0"); :579 ("148.0") is less than ("180.0"); and the
+#     round-4 verify :368 (148 < 180).
+#   GREEN (c01a394e): FlexibleRound6HostedTests (R6-3g, R6-3j), FlexibleMainPageRound4VerifyTests, -HostedTests,
+#     -Round4Tests, FlexibleLegendPlacementTests, FlexibleMainViewsTests: Executed 28 tests, with 0 failures
+#   FLEX-R6-3g mini row (632, 235, 88, 89) · note (380, 259, 244, 41); one line of four at 11" and 13" both ways.
+#
+# (4) THE RENDERS (R6_S1b_*.png; FlexibleRound6EvidenceProbe.testTheMainPagesPrismsAndTagsOnHisPadAndHisRound5 and the hosted
+#   R6-3j/k/l under FLEX_R6_EVIDENCE_DIR). Offscreen frames by the shipping renderer (MeshRenderer) with H15's Flexible list —
+#   #354's own depth planes, the other half of H15's line, are not drawn there — and hosted SwiftUI snapshots; NOT device
+#   screenshots. The faint prisms on the main page, the same frame with and without them (max-channel Δ of 255, pixels Δ > 2):
+#     A1_0003 Top (face 1, 12.0 mm):    35 399 px, median 10, p90 14, max 78
+#     A1_0003 Group C (face 3, 24.5 mm): 11 525 px, median 9,  p90 19, max 78
+#     A1_0003 [Prisms] (5 prisms):      104 737 px, median 10, p90 21, max 130 — all five tags shown
+#     r5 Top (top A 1000103 4.0 mm, top B 1000104 3.0 mm): 104 679 px, median 8, p90 16, max 126
+#     r5 [Prisms] (4 prisms):           135 651 px, median 8, p90 19, max 126 — 2 of 4 tags: faces 3 (544, 509) and 5
+#       (331, 381) DROPPED, each within a tag's height of a top sector's floor (546, 481) / (365, 373) — the greedy rule
+#       (the larger face wins), the Settings page's own
+#   So: "slightly visible" as on Settings (its band [4, 25]); the outlines carry most of it. "lattice_off" frames are still
+#   X-ray: Dent heat is on, and the dent view turns X-ray on (batch M6) — the same picture.
+#
+# (5) THE TARGETED SUITE (unseeded, CI's mode; detached driver s1b_suite_driver.py.txt — 12 classes a run, resume from an
+#   unfinished class after an xctest death, skip a class that dies twice; it needed no resume: NO death)
+#   THE CLASSES (227, s1b_suite_classes.txt, each with why): every class whose test file names a touched source file (grep
+#   -F of the file name over Tests, for each of the 35 app source files changed since e2652a41 — the merges' and ours),
+#   every class in a changed test file, every Flexible* class in both bundles, the classes that enumerate the Sources
+#   directory, and ProjectStoreTests, UndoHistoryTests, LatticeSettingsPersistTests, ViewerTests, SmoothingPageRound2Tests,
+#   LatticeSimSolveTriggerTests, LatticeStaleTypeTests, FlexibleAngledGoldenTests / -Recorder, FlexiblePressProbeTripwireTests.
+#   RESULT (s1b_suite_summary.txt, per class):
+#     TopOptFlowsTests: 219 classes, 1439 tests, 49 skipped, 9 failures (4536 s of test time)
+#     TopOptKitTests:     8 classes,   47 tests,  2 skipped, 0 failures (86 s)
+#     00:11:10 → 01:28:52; 20 runs, every one exited (0, or 1 where a known test failed); no xctest death.
+#   THE FAILURES — both known, nothing new:
+#     FlexibleBatchNVerifyTests.testEveryRefineLineIsWholeBesideTheLivePlayAllPicker ×8 (since Xcode 27) — the same 8 lines,
+#       11p, as round 6's suite
+#     LatticeSimSolveTriggerTests.testTheTriggerRefusesOnAllThreeGrounds ×1 (LatticeStressTintTests.swift:195)
+#   S1's two #354 merge-interaction reds (LatticeTypeNoBandTests, LatticeTypeReadinessFromCoreTests): GREEN (fixed by #354's
+#   578c89d9 and f4652834). LatticeStaleTypeTests 6/6. FlexibleBatchNRefineTests and FlexibleRound5SettingsHostedTests passed.
+#   THE SKIPS (51): env-gated probes and recorders only — FlexibleAngledGoldenRecorder 10, FlexibleBatchMProbe 5,
+#     FlexibleBatchM2Probe 3, FlexibleBatchNEvidenceProbe 3, FlexibleBatchNProbe 3, FlexibleSquishEvidenceProbe 3,
+#     FlexibleRound6EvidenceProbe 3, RenderQualityEvidenceGen 3, FlexibleSquishPerfProbe 2, SmoothingPreviewGateTests 2,
+#     and 1 each: FlexibleBatchMVerifyTests, FlexibleFEPassPerfTests, FlexibleGroupFieldPerfTests,
+#     FlexibleGroupPaletteEvidenceProbe, FlexibleLatticeEvidenceProbe, FlexibleLatticePassPerfTests, FlexibleRound5EvidenceProbe,
+#     FlexibleSliceProbe, FlexibleTimingProbe, LatticeCoreOwnerParityProof, LatticeDefaultGradePlanProof, LatticePageRound2Tests,
+#     LatticeStructuralPrismProbe, UnreadableProjectTests. R6-3g / R6-3i no longer skip.
+#   After the run `git status` showed two rewritten files under evidence/2026-09-02-organic-on-device/ — restored
+#   (git checkout -- docs/handoffs/assets/ evidence/), not committed.
+#
+# (6) BYTES AT THE HEAD (the main-page work is display only):
+#   goldens, deterministic: Executed 14 tests, with 0 failures — 38 identical, 0 DIFFERS
+#   goldens, unseeded (inside the suite): FlexibleAngledGoldenTests 13 tests, 0 failures; 0 DIFFERS; 1 PART-SKIP (raw subtrees)
+#   stage-job hashes (stage_job_hashes.sh, inputs unmoved): all 16 rows identical to stage_job_hashes_s1b.txt (= S1's)
+#
+# (7) iOS: xcodebuild -project app/TopOpt.xcodeproj -scheme TopOpt -configuration Debug
+#     -destination id=147E56A1-C8CA-4B9D-BE6C-CF230589A83A -derivedDataPath ~/Library/Developer/Xcode/DerivedData/flexA1 build
+#     → ** BUILD SUCCEEDED ** (01:29:51 → 01:30:35, 2026-10-09)
+#   xcrun simctl install 147E56A1-… TopOpt.app → exit 0 (the simulator was already booted). NEVER LAUNCHED.
+#   The installed TopOpt.debug.dylib: 75 703 632 B, mtime 2026-10-09 01:30, byte-identical (cmp) to the build's; strings:
+#   "flexible-main-view-prisms" 1, "a surface is pressed by one press" 1 (core 9d32b381), "907df0816037" 1.

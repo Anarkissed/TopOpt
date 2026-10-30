@@ -315,6 +315,15 @@ public struct SelectionModel: Equatable, Sendable, Codable {
         groups[idx].replaceRegions(ids)
     }
 
+    /// ★★ RESTORE THE WHOLE GROUP LAYER (the Surface stage's revert, 2026-10-08): every group as it
+    /// was captured — its faces, its regions, its name and colour, in its order — and the active one.
+    /// Groups made since are gone; groups swept since are back. A replay of a state that already kept
+    /// the one-group invariants, so nothing is stolen or swept on the way.
+    public mutating func restore(groups captured: [SelectionGroup], active: UUID?) {
+        groups = captured
+        activeGroupID = active.flatMap { a in captured.contains { $0.id == a } ? a : nil }
+    }
+
     /// Drop regions from every group (a dissolve, or a re-import that lost them).
     public mutating func removeRegions(_ ids: [RegionID]) {
         for i in groups.indices { groups[i].removeRegions(ids) }
@@ -342,6 +351,8 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     public func group(forFace face: FaceID) -> SelectionGroup? {
         groups.first { $0.faces.contains(face) }
     }
+    public func groups(forFace face: FaceID) -> [SelectionGroup] { groups.filter { $0.faces.contains(face) } }   // Flexible (PR #362) H55a: several roles on one face (owner 2026-10-25) — EVERY group that holds the face
+    public mutating func joinFaces(_ keys: [FaceID], to id: UUID) { if let i = groups.firstIndex(where: { $0.id == id }) { groups[i].addFaces(keys) } }   // Flexible (PR #362) H55b: several roles on one face (owner 2026-10-25) — a join that takes the faces from no other group
 
     /// The colour a face should render with (its group's colour), or nil if the
     /// face is in no group.
