@@ -7,8 +7,8 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 
 ## Where this stands, in plain language
 
-**Live: FCC, Kelvin, Rhombic dodecahedron** (rhombic without Doubled cells: measured, its struts
-do not meet across a halving). Measured and going live next, in the R2 order: Diamond, BCC,
+**Live: FCC, Kelvin, Rhombic dodecahedron, Diamond** (rhombic without Doubled cells: measured,
+its struts do not meet across a halving). Measured and going live next, in the R2 order: BCC,
 Simple cubic (their density laws, percolation and bending floors are all measured and in the
 evidence folder). Gyroid and Schwarz-D (K2): rows and wall law measured, bending floors still
 being measured; nothing of K2 is pushed. Parked: none.
@@ -175,6 +175,33 @@ not measured. Not print-tested.
 core/build/topopt-cli lattice-sample --topology rhombic --out rhombic_sample.stl
 ```
 
+## Diamond — LIVE
+
+The same harness, conditions and checks as FCC; evidence `diamond_*`. Diamond's cell corners are
+reached by no strut of the cell they cap, which is why node balls are decided among the cells that
+hold one of the node's struts (What changed, 2).
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | `test_strut_cell` (S 4, 16 struts, 8 nodes) |
+| 2 | Generates; octet byte-identical; deterministic | PASS | `test_lattice_types`; the M2 stand's own jobs (the swept ladder, which Diamond allows) laid and certified Diamond on three Structural rungs (0.68, 0.52: 16 cells; 0.26: 17) and the same three Aesthetic ones (18-112 cells); rung 0.38 carries no lattice in either mode because the void-reaches-exterior check, on by default, found one sealed cavity (39.7 / 79.3 mm^3), core's standing refusal, not a Diamond fault; `lattice-variant` of rung 0.52 reproduced its recorded margin exactly and was ACCEPTED (`diamond_stand_certificate.txt`); octet `r9_octet_diamond_commit.txt`: analysis_report and fields byte-identical, the one differing leaf is `/model` (the job builder writes the model path absolute) |
+| 3 | Own law, diameter table, printability floor | PASS | `diamond_law.{csv,txt}` (B3 within 4.9 %) |
+| 4 | Own floors, with conditions | PASS | bending **10** (`diamond_bend*.txt`: +907.9 / +98.2 / +37.4 / +19.0 / +11.1 / +7.1 / +4.8 / +3.4 / +2.42 / **+1.77** % at 1-10 cells, C2b vpc12, cell rho 0.2685; 9 cells misses the 2.4 % band by 0.02); percolation **0.75**; aesthetic hard floor **2** (+98.2 % at 2 cells, percolates) |
+| 5 | Size-step verdict | PASS: Doubled and Stepped allowed | `diamond_step.txt`: S\|S/2 1 component, 0 dangling of 2,304 ends; S\|2S/3 1 component, 0 of 1,120 |
+| 6 | Certificate, both modes; receipts name it | PASS | every receipt `"diamond"`; analyze Structural recertified margin 184.53, accepted, on Diamond's band 0.157-0.592 and floor 10 |
+| 7 | Percolation on the emitted mesh | PASS | block, Doubled and Stepped one solid (`test_lattice_types`); M2 stand rung 0.52: 15 pockets, **0 floating** (every piece reaches a cut, the solid companion or the shell) (`diamond_stand_percolation.txt`) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("diamond")` |
+
+Numbers: band 0.15712-0.59201; cells per member 10; percolation 0.75; aesthetic floor 2; aesthetic
+ceiling 0.1790; smallest printable cell 2.395 x the bead; 672 triangles per cell; strut strength
+not measured. Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.375, 2.47 mm struts, 1.5 mm plate, 87,252 triangles; `diamond_sample_40mm.stl`):
+
+```bash
+core/build/topopt-cli lattice-sample --topology diamond --out diamond_sample.stl
+```
+
 <!-- PER TYPE -->
 
 ## BRIDGE CONTRACT (02-core-spec §5) — what the app calls, and what each answer means
@@ -279,6 +306,7 @@ trial run (brief item g).
 | FCC | 165 / 165 passed, 4,347 s (`ctest_fcc.txt`) | passed, 1,994 s | 18 identical; 3 differ only in: `test_lattice_gen` 29 -> 30 checks (its enum tripwire checks one name per generatable type, and `fcc` is one more), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build directory's path inside two output lines (`identity_fcc.txt`) |
 | Kelvin | 163 / 165 in the gate's archive copy; the two that failed (`app_core_capability_mirror`, `smooth_brush`) read `../app` and `../docs`, which a `git archive` of `core/` does not carry, and both pass re-run in that same build with the trees linked (`ctest_kelvin.txt`); the pipeline now links them | passed, 1,965 s | 19 identical; `test_lattice_gen` (one more tripwire name) and `test_lattice_void_exterior` (build path) as before (`identity_kelvin.txt`) |
 | Rhombic | 165 / 165 passed, 4,174 s (`ctest_rhombic.txt`) | passed, 1,881 s | 18 identical; `test_lattice_gen` 29 -> 32 checks (one tripwire name each for fcc, kelvin, rhombic), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_rhombic.txt`) |
+| Diamond | 165 / 165 passed, 4,210 s (`ctest_diamond.txt`) | passed, 1,903 s | 18 identical; `test_lattice_gen` 29 -> 33 checks (one tripwire name each for fcc, kelvin, rhombic, diamond), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_diamond.txt`) |
 
 Tests added for the round: `test_strut_cell` (237 checks), `test_lattice_types` (85). Edited, each
 because it was built to flip when a type goes live: `test_strut_diameter_per_type` (FCC leaves the
