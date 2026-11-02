@@ -7,7 +7,7 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 
 ## Where this stands, in plain language
 
-**Live: FCC.** Measured and going live next, in the R2 order: Kelvin, Rhombic dodecahedron,
+**Live: FCC, Kelvin.** Measured and going live next, in the R2 order: Rhombic dodecahedron,
 Diamond, BCC, Simple cubic (their density laws, percolation and bending floors are all measured
 and in the evidence folder). Not started: Gyroid, Schwarz-D (K2). Parked: none.
 
@@ -118,6 +118,32 @@ not print-tested.
 core/build/topopt-cli lattice-sample --topology fcc --out fcc_sample.stl
 ```
 
+## Kelvin — LIVE
+
+The same harness, conditions and checks as FCC; evidence `kelvin_*` beside FCC's.
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | `test_strut_cell` (S 4, 24 struts, 12 nodes) |
+| 2 | Generates; octet byte-identical; deterministic | PASS | `test_lattice_types`; the M2 stand `run` laid and certified Kelvin on all four Structural rungs (12-16 cells each: the 8-cell floor keeps cells coarse) and three Aesthetic ones (`kelvin_stand_certificate.txt`); octet `r9_octet_kelvin_commit.txt`: analysis_report and fields byte-identical, the one differing leaf is `/model` (the job builder writes the model path absolute) |
+| 3 | Own law, diameter table, printability floor | PASS | `kelvin_law.{csv,txt}` (B3 within 3.9 %) |
+| 4 | Own floors, with conditions | PASS | bending **8** (`kelvin_bend*.txt`: +62.3 / +32.9 / +18.1 / +11.0 / +7.1 / +4.6 / +3.0 / **+1.9** % at 1-8 cells, C2b vpc12, cell rho 0.1944); percolation **0.75**; aesthetic hard floor **2** (+32.9 % at 2 cells, percolates) |
+| 5 | Size-step verdict | PASS: Doubled and Stepped allowed | `kelvin_step.txt`: S\|S/2 1 component, 0 dangling of 3,936 ends; S\|2S/3 1 component, 0 of 1,992 |
+| 6 | Certificate, both modes; receipts name it | PASS | every receipt `"kelvin"`; analyze Structural recertified margin 99.66, accepted, on Kelvin's band 0.094-0.505 and floor 8 |
+| 7 | Percolation on the emitted mesh | PASS | block, Doubled and Stepped one solid (`test_lattice_types`); M2 stand rung 0.38: 14 pockets, **0 floating** (`kelvin_stand_percolation.txt`) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("kelvin")` |
+
+Numbers: band 0.09375-0.50521; cells per member 8; percolation 0.75; aesthetic floor 2; aesthetic
+ceiling 0.2065; smallest printable cell 2.793 x the bead; 1,008 triangles per cell; strut strength
+not measured. Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.300, 2.00 mm struts, 1.5 mm plate, 141,612 triangles;
+`kelvin_sample_40mm.stl`):
+
+```bash
+core/build/topopt-cli lattice-sample --topology kelvin --out kelvin_sample.stl
+```
+
 <!-- PER TYPE -->
 
 ## BRIDGE CONTRACT (02-core-spec §5) — what the app calls, and what each answer means
@@ -220,6 +246,7 @@ trial run (brief item g).
 | type | ctest | cli_demo | identity diff (21 binaries) |
 |---|---|---|---|
 | FCC | 165 / 165 passed, 4,347 s (`ctest_fcc.txt`) | passed, 1,994 s | 18 identical; 3 differ only in: `test_lattice_gen` 29 -> 30 checks (its enum tripwire checks one name per generatable type, and `fcc` is one more), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build directory's path inside two output lines (`identity_fcc.txt`) |
+| Kelvin | 163 / 165 in the gate's archive copy; the two that failed (`app_core_capability_mirror`, `smooth_brush`) read `../app` and `../docs`, which a `git archive` of `core/` does not carry, and both pass re-run in that same build with the trees linked (`ctest_kelvin.txt`); the pipeline now links them | passed, 1,965 s | 19 identical; `test_lattice_gen` (one more tripwire name) and `test_lattice_void_exterior` (build path) as before (`identity_kelvin.txt`) |
 
 Tests added for the round: `test_strut_cell` (237 checks), `test_lattice_types` (85). Edited, each
 because it was built to flip when a type goes live: `test_strut_diameter_per_type` (FCC leaves the
