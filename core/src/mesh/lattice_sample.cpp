@@ -9,6 +9,7 @@
 
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/lattice_types.hpp"
 #include "topopt/tpms_gen.hpp"
 
 namespace topopt {
@@ -108,6 +109,8 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
 std::string lattice_sample_receipt_json(const LatticeSampleReceipt& r) {
   std::string s = "{\n";
   s += "  \"topology\": \"" + r.topology + "\",\n";
+  const std::string note = lattice_type_directional_note(r.topology);
+  if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
   s += "  \"relative_density\": " + num(r.rho) + ",\n";
   s += "  \"relative_density_is_band_middle\": " +
        std::string(r.rho_was_band_middle ? "true" : "false") + ",\n";

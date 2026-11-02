@@ -62,6 +62,9 @@ LatticeOption lattice_type_doubled(LatticeTopology topo) {
     case LatticeTopology::Octet:  // PR 235's C4 (zero bridge struts) and octet_step.txt
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 2,208 ends
     case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 3,936 ends
+    case LatticeTopology::Diamond:  // diamond_step.txt: 1 component, 0 dangling of 2,304 ends
+    case LatticeTopology::Bcc:      // bcc_step.txt: 1 component, 0 dangling of 1,152 ends
+    case LatticeTopology::SimpleCubic:  // sc_step.txt: 1 component, 0 dangling of 708 ends
       return yes();
     case LatticeTopology::Rhombic:  // rhombic_step.txt: the S|S/2 block is TWO pieces
       return no("Doubled cells are not offered for the rhombic dodecahedron: measured, its "
@@ -82,6 +85,9 @@ LatticeOption lattice_type_stepped(LatticeTopology topo) {
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 1,152 ends
     case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 1,992 ends
     case LatticeTopology::Rhombic:  // rhombic_step.txt: 1 component, 0 dangling of 2,240 ends
+    case LatticeTopology::Diamond:  // diamond_step.txt: 1 component, 0 dangling of 1,120 ends
+    case LatticeTopology::Bcc:      // bcc_step.txt: 1 component, 0 dangling of 560 ends
+    case LatticeTopology::SimpleCubic:  // sc_step.txt: 1 component, 0 dangling of 396 ends
       return yes();
     default:
       return no(std::string("Stepped cells are not offered for ") +
@@ -89,6 +95,14 @@ LatticeOption lattice_type_stepped(LatticeTopology topo) {
                 " yet: core has not measured whether its struts join across a size "
                 "step.");
   }
+}
+
+std::string lattice_type_directional_note(const std::string& id) {
+  // tensor-library-nine: the certificate carries the full tensor and is right, but the
+  // grading law's scalar E100 proxy mis-ranks an off-axis member of these two.
+  if (id == "sc" || id == "bcc")
+    return "Strongly directional: best when the load runs along the cell axes.";
+  return "";
 }
 
 const std::vector<std::string>& lattice_type_ids() {
@@ -121,10 +135,8 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
     f.rho_min = lattice_rho_min(topo);
     f.rho_max = lattice_rho_max(topo);
   }
-  f.directional = topo == LatticeTopology::SimpleCubic || topo == LatticeTopology::Bcc;
-  if (f.directional)
-    f.directional_note =
-        "Strongly directional: best when the load runs along the cell axes.";
+  f.directional_note = lattice_type_directional_note(id);
+  f.directional = !f.directional_note.empty();
   if (lattice_has_strut_cell(topo)) {
     const StrutCell& c = lattice_strut_cell(topo);
     f.cell_denominator = c.S;

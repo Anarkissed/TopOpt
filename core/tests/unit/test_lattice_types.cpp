@@ -209,6 +209,9 @@ int main() {
   const std::vector<std::pair<LatticeGenTopology, LatticeTopology>> live = {
       {LatticeGenTopology::Octet, LatticeTopology::Octet},
       {LatticeGenTopology::Fcc, LatticeTopology::Fcc},
+      {LatticeGenTopology::SimpleCubic, LatticeTopology::SimpleCubic},
+      {LatticeGenTopology::Bcc, LatticeTopology::Bcc},
+      {LatticeGenTopology::Diamond, LatticeTopology::Diamond},
       {LatticeGenTopology::Rhombic, LatticeTopology::Rhombic},
       {LatticeGenTopology::Kelvin, LatticeTopology::Kelvin},
   };
@@ -308,10 +311,63 @@ int main() {
       CHECK(worst > -1e-6, (id + ": no interior strut or node solid leaves the part").c_str());
       CHECK(h1.h == h2.h, (id + ": a clipped, skinned run is deterministic").c_str());
     }
+
+    // ★ AND THE SKIN IS ONE PIECE on a face just off a node plane, where the landings
+    // bunch around the nodes that send a strut across it. FCC, BCC and SC's are a full
+    // cell apart (octet's 0.7071), and octet's 0.72-cell link radius left 9 to 25 islands
+    // there until each type's radius scaled to its own gap (crossing_node_gap). Anchors
+    // on the face's interior (a cell in from its edges) and the skin edges joining them
+    // go into one union-find; the anchors must end up in one component.
+    {
+      const double rr = 0.45, x0 = 0.95 * 8.0 - rr;  // landings at 0.95 cell
+      LatticeBoundary B;
+      B.add_box({x0, 0.3, 0.3}, {39.7, 39.7, 39.7});
+      LatticeRegion R;
+      R.nx = R.ny = R.nz = 5; R.cell_mm = 8.0; R.boundary = &B;
+      LatticeRadiusField G; G.uniform_mm = rr;
+      LatticeSkinSpec skin;
+      skin.mode = LatticeSkinMode::Diagrid;
+      skin.min_radius_mm = lattice_skin_min_radius_mm(0.42);
+      std::map<std::tuple<long, long, long>, int> key;
+      std::vector<int> parent, anchors;
+      auto node = [&](const Vec3& q) {
+        const auto k = std::make_tuple(std::lround(q.x * 1e3), std::lround(q.y * 1e3),
+                                       std::lround(q.z * 1e3));
+        const auto it = key.find(k);
+        if (it != key.end()) return it->second;
+        const int n = static_cast<int>(parent.size());
+        parent.push_back(n);
+        key[k] = n;
+        return n;
+      };
+      auto root = [&](int x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      auto on_face = [&](const Vec3& q) { return q.x < x0 + 2.0; };
+      LatticeGenObserver obs;
+      obs.on_element = [&](LatticeGenElement k, const Vec3& a, const Vec3& b, double) {
+        if (k == LatticeGenElement::AnchorNode && on_face(a) && a.y > 8.0 && a.y < 31.7 &&
+            a.z > 8.0 && a.z < 31.7)
+          anchors.push_back(node(a));
+        if (k == LatticeGenElement::SkinStrut && on_face(a) && on_face(b))
+          parent[root(node(a))] = root(node(b));
+      };
+      NullSink sink;
+      (void)generate_lattice(gt, R, G, sink, skin, &obs);
+      std::set<int> pieces;
+      for (int n : anchors) pieces.insert(root(n));
+      char msg[200];
+      std::snprintf(msg, sizeof msg,
+                    "%s: the diagrid skin on a face just off a node plane is ONE piece "
+                    "(%zu pieces over %zu anchors)",
+                    id.c_str(), pieces.size(), anchors.size());
+      CHECK(anchors.size() >= 4 && pieces.size() == 1, msg);
+    }
   }
 
   // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"diamond", "bcc", "sc", "gyroid"}) {
+  for (const char* id : {"gyroid"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -345,13 +401,17 @@ int main() {
                     lattice_min_printable_cell_mm(LatticeTopology::Fcc, 0.42, 0.0)) < 1e-9,
           "facts fcc: printable cell per bead");
 
-    const LatticeTypeFacts kel = lattice_type_facts("diamond");
-    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts diamond: not live");
-    CHECK(!kel.numbers_measured && std::isnan(kel.cells_per_member_min) &&
-              std::isnan(kel.aesthetic_density_ceiling),
-          "facts diamond: no number is octet's (NaN until measured)");
-    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts diamond: refused, with a reason");
+    // No strut type of round 1 is left un-live, so the not-live example is a tetragonal
+    // id core knows and neither generates nor certifies.
+    const LatticeTypeFacts nl = lattice_type_facts("bccz");
+    CHECK(nl.readiness == LatticeTypeReadiness::NotEither, "facts bccz: not live");
+    CHECK(!nl.numbers_measured && std::isnan(nl.cells_per_member_min) &&
+              std::isnan(nl.aesthetic_density_ceiling),
+          "facts bccz: no number is octet's (NaN until measured)");
+    CHECK(!nl.doubled.allowed && !nl.doubled.reason.empty(), "facts bccz: refused, with a reason");
     const LatticeTypeFacts sc = lattice_type_facts("sc");
+    CHECK(sc.readiness == LatticeTypeReadiness::Live && sc.cells_per_member_min == 4.0,
+          "facts sc: live, on its own on-axis floor");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
     const LatticeTypeFacts gy = lattice_type_facts("gyroid");
     CHECK(gy.family == "sheet" && gy.readiness == LatticeTypeReadiness::NotEither,
@@ -424,6 +484,19 @@ int main() {
     LatticeSampleSpec b2 = s; b2.rho = 0.9;     CHECK(refused(b2), "sample: out of band is refused");
     LatticeSampleSpec b3 = s; b3.bead_mm = 3.0; CHECK(refused(b3), "sample: thinner than a bead is refused");
     LatticeSampleSpec b4 = s; b4.topology = "bccz"; CHECK(refused(b4), "sample: a type not live is refused");
+    // R3: a directional type's receipt says so; every other type's has no such key.
+    LatticeSampleSpec d = s; d.topology = "bcc";
+    const std::string dj = lattice_sample_receipt_json(write_lattice_sample(d, sink));
+    CHECK(dj.find("\"directional_note\": \"" + lattice_type_directional_note("bcc") + "\"") !=
+              std::string::npos,
+          "sample: a BCC receipt carries the R3 directional note");
+    CHECK(lattice_sample_receipt_json(r).find("directional_note") == std::string::npos,
+          "sample: an FCC receipt has no directional key");
+    CHECK(lattice_type_directional_note("octet").empty() &&
+              lattice_type_directional_note("fcc").empty() &&
+              !lattice_type_directional_note("sc").empty() &&
+              lattice_type_facts("bcc").directional_note == lattice_type_directional_note("bcc"),
+          "R3: the note is SC's and BCC's only, and the facts read the same words");
   }
 
   // 4d. The job parse: a live type with organic is refused; a region density outside

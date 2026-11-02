@@ -153,7 +153,70 @@ struct CellTable {
   // the cells that hold one of its struts, and a ball is never emitted with none.
   bool generic = false;
   std::vector<unsigned> node_listers;
+  // The diagrid link radius is kLinkFactor * link_scale cell edges. kLinkFactor (0.72)
+  // is octet's: near a plane of nodes, a face's landings bunch around the nodes that
+  // send a strut ACROSS that plane, and octet's are 0.7071 cell apart. A type whose
+  // crossing nodes sit farther apart scales by the ratio (crossing_node_gap below), so
+  // its clusters link the way octet's do; 1.0 (and byte-identical) for every type whose
+  // gap is octet's.
+  double link_scale = 1.0;
 };
+
+// On every node plane normal to a cell axis: the nodes that send a strut across it,
+// and the radius at which they connect in the plane (the bottleneck edge of their
+// minimum spanning tree, periodic min-image). The largest over planes and axes, in cell
+// edges: what a diagrid on a face just off a node plane must bridge. Octet, Kelvin,
+// Rhombic and Diamond: 0.7071; FCC, BCC and SC: 1 (only nodes a full cell apart cross).
+double crossing_node_gap(const StrutCell& cell) {
+  const int S = cell.S;
+  auto wrap = [S](int v) { return ((v % S) + S) % S; };
+  const std::vector<StrutCellStrut> struts = strut_cell_closed_struts(cell);
+  double worst = 0.0;
+  for (int ax = 0; ax < 3; ++ax) {
+    const int u = (ax + 1) % 3, w = (ax + 2) % 3;
+    std::set<int> planes;
+    for (const StrutCellPoint& n : cell.nodes) planes.insert(ax == 0 ? n.x : ax == 1 ? n.y : n.z);
+    for (int v : planes) {
+      std::set<std::pair<int, int>> pts;
+      for (const StrutCellStrut& st : struts) {
+        const int A[3] = {st.a.x, st.a.y, st.a.z}, B[3] = {st.b.x, st.b.y, st.b.z};
+        if (wrap(A[ax]) == v && B[ax] != A[ax]) pts.insert({wrap(A[u]), wrap(A[w])});
+        if (wrap(B[ax]) == v && A[ax] != B[ax]) pts.insert({wrap(B[u]), wrap(B[w])});
+      }
+      if (pts.empty()) continue;
+      const std::vector<std::pair<int, int>> p(pts.begin(), pts.end());
+      const int n = static_cast<int>(p.size());
+      // One crossing node per cell links only to its own image, a cell away.
+      double gap = n == 1 ? S : 0.0;
+      std::vector<std::tuple<int, int, int>> edges;  // (squared distance, i, j)
+      for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j) {
+          int du = std::abs(p[i].first - p[j].first), dw = std::abs(p[i].second - p[j].second);
+          du = std::min(du, S - du);
+          dw = std::min(dw, S - dw);
+          edges.emplace_back(du * du + dw * dw, i, j);
+        }
+      std::sort(edges.begin(), edges.end());
+      std::vector<int> parent(n);
+      for (int i = 0; i < n; ++i) parent[i] = i;
+      auto root = [&parent](int x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      int pieces = n;
+      for (const auto& [d2, i, j] : edges) {
+        if (pieces == 1) break;
+        const int a = root(i), b = root(j);
+        if (a == b) continue;
+        parent[a] = b;
+        --pieces;
+        gap = std::sqrt(static_cast<double>(d2));
+      }
+      worst = std::max(worst, gap / S);
+    }
+  }
+  return worst;
+}
 
 const CellTable& octet_table() {
   static const CellTable t = [] {
@@ -204,6 +267,11 @@ CellTable generic_table(LatticeTopology topo) {
     c.node_listers.push_back(mask);
   }
   c.generic = true;
+  // Octet's gap is half a face diagonal; a type whose crossing nodes are farther apart
+  // gets octet's radius scaled to its own gap (SC, BCC, FCC: sqrt 2).
+  const double octet_gap = 0.5 * std::sqrt(2.0);
+  const double gap = crossing_node_gap(cell);
+  if (gap > octet_gap + 1e-9) c.link_scale = gap / octet_gap;
   return c;
 }
 
@@ -221,6 +289,18 @@ const CellTable& cell_table(LatticeGenTopology topo) {
     }
     case LatticeGenTopology::Rhombic: {
       static const CellTable t = generic_table(LatticeTopology::Rhombic);
+      return t;
+    }
+    case LatticeGenTopology::Diamond: {
+      static const CellTable t = generic_table(LatticeTopology::Diamond);
+      return t;
+    }
+    case LatticeGenTopology::Bcc: {
+      static const CellTable t = generic_table(LatticeTopology::Bcc);
+      return t;
+    }
+    case LatticeGenTopology::SimpleCubic: {
+      static const CellTable t = generic_table(LatticeTopology::SimpleCubic);
       return t;
     }
     case LatticeGenTopology::Gyroid:
@@ -1066,6 +1146,12 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::SimpleCubic:
+      return "sc";
+    case LatticeGenTopology::Bcc:
+      return "bcc";
+    case LatticeGenTopology::Diamond:
+      return "diamond";
     case LatticeGenTopology::Gyroid:
       return "gyroid";
     case LatticeGenTopology::SchwarzD:
@@ -1089,7 +1175,7 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond, LatticeGenTopology::Bcc, LatticeGenTopology::SimpleCubic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
 }
@@ -1100,6 +1186,12 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
       return LatticeTopology::Octet;
     case LatticeGenTopology::Fcc:
       return LatticeTopology::Fcc;
+    case LatticeGenTopology::SimpleCubic:
+      return LatticeTopology::SimpleCubic;
+    case LatticeGenTopology::Bcc:
+      return LatticeTopology::Bcc;
+    case LatticeGenTopology::Diamond:
+      return LatticeTopology::Diamond;
     case LatticeGenTopology::Gyroid:
       return LatticeTopology::Gyroid;
     case LatticeGenTopology::SchwarzD:
@@ -1117,7 +1209,7 @@ bool lattice_gen_is_sheet(LatticeGenTopology topo) {
 }
 
 LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond, LatticeGenTopology::Bcc, LatticeGenTopology::SimpleCubic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
     if (id == lattice_gen_topology_name(t)) return t;
   throw std::invalid_argument(
       "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +
@@ -1281,7 +1373,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                               ncut.landings.end());
                 }
             if (hood.empty() || (own_landings == 0 && hood.size() < 2)) continue;
-            const double link = kLinkFactor * R.cell_mm;
+            const double link = kLinkFactor * T.link_scale * R.cell_mm;
             const Vec3 cmin{R.origin.x + ci * R.cell_mm,
                             R.origin.y + cj * R.cell_mm,
                             R.origin.z + ck * R.cell_mm};

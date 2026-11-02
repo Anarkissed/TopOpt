@@ -40,6 +40,7 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice_boundary.hpp"
+#include "topopt/lattice_types.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/tpms_gen.hpp"
 #include "topopt/lattice_void.hpp"
@@ -3435,6 +3436,10 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   std::string s = "{\n";
   s += "  \"topology\": \"" + std::string(lattice_topology_name(a.lattice_topology)) +
        "\",\n";
+  {
+    const std::string note = lattice_type_directional_note(lattice_topology_name(a.lattice_topology));
+    if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+  }
   s += "  \"cell_mm\": " + json_num(cell_mm) + ",\n";
   s += "  \"strut_radius_mm\": " +
        (graded.present ? std::string("null") : json_num(lat.strut_radius_mm)) +
@@ -9709,6 +9714,10 @@ std::string lattice_forecast_json(const JobDescription& job,
     s += "  \"variant_volume_fraction\": " +
          json_num(sd.requested_volume_fraction) + ",\n";
     s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+    {
+      const std::string note = lattice_type_directional_note(job.lattice.topology);
+      if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+    }
     s += "  \"cell_mode\": \"uniform\",\n";
     s += "  \"cell_size_mm\": " + json_num(job.lattice.cell_mm) + ",\n";
     s += "  \"uniform_note\": \"this job carries NO \\\"grading\\\" block, so "
@@ -9962,6 +9971,10 @@ std::string lattice_forecast_json(const JobDescription& job,
   s += "  \"variant_volume_fraction\": " +
        json_num(sd.requested_volume_fraction) + ",\n";
   s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+  {
+    const std::string note = lattice_type_directional_note(job.lattice.topology);
+    if (!note.empty()) s += "  \"directional_note\": \"" + note + "\",\n";
+  }
   s += "  \"cell_mode\": \"" + std::string(cell_size_mode_name(gf.cell_mode)) +
        "\",\n";
   s += "  \"cell_size_mm\": " + json_num(gf.cell_size_mm) + ",\n";

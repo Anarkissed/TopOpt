@@ -80,4 +80,9 @@ LatticeTypeFacts lattice_type_facts(const std::string& id);
 LatticeOption lattice_type_doubled(LatticeTopology topo);
 LatticeOption lattice_type_stepped(LatticeTopology topo);
 
+// R3: the "strongly directional" note SC and BCC carry on the picker AND on every
+// receipt that names the topology (02-core-spec §2.5). Empty for every other id, and a
+// receipt writes the key only when it is not, so octet's receipts stay byte-identical.
+std::string lattice_type_directional_note(const std::string& id);
+
 }  // namespace topopt
