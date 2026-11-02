@@ -35,9 +35,15 @@ double transverse_K(const VoxelGrid& g, const std::vector<double>& ey,
   if (nd) *nd = 3L * fea_node_count(g);
   FeaSolution sol;
   static const double rtol = [] { const char* s = std::getenv("TOPOPT_GCS_RESTOL"); return s ? std::atof(s) : 1e-6; }();
+  // TOPOPT_BEND_MATFREE=1 (not in PR 235): the resolved solve through fea_solve_cg_matfree,
+  // the same reduced system and stopping criterion with no assembled K. The assembled K
+  // of a 9-cell sheet block at vpc24 (~20M dof) peaked at 39.5 GB and was killed on a
+  // 16 GB machine. Unset = the verbatim path, so every earlier measurement reproduces.
+  static const bool matfree = [] { const char* s = std::getenv("TOPOPT_BEND_MATFREE"); return s && s[0] == '1'; }();
   auto t0 = std::chrono::steady_clock::now();
   try {
     if (lattice) sol = fea_solve_cg_lattice(g, ey, mask, c11, c12, c44, kNu, bcs, {}, 1e-7, 40000, nullptr);
+    else if (matfree) sol = fea_solve_cg_matfree(g, ey, kNu, bcs, {}, rtol, 40000, nullptr, nullptr);
     else sol = fea_solve_cg(g, ey, kNu, bcs, {}, rtol, 40000, nullptr, nullptr);
   } catch (const std::exception& e) { std::fprintf(stderr, "  [transverse_K unconverged: %s]\n", e.what()); return -1.0; }
   if (ms) *ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
