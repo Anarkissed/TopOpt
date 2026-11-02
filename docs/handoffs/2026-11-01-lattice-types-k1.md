@@ -1,4 +1,4 @@
-# Handoff — 2026-11-01-lattice-types-k1: the strut generators, one type at a time (TRACK core)
+# Handoff — 2026-11-01-lattice-types-k1: the strut and sheet generators, one type at a time (TRACK core)
 
 Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6cbd9f` (K0's
 `0a5f86df` is in it). Plan: `docs/design/lattice-types/`. Previous core handoff:
@@ -9,13 +9,18 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 
 **Live: FCC, Kelvin, Rhombic dodecahedron, Diamond, BCC, Simple cubic**: every strut type of K1
 (rhombic without Doubled cells: measured, its struts do not meet across a halving). Two rulings are
-asked of the maintainer (Findings 6 and 7); either could send BCC or SC back. Gyroid and Schwarz-D
-(K2): rows and wall law measured, bending floors still being measured; nothing of K2 is pushed.
+asked of the maintainer (Findings 6 and 7); either could send BCC or SC back.
+
+**Live (K2, the sheets): Gyroid, Schwarz-D**, with one cell size for the whole part (Doubled and
+Stepped refused, R5) and a Rim or no skin (Diagrid refused, R8). A 4 mm sheet needs members
+36-40 mm across and costs 15-19 times octet's triangles a cell (Findings 8 and 9). Not
+print-tested.
+
 Parked: none.
 
 <!-- STATUS -->
 
-## What changed in core, once, for every strut type
+## What changed in core, once, for every strut type (and, 9-10, for the sheets)
 
 1. **One canonical cell per type** (`topopt/strut_cell.hpp`). Octet, SC, BCC, FCC, Diamond,
    Kelvin, Rhombic as `(S, struts, nodes)` on an integer grid. `test_strut_cell` compiles the
@@ -63,6 +68,42 @@ Parked: none.
    this is a change to a pushed type: the gate on SC's commit covers it. `test_lattice_types`
    holds every live type to one skin piece on such a face (RED without the scaling: FCC 12
    pieces, BCC 16).
+
+9. **The sheets (K2): Gyroid and Schwarz-D** (02-core-spec §3), from the K2 work merged in
+   at `13ef314c`, live at `ccf0e03b`:
+   - `LatticeTopology` gains `Gyroid` and `SchwarzD`; the planned-ids list is gone.
+   - **Rows re-measured on the production wall** (`topopt/tpms.hpp`, the gradient-normalised
+     band |f|/|grad f| <= t/2, R7), by the strut rows' periodic homogenisation
+     (`tpms_probe rows`): VALID rows only, each resolution-checked against a finer grid
+     (vpc96 against vpc128 up to rho 0.35, vpc48 against vpc64 from 0.40; every drift under
+     2.4 %), the first unresolved row kept as `resolved = false`. Bands: gyroid
+     0.15010-0.60069, Schwarz-D 0.20038-0.60012 (`<sheet>_rows_vpc{48,96}.*`).
+   - **The wall law** (`<sheet>_wall_law.*`): the field parameter t bisected on the converged
+     solid fraction, and the TRUE normal wall measured on 4,000 points of the sheet (uniform
+     to 1-3 % over the sheet; it runs below t as the wall thickens, -16 % at rho 0.60). The
+     true wall is the sheet's "diameter" everywhere core reads one: printability
+     (wall >= bead, R6) reads it unchanged, and `lattice_sheet_wall_param_mm` turns it into
+     the field's parameter for the generator.
+   - **The generator** `generate_tpms` (`tpms_gen.hpp`): dual contouring of the field's
+     distance estimate (`lattice_dc.hpp`), clipped by the same boundary the struts use (eroded
+     by one DC cell, as the strut clip erodes by the radius), streamed, deterministic. DC cell
+     = a third of the thinnest wall laid (-0.4 % volume against the exact solid fraction).
+     The run's export lays it for a sheet job; Rim is the strut generator's rim pass alone.
+   - **At the parse** (R5, R8): Doubled, Stepped, swept, fit and stepped cells are refused for
+     a sheet with the R5 reason; Diagrid, stated or the default, with the R8 reason (a sheet
+     job states `"skin": "rim"` or `"none"`); organic as for every non-octet type. One cell and
+     one grid for the whole part, so two sheet regions that touch always share cell size and
+     phase.
+   - **The harness** `core/tests/harness/tpms_probe.cpp`: `law`, `rows`, `perc`, `bend`, `tris`,
+     and `mesh` (go-live item 7 on an emitted sheet: its pieces, and which touch or sit inside
+     the solid body the run writes beside it).
+   - **Each sheet's numbers** in `type_measured` (bending 10 / 9, percolation 0.5, aesthetic
+     2), facts with `family: "sheet"` and the measured triangle cost, and the sample block.
+10. **The C2b bend can run matrix-free** (`TOPOPT_BEND_MATFREE=1`, `07ffbfda`): the sheets'
+    floors lie at 9-10 cells, where the resolved block is ~20-25M dof and its assembled K
+    peaked at a 39.5 GB footprint and was killed on a 16 GB machine. `fea_solve_cg_matfree`
+    solves the same reduced system to the same criterion; it reproduced both sheets' 3-cell
+    runs to every printed digit (643.4300, 745.4677). Unset, the probe is unchanged.
 
 ## Findings that reach past this round (measured; nothing about them is changed here)
 
@@ -128,6 +169,22 @@ Parked: none.
    the activation (every cell that overlaps a masked voxel, or a cell never finer than the solve
    voxel) and moves octet's bytes (R9), so nothing is changed here: the maintainer rules.
 
+
+8. **A sheet costs an order of magnitude more triangles than a strut lattice.** On the stand's rung 0.52, on one fixed 4 mm cell, Gyroid laid 33 cells in 527,072
+   triangles and Schwarz-D 33 in 634,768, where octet laid 78 in 80,316: 15,972 and 19,235
+   triangles a cell against octet's 1,030 (15.5x and 18.7x; `gyroid_stand_certificate.txt`).
+   The cost is the wall resolution: a DC cell a third of the thinnest wall, and per interior
+   cell 19.44 (gyroid) / 24.00 (Schwarz-D) x (cell / DC cell)^2 triangles
+   (`sheet_triangle_cost.txt`). The sample blocks are 1.39M and 2.32M triangles (69 and 116 MB
+   STL; not committed, their receipts are). The app's budget reads `sheet_triangles_coeff`.
+9. **Fine sheet cells do not print.** With the 0.42 mm bead a gyroid wall reaches one bead
+   only from rho 0.42 at a 3 mm cell and 0.32 at 4 mm, and no density in the band does below
+   2.03 mm (4.84 beads); Schwarz-D needs 0.51 / 0.39 and 2.52 mm (6.01 beads)
+   (`sheet_printability.txt`, which core's own inverse reproduces). So the fixed-cell runs
+   raise the density to suit (the stand's 4 mm gyroid runs start at 0.319, the 1-bead density),
+   and with the bending floors of 10 / 9 cells a 4 mm sheet needs members 36-40 mm across.
+   Justino Netto 2024 saw holes at overhangs with 1-bead PLA gyroid walls (R6, Q3): the print
+   test decides whether the floor should be two beads.
 
 ## FCC — LIVE
 
@@ -306,6 +363,64 @@ aesthetic ceiling 0.0831 (below the band: Finding 6); smallest printable cell 1.
 core/build/topopt-cli lattice-sample --topology sc --out sc_sample.stl
 ```
 
+## Gyroid — LIVE (sheet, K2)
+
+The sheet harness (`tpms_probe.cpp`) on the production wall; evidence `gyroid_*`, `sheet_*`.
+Its stand runs use a fixed 4 mm cell (`make_stand_jobs.py --fixed 4`): a sheet refuses the
+committed jobs' swept ladder (R5), as rhombic's Doubled verdict did.
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | the rows were re-measured on `tpms.hpp`'s production wall, the one `generate_tpms` contours (`gyroid_rows_vpc{48,96}.*`); `test_tpms` §1 holds the field, its gradient and the wall distance |
+| 2 | Generates on a block and on the M2 stand; octet byte-identical; deterministic | PASS | `test_tpms` §2 (a clipped, holed, graded block: closed and manifold, two runs one hash, inside the part); the M2 stand on a fixed 4 mm cell laid and certified Gyroid on two Structural rungs (0.52: 33 cells, margin 1766; 0.38: 4, margin 1686) and the same two Aesthetic ones, all accepted; 0.68 holds the sealed 595 mm³ cavity (core's void-reaches-exterior refusal, as for Rhombic on this cell) and 0.26's widest member (20.5 mm) is under the 40 mm a 10-cell floor needs; `lattice-variant` of rungs 0.38 and 0.52 reproduced their recorded margins exactly and was ACCEPTED both times (`gyroid_stand_certificate.txt`); octet `r9_octet_gyroid_commit.txt`: analysis_report and fields byte-identical, the one differing leaf is `/model` |
+| 3 | Own density law, wall table, printability floor | PASS | `gyroid_wall_law.{csv,txt}` (the TRUE wall, rho 0.05-0.60); printability is wall >= bead (`sheet_printability.txt`, R6); no octet table is read (`test_strut_diameter_per_type`) |
+| 4 | Own floors, with conditions | PASS | bending **10** (`gyroid_bend.txt` + `gyroid_bend_wide.txt`: +227.08 / +43.56 / +20.84 / +12.39 / +8.25 / +5.90 / +4.43 / +3.45 / +2.76 / **+2.24** % at 1-10 cells; C2b, S 5 mm, vpc24, 6 cells long, cell rho 0.4051; from 7 cells matrix-free); percolation **0.5** (`gyroid_perc.txt`: spans at every placement and rho 0.15 / 0.35 / 0.60 from 0.5 cells, the smallest measured); aesthetic hard floor **2** (+43.56 %, percolates) |
+| 5 | Size-step: refusal with a reason | PASS: Doubled and Stepped refused (R5) | "A sheet lattice grades by wall thickness at one cell size per region (R5): a change of cell size leaves its sheets unjoined, and no measured method joins them yet." `test_tpms` §4 (Stepped refused at the parse) |
+| 6 | Certificate, both modes; receipts name it | PASS | analyze certified Structural (margin 352.9, accepted, at rho 0.319: core raised the density to the 1-bead wall at 4 mm) and ran Aesthetic (rho 0.319-0.519); every run report says `"topology": "gyroid"` and carries no directional note (`gyroid_stand_certificate.txt`) |
+| 7 | Percolation on the emitted mesh | PASS | the sample block's lattice is one piece (`test_tpms` §5, with the cell-line cut as its control: that cut leaves a stray corner cap); on the stand's emitted lattice STL (rungs 0.38 and 0.52) 0 pieces float: each pocket's sheet is one piece, cut where it meets the solid, and the 12-72-triangle caps cut off at cell corners lie wholly inside the solid body (0.135-4.6 mm in), so they print as solid; no edge is open, and the non-manifold edges are all in the solid body the run writes beside the lattice (SC's run has the same body) (`gyroid_stand_percolation.txt`) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("gyroid")`, `family` "sheet" (BRIDGE CONTRACT, Sheets) |
+
+Numbers: band 0.15010-0.60069; cells per member 10; percolation 0.5; aesthetic floor 2;
+aesthetic ceiling = the band top (a wall has no strut-per-cell reading; Q1's default);
+smallest printable cell 4.841 x the bead (the true wall at the band top is 0.2066 of the cell);
+19.44 x (cell / DC cell)^2 triangles per cell (11,347 for an 8 mm cell at the band middle); sheet strength not measured (R10, refused in words). Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.375, 0.993 mm wall, 1.5 mm plate, 1,385,948
+triangles, about 69 MB; the sheet is shifted an eighth of a cell so no corner of the cube cuts
+off a cap; receipt `gyroid_sample_40mm.stl.json`, the STL is not committed):
+
+```bash
+core/build/topopt-cli lattice-sample --topology gyroid --out gyroid_sample.stl
+```
+
+## Schwarz-D — LIVE (sheet, K2)
+
+The same harness, conditions and checks as Gyroid; evidence `schwarz_d_*`, `sheet_*`; stand
+on the same fixed 4 mm cell, with the binary of Gyroid's gate (one commit carries both).
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | rows re-measured on the production wall (`schwarz_d_rows_vpc{48,96}.*`); `test_tpms` §1 |
+| 2 | Generates; octet byte-identical; deterministic | PASS | `test_tpms` §2; the stand on the same fixed 4 mm cell laid and certified Schwarz-D on the same two rungs in both modes (0.52: 33 cells, margin 1765; 0.38: 4, margin 1686), all accepted; 0.68 and 0.26 carry none for Gyroid's reasons (the 9-cell floor needs 36 mm); `lattice-variant` of rungs 0.38 and 0.52 reproduced their margins exactly and was ACCEPTED both times (`schwarz_d_stand_certificate.txt`); octet: Gyroid's gate (the same commit) |
+| 3 | Own law, wall table, printability floor | PASS | `schwarz_d_wall_law.{csv,txt}`; `sheet_printability.txt` |
+| 4 | Own floors, with conditions | PASS | bending **9** (`schwarz_d_bend.txt` + `schwarz_d_bend_wide.txt`: +65.60 / +20.48 / +11.53 / +7.71 / +5.56 / +4.20 / +3.26 / +2.59 / **+2.09** % at 1-9 cells; cell rho 0.4074); percolation **0.5**; aesthetic hard floor **2** (+20.48 %, percolates) |
+| 5 | Size-step: refusal with a reason | PASS: refused (R5) | as Gyroid |
+| 6 | Certificate, both modes; receipts name it | PASS | analyze certified Structural (margin 467.1, accepted, at rho 0.393, the 1-bead wall at 4 mm) and ran Aesthetic (rho 0.393-0.600); receipts say `"topology": "schwarz_d"`, no directional note |
+| 7 | Percolation on the emitted mesh | PASS | the sample block's lattice is one piece (`test_tpms` §5); 0 pieces float on rungs 0.38 and 0.52; the corner caps (12-36 triangles) lie inside the solid body (0.135-4.6 mm in) (`schwarz_d_stand_percolation.txt`) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("schwarz_d")` |
+
+Numbers: band 0.20038-0.60012; cells per member 9; percolation 0.5; aesthetic floor 2;
+aesthetic ceiling = the band top; smallest printable cell 6.008 x the bead (the true wall at
+the band top is 0.1665 of the cell); 24.00 x (cell / DC cell)^2 triangles per cell (18,865 at an 8 mm cell, band middle); sheet
+strength not measured. Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.400, 0.856 mm wall, 1.5 mm plate, 2,319,684
+triangles, about 116 MB; receipt `schwarz_d_sample_40mm.stl.json`):
+
+```bash
+core/build/topopt-cli lattice-sample --topology schwarz_d --out schwarz_d_sample.stl
+```
+
 <!-- PER TYPE -->
 
 ## BRIDGE CONTRACT (02-core-spec §5) — what the app calls, and what each answer means
@@ -318,7 +433,7 @@ built (A2); nothing here forces a type onto the screen.
 |---|---|---|
 | `lattice_type_ids()` | `lattice_types.hpp` | the picker's order: `octet` first (M4), then `sc`, `bcc`, `fcc`, `diamond`, `kelvin`, `rhombic`, `gyroid`, `schwarz_d` |
 | `lattice_gen_topology_names()` | `lattice_gen.hpp` | the GENERATABLE ids; grows by one per type that goes live |
-| `lattice_certifiable_topology_names()` | `lattice.hpp` | the CERTIFIABLE ids (unchanged by this round for struts) |
+| `lattice_certifiable_topology_names()` | `lattice.hpp` | the CERTIFIABLE ids (unchanged by this round for struts; the two sheets join, 9 in all) |
 | `lattice_type_readiness(id, gen, cert)` + `lattice_type_readiness_plain(r)` | `lattice.hpp` | `Live` = offer it; anything else = grey it with core's plain words |
 
 ### One plain struct per type: `LatticeTypeFacts lattice_type_facts(id)` (`lattice_types.hpp`)
@@ -361,6 +476,21 @@ active; otherwise by the lexicographically smallest ACTIVE cell (i, then j, then
 shares it. A node ball is emitted the same way, but only among the cells that hold one of
 its struts — a node no active cell's strut reaches is not emitted (diamond's cell corners
 are the case that needs this).
+
+### Sheets (`family: "sheet"`): what differs from a strut type
+| call / key | answer |
+|---|---|
+| `tpms_eval`, `tpms_wall_distance`, `tpms_in_wall` (`tpms.hpp`) | the field the preview draws: period = the cell, phase 0 at the cell grid's anchor (the same anchor the app sends), the wall = |f|/|grad f| <= t/2 |
+| `lattice_strut_diameter_mm(sheet, rho, cell)` | the TRUE wall thickness (what printability reads: wall >= bead) |
+| `lattice_sheet_wall_param_mm(sheet, wall, cell)` | the field's t for that true wall (what `tpms_in_wall` takes) |
+| `lattice_density_from_strut(sheet, cell, wall / 2)` | the density of that wall (the table; off it, the sheet's own solid fraction) |
+| `sheet_triangles_coeff` | triangles per interior cell = coeff x (cell / DC cell)^2, DC cell = a third of the thinnest wall laid; `triangles_per_cell` is that at the band middle with an 8 mm cell |
+| `doubled`, `stepped` | refused with the R5 reason; the job refuses `swept`, `fit`, `stepped` and stepped cells. Only `fixed` and `auto` lay a sheet, one cell for the part |
+| `diagrid` | refused with the R8 reason; a sheet job must state `"skin": "rim"` or `"none"` (the default Diagrid is refused) |
+| `aesthetic_density_ceiling` | the band top (a wall has no strut-per-cell "prints open" reading) |
+| the sample block | shifted an eighth of a cell from the run's phase, so no corner of the cube cuts off a cap; the run keeps phase 0 at the grid anchor |
+| R6 (wall >= one bead) | `sheet_printability.txt`: the density at which each cell size reaches one and two beads |
+| the sample receipt (`<file.stl>.json`) | `strut_diameter_mm` is the true wall; `struts` and `nodes` are 0 |
 
 ### Every existing per-topology call accepts the new ids
 `lattice_derive_cell_for_member`, `lattice_rho_min/max`, `lattice_cells_per_member_min`,
@@ -415,6 +545,7 @@ trial run (brief item g).
 | Diamond | 165 / 165 passed, 4,210 s (`ctest_diamond.txt`) | passed, 1,903 s | 18 identical; `test_lattice_gen` 29 -> 33 checks (one tripwire name each for fcc, kelvin, rhombic, diamond), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_diamond.txt`) |
 | BCC | 165 / 165 passed, 4,178 s (`ctest_bcc.txt`) | passed, 1,869 s | 18 identical; `test_lattice_gen` 29 -> 34 checks (one tripwire name each for fcc, kelvin, rhombic, diamond, bcc), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_bcc.txt`) |
 | SC | 165 / 165 passed, 4,151 s (`ctest_sc.txt`; the commit also carries `af9b60a2` and `9118402c`) | passed, 1,866 s | 18 identical; `test_lattice_gen` 29 -> 35 checks (one tripwire name each for fcc, kelvin, rhombic, diamond, bcc, sc), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_sc.txt`) |
+| Gyroid + Schwarz-D (one commit, `ccf0e03b`) | 165 / 166 passed, 4,141 s; the one failure, `lattice_certification`, held the certifiable count at 7 and the sheets make 9: fixed in `472b5632` (test only) and re-run in the same build, passed (`ctest_gyroid.txt`) | passed, 1,849 s | 17 identical; `test_lattice_gen` 29 -> 37 checks (one tripwire name each for the six strut types and the two sheets), `test_lattice_certification` the two lines of that fix, `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_gyroid.txt`) |
 
 Tests added for the round: `test_strut_cell` (237 checks), `test_lattice_types` (85 at FCC). Edited, each
 because it was built to flip when a type goes live: `test_strut_diameter_per_type` (FCC leaves the
@@ -425,5 +556,11 @@ example moves from FCC to Kelvin; new section 3b pins FCC's law), `test_job` (FC
 hold the converse: every certifiable type has its own law and parses (`7ae8eea7`). At SC's gate
 `test_lattice_types` has 195 checks (every live type, the Diagrid skin on a face just off a node
 plane, and the R3 note on the receipts).
+
+K2: `test_tpms` (34 checks: the field and its wall distance, the generator on a clipped, holed,
+graded block, Stepped refused at the parse, the sample block one piece with the cell-line cut as its
+control); `test_lattice_types` 208 (each sheet's facts, floors, R5/R8 reasons and off-table inverse);
+`test_job` 302 (a sheet job states `"skin": "rim"`); `test_strut_diameter_per_type` 191 (the sheets
+have their own law); `test_lattice_certification` (9 certifiable, `472b5632`).
 
 <!-- TESTS -->

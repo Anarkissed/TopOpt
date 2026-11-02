@@ -38,6 +38,9 @@
 //                                no vertex inside or within 0.05 mm of the solid companion,
 //                                nor within shell + 0.05 mm of the part's surface
 //                                (lattice_types_probe `spans`' rule, with no strut radius).
+//                                SOLID "=" takes the companion from the lattice STL itself
+//                                (the run writes the solid body beside the sheet): its widest
+//                                piece; each other piece's gap to it is printed.
 //
 // kind: gyroid | schwarz_d. CSVs land in TOPOPT_LATTICE_CSV_DIR.
 // Build (from core/, after the library):
@@ -427,7 +430,67 @@ int mode_mesh(const std::string& path, std::string solid_path, const std::string
       std::printf("  %ld non-manifold edges in the piece of %ld triangles\n", n, tris[root]);
   }
   std::map<int, bool> held;
-  if (!solid_path.empty()) {
+  std::map<int, double> gap;  // "=" only: each piece's nearest vertex to the companion
+  std::map<int, std::pair<double, double>> depth;  // "=" only: its depth in the part, min..max
+  std::map<int, std::pair<double, double>> side;   // "=" only: signed distance to the companion
+  if (solid_path == "=") {
+    // The companion is IN this file: the run's lattice STL carries the solid body beside the
+    // sheet, unwelded to it. It is the piece with the widest bounding box (the whole part).
+    // A piece is held when a vertex lies inside that body or within 0.05 mm of its surface
+    // (the spans rule). The body carries non-manifold edges, so its inside/out sign is
+    // printed beside the gap for every piece, with the depth in the (closed) part as a check.
+    std::map<int, std::pair<Vec3, Vec3>> bb;
+    for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+      const int c = find(int(v));
+      if (!tris.count(c)) continue;
+      const Vec3& p = m.vertices[v];
+      auto it = bb.find(c);
+      if (it == bb.end()) { bb[c] = {p, p}; continue; }
+      Vec3& lo = it->second.first;
+      Vec3& hi = it->second.second;
+      lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+      hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+    }
+    int comp = -1;
+    double widest = -1.0;
+    for (const auto& [c, b] : bb) {
+      const double dx = b.second.x - b.first.x, dy = b.second.y - b.first.y,
+                   dz = b.second.z - b.first.z, w = dx * dx + dy * dy + dz * dz;
+      if (w > widest) { widest = w; comp = c; }
+    }
+    topopt::TriangleMesh body;
+    body.vertices = m.vertices;
+    for (const auto& t : m.triangles)
+      if (find(t[0]) == comp) body.triangles.push_back(t);
+    const topopt::MeshDistance bd(body);
+    std::unique_ptr<topopt::MeshDistance> pd;
+    topopt::TriangleMesh part;  // MeshDistance keeps a pointer to its mesh
+    if (!part_path.empty()) {
+      part = topopt::read_stl_file(part_path).mesh;
+      pd = std::make_unique<topopt::MeshDistance>(part);
+    }
+    for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+      const int c = find(int(v));
+      if (c == comp || !tris.count(c)) continue;
+      const double d = bd.unsigned_distance(m.vertices[v]);
+      auto it = gap.find(c);
+      if (it == gap.end() || d < it->second) gap[c] = d;
+      const double sc = bd.signed_distance(m.vertices[v]);
+      auto kt = side.find(c);
+      if (kt == side.end()) side[c] = {sc, sc};
+      else kt->second = {std::min(kt->second.first, sc), std::max(kt->second.second, sc)};
+      if (pd) {
+        const double s = pd->signed_distance(m.vertices[v]);
+        auto jt = depth.find(c);
+        if (jt == depth.end()) depth[c] = {s, s};
+        else jt->second = {std::min(jt->second.first, s), std::max(jt->second.second, s)};
+      }
+    }
+    held[comp] = true;
+    for (const auto& [c, d] : gap) held[c] = d <= 0.05 || side[c].second > 0.0;
+    std::printf("  companion: the piece of %ld triangles (the widest); held = a vertex within "
+                "0.05 mm of it or inside it\n", tris[comp]);
+  } else if (!solid_path.empty()) {
     const topopt::TriangleMesh solid = topopt::read_stl_file(solid_path).mesh;
     const topopt::MeshDistance sd(solid);
     std::unique_ptr<topopt::MeshDistance> pd;
@@ -474,10 +537,21 @@ int mode_mesh(const std::string& path, std::string solid_path, const std::string
   std::vector<std::pair<long, int>> order;
   for (const auto& kv : tris) order.push_back({kv.second, kv.first});
   std::sort(order.rbegin(), order.rend());
-  for (std::size_t i = 1; i < order.size() && i <= 40; ++i) {
+  for (std::size_t i = gap.empty() ? 1 : 0; i < order.size() && i <= 40; ++i) {
     const auto& [lo, hi] = box[order[i].second];
-    std::printf("  piece %ld triangles bbox (%.3f %.3f %.3f)-(%.3f %.3f %.3f)%s\n",
-                order[i].first, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z,
+    char g[160] = "";
+    if (gap.count(order[i].second)) {
+      const int c = order[i].second;
+      if (depth.count(c))
+        std::snprintf(g, sizeof g,
+                      " gap %.3f mm (signed %.3f..%.3f, + = in the body), depth in the part "
+                      "%.3f..%.3f mm", gap[c], side[c].first, side[c].second, depth[c].first,
+                      depth[c].second);
+      else
+        std::snprintf(g, sizeof g, " gap %.3f mm", gap[c]);
+    }
+    std::printf("  piece %ld triangles bbox (%.3f %.3f %.3f)-(%.3f %.3f %.3f)%s%s\n",
+                order[i].first, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, g,
                 solid_path.empty() ? "" : held[order[i].second] ? " held" : " FLOATING");
   }
   std::printf("  piece sizes (triangles), largest first:");
