@@ -2826,6 +2826,13 @@ JobDescription parse_job(const std::string& json_text) {
           "no cell type, so it runs only with \"topology\": \"octet\" (this job says \"" +
           job.lattice.topology + "\"). Use \"doubled\" or \"stepped\" to build " +
           job.lattice.topology + ".");
+    // (2b) R8: Diagrid anchors where struts meet the surface; a sheet meets it along curves,
+    // so there is nothing to anchor. Refused whether stated or the default.
+    if (lattice_topology_is_sheet(topo) && job.lattice.present && job.lattice.skin == "diagrid")
+      schema_fail(
+          "lattice \"skin\": \"diagrid\" anchors where struts meet the surface, and " +
+          job.lattice.topology + " is a sheet with no struts (R8). State \"skin\": \"rim\" "
+          "or \"none\".");
     // (3) R4: cells of two sizes are offered for a type only where core has PROVED its
     // struts join across the step (lattice_types.hpp). Octet and every type that
     // passed keep today's behaviour exactly.

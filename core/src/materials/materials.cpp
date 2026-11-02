@@ -403,16 +403,16 @@ void refuse_duplicate_keys(const JsonValue& obj, const std::string& where,
 
 // Every id the file may name: lattice_topology_name over every enum value (C++ cannot
 // enumerate an enum, so the values are listed here; a value added to the enum without a
-// name fails lattice_topology_name's own -Wswitch first), then the planned sheet ids.
+// name fails lattice_topology_name's own -Wswitch first). The sheet ids are enum values
+// since K2.
 bool accepted_type_id(const std::string& id) {
   for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic,
                             LatticeTopology::Bcc, LatticeTopology::Fcc,
                             LatticeTopology::Diamond, LatticeTopology::Kelvin,
                             LatticeTopology::Rhombic, LatticeTopology::Bccz,
-                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant,
+                            LatticeTopology::Gyroid, LatticeTopology::SchwarzD})
     if (id == lattice_topology_name(t)) return true;
-  for (const std::string& p : lattice_planned_topology_ids())
-    if (id == p) return true;
   return false;
 }
 

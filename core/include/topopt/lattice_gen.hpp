@@ -49,7 +49,7 @@ class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
 // SAME ownership, clipping, skin and streaming machinery.
 // (Explicit underlying type so the enum-probe tripwire in test_lattice_gen can
 // legally test values beyond the last case.)
-enum class LatticeGenTopology : int { Octet, Fcc, Kelvin, Rhombic };
+enum class LatticeGenTopology : int { Octet, Fcc, Kelvin, Rhombic, Gyroid, SchwarzD };
 
 enum class LatticeTopology;  // topopt/lattice.hpp (the certification library)
 
@@ -75,6 +75,11 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo);
 // std::invalid_argument, naming the id, for anything core cannot generate — never
 // a fallback to octet.
 LatticeGenTopology lattice_gen_topology_from_id(const std::string& id);
+
+// The two SHEET lattices (gyroid, schwarz_d) are generatable ids, but they have no struts:
+// generate_lattice refuses them by name and the run builds them with generate_tpms
+// (tpms_gen.hpp) over the same region, boundary and grade. These say which is which.
+bool lattice_gen_is_sheet(LatticeGenTopology topo);
 
 // The lattice REGION: a rectangular block of nx*ny*nz cubic cells of edge
 // `cell_mm`, its (i=0,j=0,k=0) corner at `origin` (model mm). Cell (ci,cj,ck) is
@@ -305,6 +310,14 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  TriangleSink& sink,
                                  const LatticeSkinSpec& skin = LatticeSkinSpec{},
                                  const LatticeGenObserver* observer = nullptr);
+
+// The RIM loops alone (the skin's first pass), for a lattice with no struts: the sheet
+// lattices (tpms_gen.hpp) take the Rim finish this way (R8). Any skin mode but None emits
+// the rims; Diagrid's anchored net needs strut landings and is not emitted here.
+LatticeGenStats generate_lattice_rims(const LatticeRegion& region,
+                                      const LatticeRadiusField& radius, TriangleSink& sink,
+                                      const LatticeSkinSpec& skin,
+                                      const LatticeGenObserver* observer = nullptr);
 
 // ── SWEPT CELL SIZE: one pass per dyadic level (handoff 2026-08-01-lattice-cell-
 //    size-sweep) ──────────────────────────────────────────────────────────────

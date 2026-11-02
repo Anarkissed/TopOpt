@@ -294,7 +294,10 @@ struct CellAnalysis {
 };
 
 // v[8] are the corner values in corner-index order; lo is the cell's minimum corner.
-void analyse_cell(const Field& F, const Vec3& lo, double size, const double v[8],
+// (A template over the field so the sheet contouring below runs the SAME analysis on its
+// own field; the capsule Field's instantiation is the code it always was.)
+template <class FieldT>
+void analyse_cell(const FieldT& F, const Vec3& lo, double size, const double v[8],
                   int crossing_steps, double lambda, CellAnalysis& A) {
   A = CellAnalysis{};
   A.comp.fill(-1);
@@ -957,6 +960,127 @@ TriangleMesh lattice_dual_contour(const std::vector<OrganicSpan>& spans,
   mesh_quality(mesh, stats);
   stats.seconds = now_seconds() - t0;
   return mesh;
+}
+
+
+// ── ★ ANY SIGNED FIELD, ON A UNIFORM GRID, STREAMED BY SLAB (lattice types round 1, K2) ──
+// The sheet lattices are the zero set of a field that is everywhere in the region, not a
+// union of capsules, so the capsule walk above cannot find their cells. This visits the
+// box layer by layer: two planes of corner values, the cells of one layer analysed by the
+// SAME analyse_cell (manifold DC, one vertex per surface component), and every quad emitted
+// as soon as the four cells around its grid edge exist. Memory is two layers, whatever the
+// box; the triangles go straight to the sink.
+namespace {
+struct FnField {
+  const std::function<double(const Vec3&)>* f = nullptr;
+  const std::function<Vec3(const Vec3&)>* g = nullptr;
+  mutable std::size_t evals = 0;
+  double eval(const Vec3& p) const { ++evals; return (*f)(p); }
+  Vec3 gradient(const Vec3& p) const { return (*g)(p); }
+};
+}  // namespace
+
+LatticeDcFieldStats lattice_dual_contour_field(
+    const std::function<double(const Vec3&)>& field,
+    const std::function<Vec3(const Vec3&)>& gradient, const Vec3& lo, const Vec3& hi,
+    double h, TriangleSink& sink, int crossing_steps, double qef_regularisation) {
+  LatticeDcFieldStats st;
+  if (!(h > 0.0) || !(hi.x > lo.x) || !(hi.y > lo.y) || !(hi.z > lo.z))
+    throw std::invalid_argument("lattice_dual_contour_field: empty box or non-positive cell");
+  const double t0 = now_seconds();
+  FnField F;
+  F.f = &field;
+  F.g = &gradient;
+  const long long nx = static_cast<long long>(std::ceil((hi.x - lo.x) / h));
+  const long long ny = static_cast<long long>(std::ceil((hi.y - lo.y) / h));
+  const long long nz = static_cast<long long>(std::ceil((hi.z - lo.z) / h));
+  st.cells = nx * ny * nz;
+  auto P = [&](long long i, long long j, long long k) {
+    return Vec3{lo.x + i * h, lo.y + j * h, lo.z + k * h};
+  };
+  const std::size_t plane = static_cast<std::size_t>((nx + 1) * (ny + 1));
+  std::vector<double> c0(plane), c1(plane);   // corner values at z-levels k and k+1
+  auto cidx = [&](long long i, long long j) { return static_cast<std::size_t>(j * (nx + 1) + i); };
+  for (long long j = 0; j <= ny; ++j)
+    for (long long i = 0; i <= nx; ++i) c0[cidx(i, j)] = F.eval(P(i, j, 0));
+  // per-layer cell slots: for each cell, the vertex (index into that layer's vertex list)
+  // each of its 12 edges hands back; -1 = no crossing. Two layers live: k-1 and k.
+  const std::size_t layer = static_cast<std::size_t>(nx * ny);
+  std::vector<std::array<int, 12>> slot_prev(layer), slot_cur(layer);
+  std::vector<Vec3> vert_prev, vert_cur;
+  for (auto& s : slot_prev) s.fill(-1);
+  CellAnalysis A;
+  auto vtx = [&](long long i, long long j, int which_layer, int slot, const Vec3** out) {
+    if (i < 0 || j < 0 || i >= nx || j >= ny) return false;
+    const auto& S = which_layer ? slot_cur : slot_prev;
+    const auto& V = which_layer ? vert_cur : vert_prev;
+    const int v = S[static_cast<std::size_t>(j * nx + i)][static_cast<std::size_t>(slot)];
+    if (v < 0) return false;
+    *out = &V[static_cast<std::size_t>(v)];
+    return true;
+  };
+  auto quad = [&](const Vec3* q[4], bool flip) {
+    if (!flip) { sink.add_triangle(*q[0], *q[1], *q[2]); sink.add_triangle(*q[0], *q[2], *q[3]); }
+    else { sink.add_triangle(*q[0], *q[2], *q[1]); sink.add_triangle(*q[0], *q[3], *q[2]); }
+    st.triangles += 2;
+  };
+  for (long long k = 0; k < nz; ++k) {
+    for (long long j = 0; j <= ny; ++j)
+      for (long long i = 0; i <= nx; ++i) c1[cidx(i, j)] = F.eval(P(i, j, k + 1));
+    vert_cur.clear();
+    for (long long j = 0; j < ny; ++j)
+      for (long long i = 0; i < nx; ++i) {
+        auto& slot = slot_cur[static_cast<std::size_t>(j * nx + i)];
+        slot.fill(-1);
+        double v[8];
+        bool neg = false, pos = false;
+        for (int ci = 0; ci < 8; ++ci) {
+          const long long ii = i + (ci & 1), jj = j + ((ci >> 1) & 1);
+          v[ci] = ((ci >> 2) & 1) ? c1[cidx(ii, jj)] : c0[cidx(ii, jj)];
+          (v[ci] < 0.0 ? neg : pos) = true;
+        }
+        if (!(neg && pos)) continue;
+        analyse_cell(F, P(i, j, k), h, v, crossing_steps, qef_regularisation, A);
+        ++st.cells_active;
+        if (A.ncomp > 1) ++st.cells_split;
+        const int vfirst = static_cast<int>(vert_cur.size());
+        for (int t = 0; t < A.ncomp; ++t) vert_cur.push_back(A.pos[static_cast<std::size_t>(t)]);
+        for (int e = 0; e < 12; ++e)
+          slot[static_cast<std::size_t>(e)] =
+              A.comp[static_cast<std::size_t>(e)] < 0 ? -1 : vfirst + A.comp[static_cast<std::size_t>(e)];
+      }
+    st.vertices += vert_cur.size();
+    // Quads. z-edges from level k to k+1 need only this layer; x- and y-edges ON level k
+    // need layers k-1 and k (the fan's dk = -1 entries read the previous layer).
+    for (long long j = 0; j <= ny; ++j)
+      for (long long i = 0; i <= nx; ++i) {
+        const double d000 = c0[cidx(i, j)];
+        for (int axis = 0; axis < 3; ++axis) {
+          double dn;
+          if (axis == 0) { if (i == nx) continue; dn = c0[cidx(i + 1, j)]; }
+          else if (axis == 1) { if (j == ny) continue; dn = c0[cidx(i, j + 1)]; }
+          else dn = c1[cidx(i, j)];
+          if ((d000 < 0.0) == (dn < 0.0)) continue;
+          const EdgeFan& f = fan_for(axis);
+          const Vec3* q[4];
+          bool ok = true;
+          for (int t = 0; t < 4 && ok; ++t) {
+            // the fan's dk is 0 or -1: 0 is this layer, -1 the previous one
+            const int which = f.dk[t] == 0 ? 1 : 0;
+            if (k == 0 && which == 0) { ok = false; break; }
+            ok = vtx(i + f.di[t], j + f.dj[t], which, f.slot[t], &q[t]);
+          }
+          if (!ok) { ++st.quads_dropped; continue; }
+          quad(q, d000 >= 0.0);
+        }
+      }
+    std::swap(c0, c1);
+    std::swap(slot_prev, slot_cur);
+    std::swap(vert_prev, vert_cur);
+  }
+  st.field_evaluations = F.evals;
+  st.seconds = now_seconds() - t0;
+  return st;
 }
 
 }  // namespace topopt

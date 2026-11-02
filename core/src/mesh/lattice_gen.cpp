@@ -223,6 +223,12 @@ const CellTable& cell_table(LatticeGenTopology topo) {
       static const CellTable t = generic_table(LatticeTopology::Rhombic);
       return t;
     }
+    case LatticeGenTopology::Gyroid:
+    case LatticeGenTopology::SchwarzD:
+      throw std::invalid_argument(
+          std::string("generate_lattice: \"") + lattice_gen_topology_name(topo) +
+          "\" is a SHEET lattice with no struts; it is built by generate_tpms "
+          "(tpms_gen.hpp), not by the strut generator");
   }
   throw std::invalid_argument("generate_lattice: unknown LatticeGenTopology");
 }
@@ -1020,10 +1026,50 @@ void emit_rim_torus(TriangleSink& sink, const LatticeRegion& R,
 
 }  // namespace
 
+namespace {
+// The rim loops where analytic faces meet -- the Rim finish, and the first part of
+// Diagrid. Its own function so a SHEET lattice (which has no struts and so no landings,
+// tpms_gen.hpp) gets the same rim (R8) through generate_lattice_rims below.
+void emit_rims(TriangleSink& sink, const LatticeRegion& R, const LatticeRadiusField& G,
+               const LatticeSkinSpec& skin, LatticeGenStats& st, const LatticeGenObserver* obs) {
+  const auto& faces = R.boundary->faces();
+  for (std::size_t i = 0; i < faces.size(); ++i)
+    for (std::size_t j = i + 1; j < faces.size(); ++j) {
+      const bool pi = faces[i].kind == LatticeBoundaryFace::Kind::Plane;
+      const bool pj = faces[j].kind == LatticeBoundaryFace::Kind::Plane;
+      if (pi && pj) {
+        emit_rim_line(sink, R, G, skin, static_cast<int>(i), static_cast<int>(j), st, obs);
+      } else if (pi != pj) {
+        const int fp = pi ? static_cast<int>(i) : static_cast<int>(j);
+        const int fb = pi ? static_cast<int>(j) : static_cast<int>(i);
+        if (faces[static_cast<std::size_t>(fb)].collar)
+          emit_rim_torus(sink, R, G, skin, fp, fb, st, obs);
+      }
+      // bore-bore pairs meet nowhere a rim can ride; nothing to emit
+    }
+}
+}  // namespace
+
+LatticeGenStats generate_lattice_rims(const LatticeRegion& R, const LatticeRadiusField& G,
+                                      TriangleSink& sink, const LatticeSkinSpec& skin,
+                                      const LatticeGenObserver* obs) {
+  if (!R.boundary)
+    throw std::invalid_argument("generate_lattice_rims: a rim needs region.boundary");
+  LatticeGenStats st;
+  st.min_strut_diameter_mm = 1e30;
+  st.max_strut_diameter_mm = 0.0;
+  if (skin.mode != LatticeSkinMode::None) emit_rims(sink, R, G, skin, st, obs);
+  return st;
+}
+
 const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::Gyroid:
+      return "gyroid";
+    case LatticeGenTopology::SchwarzD:
+      return "schwarz_d";
     case LatticeGenTopology::Rhombic:
       return "rhombic";
     case LatticeGenTopology::Kelvin:
@@ -1043,7 +1089,7 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
 }
@@ -1054,6 +1100,10 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
       return LatticeTopology::Octet;
     case LatticeGenTopology::Fcc:
       return LatticeTopology::Fcc;
+    case LatticeGenTopology::Gyroid:
+      return LatticeTopology::Gyroid;
+    case LatticeGenTopology::SchwarzD:
+      return LatticeTopology::SchwarzD;
     case LatticeGenTopology::Rhombic:
       return LatticeTopology::Rhombic;
     case LatticeGenTopology::Kelvin:
@@ -1062,8 +1112,12 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
   throw std::logic_error("lattice_gen_certificate_topology: unmapped LatticeGenTopology");
 }
 
+bool lattice_gen_is_sheet(LatticeGenTopology topo) {
+  return topo == LatticeGenTopology::Gyroid || topo == LatticeGenTopology::SchwarzD;
+}
+
 LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Gyroid, LatticeGenTopology::SchwarzD})
     if (id == lattice_gen_topology_name(t)) return t;
   throw std::invalid_argument(
       "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +
@@ -1187,22 +1241,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
   // ── the boundary skin (a SEPARATE pass; bar B8's streaming discipline) ─────
   if (B && skin.mode != LatticeSkinMode::None) {
     // Rim loops where analytic faces meet (both Rim and Diagrid modes).
-    const auto& faces = B->faces();
-    for (std::size_t i = 0; i < faces.size(); ++i)
-      for (std::size_t j = i + 1; j < faces.size(); ++j) {
-        const bool pi = faces[i].kind == LatticeBoundaryFace::Kind::Plane;
-        const bool pj = faces[j].kind == LatticeBoundaryFace::Kind::Plane;
-        if (pi && pj) {
-          emit_rim_line(sink, R, G, skin, static_cast<int>(i),
-                        static_cast<int>(j), st, obs);
-        } else if (pi != pj) {
-          const int fp = pi ? static_cast<int>(i) : static_cast<int>(j);
-          const int fb = pi ? static_cast<int>(j) : static_cast<int>(i);
-          if (faces[static_cast<std::size_t>(fb)].collar)
-            emit_rim_torus(sink, R, G, skin, fp, fb, st, obs);
-        }
-        // bore-bore pairs meet nowhere a rim can ride; nothing to emit
-      }
+    emit_rims(sink, R, G, skin, st, obs);
 
     // The anchored diagrid (Diagrid mode): anchor balls at every landing, skin
     // edges linking neighbouring landings on the same face. Each cell gathers

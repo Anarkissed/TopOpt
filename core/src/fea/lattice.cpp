@@ -207,6 +207,39 @@ constexpr std::array<Row, 8> kRhombic = {{
     {0.59925, 1446.0481, 612.3678, 511.1671, false},
 }};
 
+// ── THE SHEETS (lattice types round 1, K2), RE-MEASURED ON THE PRODUCTION WALL ──────
+// The July rows (PR 198) were measured on |f| < level, whose thickness varies over the
+// sheet; these are on tpms.hpp's |f|/|grad f| <= t/2, the wall the generator builds (R7).
+// core/tests/harness/tpms_probe.cpp `rows`, L = 5 mm, the PR 198/246 periodic
+// homogenisation; evidence docs/handoffs/evidence/2026-11-01-lattice-types-k1/
+// <sheet>_rows_vpc{48,96}.{csv,txt}. A row is resolved when its E100 is within 2.4 % of a
+// finer reference curve at the row's own rho AND its wall is >= 4 voxels (PR 198's floor).
+// The low rows are vpc96 against vpc128, the high ones vpc48 against vpc64 (PR 237's
+// mixed-resolution precedent). Gyroid's E100/Es at rho 0.30 is 0.113 against July's 0.114:
+// the wall change moves the density -> thickness law far more than the tensor.
+constexpr std::array<Row, 9> kGyroid = {{
+    {0.10008, 164.8816, 84.8909, 44.2575, false},    // vpc96, wall 3.1 vox
+    {0.15010, 256.7294, 130.0176, 71.6195, true},    // vpc96, drift -0.89 %
+    {0.20005, 353.8641, 175.2038, 102.0082, true},   // vpc96, -0.33 %
+    {0.24996, 456.8889, 222.1241, 136.1484, true},   // vpc96, -0.36 %
+    {0.30002, 570.4769, 270.4755, 175.0008, true},   // vpc96, +0.14 %
+    {0.34993, 692.6102, 321.0779, 218.1758, true},   // vpc96, +0.14 %
+    {0.39988, 816.9401, 371.4404, 264.8958, true},   // vpc48, -0.92 %
+    {0.50058, 1138.8644, 496.9424, 376.0255, true},  // vpc48, -0.40 %
+    {0.60069, 1537.4855, 650.1203, 507.1088, true},  // vpc48, -0.11 %
+}};
+constexpr std::array<Row, 9> kSchwarzD = {{
+    {0.10012, 181.3303, 75.5420, 36.2826, false},    // vpc96, wall 2.6 vox
+    {0.15025, 282.4526, 116.1866, 60.2473, false},   // vpc96, wall 3.9 vox
+    {0.20038, 387.5145, 158.1366, 88.5665, true},    // vpc96, drift +0.62 %
+    {0.24993, 495.2768, 202.1085, 122.1545, true},   // vpc96, -0.34 %
+    {0.29962, 611.1977, 248.3459, 160.2463, true},   // vpc96, -0.19 %
+    {0.35004, 738.3611, 299.4426, 205.2824, true},   // vpc96, -0.57 %
+    {0.40336, 887.9079, 350.8664, 254.6653, true},   // vpc48, +2.38 %
+    {0.49769, 1168.9725, 472.4790, 366.4813, true},  // vpc48, -0.87 %
+    {0.60012, 1587.8055, 641.3626, 506.5710, true},  // vpc48, -1.00 %
+}};
+
 // A view over one topology's row table (variable length — octet has 8, others differ).
 struct RowTable {
   const Row* data;
@@ -228,6 +261,8 @@ RowTable rows_of(LatticeTopology topo) {
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:   return {nullptr, 0};  // tetragonal: not certifiable
+    case LatticeTopology::Gyroid:      return {kGyroid.data(), (int)kGyroid.size()};
+    case LatticeTopology::SchwarzD:    return {kSchwarzD.data(), (int)kSchwarzD.size()};
   }
   return {nullptr, 0};
 }
@@ -255,6 +290,8 @@ const char* lattice_topology_name(LatticeTopology topo) {
     case LatticeTopology::Bccz:        return "bccz";
     case LatticeTopology::Fccz:        return "fccz";
     case LatticeTopology::Reentrant:   return "reentrant";
+    case LatticeTopology::Gyroid:      return "gyroid";
+    case LatticeTopology::SchwarzD:    return "schwarz_d";
   }
   return "?";
 }
@@ -269,7 +306,8 @@ std::vector<std::string> lattice_certifiable_topology_names() {
                             LatticeTopology::Bcc, LatticeTopology::Fcc,
                             LatticeTopology::Diamond, LatticeTopology::Kelvin,
                             LatticeTopology::Rhombic, LatticeTopology::Bccz,
-                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant,
+                            LatticeTopology::Gyroid, LatticeTopology::SchwarzD})
     if (lattice_topology_certifiable(t)) out.emplace_back(lattice_topology_name(t));
   return out;
 }
@@ -312,6 +350,38 @@ std::vector<LatticeResolvedRow> lattice_resolved_rows(LatticeTopology topo) {
 }
 
 double lattice_library_youngs_modulus() { return kLibraryEs; }
+
+// ── ★ THE SHEET WALL LAW (K2) ─────────────────────────────────────────────────
+// docs/handoffs/evidence/2026-11-01-lattice-types-k1/<sheet>_wall_law.{csv,txt}, from
+// core/tests/harness/tpms_probe.cpp `law` on the PRODUCTION wall (tpms.hpp): the wall's
+// field parameter t bisected (50 steps) on its converged solid fraction (2^20 Halton
+// points), and the TRUE normal thickness measured on 4,000 points of the sheet (marching out
+// along the normal from the zero set). Both at a 4 mm cell; both linear in the cell. The
+// true wall is uniform to +-1-3 % over the sheet at every density, which is what R7 asked of
+// the gradient-normalised band; it runs below t as the wall thickens (-16 % at rho 0.60),
+// because |f|/|grad f| is a first-order distance.
+struct SheetWallRow { double rho, mm_at_cell4; };
+constexpr SheetWallRow kGyroidTrueWall[] = {
+    {0.05, 0.06469}, {0.08, 0.10366}, {0.10, 0.12956}, {0.15, 0.19467},
+    {0.20, 0.26028}, {0.25, 0.32650}, {0.30, 0.39356}, {0.35, 0.46154},
+    {0.40, 0.53073}, {0.50, 0.67386}, {0.60, 0.82634},
+};
+constexpr SheetWallRow kGyroidWallParam[] = {
+    {0.05, 0.06475}, {0.08, 0.10393}, {0.10, 0.13008}, {0.15, 0.19643},
+    {0.20, 0.26453}, {0.25, 0.33497}, {0.30, 0.40861}, {0.35, 0.48621},
+    {0.40, 0.56898}, {0.50, 0.75621}, {0.60, 0.98931},
+};
+constexpr SheetWallRow kSchwarzDTrueWall[] = {
+    {0.05, 0.05214}, {0.08, 0.08338}, {0.10, 0.10440}, {0.15, 0.15681},
+    {0.20, 0.20978}, {0.25, 0.26302}, {0.30, 0.31697}, {0.35, 0.37164},
+    {0.40, 0.42772}, {0.50, 0.54291}, {0.60, 0.66583},
+};
+constexpr SheetWallRow kSchwarzDWallParam[] = {
+    {0.05, 0.05219}, {0.08, 0.08358}, {0.10, 0.10479}, {0.15, 0.15813},
+    {0.20, 0.21297}, {0.25, 0.26936}, {0.30, 0.32819}, {0.35, 0.38997},
+    {0.40, 0.45610}, {0.50, 0.60335}, {0.60, 0.78374},
+};
+constexpr int kSheetWallRows = 11;
 
 // ── ★ EACH LIVE TYPE'S OWN MEASUREMENTS, IN ONE PLACE (lattice types round 1) ──
 // R1: a type goes live only when every number it uses is its OWN measurement. They
@@ -432,6 +502,8 @@ const TypeMeasurements* type_measured(LatticeTopology topo) {
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       return nullptr;
   }
   return nullptr;
@@ -464,6 +536,31 @@ double type_table_diameter_mm(const TypeMeasurements& m, double rho, double cell
 }
 
 }  // namespace
+
+bool lattice_topology_is_sheet(LatticeTopology topo) {
+  return topo == LatticeTopology::Gyroid || topo == LatticeTopology::SchwarzD;
+}
+
+double lattice_sheet_wall_param_mm(LatticeTopology topo, double true_wall_mm, double cell_mm) {
+  if (!lattice_topology_is_sheet(topo))
+    throw std::invalid_argument(std::string("lattice_sheet_wall_param_mm: \"") +
+                                lattice_topology_name(topo) + "\" is not a sheet lattice");
+  if (!(cell_mm > 0.0) || !(true_wall_mm > 0.0))
+    throw std::invalid_argument("lattice_sheet_wall_param_mm: wall and cell must be > 0");
+  const SheetWallRow* tw = topo == LatticeTopology::Gyroid ? kGyroidTrueWall : kSchwarzDTrueWall;
+  const SheetWallRow* tp = topo == LatticeTopology::Gyroid ? kGyroidWallParam : kSchwarzDWallParam;
+  // the same density on both tables: invert the TRUE wall, read the parameter there (both
+  // are linear in the cell, so this is done at the tables' 4 mm cell and scaled back)
+  const double w4 = true_wall_mm * (4.0 / cell_mm);
+  const int n = kSheetWallRows;
+  if (w4 <= tw[0].mm_at_cell4) return tp[0].mm_at_cell4 / tw[0].mm_at_cell4 * true_wall_mm;
+  if (w4 >= tw[n - 1].mm_at_cell4)
+    return tp[n - 1].mm_at_cell4 / tw[n - 1].mm_at_cell4 * true_wall_mm;
+  int a = 0;
+  while (a + 1 < n - 1 && tw[a + 1].mm_at_cell4 < w4) ++a;
+  const double t = (w4 - tw[a].mm_at_cell4) / (tw[a + 1].mm_at_cell4 - tw[a].mm_at_cell4);
+  return (tp[a].mm_at_cell4 + t * (tp[a + 1].mm_at_cell4 - tp[a].mm_at_cell4)) * (cell_mm / 4.0);
+}
 
 bool lattice_type_numbers_measured(LatticeTopology topo) {
   return topo == LatticeTopology::Octet || type_measured(topo) != nullptr;
@@ -883,6 +980,8 @@ double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       break;
   }
   if (const TypeMeasurements* m = type_measured(topo)) {
@@ -940,9 +1039,14 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo) {
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       break;
   }
   if (type_measured(topo)) {
+    // Sheets: "prints open" has no strut-per-cell reading for a wall, so the ceiling is the
+    // band maximum until Q1 is ruled (00-decisions.md R11 / Q1).
+    if (lattice_topology_is_sheet(topo)) return lattice_rho_max(topo);
     // Octet's bisection (octet_aesthetic_density_ceiling), through THIS type's table.
     const double cell = 4.0;
     const double want = kOctetAestheticStrutPerCell * cell;
@@ -1009,13 +1113,6 @@ const char* lattice_type_readiness_plain(LatticeTypeReadiness r) {
   return "Not a lattice type";
 }
 
-const std::vector<std::string>& lattice_planned_topology_ids() {
-  // Deleted at K2: once a type is in the enum, the sets answer for it and a name here
-  // would shadow the real answer.
-  static const std::vector<std::string> planned{"gyroid", "schwarz_d"};
-  return planned;
-}
-
 LatticeTypeReadiness lattice_type_readiness(
     const std::string& id, const std::vector<std::string>& generatable,
     const std::vector<std::string>& certifiable) {
@@ -1024,12 +1121,9 @@ LatticeTypeReadiness lattice_type_readiness(
                             LatticeTopology::Bcc, LatticeTopology::Fcc,
                             LatticeTopology::Diamond, LatticeTopology::Kelvin,
                             LatticeTopology::Rhombic, LatticeTopology::Bccz,
-                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant,
+                            LatticeTopology::Gyroid, LatticeTopology::SchwarzD})
     if (id == lattice_topology_name(t)) { known = true; break; }
-  // A PLANNED id is one core knows and has not built: not a typo, so not UnknownId.
-  if (!known)
-    for (const std::string& n : lattice_planned_topology_ids())
-      if (id == n) { known = true; break; }
   bool gen = false, cert = false;
   for (const std::string& n : generatable) if (n == id) { gen = true; break; }
   for (const std::string& n : certifiable) if (n == id) { cert = true; break; }
@@ -1047,7 +1141,8 @@ LatticeTopology lattice_topology_from_id(const std::string& id) {
                             LatticeTopology::Bcc, LatticeTopology::Fcc,
                             LatticeTopology::Diamond, LatticeTopology::Kelvin,
                             LatticeTopology::Rhombic, LatticeTopology::Bccz,
-                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant,
+                            LatticeTopology::Gyroid, LatticeTopology::SchwarzD})
     if (id == lattice_topology_name(t)) return t;
   throw std::invalid_argument(
       "lattice_topology_from_id: unknown lattice topology \"" + id +
@@ -1084,6 +1179,8 @@ double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       break;
   }
   // Every live type's OWN table (type_measured, one block per type, with its source).

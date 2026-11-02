@@ -9,6 +9,7 @@
 
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/tpms_gen.hpp"
 
 namespace topopt {
 namespace {
@@ -72,6 +73,23 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
   if (spec.plate_mm > 0.0) {
     emit_box(sink, Vec3{0.0, 0.0, 0.0}, Vec3{spec.size_mm, spec.size_mm, spec.plate_mm});
     r.triangles += 12;
+  }
+  if (lattice_gen_is_sheet(gt)) {
+    // A sheet: the TPMS wall over the same cube, the TRUE wall from the type's law (the
+    // receipt's "strut_diameter_mm" is that wall), the field parameter from the wall law.
+    TpmsRegion TR;
+    TR.anchor = Vec3{0.0, 0.0, spec.plate_mm};
+    TR.nx = TR.ny = TR.nz = n;
+    TR.cell_mm = spec.cell_mm;
+    TpmsWallField W;
+    W.uniform_mm = lattice_sheet_wall_param_mm(t, r.strut_diameter_mm, spec.cell_mm);
+    TpmsGenOptions o;
+    o.min_wall_mm = r.strut_diameter_mm;
+    const TpmsGenStats ts = generate_tpms(
+        gt == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD, TR, W, sink, o);
+    r.lattice_triangles = ts.dc.triangles;
+    r.triangles += ts.dc.triangles;
+    return r;
   }
   LatticeRegion R;
   R.origin = Vec3{0.0, 0.0, spec.plate_mm};

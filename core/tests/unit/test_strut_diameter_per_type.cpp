@@ -59,8 +59,9 @@ int main() {
       LatticeTopology::Bcc,     LatticeTopology::Fcc,
       LatticeTopology::Diamond, LatticeTopology::Kelvin,
       LatticeTopology::Rhombic, LatticeTopology::Bccz,
-      LatticeTopology::Fccz,    LatticeTopology::Reentrant};
-  CHECK(all.size() == 10, "the enum still carries ten topologies");
+      LatticeTopology::Fccz,    LatticeTopology::Reentrant,
+      LatticeTopology::Gyroid,  LatticeTopology::SchwarzD};
+  CHECK(all.size() == 12, "the enum carries twelve topologies (the two sheets since K2)");
   // ★ The types whose OWN law is landed (lattice types round 1: each joins this list
   // as it goes live, with its own section below). Sections 2 and 7 assert that every
   // OTHER type still refuses.
@@ -251,7 +252,7 @@ int main() {
     // An unknown id refuses and names what it was given. "Octet" with a capital O is
     // in the list on purpose: the ids are lower-case, and a near-miss must refuse
     // rather than fall back.
-    for (const char* bad : {"", "Octet", "OCTET", "oct", "octet ", "gyroid",
+    for (const char* bad : {"", "Octet", "OCTET", "oct", "octet ", "gyroids",
                             "schwarz-d", "honeycomb", "bcc-z"}) {
       bool threw = false, named = false;
       try {
@@ -494,28 +495,19 @@ int main() {
     }
   }
 
-  // ── ★ PLANNED IDS ARE "NOT YET", NOT "NO SUCH THING" ───────────────────────
-  // gyroid and schwarz_d are on the go-live list and not in the enum, so the readiness
-  // answer would otherwise be UnknownId -- the answer for a TYPO. The app would then tell
-  // the user they misspelled a type core is going to ship. NotEither is the honest answer:
-  // core knows it and has not built it.
+  // ── ★ THE SHEET IDS ARE TYPES, NOT TYPOS (K2) ───────────────────────────────
+  // gyroid and schwarz_d used to be a separate "planned" list so they would not read as
+  // typos before they had enum values. At K2 they are LatticeTopology ids, so the list is
+  // gone and they read like any type: known, and live exactly when both sets hold them.
   {
     const std::vector<std::string> gen = lattice_gen_topology_names();
     const std::vector<std::string> cert = lattice_certifiable_topology_names();
-    for (const std::string& id : lattice_planned_topology_ids()) {
-      CHECK(lattice_type_readiness(id, gen, cert) ==
-                LatticeTypeReadiness::NotEither,
-            "a PLANNED id reads NotEither, not UnknownId");
-      // And it really is absent from both sets -- otherwise this says nothing.
-      bool in_either = false;
-      for (const std::vector<std::string>* s : {&gen, &cert})
-        for (const std::string& n : *s)
-          if (n == id) in_either = true;
-      CHECK(!in_either, "premise: a planned id is in neither live set");
+    for (const char* id : {"gyroid", "schwarz_d"}) {
+      CHECK(lattice_type_readiness(id, gen, cert) != LatticeTypeReadiness::UnknownId,
+            "a sheet id is a type core knows, never UnknownId");
+      CHECK(lattice_topology_name(lattice_topology_from_id(id)) == std::string(id),
+            "a sheet id round-trips through the enum");
     }
-    CHECK(lattice_planned_topology_ids().size() == 2,
-          "the planned list is gyroid and schwarz_d today; this fails when one goes live, "
-          "which is the reminder to delete it from the list at K2");
     // A genuine typo must still be UnknownId, or the distinction is lost.
     for (const char* typo : {"gyroids", "gyroid ", "schwarz-d", "schwarzd", "octett"})
       CHECK(lattice_type_readiness(typo, gen, cert) ==

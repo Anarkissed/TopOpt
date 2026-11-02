@@ -70,6 +70,9 @@ enum class LatticeTopology {
   Bccz,         // "bccz"    — TETRAGONAL (z columns): generate-but-NOT-certify
   Fccz,         // "fccz"    — TETRAGONAL (z columns): generate-but-NOT-certify
   Reentrant,    // "reentrant" — TETRAGONAL/auxetic (z waist): generate-but-NOT-certify
+  // ── the SHEET lattices (lattice types round 1, K2): one TPMS field, topopt/tpms.hpp ──
+  Gyroid,       // "gyroid"    — cubic; rows re-measured on the production wall (R7)
+  SchwarzD,     // "schwarz_d" — cubic; rows re-measured on the production wall (R7)
 };
 
 const char* lattice_topology_name(LatticeTopology topo);
@@ -120,6 +123,15 @@ double lattice_cells_per_member_min(LatticeTopology topo);
 // and below still return octet's forwarded placeholders for it, which must never be
 // shown or used as that type's numbers (R1).
 bool lattice_type_numbers_measured(LatticeTopology topo);
+
+// ── ★ THE SHEET LATTICES (K2) ────────────────────────────────────────────────
+// Gyroid and Schwarz-D have no struts. For them every "strut diameter" in this header is
+// the sheet's TRUE normal WALL THICKNESS -- the member a bead has to print -- so the
+// printability floor, the minimum density and every receipt that compares a member to the
+// bead read the right thing without a second path. The generator needs one more number,
+// the field's thickness parameter t (tpms.hpp) that builds that wall:
+bool lattice_topology_is_sheet(LatticeTopology topo);
+double lattice_sheet_wall_param_mm(LatticeTopology topo, double true_wall_mm, double cell_mm);
 
 // ★ THE OTHER FLOOR, AND IT IS NOT THE ONE ABOVE. The minimum cells across a member
 // for the strut network to PERCOLATE — to be connected geometry at all. Measured for
@@ -432,18 +444,9 @@ const char* lattice_type_readiness_plain(LatticeTypeReadiness r);
 // `id` is the job's topology string. `generatable` and `certifiable` are the two name
 // sets. An id absent from both AND not a known topology name is UnknownId, which is a
 // different answer from NotEither: one is a typo, the other is a type core knows.
-// ── ★ THE IDS CORE HAS PLANNED BUT NOT BUILT (reviewer's ruling, 2026-10-07) ───
-// `gyroid` and `schwarz_d` are the two SHEET types on the go-live list. They are not in
-// LatticeTopology yet, so `lattice_type_readiness` would call them UnknownId -- "not a
-// topology id at all", the answer for a TYPO. That is the wrong answer: core knows these
-// two and has simply not built them, which is exactly what NotEither means. An app that
-// cannot tell "we have not got there yet" from "you misspelled it" shows the user the
-// wrong message.
-//
-// ONE list, shared with the print-tests loader (K4) so a maintainer row naming a planned
-// type is refused by the same set that answers the app. DELETED AT K2, when the sheet
-// types enter the enum and the generatable/certifiable sets answer for them.
-const std::vector<std::string>& lattice_planned_topology_ids();
+// (`lattice_planned_topology_ids`, the list that kept "gyroid" and "schwarz_d" from
+// reading as typos before they had enum values, was DELETED AT K2 as it said it would be:
+// they are LatticeTopology ids now, and the sets answer for them like any other type.)
 
 LatticeTypeReadiness lattice_type_readiness(
     const std::string& id, const std::vector<std::string>& generatable,

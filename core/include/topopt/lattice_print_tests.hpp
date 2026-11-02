@@ -11,8 +11,8 @@
 // with '_' are comments at every level (the file's own "_comment").
 //
 // THE ACCEPTED TYPE IDS ARE DERIVED, NOT LISTED (reviewer, 2026-09-30): every
-// LatticeTopology id (lattice_topology_name over the enum) plus the planned sheet ids
-// (lattice_planned_topology_ids). So a row the maintainer adds for any type core knows
+// LatticeTopology id (lattice_topology_name over the enum; the sheet ids gyroid and
+// schwarz_d are enum values since K2). So a row the maintainer adds for any type core knows
 // -- fccz and reentrant included -- loads, and a misspelling ("Gyroid") is refused BY
 // NAME.
 //

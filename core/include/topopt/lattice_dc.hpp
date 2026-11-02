@@ -38,6 +38,7 @@
 // measured without any mesh and so cannot be fooled by a defect in this one.
 
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 #include "topopt/lattice_boundary.hpp"
@@ -168,5 +169,23 @@ struct LatticeDcStats {
 
 TriangleMesh lattice_dual_contour(const std::vector<OrganicSpan>& spans,
                                   const LatticeDcOptions& opt, LatticeDcStats& stats);
+
+// ── ★ ANY SIGNED FIELD (negative inside), CONTOURED THE SAME WAY, STREAMED ───────────
+// (lattice types round 1, K2: the sheet lattices.) A uniform grid of cell `h` over the box
+// [lo, hi], visited one z-layer at a time with the SAME manifold cell analysis as above,
+// triangles pushed to `sink` as soon as the four cells around a grid edge exist -- so
+// memory is two layers of the box, never the box. The field must be positive on the box's
+// boundary for the surface to close there (pad the box by a cell). `gradient` is the
+// field's unit normal at a point on the surface (finite differences are fine).
+struct LatticeDcFieldStats {
+  long long cells = 0;
+  std::size_t cells_active = 0, cells_split = 0, quads_dropped = 0;
+  std::size_t vertices = 0, triangles = 0, field_evaluations = 0;
+  double seconds = 0.0;
+};
+LatticeDcFieldStats lattice_dual_contour_field(
+    const std::function<double(const Vec3&)>& field,
+    const std::function<Vec3(const Vec3&)>& gradient, const Vec3& lo, const Vec3& hi,
+    double h, TriangleSink& sink, int crossing_steps = 12, double qef_regularisation = 0.02);
 
 }  // namespace topopt

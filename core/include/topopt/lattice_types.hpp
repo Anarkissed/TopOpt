@@ -51,7 +51,12 @@ struct LatticeTypeFacts {
 
   // Triangles per cell of the infinite tiling as the generator emits it (8-gon prisms,
   // 20-triangle nodes). A block's outer faces add their own; this is the per-cell cost.
+  // Sheets: the cost depends on the DC cell, a third of the thinnest wall laid
+  // (tpms_gen.hpp), so it is sheet_triangles_coeff x (cell / DC cell)^2; this field is that
+  // at the band middle with a uniform wall (a cell-size-free number: the wall scales with
+  // the cell).
   double triangles_per_cell = 0.0;
+  double sheet_triangles_coeff = 0.0;  // sheets only; NaN for struts
 
   bool strut_strength_measured = false;  // R10
   std::string strut_strength_note;

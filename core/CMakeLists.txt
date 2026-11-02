@@ -120,6 +120,7 @@ add_library(topopt
   src/mesh/surface_operator.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/lattice_sample.cpp
+  src/mesh/tpms_gen.cpp
   src/mesh/organic_lattice.cpp
   src/mesh/lattice_lslt.cpp
   src/mesh/lattice_union_volume.cpp
@@ -460,6 +461,12 @@ target_link_libraries(test_lattice_types PRIVATE topopt)
 target_compile_definitions(test_lattice_types PRIVATE
   LATTICE_PRINT_TESTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/lattice_print_tests.json")
 add_test(NAME lattice_types COMMAND test_lattice_types)
+
+# ★ The sheet lattices (K2): the TPMS field, and generate_tpms's mesh closed, manifold,
+# deterministic, inside the part and at the solid fraction's volume.
+add_executable(test_tpms tests/unit/test_tpms.cpp)
+target_link_libraries(test_tpms PRIVATE topopt)
+add_test(NAME tpms COMMAND test_tpms)
 
 if(Eigen3_FOUND)
   add_executable(test_strut_cell tests/unit/test_strut_cell.cpp)

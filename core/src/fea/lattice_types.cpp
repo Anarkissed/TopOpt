@@ -49,7 +49,15 @@ bool known_topology(const std::string& id, LatticeTopology* out) {
 // strut ends (core/tests/harness/lattice_types_probe.cpp `step`, evidence
 // docs/handoffs/evidence/2026-11-01-lattice-types-k1/<id>_step.{csv,txt}). Doubled is
 // an S | S/2 block, Stepped an S | 2S/3 interface, both at the band's middle density.
+// R5: a sheet grades by WALL THICKNESS at one cell size per region. No published method
+// grades a TPMS's cell size at a fixed wall, and a period change at a boundary leaves the
+// sheets unjoined, so neither size step is offered for one.
+static const char* const kSheetNoSteps =
+    "A sheet lattice grades by wall thickness at one cell size per region (R5): a change of "
+    "cell size leaves its sheets unjoined, and no measured method joins them yet.";
+
 LatticeOption lattice_type_doubled(LatticeTopology topo) {
+  if (lattice_topology_is_sheet(topo)) return no(kSheetNoSteps);
   switch (topo) {
     case LatticeTopology::Octet:  // PR 235's C4 (zero bridge struts) and octet_step.txt
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 2,208 ends
@@ -68,6 +76,7 @@ LatticeOption lattice_type_doubled(LatticeTopology topo) {
 }
 
 LatticeOption lattice_type_stepped(LatticeTopology topo) {
+  if (lattice_topology_is_sheet(topo)) return no(kSheetNoSteps);
   switch (topo) {
     case LatticeTopology::Octet:  // octet_step.txt: 1 component, 0 dangling
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 1,152 ends
@@ -98,19 +107,16 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
   f.readiness_plain = lattice_type_readiness_plain(f.readiness);
   f.rho_min = f.rho_max = f.cells_per_member_min = f.percolation_cells_per_member_min =
       f.aesthetic_hard_floor_cells = f.printable_cell_per_bead =
-          f.aesthetic_density_ceiling = f.triangles_per_cell = kNaN;
+          f.aesthetic_density_ceiling = f.triangles_per_cell = f.sheet_triangles_coeff = kNaN;
   const std::string not_live =
       std::string("Not offered: ") + f.readiness_plain + ".";
   f.outline = f.rim = f.diagrid = f.uniform = f.doubled = f.stepped = no(not_live);
   f.strut_strength_note = "Strut strength is not measured for this type.";
 
-  if (id == "gyroid" || id == "schwarz_d") {
-    f.family = "sheet";
-    return f;  // planned (K2): nothing measured yet
-  }
   LatticeTopology topo;
   if (!known_topology(id, &topo)) return f;  // UnknownId: no facts to borrow
-  f.family = "strut";
+  const bool sheet = lattice_topology_is_sheet(topo);
+  f.family = sheet ? "sheet" : "strut";
   if (lattice_topology_certifiable(topo)) {
     f.rho_min = lattice_rho_min(topo);
     f.rho_max = lattice_rho_max(topo);
@@ -132,11 +138,23 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
     f.aesthetic_hard_floor_cells = aesthetic_cells_per_member_hard_floor(topo);
     f.printable_cell_per_bead = lattice_min_printable_cell_mm(topo, 1.0, 0.0);
     f.aesthetic_density_ceiling = lattice_aesthetic_density_ceiling(topo);
+    if (sheet) {
+      // sheet_triangle_cost.txt (tpms_probe `tris`): triangles per interior cell over
+      // (L/h)^2, the larger of rho 0.20 / 0.40 at L/h 20 and 30 (a budget should not
+      // undercount). Uniform wall at the band middle, h = a third of it: cell-size free.
+      f.sheet_triangles_coeff = topo == LatticeTopology::Gyroid ? 19.44 : 24.00;
+      const double mid = 0.5 * (f.rho_min + f.rho_max), cell = 8.0;
+      const double h = lattice_strut_diameter_mm(topo, mid, cell) / 3.0;
+      f.triangles_per_cell = f.sheet_triangles_coeff * (cell / h) * (cell / h);
+    }
   }
   if (f.readiness == LatticeTypeReadiness::Live) {
     // R8: the solid outline and Rim apply to every type; Diagrid anchors where struts
-    // meet the surface, which every strut type has.
+    // meet the surface, which every strut type has and a sheet does not.
     f.outline = f.rim = f.diagrid = yes();
+    if (sheet)
+      f.diagrid = no("Diagrid anchors where struts meet the surface; a sheet meets it along "
+                     "curves, so there is nothing to anchor to (R8).");
     f.uniform = yes();
     f.doubled = lattice_type_doubled(topo);
     f.stepped = lattice_type_stepped(topo);

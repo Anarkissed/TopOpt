@@ -221,6 +221,12 @@ StrutCell build(LatticeTopology topo) {
           std::string("lattice_strut_cell: \"") + lattice_topology_name(topo) +
           "\" has no canonical cell in core: it is tetragonal and not in round 1 "
           "(docs/design/lattice-types/00-decisions.md M1).");
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
+      throw std::invalid_argument(
+          std::string("lattice_strut_cell: \"") + lattice_topology_name(topo) +
+          "\" is a SHEET lattice: it has no struts, its geometry is the TPMS field "
+          "(topopt/tpms.hpp).");
   }
   // The ownership invariant the generator rests on: every canonical strut lies inside
   // its owner's CLOSED box. A cell that broke this would emit geometry outside itself.
@@ -247,6 +253,8 @@ bool lattice_has_strut_cell(LatticeTopology topo) {
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       return false;
   }
   return false;
@@ -265,6 +273,8 @@ const StrutCell& lattice_strut_cell(LatticeTopology topo) {
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
+    case LatticeTopology::Gyroid:
+    case LatticeTopology::SchwarzD:
       break;
   }
   build(topo);  // throws, naming the type

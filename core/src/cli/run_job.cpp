@@ -41,6 +41,7 @@
 #include "topopt/lattice_algorithm.hpp"
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
+#include "topopt/tpms_gen.hpp"
 #include "topopt/lattice_void.hpp"
 #include "topopt/beam_network.hpp"
 #include "topopt/organic_lattice.hpp"
@@ -2567,6 +2568,54 @@ LatticeExportOutcome export_latticed_variant(
   // admits a live type only, and lattice_gen_topology_from_id refuses anything core
   // cannot build -- never octet in its place.
   const LatticeGenTopology gen_topo = lattice_gen_topology_from_id(lat.topology);
+  // ★ SHEETS (K2): the same region, boundary and grade, built as the TPMS wall by
+  // generate_tpms instead of struts. The radius field carries HALF THE TRUE WALL (the sheet
+  // reading of "strut diameter", lattice.hpp), which the type's wall law turns into the
+  // field's parameter; the DC cell is a third of the thinnest wall this pass lays. No struts, so no landings and no Diagrid (refused at the parse); Rim is the rim
+  // pass alone. Doubled and Stepped never reach here for a sheet (refused at the parse, R5).
+  const bool sheet = lattice_gen_is_sheet(gen_topo);
+  auto sheet_pass = [&](TriangleSink& w) {
+    const LatticeTopology ct = lattice_gen_certificate_topology(gen_topo);
+    TpmsRegion TR;
+    TR.anchor = R.origin;
+    TR.nx = R.nx; TR.ny = R.ny; TR.nz = R.nz;
+    TR.cell_mm = R.cell_mm;
+    TR.latticed = R.latticed;
+    TR.boundary = R.boundary;
+    TpmsWallField W;
+    W.field = [&radius, ct, &R](const Vec3& p) {
+      return lattice_sheet_wall_param_mm(ct, 2.0 * radius.radius_at(p), R.cell_mm);
+    };
+    // The thinnest wall laid: the field at each latticed cell's corners, edge and face
+    // midpoints and centre (it is graded per voxel), never below the band's own minimum.
+    // Sizing the DC cell from the band's minimum instead costs (wall ratio)^2 triangles
+    // for nothing: 4x on a 4 mm gyroid graded from 0.30 (sheet_triangle_cost.txt).
+    const double band_min_wall = lattice_strut_diameter_mm(ct, lattice_rho_min(ct), R.cell_mm);
+    double min_wall = std::numeric_limits<double>::infinity();
+    for (int k = 0; k < R.nz; ++k)
+      for (int j = 0; j < R.ny; ++j)
+        for (int i = 0; i < R.nx; ++i) {
+          if (R.latticed && !R.latticed(i, j, k)) continue;
+          for (int c = 0; c < 27; ++c) {
+            const Vec3 p{R.origin.x + (i + 0.5 * (c % 3)) * R.cell_mm,
+                         R.origin.y + (j + 0.5 * (c / 3 % 3)) * R.cell_mm,
+                         R.origin.z + (k + 0.5 * (c / 9)) * R.cell_mm};
+            min_wall = std::min(min_wall, 2.0 * radius.radius_at(p));
+          }
+        }
+    TpmsGenOptions o;
+    o.min_wall_mm = std::isfinite(min_wall) ? std::max(min_wall, band_min_wall) : band_min_wall;
+    const TpmsGenStats ts =
+        generate_tpms(gen_topo == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid
+                                                             : TpmsKind::SchwarzD,
+                      TR, W, w, o);
+    LatticeGenStats st;
+    if (R.boundary && skin.mode == LatticeSkinMode::Rim)
+      st = generate_lattice_rims(R, radius, w, skin, nullptr);
+    st.latticed_cells = ts.latticed_cells;
+    st.triangles += ts.dc.triangles;
+    return st;
+  };
   LatticeGenObserver weld_obs;
   weld_obs.on_element = [&organic_spans, &lat, laid_tap](LatticeGenElement k,
                                                          const Vec3& a, const Vec3& b,
@@ -2580,6 +2629,7 @@ LatticeExportOutcome export_latticed_variant(
   const LatticeGenObserver* weld_tap =
       (lat.emit_welded_stl || (laid_tap && *laid_tap)) ? &weld_obs : nullptr;
   auto emit_lattice = [&](TriangleSink& w) {
+    if (sheet && !measure_protrusion) return sheet_pass(w);
     if (!measure_protrusion) {
       if (organic)
         return organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
@@ -2650,6 +2700,7 @@ LatticeExportOutcome export_latticed_variant(
             ? organic_stats(generate_organic_lattice(
                   *organic, m, &boundary, 8, &obs, &organic_spans,
                   measure_protrusion ? &shell_dist : nullptr))
+            : sheet ? sheet_pass(m)
             : (stepped ? generate_lattice_stepped(gen_topo, *stepped, m, skin, &obs)
                        : (swept ? generate_lattice_multilevel(gen_topo, Rbase,
                                                               *levels, m, skin, &obs)
