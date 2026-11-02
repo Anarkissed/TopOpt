@@ -7,9 +7,11 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 
 ## Where this stands, in plain language
 
-**Live: FCC, Kelvin.** Measured and going live next, in the R2 order: Rhombic dodecahedron,
-Diamond, BCC, Simple cubic (their density laws, percolation and bending floors are all measured
-and in the evidence folder). Not started: Gyroid, Schwarz-D (K2). Parked: none.
+**Live: FCC, Kelvin, Rhombic dodecahedron** (rhombic without Doubled cells: measured, its struts
+do not meet across a halving). Measured and going live next, in the R2 order: Diamond, BCC,
+Simple cubic (their density laws, percolation and bending floors are all measured and in the
+evidence folder). Gyroid and Schwarz-D (K2): rows and wall law measured, bending floors still
+being measured; nothing of K2 is pushed. Parked: none.
 
 <!-- STATUS -->
 
@@ -144,6 +146,35 @@ not measured. Not print-tested.
 core/build/topopt-cli lattice-sample --topology kelvin --out kelvin_sample.stl
 ```
 
+## Rhombic dodecahedron — LIVE (Doubled refused, measured; Stepped allowed)
+
+The same harness, conditions and checks as FCC; evidence `rhombic_*`. The one difference from FCC
+and Kelvin is the size-step verdict: across a cell-size halving its struts do not meet, so core
+refuses Doubled for it by name, everywhere a job can ask for it (`cell_mode` swept or fit,
+`stepped_cells`). Stepped (S | 2S/3) joins and is allowed.
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | `test_strut_cell` (S 4, 32 struts, 12 nodes) |
+| 2 | Generates; octet byte-identical; deterministic | PASS | `test_lattice_types`; the M2 stand's own jobs use the swept (Doubled) ladder, which core now refuses for rhombic at parse time (`rhombic_stand_swept_refused.txt`), so the stand ran on one fixed 4 mm cell (`make_stand_jobs.py rhombic <dir> --fixed 4`): it laid and certified rhombic on two Structural rungs (0.52: 33 cells; 0.38: 4) and the same two Aesthetic ones. The other two rungs carry no lattice for reasons core gives for any type: 0.26's widest member is 20.5 mm, under the 40 mm a 10-cell floor needs at 4 mm, and 0.68 holds a sealed 595 mm³ cavity (the void-reaches-exterior check) (`rhombic_stand_certificate.txt`); octet `r9_octet_rhombic_commit.txt`: the one differing leaf is `/model`, as before |
+| 3 | Own law, diameter table, printability floor | PASS | `rhombic_law.{csv,txt}` (B3 within 5.0 %; the vpc48 staircase is why the law is bisected on the converged solid fraction, Finding 1) |
+| 4 | Own floors, with conditions | PASS | bending **10** (`rhombic_bend*.txt`: +119.6 / +32.0 / +16.3 / +10.4 / +7.3 / +5.5 / +4.3 / +3.4 / +2.8 / **+2.3** % at 1-10 cells, C2b vpc12, cell rho 0.2963; +1.7 % at 12); percolation **0.75**; aesthetic hard floor **2** (+32.0 % at 2 cells, percolates) |
+| 5 | Size-step verdict | **Doubled REFUSED**, Stepped allowed | `rhombic_step.txt`: S\|S/2 comes out as **2 components** (0 dangling of 4,608 ends: each side is whole, the two never touch); S\|2S/3 1 component, 0 of 2,240. `lattice_type_doubled("rhombic")` carries the reason, and `test_lattice_types` holds the generator to it both ways |
+| 6 | Certificate, both modes; receipts name it | PASS | every receipt `"rhombic"`; analyze Structural recertified margin 98.43, accepted, on rhombic's band 0.172-0.513 and floor 10 |
+| 7 | Percolation on the emitted mesh | PASS | block and Stepped one solid (`test_lattice_types`); M2 stand rung 0.38: 2 pieces, both with a cut end into the solid, **0 floating** (`rhombic_stand_percolation.txt`) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("rhombic")`: `doubled.allowed` false with the reason, `stepped.allowed` true |
+
+Numbers: band 0.17245-0.51331; cells per member 10; percolation 0.75; aesthetic floor 2; aesthetic
+ceiling 0.3181; smallest printable cell 3.650 x the bead; 1,264 triangles per cell; strut strength
+not measured. Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.343, 1.68 mm struts, 1.5 mm plate, 161,312 triangles;
+`rhombic_sample_40mm.stl`):
+
+```bash
+core/build/topopt-cli lattice-sample --topology rhombic --out rhombic_sample.stl
+```
+
 <!-- PER TYPE -->
 
 ## BRIDGE CONTRACT (02-core-spec §5) — what the app calls, and what each answer means
@@ -247,6 +278,7 @@ trial run (brief item g).
 |---|---|---|---|
 | FCC | 165 / 165 passed, 4,347 s (`ctest_fcc.txt`) | passed, 1,994 s | 18 identical; 3 differ only in: `test_lattice_gen` 29 -> 30 checks (its enum tripwire checks one name per generatable type, and `fcc` is one more), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build directory's path inside two output lines (`identity_fcc.txt`) |
 | Kelvin | 163 / 165 in the gate's archive copy; the two that failed (`app_core_capability_mirror`, `smooth_brush`) read `../app` and `../docs`, which a `git archive` of `core/` does not carry, and both pass re-run in that same build with the trees linked (`ctest_kelvin.txt`); the pipeline now links them | passed, 1,965 s | 19 identical; `test_lattice_gen` (one more tripwire name) and `test_lattice_void_exterior` (build path) as before (`identity_kelvin.txt`) |
+| Rhombic | 165 / 165 passed, 4,174 s (`ctest_rhombic.txt`) | passed, 1,881 s | 18 identical; `test_lattice_gen` 29 -> 32 checks (one tripwire name each for fcc, kelvin, rhombic), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_rhombic.txt`) |
 
 Tests added for the round: `test_strut_cell` (237 checks), `test_lattice_types` (85). Edited, each
 because it was built to flip when a type goes live: `test_strut_diameter_per_type` (FCC leaves the
