@@ -1,5 +1,6 @@
 #include "topopt/observability.hpp"
 #include "topopt/organic_lattice.hpp"  // OrganicGenStats, for copy_growth_stats
+#include "topopt/lattice_types.hpp"    // lattice_type_directional_note (R3)
 
 #include <chrono>
 #include <cmath>
@@ -471,6 +472,14 @@ std::string json_escape(const std::string& s) {
 }
 
 std::string bool_json(bool b) { return b ? "true" : "false"; }
+
+// R3: `, "directional_note": "..."` after a receipt's topology for SC and BCC; empty
+// for every other type, so their receipts are byte-identical to before.
+std::string directional_note_json(const std::string& topology) {
+  const std::string note = lattice_type_directional_note(topology);
+  return note.empty() ? std::string()
+                      : ", \"directional_note\": \"" + json_escape(note) + "\"";
+}
 
 }  // namespace
 
@@ -1009,6 +1018,7 @@ std::string run_info_json(const RunInfo& info) {
       /*comma=*/has_cert || has_exp || has_grad || has_frame);
   if (has_cert) {
     std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
+    lat += directional_note_json(info.lattice_topology);
     lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
     lat += ", \"rho_min\": " + fmt(info.lattice_rho_min);
     lat += ", \"rho_max\": " + fmt(info.lattice_rho_max);
@@ -1048,6 +1058,7 @@ std::string run_info_json(const RunInfo& info) {
   }
   if (has_exp) {
     std::string le = "{\"topology\": \"" + info.lattice_export_topology + "\"";
+    le += directional_note_json(info.lattice_export_topology);
     le += ", \"cell_size_mm\": " + fmt(info.lattice_export_cell_mm);
     le += ", \"strut_radius_min_mm\": " + fmt(info.lattice_export_strut_radius_min_mm);
     le += ", \"strut_radius_max_mm\": " + fmt(info.lattice_export_strut_radius_max_mm);
@@ -1194,6 +1205,7 @@ std::string run_info_json(const RunInfo& info) {
     // grade stayed solid); `min_strut_diameter_mm` / `any_strut_below_min` are the
     // requirement-3 printability check. ALWAYS last when present (no trailing comma).
     std::string gr = "{\"topology\": \"" + info.grading_topology + "\"";
+    gr += directional_note_json(info.grading_topology);
     gr += ", \"band_rho_min\": " + fmt(info.grading_band_rho_min);
     gr += ", \"band_rho_max\": " + fmt(info.grading_band_rho_max);
     gr += ", \"cells_per_member_floor\": " +
@@ -2105,6 +2117,7 @@ std::string run_info_json(const RunInfo& info) {
   if (info.multiscale_armed) {
     std::string ms = "{\"armed\": true";
     ms += ", \"topology\": \"" + info.multiscale_topology + "\"";
+    ms += directional_note_json(info.multiscale_topology);
     ms += ", \"region_voxels\": " + fmt_ll(info.multiscale_region_voxels);
     ms += ", \"fit_rows\": " + fmt_ll(info.multiscale_fit_rows);
     ms += ", \"band\": [" + fmt(info.multiscale_rho_lo) + ", " +

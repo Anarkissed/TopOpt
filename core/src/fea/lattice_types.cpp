@@ -86,6 +86,14 @@ LatticeOption lattice_type_stepped(LatticeTopology topo) {
   }
 }
 
+std::string lattice_type_directional_note(const std::string& id) {
+  // tensor-library-nine: the certificate carries the full tensor and is right, but the
+  // grading law's scalar E100 proxy mis-ranks an off-axis member of these two.
+  if (id == "sc" || id == "bcc")
+    return "Strongly directional: best when the load runs along the cell axes.";
+  return "";
+}
+
 const std::vector<std::string>& lattice_type_ids() {
   static const std::vector<std::string> ids = {"octet",   "sc",     "bcc",
                                                "fcc",     "diamond", "kelvin",
@@ -119,10 +127,8 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
     f.rho_min = lattice_rho_min(topo);
     f.rho_max = lattice_rho_max(topo);
   }
-  f.directional = topo == LatticeTopology::SimpleCubic || topo == LatticeTopology::Bcc;
-  if (f.directional)
-    f.directional_note =
-        "Strongly directional: best when the load runs along the cell axes.";
+  f.directional_note = lattice_type_directional_note(id);
+  f.directional = !f.directional_note.empty();
   if (lattice_has_strut_cell(topo)) {
     const StrutCell& c = lattice_strut_cell(topo);
     f.cell_denominator = c.S;

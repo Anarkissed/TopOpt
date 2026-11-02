@@ -426,6 +426,19 @@ int main() {
     LatticeSampleSpec b2 = s; b2.rho = 0.9;     CHECK(refused(b2), "sample: out of band is refused");
     LatticeSampleSpec b3 = s; b3.bead_mm = 3.0; CHECK(refused(b3), "sample: thinner than a bead is refused");
     LatticeSampleSpec b4 = s; b4.topology = "bccz"; CHECK(refused(b4), "sample: a type not live is refused");
+    // R3: a directional type's receipt says so; every other type's has no such key.
+    LatticeSampleSpec d = s; d.topology = "bcc";
+    const std::string dj = lattice_sample_receipt_json(write_lattice_sample(d, sink));
+    CHECK(dj.find("\"directional_note\": \"" + lattice_type_directional_note("bcc") + "\"") !=
+              std::string::npos,
+          "sample: a BCC receipt carries the R3 directional note");
+    CHECK(lattice_sample_receipt_json(r).find("directional_note") == std::string::npos,
+          "sample: an FCC receipt has no directional key");
+    CHECK(lattice_type_directional_note("octet").empty() &&
+              lattice_type_directional_note("fcc").empty() &&
+              !lattice_type_directional_note("sc").empty() &&
+              lattice_type_facts("bcc").directional_note == lattice_type_directional_note("bcc"),
+          "R3: the note is SC's and BCC's only, and the facts read the same words");
   }
 
   // 4d. The job parse: a live type with organic is refused; a region density outside
