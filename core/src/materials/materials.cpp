@@ -1,8 +1,12 @@
 #include "topopt/materials.hpp"
 
+#include "topopt/lattice.hpp"              // the type ids the print-tests file may name
+#include "topopt/lattice_print_tests.hpp"
+
 #include <cctype>
 #include <cstddef>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -370,6 +374,138 @@ MaterialLibrary load_materials_file(const std::string& path) {
   std::ostringstream ss;
   ss << in.rdbuf();
   return parse_materials(ss.str());
+}
+
+// ── the lattice print-tests file (topopt/lattice_print_tests.hpp) ──────────────
+// The same parser as materials.json, on purpose: one strictness for maintainer data.
+namespace {
+
+bool is_comment_key(const std::string& k) { return !k.empty() && k[0] == '_'; }
+
+bool is_date(const std::string& s) {
+  if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+  for (std::size_t i : {0u, 1u, 2u, 3u, 5u, 6u, 8u, 9u})
+    if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+  const int month = (s[5] - '0') * 10 + (s[6] - '0');
+  const int day = (s[8] - '0') * 10 + (s[9] - '0');
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+// A JSON object that names a key twice keeps only one of them silently; the file is
+// maintainer data, so a repeated key is refused rather than half-read.
+void refuse_duplicate_keys(const JsonValue& obj, const std::string& where,
+                           const std::function<void(const std::string&)>& bad) {
+  for (std::size_t i = 0; i < obj.obj.size(); ++i)
+    for (std::size_t j = i + 1; j < obj.obj.size(); ++j)
+      if (obj.obj[i].first == obj.obj[j].first)
+        bad(where + " names \"" + obj.obj[i].first + "\" twice");
+}
+
+// Every id the file may name: lattice_topology_name over every enum value (C++ cannot
+// enumerate an enum, so the values are listed here; a value added to the enum without a
+// name fails lattice_topology_name's own -Wswitch first), then the planned sheet ids.
+bool accepted_type_id(const std::string& id) {
+  for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic,
+                            LatticeTopology::Bcc, LatticeTopology::Fcc,
+                            LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz,
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+    if (id == lattice_topology_name(t)) return true;
+  for (const std::string& p : lattice_planned_topology_ids())
+    if (id == p) return true;
+  return false;
+}
+
+}  // namespace
+
+LatticePrintTests parse_lattice_print_tests(const std::string& json_text) {
+  auto bad = [](const std::string& m) {
+    throw LatticePrintTestsError("lattice_print_tests.json: " + m);
+  };
+  JsonValue root;
+  try {
+    root = JsonParser(json_text).parse();
+  } catch (const MaterialError& e) {
+    bad(e.what());
+  }
+  if (root.type != JsonValue::Type::Object) bad("the top level must be an object");
+  refuse_duplicate_keys(root, "the top level", bad);
+  const JsonValue* types = nullptr;
+  bool version_seen = false;
+  for (const auto& kv : root.obj) {
+    if (is_comment_key(kv.first)) continue;
+    if (kv.first == "schema_version") {
+      if (kv.second.type != JsonValue::Type::Number || kv.second.num != 1.0)
+        bad("\"schema_version\" must be 1");
+      version_seen = true;
+    } else if (kv.first == "types") {
+      if (kv.second.type != JsonValue::Type::Object) bad("\"types\" must be an object");
+      types = &kv.second;
+    } else {
+      bad("unknown top-level key \"" + kv.first + "\"");
+    }
+  }
+  if (!version_seen) bad("missing \"schema_version\"");
+  if (!types) bad("missing \"types\"");
+  refuse_duplicate_keys(*types, "\"types\"", bad);
+  LatticePrintTests out;
+  for (const auto& tv : types->obj) {
+    const std::string& id = tv.first;
+    if (is_comment_key(id)) continue;
+    if (!accepted_type_id(id))
+      bad("\"" + id + "\" is not a lattice type id core knows (ids are core's "
+          "topology ids, lower case: octet, sc, bcc, fcc, diamond, kelvin, rhombic, "
+          "bccz, fccz, reentrant, gyroid, schwarz_d)");
+    if (out.count(id)) bad("type \"" + id + "\" is listed twice");
+    if (tv.second.type != JsonValue::Type::Object) bad("type \"" + id + "\" must be an object");
+    refuse_duplicate_keys(tv.second, "type \"" + id + "\"", bad);
+    LatticePrintStatus st;
+    st.listed = true;
+    bool seen_tested = false, seen_date = false, seen_note = false;
+    for (const auto& f : tv.second.obj) {
+      if (is_comment_key(f.first)) continue;
+      const JsonValue& v = f.second;
+      if (f.first == "print_tested") {
+        if (v.type != JsonValue::Type::Bool) bad("\"" + id + "\".print_tested must be true or false");
+        st.print_tested = v.num != 0.0;
+        seen_tested = true;
+      } else if (f.first == "date") {
+        if (v.type == JsonValue::Type::String) {
+          if (!is_date(v.str)) bad("\"" + id + "\".date must be YYYY-MM-DD (got \"" + v.str + "\")");
+          st.date = v.str;
+        } else if (v.type != JsonValue::Type::Null) {
+          bad("\"" + id + "\".date must be a string or null");
+        }
+        seen_date = true;
+      } else if (f.first == "note") {
+        if (v.type == JsonValue::Type::String) st.note = v.str;
+        else if (v.type != JsonValue::Type::Null) bad("\"" + id + "\".note must be a string or null");
+        seen_note = true;
+      } else {
+        bad("type \"" + id + "\": unknown key \"" + f.first + "\"");
+      }
+    }
+    if (!seen_tested) bad("type \"" + id + "\": missing \"print_tested\"");
+    if (!seen_date) bad("type \"" + id + "\": missing \"date\"");
+    if (!seen_note) bad("type \"" + id + "\": missing \"note\"");
+    if (st.print_tested && st.date.empty())
+      bad("type \"" + id + "\" is marked print_tested but has no date");
+    out.emplace(id, std::move(st));
+  }
+  return out;
+}
+
+LatticePrintTests load_lattice_print_tests_file(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) throw LatticePrintTestsError("cannot open lattice print-tests file: " + path);
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return parse_lattice_print_tests(ss.str());
+}
+
+LatticePrintStatus lattice_print_status(const LatticePrintTests& tests, const std::string& id) {
+  const auto it = tests.find(id);
+  return it == tests.end() ? LatticePrintStatus{} : it->second;
 }
 
 }  // namespace topopt

@@ -31,9 +31,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <set>
+#include <tuple>
 #include <vector>
 
+#include "topopt/lattice.hpp"
 #include "topopt/lattice_boundary.hpp"
+#include "topopt/strut_cell.hpp"
 
 namespace topopt {
 namespace {
@@ -87,12 +91,22 @@ std::vector<INode> ref_nodes() {
 //   LEG  : a tetrahedron leg (face-centre to cube corner); lies in ONE cube face
 //          plane and is shared with the neighbour across that face. Owned by the
 //          cell on the min side of that face (see owns_leg).
-enum class Cls { OCTA, LEG };
+//   GEN  : (every type but octet) a strut of the canonical cell table, in the
+//          closed box. Owned by the cell whose half-open box holds its midpoint,
+//          else by the lex-smallest ACTIVE cell sharing it (owns_generic) — the
+//          rule octet's nodes already use, applied to struts.
+enum class Cls { OCTA, LEG, GEN };
 struct RStrut {
   INode a, b;
   Cls cls;
   int face_axis;  // for LEG: 0=x,1=y,2=z
   int face_side;  // for LEG: 0 (min plane) or 2 (max plane)
+  // for GEN, per axis: the cells sharing it are this one + [lo, hi] (lo in {-1,0},
+  // hi in {0,+1}: -1 when the strut lies in the min face plane, +1 in the max), and
+  // the canonical owner is +canon (1 only for the max plane: the midpoint is there).
+  int lo[3] = {0, 0, 0};
+  int hi[3] = {0, 0, 0};
+  int canon[3] = {0, 0, 0};
 };
 
 std::vector<RStrut> ref_struts() {
@@ -121,6 +135,90 @@ std::vector<RStrut> ref_struts() {
   return s;
 }
 
+// --------------------------------------------------------------------------- tables
+// One cell's candidate geometry: every strut and node inside its CLOSED box, on the
+// integer grid of units L/S. Octet's is its hand-written table (S = 2, LEG/OCTA
+// classes, the PR 201 order), so its bytes cannot move; every other type's comes from
+// the canonical cell (topopt/strut_cell.hpp), which is the cell its tensor rows were
+// measured on.
+struct CellTable {
+  int S = 2;
+  double inv_s = 0.5;  // 1.0 / S, exact for S = 2 and 4
+  std::vector<RStrut> struts;
+  std::vector<INode> nodes;
+  // GEN tables only: a node is a candidate in a cell only when a strut OF THAT CELL
+  // ends on it (diamond's cell corners are reached by no strut of the cell they cap),
+  // and `node_listers[i]` says which of the 27 neighbouring cells (bit
+  // (dk+1)*9 + (dj+1)*3 + (di+1)) also list node i — so ownership is decided among
+  // the cells that hold one of its struts, and a ball is never emitted with none.
+  bool generic = false;
+  std::vector<unsigned> node_listers;
+};
+
+const CellTable& octet_table() {
+  static const CellTable t = [] {
+    CellTable c;
+    c.S = 2;
+    c.inv_s = 0.5;
+    c.struts = ref_struts();
+    c.nodes = ref_nodes();
+    return c;
+  }();
+  return t;
+}
+
+CellTable generic_table(LatticeTopology topo) {
+  const StrutCell& cell = lattice_strut_cell(topo);
+  CellTable c;
+  c.S = cell.S;
+  c.inv_s = 1.0 / cell.S;
+  for (const StrutCellStrut& s : strut_cell_closed_struts(cell)) {
+    RStrut r;
+    r.a = {s.a.x, s.a.y, s.a.z};
+    r.b = {s.b.x, s.b.y, s.b.z};
+    r.cls = Cls::GEN;
+    r.face_axis = r.face_side = -1;
+    const int A[3] = {s.a.x, s.a.y, s.a.z}, B[3] = {s.b.x, s.b.y, s.b.z};
+    for (int ax = 0; ax < 3; ++ax) {
+      if (A[ax] == 0 && B[ax] == 0) r.lo[ax] = -1;            // in the min plane
+      if (A[ax] == cell.S && B[ax] == cell.S) r.hi[ax] = r.canon[ax] = 1;  // max plane
+    }
+    c.struts.push_back(r);
+  }
+  // Nodes: the closed-box nodes some strut of this cell ends on, in the closed-node
+  // order (deterministic).
+  std::set<std::tuple<int, int, int>> ends;
+  for (const RStrut& r : c.struts) {
+    ends.insert({r.a.x, r.a.y, r.a.z});
+    ends.insert({r.b.x, r.b.y, r.b.z});
+  }
+  for (const StrutCellPoint& n : strut_cell_closed_nodes(cell)) {
+    if (!ends.count({n.x, n.y, n.z})) continue;
+    unsigned mask = 0;
+    for (int dk = -1; dk <= 1; ++dk)
+      for (int dj = -1; dj <= 1; ++dj)
+        for (int di = -1; di <= 1; ++di)
+          if (ends.count({n.x - di * cell.S, n.y - dj * cell.S, n.z - dk * cell.S}))
+            mask |= 1u << ((dk + 1) * 9 + (dj + 1) * 3 + (di + 1));
+    c.nodes.push_back({n.x, n.y, n.z});
+    c.node_listers.push_back(mask);
+  }
+  c.generic = true;
+  return c;
+}
+
+const CellTable& cell_table(LatticeGenTopology topo) {
+  switch (topo) {
+    case LatticeGenTopology::Octet:
+      return octet_table();
+    case LatticeGenTopology::Fcc: {
+      static const CellTable t = generic_table(LatticeTopology::Fcc);
+      return t;
+    }
+  }
+  throw std::invalid_argument("generate_lattice: unknown LatticeGenTopology");
+}
+
 // --------------------------------------------------------------------------- region
 // Composite cell activity: the caller's predicate AND (boundary finish) the
 // overlap activation. BOTH the strut/node ownership rules and the emission
@@ -140,10 +238,11 @@ bool cell_active(const LatticeRegion& R, int ci, int cj, int ck) {
 
 // Node-owner cell under the even/odd mapping, clamped to the grid. Even component
 // (corner on that axis) -> coord/2; odd (face centre) -> (coord-1)/2 == coord/2.
-void node_owner(const LatticeRegion& R, int gx, int gy, int gz, int& oi, int& oj,
-                int& ok) {
-  auto own = [](int g, int n) {
-    int o = g / 2;
+// (S = 2 for octet; the same rule in units of L/S for every other type.)
+void node_owner(const LatticeRegion& R, int S, int gx, int gy, int gz, int& oi,
+                int& oj, int& ok) {
+  auto own = [S](int g, int n) {
+    int o = g / S;
     if (o < 0) o = 0;
     if (o >= n) o = n - 1;
     return o;
@@ -163,9 +262,59 @@ bool owns_leg(const LatticeRegion& R, int ci, int cj, int ck, int axis, int side
   return !cell_active(R, ni, nj, nk);                       // fraction boundary
 }
 
-Vec3 node_pos(const LatticeRegion& R, int gx, int gy, int gz) {
-  return {R.origin.x + gx * 0.5 * R.cell_mm, R.origin.y + gy * 0.5 * R.cell_mm,
-          R.origin.z + gz * 0.5 * R.cell_mm};
+// Does cell (ci,cj,ck) own this GEN strut? The canonical owner (clamped to the grid,
+// as node_owner clamps) emits it when active; otherwise the lex-smallest active cell
+// that shares it does, so a strut on the face, edge or corner of an inactive region
+// is emitted exactly once and never dropped (octet's node fallback, verbatim in
+// structure).
+bool owns_generic(const LatticeRegion& R, int ci, int cj, int ck, const RStrut& s) {
+  auto clampi = [](int v, int n) { return v < 0 ? 0 : (v >= n ? n - 1 : v); };
+  const int oi = clampi(ci + s.canon[0], R.nx), oj = clampi(cj + s.canon[1], R.ny),
+            ok = clampi(ck + s.canon[2], R.nz);
+  if (cell_active(R, oi, oj, ok)) return oi == ci && oj == cj && ok == ck;
+  for (int di = s.lo[0]; di <= s.hi[0]; ++di)
+    for (int dj = s.lo[1]; dj <= s.hi[1]; ++dj)
+      for (int dk = s.lo[2]; dk <= s.hi[2]; ++dk) {
+        const int ni = ci + di, nj = cj + dj, nk = ck + dk;
+        if (!cell_active(R, ni, nj, nk)) continue;
+        if (ni < ci || (ni == ci && nj < cj) || (ni == ci && nj == cj && nk < ck))
+          return false;  // a smaller active sharer emits it
+      }
+  return true;
+}
+
+// Does cell (ci,cj,ck) own GEN node i (local coords n)? The canonical owner (the cell
+// whose half-open box holds it, clamped to the grid) emits it when it is active AND
+// holds one of its struts; otherwise the lex-smallest active cell that holds one does.
+bool owns_generic_node(const LatticeRegion& R, const CellTable& T, std::size_t i,
+                       int ci, int cj, int ck) {
+  const INode& n = T.nodes[i];
+  const unsigned mask = T.node_listers[i];
+  auto lists = [mask](int di, int dj, int dk) {
+    return (mask >> ((dk + 1) * 9 + (dj + 1) * 3 + (di + 1))) & 1u;
+  };
+  auto clampi = [](int v, int nn) { return v < 0 ? 0 : (v >= nn ? nn - 1 : v); };
+  const int oi = clampi(ci + (n.x == T.S ? 1 : 0), R.nx),
+            oj = clampi(cj + (n.y == T.S ? 1 : 0), R.ny),
+            ok = clampi(ck + (n.z == T.S ? 1 : 0), R.nz);
+  if (cell_active(R, oi, oj, ok) && lists(oi - ci, oj - cj, ok - ck))
+    return oi == ci && oj == cj && ok == ck;
+  for (int dk = -1; dk <= 1; ++dk)
+    for (int dj = -1; dj <= 1; ++dj)
+      for (int di = -1; di <= 1; ++di) {
+        if (!lists(di, dj, dk)) continue;
+        const int ni = ci + di, nj = cj + dj, nk = ck + dk;
+        if (!cell_active(R, ni, nj, nk)) continue;
+        if (ni < ci || (ni == ci && nj < cj) || (ni == ci && nj == cj && nk < ck))
+          return false;  // a smaller active cell that holds one of its struts emits it
+      }
+  return true;
+}
+
+// inv_s = 1/S: exactly 0.5 for octet, so the expression is octet's own, bit for bit.
+Vec3 node_pos(const LatticeRegion& R, double inv_s, int gx, int gy, int gz) {
+  return {R.origin.x + gx * inv_s * R.cell_mm, R.origin.y + gy * inv_s * R.cell_mm,
+          R.origin.z + gz * inv_s * R.cell_mm};
 }
 
 // --------------------------------------------------------------------------- emit
@@ -363,26 +512,26 @@ bool project_to_offset(const LatticeBoundary& B, double target, Vec3& q) {
 // this for neighbour cells instead of keeping any global landing set, which is
 // what preserves cell-local streaming). Returns nothing for inactive cells.
 void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
-                     const std::vector<RStrut>& RS, int ci, int cj, int ck,
-                     CellCut& out) {
+                     const CellTable& T, int ci, int cj, int ck, CellCut& out) {
   out.frags.clear();
   out.landings.clear();
   out.clipped = out.dropped = out.full = 0;
   out.uncertified = 0;
   if (!cell_active(R, ci, cj, ck)) return;
   const LatticeBoundary* B = R.boundary;
-  const int bx = 2 * ci, by = 2 * cj, bz = 2 * ck;
+  const int bx = T.S * ci, by = T.S * cj, bz = T.S * ck;
   const Vec3 centre{R.origin.x + (ci + 0.5) * R.cell_mm,
                     R.origin.y + (cj + 0.5) * R.cell_mm,
                     R.origin.z + (ck + 0.5) * R.cell_mm};
   const double half_diag = 0.5 * R.cell_mm * std::sqrt(3.0);
   const double sd_centre = B ? B->signed_distance(centre) : 0.0;
 
-  for (const auto& rs : RS) {
+  for (const auto& rs : T.struts) {
     if (rs.cls == Cls::LEG && !owns_leg(R, ci, cj, ck, rs.face_axis, rs.face_side))
       continue;
-    const Vec3 pa = node_pos(R, rs.a.x + bx, rs.a.y + by, rs.a.z + bz);
-    const Vec3 pb = node_pos(R, rs.b.x + bx, rs.b.y + by, rs.b.z + bz);
+    if (rs.cls == Cls::GEN && !owns_generic(R, ci, cj, ck, rs)) continue;
+    const Vec3 pa = node_pos(R, T.inv_s, rs.a.x + bx, rs.a.y + by, rs.a.z + bz);
+    const Vec3 pb = node_pos(R, T.inv_s, rs.b.x + bx, rs.b.y + by, rs.b.z + bz);
     const double r = checked_radius(G, scale(add(pa, pb), 0.5));
     if (!B || sd_centre >= half_diag + r) {
       // Fast path: the Lipschitz bound proves the whole strut (and its solid)
@@ -867,6 +1016,8 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::Fcc:
+      return "fcc";
   }
   // No silent fallback: an enum case without a name must be named above before
   // anything can serialize it (and -Wswitch flags the missing case at compile
@@ -880,9 +1031,29 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
+}
+
+LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
+  switch (topo) {
+    case LatticeGenTopology::Octet:
+      return LatticeTopology::Octet;
+    case LatticeGenTopology::Fcc:
+      return LatticeTopology::Fcc;
+  }
+  throw std::logic_error("lattice_gen_certificate_topology: unmapped LatticeGenTopology");
+}
+
+LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc})
+    if (id == lattice_gen_topology_name(t)) return t;
+  throw std::invalid_argument(
+      "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +
+      "\" (generatable: the ids lattice_gen_topology_names() lists). There is no "
+      "fallback: building octet in its place would ship a different lattice than "
+      "the one certified.");
 }
 
 long long latticed_cell_count(const LatticeRegion& R) {
@@ -898,8 +1069,6 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                                  const LatticeRadiusField& G, TriangleSink& sink,
                                  const LatticeSkinSpec& skin,
                                  const LatticeGenObserver* obs) {
-  if (topo != LatticeGenTopology::Octet)
-    throw std::invalid_argument("generate_lattice: only Octet is implemented");
   if (R.nx < 1 || R.ny < 1 || R.nz < 1 || !(R.cell_mm > 0.0))
     throw std::invalid_argument("generate_lattice: degenerate region");
   if (G.nseg < 3)
@@ -908,8 +1077,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
     throw std::invalid_argument(
         "generate_lattice: a skin needs region.boundary (the shared predicate)");
 
-  static const std::vector<RStrut> RS = ref_struts();
-  static const std::vector<INode> RN = ref_nodes();
+  const CellTable& T = cell_table(topo);
   const LatticeBoundary* B = R.boundary;
 
   LatticeGenStats st;
@@ -923,11 +1091,11 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
       for (int ci = 0; ci < R.nx; ++ci) {
         if (!cell_active(R, ci, cj, ck)) continue;
         ++st.latticed_cells;
-        const int bx = 2 * ci, by = 2 * cj, bz = 2 * ck;
+        const int bx = T.S * ci, by = T.S * cj, bz = T.S * ck;
 
         // struts (clipped through the shared predicate when a boundary is set;
         // cut_cell_struts is the SAME walk the skin pass recomputes later)
-        cut_cell_struts(R, G, RS, ci, cj, ck, cut);
+        cut_cell_struts(R, G, T, ci, cj, ck, cut);
         st.clipped_struts += cut.clipped;
         st.dropped_struts += cut.dropped;
         st.uncertified_spans_dropped += cut.uncertified;
@@ -956,21 +1124,24 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
 
         // nodes (own each candidate node whose owner is this cell; if the owner
         // cell is not active, fall back to the lex-smallest active sharer)
-        for (const auto& rn : RN) {
+        for (std::size_t ni = 0; ni < T.nodes.size(); ++ni) {
+          const INode& rn = T.nodes[ni];
           const int gx = rn.x + bx, gy = rn.y + by, gz = rn.z + bz;
           int oi, oj, ok;
-          node_owner(R, gx, gy, gz, oi, oj, ok);
+          node_owner(R, T.S, gx, gy, gz, oi, oj, ok);
           bool own;
-          if (cell_active(R, oi, oj, ok)) {
+          if (T.generic) {
+            own = owns_generic_node(R, T, ni, ci, cj, ck);
+          } else if (cell_active(R, oi, oj, ok)) {
             own = (oi == ci && oj == cj && ok == ck);
           } else {
             own = true;
             for (int dk = -1; dk <= 0 && own; ++dk)
               for (int dj = -1; dj <= 0 && own; ++dj)
                 for (int di = -1; di <= 0 && own; ++di) {
-                  const int nci = (gx % 2 == 0 ? gx / 2 + di : gx / 2),
-                            ncj = (gy % 2 == 0 ? gy / 2 + dj : gy / 2),
-                            nck = (gz % 2 == 0 ? gz / 2 + dk : gz / 2);
+                  const int nci = (gx % T.S == 0 ? gx / T.S + di : gx / T.S),
+                            ncj = (gy % T.S == 0 ? gy / T.S + dj : gy / T.S),
+                            nck = (gz % T.S == 0 ? gz / T.S + dk : gz / T.S);
                   if (nci < 0 || ncj < 0 || nck < 0) continue;
                   if (nci >= R.nx || ncj >= R.ny || nck >= R.nz) continue;
                   if (!cell_active(R, nci, ncj, nck)) continue;
@@ -980,7 +1151,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 }
           }
           if (!own) continue;
-          const Vec3 np = node_pos(R, gx, gy, gz);
+          const Vec3 np = node_pos(R, T.inv_s, gx, gy, gz);
           const double r = checked_radius(G, np);
           // Boundary finish: a node ball whose solid would breach the eroded
           // region is dropped — its incident struts were already clipped short
@@ -1034,7 +1205,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 for (int di = -1; di <= 1; ++di) {
                   const int ni = ci + di, nj = cj + dj, nk = ck + dk;
                   if (!cell_active(R, ni, nj, nk)) continue;
-                  cut_cell_struts(R, G, RS, ni, nj, nk, ncut);
+                  cut_cell_struts(R, G, T, ni, nj, nk, ncut);
                   if (di == 0 && dj == 0 && dk == 0) {
                     // Anchor balls: one at each of THIS cell's landings, at the
                     // interior strut's own radius (contained by the clip

@@ -61,6 +61,12 @@ int main() {
       LatticeTopology::Rhombic, LatticeTopology::Bccz,
       LatticeTopology::Fccz,    LatticeTopology::Reentrant};
   CHECK(all.size() == 10, "the enum still carries ten topologies");
+  // ★ The types whose OWN law is landed (lattice types round 1: each joins this list
+  // as it goes live, with its own section below). Sections 2 and 7 assert that every
+  // OTHER type still refuses.
+  auto has_own_law = [](LatticeTopology t) {
+    return t == LatticeTopology::Octet || t == LatticeTopology::Fcc;
+  };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────
   // Across the measured table's whole range and past both ends (the table clamps
@@ -100,7 +106,7 @@ int main() {
   // ── 2. EVERY OTHER TYPE REFUSES, AND NAMES ITSELF ───────────────────────────
   // This is the section that was RED against the permissive first implementation.
   for (LatticeTopology t : all) {
-    if (t == LatticeTopology::Octet) continue;
+    if (has_own_law(t)) continue;
     const std::string name = lattice_topology_name(t);
     bool threw = false;
     bool named = false;
@@ -125,20 +131,63 @@ int main() {
   }
 
   // ── 3. AND A CERTIFIABLE TYPE IS STILL REFUSED HERE ─────────────────────────
-  // The two refusals are about different things and must not be conflated: FCC's
+  // The two refusals are about different things and must not be conflated: Kelvin's
   // tensor rows are landed, so it is CERTIFIABLE, and it still has no diameter law.
+  // (This section named FCC until FCC's own law landed; FCC's is checked in 3b.)
   {
-    CHECK(lattice_topology_certifiable(LatticeTopology::Fcc),
-          "Fcc is certifiable (its tensor rows are landed)");
+    CHECK(lattice_topology_certifiable(LatticeTopology::Kelvin),
+          "Kelvin is certifiable (its tensor rows are landed)");
     bool threw = false;
     try {
-      (void)lattice_strut_diameter_mm(LatticeTopology::Fcc, 0.30, 8.0);
+      (void)lattice_strut_diameter_mm(LatticeTopology::Kelvin, 0.30, 8.0);
     } catch (const LatticeDiameterLawNotMeasured&) {
       threw = true;
     }
     CHECK(threw,
-          "Fcc: certifiable and still has no measured diameter law — the two "
+          "Kelvin: certifiable and still has no measured diameter law — the two "
           "refusals are independent");
+  }
+
+  // ── 3b. FCC'S OWN LAW (lattice types round 1) ───────────────────────────────
+  // FCC's table was measured on FCC's own canonical cell, on its converged solid
+  // fraction (lattice_types_probe `law`). Octet's table was measured on the legs-only
+  // cell -- which IS FCC -- on the vpc48 voxel staircase, so the two agree to within
+  // that staircase (<= 3 %), which is asserted as the cross-check it is.
+  {
+    const double rows[8][2] = {{0.05, 0.3639}, {0.08, 0.4670}, {0.10, 0.5265},
+                               {0.15, 0.6580}, {0.20, 0.7739}, {0.30, 0.9807},
+                               {0.40, 1.1712}, {0.60, 1.5434}};
+    for (const auto& r : rows)
+      CHECK(lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 4.0) == r[1],
+            "fcc: the measured table, verbatim at a 4 mm cell");
+    CHECK(lattice_strut_diameter_mm(LatticeTopology::Fcc, 0.30, 8.0) == 2 * 0.9807,
+          "fcc: diameter is linear in cell size");
+    for (const auto& r : rows)
+      CHECK(std::fabs(lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 7.0) /
+                          octet_strut_diameter_mm(r[0], 7.0) - 1.0) < 0.03,
+            "fcc: within 3 % of octet's legs-only table (one geometry, two "
+            "resolutions)");
+    // The other direction is the same measurement read backwards, so inside the table
+    // the round trip is exact; off it (a strut thinner than the 0.05 row) the density is
+    // integrated on the converged solid fraction, and lands below the table's first row.
+    for (double want : {0.05, 0.12, 0.30, 0.47, 0.60}) {
+      const double r = 0.5 * lattice_strut_diameter_mm(LatticeTopology::Fcc, want, 8.0);
+      CHECK(std::fabs(lattice_density_from_strut(LatticeTopology::Fcc, 8.0, r) - want) < 1e-12,
+            "fcc: (cell, radius) -> rho is the table read backwards, an exact round trip");
+    }
+    {
+      const double thin = lattice_density_from_strut(LatticeTopology::Fcc, 8.0, 0.30);
+      CHECK(thin > 0.0 && thin < 0.05, "fcc: off the table, the solid fraction answers");
+    }
+    CHECK(lattice_type_numbers_measured(LatticeTopology::Fcc),
+          "fcc: its numbers are measured");
+    CHECK(!lattice_type_numbers_measured(LatticeTopology::Kelvin),
+          "kelvin: its numbers are not measured yet");
+    CHECK(lattice_cells_per_member_min(LatticeTopology::Fcc) == 5.0 &&
+              lattice_percolation_cells_per_member_min(LatticeTopology::Fcc) == 0.75 &&
+              aesthetic_cells_per_member_hard_floor(LatticeTopology::Fcc, true) == 2.0,
+          "fcc: its own floors (5 bending, 0.75 percolation, 2 aesthetic, no finish "
+          "relaxation)");
   }
 
   // ── 4. THE TWO CONSUMERS THAT TOOK A TOPOLOGY AND IGNORED IT ────────────────
@@ -263,7 +312,7 @@ int main() {
               octet_aesthetic_density_ceiling(),
           "octet: the per-type ceiling IS octet_aesthetic_density_ceiling(), exactly");
     for (LatticeTopology t : all) {
-      if (t == LatticeTopology::Octet) continue;
+      if (has_own_law(t)) continue;
       const std::string name = lattice_topology_name(t);
       bool threw = false, named = false, right_type = true;
       try {
@@ -307,8 +356,11 @@ int main() {
               LatticeTypeReadiness::Live,
           "readiness: octet is live (generatable AND certifiable)");
     CHECK(lattice_type_readiness("fcc", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: fcc is live (lattice types round 1)");
+    CHECK(lattice_type_readiness("kelvin", gen_real, cert_real) ==
               LatticeTypeReadiness::NotGeneratable,
-          "readiness: fcc is certifiable and not yet generatable");
+          "readiness: kelvin is certifiable and not yet generatable");
     for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
       char msg[140];
       std::snprintf(msg, sizeof msg, "readiness: %s is in neither set", tetra);
@@ -409,7 +461,7 @@ int main() {
     std::printf("  octet density parity: %lld pairs, bit-identical\n", n);
 
     for (LatticeTopology t : all) {
-      if (t == LatticeTopology::Octet) continue;
+      if (has_own_law(t)) continue;
       const std::string name = lattice_topology_name(t);
       bool threw = false, named = false;
       try {

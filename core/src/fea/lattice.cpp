@@ -6,6 +6,7 @@
 // here in the .cpp adds no header cycle and avoids a second copy of the number, which
 // is how the app's strut law drifted 1.4x from core's.
 #include "topopt/grading.hpp"
+#include "topopt/strut_cell.hpp"
 
 #include <array>
 #include <cmath>
@@ -312,7 +313,114 @@ std::vector<LatticeResolvedRow> lattice_resolved_rows(LatticeTopology topo) {
 
 double lattice_library_youngs_modulus() { return kLibraryEs; }
 
+// ── ★ EACH LIVE TYPE'S OWN MEASUREMENTS, IN ONE PLACE (lattice types round 1) ──
+// R1: a type goes live only when every number it uses is its OWN measurement. They
+// live here, one block per type, each number beside the run that produced it. Octet's
+// numbers are NOT here: they stay where they always were, untouched (R9). A type with
+// no block keeps today's behaviour, and the per-type entry points below refuse it
+// rather than read octet's.
+namespace {
+
+struct TypeDiaRow { double rho, d_at_cell4_mm; };
+struct TypeCpmPoint { double cells, stiffness_error; };
+
+struct TypeMeasurements {
+  // density -> strut diameter at a 4 mm cell (diameter is exactly linear in cell).
+  const TypeDiaRow* dia;
+  int ndia;
+  // the BENDING accuracy floor (cells per member), PERCOLATION floor, and the aesthetic
+  // hard floor. No "with a finish" relaxation: octet's 1-cell skinned measurement is
+  // octet's (evidence/2026-08-21-organic-lattice/cpm), so a new type keeps the bare
+  // floor until its own skinned member is measured.
+  double cells_per_member_min;
+  double percolation_cells_per_member_min;
+  double aesthetic_hard_floor;
+  // the bending error curve the adaptive aesthetic floor reads.
+  const TypeCpmPoint* curve;
+  int ncurve;
+};
+
+// FCC — docs/handoffs/evidence/2026-11-01-lattice-types-k1/fcc_*.{csv,txt}, from
+// core/tests/harness/lattice_types_probe.cpp on the canonical cell (strut_cell.hpp).
+//
+// DIAMETER (`law fcc`): r/L bisected 50 steps on the cell's CONVERGED solid fraction
+// (strut_cell_solid_fraction, 2^20 Halton samples -- see its note for why not the vpc48
+// voxel staircase), diameter at a 4 mm cell, VERBATIM. The same bisection on the vpc48
+// voxels (octet's B3 method) reproduces octet's kOctetDia to all four digits, because
+// octet's table was measured on the LEGS-ONLY cell, which is geometrically FCC; this
+// converged table sits within -2.7 / +2.5 % of it (fcc_law.txt, column "B3 gap").
+constexpr TypeDiaRow kFccDia[] = {
+    {0.05, 0.3639}, {0.08, 0.4670}, {0.10, 0.5265}, {0.15, 0.6580},
+    {0.20, 0.7739}, {0.30, 0.9807}, {0.40, 1.1712}, {0.60, 1.5434},
+};
+// BENDING (`bend fcc`): PR 235's C2b guided cantilever on FCC's cell, S = 5 mm, vpc12,
+// 6 cells long, periodic cell rho 0.1991 (target 0.30 at vpc12, the same achieved rho
+// as octet's C2b): +54.01 / +8.92 / +4.15 / +2.58 / +1.80 / +1.32 % at 1..6 cells. The
+// 2.4 % band is crossed between 4 and 5 cells -> 5.
+constexpr TypeCpmPoint kFccCurve[] = {
+    {1.0, 0.5401}, {2.0, 0.0892}, {3.0, 0.0415}, {4.0, 0.0258}, {5.0, 0.0180}};
+// PERCOLATION (`perc fcc`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across, at rho
+// 0.0950 / 0.3430 / 0.5909 (band low, middle, high), window placed at 0, 0.25, 0.5 and
+// 0.75 cell, vpc16, 4 cells long, 6-connected: 0.5 cells fails to span at the 0.25
+// placement at every rho; from 0.75 cells up a spanning network exists at every
+// placement and rho -> 0.75. (Window-cut debris, <= 1.7 % of the solid, is reported
+// there and is the clip's, not the lattice's.)
+// AESTHETIC HARD FLOOR: 2 cells is +8.92 % in bending and percolates -> 2.
+constexpr TypeMeasurements kFccMeasured = {
+    kFccDia, 8, 5.0, 0.75, 2.0, kFccCurve, 5};
+
+const TypeMeasurements* type_measured(LatticeTopology topo) {
+  switch (topo) {
+    case LatticeTopology::Fcc:
+      return &kFccMeasured;
+    case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
+    case LatticeTopology::SimpleCubic:
+    case LatticeTopology::Bcc:
+    case LatticeTopology::Diamond:
+    case LatticeTopology::Kelvin:
+    case LatticeTopology::Rhombic:
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:
+      return nullptr;
+  }
+  return nullptr;
+}
+
+// Octet's interpolation, operation for operation (octet_strut_diameter_mm): clamp to
+// the end rows, linear between.
+double type_table_diameter_mm(const TypeMeasurements& m, double rho, double cell_size_mm,
+                              const char* who) {
+  if (!(cell_size_mm > 0.0))
+    throw std::invalid_argument(std::string(who) + ": cell_size_mm must be > 0");
+  if (!(std::isfinite(rho) && rho >= 0.0))
+    throw std::invalid_argument(std::string(who) + ": rho must be finite and >= 0");
+  const TypeDiaRow* rows = m.dia;
+  const int n = m.ndia;
+  double d4;
+  if (rho <= rows[0].rho) {
+    d4 = rows[0].d_at_cell4_mm;
+  } else if (rho >= rows[n - 1].rho) {
+    d4 = rows[n - 1].d_at_cell4_mm;
+  } else {
+    int a = 0;
+    while (a + 1 < n && rows[a + 1].rho < rho) ++a;
+    const TypeDiaRow& r0 = rows[a];
+    const TypeDiaRow& r1 = rows[a + 1];
+    const double t = r1.rho > r0.rho ? (rho - r0.rho) / (r1.rho - r0.rho) : 0.0;
+    d4 = r0.d_at_cell4_mm + t * (r1.d_at_cell4_mm - r0.d_at_cell4_mm);
+  }
+  return d4 * (cell_size_mm / 4.0);
+}
+
+}  // namespace
+
+bool lattice_type_numbers_measured(LatticeTopology topo) {
+  return topo == LatticeTopology::Octet || type_measured(topo) != nullptr;
+}
+
 double lattice_cells_per_member_min(LatticeTopology topo) {
+  if (const TypeMeasurements* m = type_measured(topo)) return m->cells_per_member_min;
   // MEASURED for octet (bending ceiling, handoff 2026-07-28-graded-cell-size-phase0
   // C2b): the 2.4% band is crossed between 4 and 5 cells across, so 5. For the other
   // certifiable topologies the bending floor is NOT independently measured here — that
@@ -322,12 +430,13 @@ double lattice_cells_per_member_min(LatticeTopology topo) {
   // and is expected to be an UNDER-estimate for the bending-dominated ones (bcc, kelvin,
   // diamond, sc), so re-measure before grading those. It is load-bearing only for the
   // grading law, which is octet-only in production — no other topology is graded against
-  // it today. Change the number HERE, per topology, once measured.
-  (void)topo;
+  // it today. Change the number HERE, per topology, once measured (type_measured).
   return 5.0;
 }
 
 double lattice_percolation_cells_per_member_min(LatticeTopology topo) {
+  if (const TypeMeasurements* m = type_measured(topo))
+    return m->percolation_cells_per_member_min;
   // MEASURED for octet, from the SAME study as the accuracy floor above
   // (handoff 2026-07-28-graded-cell-size-phase0, the C2 AXIAL table):
   //   0.5 cells across -> DISCONNECTED: the member does not percolate at all
@@ -351,7 +460,6 @@ double lattice_percolation_cells_per_member_min(LatticeTopology topo) {
   // measured: the maintainer's shipped mesh ran at 0.4263 cells per member and
   // produced 123 isolated fragments at the line-width threshold. Below percolation
   // you do not get a thin lattice, you get debris.
-  (void)topo;
   return 1.0;
 }
 
@@ -715,9 +823,10 @@ double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
   switch (topo) {
     case LatticeTopology::Octet:
       return octet_relative_density(cell_mm, strut_radius_mm);
+    case LatticeTopology::Fcc:
+      break;  // type_measured, below
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
-    case LatticeTopology::Fcc:
     case LatticeTopology::Diamond:
     case LatticeTopology::Kelvin:
     case LatticeTopology::Rhombic:
@@ -725,6 +834,39 @@ double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
       break;
+  }
+  if (const TypeMeasurements* m = type_measured(topo)) {
+    // ONE measurement, read in the other direction. The table IS the converged solid
+    // fraction bisected at its rows, so inside the table the inverse of its linear
+    // interpolation is that same law -- and it makes the round trip exact, which a
+    // second sampling would not. It is also microseconds: the app's prints-open
+    // crossing bisects this ~60 times (the checker's finding), and a 2^20-point
+    // integration per call was a multi-second stall. Off the table (a radius thinner
+    // than the 0.05 row or fatter than the 0.60 one) it integrates the solid fraction.
+    if (!(cell_mm > 0.0) || !std::isfinite(cell_mm))
+      throw std::invalid_argument(
+          "lattice_density_from_strut: cell_mm must be finite and > 0");
+    if (!(strut_radius_mm > 0.0) || !std::isfinite(strut_radius_mm))
+      throw std::invalid_argument(
+          "lattice_density_from_strut: strut_radius_mm must be finite and > 0");
+    const double d4 = 2.0 * strut_radius_mm * (4.0 / cell_mm);
+    const TypeDiaRow* rows = m->dia;
+    const int n = m->ndia;
+    if (d4 >= rows[0].d_at_cell4_mm && d4 <= rows[n - 1].d_at_cell4_mm) {
+      int a = 0;
+      while (a + 1 < n - 1 && rows[a + 1].d_at_cell4_mm < d4) ++a;
+      const TypeDiaRow& r0 = rows[a];
+      const TypeDiaRow& r1 = rows[a + 1];
+      const double t = (d4 - r0.d_at_cell4_mm) / (r1.d_at_cell4_mm - r0.d_at_cell4_mm);
+      return r0.rho + t * (r1.rho - r0.rho);
+    }
+    const double rho =
+        strut_cell_solid_fraction(lattice_strut_cell(topo), strut_radius_mm / cell_mm);
+    if (!(rho > 0.0) || rho >= 1.0)
+      throw std::invalid_argument(
+          "lattice_density_from_strut: strut radius produced a degenerate cell "
+          "(rho outside (0,1)) -- check cell_mm / strut_radius_mm");
+    return rho;
   }
   throw LatticeDiameterLawNotMeasured(
       std::string("lattice_density_from_strut: no measured density law for \"") +
@@ -738,9 +880,10 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Octet:
       return octet_aesthetic_density_ceiling();
+    case LatticeTopology::Fcc:
+      break;  // type_measured, below
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
-    case LatticeTopology::Fcc:
     case LatticeTopology::Diamond:
     case LatticeTopology::Kelvin:
     case LatticeTopology::Rhombic:
@@ -748,6 +891,17 @@ double lattice_aesthetic_density_ceiling(LatticeTopology topo) {
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
       break;
+  }
+  if (type_measured(topo)) {
+    // Octet's bisection (octet_aesthetic_density_ceiling), through THIS type's table.
+    const double cell = 4.0;
+    const double want = kOctetAestheticStrutPerCell * cell;
+    double lo = 0.01, hi = 0.90;
+    for (int it = 0; it < 200; ++it) {
+      const double mid = 0.5 * (lo + hi);
+      (lattice_strut_diameter_mm(topo, mid, cell) < want ? lo : hi) = mid;
+    }
+    return 0.5 * (lo + hi);
   }
   throw LatticeAestheticCeilingNotMeasured(
       std::string("lattice_aesthetic_density_ceiling: no measured aesthetic density "
@@ -870,9 +1024,10 @@ double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
   switch (topo) {
     case LatticeTopology::Octet:
       return octet_strut_diameter_mm(rho, cell_size_mm);
+    case LatticeTopology::Fcc:
+      break;  // type_measured, below
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
-    case LatticeTopology::Fcc:
     case LatticeTopology::Diamond:
     case LatticeTopology::Kelvin:
     case LatticeTopology::Rhombic:
@@ -881,8 +1036,11 @@ double lattice_strut_diameter_mm(LatticeTopology topo, double rho,
     case LatticeTopology::Reentrant:
       break;
   }
-  // No default: a topology added to the enum without a branch here lands on this
-  // refusal rather than on octet's table, which is the safe direction.
+  // Every live type's OWN table (type_measured, one block per type, with its source).
+  if (const TypeMeasurements* m = type_measured(topo))
+    return type_table_diameter_mm(*m, rho, cell_size_mm, "lattice_strut_diameter_mm");
+  // No default: a topology added to the enum without a block lands on this refusal
+  // rather than on octet's table, which is the safe direction.
   throw LatticeDiameterLawNotMeasured(
       std::string("lattice_strut_diameter_mm: no measured diameter law for \"") +
       lattice_topology_name(topo) +
@@ -947,7 +1105,8 @@ double aesthetic_cells_per_member_hard_floor(LatticeTopology topo) {
 
 double aesthetic_cells_per_member_hard_floor(LatticeTopology topo,
                                              bool boundary_finish_written) {
-  (void)topo;   // the curve is an octet measurement; stated in the header
+  // A measured type's own hard floor, with no finish relaxation (type_measured).
+  if (const TypeMeasurements* m = type_measured(topo)) return m->aesthetic_hard_floor;
   return boundary_finish_written ? 1.0 : 2.0;
 }
 
@@ -966,6 +1125,17 @@ double aesthetic_cells_per_member_floor(LatticeTopology topo, double utilisation
   if (!std::isfinite(utilisation) || utilisation < 0.0) return accuracy;
   if (!(error_budget > 0.0)) return accuracy;
   const double hard = aesthetic_cells_per_member_hard_floor(topo, boundary_finish_written);
+  // A measured type reads ITS OWN bending curve; it has no skinned 1-cell row, and its
+  // hard floor never admits one.
+  if (const TypeMeasurements* m = type_measured(topo)) {
+    for (int i = 0; i < m->ncurve; ++i) {
+      const TypeCpmPoint& p = m->curve[i];
+      if (p.cells < hard) continue;
+      if (p.cells >= accuracy) break;
+      if (p.stiffness_error * utilisation <= error_budget) return p.cells;
+    }
+    return accuracy;
+  }
   for (const CpmErrorPoint& p : kCpmErrorCurve) {
     if (p.cells < hard) continue;          // never below the measured bending point
     if (p.cells >= accuracy) break;        // relaxing to the floor itself is a no-op

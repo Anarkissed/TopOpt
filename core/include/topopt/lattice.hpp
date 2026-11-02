@@ -113,6 +113,14 @@ double lattice_rho_max(LatticeTopology topo);
 // that no emitted point sits below the floor (bar L2) is what catches a stale value.
 double lattice_cells_per_member_min(LatticeTopology topo);
 
+// True when `topo`'s practical numbers -- its density -> strut-diameter law, its
+// bending / percolation / aesthetic floors and its error curve -- are ITS OWN
+// measurements (octet, and each strut type as it goes live; lattice.cpp's
+// type_measured holds them with their sources). False means the floor functions above
+// and below still return octet's forwarded placeholders for it, which must never be
+// shown or used as that type's numbers (R1).
+bool lattice_type_numbers_measured(LatticeTopology topo);
+
 // ★ THE OTHER FLOOR, AND IT IS NOT THE ONE ABOVE. The minimum cells across a member
 // for the strut network to PERCOLATE — to be connected geometry at all. Measured for
 // octet in the same study as the accuracy floor (0.5 cells is DISCONNECTED, 1 cell is

@@ -2563,6 +2563,10 @@ LatticeExportOutcome export_latticed_variant(
     organic = &calibrated_lat;
   }
 
+  // ★ THE TYPE THE JOB NAMED, and only that (lattice types round 1). The schema
+  // admits a live type only, and lattice_gen_topology_from_id refuses anything core
+  // cannot build -- never octet in its place.
+  const LatticeGenTopology gen_topo = lattice_gen_topology_from_id(lat.topology);
   LatticeGenObserver weld_obs;
   weld_obs.on_element = [&organic_spans, &lat, laid_tap](LatticeGenElement k,
                                                          const Vec3& a, const Vec3& b,
@@ -2581,12 +2585,10 @@ LatticeExportOutcome export_latticed_variant(
         return organic_stats(generate_organic_lattice(*organic, w, &boundary, 8,
                                                       nullptr, &organic_spans));
       if (stepped)
-        return generate_lattice_stepped(LatticeGenTopology::Octet, *stepped, w,
-                                        skin, weld_tap);
-      return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet,
-                                                 Rbase, *levels, w, skin, weld_tap)
-                   : generate_lattice(LatticeGenTopology::Octet, R, radius, w,
-                                      skin, weld_tap);
+        return generate_lattice_stepped(gen_topo, *stepped, w, skin, weld_tap);
+      return swept ? generate_lattice_multilevel(gen_topo, Rbase, *levels, w, skin,
+                                                 weld_tap)
+                   : generate_lattice(gen_topo, R, radius, w, skin, weld_tap);
     }
     MeasuringSink m;
     m.inner = &w;
@@ -2648,13 +2650,11 @@ LatticeExportOutcome export_latticed_variant(
             ? organic_stats(generate_organic_lattice(
                   *organic, m, &boundary, 8, &obs, &organic_spans,
                   measure_protrusion ? &shell_dist : nullptr))
-            : (stepped ? generate_lattice_stepped(LatticeGenTopology::Octet,
-                                                  *stepped, m, skin, &obs)
-                       : (swept ? generate_lattice_multilevel(
-                                      LatticeGenTopology::Octet, Rbase, *levels, m,
-                                      skin, &obs)
-                                : generate_lattice(LatticeGenTopology::Octet, R,
-                                                   radius, m, skin, &obs)));
+            : (stepped ? generate_lattice_stepped(gen_topo, *stepped, m, skin, &obs)
+                       : (swept ? generate_lattice_multilevel(gen_topo, Rbase,
+                                                              *levels, m, skin, &obs)
+                                : generate_lattice(gen_topo, R, radius, m, skin,
+                                                   &obs)));
     const char* worst_pass = "unattributed";
     if (m.worst_vertex >= 0)
       for (const auto& pm : pass_marks)
@@ -2907,11 +2907,11 @@ LatticeExportOutcome export_latticed_variant(
 // faithful to the exported geometry (which now carries them as the solid
 // companion body). `graded_rho`, when non-null, supplies each voxel its OWN
 // relative density (stage 4); null => the uniform `rho`.
-LatticePosture build_lattice_posture(const VoxelGrid& sg, double cell_mm,
-                                     const std::vector<char>& mask, double rho,
-                                     const std::vector<double>* graded_rho) {
+LatticePosture build_lattice_posture(LatticeTopology topo, const VoxelGrid& sg,
+                                     double cell_mm, const std::vector<char>& mask,
+                                     double rho, const std::vector<double>* graded_rho) {
   LatticePosture post;
-  post.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
+  post.topology = topo;  // the JOB's type: the tensor certifies what was built
   post.cell_size_mm = cell_mm;
   const std::size_t nv = sg.voxel_count();
   post.mask.assign(nv, 0);
@@ -3874,17 +3874,20 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
        json_num(lattice_rho_min(a.lattice_topology)) + ", " +
        json_num(lattice_rho_max(a.lattice_topology)) + "],\n";
   s += "  \"lattice_voxels\": " + std::to_string(a.lattice_voxels) + ",\n";
+  // The type's own name where these strings said "octet" (lattice types round 1): an
+  // octet receipt is byte-identical, an FCC receipt no longer claims octet's tensor.
+  const std::string tn = lattice_topology_name(a.lattice_topology);
   if (lat.outer_finish == "skin")
-    s += "  \"describes\": \"the exported latticed mesh (octet interior + freeform "
+    s += "  \"describes\": \"the exported latticed mesh (" + tn + " interior + freeform "
          "2D boundary skin, NO solid shell) — the composite model below is "
          "shell-blind, see finish_note\",\n";
   else if (lat.outer_finish == "shell+skin")
-    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet "
-         "interior + decorative freeform skin) solved with the octet homogenized "
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + " + tn + " "
+         "interior + decorative freeform skin) solved with the " + tn + " homogenized "
          "cubic tensor\",\n";
   else
-    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet interior) "
-         "solved with the octet homogenized cubic tensor\",\n";
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + " + tn + " interior) "
+         "solved with the " + tn + " homogenized cubic tensor\",\n";
   // What the SOLID variant mesh certifies (unchanged), and the proof the composite
   // reconstruction reproduces it exactly with a null posture.
   s += "  \"solid_margin_worst_case\": " + json_num(c.solid_margin.worst_case) + ",\n";
@@ -3925,7 +3928,7 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
            "composite certification model is shell-blind (the posture never "
            "credited the shell), so the margins above describe the same model "
            "as a 'shell' run and do NOT certify the open, shell-less object: "
-           "clipped boundary cells fall below the periodic-octet stiffness the "
+           "clipped boundary cells fall below the periodic-" + tn + " stiffness the "
            "posture assumes and the 2D skin's contribution is uncertified. "
            "Refused upstream of the gate; the gate's verdict logic is "
            "unchanged.\",\n";
@@ -4176,8 +4179,12 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   }
   s += "  \"note\": \"stiffness and solid-region strength are certified against the "
        "real composite; the lattice region's macro (effective) stress is recovered "
-       "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. "
-       "Octet tensor magnitudes carry PR 198's +-10% resolution caveat.\"\n";
+       "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. " +
+       std::string(a.lattice_topology == LatticeTopology::Octet
+                       ? "Octet tensor magnitudes carry PR 198's +-10% resolution caveat."
+                       : "The " + tn + " tensor rows are PR 246's (vpc48, drift under "
+                         "2.4 % against vpc64).") +
+       "\"\n";
   s += "}\n";
   return s;
 }
@@ -4928,7 +4935,9 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   // to hold even the finest printable cell is left to those floors, which is the same
   // place Fit sends it — graded back towards solid rather than left as a hole.
   if (jg.organic_shape_fit) {
-    const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+    // (organic runs only with octet: the job schema refuses it for any other type)
+    const double n_star =
+        lattice_cells_per_member_min(lattice_topology_from_id(jg.topology));
     // Distance in voxels to the nearest NON-candidate — the boundary of the region the
     // lattice may occupy, not the part outline, since a role or keep-clear narrows it.
     // Two-pass chamfer over the 6-neighbourhood; consumed as a length cap, not as a
@@ -5784,7 +5793,7 @@ LatticeVariantOutcome lattice_one_variant(
           region_ids[e] = stepped_region_owner(c, lattice_roles.includes);
         }
     GradingLawParams gp;
-    gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
+    gp.topology = lat_topo;  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
@@ -6466,7 +6475,7 @@ LatticeVariantOutcome lattice_one_variant(
         ids_to_report.push_back(0);
 
       const double w_min = job.grading.min_extrudable_width_mm;
-      const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+      const double n_star = lattice_cells_per_member_min(lat_topo);
       // ★ D1: phi at the densest density THE JOB allows, not the band's top.
       const double phi_hi =
           w_min / lattice_min_printable_cell_mm(lat_topo, w_min, job.grading.max_relative_density);
@@ -6502,9 +6511,9 @@ LatticeVariantOutcome lattice_one_variant(
         rc.stress_fraction = part_peak > 0.0 ? peak / part_peak : 0.0;
         // ★ D1: with the job's cap, so the row reports the floor the run applies.
         rc.at_thinnest = lattice_derive_cell_for_member(
-            LatticeTopology::Octet, tmin, w_min, 0.0, job.grading.max_relative_density);
+            lat_topo, tmin, w_min, 0.0, job.grading.max_relative_density);
         rc.at_thickest = lattice_derive_cell_for_member(
-            LatticeTopology::Octet, tmax, w_min, 0.0, job.grading.max_relative_density);
+            lat_topo, tmax, w_min, 0.0, job.grading.max_relative_density);
 
         // ── THE VERDICT, resolved from measurements only, in the order §2 states.
         // A region carrying load is kept solid by the law regardless of geometry,
@@ -8690,7 +8699,7 @@ LatticeVariantOutcome lattice_one_variant(
   const LatticeCertContext cx =
       lattice_cert_context(v, part_grid, domain, options, material);
   const LatticePosture post = build_lattice_posture(
-      solved_grid, cell, mask, rho_uniform,
+      lat_topo, solved_grid, cell, mask, rho_uniform,
       graded ? &gf.posture.relative_density : nullptr);
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
@@ -9527,7 +9536,7 @@ std::vector<char> forecast_candidates(const VoxelGrid& grid,
 
 GradingLawParams forecast_grading_params(const JobDescription& job) {
   GradingLawParams gp;
-  gp.topology = LatticeTopology::Octet;   // the job schema restricts to octet
+  gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
   gp.target_cell_size_mm = job.grading.present ? job.grading.cell_mm
                                                : job.lattice.cell_mm;
   gp.min_extrudable_width_mm = job.grading.present
@@ -10440,7 +10449,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // analyze path is byte-identical (bar L1).
   if (job.grading.present) {
     GradingLawParams gp;
-    gp.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
+    gp.topology = lattice_topology_from_id(job.grading.topology);  // the job's type
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
@@ -10988,13 +10997,13 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     const double lat_rho =
         lattice_density_from_strut(
             lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
-    const double lo = lattice_rho_min(LatticeTopology::Octet);
-    const double hi = lattice_rho_max(LatticeTopology::Octet);
+    const double lo = lattice_rho_min(lattice_topology_from_id(job.grading.topology));
+    const double hi = lattice_rho_max(lattice_topology_from_id(job.grading.topology));
     if (lat_rho < lo || lat_rho > hi)
       throw JobError(
           "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
           " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
-          " implies octet relative density " + std::to_string(lat_rho) +
+          " implies " + job.lattice.topology + " relative density " + std::to_string(lat_rho) +
           ", outside the certifiable band [" + std::to_string(lo) + ", " +
           std::to_string(hi) + "].");
   }
@@ -13097,13 +13106,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       const double lat_rho =
           lattice_density_from_strut(
               lattice_topology_from_id(job.grading.topology), job.lattice.cell_mm, job.lattice.strut_radius_mm);
-      const double lo = lattice_rho_min(LatticeTopology::Octet);
-      const double hi = lattice_rho_max(LatticeTopology::Octet);
+      const double lo = lattice_rho_min(lattice_topology_from_id(job.grading.topology));
+      const double hi = lattice_rho_max(lattice_topology_from_id(job.grading.topology));
       if (lat_rho < lo || lat_rho > hi)
         throw JobError(
             "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
             " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
-            " implies octet relative density " + std::to_string(lat_rho) +
+            " implies " + job.lattice.topology + " relative density " + std::to_string(lat_rho) +
             ", outside the certifiable band [" + std::to_string(lo) + ", " +
             std::to_string(hi) +
             "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
@@ -14131,12 +14140,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     CellSizeMode preflight_mode = CellSizeMode::Fixed;
     if (resolve_cell_mode(job.grading.cell_mode, preflight_mode) &&
         preflight_mode == CellSizeMode::Fit) {
+      const LatticeTopology job_topo = lattice_topology_from_id(job.grading.topology);
       const std::vector<FitRegionCell> early_cells = fit_region_cells(
-          job, LatticeTopology::Octet, job.grading.min_extrudable_width_mm,
-          &lattice_roles);
+          job, job_topo, job.grading.min_extrudable_width_mm, &lattice_roles);
       refuse_infeasible_region_lattice(job, early_cells,
                                        job.grading.min_extrudable_width_mm);
-      refuse_unprintable_stated_density(job, early_cells, LatticeTopology::Octet,
+      refuse_unprintable_stated_density(job, early_cells, job_topo,
                                         job.grading.min_extrudable_width_mm);
     }
   }
@@ -14156,7 +14165,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           "run_job: lattice.multiscale was requested but this build withholds the "
           "permission (production_multiscale_lattice_to() is false)");
     options.multiscale_lattice = true;
-    options.multiscale_topology = LatticeTopology::Octet;  // schema restricts to octet
+    // The job's type. minimize_plastic refuses any type whose material model cannot
+    // steer a design loop (lattice_material_model_trustworthy), naming why.
+    options.multiscale_topology = lattice_topology_from_id(job.grading.topology);
     options.multiscale_region =
         multiscale_region_mask(solved_grid, lattice_kos, lattice_roles);
     options.multiscale_floor_cell_mm = multiscale_floor_cell_mm(job);
@@ -14251,14 +14262,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.multiscale_region_frozen_void = static_cast<long long>(frozen_void);
     }
     std::fprintf(stderr,
-                 "[multiscale] armed: topology=octet region_voxels=%zu "
+                 "[multiscale] armed: topology=%s region_voxels=%zu "
                  "floor_cell=%.4f mm floor_cells=%.1f\n",
+                 lattice_topology_name(options.multiscale_topology),
                  static_cast<std::size_t>(
                      std::count_if(options.multiscale_region.begin(),
                                    options.multiscale_region.end(),
                                    [](char c) { return c != 0; })),
                  options.multiscale_floor_cell_mm,
-                 lattice_cells_per_member_min(LatticeTopology::Octet));
+                 lattice_cells_per_member_min(options.multiscale_topology));
     std::fflush(stderr);
   }
 

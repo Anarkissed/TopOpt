@@ -22,7 +22,8 @@
 //   DETERMINISM. Fixed traversal order, no RNG, no threads, no float atomics ->
 //   the same inputs produce a byte-identical file.
 //
-// SCOPE (this task): OCTET ONLY, matching topopt/lattice.hpp's certification enum.
+// SCOPE: octet (PR 201's hand-written tables) plus each round-1 strut type as it goes
+// live (LatticeGenTopology below), each from its canonical cell (strut_cell.hpp).
 // The radius/DENSITY field is an INPUT — uniform, or an externally supplied
 // callback. How that field is DERIVED from stress (the grading law) is a separate
 // task, held until the certifiable density band is measured. This proves the
@@ -40,11 +41,17 @@ namespace topopt {
 
 class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
 
-// The strut-lattice topologies. Only Octet is implemented this task (the printed,
-// certified one); the enum leaves room for the rest exactly as lattice.hpp does.
+// The strut-lattice topologies core can GENERATE. A type joins this enum only when it
+// is live (docs/design/lattice-types/02-core-spec.md §4: its own density law, floors,
+// size-step verdict and certificate), in the R2 order. Octet is the hand-written PR 201
+// generator, byte-identical; every other type is built from its canonical cell
+// (topopt/strut_cell.hpp) — the cell its tensor rows were measured on — through the
+// SAME ownership, clipping, skin and streaming machinery.
 // (Explicit underlying type so the enum-probe tripwire in test_lattice_gen can
 // legally test values beyond the last case.)
-enum class LatticeGenTopology : int { Octet };
+enum class LatticeGenTopology : int { Octet, Fcc };
+
+enum class LatticeTopology;  // topopt/lattice.hpp (the certification library)
 
 // Human-readable name ("octet"), stable for run_info / job serialization.
 // Throws std::logic_error for an enum value with no name — a new case must be
@@ -58,6 +65,16 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo);
 // missing). test_lattice_gen's enum-probe tripwire fails if a new enum case is
 // named in lattice_gen_topology_name but not enumerated here.
 std::vector<std::string> lattice_gen_topology_names();
+
+// The certification library's id for a generatable topology (the tensor the run
+// certifies what it built with). One-to-one; octet -> Octet, fcc -> Fcc, ...
+LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo);
+
+// The inverse of lattice_gen_topology_name over the generatable set. A job's
+// `lattice.topology` reaches the generator through here and nowhere else. Throws
+// std::invalid_argument, naming the id, for anything core cannot generate — never
+// a fallback to octet.
+LatticeGenTopology lattice_gen_topology_from_id(const std::string& id);
 
 // The lattice REGION: a rectangular block of nx*ny*nz cubic cells of edge
 // `cell_mm`, its (i=0,j=0,k=0) corner at `origin` (model mm). Cell (ci,cj,ck) is
@@ -278,8 +295,8 @@ struct LatticeGenObserver {
 // Generate `topo` over `region` with `radius`, pushing every triangle to `sink`
 // in a fixed traversal order, and return the emitted counts. Deterministic (no
 // RNG / threads / global state), so a streaming sink writes a byte-identical file
-// for identical inputs. Throws std::invalid_argument if `topo` is not Octet, if
-// the region is degenerate (nx/ny/nz < 1 or cell_mm <= 0), if nseg < 3, or if a
+// for identical inputs. Throws std::invalid_argument if `topo` is not a known
+// enum value, if the region is degenerate (nx/ny/nz < 1 or cell_mm <= 0), if nseg < 3, or if a
 // non-positive radius is produced. `sink` may stream to disk (flat peak memory)
 // or accumulate a MeshSink (bounded meshes / tests).
 LatticeGenStats generate_lattice(LatticeGenTopology topo,
