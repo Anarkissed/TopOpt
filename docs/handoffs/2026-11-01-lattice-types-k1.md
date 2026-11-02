@@ -7,11 +7,11 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 
 ## Where this stands, in plain language
 
-**Live: FCC, Kelvin, Rhombic dodecahedron, Diamond** (rhombic without Doubled cells: measured,
-its struts do not meet across a halving). Measured and going live next, in the R2 order: BCC,
-Simple cubic (their density laws, percolation and bending floors are all measured and in the
-evidence folder). Gyroid and Schwarz-D (K2): rows and wall law measured, bending floors still
-being measured; nothing of K2 is pushed. Parked: none.
+**Live: FCC, Kelvin, Rhombic dodecahedron, Diamond, BCC** (rhombic without Doubled cells: measured,
+its struts do not meet across a halving). Measured and going live next, in the R2 order: Simple
+cubic (its density law, percolation and bending floors are measured and in the evidence folder).
+Gyroid and Schwarz-D (K2): rows and wall law measured, bending floors still being measured;
+nothing of K2 is pushed. Parked: none.
 
 <!-- STATUS -->
 
@@ -89,6 +89,26 @@ being measured; nothing of K2 is pushed. Parked: none.
    under structural. The `run` and `lattice-variant` paths certify the composite in both
    modes. Pre-existing; noted because "the certificate runs in both modes" is only true on
    those paths.
+6. **BCC's R11 aesthetic ceiling lies BELOW its certifiable band** (0.1791 vs 0.2105). R11 is
+   octet's rule per type: a strut no wider than a fifth of its cell. The thinnest strut BCC
+   certifies is already wider than that (0.219 of the cell), so by R11 no certifiable BCC "prints
+   open". Core's runs do not read the ceiling; the app's Aesthetic cap does, and min(band top,
+   ceiling) is below the band bottom. The bridge contract says what that means for the app; whether
+   R11 should read differently for an 8-strut cell is the maintainer's ruling.
+7. **A graded run lattices ONE cell per masked solve voxel when the cell is smaller than the
+   voxel**, octet included (`bcc_stand_percolation.txt`, measured on the M2 stand). `cell_latticed`
+   (`run_job.cpp`) activates a cell iff it holds a masked voxel's CENTRE. The stand solves on
+   3.41 mm voxels and the swept ladder picks 2 mm cells, so each masked voxel activates exactly one
+   cell: the receipts say latticed cells = latticed voxels (92 = 92 on BCC's rung 0.52, 112 = 112 on
+   octet's rung 0.38), and about 80 % of every pocket voxel is left empty. Two consequences. (a) The
+   certificate (the posture) reads every masked voxel at its graded density over the whole voxel, so
+   in those voxels the exported lattice holds about a fifth of the material it counts. (b) In a pocket
+   one voxel thick the lone cells reach no wall and float: BCC's rung 0.52 has 12 such pieces, octet's
+   own stand run 2 in the same place. FCC's run left two lone cells in that pocket too; they count as
+   held only because its solid companion comes within 0.05 mm of a node. Kelvin's, Rhombic's and
+   Diamond's runs latticed nothing there. The generators emit exactly the cells they are given. A fix belongs in
+   the activation (every cell that overlaps a masked voxel, or a cell never finer than the solve
+   voxel) and moves octet's bytes (R9), so nothing is changed here: the maintainer rules.
 
 
 ## FCC — LIVE
@@ -202,6 +222,36 @@ not measured. Not print-tested.
 core/build/topopt-cli lattice-sample --topology diamond --out diamond_sample.stl
 ```
 
+## BCC — LIVE (strongly directional, R3)
+
+The same harness, conditions and checks as FCC; evidence `bcc_*`. BCC is strongly directional
+(R3): `lattice_type_facts("bcc").directional` is true with the note "best when the load runs
+along the cell axes". Two things found while putting it and SC live are fixed in the commits
+after it, so they reach the branch with SC's push, gated there: every receipt that names BCC
+carries that note (`af9b60a2`), and its Diagrid skin no longer breaks into islands on a face just
+off a node plane (`9118402c`, `diagrid_skin_connectivity.txt`: 16-25 pieces before, 1 after).
+
+| # | Bar | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Production cell = measured cell | PASS | `test_strut_cell` (S 2, 8 struts, 2 nodes) |
+| 2 | Generates; octet byte-identical; deterministic | PASS | `test_lattice_types`; the M2 stand's own jobs (the swept ladder, which BCC allows) laid and certified BCC on three Structural rungs (0.68: 112 cells; 0.52: 92; 0.26: 18) and the same three Aesthetic ones; rung 0.38 carries no lattice in either mode because the void-reaches-exterior check, on by default, found one sealed cavity (79.3 mm^3, the one Diamond's Aesthetic run hit), core's standing refusal, not a BCC fault; `lattice-variant` of rung 0.52 reproduced its recorded margin exactly and was ACCEPTED (1765 -> 1772) (`bcc_stand_certificate.txt`); octet `r9_octet_bcc_commit.txt`: analysis_report and fields byte-identical, the one differing leaf is `/model` |
+| 3 | Own law, diameter table, printability floor | PASS | `bcc_law.{csv,txt}` (B3 within 4.9 %) |
+| 4 | Own floors, with conditions | PASS | bending **10** (`bcc_bend*.txt`: +220.1 / +49.7 / +22.6 / +13.0 / +8.4 / +5.8 / +4.2 / +3.2 / +2.48 / **+1.98** % at 1-10 cells, +1.32 % at 12, C2b vpc12 with the cell axes along the member, cell rho 0.2778; 9 cells misses the 2.4 % band by 0.08); percolation **0.75**; aesthetic hard floor **2** (+49.7 % at 2 cells, percolates) |
+| 5 | Size-step verdict | PASS: Doubled and Stepped allowed | `bcc_step.txt`: S\|S/2 1 component, 0 dangling of 1,152 ends; S\|2S/3 1 component, 0 of 560 |
+| 6 | Certificate, both modes; receipts name it | PASS | every receipt `"bcc"`; analyze Structural recertified margin 79.40, accepted, on BCC's band 0.2105-0.5929 and floor 10 (`bcc_stand_certificate.txt`) |
+| 7 | Percolation on the emitted mesh | PASS for the generator; the stand shows core's Finding 7 | block, Doubled and Stepped one solid (`test_lattice_types`); M2 stand rung 0.52: 64 pockets, **12 floating** (356 of 1,381 primitives). Every one is a whole 2 mm cell that the run's graded activation lattices alone: it activates the cell holding each masked voxel's centre, and the solve voxel is 3.41 mm, so each pocket voxel gets one cell; in a pocket one voxel thick those cells stop 0.24 mm short of the wall. Octet's own stand run floats the same way in the same place (2 pieces); FCC's left two lone cells there that touch its solid companion only by 0.05 mm (`bcc_stand_percolation.txt`; Finding 7) |
+| 8 | Bridge contract | PASS | `lattice_type_facts("bcc")`, `directional` true |
+
+Numbers: band 0.21050-0.59288; cells per member 10; percolation 0.75; aesthetic floor 2; aesthetic
+ceiling 0.1791 (below the band: Finding 6); smallest printable cell 2.392 x the bead; 296
+triangles per cell; strut strength not measured. Not print-tested.
+
+**Print it** (40 mm cube, 8 mm cells, rho 0.402, 2.58 mm struts, 1.5 mm plate, 38,832 triangles; `bcc_sample_40mm.stl`):
+
+```bash
+core/build/topopt-cli lattice-sample --topology bcc --out bcc_sample.stl
+```
+
 <!-- PER TYPE -->
 
 ## BRIDGE CONTRACT (02-core-spec §5) — what the app calls, and what each answer means
@@ -228,7 +278,7 @@ built (A2); nothing here forces a type onto the screen.
 | `percolation_cells_per_member_min` | below it the struts do not hold together |
 | `aesthetic_hard_floor_cells` | the aesthetic floor; no "with a finish" relaxation for the new types |
 | `printable_cell_per_bead` | smallest printable cell = this × bead width (at the band top) |
-| `aesthetic_density_ceiling` | R11 "prints open": strut diameter = 20 % of the cell, through the type's own law |
+| `aesthetic_density_ceiling` | R11 "prints open": strut diameter = 20 % of the cell, through the type's own law. **It can lie below `rho_min`** (BCC: 0.1791 < 0.2105, Finding 6): then no certifiable density prints open by R11 and an Aesthetic cap of min(`rho_max`, ceiling) is empty, so the app must not offer that cap as a range for such a type |
 | `outline`, `rim`, `diagrid` | `{allowed, reason}` (R8) |
 | `uniform`, `doubled`, `stepped` | `{allowed, reason}` (R4 measured; R5 for sheets) |
 | `directional`, `directional_note` | R3 (SC, BCC): show the note on the picker and the receipt |
@@ -307,6 +357,7 @@ trial run (brief item g).
 | Kelvin | 163 / 165 in the gate's archive copy; the two that failed (`app_core_capability_mirror`, `smooth_brush`) read `../app` and `../docs`, which a `git archive` of `core/` does not carry, and both pass re-run in that same build with the trees linked (`ctest_kelvin.txt`); the pipeline now links them | passed, 1,965 s | 19 identical; `test_lattice_gen` (one more tripwire name) and `test_lattice_void_exterior` (build path) as before (`identity_kelvin.txt`) |
 | Rhombic | 165 / 165 passed, 4,174 s (`ctest_rhombic.txt`) | passed, 1,881 s | 18 identical; `test_lattice_gen` 29 -> 32 checks (one tripwire name each for fcc, kelvin, rhombic), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_rhombic.txt`) |
 | Diamond | 165 / 165 passed, 4,210 s (`ctest_diamond.txt`) | passed, 1,903 s | 18 identical; `test_lattice_gen` 29 -> 33 checks (one tripwire name each for fcc, kelvin, rhombic, diamond), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_diamond.txt`) |
+| BCC | 165 / 165 passed, 4,178 s (`ctest_bcc.txt`) | passed, 1,869 s | 18 identical; `test_lattice_gen` 29 -> 34 checks (one tripwire name each for fcc, kelvin, rhombic, diamond, bcc), `test_lattice_variant` a wall-time line, `test_lattice_void_exterior` the build path (`identity_bcc.txt`) |
 
 Tests added for the round: `test_strut_cell` (237 checks), `test_lattice_types` (85). Edited, each
 because it was built to flip when a type goes live: `test_strut_diameter_per_type` (FCC leaves the
