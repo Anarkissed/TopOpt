@@ -9,6 +9,7 @@
 //      the DC cell the generator picks keeps it within 1 %.
 //   4. A sheet job at the parse: Rim parses (the control); Diagrid, stated or the default,
 //      organic, and Stepped are refused, each with its reason (R8, R5).
+//   5. The sample block: the lattice is ONE piece (no cap cut off at a corner).
 //
 // Self-contained CHECK harness (ARCHITECTURE §4).
 
@@ -23,6 +24,7 @@
 
 #include "topopt/job.hpp"
 #include "topopt/lattice_boundary.hpp"
+#include "topopt/lattice_sample.hpp"
 #include "topopt/tpms.hpp"
 #include "topopt/tpms_gen.hpp"
 
@@ -74,6 +76,33 @@ struct Soup : TriangleSink {
     long bad = 0;
     for (const auto& kv : e) if (kv.second != 2) ++bad;
     return bad;
+  }
+  // connected pieces: triangles that share a (welded) vertex
+  int pieces() const {
+    std::map<std::array<long, 3>, int> id;
+    std::vector<int> parent;
+    auto find = [&parent](int x) {
+      while (parent[x] != x) x = parent[x] = parent[parent[x]];
+      return x;
+    };
+    for (const auto& q : t) {
+      int v[3];
+      for (int i = 0; i < 3; ++i) {
+        const std::array<long, 3> key{std::lround(q[i].x * 1e6), std::lround(q[i].y * 1e6),
+                                      std::lround(q[i].z * 1e6)};
+        auto it = id.find(key);
+        if (it == id.end()) {
+          it = id.emplace(key, static_cast<int>(parent.size())).first;
+          parent.push_back(it->second);
+        }
+        v[i] = it->second;
+      }
+      parent[find(v[1])] = find(v[0]);
+      parent[find(v[2])] = find(v[0]);
+    }
+    int n = 0;
+    for (int i = 0; i < static_cast<int>(parent.size()); ++i) n += find(i) == i;
+    return n;
   }
 };
 double halton(unsigned i, unsigned b) {
@@ -186,6 +215,37 @@ int main() {
     CHECK(refusal(job(R"(, "skin": "rim")", R"(, "algorithm": "stepped")")).find("(R5)") !=
               std::string::npos,
           (sid + ": Stepped is refused, R5").c_str());
+  }
+
+  // 5. The sample block (go-live item 7 on the block he prints). Both sheets pass through
+  // every cell corner, so a block cut on cell lines left a cap at its far top corner that
+  // joined nothing (12 / 48 triangles on the 40 mm block, before lattice_sample shifted the
+  // sheet an eighth of a cell). The lattice must be ONE piece; the plate is a second shell.
+  for (const char* id : {"gyroid", "schwarz_d"}) {
+    LatticeSampleSpec spec;
+    spec.topology = id;
+    spec.size_mm = 16.0;
+    Soup s;
+    (void)write_lattice_sample(spec, s);
+    char msg[160];
+    std::snprintf(msg, sizeof msg, "%s: the sample block is the lattice and the plate, two "
+                  "pieces (got %d)", id, s.pieces());
+    CHECK(s.pieces() == 2, msg);
+    // The control: the same sheet cut on cell lines (phase 0 at the block's corner, no
+    // shift) does leave the cap, so the check above can fail.
+    TpmsRegion TR;
+    TR.nx = TR.ny = TR.nz = 2;
+    TR.cell_mm = 8.0;
+    TpmsWallField W;
+    W.uniform_mm = 0.9;
+    TpmsGenOptions o;
+    o.min_wall_mm = 0.9;
+    Soup c;
+    (void)generate_tpms(std::string(id) == "gyroid" ? TpmsKind::Gyroid : TpmsKind::SchwarzD, TR,
+                        W, c, o);
+    std::snprintf(msg, sizeof msg, "%s: control: cut on cell lines, the block has a stray cap "
+                  "(%d pieces)", id, c.pieces());
+    CHECK(c.pieces() > 1, msg);
   }
 
   std::printf("\n%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);

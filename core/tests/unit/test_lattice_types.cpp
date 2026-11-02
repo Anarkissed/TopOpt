@@ -366,8 +366,9 @@ int main() {
     }
   }
 
-  // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"gyroid"}) {
+  // Not-yet-live types are refused by the generator by name. (This was gyroid until the
+  // sheets went live; the tetragonal ids are known and neither generated nor certified.)
+  for (const char* id : {"bccz"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -413,9 +414,33 @@ int main() {
     CHECK(sc.readiness == LatticeTypeReadiness::Live && sc.cells_per_member_min == 4.0,
           "facts sc: live, on its own on-axis floor");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
-    const LatticeTypeFacts gy = lattice_type_facts("gyroid");
-    CHECK(gy.family == "sheet" && gy.readiness == LatticeTypeReadiness::NotEither,
-          "facts gyroid: a planned sheet, not live");
+    // The sheets (K2): live on their own numbers, with the sheet rules and their reasons.
+    for (const char* sid : {"gyroid", "schwarz_d"}) {
+      const LatticeTypeFacts sh = lattice_type_facts(sid);
+      const std::string s(sid);
+      CHECK(sh.family == "sheet" && sh.readiness == LatticeTypeReadiness::Live &&
+                sh.numbers_measured,
+            ("facts " + s + ": a live sheet, on its own measured numbers").c_str());
+      // gyroid_bend_wide.txt / schwarz_d_bend_wide.txt, <sheet>_perc.txt
+      CHECK(sh.cells_per_member_min == (s == "gyroid" ? 10.0 : 9.0) &&
+                sh.percolation_cells_per_member_min == 0.5 && sh.aesthetic_hard_floor_cells == 2.0,
+            ("facts " + s + ": its own floors (bending, percolation 0.5, aesthetic 2)").c_str());
+      CHECK(!sh.doubled.allowed && !sh.stepped.allowed &&
+                sh.doubled.reason.find("(R5)") != std::string::npos,
+            ("facts " + s + ": no Doubled or Stepped cells, with the R5 reason").c_str());
+      CHECK(!sh.diagrid.allowed && sh.diagrid.reason.find("(R8)") != std::string::npos &&
+                sh.rim.allowed && sh.outline.allowed && sh.uniform.allowed,
+            ("facts " + s + ": Rim and the outline yes, Diagrid no (R8)").c_str());
+      CHECK(sh.sheet_triangles_coeff > 0.0 && sh.triangles_per_cell > 0.0 && !sh.directional,
+            ("facts " + s + ": a measured triangle cost, no directional note").c_str());
+      // The wall -> density inverse OFF the wall table (rho 0.05-0.60) integrates the
+      // sheet's own wall: a strut type integrates its cell there, which a sheet has none of.
+      const LatticeTopology st = lattice_topology_from_id(s);
+      const double thin = lattice_density_from_strut(st, 8.0, 0.01);  // a 0.02 mm wall
+      const double thick = lattice_density_from_strut(st, 8.0, 1.2);  // a 2.4 mm wall
+      CHECK(thin > 0.0 && thin < 0.05 && thick > sh.rho_max && thick < 1.0,
+            (s + ": density from a wall off its table, below and above the band").c_str());
+    }
     const LatticeTypeFacts no = lattice_type_facts("octopus");
     CHECK(no.readiness == LatticeTypeReadiness::UnknownId && no.family.empty(),
           "facts: an unknown id gets no facts");

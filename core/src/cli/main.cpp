@@ -491,10 +491,14 @@ static int run_lattice_sample(int argc, char** argv) {
       std::remove(part.c_str());
       throw std::runtime_error("lattice-sample: cannot move the block into " + out);
     }
-    std::printf("lattice-sample: %s, rho %.4g%s, %g mm cells (%d per side), strut %.3f mm, "
+    // A sheet's "strut diameter" is its true wall thickness (lattice.hpp): say wall.
+    const bool sheet =
+        topopt::lattice_topology_is_sheet(topopt::lattice_topology_from_id(r.topology));
+    std::printf("lattice-sample: %s, rho %.4g%s, %g mm cells (%d per side), %s %.3f mm, "
                 "%.1f mm plate, %llu triangles -> %s (receipt %s)\n",
                 r.topology.c_str(), r.rho, r.rho_was_band_middle ? " (band middle)" : "",
-                r.cell_mm, r.cells_per_side, r.strut_diameter_mm, r.plate_mm,
+                r.cell_mm, r.cells_per_side, sheet ? "wall" : "strut", r.strut_diameter_mm,
+                r.plate_mm,
                 static_cast<unsigned long long>(r.triangles), out.c_str(), receipt.c_str());
     return 0;
   } catch (const std::invalid_argument& e) {

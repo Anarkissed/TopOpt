@@ -7,6 +7,7 @@
 // is how the app's strut law drifted 1.4x from core's.
 #include "topopt/grading.hpp"
 #include "topopt/strut_cell.hpp"
+#include "topopt/tpms.hpp"
 
 #include <array>
 #include <cmath>
@@ -360,7 +361,12 @@ double lattice_library_youngs_modulus() { return kLibraryEs; }
 // true wall is uniform to +-1-3 % over the sheet at every density, which is what R7 asked of
 // the gradient-normalised band; it runs below t as the wall thickens (-16 % at rho 0.60),
 // because |f|/|grad f| is a first-order distance.
-struct SheetWallRow { double rho, mm_at_cell4; };
+// One row type with every type's diameter table (type_measured, below): a sheet's TRUE wall
+// is its "diameter" there, so the table is read through that block, not copied into it.
+namespace {
+struct TypeDiaRow { double rho, d_at_cell4_mm; };
+}  // namespace
+using SheetWallRow = TypeDiaRow;
 constexpr SheetWallRow kGyroidTrueWall[] = {
     {0.05, 0.06469}, {0.08, 0.10366}, {0.10, 0.12956}, {0.15, 0.19467},
     {0.20, 0.26028}, {0.25, 0.32650}, {0.30, 0.39356}, {0.35, 0.46154},
@@ -391,7 +397,6 @@ constexpr int kSheetWallRows = 11;
 // rather than read octet's.
 namespace {
 
-struct TypeDiaRow { double rho, d_at_cell4_mm; };
 struct TypeCpmPoint { double cells, stiffness_error; };
 
 struct TypeMeasurements {
@@ -560,6 +565,40 @@ constexpr TypeCpmPoint kScCurve[] = {
 constexpr TypeMeasurements kScMeasured = {
     kScDia, 8, 4.0, 0.75, 2.0, kScCurve, 4};
 
+// THE SHEETS (K2) -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/<sheet>_*.{csv,txt},
+// from core/tests/harness/tpms_probe.cpp on the production wall (tpms.hpp).
+// "DIAMETER": a sheet's is its TRUE wall thickness (k<Sheet>TrueWall above, `law`), the
+// thickness a printer must lay, so every printability reader (wall >= bead) reads it as is.
+// BENDING (`bend`): PR 235's C2b guided cantilever on the sheet, S = 5 mm, vpc24 (the wall
+// ~3 voxels), 6 cells long, target rho 0.40. From 7 cells across the resolved solve runs
+// matrix-free (TOPOPT_BEND_MATFREE=1, the same system and criterion: it reproduces the
+// 3-cell runs to every printed digit, 643.4300 and 745.4677), because the assembled K of a
+// 9-cell block (~20M dof) does not fit in 16 GB.
+// PERCOLATION (`perc`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho 0.15 / 0.35 /
+// 0.60, placements x = y in 0 / .25 / .5 / .75 cell, vpc32, 4 cells long, 6-connected: the
+// sheet spans at every placement and rho from 0.5 cells, the smallest member measured -> 0.5.
+// AESTHETIC HARD FLOOR: 2 cells percolates (in bending +43.56 % gyroid, +20.48 % Schwarz-D)
+// -> 2, the strut types' floor.
+//
+// GYROID (`bend gyroid`, gyroid_bend.txt + gyroid_bend_wide.txt), cell rho 0.4051:
+// +227.08 / +43.56 / +20.84 / +12.39 / +8.25 / +5.90 / +4.43 / +3.45 / +2.76 / +2.24 % at
+// 1..10 cells. The 2.4 % band is crossed between 9 and 10 cells -> 10.
+constexpr TypeCpmPoint kGyroidCurve[] = {
+    {1.0, 2.2708}, {2.0, 0.4356}, {3.0, 0.2084}, {4.0, 0.1239}, {5.0, 0.0825},
+    {6.0, 0.0590}, {7.0, 0.0443}, {8.0, 0.0345}, {9.0, 0.0276}, {10.0, 0.0224},
+};
+constexpr TypeMeasurements kGyroidMeasured = {
+    kGyroidTrueWall, kSheetWallRows, 10.0, 0.5, 2.0, kGyroidCurve, 10};
+// SCHWARZ-D (`bend schwarz_d`, schwarz_d_bend.txt + schwarz_d_bend_wide.txt), cell rho
+// 0.4074: +65.60 / +20.48 / +11.53 / +7.71 / +5.56 / +4.20 / +3.26 / +2.59 / +2.09 % at
+// 1..9 cells. The 2.4 % band is crossed between 8 and 9 cells -> 9.
+constexpr TypeCpmPoint kSchwarzDCurve[] = {
+    {1.0, 0.6560}, {2.0, 0.2048}, {3.0, 0.1153}, {4.0, 0.0771}, {5.0, 0.0556},
+    {6.0, 0.0420}, {7.0, 0.0326}, {8.0, 0.0259}, {9.0, 0.0209},
+};
+constexpr TypeMeasurements kSchwarzDMeasured = {
+    kSchwarzDTrueWall, kSheetWallRows, 9.0, 0.5, 2.0, kSchwarzDCurve, 9};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
@@ -574,12 +613,14 @@ const TypeMeasurements* type_measured(LatticeTopology topo) {
       return &kRhombicMeasured;
     case LatticeTopology::Kelvin:
       return &kKelvinMeasured;
+    case LatticeTopology::Gyroid:
+      return &kGyroidMeasured;
+    case LatticeTopology::SchwarzD:
+      return &kSchwarzDMeasured;
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
-    case LatticeTopology::Gyroid:
-    case LatticeTopology::SchwarzD:
       return nullptr;
   }
   return nullptr;
@@ -629,14 +670,33 @@ double lattice_sheet_wall_param_mm(LatticeTopology topo, double true_wall_mm, do
   // are linear in the cell, so this is done at the tables' 4 mm cell and scaled back)
   const double w4 = true_wall_mm * (4.0 / cell_mm);
   const int n = kSheetWallRows;
-  if (w4 <= tw[0].mm_at_cell4) return tp[0].mm_at_cell4 / tw[0].mm_at_cell4 * true_wall_mm;
-  if (w4 >= tw[n - 1].mm_at_cell4)
-    return tp[n - 1].mm_at_cell4 / tw[n - 1].mm_at_cell4 * true_wall_mm;
+  if (w4 <= tw[0].d_at_cell4_mm) return tp[0].d_at_cell4_mm / tw[0].d_at_cell4_mm * true_wall_mm;
+  if (w4 >= tw[n - 1].d_at_cell4_mm)
+    return tp[n - 1].d_at_cell4_mm / tw[n - 1].d_at_cell4_mm * true_wall_mm;
   int a = 0;
-  while (a + 1 < n - 1 && tw[a + 1].mm_at_cell4 < w4) ++a;
-  const double t = (w4 - tw[a].mm_at_cell4) / (tw[a + 1].mm_at_cell4 - tw[a].mm_at_cell4);
-  return (tp[a].mm_at_cell4 + t * (tp[a + 1].mm_at_cell4 - tp[a].mm_at_cell4)) * (cell_mm / 4.0);
+  while (a + 1 < n - 1 && tw[a + 1].d_at_cell4_mm < w4) ++a;
+  const double t = (w4 - tw[a].d_at_cell4_mm) / (tw[a + 1].d_at_cell4_mm - tw[a].d_at_cell4_mm);
+  return (tp[a].d_at_cell4_mm + t * (tp[a + 1].d_at_cell4_mm - tp[a].d_at_cell4_mm)) * (cell_mm / 4.0);
 }
+
+namespace {
+// A sheet's solid fraction on the unit cell at field parameter t (units of L): the method
+// its wall table was bisected on (tpms_probe.cpp `law`): the 3-D Halton points (bases 2, 3,
+// 5; indices 1..2^20) inside tpms.hpp's production wall. Deterministic, continuous in t.
+double sheet_solid_fraction(LatticeTopology topo, double t_unit) {
+  auto halton = [](unsigned i, unsigned base) {
+    double f = 1.0, r = 0.0;
+    while (i > 0) { f /= base; r += f * (i % base); i /= base; }
+    return r;
+  };
+  const TpmsKind kind = topo == LatticeTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD;
+  const int samples = 1 << 20;
+  long long in = 0;
+  for (int n = 1; n <= samples; ++n)
+    if (tpms_in_wall(kind, halton(n, 2), halton(n, 3), halton(n, 5), 1.0, t_unit)) ++in;
+  return double(in) / samples;
+}
+}  // namespace
 
 bool lattice_type_numbers_measured(LatticeTopology topo) {
   return topo == LatticeTopology::Octet || type_measured(topo) != nullptr;
@@ -1085,8 +1145,14 @@ double lattice_density_from_strut(LatticeTopology topo, double cell_mm,
       const double t = (d4 - r0.d_at_cell4_mm) / (r1.d_at_cell4_mm - r0.d_at_cell4_mm);
       return r0.rho + t * (r1.rho - r0.rho);
     }
+    // A sheet has no strut cell: its wall's own solid fraction, at the field parameter its
+    // wall law gives this true wall (beyond the table that law scales by its end row).
     const double rho =
-        strut_cell_solid_fraction(lattice_strut_cell(topo), strut_radius_mm / cell_mm);
+        lattice_topology_is_sheet(topo)
+            ? sheet_solid_fraction(
+                  topo, lattice_sheet_wall_param_mm(topo, 2.0 * strut_radius_mm, cell_mm) /
+                            cell_mm)
+            : strut_cell_solid_fraction(lattice_strut_cell(topo), strut_radius_mm / cell_mm);
     if (!(rho > 0.0) || rho >= 1.0)
       throw std::invalid_argument(
           "lattice_density_from_strut: strut radius produced a degenerate cell "

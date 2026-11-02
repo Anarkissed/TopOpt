@@ -71,7 +71,10 @@ int main() {
            t == LatticeTopology::Rhombic ||
            t == LatticeTopology::Diamond ||
            t == LatticeTopology::Bcc ||
-           t == LatticeTopology::SimpleCubic;
+           t == LatticeTopology::SimpleCubic ||
+           // K2: a sheet's "diameter" is its true wall thickness (lattice.cpp's sheet blocks)
+           t == LatticeTopology::Gyroid ||
+           t == LatticeTopology::SchwarzD;
   };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────

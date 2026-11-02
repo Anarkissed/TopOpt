@@ -529,7 +529,8 @@ static void test_lattice_block() {
     return mutate("\"mesh_prefix\": \"variant\" }",
                   "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
   };
-  check_rejects(lat("{ \"topology\": \"gyroid\", \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"),
+  // (gyroid until the sheets went live; bccz is known and neither generated nor certified)
+  check_rejects(lat("{ \"topology\": \"bccz\", \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"),
                 "lattice: rejects unimplemented topology");
   check_rejects(lat("{ \"cell_mm\": 0, \"strut_radius_mm\": 0.7 }"),
                 "lattice: rejects cell_mm <= 0");
@@ -1044,7 +1045,7 @@ static void test_grading_block() {
                   "\"mesh_prefix\": \"variant\" },\n  \"grading\": " + body);
   };
   check_rejects(
-      gr("{ \"topology\": \"gyroid\", \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4 }"),
+      gr("{ \"topology\": \"bccz\", \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4 }"),
       "grading: rejects unimplemented topology");
   check_rejects(gr("{ \"cell_mm\": 0, \"min_extrudable_width_mm\": 0.4 }"),
                 "grading: rejects cell_mm <= 0");
@@ -1231,9 +1232,16 @@ static void test_a_topology_id_says_why_it_is_refused() {
   // generator. Hold that instead, so a type that loses its generator is caught here
   // rather than slipping into that refusal unseen.
   for (const std::string& cert : topopt::lattice_certifiable_topology_names()) {
+    // A sheet takes no Diagrid skin (R8), and Diagrid is the default, so a sheet's job
+    // states Rim; the refusals themselves are test_tpms's.
+    std::string text = with_topo("\"lattice\"", cert.c_str());
+    if (topopt::lattice_topology_is_sheet(topopt::lattice_topology_from_id(cert))) {
+      const std::string from = "\"strut_radius_mm\": 0.7 }";
+      text.replace(text.find(from), from.size(), "\"strut_radius_mm\": 0.7, \"skin\": \"rim\" }");
+    }
     bool threw = false;
     try {
-      (void)parse_job(with_topo("\"lattice\"", cert.c_str()));
+      (void)parse_job(text);
     } catch (const JobError&) {
       threw = true;
     }
@@ -1272,7 +1280,8 @@ static void test_a_topology_id_says_why_it_is_refused() {
   // type core is going to ship. This is not a loosened assertion: the message checked here
   // is the more specific of the two, and `gyroids` now holds the unknown-id loop's place
   // so a sheet-type-shaped near-miss still proves the distinction is kept.
-  for (const char* tetra : {"bccz", "fccz", "reentrant", "gyroid", "schwarz_d"}) {
+  // (K2: the two sheets went live and left this loop for the certifiable one above.)
+  for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
     std::string why;
     try { (void)parse_job(with_topo("\"lattice\"", tetra)); }
     catch (const JobError& e) { why = e.what(); }

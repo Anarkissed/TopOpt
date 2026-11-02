@@ -31,6 +31,13 @@
 //                                blocks (no part, uniform wall at rho 0.20 / 0.40, L 8 mm)
 //                                at DC cells L/10, L/20, L/30; count = a n^3 + b n^2 + c n
 //                                solved for a, the cost of one interior cell, and a / (L/h)^2.
+//   mesh <lattice.stl> [<SOLID.stl> <part.stl> <shell_mm>]
+//                                go-live item 7 on an EMITTED sheet: the STL's connected
+//                                pieces (triangles sharing a welded vertex), and with the
+//                                run's solid companion and part, which pieces are FLOATING:
+//                                no vertex inside or within 0.05 mm of the solid companion,
+//                                nor within shell + 0.05 mm of the part's surface
+//                                (lattice_types_probe `spans`' rule, with no strut radius).
 //
 // kind: gyroid | schwarz_d. CSVs land in TOPOPT_LATTICE_CSV_DIR.
 // Build (from core/, after the library):
@@ -41,6 +48,10 @@
 #include "tensor_library_nine_probe.cpp"
 #undef main
 
+#include <map>
+
+#include "topopt/mesh_distance.hpp"
+#include "topopt/stl.hpp"
 #include "topopt/tpms.hpp"
 #include "topopt/tpms_gen.hpp"
 
@@ -350,6 +361,131 @@ int mode_tris(const std::string& name) {
   return 0;
 }
 
+int mode_mesh(const std::string& path, std::string solid_path, const std::string& part_path,
+              double shell_mm) {
+  if (solid_path == "-") solid_path.clear();  // the part alone (no solid companion)
+  // read_stl_file welds by exact coordinate and does NOT require a closed 2-manifold, so
+  // the mesh's own edge counts are reported rather than refused.
+  const topopt::TriangleMesh m = topopt::read_stl_file(path).mesh;
+  {
+    std::map<std::pair<int, int>, int> edges;
+    for (const auto& t : m.triangles)
+      for (int k = 0; k < 3; ++k) {
+        const int a = t[k], b = t[(k + 1) % 3];
+        ++edges[{std::min(a, b), std::max(a, b)}];
+      }
+    long open = 0, nonmanifold = 0;
+    std::vector<Vec3> nm_mid;
+    for (const auto& [e, n] : edges) {
+      if (n == 1) ++open;
+      if (n > 2) {
+        ++nonmanifold;
+        const Vec3 &a = m.vertices[e.first], &b = m.vertices[e.second];
+        nm_mid.push_back({0.5 * (a.x + b.x), 0.5 * (a.y + b.y), 0.5 * (a.z + b.z)});
+      }
+    }
+    std::printf("EDGES %s: %zu edges, %ld open, %ld non-manifold (in more than two triangles)\n",
+                path.c_str(), edges.size(), open, nonmanifold);
+    if (!nm_mid.empty() && !part_path.empty()) {
+      const topopt::TriangleMesh part = topopt::read_stl_file(part_path).mesh;
+      const topopt::MeshDistance pd(part);
+      const double bins[] = {0.25, 0.5, 1.0, shell_mm, shell_mm + 0.5, 1e30};
+      long cnt[6] = {0, 0, 0, 0, 0, 0};
+      for (const Vec3& p : nm_mid) {
+        const double d = std::fabs(pd.signed_distance(p));
+        int b = 0;
+        while (d > bins[b]) ++b;
+        ++cnt[b];
+      }
+      std::printf("  non-manifold edges by distance to the part's surface: <=0.25 mm %ld, "
+                  "<=0.5 %ld, <=1 %ld, <=shell %.2f %ld, <=shell+0.5 %ld, beyond %ld\n",
+                  cnt[0], cnt[1], cnt[2], shell_mm, cnt[3], cnt[4], cnt[5]);
+    }
+  }
+  std::vector<int> parent(m.vertices.size());
+  std::iota(parent.begin(), parent.end(), 0);
+  auto find = [&parent](int x) {
+    while (parent[x] != x) x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  for (const auto& t : m.triangles)
+    for (int k = 1; k < 3; ++k) parent[find(t[k])] = find(t[0]);
+  std::map<int, long> tris;  // piece root -> triangle count
+  for (const auto& t : m.triangles) ++tris[find(t[0])];
+  {
+    // which pieces the non-manifold edges belong to (largest pieces first)
+    std::map<std::pair<int, int>, int> edges;
+    for (const auto& t : m.triangles)
+      for (int k = 0; k < 3; ++k) {
+        const int a = t[k], b = t[(k + 1) % 3];
+        ++edges[{std::min(a, b), std::max(a, b)}];
+      }
+    std::map<int, long> nm;
+    for (const auto& [e, n] : edges)
+      if (n > 2) ++nm[find(e.first)];
+    for (const auto& [root, n] : nm)
+      std::printf("  %ld non-manifold edges in the piece of %ld triangles\n", n, tris[root]);
+  }
+  std::map<int, bool> held;
+  if (!solid_path.empty()) {
+    const topopt::TriangleMesh solid = topopt::read_stl_file(solid_path).mesh;
+    const topopt::MeshDistance sd(solid);
+    std::unique_ptr<topopt::MeshDistance> pd;
+    topopt::TriangleMesh part;
+    if (!part_path.empty()) {
+      part = topopt::read_stl_file(part_path).mesh;
+      pd = std::make_unique<topopt::MeshDistance>(part);
+    }
+    for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+      const int c = find(int(v));
+      if (!tris.count(c) || held[c]) continue;
+      const double s = sd.signed_distance(m.vertices[v]);
+      if (s > 0.0 || std::fabs(s) <= 0.05 ||
+          (pd && std::fabs(pd->signed_distance(m.vertices[v])) <= shell_mm + 0.05))
+        held[c] = true;
+    }
+  }
+  std::vector<long> sizes;
+  for (const auto& kv : tris) sizes.push_back(kv.second);
+  std::sort(sizes.rbegin(), sizes.rend());
+  std::printf("MESH %s: %zu triangles, %zu vertices, %zu pieces\n", path.c_str(),
+              m.triangles.size(), m.vertices.size(), tris.size());
+  if (!solid_path.empty()) {
+    int floating = 0;
+    long floating_tris = 0;
+    for (const auto& kv : tris)
+      if (!held[kv.first]) { ++floating; floating_tris += kv.second; }
+    std::printf("  FLOATING (no vertex on the solid companion%s): %d pieces, %ld triangles\n",
+                part_path.empty() ? "" : " or within the shell", floating, floating_tris);
+  }
+  // Where each piece but the largest lies (up to 40 of them), and whether it floats.
+  std::map<int, std::pair<Vec3, Vec3>> box;
+  for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+    const int c = find(int(v));
+    if (!tris.count(c)) continue;
+    const Vec3& p = m.vertices[v];
+    auto it = box.find(c);
+    if (it == box.end()) { box[c] = {p, p}; continue; }
+    Vec3& lo = it->second.first;
+    Vec3& hi = it->second.second;
+    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
+    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+  }
+  std::vector<std::pair<long, int>> order;
+  for (const auto& kv : tris) order.push_back({kv.second, kv.first});
+  std::sort(order.rbegin(), order.rend());
+  for (std::size_t i = 1; i < order.size() && i <= 40; ++i) {
+    const auto& [lo, hi] = box[order[i].second];
+    std::printf("  piece %ld triangles bbox (%.3f %.3f %.3f)-(%.3f %.3f %.3f)%s\n",
+                order[i].first, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z,
+                solid_path.empty() ? "" : held[order[i].second] ? " held" : " FLOATING");
+  }
+  std::printf("  piece sizes (triangles), largest first:");
+  for (std::size_t i = 0; i < sizes.size() && i < 40; ++i) std::printf(" %ld", sizes[i]);
+  std::printf("%s\n", sizes.size() > 40 ? " ..." : "");
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -363,6 +499,9 @@ int main(int argc, char** argv) {
   if (cmd == "perc") return mode_perc(argv[2]);
   if (cmd == "bend") return mode_bend(argv[2]);
   if (cmd == "tris") return mode_tris(argv[2]);
+  if (cmd == "mesh")
+    return mode_mesh(argv[2], argc > 3 ? argv[3] : "", argc > 4 ? argv[4] : "",
+                     argc > 5 ? std::atof(argv[5]) : 0.0);
   if (cmd == "rows" && argc >= 5) return mode_rows(argv[2], std::atoi(argv[3]), std::atoi(argv[4]));
   std::fprintf(stderr, "bad arguments\n");
   return 2;

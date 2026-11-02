@@ -8,6 +8,7 @@
 #include <string>
 
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/lattice_types.hpp"
 #include "topopt/tpms_gen.hpp"
@@ -78,14 +79,29 @@ LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, Triangl
   if (lattice_gen_is_sheet(gt)) {
     // A sheet: the TPMS wall over the same cube, the TRUE wall from the type's law (the
     // receipt's "strut_diameter_mm" is that wall), the field parameter from the wall law.
-    TpmsRegion TR;
-    TR.anchor = Vec3{0.0, 0.0, spec.plate_mm};
-    TR.nx = TR.ny = TR.nz = n;
-    TR.cell_mm = spec.cell_mm;
-    TpmsWallField W;
-    W.uniform_mm = lattice_sheet_wall_param_mm(t, r.strut_diameter_mm, spec.cell_mm);
+    // Both sheets pass through every cell corner (f = 0 there), so a block cut on cell
+    // lines leaves a cap at a corner that joins nothing: measured, a 12-triangle gyroid
+    // piece and a 48-triangle Schwarz-D piece at the far top corner of the 40 mm block,
+    // which would print as a loose speck. So the sample shifts the sheet an eighth of a
+    // cell, where both fields are at their maximum (the middle of a channel, the farthest
+    // point from the wall), and clips it to the cube: no corner of the block meets the
+    // wall. The clip box reaches one DC cell past the cube (the generator erodes its clip
+    // by one) and down into the plate, so the sheet fills the cube and stands on the plate.
+    const double s = spec.cell_mm / 8.0;
     TpmsGenOptions o;
     o.min_wall_mm = r.strut_diameter_mm;
+    o.dc_cell_mm = r.strut_diameter_mm / 3.0;  // the generator's own default, stated
+    const double h = o.dc_cell_mm;
+    LatticeBoundary cube;
+    cube.add_box(Vec3{-h, -h, 0.5 * spec.plate_mm},
+                 Vec3{spec.size_mm + h, spec.size_mm + h, spec.plate_mm + spec.size_mm + h});
+    TpmsRegion TR;
+    TR.anchor = Vec3{-s, -s, spec.plate_mm - s};
+    TR.nx = TR.ny = TR.nz = n + 1;
+    TR.cell_mm = spec.cell_mm;
+    TR.boundary = &cube;
+    TpmsWallField W;
+    W.uniform_mm = lattice_sheet_wall_param_mm(t, r.strut_diameter_mm, spec.cell_mm);
     const TpmsGenStats ts = generate_tpms(
         gt == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD, TR, W, sink, o);
     r.lattice_triangles = ts.dc.triangles;
