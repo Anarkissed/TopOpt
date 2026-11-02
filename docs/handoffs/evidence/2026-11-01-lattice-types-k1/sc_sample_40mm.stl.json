@@ -1,0 +1,16 @@
+{
+  "topology": "sc",
+  "directional_note": "Strongly directional: best when the load runs along the cell axes.",
+  "relative_density": 0.291485,
+  "relative_density_is_band_middle": true,
+  "band": [0.08659, 0.49638],
+  "cell_mm": 8,
+  "cells_per_side": 5,
+  "size_mm": 40,
+  "base_plate_mm": 1.5,
+  "strut_diameter_mm": 3.23013,
+  "triangles": 21612,
+  "lattice_triangles": 21600,
+  "struts": 540,
+  "nodes": 216
+}

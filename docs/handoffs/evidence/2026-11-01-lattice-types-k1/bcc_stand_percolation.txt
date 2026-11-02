@@ -22,7 +22,7 @@ Octet control, the same located probe on octet's own stand lattice (stand_percol
   float comp 91 prims (68 seg, 23 ball) r<=0.283 bbox (119.72 -44.91 18.00)-(123.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.180 mm
   float comp 166 prims (128 seg, 38 ball) r<=0.243 bbox (119.72 -40.91 18.00)-(123.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.220 mm
 
-What they are (measured): every floating piece is one or two whole 2 mm cells in a pocket ONE solve voxel
+What they are (measured): every floating piece is 1, 2 or 4 whole 2 mm cells in a pocket ONE solve voxel
 thick (z 17.05-20.46 mm, voxel 3.41 mm; ten pieces at x 101-124, two at x 23-32), and octet's two floating
 pieces sit in the same place (x 119.72-123.72). The run's graded cell activation (run_job.cpp, `cell_latticed`) lattices a cell iff it
 holds a masked voxel's CENTRE. With the cell (2 mm) smaller than the solve voxel (3.41 mm) each masked
