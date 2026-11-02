@@ -209,6 +209,7 @@ int main() {
   const std::vector<std::pair<LatticeGenTopology, LatticeTopology>> live = {
       {LatticeGenTopology::Octet, LatticeTopology::Octet},
       {LatticeGenTopology::Fcc, LatticeTopology::Fcc},
+      {LatticeGenTopology::SimpleCubic, LatticeTopology::SimpleCubic},
       {LatticeGenTopology::Bcc, LatticeTopology::Bcc},
       {LatticeGenTopology::Diamond, LatticeTopology::Diamond},
       {LatticeGenTopology::Rhombic, LatticeTopology::Rhombic},
@@ -366,7 +367,7 @@ int main() {
   }
 
   // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"sc", "gyroid"}) {
+  for (const char* id : {"gyroid"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -400,13 +401,17 @@ int main() {
                     lattice_min_printable_cell_mm(LatticeTopology::Fcc, 0.42, 0.0)) < 1e-9,
           "facts fcc: printable cell per bead");
 
-    const LatticeTypeFacts kel = lattice_type_facts("sc");
-    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts sc: not live");
-    CHECK(!kel.numbers_measured && std::isnan(kel.cells_per_member_min) &&
-              std::isnan(kel.aesthetic_density_ceiling),
-          "facts sc: no number is octet's (NaN until measured)");
-    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts sc: refused, with a reason");
+    // No strut type of round 1 is left un-live, so the not-live example is a tetragonal
+    // id core knows and neither generates nor certifies.
+    const LatticeTypeFacts nl = lattice_type_facts("bccz");
+    CHECK(nl.readiness == LatticeTypeReadiness::NotEither, "facts bccz: not live");
+    CHECK(!nl.numbers_measured && std::isnan(nl.cells_per_member_min) &&
+              std::isnan(nl.aesthetic_density_ceiling),
+          "facts bccz: no number is octet's (NaN until measured)");
+    CHECK(!nl.doubled.allowed && !nl.doubled.reason.empty(), "facts bccz: refused, with a reason");
     const LatticeTypeFacts sc = lattice_type_facts("sc");
+    CHECK(sc.readiness == LatticeTypeReadiness::Live && sc.cells_per_member_min == 4.0,
+          "facts sc: live, on its own on-axis floor");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
     const LatticeTypeFacts gy = lattice_type_facts("gyroid");
     CHECK(gy.family == "sheet" && gy.readiness == LatticeTypeReadiness::NotEither,

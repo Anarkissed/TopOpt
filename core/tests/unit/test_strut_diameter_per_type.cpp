@@ -69,7 +69,8 @@ int main() {
            t == LatticeTopology::Kelvin ||
            t == LatticeTopology::Rhombic ||
            t == LatticeTopology::Diamond ||
-           t == LatticeTopology::Bcc;
+           t == LatticeTopology::Bcc ||
+           t == LatticeTopology::SimpleCubic;
   };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────
@@ -134,22 +135,26 @@ int main() {
     CHECK(named, msg);
   }
 
-  // ── 3. AND A CERTIFIABLE TYPE IS STILL REFUSED HERE ─────────────────────────
-  // The two refusals are about different things and must not be conflated: Kelvin's
-  // tensor rows are landed, so it is CERTIFIABLE, and it still has no diameter law.
-  // (This section named FCC, then Kelvin, until each one's own law landed.)
-  {
-    CHECK(lattice_topology_certifiable(LatticeTopology::SimpleCubic),
-          "SimpleCubic is certifiable (its tensor rows are landed)");
+  // ── 3. AND EVERY CERTIFIABLE TYPE NOW HAS ITS OWN LAW ───────────────────────
+  // The two refusals are about different things and must not be conflated. This section
+  // named FCC, Kelvin, then Simple cubic as a CERTIFIABLE type that still had no
+  // diameter law, until each one's own law landed. With Simple cubic's (the last strut
+  // type of lattice types round 1) none is left, so it holds the converse: no
+  // certifiable type is refused here.
+  for (LatticeTopology t : all) {
+    if (!lattice_topology_certifiable(t)) continue;
+    const std::string name = lattice_topology_name(t);
     bool threw = false;
     try {
-      (void)lattice_strut_diameter_mm(LatticeTopology::SimpleCubic, 0.30, 8.0);
+      (void)lattice_strut_diameter_mm(t, 0.30, 8.0);
     } catch (const LatticeDiameterLawNotMeasured&) {
       threw = true;
     }
-    CHECK(threw,
-          "SimpleCubic: certifiable and still has no measured diameter law — the two "
-          "refusals are independent");
+    char msg[160];
+    std::snprintf(msg, sizeof msg,
+                  "%s: certifiable, so it has its own measured diameter law",
+                  name.c_str());
+    CHECK(has_own_law(t) && !threw, msg);
   }
 
   // ── 3b. FCC'S OWN LAW (lattice types round 1) ───────────────────────────────
@@ -185,8 +190,10 @@ int main() {
     }
     CHECK(lattice_type_numbers_measured(LatticeTopology::Fcc),
           "fcc: its numbers are measured");
-    CHECK(!lattice_type_numbers_measured(LatticeTopology::SimpleCubic),
-          "sc: its numbers are not measured yet");
+    CHECK(lattice_type_numbers_measured(LatticeTopology::SimpleCubic),
+          "sc: its numbers are measured (the last strut type of round 1)");
+    CHECK(!lattice_type_numbers_measured(LatticeTopology::Bccz),
+          "bccz: its numbers are not measured (not in round 1)");
     CHECK(lattice_cells_per_member_min(LatticeTopology::Fcc) == 5.0 &&
               lattice_percolation_cells_per_member_min(LatticeTopology::Fcc) == 0.75 &&
               aesthetic_cells_per_member_hard_floor(LatticeTopology::Fcc, true) == 2.0,
@@ -381,8 +388,8 @@ int main() {
               LatticeTypeReadiness::Live,
           "readiness: bcc is live");
     CHECK(lattice_type_readiness("sc", gen_real, cert_real) ==
-              LatticeTypeReadiness::NotGeneratable,
-          "readiness: sc is certifiable and not yet generatable");
+              LatticeTypeReadiness::Live,
+          "readiness: sc is live");
     for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
       char msg[140];
       std::snprintf(msg, sizeof msg, "readiness: %s is in neither set", tetra);

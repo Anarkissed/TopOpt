@@ -466,10 +466,36 @@ constexpr TypeCpmPoint kBccCurve[] = {
 constexpr TypeMeasurements kBccMeasured = {
     kBccDia, 8, 10.0, 0.75, 2.0, kBccCurve, 10};
 
+// SIMPLE CUBIC -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/sc_*.{csv,txt}, the
+// same harness and conditions as FCC's block above.
+// DIAMETER (`law sc`): bisected on the converged solid fraction; within the band the
+// vpc48 B3 table differs by at most 4.0 % (sc_law.txt, "B3 gap").
+constexpr TypeDiaRow kScDia[] = {
+    {0.05, 0.6113}, {0.08, 0.7847}, {0.10, 0.8849}, {0.15, 1.1051}, {0.20, 1.2988},
+    {0.30, 1.6445}, {0.40, 1.9620}, {0.60, 2.5777},
+};
+// BENDING (`bend sc`, sc_bend.txt + sc_bend_wide.txt): C2b guided cantilever, S = 5 mm,
+// vpc12, 6 cells long, periodic cell rho 0.2593: -3.72 / +12.49 / +6.03 / +2.08 % at
+// 1..4 cells (-0.12 at 5, -1.48 at 6). The 2.4 % band is crossed between 3 and 4 cells
+// -> 4. Measured with the cell axes ALONG the member (C2b's orientation): SC is strongly
+// directional (R3) and this floor says nothing about an off-axis member.
+constexpr TypeCpmPoint kScCurve[] = {
+    {1.0, -0.0372}, {2.0, 0.1249}, {3.0, 0.0603}, {4.0, 0.0208},
+};
+// PERCOLATION (`perc sc`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho 0.0866 /
+// 0.2915 / 0.4964 (band low, middle, high), placements 0 / .25 / .5 / .75 cell, vpc16, 4
+// cells long, 6-connected: a spanning network at every placement and rho from 0.75 cells
+// -> 0.75.
+// AESTHETIC HARD FLOOR: 2 cells is +12.49 % in bending and percolates -> 2.
+constexpr TypeMeasurements kScMeasured = {
+    kScDia, 8, 4.0, 0.75, 2.0, kScCurve, 4};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
       return &kFccMeasured;
+    case LatticeTopology::SimpleCubic:
+      return &kScMeasured;
     case LatticeTopology::Bcc:
       return &kBccMeasured;
     case LatticeTopology::Diamond:
@@ -479,7 +505,6 @@ const TypeMeasurements* type_measured(LatticeTopology topo) {
     case LatticeTopology::Kelvin:
       return &kKelvinMeasured;
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
-    case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:

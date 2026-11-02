@@ -46,7 +46,9 @@ AFTER (link = 0.72 x gap / 0.7071 cell: sqrt 2 x octet's for FCC, BCC and SC; un
     -> worst 1 components (at c 0.05)
   bcc (r 1.290 mm): c0.05:1/64 c0.10:1/64 c0.15:1/64 c0.20:1/64 c0.25:1/64 c0.30:1/64 c0.35:1/64 c0.40:1/64 c0.45:1/64 c0.50:1/64 c0.55:1/64 c0.60:1/64 c0.65:1/64 c0.70:1/64 c0.75:1/64 c0.80:1/64 c0.85:1/49 c0.90:1/64 c0.95:1/64
     -> worst 1 components (at c 0.05)
-  (SC: measured with SC's go-live commit, below it in the history.)
+  SC, measured with its go-live commit:
+  sc (r 1.615 mm): c0.05:1/9 c0.10:1/9 c0.15:1/9 c0.20:1/9 c0.25:1/9 c0.30:1/9 c0.35:1/9 c0.40:1/9 c0.45:1/9 c0.50:1/9 c0.55:1/9 c0.60:1/9 c0.65:1/9 c0.70:1/9 c0.75:1/9 c0.80:1/9 c0.85:1/9 c0.90:1/9 c0.95:1/9
+    -> worst 1 components (at c 0.05)
 
 Byte identity of the skinned blocks (19 offsets x 2 box shapes per type, FNV-1a over every triangle):
   before = the frozen gate build of 9e4484be, after = this commit
