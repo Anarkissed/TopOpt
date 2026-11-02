@@ -7,6 +7,8 @@
 //      triangles), deterministic, and stays inside the part.
 //   3. Its volume against the exact solid fraction of the same wall (2^18 Halton points):
 //      the DC cell the generator picks keeps it within 1 %.
+//   4. A sheet job at the parse: Rim parses (the control); Diagrid, stated or the default,
+//      organic, and Stepped are refused, each with its reason (R8, R5).
 //
 // Self-contained CHECK harness (ARCHITECTURE §4).
 
@@ -19,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/job.hpp"
 #include "topopt/lattice_boundary.hpp"
 #include "topopt/tpms.hpp"
 #include "topopt/tpms_gen.hpp"
@@ -152,6 +155,39 @@ int main() {
                   id.c_str(), s3.volume(), exact);
     CHECK(std::fabs(s3.volume() / exact - 1.0) < 0.01, msg);
   }
+
+  // 4. The parse. Each job is one mutation of the control, so a refusal is about that key.
+  for (const char* id : {"gyroid", "schwarz_d"}) {
+    auto job = [id](const std::string& lattice_extra, const std::string& grading_extra) {
+      return std::string(R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "lattice": { "topology": ")") + id + "\"" + lattice_extra + R"( },
+  "grading": { "topology": ")" + id + R"(", "cell_mm": 4.0, "min_extrudable_width_mm": 0.4)" +
+             grading_extra + R"( },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ] }
+})";
+    };
+    auto refusal = [](const std::string& text) {
+      try { (void)parse_job(text); } catch (const JobError& e) { return std::string(e.what()); }
+      return std::string();
+    };
+    const std::string sid(id);
+    const std::string ok = refusal(job(R"(, "skin": "rim")", ""));
+    CHECK(ok.empty(), (sid + ": a Rim sheet job parses (control)" + (ok.empty() ? "" : ": " + ok)).c_str());
+    CHECK(refusal(job(R"(, "skin": "none")", "")).empty(), (sid + ": no skin parses").c_str());
+    CHECK(refusal(job(R"(, "skin": "diagrid")", "")).find("(R8)") != std::string::npos,
+          (sid + ": a stated Diagrid is refused, R8").c_str());
+    CHECK(refusal(job("", "")).find("(R8)") != std::string::npos,
+          (sid + ": the default skin (Diagrid) is refused too, asking for rim or none").c_str());
+    CHECK(refusal(job(R"(, "skin": "rim")", R"(, "algorithm": "organic", "intent": "aesthetic")"))
+                  .find("only with \"topology\": \"octet\"") != std::string::npos,
+          (sid + ": organic is refused").c_str());
+    CHECK(refusal(job(R"(, "skin": "rim")", R"(, "algorithm": "stepped")")).find("(R5)") !=
+              std::string::npos,
+          (sid + ": Stepped is refused, R5").c_str());
+  }
+
   std::printf("\n%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }
