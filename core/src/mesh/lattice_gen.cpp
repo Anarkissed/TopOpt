@@ -223,6 +223,10 @@ const CellTable& cell_table(LatticeGenTopology topo) {
       static const CellTable t = generic_table(LatticeTopology::Rhombic);
       return t;
     }
+    case LatticeGenTopology::Diamond: {
+      static const CellTable t = generic_table(LatticeTopology::Diamond);
+      return t;
+    }
   }
   throw std::invalid_argument("generate_lattice: unknown LatticeGenTopology");
 }
@@ -1024,6 +1028,8 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::Diamond:
+      return "diamond";
     case LatticeGenTopology::Rhombic:
       return "rhombic";
     case LatticeGenTopology::Kelvin:
@@ -1043,7 +1049,7 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
 }
@@ -1054,6 +1060,8 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
       return LatticeTopology::Octet;
     case LatticeGenTopology::Fcc:
       return LatticeTopology::Fcc;
+    case LatticeGenTopology::Diamond:
+      return LatticeTopology::Diamond;
     case LatticeGenTopology::Rhombic:
       return LatticeTopology::Rhombic;
     case LatticeGenTopology::Kelvin:
@@ -1063,7 +1071,7 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
 }
 
 LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin, LatticeGenTopology::Rhombic, LatticeGenTopology::Diamond})
     if (id == lattice_gen_topology_name(t)) return t;
   throw std::invalid_argument(
       "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +

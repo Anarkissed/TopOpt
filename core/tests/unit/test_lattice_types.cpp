@@ -209,6 +209,7 @@ int main() {
   const std::vector<std::pair<LatticeGenTopology, LatticeTopology>> live = {
       {LatticeGenTopology::Octet, LatticeTopology::Octet},
       {LatticeGenTopology::Fcc, LatticeTopology::Fcc},
+      {LatticeGenTopology::Diamond, LatticeTopology::Diamond},
       {LatticeGenTopology::Rhombic, LatticeTopology::Rhombic},
       {LatticeGenTopology::Kelvin, LatticeTopology::Kelvin},
   };
@@ -311,7 +312,7 @@ int main() {
   }
 
   // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"diamond", "bcc", "sc", "gyroid"}) {
+  for (const char* id : {"bcc", "sc", "gyroid"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -345,12 +346,12 @@ int main() {
                     lattice_min_printable_cell_mm(LatticeTopology::Fcc, 0.42, 0.0)) < 1e-9,
           "facts fcc: printable cell per bead");
 
-    const LatticeTypeFacts kel = lattice_type_facts("diamond");
-    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts diamond: not live");
+    const LatticeTypeFacts kel = lattice_type_facts("bcc");
+    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts bcc: not live");
     CHECK(!kel.numbers_measured && std::isnan(kel.cells_per_member_min) &&
               std::isnan(kel.aesthetic_density_ceiling),
-          "facts diamond: no number is octet's (NaN until measured)");
-    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts diamond: refused, with a reason");
+          "facts bcc: no number is octet's (NaN until measured)");
+    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts bcc: refused, with a reason");
     const LatticeTypeFacts sc = lattice_type_facts("sc");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
     const LatticeTypeFacts gy = lattice_type_facts("gyroid");

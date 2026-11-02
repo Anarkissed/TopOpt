@@ -417,10 +417,37 @@ constexpr TypeCpmPoint kRhombicCurve[] = {
 constexpr TypeMeasurements kRhombicMeasured = {
     kRhombicDia, 8, 10.0, 0.75, 2.0, kRhombicCurve, 10};
 
+// DIAMOND -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/diamond_*.{csv,txt}, the
+// same harness and conditions as FCC's block above.
+// DIAMETER (`law diamond`): bisected on the converged solid fraction; within the band
+// the vpc48 B3 table differs by at most 4.9 % (diamond_law.txt, "B3 gap").
+constexpr TypeDiaRow kDiamondDia[] = {
+    {0.05, 0.4021}, {0.08, 0.5158}, {0.10, 0.5819}, {0.15, 0.7261}, {0.20, 0.8533},
+    {0.30, 1.0796}, {0.40, 1.2866}, {0.60, 1.6864},
+};
+// BENDING (`bend diamond`, diamond_bend.txt + diamond_bend_wide.txt): C2b guided
+// cantilever, S = 5 mm, vpc12, 6 cells long, periodic cell rho 0.2685: +907.89 / +98.17
+// / +37.40 / +19.03 / +11.11 / +7.07 / +4.76 / +3.35 / +2.42 / +1.77 % at 1..10 cells
+// (+0.93 at 12). 9 cells reads +2.42 %, just outside the 2.4 % band, so the crossing is
+// between 9 and 10 -> 10.
+constexpr TypeCpmPoint kDiamondCurve[] = {
+    {1.0, 9.0789}, {2.0, 0.9817}, {3.0, 0.3740}, {4.0, 0.1903}, {5.0, 0.1111},
+    {6.0, 0.0707}, {7.0, 0.0476}, {8.0, 0.0335}, {9.0, 0.0242}, {10.0, 0.0177},
+};
+// PERCOLATION (`perc diamond`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho
+// 0.1571 / 0.3746 / 0.5920 (band low, middle, high), placements 0 / .25 / .5 / .75 cell,
+// vpc16, 4 cells long, 6-connected: a spanning network at every placement and rho from
+// 0.75 cells -> 0.75.
+// AESTHETIC HARD FLOOR: 2 cells is +98.17 % in bending and percolates -> 2.
+constexpr TypeMeasurements kDiamondMeasured = {
+    kDiamondDia, 8, 10.0, 0.75, 2.0, kDiamondCurve, 10};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
       return &kFccMeasured;
+    case LatticeTopology::Diamond:
+      return &kDiamondMeasured;
     case LatticeTopology::Rhombic:
       return &kRhombicMeasured;
     case LatticeTopology::Kelvin:
@@ -428,7 +455,6 @@ const TypeMeasurements* type_measured(LatticeTopology topo) {
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
-    case LatticeTopology::Diamond:
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:
