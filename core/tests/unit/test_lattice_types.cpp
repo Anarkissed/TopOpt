@@ -310,6 +310,59 @@ int main() {
       CHECK(worst > -1e-6, (id + ": no interior strut or node solid leaves the part").c_str());
       CHECK(h1.h == h2.h, (id + ": a clipped, skinned run is deterministic").c_str());
     }
+
+    // ★ AND THE SKIN IS ONE PIECE on a face just off a node plane, where the landings
+    // bunch around the nodes that send a strut across it. FCC, BCC and SC's are a full
+    // cell apart (octet's 0.7071), and octet's 0.72-cell link radius left 9 to 25 islands
+    // there until each type's radius scaled to its own gap (crossing_node_gap). Anchors
+    // on the face's interior (a cell in from its edges) and the skin edges joining them
+    // go into one union-find; the anchors must end up in one component.
+    {
+      const double rr = 0.45, x0 = 0.95 * 8.0 - rr;  // landings at 0.95 cell
+      LatticeBoundary B;
+      B.add_box({x0, 0.3, 0.3}, {39.7, 39.7, 39.7});
+      LatticeRegion R;
+      R.nx = R.ny = R.nz = 5; R.cell_mm = 8.0; R.boundary = &B;
+      LatticeRadiusField G; G.uniform_mm = rr;
+      LatticeSkinSpec skin;
+      skin.mode = LatticeSkinMode::Diagrid;
+      skin.min_radius_mm = lattice_skin_min_radius_mm(0.42);
+      std::map<std::tuple<long, long, long>, int> key;
+      std::vector<int> parent, anchors;
+      auto node = [&](const Vec3& q) {
+        const auto k = std::make_tuple(std::lround(q.x * 1e3), std::lround(q.y * 1e3),
+                                       std::lround(q.z * 1e3));
+        const auto it = key.find(k);
+        if (it != key.end()) return it->second;
+        const int n = static_cast<int>(parent.size());
+        parent.push_back(n);
+        key[k] = n;
+        return n;
+      };
+      auto root = [&](int x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      auto on_face = [&](const Vec3& q) { return q.x < x0 + 2.0; };
+      LatticeGenObserver obs;
+      obs.on_element = [&](LatticeGenElement k, const Vec3& a, const Vec3& b, double) {
+        if (k == LatticeGenElement::AnchorNode && on_face(a) && a.y > 8.0 && a.y < 31.7 &&
+            a.z > 8.0 && a.z < 31.7)
+          anchors.push_back(node(a));
+        if (k == LatticeGenElement::SkinStrut && on_face(a) && on_face(b))
+          parent[root(node(a))] = root(node(b));
+      };
+      NullSink sink;
+      (void)generate_lattice(gt, R, G, sink, skin, &obs);
+      std::set<int> pieces;
+      for (int n : anchors) pieces.insert(root(n));
+      char msg[200];
+      std::snprintf(msg, sizeof msg,
+                    "%s: the diagrid skin on a face just off a node plane is ONE piece "
+                    "(%zu pieces over %zu anchors)",
+                    id.c_str(), pieces.size(), anchors.size());
+      CHECK(anchors.size() >= 4 && pieces.size() == 1, msg);
+    }
   }
 
   // Not-yet-live types are refused by the generator by name.
