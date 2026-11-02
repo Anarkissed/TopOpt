@@ -1,0 +1,38 @@
+Stand percolation, BCC: lattice-variant of the Structural run's rung 0.52 (out_lv1_bcc), part = that run's variant_052.stl, shell 2.22 mm (0.42 + 4 x 0.45).
+SPANS out_lv1_bcc/variant_052_lattice_SPANS.txt: 1381 primitives, 64 components, 66 of 1472 strut ends cut (no other primitive covers them)
+  components with no cut end: 47 (1120 primitives)
+  FLOATING (no cut end, not touching the solid companion or the shell): 12 components, 356 primitives
+  component sizes (primitives), largest first: 54 54 43 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 27 24 24 17 17 17 17 17 17 17 17 17 17 17 17 17 17 17 17 17 ...
+
+The 12 floating components, located (the same spans mode plus one line per floating component: stand_percolation_locate.patch):
+  float comp 17 prims (8 seg, 9 ball) r<=0.219 bbox (101.72 -44.91 18.00)-(103.72 -42.91 20.00) ext (2.00 2.00 2.00) gap-to-solid 0.244 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.219 bbox (105.72 -44.91 18.00)-(109.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.244 mm
+  float comp 17 prims (8 seg, 9 ball) r<=0.219 bbox (111.72 -44.91 18.00)-(113.72 -42.91 20.00) ext (2.00 2.00 2.00) gap-to-solid 0.244 mm
+  float comp 17 prims (8 seg, 9 ball) r<=0.219 bbox (115.72 -44.91 18.00)-(117.72 -42.91 20.00) ext (2.00 2.00 2.00) gap-to-solid 0.244 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.219 bbox (119.72 -44.91 18.00)-(123.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.244 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.219 bbox (101.72 -40.91 18.00)-(103.72 -36.91 20.00) ext (2.00 4.00 2.00) gap-to-solid 0.244 mm
+  float comp 54 prims (32 seg, 22 ball) r<=0.219 bbox (105.72 -40.91 18.00)-(109.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.244 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.219 bbox (111.72 -40.91 18.00)-(113.72 -36.91 20.00) ext (2.00 4.00 2.00) gap-to-solid 0.244 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.219 bbox (115.72 -40.91 18.00)-(117.72 -36.91 20.00) ext (2.00 4.00 2.00) gap-to-solid 0.244 mm
+  float comp 54 prims (32 seg, 22 ball) r<=0.219 bbox (119.72 -40.91 18.00)-(123.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.244 mm
+  float comp 17 prims (8 seg, 9 ball) r<=0.244 bbox (23.72 -2.91 18.00)-(25.72 -0.91 20.00) ext (2.00 2.00 2.00) gap-to-solid 0.498 mm
+  float comp 30 prims (16 seg, 14 ball) r<=0.244 bbox (27.72 -2.91 18.00)-(31.72 -0.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.547 mm
+
+Octet control, the same located probe on octet's own stand lattice (stand_percolation.txt, rung 0.38) -- its 2 floating components:
+  float comp 91 prims (68 seg, 23 ball) r<=0.283 bbox (119.72 -44.91 18.00)-(123.72 -42.91 20.00) ext (4.00 2.00 2.00) gap-to-solid 0.180 mm
+  float comp 166 prims (128 seg, 38 ball) r<=0.243 bbox (119.72 -40.91 18.00)-(123.72 -36.91 20.00) ext (4.00 4.00 2.00) gap-to-solid 0.220 mm
+
+What they are (measured): every floating piece is one or two whole 2 mm cells in a pocket ONE solve voxel
+thick (z 17.05-20.46 mm, voxel 3.41 mm; ten pieces at x 101-124, two at x 23-32), and octet's two floating
+pieces sit in the same place (x 119.72-123.72). The run's graded cell activation (run_job.cpp, `cell_latticed`) lattices a cell iff it
+holds a masked voxel's CENTRE. With the cell (2 mm) smaller than the solve voxel (3.41 mm) each masked
+voxel activates exactly one cell -- the reports say so: latticed_cells 92 == latticed_voxels 92 here,
+112 == 112 on octet's -- and the other ~80 % of every pocket voxel is left empty. All 24 cells in the
+floating pieces hold a voxel centre (checked against the GRID line); their neighbours hold none, so in a
+slab one voxel thick nothing reaches the wall: the corner balls stop 0.24 mm short of it (0.18-0.22 mm
+for octet's). FCC's stand run left two such lone cells in the same pocket (x 115.72-117.72 and
+119.72-121.72); they count as held only because FCC's solid companion comes within 0.05 mm of a node
+(gap -0.17 mm with r 0.22); Kelvin's, Rhombic's and Diamond's runs latticed nothing there. BCC's
+generator emits exactly the cells it is given (block, Doubled and Stepped are one
+solid each); the pieces float because core gives it isolated cells. Reported under Findings; not
+changed here (it is octet's path too, R9).
