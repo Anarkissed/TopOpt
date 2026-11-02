@@ -209,6 +209,7 @@ int main() {
   const std::vector<std::pair<LatticeGenTopology, LatticeTopology>> live = {
       {LatticeGenTopology::Octet, LatticeTopology::Octet},
       {LatticeGenTopology::Fcc, LatticeTopology::Fcc},
+      {LatticeGenTopology::Rhombic, LatticeTopology::Rhombic},
       {LatticeGenTopology::Kelvin, LatticeTopology::Kelvin},
   };
 
@@ -244,9 +245,11 @@ int main() {
             generate_lattice(gt, R, G, sink, LatticeSkinSpec{}, o);
           }) == 1,
           (id + ": a 3x3x3 block is one connected solid").c_str());
-    // ... and across a size step, through the production multilevel and stepped passes
-    // (R4: these are the two modes the facts say this type may use).
-    CHECK(overlap_components([&](const LatticeGenObserver* o) {
+    // ... and across a size step, through the production multilevel and stepped passes,
+    // exactly as far as the type's R4 verdict says: a step the facts allow joins into one
+    // solid, and a step they refuse is the one that was measured NOT to.
+    const bool doubled_ok = lattice_type_doubled(t).allowed;
+    CHECK((overlap_components([&](const LatticeGenObserver* o) {
             LatticeRegion base;
             base.nx = 6; base.ny = 2; base.nz = 2; base.cell_mm = 4.0;
             std::vector<LatticeLevelSpec> lv(2);
@@ -257,9 +260,12 @@ int main() {
             lv[1].latticed = [](int i, int, int) { return i >= 1; };
             lv[1].radius.uniform_mm = r;
             generate_lattice_multilevel(gt, base, lv, sink, {}, o);
-          }) == 1,
-          (id + ": a Doubled S|S/2 block is one connected solid").c_str());
-    CHECK(overlap_components([&](const LatticeGenObserver* o) {
+          }) == 1) == doubled_ok,
+          (id + ": a Doubled S|S/2 block is one solid exactly when Doubled is allowed").c_str());
+    CHECK(doubled_ok || !lattice_type_doubled(t).reason.empty(),
+          (id + ": a refused Doubled says why").c_str());
+    const bool stepped_ok = lattice_type_stepped(t).allowed;
+    CHECK((overlap_components([&](const LatticeGenObserver* o) {
             std::vector<LatticeSteppedPass> p(2);
             p[0].region.nx = p[0].region.ny = p[0].region.nz = 2;
             p[0].region.cell_mm = 6.0;
@@ -269,8 +275,9 @@ int main() {
             p[1].region.cell_mm = 4.0;
             p[1].radius.uniform_mm = 0.5 * lattice_strut_diameter_mm(t, rho, 4.0);
             generate_lattice_stepped(gt, p, sink, {}, o);
-          }) == 1,
-          (id + ": a Stepped 6 mm | 4 mm interface is one connected solid").c_str());
+          }) == 1) == stepped_ok,
+          (id + ": a Stepped 6 mm | 4 mm interface is one solid exactly when Stepped is "
+                "allowed").c_str());
 
     // The BOUNDARY FINISH on this type: clip to a box with a bore through it, Diagrid
     // skin. Every interior strut and node solid stays inside the part (the clip's
@@ -304,7 +311,7 @@ int main() {
   }
 
   // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"rhombic", "diamond", "bcc", "sc", "gyroid"}) {
+  for (const char* id : {"diamond", "bcc", "sc", "gyroid"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -338,12 +345,12 @@ int main() {
                     lattice_min_printable_cell_mm(LatticeTopology::Fcc, 0.42, 0.0)) < 1e-9,
           "facts fcc: printable cell per bead");
 
-    const LatticeTypeFacts kel = lattice_type_facts("rhombic");
-    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts rhombic: not live");
+    const LatticeTypeFacts kel = lattice_type_facts("diamond");
+    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts diamond: not live");
     CHECK(!kel.numbers_measured && std::isnan(kel.cells_per_member_min) &&
               std::isnan(kel.aesthetic_density_ceiling),
-          "facts rhombic: no number is octet's (NaN until measured)");
-    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts rhombic: refused, with a reason");
+          "facts diamond: no number is octet's (NaN until measured)");
+    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts diamond: refused, with a reason");
     const LatticeTypeFacts sc = lattice_type_facts("sc");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
     const LatticeTypeFacts gy = lattice_type_facts("gyroid");
@@ -482,6 +489,31 @@ int main() {
       band = std::string(e.what()).find("fcc's certifiable band") != std::string::npos;
     }
     CHECK(band, "job: the same region density is refused for fcc, naming its band");
+
+    // R4 at the parse: a live type whose Doubled verdict is NOT a pass is refused a swept
+    // grade, with the verdict's own words; one that passed parses. (Fit lays the same
+    // ladder and goes through the same check in job.cpp; its job needs declared regions,
+    // so it is not rebuilt here.)
+    for (const std::string& gid : lattice_gen_topology_names()) {
+      const LatticeTopology tt = lattice_topology_from_id(gid);
+      const LatticeOption dv = lattice_type_doubled(tt);
+      for (const char* mode : {"swept"}) {
+        const std::string j = std::string(R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "grading": { "topology": ")") + gid + R"(", "min_extrudable_width_mm": 0.4,
+               "cell_mode": ")" + mode + R"(", "cell_min_mm": 2.0, "cell_max_mm": 8.0 },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ] }
+})";
+        bool refused = false;
+        std::string why;
+        try { (void)parse_job(j); } catch (const JobError& e) { refused = true; why = e.what(); }
+        CHECK(refused != dv.allowed && (dv.allowed || why.find(dv.reason) != std::string::npos),
+              (gid + " " + mode + ": parse follows the Doubled verdict" +
+               (refused && dv.allowed ? " (unexpected refusal: " + why + ")" : ""))
+                  .c_str());
+      }
+    }
   }
 
   std::printf("\n%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,

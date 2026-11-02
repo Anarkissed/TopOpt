@@ -393,17 +393,42 @@ constexpr TypeCpmPoint kKelvinCurve[] = {
 constexpr TypeMeasurements kKelvinMeasured = {
     kKelvinDia, 8, 8.0, 0.75, 2.0, kKelvinCurve, 8};
 
+// RHOMBIC DODECAHEDRON -- docs/handoffs/evidence/2026-11-01-lattice-
+// types-k1/rhombic_*.{csv,txt}, the same harness and conditions as FCC's block above.
+// DIAMETER (`law rhombic`): bisected on the converged solid fraction; within the band
+// the vpc48 B3 table differs by at most 5.0 % (rhombic_law.txt, "B3 gap").
+constexpr TypeDiaRow kRhombicDia[] = {
+    {0.05, 0.2849}, {0.08, 0.3667}, {0.10, 0.4132}, {0.15, 0.5166}, {0.20, 0.6081},
+    {0.30, 0.7724}, {0.40, 0.9247}, {0.60, 1.2271},
+};
+// BENDING (`bend rhombic`, rhombic_bend.txt + rhombic_bend_wide.txt): C2b guided
+// cantilever, S = 5 mm, vpc12, 6 cells long, periodic cell rho 0.2963: +119.63 / +31.98
+// / +16.34 / +10.40 / +7.33 / +5.49 / +4.27 / +3.42 / +2.80 / +2.34 % at 1..10 cells
+// (+1.70 at 12). The 2.4 % band is crossed between 9 and 10 cells -> 10.
+constexpr TypeCpmPoint kRhombicCurve[] = {
+    {1.0, 1.1963}, {2.0, 0.3198}, {3.0, 0.1634}, {4.0, 0.1040}, {5.0, 0.0733},
+    {6.0, 0.0549}, {7.0, 0.0427}, {8.0, 0.0342}, {9.0, 0.0280}, {10.0, 0.0234},
+};
+// PERCOLATION (`perc rhombic`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho
+// 0.1724 / 0.3429 / 0.5133 (band low, middle, high), placements 0 / .25 / .5 / .75 cell,
+// vpc16, 4 cells long, 6-connected: a spanning network at every placement and rho from
+// 0.75 cells -> 0.75.
+// AESTHETIC HARD FLOOR: 2 cells is +31.98 % in bending and percolates -> 2.
+constexpr TypeMeasurements kRhombicMeasured = {
+    kRhombicDia, 8, 10.0, 0.75, 2.0, kRhombicCurve, 10};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
       return &kFccMeasured;
+    case LatticeTopology::Rhombic:
+      return &kRhombicMeasured;
     case LatticeTopology::Kelvin:
       return &kKelvinMeasured;
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
     case LatticeTopology::Diamond:
-    case LatticeTopology::Rhombic:
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:

@@ -55,6 +55,10 @@ LatticeOption lattice_type_doubled(LatticeTopology topo) {
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 2,208 ends
     case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 3,936 ends
       return yes();
+    case LatticeTopology::Rhombic:  // rhombic_step.txt: the S|S/2 block is TWO pieces
+      return no("Doubled cells are not offered for the rhombic dodecahedron: measured, its "
+                "struts do not meet across a cell-size halving (an S | S/2 block comes out "
+                "as two separate pieces). Use one cell size, or Stepped.");
     default:
       return no(std::string("Doubled cells are not offered for ") +
                 lattice_topology_name(topo) +
@@ -68,6 +72,7 @@ LatticeOption lattice_type_stepped(LatticeTopology topo) {
     case LatticeTopology::Octet:  // octet_step.txt: 1 component, 0 dangling
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 1,152 ends
     case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 1,992 ends
+    case LatticeTopology::Rhombic:  // rhombic_step.txt: 1 component, 0 dangling of 2,240 ends
       return yes();
     default:
       return no(std::string("Stepped cells are not offered for ") +
