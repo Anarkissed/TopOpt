@@ -369,15 +369,40 @@ constexpr TypeCpmPoint kFccCurve[] = {
 constexpr TypeMeasurements kFccMeasured = {
     kFccDia, 8, 5.0, 0.75, 2.0, kFccCurve, 5};
 
+// KELVIN -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/kelvin_*.{csv,txt}, the
+// same harness and conditions as FCC's block above.
+// DIAMETER (`law kelvin`): bisected on the converged solid fraction; within the band the
+// vpc48 B3 table differs by at most 3.9 % (kelvin_law.txt, "B3 gap").
+constexpr TypeDiaRow kKelvinDia[] = {
+    {0.05, 0.3658}, {0.08, 0.4704}, {0.10, 0.5315}, {0.15, 0.6661}, {0.20, 0.7858},
+    {0.30, 1.0027}, {0.40, 1.2077}, {0.60, 1.6343},
+};
+// BENDING (`bend kelvin`, kelvin_bend.txt + kelvin_bend_wide.txt): C2b guided
+// cantilever, S = 5 mm, vpc12, 6 cells long, periodic cell rho 0.1944: +62.30 / +32.90 /
+// +18.14 / +11.00 / +7.06 / +4.64 / +3.03 / +1.89 % at 1..8 cells (+1.04 at 9, +0.38 at
+// 10, -0.57 at 12). The 2.4 % band is crossed between 7 and 8 cells -> 8.
+constexpr TypeCpmPoint kKelvinCurve[] = {
+    {1.0, 0.6230}, {2.0, 0.3290}, {3.0, 0.1814}, {4.0, 0.1100}, {5.0, 0.0706},
+    {6.0, 0.0464}, {7.0, 0.0303}, {8.0, 0.0189},
+};
+// PERCOLATION (`perc kelvin`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho
+// 0.0938 / 0.2995 / 0.5052 (band low, middle, high), placements 0 / .25 / .5 / .75 cell,
+// vpc16, 4 cells long, 6-connected: a spanning network at every placement and rho from
+// 0.75 cells -> 0.75.
+// AESTHETIC HARD FLOOR: 2 cells is +32.90 % in bending and percolates -> 2.
+constexpr TypeMeasurements kKelvinMeasured = {
+    kKelvinDia, 8, 8.0, 0.75, 2.0, kKelvinCurve, 8};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
       return &kFccMeasured;
+    case LatticeTopology::Kelvin:
+      return &kKelvinMeasured;
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
     case LatticeTopology::SimpleCubic:
     case LatticeTopology::Bcc:
     case LatticeTopology::Diamond:
-    case LatticeTopology::Kelvin:
     case LatticeTopology::Rhombic:
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:

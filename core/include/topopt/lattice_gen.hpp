@@ -49,7 +49,7 @@ class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
 // SAME ownership, clipping, skin and streaming machinery.
 // (Explicit underlying type so the enum-probe tripwire in test_lattice_gen can
 // legally test values beyond the last case.)
-enum class LatticeGenTopology : int { Octet, Fcc };
+enum class LatticeGenTopology : int { Octet, Fcc, Kelvin };
 
 enum class LatticeTopology;  // topopt/lattice.hpp (the certification library)
 

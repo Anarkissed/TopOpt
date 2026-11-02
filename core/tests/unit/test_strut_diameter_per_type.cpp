@@ -65,7 +65,8 @@ int main() {
   // as it goes live, with its own section below). Sections 2 and 7 assert that every
   // OTHER type still refuses.
   auto has_own_law = [](LatticeTopology t) {
-    return t == LatticeTopology::Octet || t == LatticeTopology::Fcc;
+    return t == LatticeTopology::Octet || t == LatticeTopology::Fcc ||
+           t == LatticeTopology::Kelvin;
   };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────
@@ -133,18 +134,18 @@ int main() {
   // ── 3. AND A CERTIFIABLE TYPE IS STILL REFUSED HERE ─────────────────────────
   // The two refusals are about different things and must not be conflated: Kelvin's
   // tensor rows are landed, so it is CERTIFIABLE, and it still has no diameter law.
-  // (This section named FCC until FCC's own law landed; FCC's is checked in 3b.)
+  // (This section named FCC, then Kelvin, until each one's own law landed.)
   {
-    CHECK(lattice_topology_certifiable(LatticeTopology::Kelvin),
-          "Kelvin is certifiable (its tensor rows are landed)");
+    CHECK(lattice_topology_certifiable(LatticeTopology::Rhombic),
+          "Rhombic is certifiable (its tensor rows are landed)");
     bool threw = false;
     try {
-      (void)lattice_strut_diameter_mm(LatticeTopology::Kelvin, 0.30, 8.0);
+      (void)lattice_strut_diameter_mm(LatticeTopology::Rhombic, 0.30, 8.0);
     } catch (const LatticeDiameterLawNotMeasured&) {
       threw = true;
     }
     CHECK(threw,
-          "Kelvin: certifiable and still has no measured diameter law — the two "
+          "Rhombic: certifiable and still has no measured diameter law — the two "
           "refusals are independent");
   }
 
@@ -181,8 +182,8 @@ int main() {
     }
     CHECK(lattice_type_numbers_measured(LatticeTopology::Fcc),
           "fcc: its numbers are measured");
-    CHECK(!lattice_type_numbers_measured(LatticeTopology::Kelvin),
-          "kelvin: its numbers are not measured yet");
+    CHECK(!lattice_type_numbers_measured(LatticeTopology::Rhombic),
+          "rhombic: its numbers are not measured yet");
     CHECK(lattice_cells_per_member_min(LatticeTopology::Fcc) == 5.0 &&
               lattice_percolation_cells_per_member_min(LatticeTopology::Fcc) == 0.75 &&
               aesthetic_cells_per_member_hard_floor(LatticeTopology::Fcc, true) == 2.0,
@@ -205,23 +206,27 @@ int main() {
             lattice_min_density_for_strut(LatticeTopology::Octet, c, w);
         CHECK(std::isfinite(m), "octet: the minimum density still answers");
       }
-      // A type with no diameter law refuses, rather than being handed octet's.
-      bool threw_floor = false;
-      try {
-        (void)lattice_cell_printability_floor_mm(LatticeTopology::Kelvin, w);
-      } catch (const LatticeDiameterLawNotMeasured&) {
-        threw_floor = true;
+      // Every certifiable type with no diameter law of its own refuses, rather than being
+      // handed octet's (a loop, so a type leaves it by going live, not by an edit here).
+      for (LatticeTopology t : all) {
+        if (has_own_law(t) || !lattice_topology_certifiable(t)) continue;
+        bool threw_floor = false;
+        try {
+          (void)lattice_cell_printability_floor_mm(t, w);
+        } catch (const LatticeDiameterLawNotMeasured&) {
+          threw_floor = true;
+        }
+        CHECK(threw_floor,
+              "no law: the printability floor must refuse, not read octet's table");
+        bool threw_min = false;
+        try {
+          (void)lattice_min_density_for_strut(t, 8.0, w);
+        } catch (const LatticeDiameterLawNotMeasured&) {
+          threw_min = true;
+        }
+        CHECK(threw_min,
+              "no law: the minimum density must refuse, not read octet's table");
       }
-      CHECK(threw_floor,
-            "Kelvin: the printability floor must refuse, not read octet's table");
-      bool threw_min = false;
-      try {
-        (void)lattice_min_density_for_strut(LatticeTopology::Kelvin, 8.0, w);
-      } catch (const LatticeDiameterLawNotMeasured&) {
-        threw_min = true;
-      }
-      CHECK(threw_min,
-            "Kelvin: the minimum density must refuse, not read octet's table");
     }
   }
 
@@ -280,26 +285,28 @@ int main() {
           "unprintable (as test_lattice_refusal pins)");
     CHECK(!lattice_stated_density_unprintable(LatticeTopology::Octet, 0.25, c, w),
           "stated density: octet, rho 0.25 there is printable");
-    bool quiet = true;
-    try {
-      for (double nothing : {0.0, -1.0, -1e-300})
-        if (lattice_stated_density_unprintable(LatticeTopology::Kelvin, nothing, c, w))
-          quiet = false;
-    } catch (const std::exception&) {
-      quiet = false;   // it must NOT consult the diameter law when nothing is stated
+    for (LatticeTopology t : all) {
+      if (has_own_law(t)) continue;
+      bool quiet = true;
+      try {
+        for (double nothing : {0.0, -1.0, -1e-300})
+          if (lattice_stated_density_unprintable(t, nothing, c, w)) quiet = false;
+      } catch (const std::exception&) {
+        quiet = false;   // it must NOT consult the diameter law when nothing is stated
+      }
+      CHECK(quiet,
+            "stated density: nothing stated returns false for a type with no diameter "
+            "law, without consulting it");
+      // But a STATED density on such a type does reach the law, and refuses.
+      bool threw = false;
+      try {
+        (void)lattice_stated_density_unprintable(t, 0.25, c, w);
+      } catch (const LatticeDiameterLawNotMeasured&) {
+        threw = true;
+      }
+      CHECK(threw,
+            "stated density: a STATED density on a type with no diameter law refuses");
     }
-    CHECK(quiet,
-          "stated density: nothing stated returns false for a type with no diameter "
-          "law, without consulting it");
-    // But a STATED density on such a type does reach the law, and refuses.
-    bool threw = false;
-    try {
-      (void)lattice_stated_density_unprintable(LatticeTopology::Kelvin, 0.25, c, w);
-    } catch (const LatticeDiameterLawNotMeasured&) {
-      threw = true;
-    }
-    CHECK(threw,
-          "stated density: a STATED density on a type with no diameter law refuses");
   }
 
   // ── 7. R11: THE AESTHETIC CEILING, PER TYPE ─────────────────────────────────
@@ -359,8 +366,11 @@ int main() {
               LatticeTypeReadiness::Live,
           "readiness: fcc is live (lattice types round 1)");
     CHECK(lattice_type_readiness("kelvin", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: kelvin is live");
+    CHECK(lattice_type_readiness("rhombic", gen_real, cert_real) ==
               LatticeTypeReadiness::NotGeneratable,
-          "readiness: kelvin is certifiable and not yet generatable");
+          "readiness: rhombic is certifiable and not yet generatable");
     for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
       char msg[140];
       std::snprintf(msg, sizeof msg, "readiness: %s is in neither set", tetra);

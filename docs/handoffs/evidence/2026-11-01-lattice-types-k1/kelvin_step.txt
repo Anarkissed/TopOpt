@@ -1,0 +1,5 @@
+  [writing ../docs/handoffs/evidence/2026-11-01-lattice-types-k1/kelvin_step.csv]
+STEP kelvin at rho 0.2995 (band middle), S=8 mm, production generator
+  uniform_4x4x4              prims   2688  components   1  ends   3456  dangling    0  -> PASS
+  doubled_S|S/2              prims   3072  components   1  ends   3936  dangling    0  -> PASS
+  stepped_S|2S/3             prims   1572  components   1  ends   1992  dangling    0  -> PASS

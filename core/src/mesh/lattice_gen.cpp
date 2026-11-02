@@ -215,6 +215,10 @@ const CellTable& cell_table(LatticeGenTopology topo) {
       static const CellTable t = generic_table(LatticeTopology::Fcc);
       return t;
     }
+    case LatticeGenTopology::Kelvin: {
+      static const CellTable t = generic_table(LatticeTopology::Kelvin);
+      return t;
+    }
   }
   throw std::invalid_argument("generate_lattice: unknown LatticeGenTopology");
 }
@@ -1016,6 +1020,8 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo) {
   switch (topo) {
     case LatticeGenTopology::Octet:
       return "octet";
+    case LatticeGenTopology::Kelvin:
+      return "kelvin";
     case LatticeGenTopology::Fcc:
       return "fcc";
   }
@@ -1031,7 +1037,7 @@ std::vector<std::string> lattice_gen_topology_names() {
   // name must appear here, so a topology added to the enum + name switch but not
   // to this list fails the suite rather than silently vanishing from pickers.
   std::vector<std::string> out;
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin})
     out.emplace_back(lattice_gen_topology_name(t));
   return out;
 }
@@ -1042,12 +1048,14 @@ LatticeTopology lattice_gen_certificate_topology(LatticeGenTopology topo) {
       return LatticeTopology::Octet;
     case LatticeGenTopology::Fcc:
       return LatticeTopology::Fcc;
+    case LatticeGenTopology::Kelvin:
+      return LatticeTopology::Kelvin;
   }
   throw std::logic_error("lattice_gen_certificate_topology: unmapped LatticeGenTopology");
 }
 
 LatticeGenTopology lattice_gen_topology_from_id(const std::string& id) {
-  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc})
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet, LatticeGenTopology::Fcc, LatticeGenTopology::Kelvin})
     if (id == lattice_gen_topology_name(t)) return t;
   throw std::invalid_argument(
       "lattice_gen_topology_from_id: core cannot generate lattice topology \"" + id +

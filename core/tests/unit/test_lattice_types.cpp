@@ -209,6 +209,7 @@ int main() {
   const std::vector<std::pair<LatticeGenTopology, LatticeTopology>> live = {
       {LatticeGenTopology::Octet, LatticeTopology::Octet},
       {LatticeGenTopology::Fcc, LatticeTopology::Fcc},
+      {LatticeGenTopology::Kelvin, LatticeTopology::Kelvin},
   };
 
   for (const auto& [gt, t] : live) {
@@ -303,7 +304,7 @@ int main() {
   }
 
   // Not-yet-live types are refused by the generator by name.
-  for (const char* id : {"kelvin", "rhombic", "diamond", "bcc", "sc", "gyroid"}) {
+  for (const char* id : {"rhombic", "diamond", "bcc", "sc", "gyroid"}) {
     bool threw = false;
     try { (void)lattice_gen_topology_from_id(id); }
     catch (const std::invalid_argument& e) { threw = std::string(e.what()).find(id) != std::string::npos; }
@@ -337,12 +338,12 @@ int main() {
                     lattice_min_printable_cell_mm(LatticeTopology::Fcc, 0.42, 0.0)) < 1e-9,
           "facts fcc: printable cell per bead");
 
-    const LatticeTypeFacts kel = lattice_type_facts("kelvin");
-    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts kelvin: not live");
+    const LatticeTypeFacts kel = lattice_type_facts("rhombic");
+    CHECK(kel.readiness == LatticeTypeReadiness::NotGeneratable, "facts rhombic: not live");
     CHECK(!kel.numbers_measured && std::isnan(kel.cells_per_member_min) &&
               std::isnan(kel.aesthetic_density_ceiling),
-          "facts kelvin: no number is octet's (NaN until measured)");
-    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts kelvin: refused, with a reason");
+          "facts rhombic: no number is octet's (NaN until measured)");
+    CHECK(!kel.doubled.allowed && !kel.doubled.reason.empty(), "facts rhombic: refused, with a reason");
     const LatticeTypeFacts sc = lattice_type_facts("sc");
     CHECK(sc.directional && !sc.directional_note.empty(), "facts sc: directional note (R3)");
     const LatticeTypeFacts gy = lattice_type_facts("gyroid");
@@ -415,7 +416,7 @@ int main() {
     LatticeSampleSpec b1 = s; b1.size_mm = 42;  CHECK(refused(b1), "sample: a part cell is refused");
     LatticeSampleSpec b2 = s; b2.rho = 0.9;     CHECK(refused(b2), "sample: out of band is refused");
     LatticeSampleSpec b3 = s; b3.bead_mm = 3.0; CHECK(refused(b3), "sample: thinner than a bead is refused");
-    LatticeSampleSpec b4 = s; b4.topology = "kelvin"; CHECK(refused(b4), "sample: a type not live is refused");
+    LatticeSampleSpec b4 = s; b4.topology = "bccz"; CHECK(refused(b4), "sample: a type not live is refused");
   }
 
   // 4d. The job parse: a live type with organic is refused; a region density outside

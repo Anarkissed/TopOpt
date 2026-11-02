@@ -53,6 +53,7 @@ LatticeOption lattice_type_doubled(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Octet:  // PR 235's C4 (zero bridge struts) and octet_step.txt
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 2,208 ends
+    case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 3,936 ends
       return yes();
     default:
       return no(std::string("Doubled cells are not offered for ") +
@@ -66,6 +67,7 @@ LatticeOption lattice_type_stepped(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Octet:  // octet_step.txt: 1 component, 0 dangling
     case LatticeTopology::Fcc:    // fcc_step.txt: 1 component, 0 dangling of 1,152 ends
+    case LatticeTopology::Kelvin: // kelvin_step.txt: 1 component, 0 dangling of 1,992 ends
       return yes();
     default:
       return no(std::string("Stepped cells are not offered for ") +
