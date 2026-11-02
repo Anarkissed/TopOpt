@@ -130,8 +130,12 @@ int main() {
           !lattice_topology_certifiable(LatticeTopology::Fccz) &&
           !lattice_topology_certifiable(LatticeTopology::Reentrant),
           "the three tetragonal topologies are NOT certifiable");
-    check(lattice_certifiable_topology_names().size() == 7,
-          "certifiable-names accessor lists exactly the 7 cubic topologies");
+    // The two sheets (K2) are cubic too, with rows measured on the production wall.
+    check(lattice_topology_certifiable(LatticeTopology::Gyroid) &&
+          lattice_topology_certifiable(LatticeTopology::SchwarzD),
+          "the two sheet topologies are certifiable");
+    check(lattice_certifiable_topology_names().size() == 9,
+          "certifiable-names accessor lists exactly the 9 cubic topologies");
 
     // A new cubic topology (diamond) returns a valid, anisotropic, monotone,
     // Es-linear tensor with a reported band.
