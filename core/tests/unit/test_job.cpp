@@ -1219,14 +1219,14 @@ static void test_a_topology_id_says_why_it_is_refused() {
     CHECK(j.lattice.topology == "octet", "topology: octet still parses");
   }
   // A LIVE type parses on both gates (lattice types round 1: each joins as it lands).
-  for (const char* live : {"fcc", "kelvin", "rhombic", "diamond"}) {
+  for (const char* live : {"fcc", "kelvin", "rhombic", "diamond", "bcc"}) {
     const JobDescription j = parse_job(with_topo("\"lattice\"", live));
     CHECK(j.lattice.topology == live && j.grading.topology == live,
           "topology: a live type parses, and both keys carry it");
   }
   // A KNOWN id that is not live yet: refused, and the message names the type and
   // says it cannot be BUILT yet rather than that it is not octet.
-  for (const char* known : {"sc", "bcc"}) {
+  for (const char* known : {"sc"}) {
     bool threw = false;
     std::string why;
     try {

@@ -442,10 +442,36 @@ constexpr TypeCpmPoint kDiamondCurve[] = {
 constexpr TypeMeasurements kDiamondMeasured = {
     kDiamondDia, 8, 10.0, 0.75, 2.0, kDiamondCurve, 10};
 
+// BCC -- docs/handoffs/evidence/2026-11-01-lattice-types-k1/bcc_*.{csv,txt}, the same
+// harness and conditions as FCC's block above.
+// DIAMETER (`law bcc`): bisected on the converged solid fraction; within the band the
+// vpc48 B3 table differs by at most 4.9 % (bcc_law.txt, "B3 gap").
+constexpr TypeDiaRow kBccDia[] = {
+    {0.05, 0.4018}, {0.08, 0.5157}, {0.10, 0.5817}, {0.15, 0.7262}, {0.20, 0.8531},
+    {0.30, 1.0795}, {0.40, 1.2869}, {0.60, 1.6864},
+};
+// BENDING (`bend bcc`, bcc_bend.txt + bcc_bend_wide.txt): C2b guided cantilever, S = 5
+// mm, vpc12, 6 cells long, periodic cell rho 0.2778: +220.05 / +49.68 / +22.62 / +12.95
+// / +8.35 / +5.78 / +4.20 / +3.18 / +2.48 / +1.98 % at 1..10 cells (+1.32 at 12). The
+// 2.4 % band is crossed between 9 and 10 cells -> 10.
+constexpr TypeCpmPoint kBccCurve[] = {
+    {1.0, 2.2005}, {2.0, 0.4968}, {3.0, 0.2262}, {4.0, 0.1295}, {5.0, 0.0835},
+    {6.0, 0.0578}, {7.0, 0.0420}, {8.0, 0.0318}, {9.0, 0.0248}, {10.0, 0.0198},
+};
+// PERCOLATION (`perc bcc`): members 0.5 / 0.75 / 1 / 1.5 / 2 cells across at rho 0.2105
+// / 0.4017 / 0.5929 (band low, middle, high), placements 0 / .25 / .5 / .75 cell, vpc16,
+// 4 cells long, 6-connected: a spanning network at every placement and rho from 0.75
+// cells -> 0.75.
+// AESTHETIC HARD FLOOR: 2 cells is +49.68 % in bending and percolates -> 2.
+constexpr TypeMeasurements kBccMeasured = {
+    kBccDia, 8, 10.0, 0.75, 2.0, kBccCurve, 10};
+
 const TypeMeasurements* type_measured(LatticeTopology topo) {
   switch (topo) {
     case LatticeTopology::Fcc:
       return &kFccMeasured;
+    case LatticeTopology::Bcc:
+      return &kBccMeasured;
     case LatticeTopology::Diamond:
       return &kDiamondMeasured;
     case LatticeTopology::Rhombic:
@@ -454,7 +480,6 @@ const TypeMeasurements* type_measured(LatticeTopology topo) {
       return &kKelvinMeasured;
     case LatticeTopology::Octet:  // octet's numbers are where they always were (R9)
     case LatticeTopology::SimpleCubic:
-    case LatticeTopology::Bcc:
     case LatticeTopology::Bccz:
     case LatticeTopology::Fccz:
     case LatticeTopology::Reentrant:

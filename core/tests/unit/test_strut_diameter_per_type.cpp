@@ -68,7 +68,8 @@ int main() {
     return t == LatticeTopology::Octet || t == LatticeTopology::Fcc ||
            t == LatticeTopology::Kelvin ||
            t == LatticeTopology::Rhombic ||
-           t == LatticeTopology::Diamond;
+           t == LatticeTopology::Diamond ||
+           t == LatticeTopology::Bcc;
   };
 
   // ── 1. OCTET, BIT FOR BIT ───────────────────────────────────────────────────
@@ -138,16 +139,16 @@ int main() {
   // tensor rows are landed, so it is CERTIFIABLE, and it still has no diameter law.
   // (This section named FCC, then Kelvin, until each one's own law landed.)
   {
-    CHECK(lattice_topology_certifiable(LatticeTopology::Bcc),
-          "Bcc is certifiable (its tensor rows are landed)");
+    CHECK(lattice_topology_certifiable(LatticeTopology::SimpleCubic),
+          "SimpleCubic is certifiable (its tensor rows are landed)");
     bool threw = false;
     try {
-      (void)lattice_strut_diameter_mm(LatticeTopology::Bcc, 0.30, 8.0);
+      (void)lattice_strut_diameter_mm(LatticeTopology::SimpleCubic, 0.30, 8.0);
     } catch (const LatticeDiameterLawNotMeasured&) {
       threw = true;
     }
     CHECK(threw,
-          "Bcc: certifiable and still has no measured diameter law — the two "
+          "SimpleCubic: certifiable and still has no measured diameter law — the two "
           "refusals are independent");
   }
 
@@ -184,8 +185,8 @@ int main() {
     }
     CHECK(lattice_type_numbers_measured(LatticeTopology::Fcc),
           "fcc: its numbers are measured");
-    CHECK(!lattice_type_numbers_measured(LatticeTopology::Bcc),
-          "bcc: its numbers are not measured yet");
+    CHECK(!lattice_type_numbers_measured(LatticeTopology::SimpleCubic),
+          "sc: its numbers are not measured yet");
     CHECK(lattice_cells_per_member_min(LatticeTopology::Fcc) == 5.0 &&
               lattice_percolation_cells_per_member_min(LatticeTopology::Fcc) == 0.75 &&
               aesthetic_cells_per_member_hard_floor(LatticeTopology::Fcc, true) == 2.0,
@@ -377,8 +378,11 @@ int main() {
               LatticeTypeReadiness::Live,
           "readiness: diamond is live");
     CHECK(lattice_type_readiness("bcc", gen_real, cert_real) ==
+              LatticeTypeReadiness::Live,
+          "readiness: bcc is live");
+    CHECK(lattice_type_readiness("sc", gen_real, cert_real) ==
               LatticeTypeReadiness::NotGeneratable,
-          "readiness: bcc is certifiable and not yet generatable");
+          "readiness: sc is certifiable and not yet generatable");
     for (const char* tetra : {"bccz", "fccz", "reentrant"}) {
       char msg[140];
       std::snprintf(msg, sizeof msg, "readiness: %s is in neither set", tetra);
