@@ -5,7 +5,7 @@
 //   • the app's pad (NumberPad: the setting's name and range, §4.33's keys) in a popover beside the number — below it, above
 //     when there is no room (the system's own placement; on the iPad a tap anywhere else closes it);
 //   • Done, or a tap anywhere else, keeps the number; outside its range the nearest allowed value is kept and the page says
-//     so ("Kept to 1 to 40", through `numberPadNote`);
+//     so ("Kept 40 (1 to 40 mm)", through `numberPadNote`);
 //   • with a hardware keyboard connected (iPadOS reports it: `GCKeyboard.coalesced`, watched through
 //     `GCKeyboardDidConnect` / `GCKeyboardDidDisconnect`) no pad opens: the number takes typing in place, Return keeps it,
 //     Esc cancels.
@@ -65,7 +65,7 @@ private struct NumberPadNoteKey: EnvironmentKey {
     static let defaultValue: ((String) -> Void)? = nil
 }
 extension EnvironmentValues {
-    /// Where a page says what a number pad kept ("Kept to 1 to 40"): its toast.
+    /// Where a page says what a number pad kept ("Kept 40 (1 to 40 mm)"): its toast.
     var numberPadNote: ((String) -> Void)? {
         get { self[NumberPadNoteKey.self] }
         set { self[NumberPadNoteKey.self] = newValue }
@@ -122,7 +122,7 @@ struct NumberPadField: ViewModifier {
         guard config.clampsOnClose, !NumberPadProbe.controlOldPad, case .some(.some(let v)) = typed,
               let r = config.range, !r.contains(v) else { return }
         onValue(r.clamp(v))
-        note?(r.keptNote)
+        note?(r.keptNote(r.clamp(v), unit: config.unit))
     }
 }
 

@@ -115,7 +115,7 @@ public struct NumberPadEntry: Equatable, Sendable {
 }
 
 /// ★ B2 (U15, design-system §4.33): the range a number may take, as the pad's header says it ("1 to 40 mm", "150 % and up")
-/// and as the toast says what was kept ("Kept to 1 to 40"). `upper` nil = no top ("Custom… (150 % and up)", app-map §7).
+/// and as the toast says what was kept ("Kept 40 (1 to 40 mm)"). `upper` nil = no top ("Custom… (150 % and up)", app-map §7).
 public struct NumberRange: Equatable, Sendable {
     public var lower: Double
     public var upper: Double?
@@ -132,8 +132,11 @@ public struct NumberRange: Equatable, Sendable {
         guard let upper else { return "\(Self.number(lower))\(u) and up" }
         return "\(Self.number(lower)) to \(Self.number(upper))\(u)"
     }
-    /// The toast after an out-of-range number: "Kept to 1 to 40".
-    public var keptNote: String { "Kept to \(text(unit: nil))" }
+    /// The toast after an out-of-range number: the number kept, then the range — "Kept 40 (1 to 40 mm)", "Kept 150 % (150 %
+    /// and up)" (the reviewer's wording, 11-03: a percent is said with its sign).
+    public func keptNote(_ kept: Double, unit: String?) -> String {
+        "Kept \(Self.number(kept))\(unit == "%" ? " %" : "") (\(text(unit: unit)))"
+    }
 
     static func number(_ v: Double) -> String { String(format: "%g", (v * 100).rounded() / 100) }
 }

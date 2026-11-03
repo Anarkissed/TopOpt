@@ -4,7 +4,7 @@
 // On Topology Setup, Safety margin › Custom… (a number, 150 % and up, app-map §7), with real clicks:
 //   • with no keyboard connected the app's pad opens beside the number (below it, or above), 276 pt, its keys ≥ 44 pt;
 //   • Done keeps the number (a tap anywhere else closes it through the same binding: UIKit's, checked on his iPad);
-//   • out of range keeps the nearest allowed value and the page says so ("Kept to 150 and up");
+//   • out of range keeps the nearest allowed value and the page says so ("Kept 150 % (150 % and up)");
 //   • with a keyboard connected no pad opens: the number takes typing, Return keeps it, Esc cancels.
 // The pad is a popover (its own window): the clicks go to that window (`AppBuildHost.padTap`).
 // RED: `NumberPadProbe.controlOldPad` (and the saved run, NUMBERPAD_RED=1) puts the old pad back — no range, no keyboard path.
@@ -77,7 +77,7 @@ final class NumberPadHostedTests: XCTestCase {
         try press(h, "100")
         try h.padTap("numberPad-done", "Done")
         XCTAssertEqual(p.force.safetyMarginValue, 1.5, accuracy: 1e-9, "★ 100 % is out of range: the nearest allowed (150 %) is kept")
-        XCTAssertEqual(app.toast, "Kept to 150 and up", "★ and the page says so")
+        XCTAssertEqual(app.toast, "Kept 150 % (150 % and up)", "★ and the page says so: the number kept, then the range")
     }
 
     func testWithAKeyboardConnectedNoPadOpensAndReturnKeepsIt() throws {
@@ -122,7 +122,8 @@ final class NumberPadLayoutTests: XCTestCase {
         XCTAssertEqual(NumberPad.Config(title: "Safety margin", unit: "%", range: NumberRange(150, nil)).header,
                        "Safety margin · 150 % and up")
         XCTAssertEqual(NumberPad.Config(title: "Port").header, "Port", "no range: the name alone")
-        XCTAssertEqual(NumberRange(0, 24).keptNote, "Kept to 0 to 24")
+        XCTAssertEqual(NumberRange(1, 40).keptNote(40, unit: "mm"), "Kept 40 (1 to 40 mm)")
+        XCTAssertEqual(NumberRange(150, nil).keptNote(150, unit: "%"), "Kept 150 % (150 % and up)")
         XCTAssertEqual(NumberRange(1, 40).clamp(55), 40)
         XCTAssertEqual(NumberRange(150, nil).clamp(100), 150)
         XCTAssertEqual(NumberRange(150, nil).clamp(9000), 9000)

@@ -1699,7 +1699,7 @@ public struct WorkspacePlaceholder: View {
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
             if rects != bandChipKeepOut { bandChipKeepOut = rects }
         }
-        // ★ B2 (U15): what a number pad kept ("Kept to 1 to 40") is the page's toast
+        // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
         .laneControls(laneControls)
@@ -11712,7 +11712,7 @@ public struct WorkspacePlaceholder: View {
             }
             if safetyCustomDraft != nil {
                 // ★ B2 (U11, U15): Custom… is a number field whose pad opens at once; Done or a tap elsewhere keeps it, and
-                // under 150 % keeps 150 % ("Kept to 150 and up", the app-map's "Custom… (150 % and up)")
+                // under 150 % keeps 150 % ("Kept 150 % (150 % and up)", the app-map's "Custom… (150 % and up)")
                 HStack(spacing: DS.Space.s) {
                     NumberField(key: "safety-custom", title: "Safety margin",
                                 spec: FlexNumberSpec(value: (force.safetyMarginValue * 100).rounded(), unit: "%", step: 25,
