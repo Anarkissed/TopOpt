@@ -7,6 +7,7 @@
 import XCTest
 import SwiftUI
 import simd
+import Metal
 @testable import TopOptFlows
 @testable import TopOptKit
 
@@ -58,6 +59,39 @@ final class ViewCornerB2Tests: XCTestCase {
         // ★ the whole part sits between the planes (nothing clipped)
         var oc2 = framed(true); oc2.zoom(0.2)   // zoomed right in
         XCTAssertNotNil(CameraProjection(camera: oc2, viewportSize: size).project(c.target + c.direction * 50), "the near side is not clipped")
+    }
+
+    /// ★ #362's condition (04:08): under Orthographic, the lattice passes' rays (the octet's ray-march and Flexible's lattice
+    /// pass) go through exactly the point the DRAWN projection puts on that pixel. Red if either pass spreads its rays with
+    /// the lens instead of the drawn field of view.
+    func testUnderOrthographicTheLatticeRaysMatchTheDrawnProjection() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let oct = try XCTUnwrap(LatticeSDFRenderer(device: device, buildPipeline: false))
+        var cam = OrbitCamera()
+        cam.frame(MeshBounds(min: SIMD3(0, 0, 0), max: SIMD3(40, 40, 20), isEmpty: false))
+        cam.setOrientation(azimuth: 0.9, elevation: 0.35)
+        cam.orthographic = true
+        let settle = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: simd_normalize(SIMD3<Float>(0.3, -1, 0.2)))
+        let centre = SIMD3<Float>(23.3, 18.3, 12.1)
+        oct.camera = cam; oct.modelRotation = settle; oct.modelCenter = centre
+        let aspect: Float = 1.37
+        let inv = oct.modelViewProjection(aspect: aspect).inverse
+        let u = oct.makeUniforms(aspect: aspect)
+        let octet = (eye: SIMD3(u.eye.x, u.eye.y, u.eye.z), rayX: SIMD3(u.rayX.x, u.rayX.y, u.rayX.z),
+                     rayY: SIMD3(u.rayY.x, u.rayY.y, u.rayY.z), rayDir: SIMD3(u.rayDir.x, u.rayDir.y, u.rayDir.z))
+        let flexible = FlexibleLatticePass.rayBasis(camera: cam, modelRotation: settle, modelCenter: centre, aspect: aspect)
+        for (name, b) in [("the lattice ray-march", octet), ("Flexible's lattice pass", flexible)] {
+            var worst: Float = 0
+            for (x, y) in [(0, 0), (0.8, 0.6), (-0.9, 0.3), (0.5, -0.85)] as [(Float, Float)] {
+                // the model-space point the drawn projection puts on this pixel, mid-depth
+                let h = inv * SIMD4<Float>(x, y, 0.5, 1)
+                let p = SIMD3(h.x, h.y, h.z) / h.w
+                let rd = simd_normalize(b.rayDir + b.rayX * x + b.rayY * y)
+                let v = p - b.eye, along = simd_dot(v, rd)
+                worst = max(worst, simd_length(v - rd * along) / max(along, 1e-6))
+            }
+            XCTAssertLessThan(worst, 1e-4, "★ \(name): under Orthographic its rays leave the drawn pixel (angle \(worst))")
+        }
     }
 
     func testAScreensCameraFollowsTheOneChoice() {

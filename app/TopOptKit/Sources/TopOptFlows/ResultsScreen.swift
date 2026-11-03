@@ -79,6 +79,8 @@ public struct ResultsScreen: View {
     var smoothing: SmoothingModel?
     /// ★ Results redesign (2026-10-27): the app's undo / redo at the top left, as on every page.
     var undo: (() -> Void)?
+    /// ★ B2 (U1): the workspace's one top-left block (TopLeftBlock), drawn here in its own place. nil = the old row (tests).
+    var topLeftBlock: AnyView?
     var redo: (() -> Void)?
     var canUndo: () -> Bool = { false }
     var canRedo: () -> Bool = { false }
@@ -169,6 +171,7 @@ public struct ResultsScreen: View {
                 onFullScreen: ((Bool) -> Void)? = nil,
                 loadSurfacePoints: @escaping () -> [[SIMD3<Float>]] = { [] },
                 scenarioLoads: ResultsScenarioLoads = ResultsScenarioLoads(),
+                topLeftBlock: AnyView? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -195,6 +198,7 @@ public struct ResultsScreen: View {
         self.latticeEntry = latticeEntry
         self.smoothing = smoothing
         self.undo = undo; self.redo = redo; self.canUndo = canUndo; self.canRedo = canRedo
+        self.topLeftBlock = topLeftBlock
         self.onFullScreen = onFullScreen
         self.scenarioLoads = scenarioLoads
         self.loadSurfacePoints = loadSurfacePoints
@@ -1105,7 +1109,17 @@ public struct ResultsScreen: View {
     /// instead of letting "See Original" and Export overlap. The secondary viz chips
     /// were pulled OUT of here onto the right rail (`vizRail`), which is what freed the
     /// space. Pixels are device QA (the M7 /app/ standard).
-    private var topBar: some View {
+    @ViewBuilder private var topBar: some View {
+        // ★ B2 (U1, notes 17, 18): the workspace's ONE top-left block, in the same place as on every page ("Optimized ✓"
+        // and nothing else: no run time, no machine on the name row)
+        if let topLeftBlock {
+            topLeftBlock.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            legacyTopBar
+        }
+    }
+
+    private var legacyTopBar: some View {
         VStack {
             HStack(spacing: DS.Space.m) {
                 Button(action: onClose) {

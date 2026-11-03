@@ -76,6 +76,28 @@ final class AppBuildHost {
         return f
     }
 
+    // MARK: ScreenProbe (B2, plan.md "How every batch is proven")
+
+    /// The four window sizes every new control is proven at.
+    static let probeSizes: [CGSize] = [landscape13, portrait13, landscape11, moreSpace]
+
+    /// The ScreenProbe checks for one control: drawn, wholly inside the window, a hit area of at least 44 × 44 pt, and not
+    /// under any of `covers` (frames drawn above it: a sheet, a panel, a menu, a chip), unless it lies inside that frame
+    /// (a row inside its own panel). The real click is the caller's (`tap`), so it can assert the state it changes.
+    @discardableResult
+    func probe(_ key: String, _ what: String, covers: [String] = [], minHit: CGFloat = 44,
+               file: StaticString = #filePath, line: UInt = #line) throws -> CGRect {
+        let f = try onScreen(key, what, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(f.width, minHit - 0.5, "★ \(what): its hit area is \(f.width) pt wide", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(f.height, minHit - 0.5, "★ \(what): its hit area is \(f.height) pt tall", file: file, line: line)
+        for c in covers {
+            guard let cf = frames.all[c], c != key else { continue }
+            let inside = cf.insetBy(dx: -0.5, dy: -0.5).contains(f)
+            XCTAssertTrue(inside || !cf.intersects(f.insetBy(dx: 0.5, dy: 0.5)), "★ \(what) is under '\(c)' \(cf): \(f)", file: file, line: line)
+        }
+        return f
+    }
+
     /// Click the control `key` at its middle.
     func tap(_ key: String, _ what: String, settle: Double = 0.8, file: StaticString = #filePath, line: UInt = #line) throws {
         let f = try onScreen(key, what, file: file, line: line)

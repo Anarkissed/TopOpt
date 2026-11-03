@@ -1352,7 +1352,7 @@ public struct WorkspacePlaceholder: View {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
 
-            if !fullScreenPageUp { chrome }
+            if !fullScreenPageUp || (showLatticeWizard && !showLatticePage && !showSmoothingPage && !showFlexiblePage) { chrome }   // ★ B2 (note 16, IMG_0564): the Cells page keeps the top-left block
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
@@ -1675,7 +1675,8 @@ public struct WorkspacePlaceholder: View {
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
                               onFullScreen: { resultsFullScreen = $0 },
                               loadSurfacePoints: { loadFlowSurfacePoints() },
-                              scenarioLoads: resultsScenarioLoads)
+                              scenarioLoads: resultsScenarioLoads,
+                              topLeftBlock: AnyView(resultsTopLeftBlock))
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -3027,76 +3028,26 @@ public struct WorkspacePlaceholder: View {
 
     // MARK: top-left chrome (back + project / material chip)
 
+    /// ★ B2 (U1): Results' copy of the block — the same view, plus "Optimized ✓" (note 18).
+    private var resultsTopLeftBlock: some View {
+        TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
+                     process: project.process, optimized: true, back: { model.backHome() },
+                     rename: { nameDraft = project.name; renaming = true },
+                     canUndo: project.canUndoNow, canRedo: project.canRedoNow,
+                     undo: { project.performUndo() }, redo: { project.performRedo() })
+    }
+
     private var chrome: some View {
-        HStack(spacing: DS.Space.m) {
-            Button { model.backHome() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(DS.Surface.bar.color)
-                        .overlay(Circle().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-            .background(CornerPairStyle.publish("backButton"))   // B1: hosted tests find it by its frame
-
-            HStack(spacing: DS.Space.sm) {
-                // Tap the title to rename.
-                Button { nameDraft = project.name; renaming = true } label: {
-                    Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                }
-                .buttonStyle(.plain)
-                Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
-                // Tap the material to switch it — only same-category materials.
-                Menu {
-                    ForEach(model.materials(for: project.process)) { opt in
-                        Button(opt.name) { model.setCurrentProjectMaterial(opt.name) }
-                    }
-                } label: {
-                    Text(project.material)
-                        .dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
-                }
-            }
-            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            .foregroundStyle(DS.Color.textPrimary.color)
-
-            // Round-6 item 4: Undo / Redo, to the RIGHT of the name/material header. They enable/
-            // disable with the history (`project.undo`); the same actions are reachable by the
-            // two-finger double-/triple-tap on the viewport (see `MetalMeshView`).
-            HStack(spacing: DS.Space.xs) {
-                undoRedoButton("arrow.uturn.backward", label: "Undo",
-                               enabled: project.canUndoNow) { project.performUndo() }
-                undoRedoButton("arrow.uturn.forward", label: "Redo",
-                               enabled: project.canRedoNow) { project.performRedo() }
-            }
-
-            // ★★★ THE MODE TITLE LIVES IN THIS ROW — not in an overlay above it
-            // (maintainer, 2026-08-21: "the title is covering the redo button").
-            //
-            // ★ THREE OVERLAY ATTEMPTS ALL COLLIDED, AND FOR ONE REASON: an overlay
-            // has to be TOLD where the buttons end, and every mechanism for telling it
-            // was conditional. `TopClusterEdgeKey` is only filled in while the rebuild
-            // notification is on screen; a fixed 260 pt centred on the window lands on
-            // Redo at this title length. Putting the pill IN the row makes the
-            // clearance a layout fact instead of a measurement — HStack cannot overlap
-            // its own children, at any title length, on any device.
-            //
-            // It still fills the span he asked for: `maxWidth: .infinity` takes
-            // everything between Redo and the trailing inset kept for Settings + the
-            // orientation cube.
-            // ★ B4: the type is named by the capsule (● Structural ⌄); its About row opens the mode sheet that
-            // this chip opened, so the chip is gone from the row.
-
-        }
+        // ★ B2 (U1, approved design 2026-11-02): THE ONE TOP-LEFT BLOCK (TopLeftBlock.swift) — ‹ where Back goes · name,
+        // version · material · undo · redo; Results draws the same view. Its insets are the ones this row always had.
+        TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
+                     process: project.process, back: { model.backHome() },
+                     rename: { nameDraft = project.name; renaming = true },
+                     canUndo: project.canUndoNow, canRedo: project.canRedoNow,
+                     undo: { project.performUndo() }, redo: { project.performRedo() })
         // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
         // The way back sits under it (`StageNavPlacement`) and the lattice MODE takes
         // the top-CENTRE slot, so nothing competes for this one.
-        .padding(.top, DS.Space.xl3)
-        .padding(.leading, DS.Space.xl4)
         // ★ reports its TRAILING edge, for the banner's gap.
         .background(GeometryReader { g in
             Color.clear.preference(key: TopClusterEdgeKey.self,
@@ -12950,6 +12901,7 @@ extension WorkspacePlaceholder {
         .dsShadow(DS.Shadow.panel)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("edit-faces-header")
+        .background(CornerPairStyle.publish("capsule"))   // ★ B2 (U1): Edit faces' stage row, in the capsule's place
         .overlay(alignment: .bottomLeading) {
             if editFacesDiscardAsking {
                 Text(EditFacesCopy.discardAsk).font(.system(size: 13, weight: .semibold))
