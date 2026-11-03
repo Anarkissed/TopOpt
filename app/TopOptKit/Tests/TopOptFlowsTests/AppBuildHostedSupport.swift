@@ -1,0 +1,127 @@
+// AppBuildHostedSupport — the whole-app build's hosted-test helpers (approved design 2026-11-02, plan.md "How every batch is
+// proven"). B1 starts it; B2 grows it into ScreenProbe (the four window sizes, the cover and hit-area checks).
+//
+// It hosts the WHOLE real page (`WorkspacePlaceholder`, or the Library root) offscreen, reads every control's laid-out frame
+// through `ChromeKeepOutKey`, and clicks with real mouse events through the window — never a direct call — the pattern
+// LoadScenarioHostedTests set (the reviewer's ruling 2026-10-26 13:22).
+#if canImport(AppKit) && canImport(MetalKit)
+import XCTest
+import SwiftUI
+import AppKit
+@testable import TopOptFlows
+@testable import TopOptKit
+
+final class AppBuildHostWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+@MainActor
+final class AppBuildHost {
+    final class Frames { var all: [String: CGRect] = [:] }
+    let window: NSWindow
+    let view: NSView
+    let size: CGSize
+    let frames: Frames
+
+    /// The window sizes the design is proven at (plan.md): 13″ landscape, 13″ portrait, 11″ landscape, "More Space".
+    static let landscape13 = CGSize(width: 1376, height: 1032)
+    static let portrait13 = CGSize(width: 1032, height: 1376)
+    static let landscape11 = CGSize(width: 1180, height: 820)
+    static let moreSpace = CGSize(width: 1590, height: 1192)
+
+    init<V: View>(_ v: V, size: CGSize, test: XCTestCase) {
+        let frames = Frames()
+        let root = AnyView(v.onPreferenceChange(ChromeKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
+        let hv = NSHostingView(rootView: root)
+        hv.frame = CGRect(origin: .zero, size: size)
+        _ = NSApplication.shared
+        let w = AppBuildHostWindow(contentRect: CGRect(x: -20000, y: -20000, width: size.width, height: size.height),
+                                   styleMask: [.borderless], backing: .buffered, defer: false)
+        w.appearance = NSAppearance(named: .darkAqua)
+        w.contentView = hv
+        w.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+        w.orderFrontRegardless()
+        w.makeKey()
+        hv.layoutSubtreeIfNeeded()
+        test.addTeardownBlock { @MainActor in w.orderOut(nil); w.contentView = nil }
+        self.window = w; self.view = hv; self.size = size; self.frames = frames
+    }
+
+    func pump(_ s: Double) {
+        let end = Date().addingTimeInterval(s)
+        while Date() < end { _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+
+    /// A real click at `p` (top-left origin, as the frames are).
+    func click(_ p: CGPoint, settle: Double = 0.8) {
+        let loc = NSPoint(x: p.x, y: size.height - p.y)
+        for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let e = NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            window.sendEvent(e)
+            pump(0.06)
+        }
+        pump(settle)
+    }
+
+    /// The control `key` as he sees it: laid out, a real size, wholly inside the window.
+    func onScreen(_ key: String, _ what: String, file: StaticString = #filePath, line: UInt = #line) throws -> CGRect {
+        let f = try XCTUnwrap(frames.all[key], "★ \(what) is not on the screen (no frame '\(key)'); frames: \(frames.all.keys.sorted())",
+                              file: file, line: line)
+        XCTAssertGreaterThan(f.width, 4, what, file: file, line: line)
+        XCTAssertGreaterThan(f.height, 4, what, file: file, line: line)
+        XCTAssertTrue(CGRect(origin: .zero, size: size).insetBy(dx: -0.5, dy: -0.5).contains(f), "★ \(what) lies outside the window: \(f)",
+                      file: file, line: line)
+        return f
+    }
+
+    /// Click the control `key` at its middle.
+    func tap(_ key: String, _ what: String, settle: Double = 0.8, file: StaticString = #filePath, line: UInt = #line) throws {
+        let f = try onScreen(key, what, file: file, line: line)
+        click(CGPoint(x: f.midX, y: f.midY), settle: settle)
+    }
+
+    /// Open the native menu behind `key` with a real click and pick the first enabled item whose title contains `title`
+    /// (driven while it tracks, as FlexibleH39HostedTests does). Returns the titles the menu offered.
+    @discardableResult
+    func pickFromMenu(_ key: String, _ title: String, what: String) throws -> [String] {
+        let f = try onScreen(key, what)
+        var offered: [String] = []
+        let obs = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { n in
+            guard let m = n.object as? NSMenu else { return }
+            RunLoop.main.perform(inModes: [.eventTracking, .default, .modalPanel]) {
+                offered = m.items.map { $0.title + ($0.isEnabled ? "" : " [off]") }
+                guard let i = m.items.firstIndex(where: { $0.title.contains(title) && $0.isEnabled }) else { m.cancelTracking(); return }
+                m.cancelTracking()
+                m.performActionForItem(at: i)
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(obs) }
+        click(CGPoint(x: f.midX, y: f.midY), settle: 2)
+        return offered
+    }
+
+    /// Opt-in (APP_BUILD_SHOT_DIR=<dir>): the page as a PNG for him (the 3D view draws nothing offscreen).
+    func picture(_ name: String) throws {
+        guard let dir = ProcessInfo.processInfo.environment["APP_BUILD_SHOT_DIR"] else { return }
+        view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: dir).appendingPathComponent(name))
+    }
+}
+
+/// Lookalike results (never his job inputs): `n` accepted variants on a one-triangle mesh, the shape Library tests use.
+enum AppBuildFixtures {
+    static func outcome(_ n: Int = 3) -> OptimizeOutcome {
+        OptimizeOutcome(variants: (0..<n).map { i in
+            OptimizeVariant(requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 10 + Double(i),
+                            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true, v3Passes: true,
+                            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2])
+        }, stoppedOnMargin: false, cancelled: false, acceptedCount: n, voxelVolumeMM3: 1,
+           gridNx: 2, gridNy: 2, gridNz: 2, gridOrigin: .zero, spacing: 1)
+    }
+}
+#endif

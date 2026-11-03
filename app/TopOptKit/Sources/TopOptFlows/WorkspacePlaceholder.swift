@@ -5839,6 +5839,13 @@ public struct WorkspacePlaceholder: View {
             editFacesHostReturn = nil
             leaveEditFacesTools()
         }
+        // ★ B1 (note 16, approved design 2026-11-02): changing stage closes Topology's Results / Smooth FIRST. Both draw over
+        // every stage (Results is mounted above the stage row), so the stage changed underneath them and the ● menu line went.
+        // The same way out the capsule's Setup segment takes.
+        if dest != .topology {
+            if showSmoothingPage { closeSmoothingPage() }
+            viewOriginal = true
+        }
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
