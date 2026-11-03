@@ -536,6 +536,12 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
         cells_covering_span(i * grid.spacing, grid.spacing, 0.0, S0, P.nx, &i0, &i1);
         cells_covering_span(j * grid.spacing, grid.spacing, 0.0, S0, P.ny, &j0, &j1);
         cells_covering_span(k * grid.spacing, grid.spacing, 0.0, S0, P.nz, &k0, &k1);
+        // The bounds (printability, the member ceiling) must hold in EVERY cell covering
+        // the voxel; the region's DERIVED cell is that region's intent, read where the
+        // region owns the voxel -- the cell holding its centre. Spread to a cell the voxel
+        // only grazes, it carried across region boundaries, and on a tie between two
+        // regions (decided by declared id) made the declaration order change the part
+        // (test_region_ownership).
         for (int ck = k0; ck <= k1; ++ck)
           for (int cj = j0; cj <= j1; ++cj)
             for (int ci = i0; ci <= i1; ++ci) {
@@ -543,8 +549,14 @@ CellSizePlan plan_cell_sizes_fit(const VoxelGrid& grid,
               ++vox[c];
               if (rho[e] < rho_min[c]) rho_min[c] = rho[e];
               if (width[e] < width_min[c]) width_min[c] = width[e];
-              if (desired_cell_mm[e] < want_min[c]) want_min[c] = desired_cell_mm[e];
             }
+        {
+          const std::size_t c = P.index(
+              std::min(P.nx - 1, static_cast<int>(std::floor((i + 0.5) * grid.spacing / S0))),
+              std::min(P.ny - 1, static_cast<int>(std::floor((j + 0.5) * grid.spacing / S0))),
+              std::min(P.nz - 1, static_cast<int>(std::floor((k + 0.5) * grid.spacing / S0))));
+          if (desired_cell_mm[e] < want_min[c]) want_min[c] = desired_cell_mm[e];
+        }
       }
 
   // The level each base cell WANTS: the coarsest ladder rung at or below its own

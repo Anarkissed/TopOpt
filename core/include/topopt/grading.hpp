@@ -687,6 +687,12 @@ struct GradedField {
   // clamp-counterfactual certification (run_job) uses to know WHICH voxels to
   // keep solid in the comparison solve.
   std::vector<char> clamp_flags;
+  // ★ Finding 7: the band-clamped LAW density of each voxel the swept plan's cover rule
+  // kept solid only because ANOTHER cell covering it was refused (its own cell was laid),
+  // 0 elsewhere (grid-indexed). The swept export never lays that other cell, so such a
+  // voxel is solid there; a run that lays its OWN cells (a stated "stepped_cells" plan)
+  // reads its density from here where the plan sent none.
+  std::vector<double> cover_dropped_rho;
 
   // ── ★ UTILISATION ACCOUNTING (task 2026-08-20-lattice-only-grading, §0) ───────
   // All zero on the peak-relative path, which is what keeps a legacy run identical.

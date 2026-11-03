@@ -423,6 +423,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
   post.mask.assign(n, 0);
   post.relative_density.assign(n, 0.0);
   out.clamp_flags.assign(n, 0);
+  out.cover_dropped_rho.assign(n, 0.0);
 
   const double kInf = std::numeric_limits<double>::infinity();
   double rho_min_used = kInf, rho_max_used = 0.0;
@@ -1012,6 +1013,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
               static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
           if (out.cell_plan.cell_size_at(ci, cj, ck) > 0.0) {
+            out.cover_dropped_rho[e] = clamp_rho(e, rho_of(e));
             ++out.solid_fallback_voxels;
             continue;
           }

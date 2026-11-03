@@ -7262,6 +7262,14 @@ LatticeVariantOutcome lattice_one_variant(
         ++plan_rho_from_law;
         continue;
       }
+      // ★ Finding 7: the law graded it, and only the swept plan's cover rule (a cell this
+      // plan does not lay) kept it solid.
+      if (graded && e < gf.cover_dropped_rho.size() && gf.cover_dropped_rho[e] > 0.0) {
+        plan_rho[e] = gf.cover_dropped_rho[e];
+        plan_rho_from_law_flag[e] = 1;
+        ++plan_rho_from_law;
+        continue;
+      }
       ++plan_rho_absent;
     }
     // A can't-happen still refuses, and names what it refuses (the standing rule). A
