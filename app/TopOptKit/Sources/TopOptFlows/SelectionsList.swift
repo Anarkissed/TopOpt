@@ -223,9 +223,9 @@ public struct SelectionsList: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // a trash's ask takes the header's line — the same height, so nothing moves and [Cancel] stays exactly where the
-            // trash was
-            if !collapsed, let id = deleteAsk, let g = groups.first(where: { $0.id == id }), !ConfirmInPlace.controlOldPlacement {
+            // ★ B2 (note 6): the trash's ask is a card under its group's line (DeleteConfirm); the header keeps its line. (The red
+            // control: the old ask — one square-tinted line in the header's place.)
+            if !collapsed, DeleteConfirm.controlOldHeaderLine, let id = deleteAsk, let g = groups.first(where: { $0.id == id }) {
                 DeleteConfirm(name: g.name, delete: confirmDelete, oneLine: true, idPrefix: idPrefix, ask: ask)
                     .frame(height: Self.lineHeight)
             } else {
@@ -240,34 +240,41 @@ public struct SelectionsList: View {
                         .accessibilityIdentifier("\(idPrefix)-sel-empty")
                 } else {
                     // as tall as its rows, scrolling past 420 (a 420 pt scroll view with three short lines was a tall empty panel)
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            if let folders {
-                                ForEach(folders) { f in
-                                    f.header
-                                    // ★ his iPad 14:13: the folder's contents sit tabbed in, a guide line down their edge
-                                    VStack(spacing: 0) {
-                                        ForEach(f.groups) { g in section(g, accessory: f.accessory) }
-                                        if let t = f.tail { t }
+                    ScrollViewReader { reader in
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                if let folders {
+                                    ForEach(folders) { f in
+                                        f.header
+                                        // ★ his iPad 14:13: the folder's contents sit tabbed in, a guide line down their edge
+                                        VStack(spacing: 0) {
+                                            ForEach(f.groups) { g in section(g, accessory: f.accessory) }
+                                            if let t = f.tail { t }
+                                        }
+                                        .padding(.leading, Self.folderIndent)
+                                        .overlay(alignment: .leading) {
+                                            Rectangle().fill(DS.Color.strokeSubtle.color).frame(width: 1)
+                                                .padding(.leading, Self.folderIndent / 2 + 6).padding(.vertical, 4)
+                                        }
                                     }
-                                    .padding(.leading, Self.folderIndent)
-                                    .overlay(alignment: .leading) {
-                                        Rectangle().fill(DS.Color.strokeSubtle.color).frame(width: 1)
-                                            .padding(.leading, Self.folderIndent / 2 + 6).padding(.vertical, 4)
-                                    }
+                                    ForEach(looseGroups) { g in section(g) }
+                                } else {
+                                    ForEach(groups) { g in section(g) }
                                 }
-                                ForEach(looseGroups) { g in section(g) }
-                            } else {
-                                ForEach(groups) { g in section(g) }
                             }
+                                .padding(.vertical, DS.Space.xs)
+                                .background(GeometryReader { g in
+                                    Color.clear.onAppear { contentHeight = g.size.height }
+                                        .onChange(of: g.size.height) { contentHeight = $0 }
+                                })
                         }
-                            .padding(.vertical, DS.Space.xs)
-                            .background(GeometryReader { g in
-                                Color.clear.onAppear { contentHeight = g.size.height }
-                                    .onChange(of: g.size.height) { contentHeight = $0 }
-                            })
+                        .frame(height: listHeight)
+                    // a card under the panel's lowest lines never opens out of sight
+                    .onChange(of: deleteAsk) { id in
+                        guard let id else { return }
+                        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.2)) { reader.scrollTo(Self.askScrollID(id)) } }
                     }
-                    .frame(height: listHeight)
+                    }
                 }
                 if chosenHeight != nil, !groups.isEmpty { grip }
                 if let footer {
@@ -322,7 +329,7 @@ public struct SelectionsList: View {
         let isPicked = picked == g.id
         VStack(alignment: .leading, spacing: 0) {
             groupLine(g, picked: isPicked, accessory: accessory)
-            if deleteAsk == g.id, ConfirmInPlace.controlOldPlacement { deleteConfirm(g) }   // (red control)
+            if deleteAsk == g.id, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
             if isPicked || isOpen?(g.id) == true { rows(g) }
         }
         .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
@@ -386,15 +393,17 @@ public struct SelectionsList: View {
                 .accessibilityIdentifier("\(idPrefix)-sel-eye-\(g.id.uuidString)")
             }
             if !locked {
-                Button { askDelete(g.id) } label: {
+                // ★ B2 (note 6): the trash stays a trash while it asks — a second tap only cancels ([Delete] is in the card, a
+                // line down)
+                Button { deleteAsk == g.id ? cancelDelete() : askDelete(g.id) } label: {
                     Image(systemName: "trash").font(.system(size: 14, weight: .medium))
                         .foregroundStyle(DS.Color.textSecondary.color)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // [Cancel] takes the trash's place; the question and [Delete] go in the header's
-                .modifier(CancelInPlace(asking: deleteAsk == g.id, keepKey: "deleteCancel", idPrefix: idPrefix,
-                                        cancel: cancelDelete))
+                // (the red control's old ask: [Cancel] on the trash, the question and [Delete] in the header's line)
+                .modifier(CancelInPlace(asking: deleteAsk == g.id && DeleteConfirm.controlOldHeaderLine, keepKey: "deleteCancel",
+                                        idPrefix: idPrefix, cancel: cancelDelete))
                 .background(publish("selTrash-\(g.id.uuidString)"))
                 .accessibilityLabel(ask?(g.name) ?? "Delete \(g.name), here and in Topology")
                 .accessibilityIdentifier("\(idPrefix)-sel-trash-\(g.id.uuidString)")
@@ -404,11 +413,14 @@ public struct SelectionsList: View {
         .background(publish("selGroup-\(g.id.uuidString)"))
     }
 
-    /// "Delete Group C here and in Topology?" [Delete] — the red control's old place, under the group's line.
+    /// ★ B2 (note 6): the trash's ask — a card 4 pt under the group's line, its inset in from the row's sides and under it.
     private func deleteConfirm(_ g: SelectionGroup) -> some View {
-        DeleteConfirm(name: g.name, delete: confirmDelete, idPrefix: idPrefix, ask: ask)
-            .padding(.horizontal, DS.Space.m).padding(.bottom, DS.Space.s)
+        DeleteConfirm(name: g.name, delete: confirmDelete, cancel: cancelDelete, idPrefix: idPrefix, ask: ask)
+            .padding(.horizontal, DeleteConfirm.cardInset).padding(.top, 4).padding(.bottom, DeleteConfirm.cardInset)
+            .id(Self.askScrollID(g.id))
     }
+
+    static func askScrollID(_ id: UUID) -> String { "deleteAsk-\(id.uuidString)" }
 
     /// The grip's height for a drag: the panel grows about its centre, so twice the finger; never under two lines, never past
     /// the screen's room.
@@ -570,64 +582,90 @@ struct InfoButton: View {
     }
 }
 
-/// The trash's confirm: the question on its own line, whole, and [Delete] under it on the LEFT (the chip); in the Selections list
-/// one line in the header's place (`oneLine`). [Cancel] is on the trash itself (CancelInPlace) — a second tap on the trash only
-/// cancels; [Delete] is a line down and to the left.
+/// ★ B2 (note 6, approved design 2026-11-02, design-system §4.13, mockup #topo-delete): the trash's ask — a card under its
+/// group's line: the question, then [Cancel] [Delete] at its right. Its corners follow the panel's (its radius the panel's minus
+/// its inset, 22 − 8) and it is never wider than its row. It was one square-tinted line in the header's place, whose corners
+/// passed the panel's ("hard corners that pass the modal's round corners"); that line is kept only as the red control.
 struct DeleteConfirm: View {
     let name: String
     let delete: () -> Void
-    /// The Selections list's ask — [Delete] then the question on ONE line, in the list header's place (the list never grows,
-    /// so the trash's spot — now [Cancel] — never moves).
+    var cancel: (() -> Void)? = nil
+    /// The red control's old ask: [Delete] then the question on ONE line in the header's place.
     var oneLine = false
     var idPrefix: String = "stage"
     /// The question (B3: Topology's "from every stage"); nil: SelectionsCopy.deleteAsk.
     var ask: ((String) -> String)? = nil
+
+    /// The card's inset from its row's sides and from what follows it.
+    static let cardInset: CGFloat = 8
+    /// The panel's radius minus the inset, so the card's corners never pass the panel's.
+    static var cardCornerRadius: CGFloat { DS.Radius.panel - cardInset }
+    /// ★ RED CONTROL (hosted): the old ask — a square tint across the header's line.
+    @MainActor static var controlOldHeaderLine = false
+
     var body: some View {
-        if oneLine { line } else { stacked }
+        if oneLine { line } else { card }
     }
 
-    private var deleteButton: some View {
-        Button(action: delete) {
-            Text(SelectionsCopy.delete).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                .padding(.horizontal, DS.Space.m).frame(height: 36)
-                .background(Capsule().fill(DS.Color.danger.color))
-                .frame(height: 44).contentShape(Rectangle())
+    private var question: String { ask?(name) ?? SelectionsCopy.deleteAsk(name) }
+
+    private func cardButton(_ title: String, red: Bool, key: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(red ? Color.white : DS.Color.textPrimary.color).lineLimit(1).fixedSize()
+                .padding(.horizontal, 14).frame(height: 34)
+                .background(Capsule().fill(red ? DS.Color.danger.color : DS.Color.chipSolid.color))
+                .frame(minWidth: ConfirmLayout.target, minHeight: ConfirmLayout.target).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(GeometryReader { g in Color.clear.preference(key: ChromeKeepOutKey.self, value: ["deleteConfirm": g.frame(in: .global)]) }
-            .allowsHitTesting(false))
-        .accessibilityIdentifier("\(idPrefix)-delete-confirm")
+        .background(ConfirmInPlace.publish(key))
+        .accessibilityIdentifier(id)
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            // never fixed-size (a 50-character question widened the 348 pt list and cut every trash)
+            Text(question).font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+                .accessibilityIdentifier("\(idPrefix)-delete-question")
+            HStack(spacing: DS.Space.s) {
+                Spacer(minLength: 0)
+                cardButton(ConfirmCopy.cancel, red: false, key: "deleteCancel", id: "\(idPrefix)-delete-cancel") { cancel?() }
+                cardButton(SelectionsCopy.delete, red: true, key: "deleteConfirm", id: "\(idPrefix)-delete-confirm", action: delete)
+            }
+        }
+        // 12 pt in; the buttons' 44 pt targets keep 5 pt of their own under the 34 pt pills
+        .padding(.horizontal, 12).padding(.bottom, 5)
+        .background(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
+            .fill(DS.Color.danger.opacity(0.10).color)
+            .overlay(RoundedRectangle(cornerRadius: Self.cardCornerRadius, style: .continuous)
+                .strokeBorder(DS.Color.danger.opacity(0.35).color, lineWidth: 1))
+            .background(ConfirmInPlace.publish("deleteAskShape")))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("\(idPrefix)-delete-ask")
     }
 
     private var line: some View {
         HStack(spacing: DS.Space.s) {
-            deleteButton
-            Text(ask?(name) ?? SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
+            Button(action: delete) {
+                Text(SelectionsCopy.delete).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, DS.Space.m).frame(height: 36)
+                    .background(Capsule().fill(DS.Color.danger.color))
+                    .frame(height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(ConfirmInPlace.publish("deleteConfirm"))
+            .accessibilityIdentifier("\(idPrefix)-delete-confirm")
+            Text(question).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("\(idPrefix)-delete-question")
         }
         .padding(.horizontal, DS.Space.m)
         .background(DS.Color.danger.opacity(0.12).color)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("\(idPrefix)-delete-ask")
-    }
-
-    private var stacked: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // never fixed-size (a 50-character question widened the 348 pt list and cut every trash)
-            Text(ask?(name) ?? SelectionsCopy.deleteAsk(name)).font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Color.textPrimary.color).lineLimit(1).minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, DS.Space.s).padding(.horizontal, DS.Space.xs)
-                .accessibilityIdentifier("\(idPrefix)-delete-question")
-            HStack(spacing: DS.Space.s) {
-                deleteButton
-                Spacer(minLength: DS.Space.xs)
-            }
-        }
-        .padding(.horizontal, DS.Space.s)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Color.danger.opacity(0.12).color))
+        .background(ConfirmInPlace.publish("deleteAskShape"))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(idPrefix)-delete-ask")
     }
