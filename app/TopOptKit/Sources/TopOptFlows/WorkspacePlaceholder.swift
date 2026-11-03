@@ -821,6 +821,7 @@ public struct WorkspacePlaceholder: View {
                 // B3: Save as new project runs in the copy as it opens (RerunCard; as #362's H50c)
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
+                    topoNotice.version = versionLabel   // ★ B3: "v8 is ready"
                     if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
@@ -11845,6 +11846,7 @@ public struct WorkspacePlaceholder: View {
                 selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
             } label: {
                 HStack(spacing: 4) { Image(systemName: "plus"); Text("Add a load scenario").dsStyle(DS.TypeScale.caption).fontWeight(.semibold) }
+                    .frame(minHeight: 44).contentShape(Rectangle())   // ★ B3 (AddScenarioVisibleHostedTests): a 44 pt target
             }
             .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color)
             .background(GeometryReader { geo in
@@ -12657,6 +12659,7 @@ public struct WorkspacePlaceholder: View {
     private func optimizeSummary(lattice: Bool) -> String {
         if lattice, let why = latticeDesignBoxConflict { return why }   // ★ B3: only a run that carries the lattice
         if lattice, let why = latticeOptimizeRefusal { return why }
+        if !lattice, let b = topologyBlock { return b.words }   // ★ B3 (U6, O2): ≤ 5 words; the fix chip is the corner's fix line
         if let why = loadDirectionRefusal { return why }
         if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
@@ -12814,7 +12817,9 @@ public struct WorkspacePlaceholder: View {
         let mac = compute.rememberedName ?? "your Mac"
         let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
         let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
-            : macNotAnswering && ok ? Self.macNotAnsweringLine : summary
+            : macNotAnswering && ok ? Self.macNotAnsweringLine
+            : !ok && run.phase != .running && sameSettingsAsLast(lattice: lattice) ? TopologyRunCopy.sameSettings(versionLabel)   // ★ B3 (§4.6)
+            : summary
         return Button {
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
@@ -13069,7 +13074,7 @@ extension WorkspacePlaceholder {
     // MARK: the corner pair (A1)
 
     var topologyCornerPair: some View {
-        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil) {
+        CornerPair(geometry: chromeGeometry, open: setupPanelOpen ? "setup" : nil, fixLine: topologyFixLine) {   // ★ B3 (U6, U12)
             topologySetupChip
         } split: {
             topologyOptimizeSplit
@@ -13143,11 +13148,79 @@ extension WorkspacePlaceholder {
         .background(CornerPairStyle.publish("optimizeSplit"))
     }
 
+    /// ★ B3 (U6, O2): why Topology's Optimize can't start, as the fix line says it — the same order the button's gate reads.
+    var topologyBlock: TopologyBlock? {
+        for g in selection.groups {
+            if case .refused(let why)? = project.loadDirection(for: g.id) { return .noDirection(group: g.id, why: why) }
+        }
+        if emptyRegionRefusal != nil, let g = selection.groups.first(where: { g in
+            let k = force.kind(for: g.id)
+            return (k.isAnchor || k.isLoad || force.isProtected(g.id)) && g.regionIDs.contains { project.runRegionIDs([$0]).isEmpty }
+        }) { return .emptyPiece(group: g.id) }
+        if force.phase == .setup { return .gravity }
+        if force.hasPending(in: selection.groups, latticeRoleGroups: latticeRoleGroupIDs) { return .pendingGroup }
+        let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
+        if !(a > 0 && l > 0), !project.minimizePlastic { return .noLoadCase }
+        return nil
+    }
+
+    /// The block's one tap: navigation and the setup it names, never a run.
+    func fixTopologyBlock(_ b: TopologyBlock) {
+        switch b {
+        case .gravity:
+            force.enterGravitySetup(); selection.clearActive(); gravityDraft = nil; gravitySnapLabel = nil
+        case .pendingGroup:
+            if let g = selection.groups.first(where: { force.needsRole($0.id, latticeRoleGroups: latticeRoleGroupIDs) }) {
+                selectionsCollapsed = false; selection.setActive(g.id)
+            }
+        case .noLoadCase:
+            selectionsCollapsed = false
+            model.toast = "Tap a face, then choose Anchor or Load"
+        case .noDirection(let g, _), .emptyPiece(let g):
+            selectionsCollapsed = false; selection.setActive(g)
+        }
+    }
+
+    /// ★ B3 (U12): the corner's fix line while Topology's Optimize is blocked — ≤ 5 words · the fix chip · (i).
+    private var topologyFixLine: AnyView? {
+        guard let b = topologyBlock, run.phase != .running else { return nil }
+        return AnyView(HStack(spacing: DS.Space.s) {
+            Text(b.words).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).fixedSize()
+            Button { fixTopologyBlock(b) } label: {
+                Text(b.fix).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, DS.Space.m).frame(height: 32)
+                    .background(Capsule().fill(DS.Color.accent.color))
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("topologyFixChip"))
+            .accessibilityIdentifier("topology-fix-chip")
+            if let info = b.info { InfoTip(key: "topologyBlock", text: info, label: "Why Optimize can\u{2019}t start") }
+        }
+        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        .background(CornerPairStyle.publish("topologyFixLine")))
+    }
+
+    /// ★ B3: this project's version as the Library names it ("v8"); nil off the Library.
+    var versionLabel: String? { model.library.version(project.id).map { "v\($0.number)" } }
+
+    /// ★ B3 (§4.6 "same settings"): Optimize is grey because nothing changed since this project's last run.
+    private func sameSettingsAsLast(lattice: Bool) -> Bool {
+        guard let last = lastRunRequest else { return false }
+        return RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome)
+    }
+
     /// ★ B3: ⌃ "Optimize, then lattice" runs once a lattice is set and the lattice run may start.
     private var optimizeThenLatticeOK: Bool { project.lattice.enabled && canOptimize(lattice: true) }
     /// Its line: the lattice run's own summary, or why it can't start.
     private var optimizeThenLatticeLine: String {
-        project.lattice.enabled ? optimizeSummary(lattice: true) : TopologyRunCopy.noLatticeYet
+        guard project.lattice.enabled else { return TopologyRunCopy.noLatticeYet }
+        // ★ B3 (the reviewer's follow-up 2, 23:05Z): core still refuses a graded lattice with Allow growth here — one plain line
+        if latticeDesignBoxConflict != nil { return TopologyRunCopy.growthClash }
+        return optimizeSummary(lattice: true)
     }
 
     /// The Setup panel: today's chips and bar controls, one row each (TopologySetupRow).
