@@ -8,8 +8,8 @@ Branch `claude/lattice-types-k1`, from `origin/claude/flexible-screens` at `da6c
 ## Where this stands, in plain language
 
 **Live: FCC, Kelvin, Rhombic dodecahedron, Diamond, BCC, Simple cubic**: every strut type of K1
-(rhombic without Doubled cells: measured, its struts do not meet across a halving). Two rulings are
-asked of the maintainer (Findings 6 and 7); either could send BCC or SC back.
+(rhombic without Doubled cells: measured, its struts do not meet across a halving). **BCC and SC are
+offered for Structural parts only** (Finding 6, ruled 2026-11-02).
 
 **Live (K2, the sheets): Gyroid, Schwarz-D**, with one cell size for the whole part (Doubled and
 Stepped refused, R5) and a Rim or no skin (Diagrid refused, R8). A 4 mm sheet needs members
@@ -18,7 +18,113 @@ print-tested.
 
 Parked: none.
 
+**The rulings of 2026-11-02**, in the order ruled, each pushed when its gate is green:
+1. Finding 6 + Finding 7 (a)+(b) + ruling (3): **DONE** (`e2b1bf5c`, `a717389e`, `c009fa30`; the
+   section below). Every cell over a latticed voxel is laid, struts and nodes are emitted at the
+   round strut's area and the sphere's volume, and every run measures what its file holds and
+   certifies the lesser of that and the law. On the stand every type's file is within 10 % of its
+   certificate on the light side (worst -3.5 %), with 0 floating pieces.
+2. (c) octet made honest (its law and tensor on the emitted full-octet cell): in progress. Until it
+   lands octet's file is 28-30 % HEAVIER than its certificate on the stand (reported, never refused).
+3. Finding 8 (sheet triangles), the coupon, the samples: queued, in that order.
+
 <!-- STATUS -->
+
+## Rulings of 2026-11-02, step 1: Findings 6 and 7, ruling (3) — DONE (`c009fa30`)
+
+What changed (core only):
+
+1. **Finding 6: BCC and SC are Structural only.** `LatticeTypeFacts` carries `structural` and
+   `aesthetic`, each `{allowed, reason}`. `aesthetic` is refused when the type's R11 ceiling lies
+   below its band (BCC, SC), with one plain line, e.g. "BCC is offered for Structural parts only:
+   its thinnest certifiable strut is 0.219 of the cell, already wider than the open-print limit of a
+   fifth of the cell, so no BCC density prints open (Finding 6)." A job with aesthetic intent and
+   one of those types is refused with the same words (`job.cpp`).
+2. **Finding 7, activation by COVER.** A cell is laid when it overlaps a latticed voxel's volume, not
+   only when it holds the voxel's centre (`cells_covering_span`, `cell_plan.hpp`; the graded, uniform,
+   design-box/roles and stepped activations, the added-material policy, the cell plan's aggregation
+   and rejection reasons, the certification mask). A voxel stays latticed only when EVERY cell over
+   it can be laid; otherwise it goes solid at its graded density and is counted in
+   `solid_fallback_voxels`. So a latticed voxel is now filled completely, and a voxel that cannot be
+   is solid, never four-fifths empty. Audits gain `voxels_strut_and_solid_bond`.
+3. **(b) equal AREA prisms and equal VOLUME nodes** (Finding 2 fixed). The 8-gon prism is emitted at
+   r x 1.0539 (its area equals the round strut's) and the icosahedral node at circumradius x 1.1824
+   (its volume equals the sphere's): `lattice_strut_emit_scale`, `lattice_node_emit_scale`
+   (`lattice_gen.hpp`). The clip, the node drop, the anchor balls and the skin's radius read the
+   emitted size. Organic keeps the raw shapes (`lattice_emit_prism`, `lattice_emit_icosahedron`).
+   On a single cell every K1 type's exported fraction is within 0.7 % of its law after (b).
+4. **The volume check** (`lattice_volume_check.hpp`). The run rebuilds the exact pieces it emitted
+   (prisms, icosahedra, skin and rim prisms; a sheet's own inside test on the contoured wall) and
+   measures each latticed voxel's solid fraction (Halton points, deterministic). Pockets are the
+   face-connected latticed voxels; a pocket smaller than one cell is listed but not judged.
+   **(a) One-sided LOW:** a rung is refused only when a judged pocket holds more than 10 % LESS than
+   certified (`kLatticeVolumeGapLimit`); the high side is reported ("file +N % over certified") and
+   never refuses. A refused rung's files are removed and the ladder moves on.
+5. **(3) The certificate is rebuilt from what shipped.** Each latticed voxel is certified at
+   min(the law's density, the measured fraction), never below the band floor
+   (`lattice_certify_shipped`); the 10 % check then judges THAT certificate. Where the file is light
+   the margin drops; where it is heavy the law's density stands.
+6. **Receipts.** Each lattice receipt has a `volume_check` block (rule, limit, pockets judged and not,
+   certified and exported mm3, the overall gap, the lightest and heaviest judged pocket, the high-side
+   line, voxels lowered to the file and held at the floor, the law's own gap, refused); the run's
+   lattice block aggregates them (`volume_check: {refused_variants, worst_gap, ...}`).
+
+### The flip table (M2 stand, Structural ladder; before = `eede708a`, after = `c009fa30`)
+
+Full table with cells, density range, mass, margin and every pocket gap: `f7_stand_flip_table.txt`
+(by `f7_gate_full.sh` + `f7_flip.py`). "gap" = exported / certified - 1 over the judged pockets.
+
+| type | 0.68 | 0.52 | 0.38 | 0.26 | lightest judged pocket | floating |
+|---|---|---|---|---|---|---|
+| octet | sealed / sealed | sealed / sealed | acc / acc (+27.9 %) | acc / acc (+30.2 %) | +0.0 % | 0 |
+| FCC | acc / **sealed** | acc / **sealed** | acc / acc (0.0 %) | acc / acc (0.0 %) | 0.0 % | 0 |
+| Kelvin | acc / acc (0.0 %) | acc / acc | acc / acc | acc / acc | 0.0 % | 0 |
+| Rhombic | sealed / sealed | acc / acc (-3.1 %) | acc / acc | none / none | **-3.5 %** | 0 |
+| Diamond | acc / acc | acc / acc | sealed / **acc** | acc / acc | 0.0 % | 0 |
+| BCC | acc / **sealed** | acc / acc (-1.1 %) | sealed / **acc** | acc / acc | -1.5 % | 0 |
+| SC | acc / **sealed** | acc / acc (+5.6 %) | acc / acc (+8.8 %) | acc / acc (+9.0 %) | -0.0 % | 0 |
+| Gyroid (4 mm) | sealed / sealed | acc / acc (+1.1 %) | acc / acc | none / none | 0.0 % | 0 |
+| Schwarz-D (4 mm) | sealed / sealed | acc / acc (+1.4 %) | acc / acc | none / none | 0.0 % | 0 |
+
+(before / after; acc = accepted; sealed = refused, sealed cavity; none = the law could lattice no
+cell, unchanged.) **BAR met:** the light-side gap is within 10 % on every rung of every type (worst
+-3.5 %, rhombic 0.52), BCC's rung 0.52 is accepted, 0 floating pieces on every latticed rung
+(`f7_stand_floating.txt`), no rung refused by the volume check.
+
+**Every flip, in plain words:**
+- **FCC 0.68 and 0.52, BCC 0.68, SC 0.68: now refused, sealed cavity.** The small declared include
+  region 8, at (19.2, -8.0, 17.1) to (29.5, -1.2, 23.9) mm, is boxed in. Under the cover rule the
+  voxels between it and the rest of the lattice are solid (not every cell over them can be laid), so
+  the space between the struts in region 8 (12 voxels on FCC 0.68, 4 on 0.52, 18 on BCC 0.68, 12 on
+  SC 0.68) has no path out, and core's existing sealed-cavity rule refuses the rung. Nothing is
+  auto-corrected. Each type's 0.38 rung is accepted.
+- **Diamond 0.38 and BCC 0.38: now accepted.** Before, one latticed voxel in region 8 was sealed
+  and the rung was refused; after, every latticed voxel reaches the outside (4 of 4 on diamond).
+- No rung flips because of the volume check or (b).
+
+Two things the table shows that are not flips. **Fewer latticed voxels, more cells:** FCC 0.38 goes
+from 61 latticed voxels holding 61 cells to 12 voxels holding 419. The stand solves on 3.41 mm voxels
+and lays 2 mm cells; before, each voxel got the one cell at its centre (about a fifth of its volume)
+and was certified as if full; now a voxel is latticed only when it can be filled. The lattice mass
+moves by under 1.5 % (510.4 to 512.1 g). **Octet is 28-30 % heavy:** its law and tensor are the
+legs-only cell's, and the generator lays the full octet (Finding 1, Q2). That is step (c).
+
+### The gate (`c009fa30`)
+
+ctest 167 / 167 passed, 4,607 s (`f7_ctest.txt`); cli_demo passed, 2,146 s. The 21 binaries
+(`f7_identity_21.txt`): 12 identical; 9 differ, each passing with the same check count:
+`test_lattice_boundary` (B3's oblique overshoot -0.117 to -0.124 mm and 18 more skin struts: the
+clip and the skin read the emitted radius), `test_lattice_clip_shell` (the control's worst
+0.178 to 0.156 mm), `test_lattice_skin_freeform` (3,012 to 3,288 landings, largest piece still
+100 %), `test_lattice_hookup` (the new volume-check lines only), `test_lattice_variant` (11,904 to
+11,894 latticed voxels: the cover rule; a wall time), `test_designbox_lattice_recert` (composite
+12,086.9 to 11,660.6, -3.5 %: its file is lighter than the law, so the certificate drops; recorded
+still equals reproduced), `test_lattice_void_exterior` (lattice margins 3,384.15 to 3,383.72 and
+3,000.73 to 2,954.28, the same reason; a build path), `test_bake_build_orientation` (112,428
+vertices compared, 0 drifted; exclude-region occupancy 965 = 965), and every octet run's stderr
+shows its high side (+45 to +81 %: step (c)). Tests: `test_lattice_volume_check` (new, 40 checks),
+`test_lattice_types` (Finding 6, 253), `test_mesh_winding` (its pin moves with (b): 755.506110 to
+858.361992 mm3).
 
 ## What changed in core, once, for every strut type (and, 9-10, for the sheets)
 
@@ -121,7 +227,7 @@ Parked: none.
    (`<type>_law.txt`, column "B3 gap"). **Octet's shipped table is the B3 table and is
    unchanged (R9).** FCC's B3 table equals it to four digits, which confirms octet's law
    was measured on the legs-only cell.
-2. **The printed struts are lighter than the certified ones, for every type including
+2. **FIXED 2026-11-02 (ruling (b)).** **The printed struts are lighter than the certified ones, for every type including
    octet.** The generator emits an 8-gon prism with circumradius r (area 2*sqrt(2)/pi =
    0.900 of the circle) and an icosahedral node of circumradius r; the tensor rows were
    measured on round capsules of radius r. At the same r the production solid is 6-10 %
@@ -146,14 +252,14 @@ Parked: none.
    under structural. The `run` and `lattice-variant` paths certify the composite in both
    modes. Pre-existing; noted because "the certificate runs in both modes" is only true on
    those paths.
-6. **BCC's and SC's R11 aesthetic ceiling lies BELOW their certifiable band** (BCC 0.1791 vs
+6. **RULED 2026-11-02: Structural only.** **BCC's and SC's R11 aesthetic ceiling lies BELOW their certifiable band** (BCC 0.1791 vs
    0.2105; SC 0.0831 vs 0.0866). R11 is octet's rule per type: a strut no wider than a fifth of
    its cell. The thinnest strut either type certifies is already wider than that (BCC 0.219,
    SC 0.204 of the cell), so by R11 no certifiable BCC or SC "prints open". Core's runs do not
    read the ceiling; the app's Aesthetic cap does, and min(band top, ceiling) is below the band
    bottom for these two. The bridge contract says what the app should do; whether R11 should
    read differently for 3- and 8-strut cells is the maintainer's ruling.
-7. **A graded run lattices ONE cell per masked solve voxel when the cell is smaller than the
+7. **FIXED 2026-11-02 (cover rule, volume check, certificate from what shipped).** **A graded run lattices ONE cell per masked solve voxel when the cell is smaller than the
    voxel**, octet included (`bcc_stand_percolation.txt`, measured on the M2 stand). `cell_latticed`
    (`run_job.cpp`) activates a cell iff it holds a masked voxel's CENTRE. The stand solves on
    3.41 mm voxels and the swept ladder picks 2 mm cells, so each masked voxel activates exactly one
@@ -449,6 +555,7 @@ built (A2); nothing here forces a type onto the screen.
 | `printable_cell_per_bead` | smallest printable cell = this × bead width (at the band top) |
 | `aesthetic_density_ceiling` | R11 "prints open": strut diameter = 20 % of the cell, through the type's own law. **It can lie below `rho_min`** (BCC: 0.1791 < 0.2105; SC: 0.0831 < 0.0866; Finding 6): then no certifiable density prints open by R11 and an Aesthetic cap of min(`rho_max`, ceiling) is empty, so the app must not offer that cap as a range for such a type |
 | `outline`, `rim`, `diagrid` | `{allowed, reason}` (R8) |
+| `structural`, `aesthetic` | `{allowed, reason}` per intent (Finding 6, ruled 2026-11-02): `aesthetic` is refused for BCC and SC with core's one plain line; the app greys the type under Aesthetic with that line and offers it under Structural |
 | `uniform`, `doubled`, `stepped` | `{allowed, reason}` (R4 measured; R5 for sheets) |
 | `directional`, `directional_note` | R3 (SC, BCC): show the note on the picker and the receipt. Core's receipts carry the same words under `"directional_note"` (What changed item 7); for every other type the key is absent |
 | `triangles_per_cell` | the per-cell emitted cost of the infinite tiling (8-gon prism 32, node 20) |
@@ -503,13 +610,24 @@ one that is not.
 
 ### The job (unchanged keys)
 `lattice.topology` / `grading.topology` take any live id (they must agree, as before).
-New refusals, each naming the reason: `algorithm: "organic"` with a non-octet type; a
+New refusals, each naming the reason: `"intent": "aesthetic"` with BCC or SC (Finding 6); `algorithm: "organic"` with a non-octet type; a
 region `relative_density` outside the TYPE's band; Doubled/Stepped for a type whose R4
 verdict is not PASS. Multiscale refuses every type but octet (its material model needs
 octet's upper rows), with core's existing reason. Receipts name the type:
 `run_info.grading.topology`, `lattice_topology`, `lattice_export_topology`. For SC and BCC each of
 those blocks, the per-variant lattice receipt and the sample block's receipt also carry
 `"directional_note"`, right after the topology; no other type writes the key.
+
+### The volume check on every lattice receipt (Finding 7, 2026-11-02)
+Each per-variant lattice receipt has `volume_check`: `certified_mm3`, `exported_mm3`, `gap`
+(exported / certified - 1 over the judged pockets), `worst_gap` / `highest_gap` (the lightest and
+heaviest judged pocket), `high_side` (plain: "file +N % over certified"), `refused`,
+`judged_from_mm3` (one cell's volume), `voxels_lowered_to_file`, `voxels_held_at_band_floor`,
+`law_certified_mm3` and `law_gap` (what the law alone would have certified), the small pockets not
+judged, and the eight lightest judged pockets. A rung it refuses writes no lattice file and is skipped
+by the ladder with core's plain reason ("the certificate counts ..."), as any refused rung is. The
+run's lattice block carries `volume_check: {limit, refused_variants, worst_gap, certified_mm3,
+exported_mm3}`. The app needs nothing new: the margin it shows is the rebuilt certificate's.
 
 ### The sample block
 `topopt-cli lattice-sample --topology <id> [--cell 8] [--rho <band middle>] [--size 40]
