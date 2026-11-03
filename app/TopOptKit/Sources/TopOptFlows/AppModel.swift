@@ -339,7 +339,7 @@ public final class AppModel: ObservableObject {
                           // Emitted only when the user authored one, so an
                           // untouched project ships the identical request — and
                           // hence the identical job.json — it always did (R1).
-                          faceRegions: project.faceRegions.regions,
+                          faceRegions: FaceRegionSend.kept(project.faceRegions.regions),   // ★ B1 (note 38): never an empty region
                           anchorRegionIDs: lc.anchorRegionIDs,
                           faceProtectionRegionIDs: protections.regionIDs,
                           faceProtectionRegionDepthsMM: protections.regionDepthsMM,

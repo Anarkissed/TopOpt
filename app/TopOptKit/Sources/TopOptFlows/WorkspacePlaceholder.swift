@@ -12496,6 +12496,7 @@ public struct WorkspacePlaceholder: View {
         guard latticeOptimizeRefusal == nil else { return false }
         // ★★ a load with no single direction is refused on the button (2026-10-09)
         guard loadDirectionRefusal == nil else { return false }
+        guard emptyRegionRefusal == nil else { return false }   // ★ B1 (note 38): a role names a cut piece with no faces
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -12562,10 +12563,23 @@ public struct WorkspacePlaceholder: View {
         return nil
     }
 
+    /// ★ B1 (note 38, the app half): an anchor, load or protection holds a piece left with no faces (core would refuse the
+    /// job with its own text: "face region 107 …"). One line on the button, before anything is sent.
+    private var emptyRegionRefusal: String? {
+        guard !FaceRegionSend.empty(project.faceRegions.regions).isEmpty else { return nil }
+        for g in selection.groups {
+            let k = force.kind(for: g.id)
+            guard k.isAnchor || k.isLoad || force.isProtected(g.id) else { continue }
+            if g.regionIDs.contains(where: { project.runRegionIDs([$0]).isEmpty }) { return FaceRegionSend.refusalLine }
+        }
+        return nil
+    }
+
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
         if let why = latticeOptimizeRefusal { return why }
         if let why = loadDirectionRefusal { return why }
+        if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -12689,6 +12703,7 @@ public struct WorkspacePlaceholder: View {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                       regions: project.latticeJobRegions().regions)
             ?? latticeSettingsRefusal
+            ?? emptyRegionRefusal   // ★ B1 (note 38): the lattice run sends the same regions
     }
 
     var canLatticeThis: Bool {
