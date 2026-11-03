@@ -60,6 +60,13 @@ public final class ComputeLocationModel: ObservableObject {
 
     /// Start browsing `_topopt._tcp`. Idempotent; safe to call on every appear.
     public func startBrowsing() {
+        if let t = Self.hostedTestDiscovery {   // hosted tests: no network
+            DispatchQueue.main.asyncAfter(deadline: .now() + t.delay) { [weak self] in
+                guard let self, case let .worker(name) = self.choice, name == t.name, let cfg = t.config else { return }
+                self.activeRemote = cfg
+            }
+            return
+        }
         guard browser == nil else { return }
         let params = NWParameters()
         params.includePeerToPeer = true
@@ -155,7 +162,11 @@ public final class ComputeLocationModel: ObservableObject {
     }
 
     /// How long Optimize looks for the remembered Mac before it says it isn't answering.
-    public static let findSeconds: Double = 8
+    nonisolated(unsafe) public static var findSeconds: Double = 8
+
+    /// Hosted tests only: stands in for Bonjour (discover + resolve). The remembered worker `name` resolves to `config` after
+    /// `delay` seconds; nil `config` = never found. The app never sets it.
+    nonisolated(unsafe) static var hostedTestDiscovery: (name: String, config: RemoteRunnerConfig?, delay: Double)?
 
     /// A short label for the current choice, for the bottom-bar pill.
     public var label: String {

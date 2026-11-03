@@ -303,7 +303,7 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertTrue(src.contains("scenarioAnchorOff(g.id)"), "an anchor off here is dimmed, not hidden")
         XCTAssertTrue(src.contains("force.addScenario()"), "+ Add a load scenario")
         XCTAssertTrue(src.contains("LoadScenarioRule.info"), "the (i)")
-        XCTAssertTrue(src.contains("if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }"), "Optimize's pre-flight")
+        XCTAssertTrue(src.contains("if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }"), "Optimize's pre-flight")
         XCTAssertTrue(src.contains("force.switchAllAnchorsOn(in: s.id)"), "the gap's one-tap fix")
         // (the controls themselves are found ON SCREEN in LoadScenarioHostedTests; these only pin the wiring)
         XCTAssertFalse(src.contains("selectionsListBody"), "★ no dead copy in the old library card")

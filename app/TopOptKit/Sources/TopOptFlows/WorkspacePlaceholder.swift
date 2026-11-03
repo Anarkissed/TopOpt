@@ -559,6 +559,8 @@ public struct WorkspacePlaceholder: View {
     @State private var pendingReplacement: ResultsReplacementPrompt?
     @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d: the re-run card's Save as new project is for an Optimize re-run only
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
+    @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
+    @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
     @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
@@ -1847,6 +1849,8 @@ public struct WorkspacePlaceholder: View {
 
     private func startRun() {
         guard canOptimize else { return }
+        // ★ B1 (note 4): a remembered Mac that is not found yet is looked for first, never refused as missing
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRun() }; return }
         // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
         // face, the run would reach the core with empty external_loads and be
         // refused — so block it up front with an actionable message naming the group
@@ -1871,8 +1875,8 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
-        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
-        if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
+        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
+        if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
         lastRunRequest = request   // Optimize greys out until the inputs change
         // Pick the runner for THIS run from the compute-location choice. A remote
         // config (a worker was selected + resolved) offloads to the LAN worker;
@@ -3380,6 +3384,7 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B1 (note 4): a remembered Mac is looked for as the workspace opens, not only when Settings opens
         .onAppear { if compute.wantsRemote { compute.startBrowsing() } }
+        .onChange(of: compute.activeRemote != nil) { found in if found { macNotAnswering = false } }
     }
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
@@ -3425,7 +3430,7 @@ public struct WorkspacePlaceholder: View {
             retainedJob: art?.jobJSON, retainedDesign: art?.designBin,
             runGeneratedLattice: o.latticeReport != nil,
             modelPath: project.importedFile?.path,
-            workerSelected: compute.activeRemote != nil,
+            workerSelected: compute.wantsRemote,   // ★ B1 (note 4): the remembered Mac
             runInFlight: run.phase == .running,
             // A RE-ATTACHED run has no submitted document to retain (the app was
             // restarted since), and says exactly that rather than borrowing the
@@ -3985,6 +3990,8 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t lattice this variant: \(why)."
             return
         }
+        // ★ B1 (note 4): a remembered Mac not found yet is looked for first
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRelatticeRun() }; return }
         guard let config = compute.activeRemote else {
             model.toast = "Latticing a variant runs on a Mac worker — pick one in Compute."
             return
@@ -6590,7 +6597,7 @@ public struct WorkspacePlaceholder: View {
     /// is a mode of its own now and not the absence of one.
     private var minimizePlasticChip: some View {
         let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
-        let macOnly = StrengthenRoute.line(workerSelected: compute.activeRemote != nil)   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — on device: Runs on your Mac
+        let macOnly = StrengthenRoute.line(workerSelected: compute.wantsRemote)   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — on device: Runs on your Mac
         return Button { if project.minimizePlastic, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }; project.minimizePlastic.toggle() } label: {   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — the strengthen choice, disabled on device
             HStack(spacing: DS.Space.s) {
                 Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "arrow.up.circle.fill")
@@ -12473,6 +12480,7 @@ public struct WorkspacePlaceholder: View {
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
+        guard !macFinding else { return false }              // ★ B1 (note 4): nor while it looks for the Mac
         // The core refuses a GRADED lattice job on an expanded domain BEFORE any
         // solve, so the button that would submit one is disabled with that reason
         // rather than inviting a configuration the run cannot honour (task
@@ -12701,15 +12709,39 @@ public struct WorkspacePlaceholder: View {
         let summary = optimizeSummary
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
+        // ★ B1 (note 4): while it looks for the remembered Mac the button says so; if the Mac never answers, one line, and
+        // the tap tries again (the design's "Finding Nadim's Mac mini…" / "Your Mac isn't answering · Try again")
+        let mac = compute.rememberedName ?? "your Mac"
+        let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
+        let line = macNotAnswering && ok ? Self.macNotAnsweringLine : summary
         return Button {
-            if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            if ok { macNotAnswering = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks || opensType,
+            StageActionCapsuleLabel(title: title, summary: line, ok: ok || macFinding, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
         .disabled(!ok && !marks && !opensType)
-        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
+        .background(CornerPairStyle.publish(macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering" : "optimizeButton"))
+    }
+
+    /// ★ B1 (note 4): the one line on Optimize when the remembered Mac never answered; a tap tries again.
+    static let macNotAnsweringLine = "Your Mac isn\u{2019}t answering \u{00B7} tap to try again"
+
+    /// ★ B1 (note 4, approved design 2026-11-02): look for the remembered Mac for a few seconds, then go on; if it never
+    /// answers, Optimize says so in one line. Discovery itself starts as the workspace opens (workspaceCardsHost).
+    private func findTheMac(then go: @escaping () -> Void) {
+        guard !macFinding else { return }
+        macFinding = true
+        macNotAnswering = false
+        compute.startBrowsing()
+        Task { @MainActor in
+            let end = Date().addingTimeInterval(ComputeLocationModel.findSeconds)
+            while compute.activeRemote == nil, Date() < end { try? await Task.sleep(nanoseconds: 150_000_000) }
+            macFinding = false
+            if compute.activeRemote != nil { go() } else { macNotAnswering = true }
+        }
     }
 }
 
