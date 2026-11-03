@@ -1732,6 +1732,20 @@ public struct WorkspacePlaceholder: View {
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
             if rects != bandChipKeepOut { bandChipKeepOut = rects }
         }
+        // ★ WHOLE-APP B3 (U7, OneWayToSayNoTests): it asks IN PLACE, a card over the run button's corner — never an alert. Over the whole
+        // page, so the 3D view under it never takes its clicks
+        .overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue, message: pendingReplacement?.message ?? "",
+                                                              leaveToken: RerunLeaveToken(stage: stage, edit: project.editSnapshot),
+                                                              onLeave: { pendingReplacement = nil },
+                                                              bottom: bottomBarHeight + DS.Space.xl4 + DS.Space.s) {
+            Button(TopologyRerunChoice.rerunHere.label) {
+                pendingReplacement = nil
+                startRun(lattice: runWithLattice)
+            }
+            .buttonStyle(RerunChoiceStyle(danger: true))
+            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
+            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
+        } }
         // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
         // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
@@ -1834,6 +1848,9 @@ public struct WorkspacePlaceholder: View {
         .padding(.trailing, PageChrome.gizmoInset)
     }
 
+    /// ★ B3 (#362's condition 2): what leaving the re-run card means — the stage changes, or any edit / Undo lands.
+    struct RerunLeaveToken: Equatable { let stage: WorkspaceStage; let edit: EditSnapshot }
+
     private var replacementPromptBinding: Binding<Bool> {
         Binding(get: { pendingReplacement != nil },
                 set: { if !$0 { pendingReplacement = nil } })
@@ -1855,6 +1872,7 @@ public struct WorkspacePlaceholder: View {
     /// always about a real loss. Nothing to lose ⇒ no prompt, and Optimize behaves
     /// exactly as it always did.
     private func requestRun(lattice: Bool) {
+        guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
         guard canOptimize(lattice: lattice) else { return }
         runWithLattice = lattice
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
@@ -1869,6 +1887,7 @@ public struct WorkspacePlaceholder: View {
     /// selection, run no ladder. Goes through the SAME replacement prompt the
     /// optimize path uses, because it produces a result that would replace one.
     private func requestLatticeRun() {
+        guard pendingReplacement == nil else { return }   // ★ B3 (#362's condition 1): the re-run card is up — it answers first
         guard canLatticeThis else { return }
         guard let request = model.makeLatticeRunRequest() else {
             model.toast = "Import a part and set a lattice region first."
@@ -3348,16 +3367,7 @@ public struct WorkspacePlaceholder: View {
         // variants, and it says so before it does.
         // ★ B3: THE RE-RUN CARD (RerunCard's words; TopologyRerunChoice): Re-run here / Save as new
         // project (an Optimize re-run only) / Cancel. B4: the Lattice run has its own card, below.
-        .alert(RerunCard.title, isPresented: replacementPromptBinding) {
-            Button(TopologyRerunChoice.rerunHere.label, role: .destructive) {
-                pendingReplacement = nil
-                startRun(lattice: runWithLattice)
-            }
-            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
-            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
-        } message: {
-            Text(pendingReplacement?.message ?? "")
-        }
+        // ★ WHOLE-APP B3 (U7): the card itself is mounted over the whole page (body), where clicks reach it
         // Library (B3): the "Optimize as vN" card (approved Library mockup, screen 6)
         .overlay { if nextVersionAsk { LibraryNextVersionCard(model: model, project: project, close: { nextVersionAsk = false }, optimize: { name in nextVersionAsk = false; optimizeAsNextVersion(name: name) }) } }
         // ★ B4 (APP LIST 6): THE LATTICE RUN'S RE-RUN CARD — "Re-running clears this lattice's results":
@@ -10215,13 +10225,21 @@ public struct WorkspacePlaceholder: View {
                 // TO-page affordance too.
                 if active, visible.groupPrimitives,
                    project.groupView.canEdit(g.id) {
-                    Button { addingPrimitiveGroup = g.id } label: {
+                    // ★ B3 (U6 / U7, OneWayToSayNoTests): the choice is a menu at the button, never a dialog
+                    Menu {
+                        // A freshly-placed primitive becomes the gizmo target so the user can move it
+                        // straight away (DEFECT 2: PR 190 had no handles to grab it by).
+                        Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
+                        Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
+                        Section("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.") {}
+                    } label: {
                         Label("primitive", systemImage: "plus")
                             .labelStyle(.titleAndIcon)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Self.clearanceTint)
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden).menuStyle(.button).buttonStyle(.plain).fixedSize()
                     .accessibilityIdentifier("add-primitive-\(g.id.uuidString)")
                 }
             }
@@ -10264,17 +10282,6 @@ public struct WorkspacePlaceholder: View {
             // T2: tapping the group IN THE LIBRARY is one of the three explicit
             // paths that reveal its primitive chips.
             chipsRevealedGroup = g.id
-        }
-        .confirmationDialog("Add a primitive", isPresented: Binding(
-            get: { addingPrimitiveGroup == g.id },
-            set: { if !$0 { addingPrimitiveGroup = nil } })) {
-            // A freshly-placed primitive becomes the gizmo target so the user can move it
-            // straight away (DEFECT 2: PR 190 had no handles to grab it by).
-            Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
-            Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
-            Button("Cancel", role: .cancel) { addingPrimitiveGroup = nil }
-        } message: {
-            Text("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.")
         }
         .overlay(alignment: .bottom) { Divider().overlay(DS.Color.strokeSubtle.color) }
     }

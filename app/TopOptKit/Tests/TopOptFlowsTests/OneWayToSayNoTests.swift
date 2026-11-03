@@ -18,10 +18,8 @@ final class OneWayToSayNoTests: XCTestCase {
                                      ("organicNotice?.title", "B7")],                // U6: the organic notices → lines
         "ResultsScreen.swift": [("Couldn’t save video", "B4"), ("Couldn’t export STL", "B4")],   // U6: error paths → a line
         "WorkspacePlaceholder.swift": [("Rename project", "B5"),                     // the name sheet (§4.11)
-                                       ("RerunCard.title", "B3"),                    // U7: the Optimize as v7 sheet / confirm
                                        ("LatticeRerunChoice.title", "B6"),           // U7: the Lattice run's re-run ask
-                                       ("Certification found", "B7"),                // the spacing choice → a row in the page
-                                       ("Add a primitive", "B3")],                   // + Allow growth here's choice → a menu
+                                       ("Certification found", "B7")],               // the spacing choice → a row in the page
         "LibraryViews.swift": [("Ungroup the Library?", "B5"), ("New project", "B5"), ("Rename project", "B5"),
                                ("Rename part", "B5"), ("deleting.map", "B5"), ("Name this version", "B5"), ("deleting.map", "B5")],
         "HomeView.swift": [("Rename project", "B5"), ("confirmationDialog(", "B5")],
