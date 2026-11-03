@@ -173,7 +173,7 @@ extension WorkspaceStage {
 /// iPad | Mac, Units, Minimize plastic, Protect skin, Design box, Print parameters). CAD surfaces (an EXPORT setting, STEP only)
 /// is a row too — it decides the run's output, so it is not a view icon.
 public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
-    case quality, plate, gravity, compute, units, minimizePlastic, protectSkin, cadFaces, designBox, printParameters
+    case quality, plate, gravity, compute, units, minimizePlastic, protectSkin, cadFaces, designBox, printParameters, material
 
     public var title: String {
         switch self {
@@ -187,6 +187,7 @@ public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
         case .cadFaces: return "CAD surfaces"
         case .designBox: return "Allow growth here"   // B6: the list of up to 6 (★ B2, U4: never "primitives")
         case .printParameters: return "Print parameters"
+        case .material: return "Material"   // ★ B3 (app-map §3.9): the Settings panel's last row
         }
     }
 

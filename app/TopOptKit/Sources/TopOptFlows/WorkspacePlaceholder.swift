@@ -13167,6 +13167,7 @@ extension WorkspacePlaceholder {
                     default: EmptyView()
                     }
                 }
+                .background(CornerPairStyle.publish("settingsRow-\(row.rawValue)"))   // ★ B3: SettingsPanelHostedTests
                 .accessibilityIdentifier("topology-setup-row-\(row.rawValue)")
             }
         }
@@ -13193,7 +13194,35 @@ extension WorkspacePlaceholder {
             Text(DesignPrimitivesCopy.count(project.designBox.primitives.count)).dsStyle(DS.TypeScale.footnote)
                 .foregroundStyle(DS.Color.textTertiary.color).accessibilityIdentifier("topology-primitives-count")
         case .printParameters: printParamsButton
+        case .material: materialMenu
         }
+    }
+
+    /// ★ B3 (app-map §3.9): Material, one line — the project's material ⌄, its process's list (today's import choices). A change
+    /// is a setup change like any other: Optimize offers the next run.
+    private var materialMenu: some View {
+        let options = project.process == .resin ? model.resinMaterials : model.fdmMaterials
+        return Menu {
+            ForEach(options) { m in
+                Button { model.setCurrentProjectMaterial(m.name) } label: {
+                    if m.name == project.material { Label(m.name, systemImage: "checkmark") } else { Text(m.name) }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(project.material.isEmpty ? "Choose" : project.material).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(DS.Color.accent.color)
+            .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())   // a 44 pt target, "PLA" too
+        }
+        .menuIndicator(.hidden)
+        .menuStyle(.button).buttonStyle(.plain)
+        .fixedSize()
+        .disabled(options.isEmpty)
+        .background(CornerPairStyle.publish("settingsMaterial"))
+        .accessibilityIdentifier("topology-setup-material")
     }
 
     // MARK: ★ B6 — the DESIGN PRIMITIVES list (Setup)
