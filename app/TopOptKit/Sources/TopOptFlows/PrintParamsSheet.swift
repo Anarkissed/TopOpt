@@ -36,6 +36,18 @@ public struct PrintParamsSheet: View {
     /// The editable numeric fields, so one `editingField` drives every field's pad.
     private enum ParamField: Hashable {
         case layerHeight, wallLoops, outerLineWidth, innerLineWidth, topLayers, bottomLayers, infill
+
+        /// ★ B2 (U15): its range — the pad's header says it, and a number outside it keeps the nearest end.
+        var range: NumberRange {
+            func r(_ c: ClosedRange<Int>) -> NumberRange { NumberRange(Double(c.lowerBound), Double(c.upperBound)) }
+            switch self {
+            case .layerHeight: return NumberRange(PrintParams.layerHeightRange)
+            case .outerLineWidth, .innerLineWidth: return NumberRange(PrintParams.lineWidthRange)
+            case .wallLoops: return r(PrintParams.wallLoopsRange)
+            case .topLayers, .bottomLayers: return r(PrintParams.shellLayersRange)
+            case .infill: return r(PrintParams.infillRange)
+            }
+        }
     }
 
     private func padBinding(_ field: ParamField) -> Binding<Bool> {
@@ -282,7 +294,7 @@ public struct PrintParamsSheet: View {
             }
             .buttonStyle(.plain)
             .numberPad(padBinding(.infill),
-                       config: .init(title: "Infill density", unit: "%", allowsDecimal: false),
+                       config: .init(title: "Infill density", unit: "%", allowsDecimal: false, range: ParamField.infill.range),
                        seed: Double(project.printParams.infillPercent)) { v in
                 if let v { project.printParams.infillPercent = Int(v.rounded()) }
             }
@@ -391,7 +403,7 @@ public struct PrintParamsSheet: View {
                 }
                 .buttonStyle(.plain)
                 .numberPad(padBinding(field),
-                           config: .init(title: label, allowsDecimal: false),
+                           config: .init(title: label, allowsDecimal: false, range: field.range),
                            seed: Double(value.wrappedValue)) { v in
                     if let v { value.wrappedValue = Int(v.rounded()) }
                 }
@@ -424,7 +436,7 @@ public struct PrintParamsSheet: View {
                 }
                 .buttonStyle(.plain)
                 .numberPad(padBinding(field),
-                           config: .init(title: label, unit: suffix, allowsDecimal: true),
+                           config: .init(title: label, unit: suffix, allowsDecimal: true, range: field.range),
                            seed: value.wrappedValue) { v in
                     if let v { value.wrappedValue = v }
                 }
