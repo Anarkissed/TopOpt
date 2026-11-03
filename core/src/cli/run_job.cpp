@@ -5326,7 +5326,8 @@ OrganicOutcome run_organic_step(bool shell_is_written,
   op.strut_diameter_mm = t_fixed;
   op.strut_diameter_field = &bead;
   op.bead_is_stated = bead_is_stated;
-  // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's 0.05047 is a
+  // ★★ THE VDI FLOOR OUTRANKS THE LIBRARY BAND. The library's floor (0.0496; 0.05047 on
+  // octet's legs-only rows before ruling 2026-11-02 (c)) is a
   // CERTIFIABILITY limit — the lightest lattice the tensor library can describe. It
   // says nothing about whether the bar can be BUILT, and at that density the slenderness
   // is l/D = 6.8 against the standard's 5. Printability is user input and outranks a

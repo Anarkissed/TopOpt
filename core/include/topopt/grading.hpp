@@ -381,8 +381,9 @@ struct GradingLawParams {
   // certifiable band an aesthetic run chooses to grade. It is not a cap a structural
   // run can state, and the preview needs one -- it rescales every automatic density
   // onto the aesthetic ceiling under BOTH intents unless "Allow quilt" is on, so
-  // without this the run grades to the full band (top 0.8999) while the preview is
-  // capped near 0.219, and the two pictures are different objects.
+  // without this the run grades to the full band (top 0.9003) while the preview is
+  // capped near 0.379 (0.8999 and 0.219 on octet's legs-only law, before ruling
+  // 2026-11-02 (c)), and the two pictures are different objects.
   //
   // So: the top of the certifiable band, lowered. Applied before the aesthetic range
   // is resolved, so an aesthetic job that states both gets the tighter of the two.

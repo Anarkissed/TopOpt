@@ -112,11 +112,13 @@ int main() {
 
   std::printf("== 2a. nine-topology tensor library (2026-07-29-tensor-library-nine) ==\n");
   {
-    // B2 — octet rows UNCHANGED: at the exact anchor rho the library returns the
-    // shipped PR 198 numbers byte-for-byte (interpolation weight is 0 at an anchor).
-    CubicTensor oc = lattice_cubic_tensor(LatticeTopology::Octet, 0.29731, E, nullptr);
-    check(std::fabs(oc.C11 - 374.2029) < 1e-9 && std::fabs(oc.C12 - 151.9733) < 1e-9 &&
-          std::fabs(oc.C44 - 135.0535) < 1e-9, "B2: octet anchor row is byte-identical");
+    // B2 — at the exact anchor rho the library returns the measured row byte-for-byte
+    // (interpolation weight is 0 at an anchor). Octet's rows are the FULL octet's since
+    // ruling 2026-11-02 (c); this anchor is PR 246's validated 0.29543 row. The old
+    // legs-only row (0.29731: 374.2029 / 151.9733 / 135.0535) is FCC's now, and only FCC's.
+    CubicTensor oc = lattice_cubic_tensor(LatticeTopology::Octet, 0.29543, E, nullptr);
+    check(std::fabs(oc.C11 - 355.6757) < 1e-9 && std::fabs(oc.C12 - 169.5095) < 1e-9 &&
+          std::fabs(oc.C44 - 155.3239) < 1e-9, "B2: octet anchor row is byte-identical");
 
     // The seven cubic topologies are certifiable; the three tetragonal ones are not.
     check(lattice_topology_certifiable(LatticeTopology::SimpleCubic) &&
@@ -148,10 +150,15 @@ int main() {
     check(lattice_rho_min(LatticeTopology::Diamond) > 0.10 &&
           lattice_rho_max(LatticeTopology::Diamond) > 0.5, "diamond band reported");
 
-    // fcc IS the shipped octet-legs geometry: at the shared anchor rho the tensors match.
+    // fcc IS the old octet-legs geometry: it keeps that row byte for byte, and since ruling
+    // 2026-11-02 (c) octet no longer reads it (this check asserted fcc == octet before).
     CubicTensor fc = lattice_cubic_tensor(LatticeTopology::Fcc, 0.29731, E, nullptr);
-    check(std::fabs(fc.C11 - oc.C11) < 1e-9 && std::fabs(fc.C44 - oc.C44) < 1e-9,
-          "fcc == octet-legs at the shared anchor row");
+    check(std::fabs(fc.C11 - 374.2029) < 1e-9 && std::fabs(fc.C12 - 151.9733) < 1e-9 &&
+              std::fabs(fc.C44 - 135.0535) < 1e-9,
+          "fcc keeps the legs-only row at its anchor");
+    CubicTensor oc_at_fc = lattice_cubic_tensor(LatticeTopology::Octet, 0.29731, E, nullptr);
+    check(std::fabs(oc_at_fc.C44 / fc.C44 - 1.0) > 0.05,
+          "and octet, the full cell, is its own tensor at that density (shear differs > 5 %)");
 
     // B3 — a tetragonal topology is REFUSED (a cubic tensor cannot represent it),
     // via a typed exception distinct from the out-of-band one.

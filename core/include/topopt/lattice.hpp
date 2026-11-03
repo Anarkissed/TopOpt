@@ -508,12 +508,14 @@ bool lattice_stated_density_unprintable(LatticeTopology topo,
 // Throws std::invalid_argument if min_extrudable_width_mm is not finite and > 0.
 // ── ★ THE SMALLEST CELL THAT PRINTS, AT THE DENSITY THE JOB ALLOWS (E1) ───────
 // #354's brief of 2026-10-06 (D1) reported core answering "what is the smallest cell that
-// prints?" with FIVE different numbers on different paths. On octet at a 0.45 mm bead:
+// prints?" with FIVE different numbers on different paths. On octet at a 0.45 mm bead
+// (octet's full-cell law since ruling 2026-11-02 (c); the legs-only law's were 4.931378498
+// and 1.173173434 mm, the numbers that brief quoted):
 //
-//   w / phi(rho_min)                 4.931378498 mm   the LIGHT floor, below
+//   w / phi(rho_min)                 7.026627796 mm   the LIGHT floor, below
 //   w / phi(min(rho_max, cap))       2.25 mm          this function -- what grade_lattice
 //                                                     actually applies
-//   w / phi(rho_max)                 1.173173434 mm   the same thing UNCAPPED, which four
+//   w / phi(rho_max)                 1.116948948 mm   the same thing UNCAPPED, which four
 //                                                     other paths computed inline
 //
 // One run reported two of them under one key name: `fit.min_printable_cell_mm` was the
@@ -563,14 +565,12 @@ double lattice_cell_printability_floor_mm(LatticeTopology topo,
 // i.e.  w / phi(rho) <= S <= W / N*. Since phi is increasing, the widest window is at
 // the band's top, and the pair set is non-empty iff W >= N* * w / phi(rho_max).
 //
-// ★ A MEASUREMENT LIMIT THAT IS LOAD-BEARING HERE. phi is measured on rho 0.05..0.60
-// and CLAMPED above 0.60, while the certifiable band reaches lattice_rho_max = 0.8999.
-// So phi is FLAT on [0.60, rho_max] and a density above 0.60 buys no extra diameter in
-// this model. That is the conservative direction — a real strut at rho 0.80 is fatter
-// than phi says, so we demand a bigger cell than strictly necessary, never a smaller
-// one — but it means `densest_relative_density` below is reported as the LIGHTEST
-// density that reaches the frontier cell, not as rho_max, because carrying more mass
-// for an identical cell would be a worse answer with no measurement behind it.
+// ★ phi WAS FLAT ABOVE 0.60 UNTIL RULING 2026-11-02 (c): the legs-only table was measured
+// on rho 0.05..0.60 and clamped above it, so a density over 0.60 bought no diameter.
+// Octet's full-cell law is measured across the whole band (0.045..0.95 brackets
+// 0.0496..0.9003), so phi rises to rho_max. `densest_relative_density` below is still
+// reported as the LIGHTEST density that reaches the frontier cell, which today is
+// rho_max itself wherever the frontier is w / phi(rho_max).
 struct LatticeCellDerivation {
   // ── the inputs that governed, echoed so a receipt never has to re-derive them ──
   double member_width_mm = 0.0;
@@ -723,21 +723,17 @@ double lattice_library_youngs_modulus();
 // the `rho` the tensor library above is keyed on (lattice certification E2E,
 // handoff 2026-07-29-lattice-certification-e2e).
 //
-// It is computed on the LIBRARY'S OWN BASIS: the single octet cell is voxelized at
-// the resolution PR 198 measured the library at (kLatticeLibraryVpc = 48 voxels
-// per cell edge) with the identical strut distance field, and rho is the solid
-// voxel fraction. This is the exact forward of the calibrate_octet_r inversion
-// PR 198 used to place each library row, so a query at a printed radius lands on
-// the same rho scale the tensor rows carry — the two cannot drift. Deterministic
-// (fixed voxel sweep, no RNG/threads); rho in (0, 1). Depends only on the RATIO
-// strut_radius_mm / cell_mm (the field scales with the cell), so it is cell-size
-// invariant. Throws std::invalid_argument if cell_mm or strut_radius_mm is not
-// finite/> 0, or if the radius is so large the cell fills solid (rho would be 1).
+// ★ OCTET MADE HONEST (ruling 2026-11-02 (c)): it is the inverse of
+// octet_strut_diameter_mm, the full octet's own law (legs and braces, 24 struts a cell,
+// the cell the generator lays), read the other way the way every other type's is: exact
+// inside the table, the full cell's converged solid fraction off it. (It used to
+// voxelise the LEGS-ONLY cell at vpc48, PR 198's basis, which is geometrically FCC.)
+// Deterministic; rho in (0, 1). Depends only on the RATIO strut_radius_mm / cell_mm, so
+// it is cell-size invariant. Throws std::invalid_argument if cell_mm or strut_radius_mm
+// is not finite/> 0, or if the radius is so large the cell fills solid (rho would be 1).
 //
-// NOTE (carried, not hidden): the production generator (lattice_gen.cpp) meshes
-// each strut as an n=8 prism, a printable inner approximation of the cylinder this
-// uses; the ~1-2 % polygon-vs-circle area gap sits well inside octet's ±10 %
-// resolution caveat (C6) and does not move the library row a query interpolates.
+// Since ruling (b) the generator emits each strut as an 8-gon prism of the round strut's
+// AREA (lattice_strut_emit_scale), so the file holds the density this returns.
 double octet_relative_density(double cell_mm, double strut_radius_mm);
 
 // ── ★ THE AESTHETIC DENSITY CEILING (ruling D, maintainer 2026-09-18) ───────────
@@ -779,8 +775,11 @@ inline double lattice_outline_bleed_mm(double band_mm) {
 }
 
 inline constexpr double kOctetAestheticStrutPerCell = 0.20;
-// ★ AND IT IS THE PREIMAGE UNDER THE DIAMETER TABLE, NOT THE FORWARD DENSITY LAW.
-// Core holds TWO measured tables and they are not exact inverses of one another:
+// ★ AND IT IS THE PREIMAGE UNDER THE DIAMETER TABLE. Since ruling 2026-11-02 (c) the
+// forward law IS that table read the other way, so the two agree exactly: the full
+// octet's strut is a fifth of its cell at rho 0.3788 (it has twice the legs-only cell's
+// struts, so the same strut holds about twice the density). Before (c) core held TWO
+// legs-only tables that were not exact inverses of one another:
 //
 //     octet_relative_density(cell, radius)  at strut/cell 0.20 -> rho 0.211733
 //     octet_strut_diameter_mm(rho, cell)    preimage of 0.20   -> rho 0.218871

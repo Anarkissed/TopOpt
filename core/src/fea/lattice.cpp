@@ -11,69 +11,13 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
 namespace topopt {
 
 namespace {
-
-// --- Octet unit-cell geometry (rho basis) ----------------------------------
-// The octet strut segments of a UNIT cell (edge 1), copied operation-for-operation
-// from PR 198's homogenization probe (lattice_homog_probe.cpp `octet_struts`): the
-// 6 face-centre nodes each join the 4 cube corners of their face. This is the SAME
-// geometry the tensor library rows were measured on, so voxelizing it recovers the
-// library's rho scale exactly. Struts are cylinders of radius r (the point-segment
-// distance field), matching `octet_dist2 < r*r`.
-std::vector<std::array<std::array<double, 3>, 2>> octet_unit_struts() {
-  std::vector<std::array<double, 3>> nodes;
-  for (int z = 0; z <= 1; ++z)
-    for (int y = 0; y <= 1; ++y)
-      for (int x = 0; x <= 1; ++x)
-        nodes.push_back({double(x), double(y), double(z)});
-  const std::array<std::array<double, 3>, 6> fc = {{{0.5, 0.5, 0.0},
-                                                    {0.5, 0.5, 1.0},
-                                                    {0.5, 0.0, 0.5},
-                                                    {0.5, 1.0, 0.5},
-                                                    {0.0, 0.5, 0.5},
-                                                    {1.0, 0.5, 0.5}}};
-  std::vector<std::array<double, 3>> all(nodes);
-  for (const auto& f : fc) all.push_back(f);
-  std::vector<std::array<std::array<double, 3>, 2>> segs;
-  for (std::size_t fi = 8; fi < all.size(); ++fi)
-    for (std::size_t ci = 0; ci < 8; ++ci) {
-      double d2 = 0.0;
-      for (int k = 0; k < 3; ++k) {
-        const double v = all[fi][k];
-        if (v == 0.0 || v == 1.0) d2 += (all[ci][k] - v) * (all[ci][k] - v);
-      }
-      if (d2 < 1e-9) segs.push_back({all[fi], all[ci]});
-    }
-  return segs;
-}
-
-// Squared distance from unit-cell point (x,y,z) to the nearest strut segment.
-double octet_point_dist2(
-    double x, double y, double z,
-    const std::vector<std::array<std::array<double, 3>, 2>>& segs) {
-  double best = 1e30;
-  for (const auto& s : segs) {
-    const double ax = s[0][0], ay = s[0][1], az = s[0][2];
-    const double bx = s[1][0], by = s[1][1], bz = s[1][2];
-    const double ex = bx - ax, ey = by - ay, ez = bz - az;
-    const double len2 = ex * ex + ey * ey + ez * ez;
-    double t = 0.0;
-    if (len2 > 0.0)
-      t = ((x - ax) * ex + (y - ay) * ey + (z - az) * ez) / len2;
-    if (t < 0.0) t = 0.0;
-    if (t > 1.0) t = 1.0;
-    const double dx = x - (ax + t * ex), dy = y - (ay + t * ey),
-                 dz = z - (az + t * ez);
-    const double d2 = dx * dx + dy * dy + dz * dz;
-    if (d2 < best) best = d2;
-  }
-  return best;
-}
 
 // The solid modulus PR 198's library was measured at (materials.json PLA E).
 // Effective stiffness is exactly linear in the solid modulus (linear elasticity),
@@ -86,43 +30,48 @@ struct Row {
 };
 
 // OCTET — the homogenized cubic tensor per MEASURED (voxelised) relative density
-// (L=5 mm, Es=3500), ordered by rho. Three provenance bands:
-//   MID  (0.148..0.591): PR 198's original library, vpc48. Reproduced bit-for-bit
-//        (PR 234 validated 0.15..0.54 within +-2.4%). UNCHANGED here — these rows are
-//        byte-identical to the shipped library (the B2 anchor test asserts it).
-//   LOW  (0.050..0.119): PR 237, vpc128 converged truth (analyze_low.txt,
-//        evidence/2026-07-28-density-band-extension). Extends the floor 0.148 -> 0.05.
-//        vox/strut 11.4..18.6; resolution drift < 2.4%. Supersedes PR 198's single
-//        under-resolved 0.103 row (dropped: it was excluded from every fit).
-//   HIGH (0.615..0.900): PR 237, vpc48 validated vs vpc64 (high_end.csv); drift
-//        < 2.4%. Replaces the old frozen clamp at 0.591 (which read up to -153% low).
-// Every row here is resolved & validated (PR 237's verdict), so the interpolation
-// range spans the full 0.050..0.900 band. Values transcribed VERBATIM from
-// evidence/2026-07-28-density-band-extension/proposed_octet_rows.txt. This is the
-// ONLY topology PR 237 re-measured; the eight tables below keep their own bands.
-constexpr std::array<Row, 19> kOctet = {{
-    // --- LOW rows (PR 237, vpc128; floor 0.148 -> 0.05) ---
-    {0.05047, 37.0649, 18.3510, 16.8552, true},
-    {0.06355, 48.3025, 23.7203, 21.6214, true},
-    {0.08109, 64.4784, 31.2998, 28.2686, true},
-    {0.09882, 81.7907, 39.2954, 35.2762, true},
-    {0.11908, 102.9136, 48.7092, 43.5388, true},
-    // --- MID rows (PR 198, vpc48; UNCHANGED) ---
-    {0.14764, 136.9621, 64.0645, 56.6726, true},
-    {0.20414, 213.7779, 94.5363, 83.3612, true},
-    {0.25297, 295.1031, 124.0143, 109.1889, true},
-    {0.29731, 374.2029, 151.9733, 135.0535, true},
-    {0.39786, 611.4884, 226.3148, 204.0181, true},
-    {0.50644, 974.8665, 328.8413, 297.3223, true},
-    {0.59093, 1344.7034, 443.6894, 392.1883, true},
-    // --- HIGH rows (PR 237, vpc48 validated vs vpc64; clamp 0.591 -> 0.90) ---
-    {0.61509, 1464.0552, 485.7181, 423.7420, true},
-    {0.65502, 1677.7877, 562.6095, 480.4917, true},
-    {0.69871, 1975.2811, 676.0779, 550.7189, true},
-    {0.75210, 2351.3476, 842.3622, 650.7516, true},
-    {0.79753, 2720.7120, 1018.8917, 743.9973, true},
-    {0.85120, 3276.6604, 1312.7907, 878.5398, true},
-    {0.89988, 3832.0119, 1640.8200, 1011.6316, true},
+// (L=5 mm, Es=3500), ordered by rho.
+//
+// ★ OCTET MADE HONEST (ruling 2026-11-02 (c)). These rows used to be PR 198's library with
+// PR 237's band extension, all measured on the LEGS-ONLY cell, which is geometrically FCC
+// (kFcc below matches it byte for byte where the densities coincide), while the generator
+// lays the FULL octet, legs and braces, 24 struts a cell. They are now the full octet's,
+// measured with the same periodic homogenization (tensor_library_nine_probe `sweep octet`,
+// PR 246's driver) and judged by its rule: |drift| < 2.4 % against a finer resolution's
+// curve at the row's own rho, >= 6 voxels across the strut, CG converged. Three blocks:
+//   LOW  (0.0496..0.1512): vpc96 rows vs the vpc128 curve, measured 2026-11-03.
+//   MID  (0.2066..0.4800): PR 246's validated rows, vpc48 vs vpc64
+//        (evidence/2026-07-29-tensor-library-nine/csv/octet_sweep.csv), measured then but
+//        never landed.
+//   HIGH (0.5411..0.9003): vpc64 rows vs the vpc96 curve, measured 2026-11-03.
+// The sweep ran one density per process (each under the heavy lock's hour), so each
+// process's reference curve held ONE point and its own drift column compared two
+// different densities; the drift here is re-judged on each set's whole reference curve,
+// which is what one process would have printed (c_octet_tensor_rows.txt). One row fails:
+// 0.18522, which lies past the end of its reference curve (the rule does not extrapolate),
+// and is left out. Every row here is resolved and validated; the band is 0.0496..0.9003.
+constexpr std::array<Row, 18> kOctet = {{
+    // --- LOW rows (vpc96 vs vpc128) ---
+    {0.04959, 36.2534, 18.4178, 17.2190, true},
+    {0.06058, 45.6481, 23.2077, 21.5912, true},
+    {0.07794, 60.9315, 30.9432, 28.6375, true},
+    {0.10532, 87.3471, 43.8564, 40.2300, true},
+    {0.11748, 99.5680, 50.0693, 45.9761, true},
+    {0.15115, 136.6541, 68.0589, 62.3069, true},
+    // --- MID rows (PR 246, vpc48 vs vpc64) ---
+    {0.20660, 213.3453, 103.9827, 94.3391, true},
+    {0.29543, 355.6757, 169.5095, 155.3239, true},
+    {0.42245, 638.9053, 285.3390, 264.5521, true},
+    {0.48003, 811.3576, 354.8678, 330.5264, true},
+    // --- HIGH rows (vpc64 vs vpc96) ---
+    {0.54114, 1006.9295, 429.2955, 398.0499, true},
+    {0.58484, 1186.9047, 497.8077, 457.7308, true},
+    {0.64856, 1516.5063, 630.9997, 561.0512, true},
+    {0.70178, 1863.4078, 781.5637, 661.6485, true},
+    {0.74805, 2217.3259, 936.1863, 749.7789, true},
+    {0.80078, 2711.0987, 1169.5786, 859.8464, true},
+    {0.85071, 3293.6552, 1464.3333, 972.4855, true},
+    {0.90027, 3861.9111, 1764.7180, 1076.4927, true},
 }};
 
 // ─── the nine-topology extension (handoff 2026-07-29-tensor-library-nine) ───────
@@ -133,10 +82,10 @@ constexpr std::array<Row, 19> kOctet = {{
 // vpc64 AND strut diameter >= 6 voxels); rows outside are kept for provenance. Only
 // the CUBIC-symmetric topologies are here — the three tetragonal variants (bccz/fccz/
 // reentrant) get NO table (rows_of returns empty) and are refused by lattice_cubic_
-// tensor (bar B3). NOTE: kFcc is geometrically the legs-only octet, so its rows match
-// kOctet where the density sampling coincides (rho 0.297, 0.591 are byte-identical) —
-// the live proof this driver reproduces the shipped octet. See the handoff for the
-// shipped-"octet"-is-legs-only finding.
+// tensor (bar B3). NOTE: kFcc is geometrically the legs-only octet, so its rows matched
+// octet's OLD rows where the density sampling coincided (rho 0.297, 0.591 byte-identical)
+// -- the live proof this driver reproduces PR 198's library, and how the shipped octet
+// was found to be legs-only. kOctet is the full octet's since ruling 2026-11-02 (c).
 
 // sc: cubic, extreme LOW shear (Zener 0.045-0.60). Worst in-band drift 0.71%.
 constexpr std::array<Row, 8> kSimpleCubic = {{
@@ -421,9 +370,10 @@ struct TypeMeasurements {
 // DIAMETER (`law fcc`): r/L bisected 50 steps on the cell's CONVERGED solid fraction
 // (strut_cell_solid_fraction, 2^20 Halton samples -- see its note for why not the vpc48
 // voxel staircase), diameter at a 4 mm cell, VERBATIM. The same bisection on the vpc48
-// voxels (octet's B3 method) reproduces octet's kOctetDia to all four digits, because
-// octet's table was measured on the LEGS-ONLY cell, which is geometrically FCC; this
-// converged table sits within -2.7 / +2.5 % of it (fcc_law.txt, column "B3 gap").
+// voxels (octet's B3 method) reproduced octet's OLD kOctetDia to all four digits, because
+// that table was measured on the LEGS-ONLY cell, which is geometrically FCC; this
+// converged table sits within -2.7 / +2.5 % of it (fcc_law.txt, column "B3 gap"). Octet's
+// table is its own full cell's since ruling 2026-11-02 (c).
 constexpr TypeDiaRow kFccDia[] = {
     {0.05, 0.3639}, {0.08, 0.4670}, {0.10, 0.5265}, {0.15, 0.6580},
     {0.20, 0.7739}, {0.30, 0.9807}, {0.40, 1.1712}, {0.60, 1.5434},
@@ -770,22 +720,30 @@ double lattice_subfloor_aggregate_cap_fraction() {
 
 namespace {
 
-// The printed octet strut DIAMETER at cell edge 4 mm, per relative density, measured
-// at vpc48 — evidence/2026-07-28-graded-cell-size-phase0/b3_printability.csv, column
-// d_mm_cell4, VERBATIM. Diameter is exactly linear in cell size (that CSV's cell8/16/
-// 32 columns are 2/4/8x these to four digits), so a query at any cell scales by
-// cell/4. Ordered by rho; the span (0.05..0.60) brackets the certifiable band.
+// The printed octet strut DIAMETER at cell edge 4 mm, per relative density.
+//
+// ★ OCTET MADE HONEST (ruling 2026-11-02 (c)). This used to be PR 198's B3 table,
+// measured on the LEGS-ONLY cell (geometrically FCC: lattice_types_probe reproduces it
+// to all four digits on FCC) while the generator lays the FULL octet, legs and braces,
+// 24 struts a cell: at the same density the file held +50 to +90 % more lattice than the
+// certificate counted (c_gapcell_before_c.txt; +0.1 to +0.3 % on this law,
+// c_gapcell_after_c.txt). It is now octet's OWN law, measured the way
+// every other type's is (Finding 1): `lattice_types_probe law octet` on the full cell,
+// r/L bisected 50 steps on the cell's CONVERGED solid fraction (strut_cell_solid_fraction,
+// 2^20 Halton samples), diameter at a 4 mm cell, VERBATIM
+// (docs/handoffs/evidence/2026-11-01-lattice-types-k1/c_octet_law.{csv,txt}). The vpc48
+// bisection on the same full cell sits within -6.5 / +5.2 % of it ("B3 gap"). Since (b)
+// the emitted strut holds the round strut's area, so this is the density the file holds.
+// Diameter is exactly linear in cell size; a query at any cell scales by cell/4. Ordered
+// by rho; the span brackets the certifiable band 0.0496..0.9003 (its two end rows, 0.045 and
+// 0.95, were measured the same way when the tensor rows landed: c_octet_law_ends.txt).
 struct DiaRow { double rho, d_at_cell4_mm; };
 constexpr double kOctetDiaCellMm = 4.0;
-constexpr std::array<DiaRow, 8> kOctetDia = {{
-    {0.05, 0.3632},
-    {0.08, 0.4787},
-    {0.10, 0.5336},
-    {0.15, 0.6401},
-    {0.20, 0.7592},
-    {0.30, 0.9754},
-    {0.40, 1.1815},
-    {0.60, 1.5343},
+constexpr std::array<DiaRow, 17> kOctetDia = {{
+    {0.045, 0.2435}, {0.050, 0.2573}, {0.065, 0.2956}, {0.080, 0.3300}, {0.100, 0.3724}, {0.120, 0.4116},
+    {0.150, 0.4653}, {0.200, 0.5473}, {0.250, 0.6226}, {0.300, 0.6934}, {0.400, 0.8286},
+    {0.500, 0.9591}, {0.600, 1.0913}, {0.700, 1.2318}, {0.800, 1.3918}, {0.900, 1.6104},
+    {0.950, 1.8202},
 }};
 
 }  // namespace
@@ -798,7 +756,7 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm) {
     throw std::invalid_argument(
         "octet_strut_diameter_mm: rho must be finite and >= 0");
 
-  const std::array<DiaRow, 8>& rows = kOctetDia;
+  const std::array<DiaRow, 17>& rows = kOctetDia;
   const int n = static_cast<int>(rows.size());
   double d4;  // diameter at the reference 4 mm cell
   if (rho <= rows[0].rho) {
@@ -816,6 +774,21 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm) {
   }
   return d4 * (cell_size_mm / kOctetDiaCellMm);
 }
+
+namespace {
+// width / phi(rho) is the cell whose strut at rho is exactly the stated width, but only
+// to rounding: on octet's full-cell law 0.42 / phi(rho_max) builds a 0.41999999999999993
+// mm strut, which every strut-vs-width test in core reads as UNDER the width (FIT derives
+// exactly this cell for a thin wall, and grade_lattice's audit threw). So the cell is
+// nudged up by ulps until its strut provably prints: a cell core calls printable prints.
+double cell_whose_strut_prints(LatticeTopology topo, double rho, double width_mm,
+                               double phi_per_mm) {
+  double cell = width_mm / phi_per_mm;
+  for (int i = 0; i < 8 && lattice_strut_diameter_mm(topo, rho, cell) < width_mm; ++i)
+    cell = std::nextafter(cell, std::numeric_limits<double>::infinity());
+  return cell;
+}
+}  // namespace
 
 double lattice_min_printable_cell_mm(LatticeTopology topo,
                                      double min_extrudable_width_mm,
@@ -852,7 +825,7 @@ double lattice_min_printable_cell_mm(LatticeTopology topo,
     throw std::invalid_argument(
         "lattice_min_printable_cell_mm: the diameter law returned no width at the capped "
         "band top");
-  return min_extrudable_width_mm / per_mm;
+  return cell_whose_strut_prints(topo, rho_hi, min_extrudable_width_mm, per_mm);
 }
 
 double lattice_cell_printability_floor_mm(LatticeTopology topo,
@@ -864,8 +837,9 @@ double lattice_cell_printability_floor_mm(LatticeTopology topo,
   // The thinnest strut at any cell size occurs at the band's LOW end (diameter is
   // monotone in rho), and diameter is exactly linear in cell size, so the floor is
   // the stated width divided by the diameter at a UNIT cell.
-  const double phi_lo = lattice_strut_diameter_mm(topo, lattice_rho_min(topo), 1.0);
-  return min_extrudable_width_mm / phi_lo;
+  const double rho_lo = lattice_rho_min(topo);
+  const double phi_lo = lattice_strut_diameter_mm(topo, rho_lo, 1.0);
+  return cell_whose_strut_prints(topo, rho_lo, min_extrudable_width_mm, phi_lo);
 }
 
 double lattice_min_density_for_strut(LatticeTopology topo, double cell_size_mm,
@@ -1346,26 +1320,26 @@ double octet_relative_density(double cell_mm, double strut_radius_mm) {
     throw std::invalid_argument(
         "octet_relative_density: strut_radius_mm must be finite and > 0");
 
-  // Voxelize ONE cell on the library's basis (vpc48). The field depends only on
-  // the ratio r/L (a unit cell with unit-cell radius), so cell_mm cancels and the
-  // result is cell-size invariant — the whole reason a homogenized cell adds no DOF.
-  const double r_unit = strut_radius_mm / cell_mm;
-  const auto segs = octet_unit_struts();
-  const int vpc = kLatticeLibraryVpc;
-  const double r2 = r_unit * r_unit;
-  long long solid = 0;
-  const long long total = static_cast<long long>(vpc) * vpc * vpc;
-  for (int k = 0; k < vpc; ++k)
-    for (int j = 0; j < vpc; ++j)
-      for (int i = 0; i < vpc; ++i) {
-        // Voxel centre in unit-cell coordinates (matches build_lattice's
-        // voxel_center on a cell of edge 1).
-        const double x = (i + 0.5) / vpc;
-        const double y = (j + 0.5) / vpc;
-        const double z = (k + 0.5) / vpc;
-        if (octet_point_dist2(x, y, z, segs) < r2) ++solid;
-      }
-  const double rho = static_cast<double>(solid) / static_cast<double>(total);
+  // ★ OCTET MADE HONEST (ruling 2026-11-02 (c)): the SAME measurement as kOctetDia, read
+  // the other way, exactly as every other type's lattice_density_from_strut is. This
+  // used to voxelise the LEGS-ONLY cell at vpc48 (PR 198's basis), while the generator
+  // lays the full octet; the two octet tables were then also not each other's inverse
+  // (0.211733 against 0.218871 at strut/cell 0.20). Inside the table the inverse of its
+  // linear interpolation makes the round trip exact; off it (a radius thinner than the
+  // 0.05 row or fatter than the 0.90 one) it integrates the full cell's converged solid
+  // fraction, the measurement the table was bisected on.
+  const double d4 = 2.0 * strut_radius_mm * (kOctetDiaCellMm / cell_mm);
+  const int n = static_cast<int>(kOctetDia.size());
+  if (d4 >= kOctetDia[0].d_at_cell4_mm && d4 <= kOctetDia[n - 1].d_at_cell4_mm) {
+    int a = 0;
+    while (a + 1 < n - 1 && kOctetDia[a + 1].d_at_cell4_mm < d4) ++a;
+    const DiaRow& r0 = kOctetDia[a];
+    const DiaRow& r1 = kOctetDia[a + 1];
+    const double t = (d4 - r0.d_at_cell4_mm) / (r1.d_at_cell4_mm - r0.d_at_cell4_mm);
+    return r0.rho + t * (r1.rho - r0.rho);
+  }
+  const double rho = strut_cell_solid_fraction(lattice_strut_cell(LatticeTopology::Octet),
+                                               strut_radius_mm / cell_mm);
   if (!(rho > 0.0) || rho >= 1.0)
     throw std::invalid_argument(
         "octet_relative_density: strut radius produced a degenerate cell "

@@ -163,9 +163,11 @@ int main() {
 
   // ── 3b. FCC'S OWN LAW (lattice types round 1) ───────────────────────────────
   // FCC's table was measured on FCC's own canonical cell, on its converged solid
-  // fraction (lattice_types_probe `law`). Octet's table was measured on the legs-only
-  // cell -- which IS FCC -- on the vpc48 voxel staircase, so the two agree to within
-  // that staircase (<= 3 %), which is asserted as the cross-check it is.
+  // fraction (lattice_types_probe `law`). Since ruling 2026-11-02 (c) octet's is measured
+  // the same way on the FULL octet (legs and braces), which has exactly twice FCC's strut
+  // length per cell: at one density its strut carries half the area, so its diameter is
+  // FCC's over sqrt(2), less only the node overlap. Asserted as the cross-check it is (it
+  // used to assert the two were EQUAL, which is how octet's legs-only table was found).
   {
     const double rows[8][2] = {{0.05, 0.3639}, {0.08, 0.4670}, {0.10, 0.5265},
                                {0.15, 0.6580}, {0.20, 0.7739}, {0.30, 0.9807},
@@ -176,10 +178,11 @@ int main() {
     CHECK(lattice_strut_diameter_mm(LatticeTopology::Fcc, 0.30, 8.0) == 2 * 0.9807,
           "fcc: diameter is linear in cell size");
     for (const auto& r : rows)
-      CHECK(std::fabs(lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 7.0) /
-                          octet_strut_diameter_mm(r[0], 7.0) - 1.0) < 0.03,
-            "fcc: within 3 % of octet's legs-only table (one geometry, two "
-            "resolutions)");
+      CHECK(std::fabs(std::sqrt(2.0) * octet_strut_diameter_mm(r[0], 7.0) /
+                          lattice_strut_diameter_mm(LatticeTopology::Fcc, r[0], 7.0) -
+                      1.0) < 0.01,
+            "fcc: the full octet's strut is FCC's over sqrt(2) to 1 % (twice the strut "
+            "length at one density)");
     // The other direction is the same measurement read backwards, so inside the table
     // the round trip is exact; off it (a strut thinner than the 0.05 row) the density is
     // integrated on the converged solid fraction, and lands below the table's first row.
@@ -545,10 +548,13 @@ int main() {
     const double light = lattice_cell_printability_floor_mm(t, w);
     const double uncapped = lattice_min_printable_cell_mm(t, w, 0.0);
     const double at_cap = lattice_min_printable_cell_mm(t, w, octet_aesthetic_density_ceiling());
-    CHECK(std::fabs(light - 4.931378498) < 5e-9,
-          "E1: the LIGHT floor w/phi(rho_min) is 4.931378498 mm");
-    CHECK(std::fabs(uncapped - 1.173173434) < 5e-9,
-          "E1: the UNCAPPED dense floor w/phi(rho_max) is 1.173173434 mm");
+    // Ruling 2026-11-02 (c): octet's law and band are the full cell's. The light floor was
+    // 4.931378498 mm on the legs-only law, a cell whose bead-wide strut held rho 0.0965 in
+    // the file, not the band floor's 0.05; the full cell's floor is about sqrt(2) coarser.
+    CHECK(std::fabs(light - 7.026627796) < 5e-9,
+          "E1: the LIGHT floor w/phi(rho_min) is 7.026627796 mm");
+    CHECK(std::fabs(uncapped - 1.116948948) < 5e-9,
+          "E1: the UNCAPPED dense floor w/phi(rho_max) is 1.116948948 mm");
     CHECK(std::fabs(at_cap - 2.25) < 5e-9,
           "E1: and at the job's cap it is 2.25 mm -- the number grade_lattice applies");
     // The three are genuinely different answers; that is the whole defect.
@@ -572,11 +578,9 @@ int main() {
     // property which makes it a floor at all, and it is what a path computing the
     // UNCAPPED number got wrong -- it reported a cell FINER than the job can print.
     //
-    // NON-STRICTLY monotone, and the reason is the measured table, not an approximation:
-    // the diameter law is CLAMPED above its last measured row (rho 0.60), so every cap
-    // from 0.60 up gives the same floor. My first draft asserted strict increase and went
-    // red at cap 0.60 against 0.80 -- the table's flat top, which is a fact worth pinning
-    // rather than an assumption worth keeping.
+    // NON-STRICTLY monotone: the diameter law is CLAMPED above its last measured row, so
+    // caps above it give the same floor. (On the legs-only table that row was rho 0.60 and
+    // a strict check went red at 0.60 against 0.80; octet's full-cell table reaches 0.90.)
     double prev = 0.0;
     for (double cap : {0.90, 0.80, 0.60, 0.55, 0.40, 0.30, 0.25, 0.20, 0.10, 0.06}) {
       const double cell = lattice_min_printable_cell_mm(t, w, cap);
@@ -590,13 +594,14 @@ int main() {
       CHECK(cell > below, "E1: and below rho 0.60 a tighter cap is strictly coarser");
       below = cell;
     }
-    // THE FLAT TOP ITSELF, pinned: a cap anywhere from the band floor's top region down to
-    // 0.60 buys nothing, because phi is clamped there. If the table ever gains a row above
-    // 0.60 this check reports it instead of the app silently getting a finer floor.
-    CHECK(lattice_min_printable_cell_mm(t, w, 0.60) ==
-              lattice_min_printable_cell_mm(t, w, 0.90),
-          "E1: caps of 0.60 and 0.90 give the SAME floor -- the diameter law is clamped "
-          "above its last measured row, so a cap up there is inert");
+    // THE FLAT TOP, GONE (ruling 2026-11-02 (c)). The legs-only table stopped at rho 0.60,
+    // so a cap from 0.60 up bought nothing (this check pinned that, "if the table ever
+    // gains a row above 0.60 this check reports it"). Octet's full-cell table has rows to
+    // 0.90: a cap up there now buys a finer printable cell, as it should.
+    CHECK(lattice_min_printable_cell_mm(t, w, 0.60) >
+              lattice_min_printable_cell_mm(t, w, 0.85),
+          "E1: a cap of 0.85 gives a FINER floor than 0.60 -- the full-cell law is measured "
+          "up there, not clamped");
 
     // A cap under the band's own floor admits no measured density: refused, named.
     bool threw = false;
@@ -612,6 +617,44 @@ int main() {
     try { (void)lattice_min_printable_cell_mm(t, 0.0, 0.2); }
     catch (const std::exception&) { threw_w = true; }
     CHECK(threw_w, "E1: a non-positive bead is refused");
+  }
+
+  // ── ★ A CELL CORE CALLS PRINTABLE PRINTS (ruling 2026-11-02 (c)) ────────────
+  // width / phi(rho) is that cell only to rounding: on octet's full-cell law 0.42 /
+  // phi(0.89988) built a 0.41999999999999993 mm strut, every strut-vs-width test read it as
+  // under the bead, and grade_lattice's audit threw on a thin wall FIT had sized. Core now
+  // nudges the cell up by ulps until the strut prints. Every type with a law, beads 0.20 to
+  // 1.00 mm, the band's two ends and a cap between: the strut prints, and the cell is still
+  // the quotient to a few ulps (a floor, not a margin). The bare quotient is the positive
+  // control: it must fall short somewhere, or this section proves nothing.
+  {
+    int bare_short = 0;
+    for (LatticeTopology t : all) {
+      if (!has_own_law(t)) continue;
+      const double lo = lattice_rho_min(t), hi = lattice_rho_max(t);
+      for (int k = 0; k <= 160; ++k) {
+        const double w = 0.20 + 0.005 * k;
+        const double light = lattice_cell_printability_floor_mm(t, w);
+        bool ok = lattice_strut_diameter_mm(t, lo, light) >= w &&
+                  light <= w / lattice_strut_diameter_mm(t, lo, 1.0) * (1.0 + 1e-14);
+        for (double cap : {0.0, 0.5 * (lo + hi)}) {
+          const double rho = cap > 0.0 ? cap : hi;
+          const double cell = lattice_min_printable_cell_mm(t, w, cap);
+          ok = ok && lattice_strut_diameter_mm(t, rho, cell) >= w &&
+               cell <= w / lattice_strut_diameter_mm(t, rho, 1.0) * (1.0 + 1e-14);
+          const double bare = w / lattice_strut_diameter_mm(t, rho, 1.0);
+          if (lattice_strut_diameter_mm(t, rho, bare) < w) ++bare_short;
+        }
+        if (!ok) {
+          std::fprintf(stderr, "  %s at a %.3f mm bead\n", lattice_topology_name(t), w);
+          CHECK(false, "the finest printable cell's strut prints, and the cell is the "
+                       "quotient to a few ulps");
+        }
+      }
+    }
+    std::printf("[rounding] the bare quotient built a strut under the bead in %d cases\n",
+                bare_short);
+    CHECK(bare_short > 0, "positive control: the bare quotient falls short somewhere");
   }
 
   if (g_failures == 0) {

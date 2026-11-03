@@ -15,15 +15,16 @@
 //
 // ★ AND A FAMILY IS ONLY ADMITTED IF ITS TILE PRINTS OPEN. A tile so small that a
 // bead-wide strut fills it is not a lattice, it is a solid block wearing a cell's name.
-// The bound is the octet law: relative density at a bead-wide strut in a tile of that
-// size, at or under kSteppedPrintsOpenMaxRho. On a 12 mm base at a 0.45 mm bead the
+// The bound is geometry: a bead-wide strut at most kSteppedPrintsOpenMaxStrutPerCell of
+// the tile (ruled as octet density 0.20 on 2026-10-10; stated as the ratio it was since
+// ruling 2026-11-02 (c)). On a 12 mm base at a 0.45 mm bead the
 // fifths print open at 2.4 mm and the sixths at 2.0 mm do not, which is exactly what
 // removes the sixths family -- and with it the 10 mm entry, reachable only as 5*(12/6).
 //
-// NOTE ON THE BOUND, for the structural case: 20 % is an AESTHETIC rule (the quilt's
+// NOTE ON THE BOUND, for the structural case: it is an AESTHETIC rule (the quilt's
 // finest rung). Under intent: structural the honest lower bound is the printability
 // floor together with the certifiable cells-per-member regime, which is a different and
-// generally COARSER limit. `min_cell_mm` is how a caller states that floor; the density
+// generally COARSER limit. `min_cell_mm` is how a caller states that floor; the prints-open
 // bound is applied on top of it, never instead of it.
 
 #include "topopt/lattice.hpp"  // LatticeTopology
@@ -37,7 +38,7 @@
 
 namespace topopt {
 
-// Divisors the packer may use. 2..6: sevenths and finer have never survived the density
+// Divisors the packer may use. 2..6: sevenths and finer have never survived the prints-open
 // bound at any bead this pipeline prints, and each extra family multiplies the packer's
 // search without adding a size the coarser families cannot already express.
 inline constexpr int kSteppedMaxDivisor = 6;
@@ -46,24 +47,26 @@ inline constexpr int kSteppedMaxDivisor = 6;
 // stop it first -- this is only a bound on the loop, not a design choice about depth.
 inline constexpr int kSteppedMaxHalvings = 8;
 // "Prints open": a bead-wide strut in a tile of this size must not exceed this relative
-// density. The octet law supplies the density; see the note above on the structural case.
+// density ON THE LEGS-ONLY OCTET LAW the rule was ruled and approved on (2026-10-10).
 inline constexpr double kSteppedPrintsOpenMaxRho = 0.20;
+// ★ THE SAME RULE AS GEOMETRY (ruling 2026-11-02 (c), option A): on that law a bead-wide
+// strut at rho 0.20 is 0.7592 / 4 = 0.1898 of its tile, and that is the bound applied.
+// Octet's law is now the full cell's, on which 0.20 would be a strut a third thinner, and
+// the menus the maintainer approved were approved by LOOKING at the preview, which always
+// drew the full octet: the geometry is what he ruled on, so the geometry is what stays.
+// One number for every type (a statement about strut and tile, not about a type's law).
+inline constexpr double kSteppedPrintsOpenMaxStrutPerCell = 0.7592 / 4.0;
 
 // ── ★ ONE RULE, ONE PLACE: DOES A CELL OF THIS SIZE PRINT OPEN? ───────────────
-// (Reviewer's ruling, 2026-10-10.) A bead-wide strut in a cell this size must leave the
-// cell mostly air -- at or under kSteppedPrintsOpenMaxRho of it. Core's FORWARD law, so
-// the answer is the one `stepped_admitted_divisors` applies; the app replaces its own two
-// call sites with this through the bridge, and its own 0.20 crossing (2.370917 mm at a
-// 0.45 mm bead) agreed with core's to 9 nm before this existed.
+// (Reviewer's ruling, 2026-10-10; stated as geometry by ruling 2026-11-02 (c).) A
+// bead-wide strut in a cell this size must leave the cell mostly air: the strut at most
+// kSteppedPrintsOpenMaxStrutPerCell of the cell. This is the answer
+// `stepped_admitted_divisors` applies; the app calls it through the bridge, and its 0.20
+// crossing (2.370917 mm at a 0.45 mm bead) is unchanged by (c).
 //
-// The density law reads radius/cell only, so the bound is proportional to the bead: the
-// smallest open cell is 5.268704 x bead, which is exactly
-// `lattice_min_printable_cell_mm(topo, bead, kSteppedPrintsOpenMaxRho)`.
-//
-// A size off the measured table is resolved BY WHICH SIDE it falls on -- a bead-wide strut
-// in a large cell is a low density (open), in a tiny one a high density (not). Swallowing
-// the throw as "not open" is the bug that made a probe of mine report the minimum open
-// cell as 50 mm.
+// The bound is proportional to the bead: the smallest open cell is 5.268704 x bead.
+// (Before (c) it was read through the octet law at rho 0.20, which is the same cell; a
+// size off that table had to be resolved by side. A ratio has no table to fall off.)
 bool lattice_prints_open(LatticeTopology topo, double cell_size_mm, double bead_mm);
 // Two menu sizes closer than this (relative) are the same size: 2*(S/4) IS S/2, and a
 // menu that listed both would make the packer try one size twice.
@@ -71,7 +74,7 @@ inline constexpr double kSteppedMenuSameRel = 1e-9;
 
 // The sizes an any-step region may use, LARGEST FIRST and deduplicated. `base_cell_mm` is
 // the region's base cell S, `bead_mm` the printable strut width, `min_cell_mm` a hard
-// floor on the tile (0 = no floor beyond the density bound). Returns {S} alone when no
+// floor on the tile (0 = no floor beyond the prints-open bound). Returns {S} alone when no
 // family prints open, which is the honest answer for a base too fine to subdivide.
 // `apply_prints_open` is the AESTHETIC half of the bound and is off under a structural
 // intent. The 20 % rule is a rule about how a quilt LOOKS; the beam-network certificate
@@ -92,11 +95,11 @@ enum class SteppedMenu {
 };
 
 // ★ `topo` IS FIRST AND HAS NO DEFAULT (task 2026-09-28-lattice-types-core). The
-// "prints open" admission asks a density question -- a bead-wide strut in this tile
-// must leave the cell mostly air -- and that is a per-type measurement. It read
-// octet's law for every type; it now reads the job's. First, because the trailing
-// parameters have defaults that callers rely on, and no default here, because a
-// defaulted topology is how one type gets another's numbers.
+// "prints open" admission was a density question read on each type's law; since ruling
+// 2026-11-02 (c) it is one geometry bound for every type (lattice_prints_open), so today
+// no answer here depends on `topo`. It stays first and undefaulted because the trailing
+// parameters have defaults that callers rely on, and a defaulted topology is how one
+// type gets another's numbers the day a per-type rule returns.
 std::vector<double> stepped_size_menu(LatticeTopology topo, double base_cell_mm,
                                       double bead_mm, double min_tile_mm = 0.0,
                                       bool apply_prints_open = true,
