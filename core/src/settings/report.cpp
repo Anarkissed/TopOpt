@@ -62,6 +62,42 @@ std::string str_json(const std::string& s) {
   return out;
 }
 
+// E1 — report.json "finish" (the BuildGroup contract of 2026-11-03), one line.
+std::string finish_json(const FinishBlock& f) {
+  auto place = [](const FinishPlace& p, bool left) {
+    std::string o = "{\"centre_mm\": [" + num_json(p.centre_mm.x) + ", " + num_json(p.centre_mm.y) +
+                    ", " + num_json(p.centre_mm.z) + "], ";
+    if (left) return o + "\"thickness_mm\": " + num_json(p.before_mm) + ", \"reason\": " +
+                     str_json(p.reason) + "}";
+    return o + "\"before_mm\": " + num_json(p.before_mm) + ", \"after_mm\": " +
+           num_json(p.after_mm) + "}";
+  };
+  std::string o = "{\"min_thickness_mm\": " + num_json(f.min_thickness_mm) +
+                  ", \"min_thickness_source\": " + str_json(f.min_thickness_source) +
+                  ", \"thin_spots_fixed\": [";
+  for (std::size_t q = 0; q < f.fixed.size(); ++q) o += (q ? ", " : "") + place(f.fixed[q], false);
+  o += "], \"thin_spots_left\": [";
+  for (std::size_t q = 0; q < f.left.size(); ++q) o += (q ? ", " : "") + place(f.left[q], true);
+  o += "], \"surface_finish\": {\"applied\": " + std::string(f.surface_applied ? "true" : "false") +
+       ", \"stair_step_removed_pct\": " + num_json(f.stair_step_removed_pct) +
+       ", \"style\": " + str_json(f.slim ? "slim" : "safe") + "}";
+  o += ", \"finish_fallback\": " + std::string(f.finish_fallback ? "true" : "false");
+  if (f.finish_fallback) o += ", \"finish_fallback_reason\": " + str_json(f.finish_fallback_reason);
+  if (f.recheck_ran)
+    o += ", \"recheck\": {\"margin\": " + num_json(f.margin) + ", \"margin_before\": " +
+         num_json(f.margin_before) + ", \"keep_clear_voxels\": " +
+         std::to_string(f.keep_clear_voxels) + ", \"pieces\": " + std::to_string(f.pieces) +
+         ", \"loose_pieces\": " + std::to_string(f.loose_pieces) + ", \"thin_joints\": " +
+         std::to_string(f.thin_joints) + ", \"thin_spots_left\": " +
+         std::to_string(f.left.size()) + ", \"mass_grams\": " + num_json(f.mass_grams) +
+         ", \"mass_before_grams\": " + num_json(f.mass_before_grams) + "}";
+  o += ", \"verdict_changed\": " + std::string(f.verdict_changed ? "true" : "false") +
+       ", \"verdict_reason\": " + str_json(f.verdict_reason) + "}";
+  // No "seconds": report.json is byte-identical on a rerun; the finishing time is in
+  // the [finish] log line.
+  return o;
+}
+
 void emit_settings(std::string& out, const SlicerSettings& s,
                    const std::string& indent) {
   const std::string in2 = indent + "  ";
@@ -170,6 +206,7 @@ void emit_variant(std::string& out, const VariantReport& v,
     }
     out += "]}";
   }
+  if (v.finish.ran) out += ",\n" + in2 + "\"finish\": " + finish_json(v.finish);
   // CORE LIST items 41 + 47 — the rung's bodies (report.hpp), only when there is
   // more than one body, a speck or a lost anchor to report.
   if (v.bodies_reported) {
@@ -695,7 +732,7 @@ static void emit_strengthen(std::string& out, const StrengthenReport& sr) {
            std::to_string(v.fine_start_loose_voxels_removed) +
            ", \"loose_voxels_left\": " + std::to_string(v.fine_start_loose_left) +
            ", \"frozen_loose_pieces\": " + std::to_string(v.fine_start_frozen_loose) +
-           "}}";
+           "}" + (v.finish.ran ? ", \"finish\": " + finish_json(v.finish) : std::string()) + "}";
   }
   out += sr.versions.empty() ? "]\n" : "\n    ]\n";
   out += "  }\n";
