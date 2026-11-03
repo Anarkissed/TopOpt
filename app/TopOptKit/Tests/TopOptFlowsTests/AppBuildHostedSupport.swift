@@ -34,6 +34,10 @@ final class AppBuildHost {
         let frames = Frames()
         let root = AnyView(v.onPreferenceChange(ChromeKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
         let hv = NSHostingView(rootView: root)
+        // ★ B3: the iPad's screen is a fixed size. By default (macOS 13+) the hosting view resizes its WINDOW to the page's ideal
+        // size, so a page whose ideal height is tall (the type selector: 6,767 pt in a 1,032 pt window) laid out off the window
+        // and its controls failed onScreen — never so on the iPad, whose UIHostingController is the screen.
+        hv.sizingOptions = []
         hv.frame = CGRect(origin: .zero, size: size)
         _ = NSApplication.shared
         let w = AppBuildHostWindow(contentRect: CGRect(x: -20000, y: -20000, width: size.width, height: size.height),
@@ -96,6 +100,29 @@ final class AppBuildHost {
             XCTAssertTrue(inside || !cf.intersects(f.insetBy(dx: 0.5, dy: 0.5)), "★ \(what) is under '\(c)' \(cf): \(f)", file: file, line: line)
         }
         return f
+    }
+
+    /// ★ B3: scroll the Selections list (the way he would) until `key` sits inside it — a row below the list's fold is laid out
+    /// but clipped, and a click there lands on nothing. (LoadScenarioHostedTests' helper, for every hosted test.)
+    func scrollIntoList(_ key: String) {
+        for _ in 0..<12 {
+            guard var list = frames.all["selectionsList"], let f = frames.all[key] else { return }
+            // the "n more ⌄" cue (U10) sits over the scroll's foot: a row under it is not reachable either
+            if let cue = frames.all.first(where: { $0.key.hasPrefix("selectionsMore") })?.value, cue.minY < list.maxY {
+                list.size.height = cue.minY - list.minY
+            }
+            if list.insetBy(dx: -1, dy: -1).contains(f) { return }
+            let probe = NSPoint(x: list.midX, y: size.height - (list.minY + SelectionsList.lineHeight + 30))
+            var v = view.hitTest(probe)
+            while let x = v, !(x is NSScrollView) { v = x.superview }
+            guard let sv = v as? NSScrollView else { return }
+            let clip = sv.contentView
+            var o = clip.bounds.origin
+            let dy = f.maxY > list.maxY - 8 ? f.maxY - (list.maxY - 8) : f.minY - (list.minY + SelectionsList.lineHeight + 8)
+            o.y += clip.isFlipped ? dy : -dy
+            clip.scroll(to: o); sv.reflectScrolledClipView(clip)
+            pump(0.4)
+        }
     }
 
     /// Click the control `key` at its middle.

@@ -742,17 +742,19 @@ public final class ProjectModel: ObservableObject {
         guard force.hasScenarios else { return [] }
         return force.scenarioList.map { s in
             var anchors: [Int] = []
+            var anchorRegions: [RegionID] = []
             var loads: [TopOptKit.LoadGroupSpec] = []
             for g in selection.groups {
                 let kind = force.kind(for: g.id)
                 if kind.isAnchor, force.anchorIsOn(g.id, in: s.id) {
                     anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
+                    anchorRegions.append(contentsOf: runRegionIDs(g.regionIDs))   // ★ B3: its switch now reaches core
                 } else if kind.isLoad, force.group(g.id, isIn: s.id), case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f), regionIDs: runRegionIDs(g.regionIDs)))   // ★ B1 (note 38)
                 }
             }
-            return LoadScenarioWire(name: s.name, anchorFaceIDs: anchors, loadGroups: loads)
+            return LoadScenarioWire(name: s.name, anchorFaceIDs: anchors, loadGroups: loads, anchorRegionIDs: anchorRegions)
         }
     }
 

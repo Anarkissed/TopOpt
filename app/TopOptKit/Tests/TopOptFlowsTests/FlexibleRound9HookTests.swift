@@ -32,7 +32,8 @@ final class FlexibleRound9HookTests: XCTestCase {
              gate: "project.groupView.showing("),
         Hook(id: "H49c", file: ws, pin: "        if let proj = projection, let gid = selection.activeGroupID, project.groupView.drawsPrimitiveKnobs(forActive: gid) {   // Flexible (PR #362) H49c",
              gate: ", project.groupView.drawsPrimitiveKnobs(forActive: gid)"),
-        Hook(id: "H50a", file: ws, pin: "        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest() == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a",
+        // ★ RE-PINNED (UI-Notes B3, #362's own note 1 from his iPad 11-03 15:03: Topology's Optimize is topology only; the lattice rides ⌃ "Optimize, then lattice" and the Lattice stage). The run carries its flavour — `lattice` — through the gate, the card, the copy and the copy's one-shot run. Same gates, same card.
+        Hook(id: "H50a", file: ws, pin: "        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a",
              gate: "RerunCard.greysOut("),
         // ★ RE-PINNED (sync of #354 at 89af86dd: B3 7e37c45f built the re-run card in WorkspacePlaceholder "as #362's H50b" with its own
         // names, so the conflict took #354's lines: the alert line is ours without the tag; the copy row's label is
@@ -43,8 +44,8 @@ final class FlexibleRound9HookTests: XCTestCase {
         Hook(id: "H50b-copy", file: ws, pin: "            if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }\n",
              gate: "if rerunOffersCopy { "),
         Hook(id: "H50b-cancel", file: ws, pin: "            Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }\n", gate: nil),
-        Hook(id: "H50b-copy-body", file: ws, pin: "    func saveAsNewProjectAndRun() {\n        if let copy = model.duplicateProject(id: project.id) {\n            RerunCard.runOnOpen(copy.id)\n            model.open(copy)\n        } else {\n            model.toast = RerunCard.copyFailedToast\n        }\n    }\n", gate: nil),
-        Hook(id: "H50c", file: ws, pin: "                    if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }\n",
+        Hook(id: "H50b-copy-body", file: ws, pin: "    func saveAsNewProjectAndRun() {\n        if let copy = model.duplicateProject(id: project.id) {\n            RerunCard.runOnOpen(copy.id, withLattice: runWithLattice)\n            model.open(copy)\n        } else {\n            model.toast = RerunCard.copyFailedToast\n        }\n    }\n", gate: nil),
+        Hook(id: "H50c", file: ws, pin: "                    if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }\n",
              gate: "if RerunCard.takeRunOnOpen(for: project.id) "),
         Hook(id: "H50d-state", file: ws, pin: "    @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d", gate: nil),
         Hook(id: "H50d-optimize", file: ws, pin: "            rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d", gate: nil),
@@ -78,7 +79,7 @@ final class FlexibleRound9HookTests: XCTestCase {
         }
         // H50d: Optimize's request sets the flag true, inside requestRun (before requestLatticeRun begins).
         // ★ SYNC #354 (89af86dd) A2: the Lattice half ("the Lattice run's sets it false") RETIRED (ruling R8) — B4's own card.
-        let optimize = ws.range(of: "    private func requestRun() {")
+        let optimize = ws.range(of: "    private func requestRun(lattice: Bool) {")   // ★ RE-PINNED (UI-Notes B3): the run's flavour
         let lattice = ws.range(of: "    private func requestLatticeRun() {")
         let setTrue = ws.range(of: "rerunOffersCopy = true; pendingReplacement = prompt")
         if let o = optimize, let l = lattice, let t = setTrue {
@@ -196,15 +197,19 @@ final class FlexibleRound9HookTests: XCTestCase {
     /// exist, and startRun is reached directly only through [Re-run here] and the copy's one-shot onAppear.
     func testAFinishedProjectIsNeverReRunWithoutTheCard() throws {
         let ws = try Self.source(Self.ws)
-        let body = try XCTUnwrap(ws.range(of: "    private func requestRun() {").map { String(ws[$0.lowerBound...].prefix(400)) })
+        // ★ RE-PINNED (UI-Notes B3, #362's own note 1 from his iPad 11-03 15:03: Topology's Optimize is topology only; the lattice rides ⌃ "Optimize, then lattice" and the Lattice stage). The run carries its flavour — `lattice` — through the gate, the card, the copy and the copy's one-shot run. Same gates, same card.
+        let body = try XCTUnwrap(ws.range(of: "    private func requestRun(lattice: Bool) {").map { String(ws[$0.lowerBound...].prefix(600)) })   // (B3: + the flavour line)
         let prompt = try XCTUnwrap(body.range(of: "ResultsReplacementPrompt.forNewRun(existing: run.outcome)"))
-        let start = try XCTUnwrap(body.range(of: "startRun()"))
+        let start = try XCTUnwrap(body.range(of: "startRun(lattice: lattice)"))
         XCTAssertLessThan(prompt.lowerBound, start.lowerBound, "the card is asked for before the run starts")
-        let callers = ws.components(separatedBy: "startRun()").count - 1
+        let callers = ws.components(separatedBy: "startRun(").count - 1
         // requestRun's fall-through, [Re-run here], the copy's onAppear, and startRun's own declaration.
         // ★ RE-PINNED (whole-app build B1, note 4, 2026-11-03): + startRun's own "the remembered Mac is found, go on"
         // (`findTheMac { startRun() }`), reached only from inside startRun, after the card — reviewed, no new door.
-        XCTAssertEqual(callers, 5, "a new startRun() caller must be reviewed against the card")
+        // ★ RE-PINNED (UI-Notes B3): + the run screen's Try again (`onRetry`), which was a reference to startRun (uncounted)
+        // and is now `{ startRun(lattice: startedRunWithLattice) }` — a failed run, never a finished one, so no new door; its
+        // flavour is the FAILED run's (#362's condition, 20:42Z), set only where a run starts.
+        XCTAssertEqual(callers, 6, "a new startRun( caller must be reviewed against the card")
     }
 
     func testCancelChangesNothing() throws {

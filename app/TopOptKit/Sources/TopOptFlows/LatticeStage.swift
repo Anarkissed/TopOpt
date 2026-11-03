@@ -65,7 +65,7 @@ public enum LatticeTypeSelector {
 // MARK: - the ● menu
 
 public enum LatticeStageMenu {
-    public enum Target: Equatable, Sendable { case none, topology, changeType, editFaces, about }
+    public enum Target: Equatable, Sendable { case none, topology, changeType, editFaces, about, deleteStage }
 
     public struct Row: Equatable, Sendable {
         public let id: String
@@ -78,6 +78,9 @@ public enum LatticeStageMenu {
 
     public static let changeTypeTitle = "Change lattice type\u{2026}"
     public static let changeTypeDetail = "asks first: the lattice work goes"
+    /// ★ B3 (his answer 11-03, via #362 20:22Z: "a way to delete the Lattice stage entirely straight from the page").
+    public static let deleteStageTitle = "Delete lattice stage"
+    public static let deleteStageDetail = "asks first \u{00B7} one Undo"
 
     /// The ● title: the project's ONE type (B3's seam, `TopologyStageMenu.latticeTitle`).
     public static func title(typeInUse: LatticeStageMode?) -> String {
@@ -104,6 +107,8 @@ public enum LatticeStageMenu {
             // the id ends "-menu-about" so StageCapsule draws its divider above it
             out.append(Row(id: "lattice-menu-about", title: "About \(name)\u{2026}", detail: "limits \u{00B7} delete the lattice",
                            enabled: true, checked: false, target: .about))
+            out.append(Row(id: "lattice-menu-delete-stage", title: deleteStageTitle, detail: deleteStageDetail, enabled: true,
+                           checked: false, target: .deleteStage))
         }
         return out
     }
@@ -116,6 +121,7 @@ public enum LatticeStageMenu {
         case .changeType: return .changeType
         case .editFaces: return .editFaces
         case .about: return .about
+        case .deleteStage: return .deleteStage
         }
     }
 }
@@ -146,6 +152,15 @@ public enum LatticeStageCopy {
 }
 
 // MARK: - "Change lattice type…" (three ways)
+
+/// ★ B3: "Delete lattice stage" asks with the clear-all confirm (design-system §4.29: it clears the whole lattice), its yes apart
+/// from its no; yes is "Continue and lose all work" (ProjectModel.clearLatticeWork, ONE undo step) and lands on Topology.
+public enum DeleteLatticeStageCopy {
+    public static func question(type: String) -> String { "Delete the \(type) lattice stage?" }
+    public static let detail = "Its regions, cells and settings go. Topology\u{2019}s groups and results stay. Undo brings it back."
+    public static let keep = "Keep it"
+    public static let delete = "Delete"
+}
 
 public enum ChangeLatticeTypeChoice: String, Equatable, Sendable, CaseIterable {
     case duplicate, loseAll, cancel
@@ -393,6 +408,7 @@ struct ChangeLatticeTypeCard: View {
             .frame(maxWidth: 440)
             .background(RoundedRectangle(cornerRadius: DS.Radius.sheet, style: .continuous).fill(DS.Surface.dialog.color))
             .dsShadow(DS.Shadow.panel)
+            .background(CornerPairStyle.publish("changeTypeCard"))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("lattice-change-type-card")
         }

@@ -81,9 +81,10 @@ final class RedesignAnswersPinsTests: XCTestCase {
         let ws = try Self.src("WorkspacePlaceholder.swift")
         let r = try XCTUnwrap(ws.range(of: "var latticeSplit: some View {"))
         let body = String(ws[r.lowerBound...].prefix(2400))
-        XCTAssertTrue(body.contains("Button(\"Optimize with this lattice\") { requestRun() }"))
+        // ★ RE-PINNED (UI-Notes B3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only, so the gate, its line and its button take the run's flavour (`lattice`); the lattice's refusals apply only to a run that carries it
+        XCTAssertTrue(body.contains("Button(\"Optimize with this lattice\") { requestRun(lattice: true) }"))
         XCTAssertTrue(body.contains(".accessibilityIdentifier(\"lattice-split-optimize\")"))
-        XCTAssertTrue(body.contains(".disabled(!canOptimize)"))
+        XCTAssertTrue(body.contains(".disabled(!canOptimize(lattice: true))"))
     }
 
     // MARK: 8 — Paint on any non-STEP mesh

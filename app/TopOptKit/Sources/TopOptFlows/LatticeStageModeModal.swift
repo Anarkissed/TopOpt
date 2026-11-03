@@ -24,13 +24,20 @@ public struct LatticeStageModeModal: View {
     public let onChoose: (LatticeStageMode) -> Void
     /// The Flexible stage's card (FlexibleStageChrome.swift): its own choice BESIDE the two modes. nil ⇒ two cards.
     public var onChooseFlexible: (() -> Void)? = nil
+    /// ★ B3 (his answer 11-03, via #362 20:22Z: "there's no way to select 'No lattice' in the type picker … add a 'Exit without
+    /// selection' button"): leave with no type and no lattice — no type is ever picked for him (LS-19). nil ⇒ no exit.
+    public var onExit: (() -> Void)? = nil
     @State private var focused: LatticeStageMode?
     @State private var flexibleFocused = false
 
-    public init(onChoose: @escaping (LatticeStageMode) -> Void, onChooseFlexible: (() -> Void)? = nil) {
+    public init(onChoose: @escaping (LatticeStageMode) -> Void, onChooseFlexible: (() -> Void)? = nil,
+                onExit: (() -> Void)? = nil) {
         self.onChoose = onChoose
         self.onChooseFlexible = onChooseFlexible
+        self.onExit = onExit
     }
+
+    public static let exitLabel = "Exit without selection"
 
     public var body: some View {
         ZStack {
@@ -76,6 +83,17 @@ public struct LatticeStageModeModal: View {
                     if let onChooseFlexible { FlexibleStageCard(focused: flexibleFocused) { flexibleFocused = true; onChooseFlexible() } }
                 }
                 .fixedSize(horizontal: false, vertical: true)
+
+                if let onExit {
+                    Button(action: onExit) {
+                        Text(Self.exitLabel).font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .padding(.horizontal, DS.Space.l).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("latticeModeExit"))
+                    .accessibilityIdentifier("lattice-mode-exit")
+                }
             }
             .padding(DS.Space.xl4)
             .frame(maxWidth: onChooseFlexible == nil ? 800 : 980)
@@ -88,6 +106,7 @@ public struct LatticeStageModeModal: View {
                     .stroke(Color.white.opacity(0.10), lineWidth: 1))
             .shadow(color: .black.opacity(0.45), radius: 40, y: 18)
         }
+        .background(CornerPairStyle.publish("latticeModeModal"))
         .accessibilityIdentifier("lattice-mode-modal")
     }
 

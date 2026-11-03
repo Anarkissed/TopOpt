@@ -173,7 +173,7 @@ extension WorkspaceStage {
 /// iPad | Mac, Units, Minimize plastic, Protect skin, Design box, Print parameters). CAD surfaces (an EXPORT setting, STEP only)
 /// is a row too — it decides the run's output, so it is not a view icon.
 public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
-    case quality, plate, gravity, compute, units, minimizePlastic, protectSkin, cadFaces, designBox, printParameters
+    case quality, plate, gravity, compute, units, minimizePlastic, protectSkin, cadFaces, designBox, printParameters, material
 
     public var title: String {
         switch self {
@@ -187,6 +187,7 @@ public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
         case .cadFaces: return "CAD surfaces"
         case .designBox: return "Allow growth here"   // B6: the list of up to 6 (★ B2, U4: never "primitives")
         case .printParameters: return "Print parameters"
+        case .material: return "Material"   // ★ B3 (app-map §3.9): the Settings panel's last row
         }
     }
 
@@ -336,4 +337,12 @@ public enum TopologyRerunChoice: String, Equatable, Sendable, CaseIterable {
     public static func choices(offersCopy: Bool) -> [TopologyRerunChoice] {
         offersCopy ? [.rerunHere, .saveAsNew, .cancel] : [.rerunHere, .cancel]
     }
+}
+
+/// ★ B3 (app-map §3.3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only; ⌃ holds the run that also
+/// lattices the part.
+public enum TopologyRunCopy {
+    public static let optimizeThenLattice = "Optimize, then lattice"
+    /// ≤ 5 words (U6): no lattice is set on this part yet.
+    public static let noLatticeYet = "No lattice set yet"
 }
