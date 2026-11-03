@@ -106,10 +106,35 @@ struct LatticeVolumeCheck {
 // Measure every pocket of `mask` (grid-indexed, nonzero = latticed). `certified_rho(e)` is
 // the density the certificate reads at voxel e; `judge_min_mm3` the smallest pocket volume
 // judged (the volume of the largest cell the run lays; 0 = every pocket).
+// `exported_fraction` (optional) receives each latticed voxel's measured solid fraction.
 LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector<char>& mask,
                                         const std::function<double(std::size_t)>& certified_rho,
                                         const LatticeSolidProbe& probe,
+                                        double judge_min_mm3 = 0.0,
+                                        std::vector<double>* exported_fraction = nullptr);
+// The same judgement on fractions already measured (no sampling).
+LatticeVolumeCheck lattice_volume_judge(const VoxelGrid& grid, const std::vector<char>& mask,
+                                        const std::function<double(std::size_t)>& certified_rho,
+                                        const std::vector<double>& exported_fraction,
                                         double judge_min_mm3 = 0.0);
+
+// ── ★ THE CERTIFICATE FROM WHAT SHIPPED (ruling 2026-11-02 (3)) ─────────────────────
+// Each latticed voxel is certified at min(the law's density, the solid fraction the file
+// holds there): the certificate never counts more than the file has, and lattice the file
+// holds beyond the law (octet's legs-only excess) is never credited. A voxel the file holds
+// less than the band's floor in is held AT the floor, as the organic rebuild holds the
+// voxels its trim emptied (the tensor is not measured below it); counted, and the 10 %
+// guard on the rebuilt certificate is the tripwire on what that floor credits.
+struct LatticeShippedPosture {
+  std::vector<double> relative_density;  // grid-indexed; the certified density
+  long long voxels_lowered = 0;          // the file held less than the law
+  long long voxels_at_floor = 0;         // ... less than the band's floor: held there
+  double law_mm3 = 0.0, certified_mm3 = 0.0;
+};
+LatticeShippedPosture lattice_certify_shipped(const std::vector<char>& mask,
+                                              const std::function<double(std::size_t)>& law_rho,
+                                              const std::vector<double>& exported_fraction,
+                                              double band_min, double voxel_mm3);
 
 // One plain sentence for a refusal: which pocket, how far off, and why it matters.
 std::string lattice_volume_refusal(const LatticeVolumeCheck& c);

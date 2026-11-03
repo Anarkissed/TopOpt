@@ -110,15 +110,25 @@ bool LatticeSolidProbe::inside_piece(std::size_t i, const Vec3& p) const {
   return true;
 }
 
-LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector<char>& mask,
-                                        const std::function<double(std::size_t)>& certified_rho,
-                                        const LatticeSolidProbe& probe,
-                                        double judge_min_mm3) {
+namespace {
+
+// Both entry points: sample the probe (frac_in null) or read a measured fraction per voxel
+// (frac_in set); either way group the pockets and judge them against the certificate.
+LatticeVolumeCheck check_impl(const VoxelGrid& grid, const std::vector<char>& mask,
+                              const std::function<double(std::size_t)>& certified_rho,
+                              const LatticeSolidProbe* probe_ptr,
+                              const std::vector<double>* frac_in,
+                              std::vector<double>* frac_out, double judge_min_mm3) {
   const auto t0 = std::chrono::steady_clock::now();
   LatticeVolumeCheck out;
   out.judge_min_mm3 = judge_min_mm3;
-  if (mask.size() != grid.voxel_count() || !probe.has_geometry()) return out;
+  if (mask.size() != grid.voxel_count()) return out;
+  if (frac_in ? frac_in->size() != grid.voxel_count() : !(probe_ptr && probe_ptr->has_geometry()))
+    return out;
   out.ran = true;
+  if (frac_out) frac_out->assign(grid.voxel_count(), 0.0);
+  static const LatticeSolidProbe kNoProbe;
+  const LatticeSolidProbe& probe = probe_ptr ? *probe_ptr : kNoProbe;
   const double s = grid.spacing, vv = s * s * s;
 
   // Compact ids for the latticed voxels.
@@ -175,13 +185,13 @@ LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector
   };
   std::vector<std::size_t> start(vox.size() + 1, 0);
   std::vector<int> bins;
-  for (int pass = 0; pass < 2; ++pass) {
+  for (int pass = frac_in ? 1 : 0; pass < 2; ++pass) {
     std::vector<std::size_t> fill;
-    if (pass == 1) {
+    if (pass == 1 && !frac_in) {
       fill.assign(start.begin(), start.end() - 1);
       bins.assign(start.back(), 0);
     }
-    for (std::size_t pi = 0; pi < P.size(); ++pi) {
+    for (std::size_t pi = 0; pi < (frac_in ? 0 : P.size()); ++pi) {
       int i0, i1, j0, j1, k0, k1;
       vrange(P[pi].lo.x, P[pi].hi.x, grid.origin.x, grid.nx, &i0, &i1);
       vrange(P[pi].lo.y, P[pi].hi.y, grid.origin.y, grid.ny, &j0, &j1);
@@ -211,6 +221,10 @@ LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector
         pk.hi = {std::max(pk.hi.x, o.x + s), std::max(pk.hi.y, o.y + s),
                  std::max(pk.hi.z, o.z + s)};
         pk.certified_mm3 += certified_rho(e) * vv;
+        if (frac_in) {
+          pk.exported_mm3 += vv * (*frac_in)[e];
+          continue;
+        }
         const std::uint64_t h0 = splitmix64(e), h1 = splitmix64(h0), h2 = splitmix64(h1);
         const double sx = unit(h0), sy = unit(h1), sz = unit(h2);
         const int n = pk.points_per_voxel;
@@ -234,6 +248,7 @@ LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector
         }
         out.points += n;
         pk.exported_mm3 += vv * static_cast<double>(in) / n;
+        if (frac_out) (*frac_out)[e] = static_cast<double>(in) / n;
       }
     }
   }
@@ -262,6 +277,47 @@ LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector
   out.seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   return out;
+}
+
+}  // namespace
+
+LatticeVolumeCheck lattice_volume_check(const VoxelGrid& grid, const std::vector<char>& mask,
+                                        const std::function<double(std::size_t)>& certified_rho,
+                                        const LatticeSolidProbe& probe, double judge_min_mm3,
+                                        std::vector<double>* exported_fraction) {
+  return check_impl(grid, mask, certified_rho, &probe, nullptr, exported_fraction,
+                    judge_min_mm3);
+}
+
+LatticeVolumeCheck lattice_volume_judge(const VoxelGrid& grid, const std::vector<char>& mask,
+                                        const std::function<double(std::size_t)>& certified_rho,
+                                        const std::vector<double>& exported_fraction,
+                                        double judge_min_mm3) {
+  return check_impl(grid, mask, certified_rho, nullptr, &exported_fraction, nullptr,
+                    judge_min_mm3);
+}
+
+LatticeShippedPosture lattice_certify_shipped(const std::vector<char>& mask,
+                                              const std::function<double(std::size_t)>& law_rho,
+                                              const std::vector<double>& exported_fraction,
+                                              double band_min, double voxel_mm3) {
+  LatticeShippedPosture r;
+  r.relative_density.assign(mask.size(), 0.0);
+  for (std::size_t e = 0; e < mask.size(); ++e) {
+    if (!mask[e]) continue;
+    const double law = law_rho(e);
+    const double f = e < exported_fraction.size() ? exported_fraction[e] : 0.0;
+    double rho = std::min(law, f);
+    r.law_mm3 += law * voxel_mm3;
+    if (f < law) ++r.voxels_lowered;
+    if (rho < band_min) {
+      rho = band_min;
+      ++r.voxels_at_floor;
+    }
+    r.relative_density[e] = rho;
+    r.certified_mm3 += rho * voxel_mm3;
+  }
+  return r;
 }
 
 std::string lattice_volume_refusal(const LatticeVolumeCheck& c) {

@@ -171,6 +171,43 @@ int main() {
     CHECK(over.highest_gap > 0.9 && !over.refused(), "a file heavier than certified does not refuse");
   }
 
+  // ── §5 (ruling (3)) the certificate rebuilt from what shipped ──────────────────────
+  {
+    const VoxelGrid g = grid_of(8, 1.0);
+    std::vector<char> mask(g.voxel_count(), 1);
+    // The file holds a slab x < 3 full and nothing beyond: per voxel 1, 1, 1, 0, ...
+    LatticeSolidProbe p;
+    p.set_inside([](const Vec3& q) { return q.x < 3.0; });
+    std::vector<double> frac;
+    const auto law = [](std::size_t) { return 0.4; };
+    const LatticeVolumeCheck lawc = lattice_volume_check(g, mask, law, p, 0.0, &frac);
+    const LatticeShippedPosture sp = lattice_certify_shipped(mask, law, frac, 0.05, 1.0);
+    long long full = 0, empty = 0;
+    for (std::size_t e = 0; e < frac.size(); ++e) {
+      if (frac[e] > 0.999) ++full;
+      if (frac[e] < 1e-9) ++empty;
+    }
+    CHECK(full == 3 * 64 && empty == 5 * 64, "§5 the measured fraction per voxel is the file's");
+    CHECK(sp.voxels_lowered == 5 * 64 && sp.voxels_at_floor == 5 * 64,
+          "§5 voxels the file holds less in are lowered, below the floor held at it");
+    bool never_more = true;
+    for (std::size_t e = 0; e < frac.size(); ++e)
+      never_more = never_more && (sp.relative_density[e] <= std::max(frac[e], 0.05) + 1e-12) &&
+                   sp.relative_density[e] <= 0.4 + 1e-12;
+    CHECK(never_more, "§5 never more than the file holds (but the floor), never more than the law");
+    const auto& srho = sp.relative_density;
+    const LatticeVolumeCheck reb =
+        lattice_volume_judge(g, mask, [&srho](std::size_t e) { return srho[e]; }, frac, 0.0);
+    std::printf("[§5] law certified %.1f mm3 against a file of %.1f (%+.1f %%); rebuilt %.1f "
+                "(%+.1f %%), refused %d\n", lawc.certified_mm3, lawc.exported_mm3,
+                100.0 * lawc.worst_gap, reb.certified_mm3, 100.0 * reb.worst_gap,
+                int(reb.refused()));
+    CHECK(std::abs(reb.exported_mm3 - lawc.exported_mm3) < 1e-9,
+          "§5 the judgement on measured fractions reads the same file");
+    CHECK(reb.worst_gap > 0.0 && !reb.refused(),
+          "§5 the rebuilt certificate is never heavier than the file here");
+  }
+
   std::printf("%s: %d checks, %d failures\n", g_failures ? "FAIL" : "PASS", g_checks,
               g_failures);
   return g_failures ? 1 : 0;

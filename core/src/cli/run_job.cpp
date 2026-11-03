@@ -3465,7 +3465,9 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      // ships in run_info instead.
                                      const LatticeVoidEscapeReport* void_escape,
                                      // ★ Finding 7: the volume check, when it ran.
-                                     const LatticeVolumeCheck* volume = nullptr) {
+                                     const LatticeVolumeCheck* volume = nullptr,
+                                     const LatticeVolumeCheck* volume_law = nullptr,
+                                     const long long* shipped_counts = nullptr) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -4182,6 +4184,23 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     }
     s += "    \"refused\": " + std::string(vc.refused() ? "true" : "false") + ",\n";
     s += "    \"judged_from_mm3\": " + json_num(vc.judge_min_mm3) + ",\n";
+    if (volume_law && volume_law->ran) {
+      // (3): the certificate above is rebuilt from the file; this is the law against it.
+      s += "    \"certified_from\": \"min(the law's density, the file's measured solid "
+           "fraction) per voxel, held at the band floor below it\",\n";
+      s += "    \"law_certified_mm3\": " + json_num(volume_law->certified_mm3) + ",\n";
+      s += "    \"law_gap\": " +
+           json_num(volume_law->certified_mm3 > 0.0
+                        ? volume_law->exported_mm3 / volume_law->certified_mm3 - 1.0
+                        : 0.0) +
+           ",\n";
+      s += "    \"law_lightest_pocket_gap\": " + json_num(volume_law->worst_gap) + ",\n";
+      s += "    \"law_heaviest_pocket_gap\": " + json_num(volume_law->highest_gap) + ",\n";
+      if (shipped_counts) {
+        s += "    \"voxels_lowered_to_file\": " + std::to_string(shipped_counts[0]) + ",\n";
+        s += "    \"voxels_held_at_band_floor\": " + std::to_string(shipped_counts[1]) + ",\n";
+      }
+    }
     s += "    \"small_pockets_not_judged\": " + std::to_string(vc.small_pockets) + ",\n";
     s += "    \"small_pockets_certified_mm3\": " + json_num(vc.small_certified_mm3) + ",\n";
     s += "    \"small_pockets_exported_mm3\": " + json_num(vc.small_exported_mm3) + ",\n";
@@ -4662,7 +4681,10 @@ struct LatticeVariantOutcome {
   // per latticed pocket. A pocket off by more than 10 % refuses the rung exactly as a
   // sealed cavity does: the ladder skips it, lattice_variant refuses, and the written
   // lattice files are removed.
-  LatticeVolumeCheck volume_check;
+  LatticeVolumeCheck volume_check;      // judged on the certificate rebuilt from the file
+  LatticeVolumeCheck volume_check_law;  // the same file against the law's own density
+  long long shipped_lowered = 0, shipped_at_floor = 0;
+  double shipped_law_mm3 = 0.0, shipped_certified_mm3 = 0.0;
   bool volume_refused = false;
   std::string volume_refused_reason;
 };
@@ -8908,17 +8930,44 @@ LatticeVariantOutcome lattice_one_variant(
   // against the density the certificate is about to read over the same voxels
   // (lattice_volume_check.hpp). More than 10 % off in any pocket and this rung is
   // refused, its lattice files removed, exactly as a sealed cavity refuses one.
+  // ★ AND THE CERTIFICATE IS REBUILT FROM WHAT SHIPPED (ruling 2026-11-02 (3)): each
+  // latticed voxel at min(the law's density, the solid fraction the file holds there,
+  // measured on the same exact solids), held at the band's floor where the file holds less
+  // (lattice_certify_shipped). The check then judges the REBUILT certificate: its 10 %
+  // guard is the tripwire on what the floor credits. The law's own gap is kept beside it.
+  std::vector<double> shipped_rho;  // the certified density, when rebuilt
   if (!organic.ran && solid_probe.has_geometry()) {
     const std::vector<double>* grho = graded ? &gf.posture.relative_density : nullptr;
+    auto law_rho = [grho, rho_uniform](std::size_t e) { return grho ? (*grho)[e] : rho_uniform; };
     // A pocket is judged from one cell up: the largest cell this export lays.
     double judge_cell = cell;
     for (const LatticeLevelSpec& lv : levels) judge_cell = std::max(judge_cell, lv.cell_mm);
     for (const LatticeSteppedPass& sp : stepped_passes)
       judge_cell = std::max(judge_cell, sp.region.cell_mm);
-    R.volume_check = lattice_volume_check(
-        solved_grid, mask,
-        [grho, rho_uniform](std::size_t e) { return grho ? (*grho)[e] : rho_uniform; },
-        solid_probe, judge_cell * judge_cell * judge_cell);
+    const double judge_mm3 = judge_cell * judge_cell * judge_cell;
+    std::vector<double> frac;
+    R.volume_check_law =
+        lattice_volume_check(solved_grid, mask, law_rho, solid_probe, judge_mm3, &frac);
+    const double vox =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    LatticeShippedPosture sp =
+        lattice_certify_shipped(mask, law_rho, frac, lattice_rho_min(lat_topo), vox);
+    R.shipped_lowered = sp.voxels_lowered;
+    R.shipped_at_floor = sp.voxels_at_floor;
+    R.shipped_law_mm3 = sp.law_mm3;
+    R.shipped_certified_mm3 = sp.certified_mm3;
+    shipped_rho = std::move(sp.relative_density);
+    const std::vector<double>& srho = shipped_rho;
+    R.volume_check = lattice_volume_judge(
+        solved_grid, mask, [&srho](std::size_t e) { return srho[e]; }, frac, judge_mm3);
+    R.volume_check.points = R.volume_check_law.points;
+    std::fprintf(stderr,
+                 "[lattice] vf=%.2f certificate from what shipped: the law counted %.1f mm3, "
+                 "the file holds %.1f; certified %.1f mm3 (%lld voxel(s) lowered to the "
+                 "file, %lld of them held at the band floor %.4f)\n",
+                 v.requested_volume_fraction, sp.law_mm3, R.volume_check_law.exported_mm3,
+                 sp.certified_mm3, sp.voxels_lowered, sp.voxels_at_floor,
+                 lattice_rho_min(lat_topo));
     const LatticeVolumeCheck& vc = R.volume_check;
     if (vc.ran && !vc.pockets.empty()) {
       const long long wvox =
@@ -8958,9 +9007,11 @@ LatticeVariantOutcome lattice_one_variant(
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
       lattice_cert_context(v, part_grid, domain, options, material);
+  // ★ (3): the certificate reads the density REBUILT from what shipped, when it was.
+  if (graded && !shipped_rho.empty()) gf.posture.relative_density = shipped_rho;
   const LatticePosture post = build_lattice_posture(
       lat_topo, solved_grid, cell, mask, rho_uniform,
-      graded ? &gf.posture.relative_density : nullptr);
+      !shipped_rho.empty() ? &shipped_rho : graded ? &gf.posture.relative_density : nullptr);
   R.cc = certify_latticed_variant(
       v, solved_grid, options, material, bcs, cx, post,
       graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
@@ -9170,13 +9221,15 @@ LatticeVariantOutcome lattice_one_variant(
     }
   }
 
+  const long long shipped_counts[2] = {R.shipped_lowered, R.shipped_at_floor};
   R.receipt_path =
       join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
                                            v.requested_volume_fraction) +
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(
       v, job.lattice, R.cc, R.oc, cell, role_rcpt, grad_rcpt, added_rcpt,
-      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr, &R.volume_check);
+      frozen_rcpt, R.void_check_ran ? &R.void_report : nullptr, &R.volume_check,
+      &R.volume_check_law, shipped_counts);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
