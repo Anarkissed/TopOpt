@@ -230,6 +230,20 @@ TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm
 // The local thickness (mm) at each vertex, capped at `cap_mm` (a vertex at least
 // that thick reports cap_mm). Exposed for the tests.
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm);
+// THE BAR's "no member under the line that was not": the vertices of `after` (the same
+// vertices as `before`, moved) newly under `line` by the surface measure, along
+// `before`'s normals — `measured` all of them, `by_inward` those where the vertex or
+// the facet limiting its ball moved INWARD (outward motion only adds material, which
+// cannot thin a member; finish.cpp thinned_by_inward_motion). The slim guard holds
+// exactly the by_inward ones.
+struct ThinnedCount {
+  bool comparable = true;  // false: different vertex counts
+  int measured = 0;
+  int by_inward = 0;
+  double thinnest_mm = 0.0;  // the thinnest by_inward one
+};
+ThinnedCount count_thinned(const TriangleMesh& before, const TriangleMesh& after, double line);
+
 // The same, each ball along `normals_from`'s vertex normals (same vertex count): a
 // finished shape measured along its unfinished normals, like for like.
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm,

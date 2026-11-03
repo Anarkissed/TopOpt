@@ -17,7 +17,8 @@
 //        the export's own bodies never; a point contact is seen; file thin joints;
 //   (s)  slim, with a safe fallback (his answer, 2026-11-03 02:48): a member between
 //        the slim line (1.8 mm) and C2's (2 x spacing) is finished, not held, and
-//        nothing goes under 1.8 mm that was not; the fallback decision.
+//        nothing goes under 1.8 mm that was not; the fallback decision; (s3) only a
+//        move INWARD thins a member (material added never counts).
 
 #include "topopt/cad_project.hpp"
 #include "topopt/finish.hpp"
@@ -536,11 +537,8 @@ int main() {
     const TriangleMesh slim = surface_finish(m0, ctx, {}, {}, &slim_rep);
     const double d0 = rms_dev(m0), ds = rms_dev(safe), dl = rms_dev(slim);
     const double safe_pct = 100.0 * (1.0 - ds / d0), slim_pct = 100.0 * (1.0 - dl / d0);
-    const std::vector<double> t0 = vertex_local_thickness_mm(m0, 1.8);
-    const std::vector<double> t1 = vertex_local_thickness_mm(slim, 1.8, m0);
-    int new_under = 0;
-    for (std::size_t v = 0; v < t0.size(); ++v)
-      new_under += t1[v] < 1.8 * (1 - 1e-3) && t0[v] >= 1.8 * (1 - 1e-3);
+    const ThinnedCount tc = count_thinned(m0, slim, 1.8);
+    const int new_under = tc.by_inward;
     std::printf("[finish] (s2) shell 3.6 mm on a 1.9 mm grid, %zu vertices: outward-only safe %zu, "
                 "slim %zu; stair-step removed safe %.1f %% (report %.1f %%), slim %.1f %% (report "
                 "%.1f %%; %d guard round(s), %zu held); folds walked back %zu / %zu; %d newly under "
@@ -555,6 +553,29 @@ int main() {
     CHECK(slim_pct > safe_pct + 5.0, "(s2) and finishes it");
     CHECK(new_under == 0, "(s2) nothing goes under 1.8 mm that was not");
     CHECK(max_axis_move(m0, slim) <= 0.5 * ctx.cell_mm + 1e-9, "(s2) no vertex leaves its cell");
+  }
+
+  // ── (s3) what counts as thinning ───────────────────────────────────────────
+  {
+    // A 2.0 mm plate between two blocks, the line 1.8 mm. Its top moved IN 0.3 mm is a
+    // member taken under the line; its bottom moved OUT 0.3 mm only adds material.
+    const TriangleMesh m0 = plate_part(2.0);
+    TriangleMesh in = m0, out = m0;
+    int top = 0;
+    for (std::size_t v = 0; v < m0.vertices.size(); ++v) {
+      const Vec3& p = m0.vertices[v];
+      if (p.x > 11.0 && p.x < 19.0 && p.y > 1.0 && p.y < 9.0) {
+        if (std::fabs(p.z - 6.0) < 1e-9) { in.vertices[v].z -= 0.3; ++top; }
+        if (std::fabs(p.z - 4.0) < 1e-9) out.vertices[v].z -= 0.3;
+      }
+    }
+    const ThinnedCount a = count_thinned(m0, in, 1.8), b = count_thinned(m0, out, 1.8);
+    std::printf("[finish] (s3) plate 2.0 mm, line 1.8: top in 0.3 mm -> %d newly under by moving in "
+                "(%d by the measure), thinnest %.3f mm; bottom out 0.3 mm -> %d (%d)\n",
+                a.by_inward, a.measured, a.thinnest_mm, b.by_inward, b.measured);
+    CHECK(top > 0 && a.by_inward > 0 && std::fabs(a.thinnest_mm - 1.7) < 0.02,
+          "(s3) a member moved in under the line is counted, at its thickness");
+    CHECK(b.by_inward == 0, "(s3) material added never counts as thinning");
   }
 
   if (g_failures == 0) {

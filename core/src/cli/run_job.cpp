@@ -16170,21 +16170,16 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
     const FinishBlock& fb = f.fb;
     const TriangleMesh& done = f.mesh;
     const WrittenAudit w = audit_as_written(done);
-    // The bar's own measures: a member newly under the slim line, a pinned vertex
-    // moved (CAD / Protect bit-identical), on the same vertex indices.
-    int new_under = 0, pinned_moved = 0;
+    // The bar's own measures: a member newly under the slim line (by moving material
+    // in; and as the surface measure reads it), a pinned vertex moved (CAD / Protect
+    // bit-identical), on the same vertex indices.
+    int new_under = 0, new_under_measured = 0, pinned_moved = 0;
     double thinnest_new = 0.0;
-    if (raw.vertices.size() == done.vertices.size() && fin.ctx.slim_line_mm > 0.0) {
-      const double line = fin.ctx.slim_line_mm, under = line * (1.0 - 1e-3);
-      const std::vector<double> t0 = vertex_local_thickness_mm(raw, line);
-      const std::vector<double> t1 = vertex_local_thickness_mm(done, line, raw);
-      for (std::size_t q = 0; q < t0.size(); ++q)
-        if (t1[q] < under && t0[q] >= under) {
-          thinnest_new = new_under == 0 ? t1[q] : std::min(thinnest_new, t1[q]);
-          ++new_under;
-        }
-    } else {
-      new_under = -1;  // not comparable vertex for vertex (the weld merged some)
+    {
+      const ThinnedCount tc = count_thinned(raw, done, fin.ctx.slim_line_mm);
+      new_under = tc.comparable ? tc.by_inward : -1;  // -1: the weld merged vertices
+      new_under_measured = tc.comparable ? tc.measured : -1;
+      thinnest_new = tc.thinnest_mm;
     }
     pinned_moved = static_cast<int>(fb.pinned_moved);
     const double req = f.analysis.margin_required > 0.0 ? f.analysis.margin_required : req0;
@@ -16198,6 +16193,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   "\"fallback\": %s, \"pieces_before\": %d, \"pieces_after\": %d, "
                   "\"bad_edges\": %d, \"open_edges\": %d, \"point_contacts\": %d, "
                   "\"shells\": %d, \"bodies\": %d, \"new_under_line\": %d, "
+                  "\"new_under_line_measured\": %d, "
                   "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
                   "\"thin_joints\": %d, \"finish_s\": %.2f, \"seconds\": %.1f}",
                   d.requested_volume_fraction,
@@ -16209,7 +16205,8 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   fb.stair_step_removed_pct, fb.slim ? "slim" : "safe",
                   fb.finish_fallback ? "true" : "false", positive_volume_bodies(raw),
                   positive_volume_bodies(done), w.non_manifold_edges, w.boundary_edges,
-                  w.non_manifold_vertices, w.shells, w.bodies, new_under, thinnest_new,
+                  w.non_manifold_vertices, w.shells, w.bodies, new_under, new_under_measured,
+                  thinnest_new,
                   pinned_moved, fb.keep_clear_voxels, fb.thin_joints, fb.seconds, secs);
     std::map<std::string, int> why;
     for (const FinishPlace& p : fb.left) ++why[p.reason];

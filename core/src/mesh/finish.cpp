@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <unordered_map>
 
@@ -226,10 +227,63 @@ std::vector<double> thickness_along(const TriangleMesh& mesh, double cap_mm,
                           limit ? &(*limit)[v] : nullptr);
   return t;
 }
+
+// The vertices the finish took under the line BY MOVING MATERIAL IN: newly under it
+// (thinner than they were), where the vertex itself or a corner of the facet that now
+// limits its ball moved inward. Outward motion only adds material, and Hildebrand's
+// local thickness cannot shrink when material is added (a sphere inside the shape stays
+// inside a larger one) — but the surface measure can still read thinner after it: a
+// sliver on a sharp edge whose corners move out along their (averaged) normals turns
+// into the opposing cone of a CAD vertex next to it (his ca84e7b7: CAD vertices 1.68 ->
+// 1.44 mm across such a sliver, every corner moved OUT 0.23-0.30 mm). Those readings
+// are the measure, not the part.
+std::vector<char> thinned_by_inward_motion(const TriangleMesh& before, const TriangleMesh& after,
+                                           const std::vector<Vec3>& n_in,
+                                           const std::vector<double>& t0,
+                                           const std::vector<double>& t1,
+                                           const std::vector<int>& lim, double under) {
+  const std::size_t nv = before.vertices.size();
+  std::vector<char> out(nv, 0);
+  auto inward = [&](std::size_t v) {
+    return dot(sub(after.vertices[v], before.vertices[v]), n_in[v]) < -1e-9;
+  };
+  for (std::size_t v = 0; v < nv; ++v) {
+    if (!(t1[v] < under && t1[v] < t0[v] - 1e-6)) continue;
+    bool in = inward(v);
+    if (!in && lim[v] >= 0)
+      for (int c = 0; c < 3 && !in; ++c)
+        in = inward(static_cast<std::size_t>(before.triangles[static_cast<std::size_t>(lim[v])][c]));
+    out[v] = in;
+  }
+  return out;
+}
 }  // namespace
 
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm) {
   return thickness_along(mesh, cap_mm, nullptr, nullptr);
+}
+
+ThinnedCount count_thinned(const TriangleMesh& before, const TriangleMesh& after, double line) {
+  ThinnedCount c;
+  if (before.vertices.size() != after.vertices.size() || !(line > 0.0)) {
+    c.comparable = false;
+    return c;
+  }
+  const double under = line * (1.0 - 1e-3);
+  const std::vector<Vec3> n_in = vertex_normals(before);
+  const std::vector<double> t0 = thickness_along(before, line, &n_in, nullptr);
+  std::vector<int> lim;
+  const std::vector<double> t1 = thickness_along(after, line, &n_in, &lim);
+  const std::vector<char> by_in = thinned_by_inward_motion(before, after, n_in, t0, t1, lim, under);
+  for (std::size_t v = 0; v < t0.size(); ++v) {
+    if (!(t1[v] < under && t0[v] >= under)) continue;
+    ++c.measured;
+    if (by_in[v]) {
+      ++c.by_inward;
+      c.thinnest_mm = c.by_inward == 1 ? t1[v] : std::min(c.thinnest_mm, t1[v]);
+    }
+  }
+  return c;
 }
 
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm,
@@ -504,6 +558,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   for (; slim; ++rounds) {
     std::vector<int> lim;
     const std::vector<double> t1 = thickness_along(res.mesh, line, &n_in, &lim);
+    const std::vector<char> thinned = thinned_by_inward_motion(mesh, res.mesh, n_in, t0, t1, lim, under);
     std::size_t changed = 0, bad = 0;
     auto hold = [&](std::size_t v) {
       if (k.sign[v] == TrustSign::Pinned || k.sign[v] == TrustSign::OutwardOnly) return;
@@ -512,7 +567,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       ++guarded;
     };
     for (std::size_t v = 0; v < nv; ++v)
-      if (t1[v] < under && t1[v] < t0[v] - 1e-6) {
+      if (thinned[v]) {
         ++bad;
         hold(v);
         for (const int w : nb[v]) hold(static_cast<std::size_t>(w));
@@ -529,7 +584,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       if (report) {
         report->fallback = true;
         char b[160];
-        std::snprintf(b, sizeof b, "The slim finish would take a member under %.1f mm", line);
+        std::snprintf(b, sizeof b, "The slim finish would take a member under %.2f mm", line);
         report->fallback_reason = b;
       }
       return out;
