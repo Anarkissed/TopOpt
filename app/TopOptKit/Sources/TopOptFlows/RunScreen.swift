@@ -106,7 +106,7 @@ public struct RunScreen: View {
 
                 HStack(spacing: DS.Space.m) {
                     PillButton("Cancel", style: .secondary) { model.cancel() }
-                    PillButton(model.runningInBackground ? "In Background" : "Run in Background",
+                    PillButton(model.runningInBackground ? "In background" : "Run in background",   // ★ B3 (app-map §3.4): plain words
                                style: .secondary,
                                isEnabled: model.canSendToBackground) { model.runInBackground() }
                 }

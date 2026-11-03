@@ -67,7 +67,9 @@ public struct TopologyResultsNotice: Equatable, Sendable {
 
     public init() {}
 
-    public static let openLabel = "Open Results"
+    public static let openLabel = "Open"   // ★ B3 (design-system §4.16: "v7 is ready · Open")
+    /// ★ B3: the version the landing run is ("v8"); nil off the Library (a flat project).
+    public var version: String? = nil
 
     /// The run's accepted-variant count moved. More variants than he was told about, while Results is shut: the dot and the
     /// message. NEVER a page change — this type cannot open anything.
@@ -81,13 +83,13 @@ public struct TopologyResultsNotice: Equatable, Sendable {
         told = accepted
         guard !resultsOpen else { return }
         dot = true
-        message = Self.message(accepted: accepted, streaming: streaming)
+        message = Self.message(accepted: accepted, streaming: streaming, version: version)
     }
 
     /// The run finished (no longer streaming) with variants he has not opened: the message says so.
     public mutating func noteFinished(accepted: Int, resultsOpen: Bool) {
         guard accepted > 0, !resultsOpen, dot else { return }
-        message = Self.message(accepted: accepted, streaming: false)
+        message = Self.message(accepted: accepted, streaming: false, version: version)
     }
 
     /// A project opened with results already on it: nothing new has landed, so no dot (the Results segment is simply live).
@@ -104,9 +106,12 @@ public struct TopologyResultsNotice: Equatable, Sendable {
     /// He dismissed the message (the dot stays until Results is opened).
     public mutating func dismiss() { message = nil }
 
-    static func message(accepted: Int, streaming: Bool) -> String {
-        let n = accepted == 1 ? "1 variant" : "\(accepted) variants"
-        return streaming ? "\(n) ready \u{2014} more on the way." : "Optimization finished \u{2014} \(n)."
+    /// ★ B3 (design-system §3 and §4.16, plain words): "v8 is ready"; while it streams, "v8: result a is in · more on the way".
+    static func message(accepted: Int, streaming: Bool, version: String? = nil) -> String {
+        guard streaming else { return TopologyRunCopy.landed(version) }
+        let letters = (0..<max(1, accepted)).map { String(UnicodeScalar(UInt8(97 + min($0, 25)))) }
+        let which = letters.count == 1 ? "result \(letters[0]) is in" : "results \(letters.first!)\u{2013}\(letters.last!) are in"
+        return "\(version ?? "Your part"): \(which) \u{00B7} more on the way"
     }
 }
 
@@ -342,7 +347,49 @@ public enum TopologyRerunChoice: String, Equatable, Sendable, CaseIterable {
 /// ★ B3 (app-map §3.3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only; ⌃ holds the run that also
 /// lattices the part.
 public enum TopologyRunCopy {
+    /// ★ B3 (design-system §4.6): the run button's same-settings state, grey.
+    public static func sameSettings(_ version: String?) -> String { "Same settings as \(version ?? "last time")" }
+    /// ★ B3 (§4.16): the landed banner.
+    public static func landed(_ version: String?) -> String { version.map { "\($0) is ready" } ?? "Your results are ready" }
     public static let optimizeThenLattice = "Optimize, then lattice"
     /// ≤ 5 words (U6): no lattice is set on this part yet.
     public static let noLatticeYet = "No lattice set yet"
+    /// ★ B3 (the reviewer, 23:05Z): ⌃ "Optimize, then lattice" while core refuses grading with a design box (TO-core next).
+    public static let growthClash = "A graded lattice can\u{2019}t use Allow growth here yet"
+}
+
+/// ★ B3 (design-system §4.6 "blocked: grey + ≤ 5 words + a fix chip beside it", U6, ledger O2): why Topology's Optimize can't
+/// start, in ≤ 5 words, with the one tap that fixes it — the fix line just above the corner pair (CornerPair's fixLine, U12);
+/// the long reason behind its (i).
+public enum TopologyBlock: Equatable, Sendable {
+    case gravity, pendingGroup, noLoadCase
+    case noDirection(group: UUID, why: String)
+    case emptyPiece(group: UUID)
+
+    public var words: String {
+        switch self {
+        case .gravity: return "Gravity isn\u{2019}t set"
+        case .pendingGroup: return "A group has no role"
+        case .noLoadCase: return "Needs an anchor and load"
+        case .noDirection: return "A load has no direction"
+        case .emptyPiece: return "A piece has no faces"
+        }
+    }
+    public var fix: String {
+        switch self {
+        case .gravity: return "Set gravity"
+        case .pendingGroup: return "Choose its role"
+        case .noLoadCase: return "Open Selections"
+        case .noDirection, .emptyPiece: return "Show it"
+        }
+    }
+    public var info: String? {
+        switch self {
+        case .gravity: return "Tap the face that points at the floor, so the part knows which way is down."
+        case .pendingGroup: return "A group with faces but no role can\u{2019}t go to the run. Make it an Anchor, a Load, Keep clear or Protect."
+        case .noLoadCase: return "A run needs at least one face that holds (Anchor) and one that carries weight (Load), or Minimize plastic on."
+        case .noDirection(_, let why): return why
+        case .emptyPiece: return FaceRegionSend.refusalLine
+        }
+    }
 }

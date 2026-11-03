@@ -76,12 +76,15 @@ final class TopologyStageTests: XCTestCase {
 
     func testALandedRunDotsResultsAndNeverOpensIt() {
         var n = TopologyResultsNotice()
+        // ★ RE-PINNED (UI-Notes B3, design-system §3 / §4.16: a version, its results a b c — never "variants"; "v7 is ready · Open")
+        n.version = "v8"
         n.note(accepted: 1, streaming: true, resultsOpen: false)
         XCTAssertTrue(n.dot)
-        XCTAssertEqual(n.message, "1 variant ready \u{2014} more on the way.")
-        n.note(accepted: 4, streaming: false, resultsOpen: false)
-        n.noteFinished(accepted: 4, resultsOpen: false)
-        XCTAssertEqual(n.message, "Optimization finished \u{2014} 4 variants.")
+        XCTAssertEqual(n.message, "v8: result a is in \u{00B7} more on the way")
+        n.note(accepted: 3, streaming: false, resultsOpen: false)
+        n.noteFinished(accepted: 3, resultsOpen: false)
+        XCTAssertEqual(n.message, "v8 is ready")
+        XCTAssertEqual(TopologyResultsNotice.openLabel, "Open")
         n.dismiss()
         XCTAssertNil(n.message); XCTAssertTrue(n.dot, "the dot stays until Results is opened")
         n.opened()
