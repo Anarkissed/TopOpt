@@ -124,6 +124,12 @@ public struct SelectionsFolder: Identifiable {
 
 /// ★ HOW TALL THE OPEN LIST MAY GROW (his iPad 2026-10-26: "make the Selections modal get much bigger than its maximum").
 /// The workspace sets it from the screen (WorkspacePanelPlacement); a list that is not told keeps 420 pt.
+/// ★ B2 (U10): each shown group line's middle in the list's scroll view.
+private struct SelectionsLineMidKey: PreferenceKey {
+    static let defaultValue: [UUID: CGFloat] = [:]
+    static func reduce(value: inout [UUID: CGFloat], nextValue: () -> [UUID: CGFloat]) { value.merge(nextValue()) { $1 } }
+}
+
 private struct SelectionsListMaxHeightKey: EnvironmentKey { static let defaultValue: CGFloat = SelectionsList.maxListHeight }
 extension EnvironmentValues {
     var selectionsListMaxHeight: CGFloat {
@@ -218,6 +224,8 @@ public struct SelectionsList: View {
     static let rowLeading: CGFloat = 24
     static let rowTrailing: CGFloat = 12
     @State private var contentHeight: CGFloat = 0
+    /// ★ B2 (U10): each shown group line's middle in the list's scroll view (0 = the list's visible top).
+    @State private var lineMids: [UUID: CGFloat] = [:]
 
     private var groups: [SelectionGroup] { project.selection.groups }
 
@@ -268,7 +276,11 @@ public struct SelectionsList: View {
                                         .onChange(of: g.size.height) { contentHeight = $0 }
                                 })
                         }
+                        .coordinateSpace(name: Self.scrollSpace)
+                        .onPreferenceChange(SelectionsLineMidKey.self) { lineMids = $0 }
                         .frame(height: listHeight)
+                        // ★ B2 (U10): nothing hidden below the fold — "n more ⌄" on the list's foot; a tap scrolls them in
+                        .overlay(alignment: .bottom) { moreCue(reader) }
                     // a card under the panel's lowest lines never opens out of sight
                     .onChange(of: deleteAsk) { id in
                         guard let id else { return }
@@ -329,12 +341,55 @@ public struct SelectionsList: View {
         let isPicked = picked == g.id
         VStack(alignment: .leading, spacing: 0) {
             groupLine(g, picked: isPicked, accessory: accessory)
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: SelectionsLineMidKey.self, value: [g.id: geo.frame(in: .named(Self.scrollSpace)).midY])
+                })
             if deleteAsk == g.id, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
             if isPicked || isOpen?(g.id) == true { rows(g) }
         }
         .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
         .overlay(alignment: .leading) {
             if isPicked { Rectangle().fill(g.color.color).frame(width: 3).padding(.vertical, 2) }
+        }
+        .id(Self.lineScrollID(g.id))
+    }
+
+    // MARK: ★ B2 (U10, design-system §4.3): the overflow cue
+
+    static let scrollSpace = "selectionsScroll"
+    static func lineScrollID(_ id: UUID) -> String { "selLine-\(id.uuidString)" }
+    /// The cue's look: a 28 pt bar on the list's foot (its target the finger's 44 pt, reaching up over the list).
+    static let cueHeight: CGFloat = 28
+
+    /// The shown group lines whose middle lies below the list's visible foot, nearest first.
+    private var linesBelow: [UUID] {
+        lineMids.filter { $0.value > listHeight }.sorted { $0.value < $1.value }.map(\.key)
+    }
+
+    @ViewBuilder private func moreCue(_ reader: ScrollViewProxy) -> some View {
+        let below = linesBelow
+        if let next = below.first {
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { reader.scrollTo(Self.lineScrollID(next), anchor: .center) }
+            } label: {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    HStack(spacing: 4) {
+                        Text("\(below.count) more").font(.system(size: 12, weight: .semibold))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundStyle(DS.Color.accent.color)
+                    .frame(maxWidth: .infinity).frame(height: Self.cueHeight)
+                    .background(DS.Surface.panel.color.overlay(DS.Color.accent.opacity(0.06).color))
+                    .overlay(alignment: .top) { Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1) }
+                }
+                .frame(height: ConfirmLayout.target)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(publish("selectionsMore-\(below.count)"))
+            .accessibilityLabel("\(below.count) more below. Show them")
+            .accessibilityIdentifier("\(idPrefix)-sel-more")
         }
     }
 
@@ -428,11 +483,15 @@ public struct SelectionsList: View {
         Swift.min(cap, Swift.max(lineHeight * 2, from + 2 * drag))
     }
 
-    /// The most the open list may be on a canvas this tall: PageLeftModal keeps `noteTop` above it twice (its spacer and its
-    /// padding) and `edge` below it twice; then the header and the pinned footer. Never under the old 420 pt.
+    /// The most the open list may be on a canvas this tall: ★ B2 (U1, U10) PageLeftModal keeps `panelTop` above the panel and
+    /// `panelBottom` below it; then the header and the pinned footer. Never under two lines. (It was never under 420 pt,
+    /// which on an 11" landscape window pushed the pinned footer under the window.)
     static func screenMax(canvasHeight: CGFloat, footerReserve: CGFloat) -> CGFloat {
-        Swift.max(maxListHeight, canvasHeight - 2 * PageChrome.noteTop - 2 * PageChrome.edge - lineHeight - 2 - footerReserve)
+        Swift.max(lineHeight * 2, canvasHeight - PageChrome.panelTop - PageChrome.panelBottom - lineHeight - 2 - footerReserve)
     }
+
+    /// Room kept under the list for its pinned footer (the add row, its (i), the safety margin) and the grip.
+    static let footerReserve: CGFloat = 190
 
     /// As tall as its rows, up to the screen — or exactly the height he dragged it to (★ his iPad 2026-10-27, note 2: the
     /// grip "does not work": a drag past the rows did nothing, the list never grew taller than what it held).

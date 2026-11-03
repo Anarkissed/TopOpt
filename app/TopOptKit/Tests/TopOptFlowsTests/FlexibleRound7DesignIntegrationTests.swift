@@ -23,9 +23,10 @@
 //       lb · 1 face · bead 0.45 mm" = the job's one group, its weight_n in his unit, its faces, its min_extrudable_width_mm.
 //       RED (at 0e66bf47): a Preview that sends shows no summary. RED CONTROL: Topology's weight formatter ("10 kg") is not the
 //       job in his unit.
-//   I5  "LATTICE READY" BESIDE THE ICONS at 11" portrait — on the row's line, left of the six icons, whole, below the capsule,
-//       never on the Selections list (whose top never rises above PageLeftModal's 2 × noteTop) — and at every viewport never
-//       under the row. RED (at 0e66bf47): under the row at 11" portrait (the left strip reserved its whole height).
+//   I5  "LATTICE READY" BESIDE THE ICONS — on the row's line, left of the six icons, whole, below the capsule, never on the
+//       Selections list. RED (at 0e66bf47): under the row at 11" portrait (the left strip reserved its whole height).
+//       ★ RE-PINNED (B2, U1 — #362's OK 2026-11-03 05:34): the open list starts at PageChrome.panelTop, so at 11" portrait the
+//       note goes under the row's right end, whole; beside the icons everywhere else.
 //   I6  NO PANEL EVER COVERS THE LEGEND (the review of R7-D1's fix, re-checked at six viewports with the note moved): the tray,
 //       the card and the callout, any height. RED CONTROL: a panel capped by the views row alone covers the 11" landscape legend.
 #if canImport(AppKit)
@@ -170,13 +171,13 @@ final class FlexibleRound7DesignIntegrationTests: XCTestCase {
             let pair = FlexibleChromeLayout.pair(viewport: v, setupWidth: setupW)
             let capsule = FlexibleChromeLayout.capsuleFrame(width: 262)
             let legend = Self.legend(v)
-            // the open list: his three quiet lines (189 tall) where PageLeftModal centres it, and its whole REACH (it grows about its
-            // centre to 465 pt, never above 2 × noteTop) — the second tier's keep-out
-            let mid = (PageChrome.noteTop + v.height - PageChrome.edge) / 2 - 4
-            let measured = CGRect(x: PageChrome.edge, y: mid - 94.5, width: PageChrome.panelWidth, height: 189)
+            // the open list: his three quiet lines (189 tall) where PageLeftModal puts it, and its whole REACH — ★ RE-PINNED (B2,
+            // U1, #362's OK 2026-11-03): top-aligned at PageChrome.panelTop, it grows DOWN (it grew about its centre) — the
+            // second tier's keep-out
+            let measured = CGRect(x: PageChrome.edge, y: PageChrome.panelTop, width: PageChrome.panelWidth, height: 189)
             let list = FlexibleFaceChipLayout.listReach(measured: measured, viewport: v)
-            XCTAssertTrue(list.contains(CGRect(x: PageChrome.edge, y: mid - 170.5, width: PageChrome.panelWidth, height: 341)) || mid - 170.5 < list.minY,
-                          "\(tag): the reach holds the list grown with Group C open (341 tall about the same centre)")
+            XCTAssertTrue(list.contains(CGRect(x: PageChrome.edge, y: PageChrome.panelTop, width: PageChrome.panelWidth, height: 341)),
+                          "\(tag): the reach holds the list grown with Group C open (341 tall from the same top)")
             let column = FlexibleFaceChipLayout.selectionsColumn(viewport: v)
             // no panel open (the chip's own case: one card at a time hides it under a panel), then the tray (4 rows, 276) and the
             // card on Preview (412) as drawn, each capped under the legend — the keep-outs still hold the open panel
@@ -350,11 +351,18 @@ final class FlexibleRound7DesignIntegrationTests: XCTestCase {
     // MARK: I5 — "Lattice ready" beside the icons
 
     func testLatticeReadySitsBesideTheIconsNeverUnderThem() throws {
-        let listTop = 2 * PageChrome.noteTop   // PageLeftModal: padded noteTop, then a spacer of at least noteTop
+        let listTop = FlexibleMainViewToggles.leftPanelHighestTop   // ★ B2: the source's own value (PageChrome.panelTop)
+        // ★ RE-PINNED (B2, U1 — #362's OK 2026-11-03 05:34): the open left panel now starts at PageChrome.panelTop, 12 pt under the stage row, so the column's top is no longer empty on the row's line; where the row leaves too little beside it (11" portrait, the 820 pt pad) the note goes UNDER the row's right end, whole (R7-D1's place). Was (R7-D3): beside, over the column's empty top.
+        let underAt: Set<String> = ["11p"]
         for (tag, v) in Self.viewports {
             let row = FlexibleMainViewToggles.rowFrame(viewport: v), note = FlexibleMainViewToggles.noteFrame(viewport: v)
-            XCTAssertLessThan(note.minY, row.maxY, "★ I5 \(tag): the note is on the row's line, never under the icons (note \(note) · row \(row))")
-            XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "★ I5 \(tag): left of the icons, \(DS.Space.s) pt clear")
+            if underAt.contains(tag) {
+                XCTAssertGreaterThanOrEqual(note.minY, row.maxY, "★ I5 \(tag): under the row (note \(note) · row \(row))")
+                XCTAssertEqual(note.maxX, row.maxX, accuracy: 0.5, "★ I5 \(tag): at the row's right end")
+            } else {
+                XCTAssertLessThan(note.minY, row.maxY, "★ I5 \(tag): the note is on the row's line, never under the icons (note \(note) · row \(row))")
+                XCTAssertLessThanOrEqual(note.maxX, row.minX - DS.Space.s + 0.5, "★ I5 \(tag): left of the icons, \(DS.Space.s) pt clear")
+            }
             XCTAssertGreaterThanOrEqual(note.width, FlexibleMainNote.minWidth, "★ I5 \(tag): whole ('Lattice ready · Show')")
             XCTAssertGreaterThanOrEqual(note.minX, PageChrome.edge - 0.5, "\(tag): on screen")
             let capsule = FlexibleChromeLayout.capsuleFrame(width: FlexibleChromeLayout.capsuleMaxWidth)
@@ -365,11 +373,12 @@ final class FlexibleRound7DesignIntegrationTests: XCTestCase {
             }
             if let l = Self.legend(v) { XCTAssertFalse(l.intersects(note), "★ I5 \(tag): off the legend (\(l))") }
         }
-        // 11" portrait: the legend comes up to the views row (the note no longer reserves a band under it) — the mockup's 292
+        // 11" portrait: the legend comes up to what the right column holds — ★ RE-PINNED (B2, U1): the note under the views row
+        // there now, so the legend comes up to the note's foot (it came up to the row's: the mockup's 292)
         let v11 = CGSize(width: 834, height: 1194)
         let l11 = try XCTUnwrap(Self.legend(v11))
-        XCTAssertEqual(l11.minY, FlexibleMainViewToggles.rowFrame(viewport: v11).maxY + FlexibleLegendPlacement.gap, accuracy: 4,
-                       "★ I5 11p: the legend right under the views row")
+        XCTAssertEqual(l11.minY, FlexibleMainViewToggles.noteFrame(viewport: v11).maxY + FlexibleLegendPlacement.gap, accuracy: 4,
+                       "★ I5 11p: the legend right under the note, under the views row")
     }
 
     // MARK: I6 — no panel covers the legend

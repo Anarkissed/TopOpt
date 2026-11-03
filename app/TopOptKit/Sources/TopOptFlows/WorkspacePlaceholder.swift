@@ -674,6 +674,10 @@ public struct WorkspacePlaceholder: View {
     /// gating every site, is what makes a fourth page correct by default.
     private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }
 
+    /// ★ B2 (U1, note 16, IMG_0564 — the Cells page dropped the back row): the Cells page (today's `showLatticeWizard`) is the
+    /// one full-screen page that keeps the workspace's top-left block; with any other page up the chrome is hidden as before.
+    private var cellsPageKeepsChrome: Bool { showLatticeWizard && !showLatticePage && !showSmoothingPage && !showFlexiblePage }
+
     /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
     /// deliberately not a default, so a project made before the modes existed reopens
     /// the choice rather than inheriting one nobody made.
@@ -1352,7 +1356,7 @@ public struct WorkspacePlaceholder: View {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
 
-            if !fullScreenPageUp || (showLatticeWizard && !showLatticePage && !showSmoothingPage && !showFlexiblePage) { chrome }   // ★ B2 (note 16, IMG_0564): the Cells page keeps the top-left block
+            if !fullScreenPageUp || cellsPageKeepsChrome { chrome }   // ★ B2 (note 16, IMG_0564): the Cells page keeps the top-left block
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
@@ -10023,7 +10027,7 @@ public struct WorkspacePlaceholder: View {
     /// `GeometryReader` of its own.
     private struct WorkspacePanelPlacement: ViewModifier {
         /// Room kept under the list for its pinned footer (the add row, its (i), the safety margin) and the grip.
-        static let footerReserve: CGFloat = 190
+        static let footerReserve: CGFloat = SelectionsList.footerReserve
         /// ★ MINIMIZED ⇒ BOTTOM-LEFT (maintainer, 2026-08-17). One placement for
         /// the ONE Selections panel, so both of its mount sites — the workspace
         /// and the lattice page's library — move together by construction.

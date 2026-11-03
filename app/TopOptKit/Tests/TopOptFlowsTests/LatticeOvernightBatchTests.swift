@@ -73,12 +73,14 @@ final class PageLeftModalPlacementTests: XCTestCase {
                        "★ a spacer below — even minLength 0 — is flexible and "
                        + "splits the free height, which centres the panel")
 
-        // OPEN keeps his §6 standard: a spacer on both sides ⇒ centred in the band.
+        // ★ RE-PINNED (B2, U1, approved design 2026-11-02 §4.1 / §4.3): OPEN starts 12 pt under the stage row
+        // (PageChrome.panelTop) — a spacer BELOW only; it never touches the bottom (PageChrome.panelBottom). It was centred
+        // (a spacer on both sides, his 08-14 §6 standard).
         let open = PageLeftModal(canvasHeight: 1300, minimized: false,
                                  canvasWidth: 1000)
-        XCTAssertTrue(open.hasSpacerAbove)
+        XCTAssertFalse(open.hasSpacerAbove, "★ open is top-aligned under the stage row")
         XCTAssertTrue(open.hasSpacerBelow,
-                      "★ open is centre-left and never touches top or bottom")
+                      "★ open never touches the bottom")
     }
 
     /// An OPEN panel is unaffected in either orientation — his earlier standard

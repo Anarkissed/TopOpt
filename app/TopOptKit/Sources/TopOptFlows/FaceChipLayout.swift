@@ -10,7 +10,8 @@
 //     top-left chrome under the capsule, FlexibleLegendPlacement.gizmoFrame, FlexibleMainViewToggles.frame and
 //     FlexibleChromeLayout.pair — and so dropped its `viewport` / `setupWidth` arguments);
 //   * the capsule's numbers are StageCapsuleLayout's, the list's height SelectionsList's, and the left panel's highest top is
-//     `2 * PageChrome.noteTop` (the source's FlexibleMainViewToggles.leftPanelHighestTop, the same value);
+//     `PageChrome.panelTop` (the source's FlexibleMainViewToggles.leftPanelHighestTop, the same value; ★ B2: it was
+//     2 × noteTop while PageLeftModal centred the panel);
 //   * FaceChipState drops `deleted` (a FlexibleFaceCommits.Deleted, the Flexible trash's undo) — Flexible-only.
 //
 // His change (a) to B1, 2026-10-14: "I want to be able to move the modals around for each face by dragging" — the chip is
@@ -67,14 +68,14 @@ public enum FaceChipLayout {
         return CGRect(x: 0, y: top, width: PageChrome.edge + PageChrome.panelWidth, height: max(0, v.height - top))
     }
 
-    /// ★ ROUND 7, R7-D3: the open list's whole REACH — it grows about its centre (PageLeftModal centres it) up to its header and
-    /// 420 pt of lines, never above 2 × noteTop — from ANY measure of it (its centre does not move as a group opens). The chip's
-    /// second tier (the mini in portrait): a measure taken before Group C opened under a pick is stale for a frame (the list
-    /// notes its frame asynchronously) — its reach never is.
+    /// ★ ROUND 7, R7-D3: the open list's whole REACH — ★ B2 (U1): top-aligned at `PageChrome.panelTop` (PageLeftModal), it grows
+    /// DOWN to its header and the screen's room of lines, never past `panelBottom` — from ANY measure of it (its top does not
+    /// move as a group opens). The chip's second tier (the mini in portrait): a measure taken before Group C opened under a pick
+    /// is stale for a frame (the list notes its frame asynchronously) — its reach never is.
     public static func listReach(measured m: CGRect, viewport v: CGSize) -> CGRect {
-        let maxH = SelectionsList.maxDrawnHeight
-        let top = min(m.minY, max(2 * PageChrome.noteTop, m.midY - maxH / 2))
-        let bottom = max(m.maxY, min(v.height - PageChrome.edge, max(m.midY + maxH / 2, top + maxH)))
+        let lines = SelectionsList.screenMax(canvasHeight: v.height, footerReserve: SelectionsList.footerReserve)
+        let top = min(m.minY, PageChrome.panelTop)
+        let bottom = max(m.maxY, min(v.height - PageChrome.panelBottom, PageChrome.panelTop + SelectionsList.lineHeight + 1 + lines + 4))
         return CGRect(x: 0, y: top, width: PageChrome.edge + PageChrome.panelWidth, height: max(0, bottom - top))
     }
 
