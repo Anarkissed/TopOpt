@@ -35,6 +35,15 @@ final class UniformChromeHostedTests: XCTestCase {
         XCTAssertEqual(b.stageRowTop - max(b.back.maxY, b.name.maxY, b.undo.maxY), 8, accuracy: 3, "\(page) \(size): the stage row 8 pt under it")
     }
 
+    /// ★ Note 20 ("Has the words 'on the part' next to the scissors icon"), the reviewer's Q3 (c) of 2026-11-03: the words
+    /// go now; a result's saving ("on −35 %") stays beside the stage row until B6's ⌃ menu takes it.
+    func testTheStageRowSaysNoOnThePart() {
+        let part: String? = LatticeStageCopy.builtOn(achievedVolumeFraction: nil)
+        XCTAssertNil(part, "★ the stage's own part: no words beside the stage row")
+        XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 0.65), "on \u{2212}35 %", "a result keeps its saving")
+        XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 1.2), "on +20 %", "a growth result keeps its own")
+    }
+
     func testTheTopLeftBlockIsTheSameOnEveryPage() throws {
         for size in [AppBuildHost.landscape13, AppBuildHost.portrait13, AppBuildHost.landscape11] {
             // a Structural lookalike with results: Topology Setup, Results, the Lattice stage, the Cells page, Edit faces

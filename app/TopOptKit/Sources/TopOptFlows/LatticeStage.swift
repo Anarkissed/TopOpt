@@ -134,10 +134,11 @@ public enum LatticeStagePage: String, Equatable, Sendable, CaseIterable {
 }
 
 public enum LatticeStageCopy {
-    /// What the lattice builds on, beside the capsule: "on the part" on the stage (it lattices the solid part), "on −35 %"
-    /// on a variant (its saving, the Results tab's own headline rule; "+N %" on a growth variant).
-    public static func builtOn(achievedVolumeFraction vf: Double?) -> String {
-        guard let vf, vf.isFinite, vf > 0 else { return "on the part" }
+    /// What the lattice builds on, beside the capsule: "on −35 %" on a variant (its saving, the Results tab's own headline
+    /// rule; "+N %" on a growth variant). ★ B2 (note 20, the reviewer's Q3 (c) 2026-11-03): nothing on the stage's own part
+    /// (it said "on the part"); B6's corner ⌃ menu takes both cases.
+    public static func builtOn(achievedVolumeFraction vf: Double?) -> String? {
+        guard let vf, vf.isFinite, vf > 0 else { return nil }
         let pct = Int(((1 - vf) * 100).rounded())
         if pct < 0 { return "on +\(-pct) %" }
         return "on \u{2212}\(pct) %"

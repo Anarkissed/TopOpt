@@ -155,7 +155,7 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertTrue(cap.contains("editFaces: { openEditFaces() }"), "✂ and the menu reach Edit faces (B5: the mode closes Cells)")
         XCTAssertFalse(ws.contains("LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }"),
                        "the identity row's type chip is gone: the capsule names it")
-        XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: nil), "on the part")
+        XCTAssertNil(LatticeStageCopy.builtOn(achievedVolumeFraction: nil))   // ★ RE-PINNED (B2, note 20, Q3 (c)): no "on the part"
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 0.65), "on \u{2212}35 %")
         XCTAssertEqual(LatticeStageCopy.builtOn(achievedVolumeFraction: 1.2), "on +20 %")
     }

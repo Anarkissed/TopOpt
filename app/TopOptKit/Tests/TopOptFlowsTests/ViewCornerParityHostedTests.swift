@@ -66,12 +66,18 @@ final class ViewCornerParityHostedTests: XCTestCase {
         ("Cut", ["Outlines", "X-ray"]),
     ]
 
+    /// §4.2's views a later batch brings (the reviewer's Q4 (b), 2026-11-03): absent now, so that batch flips them in.
+    static let later: [(page: String, view: String, batch: String)] = [("Results", "Outlines", "B4")]
+
     func testEveryStageKeepsTodaysViewsWithTheXrayPairFirst() throws {
         for size in [AppBuildHost.landscape13, AppBuildHost.portrait13] {
             let seen = try walk(size)
             for ((page, want), (seenPage, got)) in zip(Self.expected, seen) {
                 XCTAssertEqual(page, seenPage)
                 XCTAssertEqual(got, want, "\(size): ★ \(page)'s views")
+                for l in Self.later where l.page == page {
+                    XCTAssertFalse(got.contains(l.view), "\(page)'s \(l.view) comes in \(l.batch): move it into `expected` there")
+                }
             }
         }
     }

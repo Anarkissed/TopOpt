@@ -13422,9 +13422,11 @@ extension WorkspacePlaceholder {
                          menuRows: rows,
                          editFaces: { openEditFaces() },
                          changeType: { showChangeLatticeType = true })
-            Text(LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction))
-                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                .accessibilityIdentifier("lattice-built-on")
+            if let on = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction) {
+                Text(on)
+                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .accessibilityIdentifier("lattice-built-on")
+            }
         }
         .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

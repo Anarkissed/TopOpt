@@ -413,9 +413,11 @@ public struct SelectionsList: View {
             Button { pick(g.id) } label: {
                 HStack(spacing: DS.Space.s) {
                     RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 12, height: 12)
-                    // ★ his iPad 2026-10-27 (note 2): a name is never cut off — the panel widens for it (listWidth)
+                    // ★ his iPad 2026-10-27 (note 2): a name is never cut off — ★ B2 (U2, his answer to Q5 2026-11-03: "We'll try
+                    // 1 for now"): the panel stays 348 pt and a long name WRAPS inside its row (it widened the panel, to 640)
                     Text(g.name).font(.system(size: 14, weight: .semibold)).foregroundStyle(DS.Color.textPrimary.color)
-                        .lineLimit(1).fixedSize(horizontal: true, vertical: false).layoutPriority(2)
+                        .lineLimit(nil).fixedSize(horizontal: false, vertical: true).layoutPriority(2)
+                        .background(publish("selName-\(g.id.uuidString)"))
                     RoleGlyphs(project: project, group: g.id, readsLattice: readsLattice(g.id), size: 13)
                     if let w = loadWeight(g.id) {
                         Text(w).font(.system(size: 12.5)).monospacedDigit().foregroundStyle(DS.Color.textSecondary.color).lineLimit(1)
@@ -430,7 +432,8 @@ public struct SelectionsList: View {
                         Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Color.textTertiary.color)
                     }
                 }
-                .frame(height: Self.lineHeight)
+                .padding(.vertical, Self.nameWrapPadding)
+                .frame(minHeight: Self.lineHeight)   // ★ B2 (U2): taller only while a long name wraps
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -500,34 +503,14 @@ public struct SelectionsList: View {
         return min(maxHeight, max(contentHeight, Self.lineHeight))
     }
 
-    /// ★ his iPad 2026-10-27 (note 2): "the Group names are being cut off … make the selections window wider". Wide enough for
-    /// the longest line — its name and load weight plus the line's fixed parts — never under today's 348 pt, never past 640.
-    var listWidth: CGFloat {
-        let indent: CGFloat = folders == nil ? 0 : Self.folderIndent
-        let widest = groups.map { g -> CGFloat in
-            // the summary (or, in its place, the scenario switch, 52 pt): whichever is wider
-            let tail = max(52, Self.textWidth(summary?(g) ?? SelectionsSummary.summary(project: project, group: g), size: 12.5))
-            return Self.textWidth(g.name, size: 14, bold: true) + tail
-                + (loadWeight(g.id).map { Self.textWidth($0, size: 12.5) + DS.Space.s } ?? 0)
-        }.max() ?? 0
-        return Self.panelWidth(widestText: widest, indent: indent)
-    }
+    /// ★ B2 (U2, approved design 2026-11-02 §4.3; his answer to Q5 2026-11-03: "We'll try 1 for now, then change it up if
+    /// required"): every left panel is ONE width, PageChrome.panelWidth (348 pt). His 10-27 note 2 ("the Group names are
+    /// being cut off") holds by wrapping: a long name takes a second line inside its row. (The panel widened for the longest
+    /// line, up to 640 pt — to go back, this is the one place.)
+    var listWidth: CGFloat { PageChrome.panelWidth }
 
-    /// The line's fixed parts: open chevron 22, swatch 12, the role glyphs (up to 3 × 17), eye 44, trash 44, the gaps (8 × 8)
-    /// and the edges.
-    static let lineChromeWidth: CGFloat = 22 + 12 + 51 + 44 + 44 + 8 * 8 + 12
-    static func panelWidth(widestText: CGFloat, indent: CGFloat) -> CGFloat {
-        min(640, max(PageChrome.panelWidth, ceil(widestText + lineChromeWidth + indent)))
-    }
-
-    static func textWidth(_ s: String, size: CGFloat, bold: Bool = false) -> CGFloat {
-        #if canImport(UIKit)
-        let f = UIFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
-        #else
-        let f = NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
-        #endif
-        return ceil((s as NSString).size(withAttributes: [.font: f]).width)
-    }
+    /// The room a wrapped name keeps above and below its lines inside the row.
+    static let nameWrapPadding: CGFloat = 4
 
     /// ★ his ask (14:3x): "make it resizeable" — a grip under the list; drag it down for more rows, up for fewer. The panel
     /// grows about its centre, so the height moves twice the finger and the grip stays under it.
