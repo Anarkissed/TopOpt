@@ -202,10 +202,11 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(f), as: UTF8.self).contains("safetyMargin"), "150 % stores nothing")
         XCTAssertEqual(SafetyMargin.parseCustom("175%"), .success(1.75))
         XCTAssertEqual(SafetyMargin.parseCustom("149"), .failure(.init(line: SafetyMargin.belowMinimumLine)))
-        XCTAssertEqual(SafetyMargin.presets.map(\.label), ["Light use: 150% of your load", "Everyday part: 200%",
-                                                         "Repeated loads, or hard to replace: 300%"])
-        XCTAssertEqual(SafetyMargin.label(for: 1.75), "Custom: 175%")
-        XCTAssertEqual(SafetyMargin.info, "150% means a safety factor of 1.5. Printing's weaker layers and infill are already counted.")
+        // ★ B2 (design-system §3, §4.21, §4.14): the setting row's words and its (i)
+        XCTAssertEqual(SafetyMargin.presets.map(\.label), ["Light use · 150 %", "Everyday part · 200 %",
+                                                         "Repeated loads, or hard to replace · 300 %"])
+        XCTAssertEqual(SafetyMargin.label(for: 1.75), "Custom · 175 %")
+        XCTAssertEqual(SafetyMargin.info, "150 % means it holds 1.5× your load. Printing's weaker layers and infill are already counted.")
         XCTAssertEqual(SafetyMargin.builtForLine(2), "Built for 200% of your load")
     }
 

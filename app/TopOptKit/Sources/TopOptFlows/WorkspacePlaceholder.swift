@@ -207,10 +207,8 @@ public struct WorkspacePlaceholder: View {
     @State private var scenarioAnchorHint: UUID? = nil
     // ★ the safety margin (ruling 2026-10-26 13:12): Custom's draft, its refusal, the (i)
     @State private var safetyCustomDraft: String? = nil
-    @State private var safetyRefusal: String? = nil
     @State private var safetyCustomPadOpen = false   // B2 (U15): Custom…'s pad
     @StateObject private var laneControls = LaneControls()   // B2 (U16): the controls the top lane keeps clear of
-    @State private var safetyInfoOpen = false
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// The piece whose transform gizmo is up (it counts as picked: its chips show with it).
@@ -11701,28 +11699,16 @@ public struct WorkspacePlaceholder: View {
     /// ★ THE SAFETY MARGIN, once per project (ruling 2026-10-26 13:12): one line, a menu of three presets and Custom…
     private var safetyMarginRow: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
-            HStack(spacing: DS.Space.s) {
-                Text("Safety margin").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                Menu {
-                    ForEach(SafetyMargin.presets, id: \.value) { p in
-                        Button(p.label) { force.setSafetyMargin(p.value); safetyCustomDraft = nil; safetyRefusal = nil }
-                    }
-                    Button(SafetyMargin.customLabel) {
-                        safetyCustomDraft = String(format: "%.0f", force.safetyMarginValue * 100); safetyRefusal = nil
-                    }
-                } label: {
-                    Text(SafetyMargin.label(for: force.safetyMarginValue)).dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.accent.color).lineLimit(1)
+            // ★ B2 (round 1, §4.21): the setting row — Safety margin  Light use · 150 % ⌄ (i)
+            SettingRow(key: "safetyMargin", id: "safety-margin", label: "Safety margin",
+                       value: SafetyMargin.label(for: force.safetyMarginValue), info: SafetyMargin.info,
+                       infoLabel: "About the safety margin") {
+                ForEach(SafetyMargin.presets, id: \.value) { p in
+                    Button(p.label) { force.setSafetyMargin(p.value); safetyCustomDraft = nil }
                 }
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: ChromeKeepOutKey.self, value: ["safetyMargin": geo.frame(in: .global)])
-                }.allowsHitTesting(false))
-                .accessibilityIdentifier("safety-margin")
-                Button { safetyInfoOpen.toggle() } label: { Image(systemName: "info.circle") }
-                    .buttonStyle(.plain).foregroundStyle(DS.Color.textTertiary.color)
-                    .accessibilityLabel("About the safety margin")
-                Spacer()
+                Button(SafetyMargin.customLabel) {
+                    safetyCustomDraft = String(format: "%.0f", force.safetyMarginValue * 100)
+                }
             }
             if safetyCustomDraft != nil {
                 // ★ B2 (U11, U15): Custom… is a number field whose pad opens at once; Done or a tap elsewhere keeps it, and
@@ -11734,18 +11720,11 @@ public struct WorkspacePlaceholder: View {
                                 padRange: NumberRange(SafetyMargin.minimum * 100, nil),
                                 open: Binding(get: { safetyCustomPadOpen },
                                               set: { safetyCustomPadOpen = $0; if !$0 { safetyCustomDraft = nil } })) { v in
-                        force.setSafetyMargin(v / 100); safetyRefusal = nil
+                        force.setSafetyMargin(v / 100)
                     }
                     Text("of your load").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
                 }
                 .onAppear { safetyCustomPadOpen = true }
-            }
-            if let r = safetyRefusal {
-                Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
-            }
-            if safetyInfoOpen {
-                Text(SafetyMargin.info).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)

@@ -18,21 +18,23 @@ public enum SafetyMargin {
         public let value: Double
         public let label: String
     }
+    // ★ B2 (design-system §3, §4.21): the setting row's words — "Light use · 150 %"
     public static let presets = [
-        Preset(value: 1.5, label: "Light use: 150% of your load"),
-        Preset(value: 2.0, label: "Everyday part: 200%"),
-        Preset(value: 3.0, label: "Repeated loads, or hard to replace: 300%"),
+        Preset(value: 1.5, label: "Light use · 150 %"),
+        Preset(value: 2.0, label: "Everyday part · 200 %"),
+        Preset(value: 3.0, label: "Repeated loads, or hard to replace · 300 %"),
     ]
     public static let customLabel = "Custom…"
-    public static let info = "150% means a safety factor of 1.5. Printing's weaker layers and infill are already counted."
+    /// ★ B2 (§4.14): its (i).
+    public static let info = "150 % means it holds 1.5× your load. Printing's weaker layers and infill are already counted."
     public static let belowMinimumLine = "The safety margin can't be below 150% of the load"
 
     /// "150%" for 1.5.
     public static func percent(_ value: Double) -> String { String(format: "%.0f%%", value * 100) }
 
-    /// The row's label for a stored value: its preset's words, or "Custom: N%".
+    /// The row's label for a stored value: its preset's words, or "Custom · N %".
     public static func label(for value: Double) -> String {
-        presets.first { abs($0.value - value) < 1e-9 }?.label ?? "Custom: \(percent(value))"
+        presets.first { abs($0.value - value) < 1e-9 }?.label ?? "Custom · \(String(format: "%.0f", value * 100)) %"
     }
 
     /// A typed custom percentage ("175", "175%") → the margin, or the refusal line. Below 150 % is refused.
