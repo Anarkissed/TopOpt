@@ -363,7 +363,8 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertTrue(card.contains("saveAsNewProjectForLattice()"))
         let req = try Self.member(ws, "private func requestLatticeRun() {", 900)
         XCTAssertTrue(req.contains("pendingLatticeRerun = prompt"))
-        XCTAssertFalse(req.contains("pendingReplacement"), "not the Optimize card")
+        // ★ RE-PINNED (UI-Notes B3, #362's condition 1): it READS the Optimize card (and waits while it is up), never raises it
+        XCTAssertFalse(req.contains("pendingReplacement = "), "not the Optimize card")
         XCTAssertFalse(req.contains("startRun()"))
         let start = try Self.member(ws, "private func startLatticeRequest() {", 400)
         XCTAssertTrue(start.contains("model.makeLatticeRunRequest()") && start.contains("run.start(request)"))

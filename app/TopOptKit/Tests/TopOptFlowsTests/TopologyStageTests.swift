@@ -160,8 +160,9 @@ final class TopologyStageTests: XCTestCase {
                        ["Re-run here", "Save as new project", "Cancel"])
         XCTAssertEqual(TopologyRerunChoice.choices(offersCopy: false).map(\.label), ["Re-run here", "Cancel"])
         let ws = try Self.workspaceSource()
-        let card = try XCTUnwrap(ws.range(of: ".alert(RerunCard.title, isPresented: replacementPromptBinding) {"))
-        let body = String(ws[card.lowerBound...].prefix(900))
+        // ★ RE-PINNED (UI-Notes B3, U7): the card asks in place (RerunConfirm), never an alert
+        let card = try XCTUnwrap(ws.range(of: ".overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue"))
+        let body = String(ws[card.lowerBound...].prefix(1400))
         XCTAssertTrue(body.contains("startRun(lattice: runWithLattice)"), "Re-run here runs here (★ RE-PINNED, B3: the run it was asked for)")
         XCTAssertTrue(body.contains("saveAsNewProjectAndRun()"), "Save as new project copies, then runs in the copy")
         XCTAssertTrue(body.contains("TopologyRerunChoice.cancel.label, role: .cancel"))
