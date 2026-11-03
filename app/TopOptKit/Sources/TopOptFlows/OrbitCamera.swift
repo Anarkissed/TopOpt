@@ -108,8 +108,22 @@ public struct OrbitCamera: Equatable {
     /// elevation and does not affect the canonical-view `direction`. `roll == 0` is the
     /// level view Home and every snap return to.
     public private(set) var roll: Float = 0
-    /// Vertical field of view, in radians.
+    /// Vertical field of view, in radians: the LENS. Framing, zoom and pan read this with `distance` in both projections.
     public var fovY: Float
+    /// ★ B2 (ledger note 1, approved design 2026-11-02): ORTHOGRAPHIC. Drawn as a 1° telephoto from far back on the same
+    /// line of sight: lines stay parallel to within about 1 % across a part, and every pass that marches rays from the eye
+    /// (the lattice SDF, Flexible's lattice, the AO pass) stays exact, with no second, orthographic code path in each. What
+    /// is visible at the target is the lens's, so switching keeps the picture's size, and framing / zoom / pan are unchanged.
+    public var orthographic = false
+    /// The telephoto that stands in for an orthographic projection.
+    public static let telephotoFovY: Float = 1 * .pi / 180
+    /// The field of view the frame is DRAWN with (the projection, and any pass that casts rays from `eye`).
+    public var drawFovY: Float { orthographic ? Self.telephotoFovY : fovY }
+    /// How far the eye really is from `target`: `distance` for the lens; far enough back for the telephoto to show the
+    /// same extent at the target.
+    public var eyeDistance: Float {
+        orthographic ? distance * tan(fovY * 0.5) / tan(Self.telephotoFovY * 0.5) : distance
+    }
     public var minDistance: Float
     public var maxDistance: Float
 
@@ -223,7 +237,7 @@ public struct OrbitCamera: Equatable {
     /// `resetPan`/Home can always return.
     public mutating func pan(dx: Float, dy: Float, viewportHeight: Float) {
         guard viewportHeight > 0, dx.isFinite, dy.isFinite else { return }
-        let worldPerPixel = 2 * distance * tan(fovY * 0.5) / viewportHeight
+        let worldPerPixel = 2 * distance * tan(fovY * 0.5) / viewportHeight   // the same extent in both projections
         // Undo roll so a screen-down drag pans down regardless of the horizon tilt (see `orbit`).
         let c = cos(roll), s = sin(roll)
         let rx =  c * dx + s * dy
@@ -263,7 +277,7 @@ public struct OrbitCamera: Equatable {
     }
 
     /// The eye (camera) position in world space.
-    public var eye: SIMD3<Float> { target + direction * distance }
+    public var eye: SIMD3<Float> { target + direction * eyeDistance }
 
     /// The camera up-vector: world +Y rolled about the line of sight by `roll` (Rodrigues
     /// rotation about `direction`). At `roll == 0` this is exactly `(0,1,0)`, so the levelled
@@ -293,9 +307,17 @@ public struct OrbitCamera: Equatable {
         // with a float depth buffer resolves depth to ~d²·6e-8/near — about 1 mm at 400 mm, coarser
         // than the gap between a strut welded into the rim and the rim's own face. 1 % of the orbit
         // distance (0.01–5 mm) resolves ~0.003 mm there; nothing is ever that close to the eye.
-        let near = nearArg ?? (Self.fixedNearForTests ? 0.01 : Swift.max(0.01, Swift.min(5, distance * 0.01)))
+        var near = nearArg ?? (Self.fixedNearForTests ? 0.01 : Swift.max(0.01, Swift.min(5, distance * 0.01)))
+        var far = far
+        if orthographic, nearArg == nil {
+            // the telephoto's eye is far back: the near plane sits just in front of the part (its radius is maxDistance/12,
+            // `frame`), so depth resolves as finely as the lens's does
+            let reach = 2 * maxDistance / 12
+            near = Swift.max(near, eyeDistance - reach)
+            far = Swift.max(far, eyeDistance + reach * 6)
+        }
         let a = aspect > 0 ? aspect : 1
-        let ys = 1 / tan(fovY * 0.5)
+        let ys = 1 / tan(drawFovY * 0.5)   // ★ B2: the drawn field of view (the telephoto when orthographic)
         let xs = ys / a
         let zs = far / (near - far)
         return simd_float4x4(columns: (

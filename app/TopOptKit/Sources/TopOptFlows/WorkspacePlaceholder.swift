@@ -46,7 +46,7 @@ public struct WorkspacePlaceholder: View {
     @State private var projection: CameraProjection?
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
-    @StateObject private var cameraModel = OrbitCameraModel()
+    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -859,7 +859,7 @@ public struct WorkspacePlaceholder: View {
                                   surfaceUnion.partialPicks(regions: project.faceRegions),
                                   in: project.faceRegions)
                               : (visible.surfaceEditing ? surfaceSelectedUnionLighting?.chains ?? [] : []),
-                          xray: surfaceXrayOn,
+                          xray: surfaceXrayOn && !flexibleMain.owns(project, stage),   // ★ B2 (notes 2, 7): the one X-ray look (body + lines)
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),   // Flexible H4: a map-mesh swap snaps, never spins
                           showGround: showGround,
@@ -1775,8 +1775,12 @@ public struct WorkspacePlaceholder: View {
     private var gizmoSize: CGFloat { OrientationGizmoView.standardSize }
     private var orientationGizmo: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
+                // ★ B2 (note 1): [Orthographic │ Perspective], directly left of the gizmo, on every page this gizmo serves
+                ViewProjectionPair()
+                    .padding(.top, (gizmoSize - 50) / 2)
+                    .latticeBandChipKeepOut()
                 // ★ B4: the Cells page draws over the live part, so the gizmo follows the part's camera
                 OrientationGizmoView(camera: cameraModel,
                                      size: gizmoSize)
@@ -7767,6 +7771,7 @@ public struct WorkspacePlaceholder: View {
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
+                .background(CornerPairStyle.publish(on ? "view-\(label)-on" : "view-\(label)"))   // B2: hosted tests
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)

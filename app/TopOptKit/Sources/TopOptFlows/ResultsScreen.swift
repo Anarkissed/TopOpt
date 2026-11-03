@@ -142,7 +142,7 @@ public struct ResultsScreen: View {
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
     /// tapping the cube orbits the model.
-    @StateObject private var cameraModel = OrbitCameraModel()
+    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -721,7 +721,7 @@ public struct ResultsScreen: View {
 
     /// The body opacity for the current flow body mode (x-ray/stress translucent,
     /// solid opaque); 1 when the overlay is off (the normal opaque draw).
-    private var bodyAlpha: Float { layers.xray ? 0.3 : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
+    private var bodyAlpha: Float { layers.xray ? XrayLook.bodyAlpha : 1 }   // ★ 10-28: X-ray is a layer, with any colouring and motion
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -1866,8 +1866,10 @@ public struct ResultsScreen: View {
     /// tabs bottom-left, the media player bottom-centre — none reach the top-right cube.
     private var orientationGizmo: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
+                ViewProjectionPair()   // ★ B2 (note 1): [Orthographic │ Perspective], left of the gizmo, as on every page
+                    .padding(.top, 6)
                 OrientationGizmoView(camera: cameraModel)
             }
             Spacer()
