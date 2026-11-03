@@ -102,6 +102,29 @@ final class AppBuildHost {
         return f
     }
 
+    /// ★ B3: scroll the Selections list (the way he would) until `key` sits inside it — a row below the list's fold is laid out
+    /// but clipped, and a click there lands on nothing. (LoadScenarioHostedTests' helper, for every hosted test.)
+    func scrollIntoList(_ key: String) {
+        for _ in 0..<12 {
+            guard var list = frames.all["selectionsList"], let f = frames.all[key] else { return }
+            // the "n more ⌄" cue (U10) sits over the scroll's foot: a row under it is not reachable either
+            if let cue = frames.all.first(where: { $0.key.hasPrefix("selectionsMore") })?.value, cue.minY < list.maxY {
+                list.size.height = cue.minY - list.minY
+            }
+            if list.insetBy(dx: -1, dy: -1).contains(f) { return }
+            let probe = NSPoint(x: list.midX, y: size.height - (list.minY + SelectionsList.lineHeight + 30))
+            var v = view.hitTest(probe)
+            while let x = v, !(x is NSScrollView) { v = x.superview }
+            guard let sv = v as? NSScrollView else { return }
+            let clip = sv.contentView
+            var o = clip.bounds.origin
+            let dy = f.maxY > list.maxY - 8 ? f.maxY - (list.maxY - 8) : f.minY - (list.minY + SelectionsList.lineHeight + 8)
+            o.y += clip.isFlipped ? dy : -dy
+            clip.scroll(to: o); sv.reflectScrolledClipView(clip)
+            pump(0.4)
+        }
+    }
+
     /// Click the control `key` at its middle.
     func tap(_ key: String, _ what: String, settle: Double = 0.8, file: StaticString = #filePath, line: UInt = #line) throws {
         let f = try onScreen(key, what, file: file, line: line)

@@ -198,6 +198,9 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public var scenarios: LoadScenarioSet? = nil
     /// ★ THE SAFETY MARGIN (ruling 2026-10-26 13:12; SafetyMargin.swift). nil = 150 %, byte-identical to before.
     public var safetyMargin: Double? = nil
+    /// ★ B3 (note 5; LoadAim.swift): each load's aim and its Flipped check. nil = into / away from the face, byte-identical.
+    public internal(set) var loadAims: [UUID: LoadAim]? = nil
+    public internal(set) var loadFlips: Set<UUID>? = nil
 
     /// Per selection-group role/direction/weight, keyed by `SelectionGroup.id`.
     /// A group with no entry here is `.pending`.
@@ -574,6 +577,8 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
         if var map = manualPrimitives { map[id] = nil; manualPrimitives = map.isEmpty ? nil : map }
         if var map = suppressedClearanceByGroup { map[id] = nil; suppressedClearanceByGroup = map.isEmpty ? nil : map }
+        if var map = loadAims { map[id] = nil; loadAims = map.isEmpty ? nil : map }   // ★ B3 (note 5)
+        if var set = loadFlips { set.remove(id); loadFlips = set.isEmpty ? nil : set }
         pruneBoreOverrides { $0 != id }
     }
 
@@ -611,6 +616,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public mutating func sync(groups: [SelectionGroup]) {
         let live = Set(groups.map { $0.id })
         kinds = kinds.filter { live.contains($0.key) }
+        syncAims(live: live)   // ★ B3 (note 5)
         if let map = clearanceOverrides {
             let pruned = map.filter { live.contains($0.key) }
             clearanceOverrides = pruned.isEmpty ? nil : pruned
@@ -820,8 +826,8 @@ public struct ForceModel: Equatable, Sendable, Codable {
         let raw: SIMD3<Float>
         switch direction {
         case .gravity: raw = gravity ?? SIMD3<Float>(0, 0, -1)
-        case .push: raw = -n
-        case .pull: raw = n
+        // ★ B3 (note 5): Push / Pull point where he aimed them (no aim: −n / +n, as before)
+        case .push, .pull: raw = LoadAimMath.direction(direction, faceNormal: n, aim: aim(for: id), flipped: aimIsFlipped(id)) ?? -n
         }
         let len = simd_length(raw)
         guard len > 1e-6 else { return nil }
@@ -974,6 +980,7 @@ extension ForceModel {
         case scenarios              // load scenarios (2026-10-26, optional)
         case safetyMargin           // the safety margin (2026-10-26, optional; nil = 150 %)
         case autoKeepClear          // "Auto keep clear" per group (2026-10-27, optional; nil = on for anchors)
+        case loadAims, loadFlips    // ★ B3 (note 5): each load's aim and Flipped (optional; nil = into / away from the face)
     }
 
     public init(from decoder: Decoder) throws {
@@ -1024,6 +1031,8 @@ extension ForceModel {
         scenarios = try c.decodeIfPresent(LoadScenarioSet.self, forKey: .scenarios)
         safetyMargin = try c.decodeIfPresent(Double.self, forKey: .safetyMargin)
         autoKeepClear = try c.decodeIfPresent([UUID: Bool].self, forKey: .autoKeepClear)
+        loadAims = try c.decodeIfPresent([UUID: LoadAim].self, forKey: .loadAims)
+        loadFlips = try c.decodeIfPresent(Set<UUID>.self, forKey: .loadFlips)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1054,5 +1063,7 @@ extension ForceModel {
         try c.encodeIfPresent(gravityBaseModel, forKey: .gravityBaseModel)
         try c.encodeIfPresent(scenarios, forKey: .scenarios)
         try c.encodeIfPresent(safetyMargin, forKey: .safetyMargin)
+        try c.encodeIfPresent(loadAims, forKey: .loadAims)
+        try c.encodeIfPresent(loadFlips, forKey: .loadFlips)
     }
 }

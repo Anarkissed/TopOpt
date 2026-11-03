@@ -738,6 +738,12 @@ public struct WorkspacePlaceholder: View {
     @State private var showFlexiblePage = false      // the Flexible stage's page (FlexibleStagePage.swift)
     /// ★ B4: "Change lattice type…" is asking (ChangeLatticeTypeCard).
     @State private var showChangeLatticeType = false
+    /// ★ B3 (note 5): the load whose Direction waits for a tap on the part ("Pick on the part"), and the one showing Details
+    @State private var aimPickGroup: UUID? = nil
+    @State private var aimDetailsGroup: UUID? = nil
+    /// ★ B3 (note 5): the load whose arrow handle is being dragged, and whether its free end was the tail when the drag began
+    @State private var aimDragGroup: UUID? = nil
+    @State private var aimDragFromTail = true
     /// ★ B3: "Delete lattice stage" is asking (the clear-all confirm)
     @State private var deleteLatticeStageAsk = false
     /// ★ B3 (#362's note 1): whether the run being asked for carries the lattice (Topology's Optimize: no)
@@ -914,6 +920,7 @@ public struct WorkspacePlaceholder: View {
                               // THE PIECE. Its pieces are independent selections —
                               // one can join a group while its sibling stays out —
                               // and only the hit POINT can tell them apart.
+                              if takeAimPick(at: pt) { return true }   // ★ B3 (note 5): "Pick on the part" aims the load
                               return handleTopologyPiecePick(fid, at: pt, mesh: m)
                           },
                           // ★ Only while drilled in — the PRESENCE of this closure is
@@ -1456,7 +1463,7 @@ public struct WorkspacePlaceholder: View {
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if !fullScreenPageUp, visible.groupPrimitives {
-                loadOverlays.ignoresSafeArea()                  // D3/D4/D5: load pills
+                loadOverlays.coordinateSpace(name: Self.loadOverlaySpace).ignoresSafeArea()   // D3/D4/D5: load pills (★ B3: + the aim handle's drag space)
             }
             if !fullScreenPageUp {
                 bottomBar
@@ -2987,6 +2994,13 @@ public struct WorkspacePlaceholder: View {
                     }
                 }
             }
+        }
+
+        // ── ★ B3 (note 5): the selected load's aim handle, at its arrow's free end — the pills keep clear of it ──
+        if let mesh = viewerMesh, let g = aimHandleGroup, let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+            elements.append(KeepOutElement(id: "aimHandle.\(g.id.uuidString)", anchor: aimHandlePoint(g, arrow),
+                                           bounds: Self.aimHandleTouch, touch: Self.aimHandleTouch,
+                                           priority: aimDragGroup == g.id ? .activeDrag : .handle, maxShift: 0))
         }
 
         // ── MOVABLE (handle): the design-box / keep-out grab handles (visual + hit layer
@@ -12165,8 +12179,9 @@ public struct WorkspacePlaceholder: View {
                                    proj: CameraProjection) -> (tail: CGPoint, tip: CGPoint)? {
         guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g) else { return nil }
         let worldN = simd_normalize(settleQuat.act(nm))
-        let dir = ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity,
-                                             groupNormal: worldN)
+        // ★ B3 (note 5): Push / Pull point where he aimed them (no aim: today's −n / +n); Gravity as before
+        let dir = force.aimedDirection(g.id, faceNormal: nm).map { simd_normalize(settleQuat.act($0)) }
+            ?? ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity, groupNormal: worldN)
         let base = settledWorld(cm)
         let step = max(mesh.bounds.radius, 1e-3) * 0.35
         guard let pBase = proj.project(base), let pStep = proj.project(base + dir * step) else { return nil }
@@ -12255,6 +12270,10 @@ public struct WorkspacePlaceholder: View {
                             .withdrawn(placed["load.pendingchip"]?.hidden == true)   // ★ never over the Selections panel
                     }
                     // ★ B3: the Forces view hides the weight pills (the pending chip stays — it is how a face gets a role)
+                    // ★ B3 (note 5): the selected Push / Pull load's round handle, at its arrow's free end: drag it to aim
+                    if stage == .topology, topoForcesShown, let g = aimHandleGroup, let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+                        aimHandle(g, arrow: arrow, proj: proj)
+                    }
                     ForEach((stage != .topology || topoForcesShown ? loadGroups : []).filter {
                         SelectionArrowRule.groupShows($0.id, selectedGroup: selection.activeGroupID) }) { g in   // ★ his iPad 10-26 (2)(4)
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
@@ -13392,6 +13411,7 @@ extension WorkspacePlaceholder {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             autoKeepClearRow(g)   // ★ first, right under the group's line, where he looks (not under its primitives)
             groupRow(g, inList: true)
+            if force.kind(for: g.id).isLoad { loadRows(g) }   // ★ B3 (note 5): Kind, Weight, Direction
             // ★ his ask 2026-10-26 + his iPad 14:13: every face its own card, picked one at a time, with its own eye and trash
             VStack(spacing: PieceRowPick.spacing) {
                 ForEach(g.faces, id: \.self) { f in
@@ -13406,6 +13426,176 @@ extension WorkspacePlaceholder {
             .padding(.horizontal, DS.Space.l)
         }
         .padding(.bottom, DS.Space.s)
+    }
+
+    /// ★ B3 (note 5, mockup #topo-setup-load): an open Load group's Kind · Weight · Direction (and Direction's Details).
+    @ViewBuilder private func loadRows(_ g: SelectionGroup) -> some View {
+        let k = force.kind(for: g.id).loadDirection ?? .gravity
+        let kg = force.kind(for: g.id).weightKg ?? 0
+        let canEdit = project.groupView.canEdit(g.id)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: DS.Space.s) {
+                Text("Kind").dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                Spacer(minLength: DS.Space.s)
+                HStack(spacing: 2) {
+                    ForEach(LoadDirection.allCases, id: \.self) { d in
+                        Button { force.setDirection(g.id, d) } label: {
+                            Text(d.title).dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                                .foregroundStyle((d == k ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                                .padding(.horizontal, DS.Space.m).frame(minHeight: 44)
+                                .background(Capsule().fill(d == k ? DS.Color.fillSelected.color : .clear).padding(.vertical, 6))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .background(CornerPairStyle.publish("loadKind-\(d.rawValue)-\(g.id.uuidString)"))
+                        .accessibilityIdentifier("load-kind-\(d.rawValue)-\(g.id.uuidString)")
+                    }
+                }
+            }
+            .frame(minHeight: 44)
+            HStack(spacing: DS.Space.s) {
+                Text("Weight").dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                Spacer(minLength: DS.Space.s)
+                NumberField(key: "loadWeight-\(g.id.uuidString)", title: "Weight",
+                            spec: FlexNumberSpec(value: force.unit == .kg ? kg : kg * ForceModel.kgToLb, unit: force.unit.label,
+                                                 step: 0.5, range: 0 ... 100_000, decimals: 1),
+                            padRange: NumberRange(0, nil)) { v in
+                    if v > 0 { force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb) }
+                }
+            }
+            .frame(minHeight: 44)
+            if k == .gravity {
+                // U6: the row stays, greyed, says why in ≤ 5 words, and its fix is one tap
+                HStack(spacing: DS.Space.s) {
+                    Text(LoadAimCopy.title).dsStyle(DS.TypeScale.caption).fontWeight(.bold).foregroundStyle(DS.Color.textTertiary.color)
+                    Text(LoadAimCopy.followsGravity).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    Spacer(minLength: DS.Space.s)
+                    Button { force.setDirection(g.id, .push) } label: {
+                        Text(LoadAimCopy.choosePush).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                            .foregroundStyle(DS.Color.accent.color).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(!canEdit)
+                    .background(CornerPairStyle.publish("loadDirectionFix-\(g.id.uuidString)"))
+                }
+                .frame(minHeight: 44)
+            } else {
+                SettingRow(key: "loadDirection-\(g.id.uuidString)", id: "load-direction-\(g.id.uuidString)", label: LoadAimCopy.title,
+                           value: LoadAimCopy.label(force.aim(for: g.id), kind: k, flipped: force.aimIsFlipped(g.id)),
+                           info: LoadAimCopy.info, infoLabel: "About the direction") {
+                    let choices = LoadAimCopy.choices(kind: k)
+                    Button(choices[0]) { force.setAim(g.id, nil); aimPickGroup = nil }
+                    ForEach(0..<3, id: \.self) { i in Button(choices[1 + i]) { force.setAim(g.id, .axis(i)); aimPickGroup = nil } }
+                    Button(LoadAimCopy.pick) { aimPickGroup = g.id; model.toast = LoadAimCopy.pickHint }
+                    Divider()
+                    Toggle(LoadAimCopy.flippedTitle, isOn: Binding(get: { force.aimIsFlipped(g.id) },
+                                                                    set: { force.setFlipped(g.id, $0) }))
+                }
+                .disabled(!canEdit)
+                HStack {
+                    Spacer()
+                    Button { aimDetailsGroup = aimDetailsGroup == g.id ? nil : g.id } label: {
+                        Text(LoadAimCopy.details + (aimDetailsGroup == g.id ? " \u{2303}" : " \u{203A}"))
+                            .dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.accent.color)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .background(CornerPairStyle.publish("loadDirectionDetails-\(g.id.uuidString)"))
+                }
+                if aimDetailsGroup == g.id, let base = loadPushBase(g) { aimDetails(g, base: base, kind: k) }
+            }
+        }
+        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.m)
+    }
+
+    /// ★ B3 (note 5): Details — the exact angles, From the face and Around, typed.
+    @ViewBuilder private func aimDetails(_ g: SelectionGroup, base: SIMD3<Float>, kind: LoadDirection) -> some View {
+        let push = LoadAimMath.direction(.push, faceNormal: -base, aim: force.aim(for: g.id), flipped: false) ?? base
+        let a = LoadAimMath.angles(of: push, base: base)
+        HStack(spacing: DS.Space.m) {
+            Text(LoadAimCopy.fromFace).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+            NumberField(key: "aimFromFace-\(g.id.uuidString)", title: LoadAimCopy.fromFace,
+                        spec: FlexNumberSpec(value: Double(a.fromFace.rounded()), unit: "\u{00B0}", step: 15, range: 0 ... 180, decimals: 0),
+                        size: .bare, padRange: NumberRange(0, 180)) { v in
+                force.setAim(g.id, .vector(LoadAimMath.direction(fromFace: Float(v), around: a.around, base: base)))
+            }
+            Text(LoadAimCopy.around).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+            NumberField(key: "aimAround-\(g.id.uuidString)", title: LoadAimCopy.around,
+                        spec: FlexNumberSpec(value: Double(a.around.rounded()), unit: "\u{00B0}", step: 15, range: 0 ... 360, decimals: 0,
+                                             wraps: true),
+                        size: .bare, padRange: NumberRange(0, 360)) { v in
+                force.setAim(g.id, .vector(LoadAimMath.direction(fromFace: a.fromFace, around: Float(v), base: base)))
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 44)
+    }
+
+    /// The load's Push direction with no aim (−n, its faces' mean normal), in the model frame.
+    private func loadPushBase(_ g: SelectionGroup) -> SIMD3<Float>? { groupNormalModel(g).map { -$0 } }
+
+    /// ★ B3 (note 5): the load whose arrow carries the aim handle — the selected group, a Push or a Pull.
+    private var aimHandleGroup: SelectionGroup? {
+        guard force.phase == .edit, let g = activeGroup, let k = force.kind(for: g.id).loadDirection, k != .gravity,
+              loadGroups.contains(where: { $0.id == g.id }), project.groupView.canEdit(g.id) else { return nil }
+        return g
+    }
+    static let aimHandleTouch = CGSize(width: 44, height: 44)
+    /// The arrow's free end: its tail when the tip presses into the face, else its tip.
+    private func aimHandleIsTail(_ g: SelectionGroup) -> Bool {
+        guard let nm = groupNormalModel(g), let d = force.aimedDirection(g.id, faceNormal: nm) else { return true }
+        return ForceModel.arrowTipAtApplicationPoint(direction: d, faceNormal: nm)
+    }
+    private func aimHandlePoint(_ g: SelectionGroup, _ arrow: (tail: CGPoint, tip: CGPoint)) -> CGPoint {
+        aimHandleIsTail(g) ? arrow.tail : arrow.tip
+    }
+
+    /// The handle: a 20 pt ring in the group's colour on a 44 pt target. A drag aims the arrow in the plane facing the camera,
+    /// stepped (LoadAimMath.stepped) — the arrow and the job's vector follow as he drags.
+    @ViewBuilder private func aimHandle(_ g: SelectionGroup, arrow: (tail: CGPoint, tip: CGPoint), proj: CameraProjection) -> some View {
+        let at = aimHandlePoint(g, arrow)
+        Circle().fill(DS.Surface.panel.color)
+            .overlay(Circle().strokeBorder(g.color.color, lineWidth: 3))
+            .frame(width: 20, height: 20)
+            .frame(width: Self.aimHandleTouch.width, height: Self.aimHandleTouch.height)
+            .contentShape(Circle())
+            .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .named(Self.loadOverlaySpace))
+                .onChanged { v in
+                    if aimDragGroup != g.id { aimDragGroup = g.id; aimDragFromTail = aimHandleIsTail(g) }
+                    aimLoad(g, finger: v.location, proj: proj)
+                }
+                .onEnded { _ in aimDragGroup = nil })
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["aimHandle-\(g.id.uuidString)": geo.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityLabel("Aim \(g.name)")
+            .accessibilityIdentifier("aim-handle-\(g.id.uuidString)")
+            .position(at)   // last: the hit area and the published frame are the 44 pt ring's, never the stage's (orbit stays free)
+    }
+
+    /// ★ B3 (note 5): the handle under the finger → the load's aim (the force's world direction, back into the stored Push sense).
+    func aimLoad(_ g: SelectionGroup, finger: CGPoint, proj: CameraProjection) {
+        guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g), let k = force.kind(for: g.id).loadDirection,
+              k != .gravity,
+              let world = LoadAimMath.dragged(finger: finger, base: settledWorld(cm), into: aimDragFromTail, projection: proj)
+        else { return }
+        var push = settleQuat.inverse.act(world)
+        if k == .pull { push = -push }
+        if force.aimIsFlipped(g.id) { push = -push }
+        force.setAim(g.id, LoadAimMath.stepped(push, base: -nm))
+    }
+    static let loadOverlaySpace = "loadOverlays"
+
+    /// ★ B3 (note 5): "Pick on the part" — the tap's point aims the waiting load (from its centre toward the point). True: taken.
+    private func takeAimPick(at point: SIMD3<Float>?) -> Bool {
+        guard let id = aimPickGroup else { return false }
+        aimPickGroup = nil
+        guard let point, let g = selection.groups.first(where: { $0.id == id }), let c = groupCentroidModel(g),
+              let k = force.kind(for: id).loadDirection else { return true }
+        var v = point - c
+        guard simd_length(v) > 1e-4 else { return true }
+        v = simd_normalize(v)
+        force.setAim(id, .vector(k == .pull ? -v : v))   // stored in the Push sense
+        return true
     }
 
     /// ★ "Auto keep clear" (his iPad 2026-10-27), one line per group: every bolt hole in the group gets its keep-clear
