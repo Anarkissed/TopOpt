@@ -175,11 +175,11 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
       // (L/h)^2, the larger of rho 0.20 / 0.40 at L/h 20 and 30 (a budget should not
       // undercount). Uniform wall at the band middle, h = a third of it: cell-size free.
       f.sheet_triangles_coeff = topo == LatticeTopology::Gyroid ? 19.44 : 24.00;
-      // sheet_simplified_cost.txt (Finding 8): interior cells of the 40 mm sample block,
-      // simplified to 0.02 mm, near the band middle at an 8 mm cell (gyroid rho 0.375:
-      // 3,873; Schwarz-D rho 0.40: 6,213), per mm of cell. Linear in the cell: gyroid at 4
-      // mm 1,962, Schwarz-D at 5 mm 3,854.
-      f.sheet_triangles_per_cell_mm = topo == LatticeTopology::Gyroid ? 3873.0 / 8.0 : 6213.0 / 8.0;
+      // sheet_simplified_cost.txt (Finding 8): the 27 interior cells of the 40 mm sample
+      // block, simplified to 0.02 mm, near the band middle at an 8 mm cell (gyroid rho
+      // 0.375: 3,802; Schwarz-D rho 0.40: 6,105), per mm of cell. Linear in the cell to
+      // 1-2 %: gyroid at 4 mm 1,933, Schwarz-D at 5 mm 3,828.
+      f.sheet_triangles_per_cell_mm = topo == LatticeTopology::Gyroid ? 3802.0 / 8.0 : 6105.0 / 8.0;
       f.triangles_per_cell = 8.0 * f.sheet_triangles_per_cell_mm;
     }
   }
