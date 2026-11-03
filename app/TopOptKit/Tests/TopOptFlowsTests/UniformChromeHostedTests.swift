@@ -52,9 +52,9 @@ final class UniformChromeHostedTests: XCTestCase {
             try h.pickFromMenu("capsuleMenu", "Structural", what: "the stage menu")
             h.pump(1)
             seen.append(("Lattice stage", try block(h, "Lattice stage")))
-            try h.tap("capsuleCells", "the Cells page", settle: 1.5)
-            seen.append(("Cells page", try block(h, "Cells page")))
-            try h.tap("capsuleRegions", "back to Regions", settle: 1.5)
+            try h.tap("capsuleLattice", "the Lattice page", settle: 1.5)
+            seen.append(("Lattice page", try block(h, "Lattice page")))
+            try h.tap("capsuleSetup", "back to Setup", settle: 1.5)
             try h.tap("capsuleScissors", "Edit faces", settle: 1.5)
             seen.append(("Edit faces", try block(h, "Edit faces")))
 

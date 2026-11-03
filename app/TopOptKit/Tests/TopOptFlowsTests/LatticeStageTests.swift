@@ -143,7 +143,7 @@ final class LatticeStageTests: XCTestCase {
         StageCapsule.perform(.changeType, fold: nil, go: { _ in XCTFail("not a stage change") }, about: {},
                              changeType: { asked += 1 })
         XCTAssertEqual(asked, 1)
-        XCTAssertEqual(LatticeStagePage.allCases.map(\.title), ["Regions", "Cells"])
+        XCTAssertEqual(LatticeStagePage.allCases.map(\.title), ["Setup", "Lattice"])   // ★ RE-PINNED (whole-app build B2, U4: "Setup │ Lattice", never Regions / Cells)
         XCTAssertEqual(LatticeStagePage.current(cellsUp: true), .cells)
         XCTAssertFalse(WorkspaceStage.lattice.drawsForwardButtons, "the capsule carries the stage buttons")
         let ws = try Self.src("WorkspacePlaceholder.swift")

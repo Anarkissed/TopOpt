@@ -38,8 +38,8 @@ final class StageFromResultsHostedTests: XCTestCase {
             // ★ the lattice stage is up, with its top-left block: the capsule and its Regions / Cells pages
             _ = try h.onScreen("capsule", "\(size): the top-left block (the capsule) after the stage change")
             _ = try h.onScreen("capsuleMenu", "\(size): the ● menu after the stage change")
-            XCTAssertNotNil(h.frames.all["capsuleRegions"] ?? h.frames.all["capsuleCells"],
-                            "\(size): ★ the LATTICE stage's capsule (Regions / Cells); frames: \(h.frames.all.keys.sorted())")
+            XCTAssertNotNil(h.frames.all["capsuleLattice"],
+                            "\(size): ★ the LATTICE stage's capsule (Setup │ Lattice); frames: \(h.frames.all.keys.sorted())")
             XCTAssertNil(h.frames.all["capsuleResults"], "\(size): Topology's capsule is gone")
             // ★ RESULTS CLOSED FIRST: none of its controls is left drawn over the lattice stage (on 5cf6773b-era code they all
             // were — Results is mounted above the stage row, so it covered the capsule: "that entire menu line disappeared")

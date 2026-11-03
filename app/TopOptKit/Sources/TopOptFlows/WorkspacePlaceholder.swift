@@ -12974,7 +12974,7 @@ extension WorkspacePlaceholder {
         Button { withAnimation(DS.Motion.emphasized) { setupPanelOpen.toggle() } } label: {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
-                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)   // ★ B2 (Q6): the corner chip is Settings everywhere
                 Image(systemName: setupPanelOpen ? "chevron.down" : "chevron.up").font(.system(size: 11, weight: .bold))
                     .foregroundStyle(DS.Color.textSecondary.color)
             }
@@ -13028,9 +13028,9 @@ extension WorkspacePlaceholder {
                                             isStep: isStepPart, designBoxDrawn: visible.designBox)
         return VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack {
-                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 Spacer()
-                CornerPairStyle.x44("chevron.down", label: "Close Setup", id: "topology-setup-close") { setupPanelOpen = false }
+                CornerPairStyle.x44("chevron.down", label: "Close Settings", id: "topology-setup-close") { setupPanelOpen = false }
             }
             ForEach(rows, id: \.self) { row in
                 VStack(alignment: .trailing, spacing: DS.Space.s) {

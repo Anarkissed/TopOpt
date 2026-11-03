@@ -908,7 +908,7 @@ final class FlexibleLatticePass {
         let zW = simd_normalize(camera.eye - camera.target)
         let xW = simd_normalize(simd_cross(camera.up, zW))
         let yW = simd_cross(zW, xW)
-        let tanHalf = tan(camera.fovY * 0.5)
+        let tanHalf = tan(camera.drawFovY * 0.5)   // ★ B2 (note 1; #362 OK 2026-11-03 04:08): the drawn field of view (the telephoto when Orthographic)
         return (eyeModel, invR.act(xW) * tanHalf * aspect, invR.act(yW) * tanHalf, invR.act(-zW))
     }
 

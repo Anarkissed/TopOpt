@@ -127,7 +127,7 @@ public enum LatticeStageMenu {
 public enum LatticeStagePage: String, Equatable, Sendable, CaseIterable {
     case regions, cells
 
-    public var title: String { self == .regions ? "Regions" : "Cells" }
+    public var title: String { self == .regions ? "Setup" : "Lattice" }   // ★ B2 (U4, approved design 2026-11-02): "Setup │ Lattice", never Regions / Cells
 
     /// The lit page: Cells while today's settings page is up, else Regions.
     public static func current(cellsUp: Bool) -> LatticeStagePage { cellsUp ? .cells : .regions }
