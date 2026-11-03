@@ -7612,7 +7612,7 @@ public struct WorkspacePlaceholder: View {
         // at?") and none is subordinate to another.
         HStack(spacing: DS.Space.s) {
             Group {
-                viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
+                viewModeButton("grid", label: "Outlines", on: surfaceWireframeOn) {   // ★ B2 (U4): never "Wireframe"
                     surfaceWireframeOn.toggle()
                 }
                 viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
@@ -7722,7 +7722,9 @@ public struct WorkspacePlaceholder: View {
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
-                .background(CornerPairStyle.publish(on ? "view-\(label)-on" : "view-\(label)"))   // B2: hosted tests
+                .background(Group {   // B2: hosted tests (and ViewCornerParity's red control)
+                    if label != ViewCornerParity.controlDropped { CornerPairStyle.publish(on ? "view-\(label)-on" : "view-\(label)") }
+                })
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
@@ -8025,7 +8027,8 @@ public struct WorkspacePlaceholder: View {
                     )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Wireframe")
+            .accessibilityLabel("Outlines")   // ★ B2 (U4): never "Wireframe"; Cut's pair moves to the view corner in B8
+            .background(CornerPairStyle.publish(surfaceWireframeOn ? "view-Outlines-on" : "view-Outlines"))
 
             // ★ X-RAY, SEPARATELY. `#` decides whether there are lines; this
             // decides whether they show THROUGH the solid. They were one control
@@ -8045,6 +8048,7 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("X-ray")
+            .background(CornerPairStyle.publish(surfaceXrayOn ? "view-X-ray-on" : "view-X-ray"))
 
             // ★ §2 — THE PENCIL BUTTON. ★ THE ONLY NEW CONTROL IN THIS TASK, and
             // it is built to the tray it sits in rather than to a new idea: the

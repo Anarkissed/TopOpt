@@ -135,14 +135,14 @@ final class ViewCornerB2Tests: XCTestCase {
 
     func testXrayWorksWithOutlinesOff() throws {
         let (h, _) = try page()
-        _ = try h.onScreen("view-Wireframe", "Outlines, off")
+        _ = try h.onScreen("view-Outlines", "Outlines, off")
         func viewers() -> [Bool] { Array((MeshRenderer.xrayBodyByWindow[h.window.windowNumber] ?? [:]).values) }
         XCTAssertFalse(viewers().isEmpty, "the page's viewer was handed its inputs")
         XCTAssertFalse(viewers().contains(true), "the renderer starts with X-ray off")
         try h.tap("view-X-ray", "X-ray")
         h.pump(0.8)
         _ = try h.onScreen("view-X-ray-on", "X-ray lit")
-        _ = try h.onScreen("view-Wireframe", "★ Outlines still off")
+        _ = try h.onScreen("view-Outlines", "★ Outlines still off")
         XCTAssertTrue(viewers().contains(true), "★ X-ray alone reaches the renderer (it did nothing without Outlines)")
         try h.tap("view-X-ray-on", "X-ray off")
         h.pump(0.8)

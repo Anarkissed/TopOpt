@@ -18,6 +18,7 @@ final class BannedWordsTests: XCTestCase {
     static let banned: [Banned] = [
         Banned(pattern: #"\b[Dd]esign primitives\b"#, use: "Allow growth here", batch: "B2"),
         Banned(pattern: #"\bVersion (\d|\\\()"#, use: "a · Just safe, b · +10 %, c · +20 %", batch: "B2"),
+        Banned(pattern: #"^Wireframe$"#, use: "Outlines", batch: "B2"),   // the view's one name (§4.2)
     ]
 
     /// Lines that never reach the screen: logs, diagnostics, identifiers, assertions.
@@ -25,10 +26,27 @@ final class BannedWordsTests: XCTestCase {
         #"NSLog|print\(|diag\(|DIAG|signpost|emitEvent|os_log|Logger|accessibilityIdentifier|fatalError|assert|precondition"#)
     static let literal = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
 
+    /// The line without its trailing comment (a `//` outside a string literal).
+    static func code(_ line: String) -> String {
+        var inString = false, escaped = false, prev: Character = " "
+        for (i, c) in zip(line.indices, line) {
+            if inString {
+                if escaped { escaped = false } else if c == "\\" { escaped = true } else if c == "\"" { inString = false }
+            } else if c == "\"" {
+                inString = true
+            } else if c == "/", prev == "/" {
+                return String(line[..<line.index(before: i)])
+            }
+            prev = c
+        }
+        return line
+    }
+
     /// The banned words in `lines` ("file:line: the string · the word to use").
     static func scan(_ lines: [String], file: String) -> [String] {
         var out: [String] = []
-        for (n, line) in lines.enumerated() {
+        for (n, full) in lines.enumerated() {
+            let line = code(full)
             let t = line.trimmingCharacters(in: .whitespaces)
             let whole = NSRange(line.startIndex..., in: line)
             guard !t.hasPrefix("//"), offScreen.firstMatch(in: line, range: whole) == nil else { continue }
@@ -47,7 +65,9 @@ final class BannedWordsTests: XCTestCase {
         // ★ RED CONTROL: a planted screen string is caught; the same words in a log line are not
         XCTAssertEqual(Self.scan(["        Text(\"Version 2 · +10%\")"], file: "x").count, 1)
         XCTAssertEqual(Self.scan(["        viewModeButton(\"cube\", label: \"Design primitives\", on: x)"], file: "x").count, 1)
-        XCTAssertEqual(Self.scan(["        NSLog(\"Version 2 done\")", "        // \"Design primitives\""], file: "x"), [])
+        XCTAssertEqual(Self.scan(["        NSLog(\"Version 2 done\")", "        // \"Design primitives\"",
+                                  "        x(\"Outlines\")   // never \"Wireframe\""], file: "x"), [])
+        XCTAssertEqual(Self.scan(["        Link(\"https://a.b\", label: \"Wireframe\")"], file: "x").count, 1, "a // inside a string is not a comment")
     }
 
     func testNoScreenStringUsesABannedWord() throws {

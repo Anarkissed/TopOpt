@@ -14,8 +14,8 @@ final class ResultsMotionTests: XCTestCase {
 
     func testTheMovingViewsAreBackAndHiddenWhenTheRunCannotShowThem() {
         XCTAssertEqual(ResultsViewMode.shown(hasStress: true, hasDisplacement: true, canBreak: true),
-                       [.stress, .solid, .xray, .loadPaths, .bend, .breakIt])
-        XCTAssertEqual(ResultsViewMode.shown(hasStress: false, hasDisplacement: false, canBreak: false), [.solid, .xray],
+                       [.xray, .stress, .solid, .loadPaths, .bend, .breakIt])   // ★ B2: the X-ray pair first
+        XCTAssertEqual(ResultsViewMode.shown(hasStress: false, hasDisplacement: false, canBreak: false), [.xray, .solid],
                        "a view the run cannot show is hidden, never greyed")
         XCTAssertEqual(ResultsViewMode.allCases.filter(\.moves), [.loadPaths, .bend, .breakIt])
     }

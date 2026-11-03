@@ -247,8 +247,9 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var moves: Bool { self == .loadPaths || self == .bend || self == .breakIt }
 
     /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
+    /// ★ B2 (round 1, design-system §4.2): the X-ray pair first, then today's views in today's order.
     static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
-        (hasStress ? [.stress] : []) + [.solid, .xray]
+        [.xray] + (hasStress ? [.stress] : []) + [.solid]
             + (hasStress ? [.loadPaths] : []) + (hasDisplacement ? [.bend] : []) + (canBreak ? [.breakIt] : [])   // ★ 10-28: the light flow reads the stress
     }
 }

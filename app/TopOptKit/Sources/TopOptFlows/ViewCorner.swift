@@ -28,6 +28,12 @@ public final class ViewProjection: ObservableObject {
     }
 }
 
+/// ★ B2 (round 1, R0): each stage keeps every view it has today, the X-ray pair first (design-system §4.2's table).
+enum ViewCornerParity {
+    /// ★ RED CONTROL (hosted, ViewCornerParityHostedTests): the view with this label publishes no frame, as if dropped.
+    @MainActor static var controlDropped: String? = nil
+}
+
 /// The X-ray look, one for every 3D screen (it was 0.3 on Results, 0.04 on Flexible, and on Topology and Lattice only the
 /// Outlines drawn through the solid, so X-ray did nothing with Outlines off: note 7).
 public enum XrayLook {
