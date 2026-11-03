@@ -85,10 +85,15 @@ struct FinishContext {
   // The slim finish's thin-section line (mm): 2 x the printable minimum. <= 0 = the
   // safe finish (C2's own line, 2 x the solve spacing).
   double slim_line_mm = 0.0;
+  // A version with a lattice companion: the companion is built from the unfinished
+  // shape, so every vertex may only move outward and the shell never retreats from it.
+  bool outward_only = false;
 };
 // How many times the slim finish may re-run the flow with more vertices held
 // outward-only before it gives up and uses the safe finish.
 inline constexpr int kFinishSlimRounds = 8;
+// How many rounds the finish puts vertices back around a Keep clear it newly enclosed.
+inline constexpr int kFinishClearRounds = 6;
 
 struct ThinSpot {
   Vec3 centre_mm{0.0, 0.0, 0.0};
@@ -118,6 +123,8 @@ struct FinishReport {
   int slim_rounds = 0;
   std::size_t slim_guarded_vertices = 0;
   std::size_t fold_held_vertices = 0;  // corners walked back off a triangle the flow turned over
+  std::size_t keep_clear_held_vertices = 0;  // put back around a Keep clear centre it enclosed
+  std::size_t keep_clear_left = 0;  // Keep clear centres still newly enclosed after the rounds
   bool fallback = false;
   std::string fallback_reason;
   double volume_before_mm3 = 0.0;
@@ -151,6 +158,10 @@ struct FinishRecheck {
   double margin_before = 0.0;
   double margin_required = 0.0;
   long long keep_clear_voxels = 0;
+  long long keep_clear_before = 0;  // the same count on the unfinished file
+  // Keep clear centres the finished file encloses and the unfinished one does not, each
+  // confirmed by the winding number (the +Z parity misreads a column grazing a wall).
+  long long keep_clear_added = 0;
   int pieces = 1;
   int loose_pieces = 0;        // the file's pieces holding neither a load nor an anchor
   int loose_pieces_before = 0;  // the same count on the unfinished file
@@ -201,6 +212,11 @@ FallbackOutcome finish_with_fallback(Finish&& finish, Check&& check) {
 // connected pieces of printed voxels meeting through edge / corner neighbours only,
 // one per piece pair).
 int file_thin_joints(const VoxelGrid& grid, const std::vector<char>& occupancy);
+
+// Whether `mesh` (closed, either winding) encloses `p`: |generalized winding number| >
+// 0.5 (the solid angles of its triangles, van Oosterom & Strackee). Exact where a ray
+// test is not: a ray grazing a wall parallel to it.
+bool mesh_encloses(const TriangleMesh& mesh, const Vec3& p);
 
 // The pieces of `occupancy` (26-connected, as the export's bodies are) that hold no
 // Load or Fixture voxel of `grid`: loose in the print.

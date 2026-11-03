@@ -158,11 +158,14 @@ int main() {
       const double rho = materials.at("PLA").density_g_cm3;
       std::printf("[finish-run] (e) margin %.4g in the loop, %.4g on the finished file; "
                   "mass %.4g g from the report, %.4g g from the file; %d fixed, stair-step "
-                  "%.1f %%; %.2f s\n",
+                  "%.1f %%\n",
                   m_loop, m_fin, mass, rho * vol / 1000.0,
                   rep.find("\"thin_spots_fixed\": []", f) == std::string::npos ? 1 : 0,
-                  num_after(rep, "stair_step_removed_pct", f), num_after(rep, "seconds", f));
+                  num_after(rep, "stair_step_removed_pct", f));
       CHECK(std::isfinite(m_fin) && m_fin > 0.0, "(e) the finished shape is re-certified");
+      // Wall time belongs in run_info.json; report.json is byte-identical on a rerun.
+      CHECK(rep.find("\"seconds\"") == std::string::npos,
+            "(e) the report carries no wall time (a rerun is byte-identical)");
       CHECK(std::fabs(mass - rho * vol / 1000.0) <= 1e-6 * mass + 1e-9,
             "(e) the exported file IS the finished shape (its mass is the re-check's)");
     }

@@ -465,7 +465,8 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   };
   for (std::size_t v = 0; v < nv; ++v) {
     if (pinned[v]) { sign[v] = TrustSign::Pinned; continue; }
-    if (v < outward_only.size() && outward_only[v]) sign[v] = combine(sign[v], TrustSign::OutwardOnly);
+    if (ctx.outward_only || (v < outward_only.size() && outward_only[v]))
+      sign[v] = combine(sign[v], TrustSign::OutwardOnly);
     if (ctx.grid != nullptr && ctx.forbidden != nullptr && !ctx.forbidden->empty()) {
       // At or next to a Keep clear / Protect's reach: never further out.
       const Vec3& p = mesh.vertices[v];
@@ -837,6 +838,19 @@ TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm
   return rebuild_from_components(clean, root, keep);
 }
 
+bool mesh_encloses(const TriangleMesh& m, const Vec3& p) {
+  double w = 0.0;
+  for (const auto& t : m.triangles) {
+    const Vec3 a = sub(m.vertices[static_cast<std::size_t>(t[0])], p);
+    const Vec3 b = sub(m.vertices[static_cast<std::size_t>(t[1])], p);
+    const Vec3 c = sub(m.vertices[static_cast<std::size_t>(t[2])], p);
+    const double la = len(a), lb = len(b), lc = len(c);
+    w += 2.0 * std::atan2(dot(a, cross(b, c)),
+                          la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb);
+  }
+  return std::fabs(w) > 2.0 * 3.14159265358979323846;  // |w / 4 pi| > 0.5
+}
+
 int file_thin_joints(const VoxelGrid& g, const std::vector<char>& occ) {
   const std::size_t nv = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny) *
                          static_cast<std::size_t>(g.nz);
@@ -946,7 +960,10 @@ std::string finish_verdict_reason(const FinishRecheck& r) {
     return "After finishing, the margin is " + x(r.margin) + " (needs " + x(r.margin_required) + ")";
   if (!r.load_path_ok) return "After finishing, the load no longer reaches an anchor";
   if (r.anchors_slide) return "After finishing, the anchors would slide under the load";
-  if (r.keep_clear_voxels > 0) return "After finishing, a Keep clear has material in it";
+  // Only what the finishing ADDED: the unfinished file's own count (the export's, today's
+  // file) is not the finish's to refuse.
+  if (r.keep_clear_added > 0)
+    return "After finishing, a Keep clear has material in it";
   if (r.pieces > 1) return "After finishing, it prints in " + std::to_string(r.pieces) + " pieces";
   if (r.loose_pieces > r.loose_pieces_before) return "After finishing, a piece is loose";
   if (r.thin_joints > r.thin_joints_before)
@@ -1007,6 +1024,65 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
       if (blocked_reason(ctx, to).empty()) m.vertices[v] = to;
     }
     r.fold_held_vertices += unfold_against(before_nudge, m);
+    r.volume_after_mm3 = signed_volume(m);
+  }
+  // NO NEW KEEP CLEAR. The guards above test a vertex's own voxel, and the surface
+  // between free vertices can still come to enclose a Keep clear voxel's centre (his
+  // ad68d4c0: +11 on the 1,760 its unfinished file already encloses). Each Keep clear
+  // centre the finished shape encloses and the unfinished one did not puts the vertices
+  // near it back where they started, a voxel further each round, until there are none.
+  if (ctx.grid != nullptr && ctx.forbidden != nullptr &&
+      ctx.forbidden->size() == ctx.grid->voxel_count()) {
+    const VoxelGrid& g = *ctx.grid;
+    auto enclosed = [&](const TriangleMesh& mm) {
+      const VoxelGrid fv = voxelize_onto_grid(mm, g);
+      std::vector<char> o(g.voxel_count(), 0);
+      for (std::size_t i = 0; i < o.size() && i < fv.tags.size(); ++i)
+        o[i] = fv.tags[i] != VoxelTag::Empty && (*ctx.forbidden)[i] == MaskValue::FrozenVoid;
+      return o;
+    };
+    const std::vector<char> was = enclosed(mesh);
+    for (int round = 1; round <= kFinishClearRounds; ++round) {
+      const std::vector<char> now = enclosed(m);
+      std::vector<Vec3> fresh;
+      const std::size_t nxy = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny);
+      for (std::size_t i = 0; i < now.size(); ++i)
+        if (now[i] && !was[i]) {
+          const Vec3 c = g.voxel_center(static_cast<int>(i % static_cast<std::size_t>(g.nx)),
+                                        static_cast<int>((i % nxy) / static_cast<std::size_t>(g.nx)),
+                                        static_cast<int>(i / nxy));
+          if (mesh_encloses(m, c) && !mesh_encloses(mesh, c)) fresh.push_back(c);
+        }
+      r.keep_clear_left = fresh.size();
+      if (fresh.empty()) break;
+      const double reach = round * g.spacing;
+      auto near = [&](const Vec3& p) {
+        for (const Vec3& c : fresh)
+          if (std::fabs(p.x - c.x) <= reach && std::fabs(p.y - c.y) <= reach &&
+              std::fabs(p.z - c.z) <= reach)
+            return true;
+        return false;
+      };
+      for (std::size_t v = 0; v < m.vertices.size() && v < mesh.vertices.size(); ++v)
+        if ((near(m.vertices[v]) || near(mesh.vertices[v])) &&
+            (m.vertices[v].x != mesh.vertices[v].x || m.vertices[v].y != mesh.vertices[v].y ||
+             m.vertices[v].z != mesh.vertices[v].z)) {
+          m.vertices[v] = mesh.vertices[v];
+          ++r.keep_clear_held_vertices;
+        }
+      r.fold_held_vertices += unfold_against(mesh, m);
+      if (round == kFinishClearRounds) {
+        const std::vector<char> last = enclosed(m);
+        r.keep_clear_left = 0;
+        for (std::size_t i = 0; i < last.size(); ++i)
+          if (last[i] && !was[i]) {
+            const Vec3 c = g.voxel_center(static_cast<int>(i % static_cast<std::size_t>(g.nx)),
+                                          static_cast<int>((i % nxy) / static_cast<std::size_t>(g.nx)),
+                                          static_cast<int>(i / nxy));
+            r.keep_clear_left += mesh_encloses(m, c) && !mesh_encloses(mesh, c);
+          }
+      }
+    }
     r.volume_after_mm3 = signed_volume(m);
   }
   for (std::size_t v = 0; v < m.vertices.size() && v < pins.size(); ++v)

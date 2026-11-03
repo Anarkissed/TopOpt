@@ -173,11 +173,13 @@ struct FinishBlock {
   std::size_t pinned_moved = 0;
   std::size_t roughness_vertices = 0;
   std::size_t outward_only_vertices = 0, slim_guarded_vertices = 0, fold_walked_back = 0;
+  std::size_t keep_clear_held = 0, keep_clear_left = 0;  // put back around / still in a Keep clear
+  long long keep_clear_before = 0, keep_clear_added = 0;  // the unfinished file's / confirmed new
   int slim_rounds = 0;
   double roughness_before_mm = 0.0, roughness_after_mm = 0.0;
   bool verdict_changed = false;
   std::string verdict_reason;
-  double seconds = 0.0;
+  double seconds = 0.0;  // the [finish] log line's time (not written: report.json is rerun-identical)
 };
 
 struct VariantReport {

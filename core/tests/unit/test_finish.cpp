@@ -162,6 +162,27 @@ int main() {
     }
     CHECK(turned == 0 && rep.fold_held_vertices > 0,
           "(d1) no triangle turned over (PR 306's flow alone turns 164 of them)");
+
+    // (o) A version with a lattice companion: the companion is built from the
+    // unfinished shape, so the finish may only move a vertex outward (the shell never
+    // retreats from a strut that reaches it; the plate's lattice stood 0.072 mm out).
+    FinishContext octx = ctx;
+    octx.outward_only = true;
+    FinishReport orep;
+    const TriangleMesh mo = surface_finish(m0, octx, {}, {}, &orep);
+    const std::vector<Vec3> n0 = vertex_normals(m0);
+    double inward = 0.0, outward = 0.0;
+    for (std::size_t v = 0; v < m0.vertices.size() && v < mo.vertices.size(); ++v) {
+      const Vec3 d{mo.vertices[v].x - m0.vertices[v].x, mo.vertices[v].y - m0.vertices[v].y,
+                   mo.vertices[v].z - m0.vertices[v].z};
+      const double s = d.x * n0[v].x + d.y * n0[v].y + d.z * n0[v].z;
+      inward = std::fmax(inward, -s);
+      outward = std::fmax(outward, s);
+    }
+    std::printf("[finish] (o) sphere, outward only: max inward %.3e mm, max outward %.4f mm, "
+                "%.1f %% stair-step removed\n",
+                inward, outward, orep.stair_step_removed_pct);
+    CHECK(inward <= 1e-9 && outward > 0.0, "(o) outward only: no vertex moves inward");
   }
 
   // ── (d2) the dumbbell neck ─────────────────────────────────────────────────
@@ -341,6 +362,22 @@ int main() {
     CHECK(cad_n > 0 && cad_moved == 0, "(g) CAD-face vertices are bit-identical");
     CHECK(keep_moved == 0, "(g) keep-region vertices are bit-identical");
     CHECK(in_clear == 0, "(g) the Keep clear stays empty");
+    {  // and no Keep clear voxel centre the cube did not already enclose
+      const VoxelGrid f0 = voxelize_onto_grid(m0, g), f1 = voxelize_onto_grid(m1, g);
+      std::size_t added = 0;
+      for (std::size_t i = 0; i < forbid.size(); ++i)
+        added += forbid[i] == MaskValue::FrozenVoid && f1.tags[i] != VoxelTag::Empty &&
+                 f0.tags[i] == VoxelTag::Empty;
+      CHECK(added == 0, "(g) the finish encloses no Keep clear centre the export did not");
+    }
+    {  // the winding test the Keep clear rule confirms with, both windings
+      TriangleMesh flipped = m1;
+      for (auto& t : flipped.triangles) std::swap(t[1], t[2]);
+      const Vec3 in{10.0, 10.0, 5.0}, bite{19.0, 19.0, 19.0}, out{30.0, 10.0, 10.0};
+      CHECK(mesh_encloses(m1, in) && mesh_encloses(flipped, in) && !mesh_encloses(m1, bite) &&
+                !mesh_encloses(flipped, bite) && !mesh_encloses(m1, out),
+            "(g) the winding number tells inside from the bite and the outside");
+    }
     CHECK(rep.stair_step_removed_pct > 0.0, "(g) the cut surface is finished");
   }
 
@@ -357,9 +394,14 @@ int main() {
     CHECK(finish_verdict_reason(r) == "After finishing, it prints in 2 pieces", "(e) pieces");
     r.pieces = 1;
     r.keep_clear_voxels = 12;
+    r.keep_clear_before = 12;
+    CHECK(finish_verdict_reason(r).empty(),
+          "(e) a Keep clear the unfinished file already printed into is not the finish's");
+    r.keep_clear_added = 3;
     CHECK(finish_verdict_reason(r) == "After finishing, a Keep clear has material in it",
-          "(e) a Keep clear");
+          "(e) a Keep clear the finish added to");
     r.keep_clear_voxels = 0;
+    r.keep_clear_added = 0;
     CHECK(finish_verdict_reason(r).empty(), "(e) a good finished shape keeps its verdict");
   }
 

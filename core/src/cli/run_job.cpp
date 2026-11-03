@@ -756,6 +756,8 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
       f.part_voxels[i] = pv.tags[i] != VoxelTag::Empty;
   }
   f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
+  // A latticed job's versions carry a lattice companion built from the unfinished shape.
+  f.ctx.outward_only = job.lattice.present || job.grading.present;
   return f;
 }
 
@@ -788,6 +790,8 @@ FinishBlock finish_block(const FinishReport& r) {
   b.outward_only_vertices = r.outward_only_vertices;
   b.slim_guarded_vertices = r.slim_guarded_vertices;
   b.fold_walked_back = r.fold_held_vertices;
+  b.keep_clear_held = r.keep_clear_held_vertices;
+  b.keep_clear_left = r.keep_clear_left;
   b.slim_rounds = r.slim_rounds;
   b.roughness_before_mm = r.roughness_before_mm;
   b.roughness_after_mm = r.roughness_after_mm;
@@ -914,26 +918,41 @@ struct StreamedFinish {
 // part), its bodies, loose pieces and edge-only joints, each against the unfinished
 // file `raw` (only what finishing added refuses), and the analysis's own gate. The
 // caller sets the margin it needs (`rc.margin_required`) before finish_verdict_reason.
+// The solve-grid voxels whose centres a file `m` encloses.
+std::vector<char> file_occupancy(const TriangleMesh& m, const VoxelGrid& sg) {
+  const VoxelGrid fv = voxelize_onto_grid(m, sg);
+  std::vector<char> o(sg.voxel_count(), 0);
+  for (std::size_t i = 0; i < o.size() && i < fv.tags.size(); ++i) o[i] = fv.tags[i] != VoxelTag::Empty;
+  return o;
+}
+
+// Keep clear voxels a file prints (`clearance` may be null: none; `exclude` may be null:
+// voxels it freezes solid, strengthen's frozen part, are not counted).
+long long file_keep_clear_voxels(const std::vector<char>& occ, const DesignMask* clearance,
+                                 const DesignMask* exclude) {
+  long long n = 0;
+  if (clearance != nullptr && clearance->size() == occ.size())
+    for (std::size_t i = 0; i < occ.size(); ++i)
+      n += occ[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+           !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid);
+  return n;
+}
+
 FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const VoxelGrid& sg,
                            const DesignMask* clearance, const DesignMask* exclude,
                            const AnalyzeJobResult& a, double margin_required, FinishBlock& fb) {
-  auto occupancy = [&](const TriangleMesh& mm) {
-    const VoxelGrid fv = voxelize_onto_grid(mm, sg);
-    std::vector<char> o(sg.voxel_count(), 0);
-    for (std::size_t i = 0; i < o.size() && i < fv.tags.size(); ++i) o[i] = fv.tags[i] != VoxelTag::Empty;
-    return o;
-  };
-  const std::vector<char> occ = occupancy(m), occ0 = occupancy(raw);
+  const std::vector<char> occ = file_occupancy(m, sg), occ0 = file_occupancy(raw, sg);
   fb.recheck_ran = true;
   fb.margin = a.analysis.margin_effective;
-  fb.keep_clear_voxels = 0;
-  if (clearance != nullptr && clearance->size() == occ.size())
-    for (std::size_t i = 0; i < occ.size(); ++i)
-      fb.keep_clear_voxels += occ[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
-                              !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid);
+  fb.keep_clear_voxels = file_keep_clear_voxels(occ, clearance, exclude);
   // Pieces: the file's bodies (positive-volume shells; a sealed void is not one).
   fb.pieces = positive_volume_bodies(m);
-  fb.thin_joints = file_thin_joints(sg, occ);
+  // Edge- and corner-only joints, exactly, on the file's own mesh: an edge on more than
+  // two triangles, a vertex where shells touch. (On its voxels a smoother surface flips
+  // a few centres: his unfinished files read 32-42 diagonal contacts each, 2-4 more
+  // finished, none of them in the mesh.)
+  const WrittenAudit wa = audit_as_written(m), wa0 = audit_as_written(raw);
+  fb.thin_joints = wa.non_manifold_edges + wa.non_manifold_vertices;
   fb.loose_pieces = file_loose_pieces(sg, occ);
   const FixedDesignAnalysis& an = a.analysis;
   FinishRecheck rc;
@@ -946,12 +965,25 @@ FinishRecheck recheck_file(const TriangleMesh& m, const TriangleMesh& raw, const
   rc.load_path_ok = an.accepted || an.non_convergent || an.contact_held_by_sliding ||
                     an.margin_effective < rc.margin_required * (1.0 - 1e-12);
   rc.keep_clear_voxels = fb.keep_clear_voxels;
+  rc.keep_clear_before = file_keep_clear_voxels(occ0, clearance, exclude);
+  if (clearance != nullptr && clearance->size() == occ.size()) {
+    const std::size_t nx = static_cast<std::size_t>(sg.nx), nxy = nx * static_cast<std::size_t>(sg.ny);
+    for (std::size_t i = 0; i < occ.size(); ++i)
+      if (occ[i] && !occ0[i] && (*clearance)[i] == MaskValue::FrozenVoid &&
+          !(exclude != nullptr && (*exclude)[i] == MaskValue::FrozenSolid)) {
+        const Vec3 c = sg.voxel_center(static_cast<int>(i % nx), static_cast<int>((i % nxy) / nx),
+                                       static_cast<int>(i / nxy));
+        rc.keep_clear_added += mesh_encloses(m, c) && !mesh_encloses(raw, c);
+      }
+  }
+  fb.keep_clear_before = rc.keep_clear_before;
+  fb.keep_clear_added = rc.keep_clear_added;
   // Only a piece the finishing ADDED refuses: the unfinished file's N bodies stay N.
   rc.pieces = fb.pieces > std::max(1, positive_volume_bodies(raw)) ? fb.pieces : 1;
   rc.loose_pieces = fb.loose_pieces;
   rc.loose_pieces_before = file_loose_pieces(sg, occ0);
   rc.thin_joints = fb.thin_joints;
-  rc.thin_joints_before = file_thin_joints(sg, occ0);
+  rc.thin_joints_before = wa0.non_manifold_edges + wa0.non_manifold_vertices;
   return rc;
 }
 
@@ -966,6 +998,13 @@ VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescr
   VersionFinish out;
   const RunFinish safe = safe_finish(fin);
   TriangleMesh raw;
+  // The finished FILE is re-checked as the solid it is: the job's own analysis, without
+  // what the analyze path adds on top. A "grading" block would run the lattice-only
+  // grading law over the file (and refuse a minimize_plastic job, whose demand
+  // allowable is never set); the lattice companion is built from the unfinished shape.
+  JobDescription file_job = job;
+  file_job.grading.present = false;
+  file_job.has_orientation_recheck = false;
   auto finish = [&](bool slim) -> const TriangleMesh& {
     if (slim && pre != nullptr) {  // made when the version streamed
       out.fb = pre->fb;
@@ -985,7 +1024,7 @@ VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescr
     const std::string stl = join_path(check_dir, "v.stl");
     write_stl_file(stl, m);
     try {
-      out.analysis = analyze_job(job, job_dir, check_dir, materials, rules, stl, {});
+      out.analysis = analyze_job(file_job, job_dir, check_dir, materials, rules, stl, {});
     } catch (const std::exception& e) {
       const WrittenAudit w = audit_as_written(m);
       std::fprintf(stderr, "[finish] version vf %.2f: the finished file could not be re-checked: %s\n",
@@ -16265,6 +16304,18 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
       FinishBlock fb;
       const TriangleMesh done =
           variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &fin, &fb);
+      const DesignMask* clear_p =
+          setup.options.clearance_void.size() == sg.voxel_count() ? &setup.options.clearance_void : nullptr;
+      auto kc = [&](const TriangleMesh& m) {
+        return file_keep_clear_voxels(file_occupancy(m, sg), clear_p, nullptr);
+      };
+      const TriangleMesh raw_unwelded =
+          variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions);
+      const long long kc_unwelded = kc(raw_unwelded);
+      long long design_kc = 0;  // the design's own: printed voxels (rho > iso) kept clear
+      if (clear_p != nullptr)
+        for (std::size_t i = 0; i < d.density.size(); ++i)
+          design_kc += d.density[i] > iso && (*clear_p)[i] == MaskValue::FrozenVoid;
       auto au = [](const char* name, const TriangleMesh& m) {
         const WrittenAudit w = audit_as_written(m);
         char b[256];
@@ -16280,7 +16331,15 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
       lines.push_back("{\"vf\": " + std::to_string(d.requested_volume_fraction) + ", " +
                       au("mc", variant_export_model_mesh(v, job.output, sg, iso, nullptr, {})) + ", " +
                       au("cad", variant_export_model_mesh(v, job.output, sg, iso, &model, {})) + ", " +
-                      au("keep", raw) + ", " + au("finished", done) + ", \"stair_step_pct\": " +
+                      au("keep", raw) + ", " + au("finished", done) + ", \"keep_clear\": [" +
+                      std::to_string(kc(variant_export_model_mesh(v, job.output, sg, iso, nullptr, {}))) + ", " +
+                      std::to_string(kc(variant_export_model_mesh(v, job.output, sg, iso, &model, {}))) + ", " +
+                      std::to_string(kc(raw)) + ", " + std::to_string(kc(done)) + "], " +
+                      "\"design_keep_clear\": " + std::to_string(design_kc) + ", \"thin_joints\": [" +
+                      std::to_string(file_thin_joints(sg, file_occupancy(raw, sg))) + ", " +
+                      std::to_string(file_thin_joints(sg, file_occupancy(done, sg))) + "], \"held\": " +
+                      std::to_string(fb.keep_clear_held) + ", \"left\": " + std::to_string(fb.keep_clear_left) +
+                      ", \"kc_unwelded_raw\": " + std::to_string(kc_unwelded) + ", \"stair_step_pct\": " +
                       std::to_string(fb.stair_step_removed_pct) + ", \"slim\": " +
                       (fb.slim ? "true" : "false") + ", \"diag\": [" +
                       std::to_string(done.vertices.size()) + ", " + std::to_string(fb.pinned_vertices) +
@@ -16343,6 +16402,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   "\"shells\": %d, \"bodies\": %d, \"new_under_line\": %d, "
                   "\"new_under_line_measured\": %d, "
                   "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
+                  "\"keep_clear_before\": %lld, \"keep_clear_added\": %lld, \"keep_clear_left\": %zu, "
                   "\"thin_joints\": %d, \"finish_s\": %.2f, \"seconds\": %.1f}",
                   d.requested_volume_fraction,
                   material.density_g_cm3 * std::fabs(signed_volume(raw)) / 1000.0,
@@ -16355,7 +16415,8 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                   positive_volume_bodies(done), w.non_manifold_edges, w.boundary_edges,
                   w.non_manifold_vertices, w.shells, w.bodies, new_under, new_under_measured,
                   thinnest_new,
-                  pinned_moved, fb.keep_clear_voxels, fb.thin_joints, fb.seconds, secs);
+                  pinned_moved, fb.keep_clear_voxels, fb.keep_clear_before, fb.keep_clear_added,
+                  fb.keep_clear_left, fb.thin_joints, fb.seconds, secs);
     std::map<std::string, int> why;
     for (const FinishPlace& p : fb.left) ++why[p.reason];
     std::string wr;

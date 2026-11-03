@@ -92,8 +92,9 @@ std::string finish_json(const FinishBlock& f) {
          std::to_string(f.left.size()) + ", \"mass_grams\": " + num_json(f.mass_grams) +
          ", \"mass_before_grams\": " + num_json(f.mass_before_grams) + "}";
   o += ", \"verdict_changed\": " + std::string(f.verdict_changed ? "true" : "false") +
-       ", \"verdict_reason\": " + str_json(f.verdict_reason) + ", \"seconds\": " +
-       num_json(f.seconds) + "}";
+       ", \"verdict_reason\": " + str_json(f.verdict_reason) + "}";
+  // No "seconds": report.json is byte-identical on a rerun; the finishing time is in
+  // the [finish] log line.
   return o;
 }
 
