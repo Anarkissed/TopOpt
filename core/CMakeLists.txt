@@ -118,6 +118,7 @@ add_library(topopt
   # including the dependency-free iOS slices.
   src/mesh/cad_project.cpp
   src/mesh/surface_operator.cpp
+  src/mesh/finish.cpp
   src/mesh/lattice_gen.cpp
   src/mesh/organic_lattice.cpp
   src/mesh/lattice_lslt.cpp
@@ -2456,6 +2457,13 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME keep_strengthen COMMAND test_keep_strengthen)
+
+    # ENGINE BATCH E1: the finished shape (thin-spot cleanup + surface finish).
+    add_executable(test_finish tests/unit/test_finish.cpp)
+    target_link_libraries(test_finish PRIVATE topopt manifold::manifold)
+    target_include_directories(test_finish PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
+    target_compile_definitions(test_finish PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME finish COMMAND test_finish)
   endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
