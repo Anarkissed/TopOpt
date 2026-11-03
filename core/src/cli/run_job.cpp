@@ -790,6 +790,14 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
 struct LatticeExportOutcome {
   std::vector<std::string> paths;  // files written (STL and/or 3MF)
   LatticeGenStats stats;           // generator counts (identical across formats)
+  // ★ Finding 8: a sheet's mesh, simplified (mesh_simplify.hpp). The deviations are
+  // MEASURED on every written triangle: on the sheet's own surface, and at the cuts (kept
+  // as contoured; under solid in a run). samples_past_floor = samples that cut a wall
+  // below its bead (0 = none).
+  bool sheet_simplified = false;
+  long long sheet_triangles_contoured = 0, sheet_triangles = 0;
+  double sheet_max_deviation_mm = 0.0, sheet_cut_max_deviation_mm = 0.0;
+  long long sheet_samples_past_floor = 0;
   // ★★ ORGANIC's POST-CLIP connectivity (OrganicGenStats): the connectedness of what
   // was WRITTEN, after the boundary clip trimmed and dropped spans. The tracer's own
   // number describes the lattice it traced; this one describes the file.
@@ -2052,7 +2060,10 @@ LatticeExportOutcome export_latticed_variant(
     // the FIRST emission is rebuilt into it (the second writer emits the same stream), and
     // a sheet pass hands it the field its mesh is contoured from. Observing only, so the
     // bytes cannot move. Null on organic runs, which rebuild their own shipped density.
-    LatticeSolidProbe* solid_probe = nullptr) {
+    LatticeSolidProbe* solid_probe = nullptr,
+    // ★ Finding 8: the bead a sheet's wall must keep after its mesh is simplified (the
+    // grading's stated minimum extrudable width). 0 = no floor to protect.
+    double sheet_bead_mm = 0.0) {
   // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
   //
   // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
@@ -2613,16 +2624,30 @@ LatticeExportOutcome export_latticed_variant(
         }
     TpmsGenOptions o;
     o.min_wall_mm = std::isfinite(min_wall) ? std::max(min_wall, band_min_wall) : band_min_wall;
+    // ★ Finding 8: simplified to within kSheetMaxDeviationMm of the true surface, no wall
+    // cut below the bead.
+    o.max_deviation_mm = kSheetMaxDeviationMm;
+    o.bead_mm = sheet_bead_mm;
+    o.true_wall_mm = [&radius](const Vec3& p) { return 2.0 * radius.radius_at(p); };
+    {
+      const double wcell = R.cell_mm;
+      o.wall_param_of = [ct, wcell](double wall_mm) {
+        return lattice_sheet_wall_param_mm(ct, wall_mm, wcell);
+      };
+    }
     const TpmsKind tk =
         gen_topo == LatticeGenTopology::Gyroid ? TpmsKind::Gyroid : TpmsKind::SchwarzD;
     const TpmsGenStats ts = generate_tpms(tk, TR, W, w, o);
     if (solid_probe && probe_live) {
       // The probe outlives this pass, so it holds copies (the wall reads the caller's
       // radius field, which outlives the run's export and certification).
+      // The wall the mesh was CONTOURED from (thickened near the bead), which the written
+      // mesh follows to within the bound; the true wall would read it a few % light there.
       TpmsWallField PW;
-      const double pcell = R.cell_mm;
-      PW.field = [&radius, ct, pcell](const Vec3& p) {
-        return lattice_sheet_wall_param_mm(ct, 2.0 * radius.radius_at(p), pcell);
+      const double pcell = R.cell_mm, pbead = o.bead_mm, pdev = o.max_deviation_mm;
+      PW.field = [&radius, ct, pcell, pbead, pdev](const Vec3& p) {
+        return lattice_sheet_wall_param_mm(
+            ct, tpms_contoured_wall_mm(2.0 * radius.radius_at(p), pbead, pdev), pcell);
       };
       const double ph = ts.dc_cell_mm;
       solid_probe->set_inside([tk, TR, PW, ph](const Vec3& p) {
@@ -2633,7 +2658,17 @@ LatticeExportOutcome export_latticed_variant(
     if (R.boundary && skin.mode == LatticeSkinMode::Rim)
       st = generate_lattice_rims(R, radius, w, skin, nullptr);
     st.latticed_cells = ts.latticed_cells;
-    st.triangles += ts.dc.triangles;
+    st.triangles += ts.simplified ? ts.simplify.triangles_out : ts.dc.triangles;
+    if (ts.simplified) {
+      oc.sheet_simplified = true;
+      oc.sheet_triangles_contoured = ts.simplify.triangles_in;
+      oc.sheet_triangles = ts.simplify.triangles_out;
+      oc.sheet_max_deviation_mm =
+          std::max(ts.simplify.max_out_measured_mm, ts.simplify.max_in_measured_mm);
+      oc.sheet_cut_max_deviation_mm =
+          std::max(ts.simplify.cut_max_out_mm, ts.simplify.cut_max_in_mm);
+      oc.sheet_samples_past_floor = ts.simplify.samples_past_max_in;
+    }
     return st;
   };
   LatticeGenObserver weld_obs;
@@ -4157,6 +4192,19 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   // fired — this project has shipped that exact failure twice (a forecast-only
   // job that reported itself as a build; a rim that emitted nothing while
   // succeeding), so a PASS states what it found and how it found it.
+  if (oc.sheet_simplified) {
+    s += "  \"sheet_mesh\": {\n";
+    s += "    \"max_deviation_limit_mm\": " + json_num(kSheetMaxDeviationMm) + ",\n";
+    s += "    \"triangles_contoured\": " + std::to_string(oc.sheet_triangles_contoured) + ",\n";
+    s += "    \"triangles\": " + std::to_string(oc.sheet_triangles) + ",\n";
+    s += "    \"max_deviation_mm\": " + json_num(oc.sheet_max_deviation_mm) + ",\n";
+    s += "    \"cut_max_deviation_mm\": " + json_num(oc.sheet_cut_max_deviation_mm) + ",\n";
+    s += "    \"samples_past_bead_floor\": " + std::to_string(oc.sheet_samples_past_floor) + ",\n";
+    s += "    \"note\": \"bounded edge collapse (Garland & Heckbert 1997) checked against the "
+         "true surface; max_deviation is measured on every written triangle of the sheet's "
+         "own surface, cut_max_deviation where it is cut (kept as contoured, under solid)\"\n";
+    s += "  },\n";
+  }
   // ── ★ THE VOLUME CHECK (Finding 7): per latticed pocket, the lattice the file holds
   // against what the certificate reads there. No wall clock (byte-identity comparisons).
   if (volume && volume->ran) {
@@ -8454,7 +8502,8 @@ LatticeVariantOutcome lattice_one_variant(
       job.grading.organic_strut_embed_mm, job.grading.organic_dual_contour,
       job.grading.organic_dc_cell_mm, job.grading.organic_dc_tolerance_mm,
       job.grading.organic_calibrate_on_shipped, laid_fn ? &laid_fn : nullptr,
-      organic.ran ? nullptr : &solid_probe);
+      organic.ran ? nullptr : &solid_probe,
+      graded ? job.grading.min_extrudable_width_mm : job.lattice.min_extrudable_width_mm);
   // ★ THE EXPORT'S RETURN REPLACES THE WHOLE OUTCOME, and the growth stats copied
   // onto it above went with it -- the receipt read growth_ran: false and zero ties on
   // every grown run until 2026-09-05. Copy them again, after the replacement.

@@ -13,6 +13,7 @@
 // the cube's cells on top of it; the bottom struts and nodes are half sunk in the
 // plate, which is what bonds them to it.
 
+#include <array>
 #include <string>
 
 #include "topopt/mesh.hpp"  // TriangleSink
@@ -21,11 +22,18 @@ namespace topopt {
 
 struct LatticeSampleSpec {
   std::string topology;      // a GENERATABLE id (lattice_gen_topology_names)
+  // "cube" (the default: one uniform block) or "coupon" (ruling 2026-11-02: one shape that
+  // is both the app's Lattice preview and the block he prints; lattice_coupon.cpp states it).
+  std::string shape = "cube";
   double cell_mm = 8.0;
-  double rho = 0.0;          // <= 0: the middle of the type's certifiable band
-  double size_mm = 40.0;     // the cube's edge; must be a whole number of cells
+  double rho = 0.0;          // cube: <= 0 => the middle of the type's certifiable band
+  double size_mm = 40.0;     // cube: the edge; must be a whole number of cells
   double plate_mm = 1.5;     // the base plate's thickness; 0 = none
-  double bead_mm = 0.0;      // > 0: refuse a strut thinner than one bead
+  double bead_mm = 0.0;      // cube: > 0 refuses a strut under one bead. coupon: the bead
+                             //   the grade never goes below (0 => 0.42 mm)
+  // coupon: the density graded along its length, <= 0 => the band's bottom / top.
+  double rho_lo = 0.0, rho_hi = 0.0;
+  bool step = true;          // coupon: a cell-size step where the type allows one
 };
 
 struct LatticeSampleReceipt {
@@ -41,6 +49,21 @@ struct LatticeSampleReceipt {
   unsigned long long triangles = 0;        // lattice + plate
   unsigned long long lattice_triangles = 0;
   unsigned long long struts = 0, nodes = 0;
+  // ★ Finding 8, sheets: the contoured mesh before simplification, and the deviation
+  // MEASURED on every written triangle (the sheet's own surface; the block's cut faces).
+  unsigned long long lattice_triangles_contoured = 0;
+  double max_deviation_mm = 0.0, cut_max_deviation_mm = 0.0;
+  // ── the coupon ──
+  std::string shape = "cube";
+  std::array<double, 3> coupon_dims_mm{0, 0, 0};  // x, y, z extents (plate included)
+  double bead_mm = 0.0;
+  double rho_lo = 0.0, rho_hi = 0.0;              // the grade along x
+  std::string step;                               // "doubled" | "stepped" | "none"
+  double step_at_x_mm = 0.0;
+  std::string step_reason;                        // why none, in one line
+  bool tongue_latticed = false;
+  std::string tongue_reason;                      // why solid, in one line
+  unsigned long long loose_pieces_dropped = 0, loose_triangles_dropped = 0;
 };
 
 // Build the block into `sink` and return its receipt. Throws std::invalid_argument,
@@ -48,6 +71,14 @@ struct LatticeSampleReceipt {
 // number of cells, a density outside the type's band, or (bead_mm > 0) a strut that
 // would print thinner than one bead.
 LatticeSampleReceipt write_lattice_sample(const LatticeSampleSpec& spec, TriangleSink& sink);
+
+// The coupon alone (write_lattice_sample dispatches here for shape "coupon").
+LatticeSampleReceipt write_lattice_coupon(const LatticeSampleSpec& spec, TriangleSink& sink);
+
+// ★ THE BRIDGE ENTRY (preview parity): the same sample as an in-memory triangle soup, so the
+// app's Lattice preview draws exactly what core writes to the file. Throws as
+// write_lattice_sample does; `receipt` (optional) gets the receipt.
+TriangleMesh lattice_sample_mesh(const LatticeSampleSpec& spec, LatticeSampleReceipt* receipt);
 
 // The receipt as a small JSON object (one line per field).
 std::string lattice_sample_receipt_json(const LatticeSampleReceipt& r);

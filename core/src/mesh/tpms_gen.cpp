@@ -68,7 +68,36 @@ double clipped_field(TpmsKind kind, const TpmsRegion& R, const TpmsWallField& wa
   // erodes by each strut's radius for the same reason -- the run's export guard refuses
   // lattice geometry outside the shell -- and the band given up lies under the solid
   // shell (wall_thickness_mm, ~2 mm), so it is never seen.
-  if (R.boundary) d = std::max(d, h - R.boundary->signed_distance(p));
+  if (R.clip) d = std::max(d, h - R.clip(p));
+  else if (R.boundary) d = std::max(d, h - R.boundary->signed_distance(p));
+  return d;
+}
+
+// The cut alone: the active cells' faces and the part (eroded by one DC cell), as in
+// clipped_field. Positive outside the cut.
+double clip_term(const TpmsRegion& R, double h, const Vec3& p) {
+  TpmsWallField none;
+  none.uniform_mm = 0.0;
+  const double L = R.cell_mm;
+  auto active = [&](int i, int j, int k) {
+    if (i < 0 || j < 0 || k < 0 || i >= R.nx || j >= R.ny || k >= R.nz) return false;
+    return !R.latticed || R.latticed(i, j, k);
+  };
+  const double u = (p.x - R.anchor.x) / L, v = (p.y - R.anchor.y) / L, w = (p.z - R.anchor.z) / L;
+  const int i = static_cast<int>(std::floor(u)), j = static_cast<int>(std::floor(v)),
+            k = static_cast<int>(std::floor(w));
+  const double fx = (u - i) * L, fy = (v - j) * L, fz = (w - k) * L;
+  double depth = L;  // as active_depth: to the nearest face shared with the other kind
+  const bool in = active(i, j, k);
+  if (active(i - 1, j, k) != in) depth = std::min(depth, fx);
+  if (active(i + 1, j, k) != in) depth = std::min(depth, L - fx);
+  if (active(i, j - 1, k) != in) depth = std::min(depth, fy);
+  if (active(i, j + 1, k) != in) depth = std::min(depth, L - fy);
+  if (active(i, j, k - 1) != in) depth = std::min(depth, fz);
+  if (active(i, j, k + 1) != in) depth = std::min(depth, L - fz);
+  double d = in ? -depth : depth;
+  if (R.clip) d = std::max(d, h - R.clip(p));
+  else if (R.boundary) d = std::max(d, h - R.boundary->signed_distance(p));
   return d;
 }
 
@@ -111,7 +140,60 @@ TpmsGenStats generate_tpms(TpmsKind kind, const TpmsRegion& R, const TpmsWallFie
   const Vec3 lo{R.anchor.x - h, R.anchor.y - h, R.anchor.z - h};
   const Vec3 hi{R.anchor.x + R.nx * L + h, R.anchor.y + R.ny * L + h,
                 R.anchor.z + R.nz * L + h};
-  st.dc = lattice_dual_contour_field(field, gradient, lo, hi, h, sink);
+  if (!(opt.max_deviation_mm > 0.0)) {
+    st.dc = lattice_dual_contour_field(field, gradient, lo, hi, h, sink);
+    return st;
+  }
+  // ★ Finding 8: bounded edge collapse against the TRUE field, streamed in slabs (below);
+  // a vertex within three DC cells of the contouring front is still live.
+  const double dev = opt.max_deviation_mm, bead = opt.bead_mm;
+  BoundedSimplifyOptions so;
+  so.max_out_mm = dev;
+  TpmsWallField CW = wall;  // the wall contoured: the true one, offset near the bead
+  if (bead > 0.0 && opt.true_wall_mm) {
+    const auto tw = opt.true_wall_mm;
+    so.max_in_mm = [dev, bead, tw](const Vec3& p) {
+      return std::clamp(0.5 * (tw(p) - bead), 0.0, dev);
+    };
+    if (opt.wall_param_of) {
+      const auto law = opt.wall_param_of;
+      CW.field = [dev, bead, tw, law](const Vec3& p) {
+        return law(tpms_contoured_wall_mm(tw(p), bead, dev));
+      };
+    }
+  }
+  so.sample_spacing_mm = std::min(0.1, 0.5 * h);
+  // At a CREASE only: within three DC cells of both the cut and the wall. A cap's flat
+  // interior is free to simplify like any other surface.
+  so.at_cut = [&R, h, kind, &CW](const Vec3& p) {
+    const double c = clip_term(R, h, p);
+    if (!(std::abs(c) < 3.0 * h)) return false;
+    const double w = tpms_wall_distance(kind, p.x - R.anchor.x, p.y - R.anchor.y,
+                                        p.z - R.anchor.z, R.cell_mm, CW.at(p));
+    return std::abs(w) < 3.0 * h;
+  };
+  so.cut_tol_mm = std::max(dev, 0.5 * h);
+  // Long slabs: a seam is where a triangle beside a written one can no longer be mended
+  // (measured: 0.005 mm past the bound at one seam of a 24 mm gyroid block in 16 mm
+  // slabs, none in one flush). The receipt states the measured maximum either way.
+  so.slab_mm = std::max(64.0, 4.0 * L);
+  so.front_margin_mm = 3.0 * h;
+  const std::function<double(const Vec3&)> contoured = [&](const Vec3& p) {
+    return clipped_field(kind, R, CW, h, p);
+  };
+  const std::function<Vec3(const Vec3&)> contoured_gradient = [&](const Vec3& p) {
+    const Vec3 g{contoured({p.x + e, p.y, p.z}) - contoured({p.x - e, p.y, p.z}),
+                 contoured({p.x, p.y + e, p.z}) - contoured({p.x, p.y - e, p.z}),
+                 contoured({p.x, p.y, p.z + e}) - contoured({p.x, p.y, p.z - e})};
+    const double l = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+    return l > 1e-12 ? Vec3{g.x / l, g.y / l, g.z / l} : Vec3{0, 0, 1};
+  };
+  BoundedSimplifySink simp(sink, field, so);
+  st.dc = lattice_dual_contour_field(contoured, contoured_gradient, lo, hi, h, simp, 12, 0.02,
+                                     /*best_diagonal=*/true);
+  simp.finish();
+  st.simplified = true;
+  st.simplify = simp.stats();
   return st;
 }
 

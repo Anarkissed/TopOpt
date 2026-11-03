@@ -433,6 +433,10 @@ int main() {
             ("facts " + s + ": Rim and the outline yes, Diagrid no (R8)").c_str());
       CHECK(sh.sheet_triangles_coeff > 0.0 && sh.triangles_per_cell > 0.0 && !sh.directional,
             ("facts " + s + ": a measured triangle cost, no directional note").c_str());
+      // Finding 8: the per-cell cost is the SIMPLIFIED mesh's, linear in the cell.
+      CHECK(sh.sheet_triangles_per_cell_mm > 0.0 &&
+                sh.triangles_per_cell == 8.0 * sh.sheet_triangles_per_cell_mm,
+            ("facts " + s + ": the simplified cost per cell is per mm of cell").c_str());
       // The wall -> density inverse OFF the wall table (rho 0.05-0.60) integrates the
       // sheet's own wall: a strut type integrates its cell there, which a sheet has none of.
       const LatticeTopology st = lattice_topology_from_id(s);
