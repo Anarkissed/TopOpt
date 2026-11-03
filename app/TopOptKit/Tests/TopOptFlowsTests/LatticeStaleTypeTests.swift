@@ -86,8 +86,9 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(try member(ws, "private var latticeOptimizeRefusal").contains("?? latticeSettingsRefusal"), "★ Optimize")
         XCTAssertTrue(try member(ws, "private var latticeStageRefusal").contains("?? latticeSettingsRefusal"), "★ Lattice")
         // every start is behind those two (canOptimize / canLatticeThis), and the sub-line says it
-        XCTAssertTrue(try member(ws, "private var canOptimize: Bool").contains("guard latticeOptimizeRefusal == nil else { return false }"))
-        XCTAssertTrue(try member(ws, "private var optimizeSummary: String").contains("if let why = latticeOptimizeRefusal { return why }"))
+        // ★ RE-PINNED (UI-Notes B3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only, so the gate, its line and its button take the run's flavour (`lattice`); the lattice's refusals apply only to a run that carries it
+        XCTAssertTrue(try member(ws, "private func canOptimize(lattice: Bool) -> Bool").contains("guard !lattice || latticeOptimizeRefusal == nil else { return false }"))
+        XCTAssertTrue(try member(ws, "private func optimizeSummary(lattice: Bool) -> String").contains("if lattice, let why = latticeOptimizeRefusal { return why }"))
         XCTAssertTrue(try member(ws, "var canLatticeThis").contains("latticeStageRefusal == nil"))
         XCTAssertTrue(try member(ws, "private var latticeThisSummary").contains("if let why = latticeStageRefusal { return why }"))
         // the tap
@@ -95,7 +96,7 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeSettingsRefusal"))
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)
-        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
+        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there
         XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 3, "★ greyed, yet tappable")
         let go = try member(ws, "private func goToLatticeType()")

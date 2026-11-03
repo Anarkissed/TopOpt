@@ -101,7 +101,7 @@ final class TopologyStageTests: XCTestCase {
     func testTheWorkspaceNeverOpensResultsOnARun() throws {
         let ws = try Self.workspaceSource()
         XCTAssertTrue(ws.contains("@State private var viewOriginal = true"))
-        let start = try XCTUnwrap(ws.range(of: "private func startRun() {"))
+        let start = try XCTUnwrap(ws.range(of: "private func startRun(lattice: Bool) {"))   // ★ RE-PINNED (UI-Notes B3, #362's note 1): the run's flavour
         let body = String(ws[start.lowerBound...].prefix(3000))
         XCTAssertFalse(body.contains("viewOriginal = false"), "a run must not open Results")
         XCTAssertTrue(ws.contains("topoNotice.note(accepted: n, streaming: run.isStreaming, resultsOpen: !viewOriginal,"))
@@ -162,7 +162,7 @@ final class TopologyStageTests: XCTestCase {
         let ws = try Self.workspaceSource()
         let card = try XCTUnwrap(ws.range(of: ".alert(RerunCard.title, isPresented: replacementPromptBinding) {"))
         let body = String(ws[card.lowerBound...].prefix(900))
-        XCTAssertTrue(body.contains("startRun()"), "Re-run here runs here")
+        XCTAssertTrue(body.contains("startRun(lattice: runWithLattice)"), "Re-run here runs here (★ RE-PINNED, B3: the run it was asked for)")
         XCTAssertTrue(body.contains("saveAsNewProjectAndRun()"), "Save as new project copies, then runs in the copy")
         XCTAssertTrue(body.contains("TopologyRerunChoice.cancel.label, role: .cancel"))
         XCTAssertFalse(ws.contains("\"Replace your results?\""), "the old two-button alert is gone")

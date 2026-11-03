@@ -377,8 +377,16 @@ final class FlexibleMainPageRound4Tests: XCTestCase {
             // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's views row: one line of six 44 pt icons): at 11" portrait the note
             // sat UNDER the row's right end. ★ RE-PINNED (round 7, R7-D3 — the reviewer's ruling 3 of 2026-10-17: "'Lattice ready' dropping under the icons at 11\" portrait" fixed before D3 is done): beside the row, left of it, at every size — at 11"
             // portrait over the left column's empty top. Was (R7-D1): under the row there.
-            XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it at \(name)")
-            XCTAssertEqual(n.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
+            // ★ RE-PINNED (UI-Notes B2 dca1eacc, #362's OK 2026-11-03 05:34; found by the 11-03 daily suite): the open left panel
+            // starts at PageChrome.panelTop, so at 11" portrait the row leaves too little beside it and the note goes UNDER the
+            // row's right end, whole. Was: beside the row at every size.
+            if name == "11p" {
+                XCTAssertEqual(n.maxX, row.maxX, accuracy: 0.5, "under the row's right end at \(name)")
+                XCTAssertEqual(n.minY, row.maxY + DS.Space.s, accuracy: 0.5, "just under the row at \(name)")
+            } else {
+                XCTAssertEqual(n.maxX, right - DS.Space.s, accuracy: 0.5, "beside the row, left of it at \(name)")
+                XCTAssertEqual(n.midY, row.midY, accuracy: 0.5, "on the row's line at \(name)")
+            }
             let keep = FlexibleMainLegendLayout.keepOut(viewport: v, bottomClearance: 94, chipColumnWidth: 0)
             let placed = FlexibleMainLegendLayout.place([.dent, .stress, .lattice], minimized: [], viewport: v, keepOut: keep)
             for (k, p) in placed { XCTAssertFalse(p.frame.intersects(n), "the \(k) legend clears the note at \(name)") }

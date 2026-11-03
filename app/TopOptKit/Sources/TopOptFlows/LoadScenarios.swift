@@ -85,7 +85,7 @@ public enum LoadScenarioRule {
     /// bearings: the app never sends `anchor_model`, so core's bearing refusal cannot arise from the app.
     public static func refusal(for request: RunRequest, workerSelected: Bool) -> String? {
         guard request.scenarios.count >= 2 else { return nil }
-        if let s = request.scenarios.first(where: { $0.anchorFaceIDs.isEmpty }) { return noAnchorLine(s.name) }
+        if let s = request.scenarios.first(where: { $0.hasNoAnchor }) { return noAnchorLine(s.name) }
         if let s = request.scenarios.first(where: { $0.loadGroups.isEmpty }) { return noLoadLine(s.name) }
         // ★ too light to shape the part (his decision 2026-10-28) — the same sum and the same words as core
         if let line = tooLight(request.scenarios.map { s in
@@ -238,9 +238,26 @@ public struct LoadScenarioWire: Equatable, Sendable {
     public let name: String
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
-    public init(name: String, anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec]) {
-        self.name = name; self.anchorFaceIDs = anchorFaceIDs; self.loadGroups = loadGroups
+    /// ★ B3 (core 35764048bba3, TO-core's per-scenario key): the region anchors ON in this scenario (a cut piece as an
+    /// anchor). Before it, core held every region anchor in every scenario, so its switch did nothing.
+    public let anchorRegionIDs: [RegionID]
+    public init(name: String, anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec], anchorRegionIDs: [RegionID] = []) {
+        self.name = name; self.anchorFaceIDs = anchorFaceIDs; self.loadGroups = loadGroups; self.anchorRegionIDs = anchorRegionIDs
     }
+    /// Core's rule: a scenario holds by its faces or its regions; with neither it has no anchor on.
+    public var hasNoAnchor: Bool { anchorFaceIDs.isEmpty && anchorRegionIDs.isEmpty }
+}
+
+/// ★ B3 (R5, O3; plan.md §B3, mockup #topo-scen): showing one scenario at a time, and an anchor's per-scenario switch.
+public enum ScenarioSelectCopy {
+    /// The toast when a folder's name is tapped.
+    public static func showing(_ name: String) -> String { "Showing \(name)" }
+    /// The hint while scenarios rule the screen.
+    public static func hint(_ name: String) -> String { "Showing \(name) · tap a face" }
+    /// The switch's label beside it, and the line of an anchor switched off in this scenario.
+    public static let usedHere = "Used here"
+    public static let offHere = "Off here"
+    public static func switchLabel(_ name: String) -> String { "Used in \(name)" }
 }
 
 /// One scenario's result (report.json `scenarios[]`).

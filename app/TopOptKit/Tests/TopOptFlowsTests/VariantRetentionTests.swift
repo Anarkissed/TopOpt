@@ -362,11 +362,15 @@ final class VariantRetentionTests: XCTestCase {
     func testTheOptimizeButtonRoutesThroughTheConfirmation() throws {
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        let btn = try XCTUnwrap(ws.range(of: "private var optimizeButton"))
-        let body = String(ws[btn.lowerBound...].prefix(400))
-        XCTAssertTrue(body.contains("requestRun()"),
+        // ★ RE-PINNED (UI-Notes B3, the 11-03 daily suite): B1's Mac lines (note 4) pushed the button's action past a 400-character
+        // window, and B3 (#362's note 1) gives the button its run's flavour — the body runs to its label, and the action
+        // still asks (requestRun), never starts (startRun).
+        let btn = try XCTUnwrap(ws.range(of: "private func optimizeButtonView(lattice: Bool)"))
+        let rest = ws[btn.lowerBound...]
+        let body = String(rest[..<(rest.range(of: "} label: {")?.lowerBound ?? rest.endIndex)])
+        XCTAssertTrue(body.contains("requestRun(lattice: lattice)"),
                       "bar 4: Optimize asks before it retires results")
-        XCTAssertFalse(body.contains("startRun()"),
+        XCTAssertFalse(body.contains("startRun("),
                        "bar 4: …and does not start one straight from the button")
         let req = try XCTUnwrap(ws.range(of: "private func requestRun"))
         let reqBody = String(ws[req.lowerBound...].prefix(400))

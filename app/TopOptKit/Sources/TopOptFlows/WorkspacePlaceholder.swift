@@ -738,6 +738,11 @@ public struct WorkspacePlaceholder: View {
     @State private var showFlexiblePage = false      // the Flexible stage's page (FlexibleStagePage.swift)
     /// ★ B4: "Change lattice type…" is asking (ChangeLatticeTypeCard).
     @State private var showChangeLatticeType = false
+    /// ★ B3 (#362's note 1): whether the run being asked for carries the lattice (Topology's Optimize: no)
+    @State private var runWithLattice = false
+    /// ★ B3 (#362's condition 20:42Z): the flavour of the run that last STARTED — its Try again re-runs it as it was, whatever
+    /// stage the retry is tapped from
+    @State private var startedRunWithLattice = false
     /// ★ B4: the capsule's Regions leaves the Cells page through its own Save (bumped, never read).
     @State private var cellsCloseToken = 0
     /// ★ B4 (APP LIST 6): the LATTICE run's re-run card is asking.
@@ -808,7 +813,7 @@ public struct WorkspacePlaceholder: View {
                 // B3: Save as new project runs in the copy as it opens (RerunCard; as #362's H50c)
                 .onAppear {
                     topoNotice.seed(accepted: acceptedVariantCount)
-                    if RerunCard.takeRunOnOpen(for: project.id) { if canOptimize { startRun() } else { model.toast = RerunCard.copyNotReadyToast } }
+                    if RerunCard.takeRunOnOpen(for: project.id) { let l = RerunCard.takeRunOnOpenLattice(); if canOptimize(lattice: l) { startRun(lattice: l) } else { model.toast = RerunCard.copyNotReadyToast } }
                     // B4: a copy made to choose a lattice type (or the lattice card's Save as new) opens on Lattice
                     if let toast = LatticeStageOpen.take(for: project.id) { goToStage(.lattice); if !toast.isEmpty { model.toast = toast } }
                     if let r = LibraryOpen.takeExport(for: project.id) { libraryExportVariant = r; openLibraryExportIfReady() }   // Library (B3): Export from a card
@@ -1610,7 +1615,7 @@ public struct WorkspacePlaceholder: View {
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
-                      onRetry: startRun)
+                      onRetry: { startRun(lattice: startedRunWithLattice) })   // ★ B3: the run that failed, as it was
                 // The running card / failure sheet dim their OWN full-bleed
                 // backdrops; keeping RunScreen inside the safe area lets the
                 // minimized "Optimizing…" chip sit under the status bar / nav row.
@@ -1821,14 +1826,15 @@ public struct WorkspacePlaceholder: View {
     /// and a run that produces nothing puts them back — so the prompt is rare and
     /// always about a real loss. Nothing to lose ⇒ no prompt, and Optimize behaves
     /// exactly as it always did.
-    private func requestRun() {
-        guard canOptimize else { return }
+    private func requestRun(lattice: Bool) {
+        guard canOptimize(lattice: lattice) else { return }
+        runWithLattice = lattice
         if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
             if libraryAsks() { return }   // Library (B3)
             rerunOffersCopy = true; pendingReplacement = prompt   // Flexible (PR #362) H50d: Optimize's card offers Save as new project
             return
         }
-        startRun()
+        startRun(lattice: lattice)
     }
 
     /// ★ THE "LATTICE" BUTTON'S RUN (maintainer, 2026-08-17) — lattice the
@@ -1864,10 +1870,10 @@ public struct WorkspacePlaceholder: View {
         Binding(get: { pendingLatticeRerun != nil }, set: { if !$0 { pendingLatticeRerun = nil } })
     }
 
-    private func startRun() {
-        guard canOptimize else { return }
+    private func startRun(lattice: Bool) {
+        guard canOptimize(lattice: lattice) else { return }
         // ★ B1 (note 4): a remembered Mac that is not found yet is looked for first, never refused as missing
-        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRun() }; return }
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRun(lattice: lattice) }; return }
         // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
         // face, the run would reach the core with empty external_loads and be
         // refused — so block it up front with an actionable message naming the group
@@ -1888,13 +1894,14 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B3 (T2): a fresh run NO LONGER opens Results ("Results never opens by itself"): the
         // Results segment gets a dot and a message with Open Results when variants land.
-        guard let request = model.makeRunRequest() else {
+        guard let request = model.makeRunRequest(lattice: lattice) else {   // ★ B3: Topology's Optimize sends no lattice
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
         if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
         if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
         lastRunRequest = request   // Optimize greys out until the inputs change
+        startedRunWithLattice = lattice   // ★ B3: a failed run's Try again keeps this run's flavour
         runCouldntFinish = false; lastRunWasLattice = false   // ★ B1 (O1)
         // Pick the runner for THIS run from the compute-location choice. A remote
         // config (a worker was selected + resolved) offloads to the LAN worker;
@@ -3309,7 +3316,7 @@ public struct WorkspacePlaceholder: View {
         .alert(RerunCard.title, isPresented: replacementPromptBinding) {
             Button(TopologyRerunChoice.rerunHere.label, role: .destructive) {
                 pendingReplacement = nil
-                startRun()
+                startRun(lattice: runWithLattice)
             }
             if rerunOffersCopy { Button(TopologyRerunChoice.saveAsNew.label) { pendingReplacement = nil; saveAsNewProjectAndRun() } }
             Button(TopologyRerunChoice.cancel.label, role: .cancel) { pendingReplacement = nil }
@@ -4100,11 +4107,11 @@ public struct WorkspacePlaceholder: View {
                             }
                             if on, strutScene == nil { buildStrutScene() }
                         }),
-                    baseCanOptimize: canOptimize,
+                    baseCanOptimize: canOptimize(lattice: true),
                     baseSummary: force.optimizeSummary(
                         in: selection.groups,
                         latticeRoleGroups: latticeRoleGroupIDs),
-                    onOptimize: { requestRun() },
+                    onOptimize: { requestRun(lattice: true) },
                     onRelattice: { startRelatticeRun() },
                     onClose: { closeLatticePage() },
                     onBackToSetup: { closeLatticePage() },
@@ -11577,10 +11584,17 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.xs)) : nil
-            return SelectionsFolder(id: s.id, header: AnyView(scenarioFolderHeader(s, index: i, open: isOpen)),
-                                    groups: shown ? selection.groups.filter { scenarioOwned($0.id) && force.group($0.id, isIn: s.id) } : [],
-                                    tail: shown ? tail : nil,
-                                    accessory: { scenarioLineSwitch($0, in: s.id) })
+            var folder = SelectionsFolder(id: s.id, header: AnyView(scenarioFolderHeader(s, index: i, open: isOpen)),
+                                          groups: shown ? selection.groups.filter { scenarioOwned($0.id) && force.group($0.id, isIn: s.id) } : [],
+                                          tail: shown ? tail : nil,
+                                          accessory: { scenarioLineSwitch($0, in: s.id) })
+            // ★ B3 (R5): the shown scenario's folder is the selected line while no group is picked; a tap on a line in another
+            // folder shows that folder's scenario first (a shared anchor is listed in each)
+            folder.shown = isOpen
+            folder.headerSelected = isOpen && selection.activeGroupID == nil
+            folder.select = { _ in showScenario(s.id) }
+            folder.dim = { force.kind(for: $0).isAnchor && !force.anchorIsOn($0, in: s.id) }
+            return folder
         }
     }
 
@@ -11604,6 +11618,11 @@ public struct WorkspacePlaceholder: View {
     }
     private func toggleFolder(_ id: UUID) {
         if folderShown(id) { openFolders.remove(id); closedFolders.insert(id) } else { closedFolders.remove(id); openFolders.insert(id) }
+    }
+    /// ★ B3 (R5): opening is apart from showing — the folder that was shown stays open when another scenario is shown.
+    private func keepShownFolderOpen() {
+        let was = force.activeScenarioID
+        if folderShown(was) { openFolders.insert(was) }
     }
 
     /// ★ PINNED under Topology's list, never scrolled away: the last-anchor refusal, "+ Add a load scenario" and its (i),
@@ -11632,7 +11651,7 @@ public struct WorkspacePlaceholder: View {
             Button { toggleFolder(s.id) } label: {
                 Image(systemName: folderShown(s.id) ? "chevron.down" : "chevron.right")
                     .font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
-                    .frame(width: 22, height: 32).contentShape(Rectangle())
+                    .frame(width: 22, height: SelectionsList.lineHeight).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .background(GeometryReader { geo in
@@ -11640,15 +11659,29 @@ public struct WorkspacePlaceholder: View {
             }.allowsHitTesting(false))
             .accessibilityLabel(folderShown(s.id) ? "Close \(s.name)" : "Open \(s.name)")
             .accessibilityIdentifier("scenario-folder-open-\(index)")
-            Image(systemName: open ? "folder.fill" : "folder")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
             if renamingScenario == s.id {
+                Image(systemName: open ? "folder.fill" : "folder")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
                 TextField("Scenario name", text: $scenarioNameDraft)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { force.renameScenario(s.id, to: scenarioNameDraft); renamingScenario = nil }
             } else {
-                Text(s.name).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                // ★ B3 (R5): the name SELECTS the scenario (the ▶ beside it only opens the folder)
+                Button { selectScenario(s.id) } label: {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: open ? "folder.fill" : "folder")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle((open ? DS.Color.accent : DS.Color.textTertiary).color)
+                        Text(s.name).dsStyle(DS.TypeScale.bodyStrong).foregroundStyle(DS.Color.textPrimary.color).lineLimit(1)
+                    }
+                    .frame(minHeight: SelectionsList.lineHeight).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioFolderName-\(index)": geo.frame(in: .global)])
+                }.allowsHitTesting(false))
+                .accessibilityLabel(open ? "\(s.name), shown" : "Show \(s.name)")
             }
             Spacer()
             if open {
@@ -11669,9 +11702,10 @@ public struct WorkspacePlaceholder: View {
                 Image(systemName: "ellipsis.circle").foregroundStyle(DS.Color.textTertiary.color)
             }
         }
-        .padding(.leading, DS.Space.xs).padding(.trailing, DS.Space.l).padding(.vertical, DS.Space.s)
+        .padding(.leading, DS.Space.xs).padding(.trailing, DS.Space.l)
+        .frame(minHeight: SelectionsList.lineHeight)   // ★ B3 (U3): a folder row is 44 pt
         .contentShape(Rectangle())
-        .onTapGesture { openScenario(s.id) }
+        .onTapGesture { selectScenario(s.id) }
         .background(GeometryReader { geo in
             Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioFolder-\(index)": geo.frame(in: .global)])
         }.allowsHitTesting(false))
@@ -11681,21 +11715,49 @@ public struct WorkspacePlaceholder: View {
     /// Open a scenario: only its loads and arrows show from here; the selection clears.
     private func openScenario(_ id: UUID) {
         guard id != force.activeScenarioID else { return }
+        keepShownFolderOpen()
         force.openScenario(id)
         selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
     }
+    /// ★ B3 (R5): a line in a folder was tapped — the part shows that folder's scenario (the tap then picks the line).
+    private func showScenario(_ id: UUID) { openScenario(id) }
+    /// ★ B3 (R5): the folder's name SELECTS its scenario, one at a time: the part shows only it, its folder opens (others keep
+    /// theirs), no group is picked, and a toast says which is shown.
+    private func selectScenario(_ id: UUID) {
+        openScenario(id)
+        closedFolders.remove(id); openFolders.insert(id)
+        selection.clearActive(); selectedPiece = nil; leaveGroupEditing()
+        model.toast = ScenarioSelectCopy.showing(force.activeScenario.name)
+    }
 
     /// A shared anchor's switch for THIS scenario only; the last one on refuses with the inline line.
+    /// ★ B3 (O3): the switch is labelled "Used here", and an anchor switched off says "Off here" (its line dims).
     private func scenarioAnchorSwitch(_ g: UUID, in s: UUID) -> some View {
-        Toggle("Holds in this scenario", isOn: Binding(get: { force.anchorIsOn(g, in: s) },
-                             set: { on in scenarioRefusal = force.setAnchor(g, on: on, in: s, order: selection.groups.map(\.id)) }))
-        .labelsHidden()
-        .toggleStyle(.switch).controlSize(.mini)
-        .background(GeometryReader { geo in
-            Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioAnchorSwitch-\(g.uuidString)": geo.frame(in: .global)])
-        }.allowsHitTesting(false))
-        .accessibilityLabel("Holds in this scenario")
-        .accessibilityIdentifier("scenario-anchor-switch-\(g.uuidString)")
+        let on = force.anchorIsOn(g, in: s)
+        return HStack(spacing: DS.Space.xs) {
+            if !on {
+                Text(ScenarioSelectCopy.offHere).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(1).fixedSize()
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: ChromeKeepOutKey.self,
+                                               value: ["scenarioAnchorOffHere-\(s.uuidString)-\(g.uuidString)": geo.frame(in: .global)])
+                    }.allowsHitTesting(false))
+            }
+            Text(ScenarioSelectCopy.usedHere).font(.system(size: 11)).foregroundStyle(DS.Color.textTertiary.color)
+                .lineLimit(1).fixedSize()
+                .background(GeometryReader { geo in
+                    Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioAnchorUsedHere-\(g.uuidString)": geo.frame(in: .global)])
+                }.allowsHitTesting(false))
+            Toggle(ScenarioSelectCopy.usedHere, isOn: Binding(get: { force.anchorIsOn(g, in: s) },
+                                 set: { on in scenarioRefusal = force.setAnchor(g, on: on, in: s, order: selection.groups.map(\.id)) }))
+            .labelsHidden()
+            .toggleStyle(.switch).controlSize(.mini)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ChromeKeepOutKey.self, value: ["scenarioAnchorSwitch-\(g.uuidString)": geo.frame(in: .global)])
+            }.allowsHitTesting(false))
+            .accessibilityLabel(ScenarioSelectCopy.switchLabel(force.scenarioList.first { $0.id == s }?.name ?? ""))
+            .accessibilityIdentifier("scenario-anchor-switch-\(g.uuidString)")
+        }
     }
 
     /// ★ THE SAFETY MARGIN, once per project (ruling 2026-10-26 13:12): one line, a menu of three presets and Custom…
@@ -11736,6 +11798,7 @@ public struct WorkspacePlaceholder: View {
     private var addScenarioRow: some View {
         HStack(spacing: DS.Space.s) {
             Button {
+                keepShownFolderOpen()
                 force.addScenario()
                 selection.clearActive(); selectedPiece = nil; scenarioRefusal = nil; scenarioAnchorHint = nil
             } label: {
@@ -12427,6 +12490,8 @@ public struct WorkspacePlaceholder: View {
             if force.needsRole(g.id, latticeRoleGroups: latticeRoleGroupIDs) { return "Tap more faces to grow the selection, then choose Anchor or Load" }
             if k.isLoad { return "Scrub the weight left–right · tap it to type · Push / Pull follow the face" }
         }
+        // ★ B3 (R5): with scenarios, the hint says which one the part shows
+        if scenariosApply, force.hasScenarios { return ScenarioSelectCopy.hint(force.activeScenario.name) }
         return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
     }
 
@@ -12443,7 +12508,10 @@ public struct WorkspacePlaceholder: View {
     /// Optimize is enabled once gravity is set and no group is pending, AND either
     /// "Minimize plastic" is on (self-weight or force-driven removal) OR a full
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
-    private var canOptimize: Bool {
+    /// ★ B3 (#362's note 1, his iPad 11-03): `lattice` — the run carries the lattice, so the lattice's refusals apply. Topology's
+    /// Optimize is `false`: opening the Lattice stage switches the lattice on with nothing latticed, and a design box then
+    /// greyed Topology's Optimize with "a graded lattice can't use a design box" while nothing was latticed.
+    private func canOptimize(lattice: Bool) -> Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
         guard !macFinding else { return false }              // ★ B1 (note 4): nor while it looks for the Mac
         // The core refuses a GRADED lattice job on an expanded domain BEFORE any
@@ -12452,12 +12520,12 @@ public struct WorkspacePlaceholder: View {
         // 2026-08-03-variant-entry-gating-and-retention, failure B; narrowed from
         // "any lattice" to "graded" by the device-failure task, because PR 285
         // taught core to run the uniform case).
-        guard latticeDesignBoxConflict == nil else { return false }
+        guard !lattice || latticeDesignBoxConflict == nil else { return false }
         // ★★ RULING 4 (item 5, 2026-09-30): lattice on and no include wall ⇒ refused on the
         // button, before the run starts, in the stage's words — core would lattice every variant
         // WHOLE. The page's Optimize reads this same value (`baseCanOptimize`), and every start
         // (`requestRun`, `startRun`, the page's "Optimize again") is gated on it.
-        guard latticeOptimizeRefusal == nil else { return false }
+        guard !lattice || latticeOptimizeRefusal == nil else { return false }
         // ★★ a load with no single direction is refused on the button (2026-10-09)
         guard loadDirectionRefusal == nil else { return false }
         guard emptyRegionRefusal == nil else { return false }   // ★ B1 (note 38): a role names a cut piece with no faces
@@ -12466,7 +12534,7 @@ public struct WorkspacePlaceholder: View {
                                 latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
-        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest() == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a: a finished project can be re-run with the same inputs; the re-run card confirms (RerunCard)
+        if let last = lastRunRequest, RerunCard.greysOut(sameInputsAsLastRun: model.makeRunRequest(lattice: lattice) == last, existing: run.outcome) { return false }   // Flexible (PR #362) H50a: a finished project can be re-run with the same inputs; the re-run card confirms (RerunCard)
         return true
     }
 
@@ -12539,9 +12607,9 @@ public struct WorkspacePlaceholder: View {
         return nil
     }
 
-    private var optimizeSummary: String {
-        if let why = latticeDesignBoxConflict { return why }
-        if let why = latticeOptimizeRefusal { return why }
+    private func optimizeSummary(lattice: Bool) -> String {
+        if lattice, let why = latticeDesignBoxConflict { return why }   // ★ B3: only a run that carries the lattice
+        if lattice, let why = latticeOptimizeRefusal { return why }
         if let why = loadDirectionRefusal { return why }
         if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
@@ -12684,10 +12752,14 @@ public struct WorkspacePlaceholder: View {
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
     }
 
-    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked.
-    private var optimizeButton: some View {
-        let ok = canOptimize
-        let summary = optimizeSummary
+    /// The stage's own Optimize in today's bar (Edit faces, the other stages): ★ B3 — on Topology it is topology only.
+    private var optimizeButton: some View { optimizeButtonView(lattice: stage != .topology) }
+
+    /// ★ ruling 4 (item 6): greyed, and its tap takes him to where walls are marked. ★ B3 (#362's note 1): `lattice` — the run
+    /// it asks for carries the lattice (Topology's Optimize: no).
+    private func optimizeButtonView(lattice: Bool) -> some View {
+        let ok = canOptimize(lattice: lattice)
+        let summary = optimizeSummary(lattice: lattice)
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
         // ★ B1 (note 4): while it looks for the remembered Mac the button says so; if the Mac never answers, one line, and
@@ -12697,7 +12769,7 @@ public struct WorkspacePlaceholder: View {
         let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
             : macNotAnswering && ok ? Self.macNotAnsweringLine : summary
         return Button {
-            if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
             StageActionCapsuleLabel(title: title, summary: line, ok: ok || macFinding, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl5)
@@ -12987,9 +13059,19 @@ extension WorkspacePlaceholder {
         let summary = latticeThisSummary
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
+        let thenLattice = optimizeThenLatticeOK
         return HStack(spacing: 2) {
-            optimizeButton
+            optimizeButtonView(lattice: false)   // ★ B3 (#362's note 1): Topology's Optimize is topology only
             Menu {
+                // ★ B3 (app-map §3.3, #362's note 1): the one Topology run that carries the lattice
+                Button {
+                    if thenLattice { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: true) }
+                } label: {
+                    Text(TopologyRunCopy.optimizeThenLattice)
+                    Text(optimizeThenLatticeLine)
+                }
+                .disabled(!thenLattice)
+                .accessibilityIdentifier("topology-split-optimize-lattice")
                 Button {
                     if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
                 } label: {
@@ -13007,10 +13089,18 @@ extension WorkspacePlaceholder {
                     .contentShape(Capsule())
             }
             .menuIndicator(.hidden)
+            .background(CornerPairStyle.publish("topologySplitMore"))
             .accessibilityLabel("More runs")
             .accessibilityIdentifier("topology-split-more")
         }
         .background(CornerPairStyle.publish("optimizeSplit"))
+    }
+
+    /// ★ B3: ⌃ "Optimize, then lattice" runs once a lattice is set and the lattice run may start.
+    private var optimizeThenLatticeOK: Bool { project.lattice.enabled && canOptimize(lattice: true) }
+    /// Its line: the lattice run's own summary, or why it can't start.
+    private var optimizeThenLatticeLine: String {
+        project.lattice.enabled ? optimizeSummary(lattice: true) : TopologyRunCopy.noLatticeYet
     }
 
     /// The Setup panel: today's chips and bar controls, one row each (TopologySetupRow).
@@ -13333,7 +13423,7 @@ extension WorkspacePlaceholder {
 
     func saveAsNewProjectAndRun() {
         if let copy = model.duplicateProject(id: project.id) {
-            RerunCard.runOnOpen(copy.id)
+            RerunCard.runOnOpen(copy.id, withLattice: runWithLattice)
             model.open(copy)
         } else {
             model.toast = RerunCard.copyFailedToast
@@ -13350,7 +13440,7 @@ extension WorkspacePlaceholder {
     // Library (B3): Optimize as the next version — its draft runs; the version it came from never changes
     func optimizeAsNextVersion(name: String?) {
         if let next = model.optimizeAsNextVersion(id: project.id, name: name) {
-            RerunCard.runOnOpen(next.id)
+            RerunCard.runOnOpen(next.id, withLattice: runWithLattice)
             model.open(next)
         } else {
             model.toast = RerunCard.copyFailedToast
@@ -13458,8 +13548,8 @@ extension WorkspacePlaceholder {
                     Button(hasResults ? "Re-run in core\u{2026}" : "Run in core") { requestLatticeRun() }
                         .disabled(!canLatticeThis)
                         .accessibilityIdentifier("lattice-split-core")
-                    Button("Optimize with this lattice") { requestRun() }
-                        .disabled(!canOptimize)
+                    Button("Optimize with this lattice") { requestRun(lattice: true) }
+                        .disabled(!canOptimize(lattice: true))
                         .accessibilityIdentifier("lattice-split-optimize")
                 }
                 Section("Export") {

@@ -116,6 +116,14 @@ public struct SelectionsFolder: Identifiable {
     public let tail: AnyView?
     /// A control at the end of a group's line IN THIS FOLDER (an anchor's switch for this scenario).
     public let accessory: (SelectionGroup) -> AnyView?
+    /// ★ B3 (R5): the scenario the part shows. Only its folder's line of a group reads as selected or open (a shared anchor is
+    /// listed in every folder), and its header takes the selected look while no group is picked (`headerSelected`).
+    public var shown = false
+    public var headerSelected = false
+    /// ★ B3 (R5): a line of this folder was tapped (its name or its open button), before the list's own pick / open.
+    public var select: ((UUID) -> Void)? = nil
+    /// ★ B3 (O3): a line that is off in this folder's scenario (an anchor switched off here) dims.
+    public var dim: (UUID) -> Bool = { _ in false }
     public init(id: UUID, header: AnyView, groups: [SelectionGroup], tail: AnyView? = nil,
                 accessory: @escaping (SelectionGroup) -> AnyView? = { _ in nil }) {
         self.id = id; self.header = header; self.groups = groups; self.tail = tail; self.accessory = accessory
@@ -255,10 +263,10 @@ public struct SelectionsList: View {
                             VStack(spacing: 0) {
                                 if let folders {
                                     ForEach(folders) { f in
-                                        f.header
+                                        f.header.modifier(SelectedRowLook(on: f.headerSelected, outlineKey: "selOutline-folder-\(f.id.uuidString)"))
                                         // ★ his iPad 14:13: the folder's contents sit tabbed in, a guide line down their edge
                                         VStack(spacing: 0) {
-                                            ForEach(f.groups) { g in section(g, accessory: f.accessory) }
+                                            ForEach(f.groups) { g in section(g, accessory: f.accessory, folder: f) }
                                             if let t = f.tail { t }
                                         }
                                         .padding(.leading, Self.folderIndent)
@@ -339,33 +347,23 @@ public struct SelectionsList: View {
 
     // MARK: one group
 
-    @ViewBuilder private func section(_ g: SelectionGroup, accessory: ((SelectionGroup) -> AnyView?)? = nil) -> some View {
-        let isPicked = picked == g.id
+    @ViewBuilder private func section(_ g: SelectionGroup, accessory: ((SelectionGroup) -> AnyView?)? = nil,
+                                      folder: SelectionsFolder? = nil) -> some View {
+        // ★ B3 (R5): in a folder, only the shown scenario's line is the picked / open one
+        let here = folder?.shown ?? true
+        let isPicked = picked == g.id && here
         VStack(alignment: .leading, spacing: 0) {
-            groupLine(g, picked: isPicked, accessory: accessory)
+            groupLine(g, picked: isPicked, accessory: accessory, folder: folder)
                 .background(GeometryReader { geo in
                     Color.clear.preference(key: SelectionsLineMidKey.self, value: [g.id: geo.frame(in: .named(Self.scrollSpace)).midY])
                 })
-            if deleteAsk == g.id, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
-            if isPicked || isOpen?(g.id) == true { rows(g) }
+                .background { if let folder { publish("selLine-\(folder.id.uuidString)-\(g.id.uuidString)") } }
+            if deleteAsk == g.id, here, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
+            if isPicked || (isOpen?(g.id) == true && here) { rows(g) }
         }
         // ★ B2 (round 1, R2.3 / R4, design-system §4.4): a selected row reads as selected at a glance — the fill, the 3 pt
         // accent bar and a 1.5 pt accent outline inset 4 pt; every row is its own line, a hairline under it
-        .background(isPicked ? (Self.controlOldSelectedLook ? DS.Color.fillSubtle : DS.Color.fillSelected).color : Color.clear)
-        .overlay {
-            if isPicked, !Self.controlOldSelectedLook {
-                RoundedRectangle(cornerRadius: Self.outlineRadius, style: .continuous)
-                    .strokeBorder(DS.Color.accent.color, lineWidth: Self.outlineWidth)
-                    .padding(Self.outlineInset)
-                    .background(publish("selOutline-\(g.id.uuidString)").padding(Self.outlineInset))
-                    .allowsHitTesting(false)
-            }
-        }
-        .overlay(alignment: .leading) {
-            if isPicked {
-                Rectangle().fill((Self.controlOldSelectedLook ? g.color : DS.Color.accent).color).frame(width: 3).padding(.vertical, 2)
-            }
-        }
+        .modifier(SelectedRowLook(on: isPicked, outlineKey: "selOutline-\(g.id.uuidString)", oldBar: g.color))
         .overlay(alignment: .bottom) {
             Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1).allowsHitTesting(false)
         }
@@ -374,6 +372,8 @@ public struct SelectionsList: View {
 
     /// RED CONTROL (SelectedRowHostedTests): today's look — a faint fill and the group-colour bar, no outline.
     @MainActor static var controlOldSelectedLook = false
+    /// ★ B3 (O3): how faint a line that is off in its folder's scenario reads.
+    static let offHereOpacity: Double = 0.5
     /// The selected row's outline (§4.4, round 1).
     static let outlineInset: CGFloat = 4
     static let outlineWidth: CGFloat = 1.5
@@ -419,13 +419,16 @@ public struct SelectionsList: View {
     }
 
     private func groupLine(_ g: SelectionGroup, picked isPicked: Bool,
-                           accessory folderAccessory: ((SelectionGroup) -> AnyView?)? = nil) -> some View {
+                           accessory folderAccessory: ((SelectionGroup) -> AnyView?)? = nil,
+                           folder: SelectionsFolder? = nil) -> some View {
         let locked = isLocked(g.id)
         let accessory = folderAccessory.map { $0(g) } ?? lineAccessory(g)
+        let here = folder?.shown ?? true
+        let select = folder?.select
         return HStack(spacing: DS.Space.s) {
             if let toggleOpen, let isOpen {
-                let open = isOpen(g.id) || isPicked
-                Button { toggleOpen(g.id) } label: {
+                let open = (isOpen(g.id) && here) || isPicked
+                Button { select?(g.id); toggleOpen(g.id) } label: {
                     Image(systemName: open ? "chevron.down" : "chevron.right")
                         .font(.system(size: 11, weight: .bold)).foregroundStyle(DS.Color.textTertiary.color)
                         .frame(width: 22, height: Self.lineHeight).contentShape(Rectangle())
@@ -435,7 +438,7 @@ public struct SelectionsList: View {
                 .accessibilityLabel(open ? "Close \(g.name)" : "Open \(g.name)")
                 .accessibilityIdentifier("\(idPrefix)-sel-open-\(g.id.uuidString)")
             }
-            Button { pick(g.id) } label: {
+            Button { select?(g.id); pick(g.id) } label: {
                 HStack(spacing: DS.Space.s) {
                     RoundedRectangle(cornerRadius: 3).fill(g.color.color).frame(width: 12, height: 12)
                     // ★ his iPad 2026-10-27 (note 2): a name is never cut off — ★ B2 (U2, his answer to Q5 2026-11-03: "We'll try
@@ -460,6 +463,7 @@ public struct SelectionsList: View {
                 .padding(.vertical, Self.nameWrapPadding)
                 .frame(minHeight: Self.groupLineHeight)   // ★ B2 (U2, U3): 48 pt; taller only while a long name wraps
                 .contentShape(Rectangle())
+                .opacity(folder?.dim(g.id) == true ? Self.offHereOpacity : 1)   // ★ B3 (O3): off in this scenario
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("\(idPrefix)-sel-group-\(g.id.uuidString)")
@@ -751,5 +755,33 @@ struct SummaryLabel: View {
         }
         .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
         .foregroundStyle(DS.Color.textSecondary.color).lineLimit(1).fixedSize()
+    }
+}
+
+/// ★ B2 (round 1, R2.3 / R4, design-system §4.4) — the selected row's look: the fill, the 3 pt accent bar and a 1.5 pt accent
+/// outline inset 4 pt; a hairline under every row is the row's own. ★ B3 (R5): a scenario folder's header wears it too, while
+/// its scenario is the one shown and no group is picked.
+struct SelectedRowLook: ViewModifier {
+    let on: Bool
+    let outlineKey: String
+    var oldBar: RGBA = DS.Color.accent
+    func body(content: Content) -> some View {
+        let old = SelectionsList.controlOldSelectedLook
+        content
+            .background(on ? (old ? DS.Color.fillSubtle : DS.Color.fillSelected).color : Color.clear)
+            .overlay {
+                if on, !old {
+                    RoundedRectangle(cornerRadius: SelectionsList.outlineRadius, style: .continuous)
+                        .strokeBorder(DS.Color.accent.color, lineWidth: SelectionsList.outlineWidth)
+                        .padding(SelectionsList.outlineInset)
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: ChromeKeepOutKey.self, value: [outlineKey: geo.frame(in: .global)])
+                        }.padding(SelectionsList.outlineInset).allowsHitTesting(false))
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .leading) {
+                if on { Rectangle().fill((old ? oldBar : DS.Color.accent).color).frame(width: 3).padding(.vertical, 2) }
+            }
     }
 }

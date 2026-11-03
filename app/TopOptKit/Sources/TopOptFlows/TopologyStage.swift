@@ -337,3 +337,11 @@ public enum TopologyRerunChoice: String, Equatable, Sendable, CaseIterable {
         offersCopy ? [.rerunHere, .saveAsNew, .cancel] : [.rerunHere, .cancel]
     }
 }
+
+/// ★ B3 (app-map §3.3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only; ⌃ holds the run that also
+/// lattices the part.
+public enum TopologyRunCopy {
+    public static let optimizeThenLattice = "Optimize, then lattice"
+    /// ≤ 5 words (U6): no lattice is set on this part yet.
+    public static let noLatticeYet = "No lattice set yet"
+}

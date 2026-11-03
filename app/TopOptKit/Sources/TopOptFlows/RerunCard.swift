@@ -51,14 +51,24 @@ public enum RerunCard {
     // ── the run handed to the copy ──────────────────────────────────────────
 
     @MainActor private static var pendingRun: UUID?
+    @MainActor private static var pendingRunLattice = false
 
-    /// Ask the workspace that next opens `project` to start its run once (Save as new project).
-    @MainActor public static func runOnOpen(_ project: UUID) { pendingRun = project }
+    /// Ask the workspace that next opens `project` to start its run once (Save as new project). ★ B3: `withLattice` — the run
+    /// asked for carried the lattice (a Lattice stage Optimize, or ⌃ "Optimize, then lattice"); Topology's Optimize does not.
+    @MainActor public static func runOnOpen(_ project: UUID, withLattice: Bool = false) {
+        pendingRun = project; pendingRunLattice = withLattice
+    }
 
     /// True exactly once, for the project that was asked for.
     @MainActor public static func takeRunOnOpen(for project: UUID) -> Bool {
         guard pendingRun == project else { return false }
         pendingRun = nil
         return true
+    }
+
+    /// ★ B3: whether the run just taken carries the lattice (read once, right after `takeRunOnOpen`).
+    @MainActor public static func takeRunOnOpenLattice() -> Bool {
+        defer { pendingRunLattice = false }
+        return pendingRunLattice
     }
 }

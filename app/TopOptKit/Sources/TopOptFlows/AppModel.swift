@@ -287,7 +287,10 @@ public final class AppModel: ObservableObject {
         return base.withJobMode("lattice_part")
     }
 
-    public func makeRunRequest() -> RunRequest? {
+    /// ★ B3 (#362's note from his iPad, 11-03 15:03; app-map §3.3): `lattice: false` is Topology's Optimize — topology only, no
+    /// lattice block, whatever the Lattice stage left switched on. The lattice rides only the runs that say so (⌃ "Optimize,
+    /// then lattice", the Lattice stage's and page's own Optimize), so the default keeps every other caller as it was.
+    public func makeRunRequest(lattice withLattice: Bool = true) -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
@@ -311,7 +314,7 @@ public final class AppModel: ObservableObject {
         // which a variant's re-lattice job builds from too (ruling b, 2026-09-30). Resolved
         // from the EMITTED regions, not the role map, so a role whose face has no usable
         // B-rep geometry cannot select a mode with nothing to fit into.
-        let latticeSpec = project.latticeRunSpec(emission: emission)
+        let latticeSpec = withLattice ? project.latticeRunSpec(emission: emission) : nil
         var request = RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

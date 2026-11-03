@@ -150,13 +150,15 @@ final class LatticeIncludeGateTests: XCTestCase {
 
         // the workspace's own gate, and every start behind it
         let ws = try src("WorkspacePlaceholder.swift")
-        let can = try member(ws, "private var canOptimize: Bool")
-        XCTAssertTrue(can.contains("guard latticeOptimizeRefusal == nil else { return false }"), "★ the button")
-        XCTAssertTrue(try member(ws, "private var optimizeSummary: String").contains("if let why = latticeOptimizeRefusal { return why }"),
+        // ★ RE-PINNED (UI-Notes B3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only — the include gate
+        // holds every run that CARRIES the lattice (`lattice: true`: the page's, the Lattice stage's, ⌃ "Optimize, then lattice")
+        let can = try member(ws, "private func canOptimize(lattice: Bool) -> Bool")
+        XCTAssertTrue(can.contains("guard !lattice || latticeOptimizeRefusal == nil else { return false }"), "★ the button")
+        XCTAssertTrue(try member(ws, "private func optimizeSummary(lattice: Bool) -> String").contains("if lattice, let why = latticeOptimizeRefusal { return why }"),
                       "★ …in the same words")
-        XCTAssertTrue(try member(ws, "private func requestRun()").contains("guard canOptimize else { return }"))
-        XCTAssertTrue(try member(ws, "private func startRun()").contains("guard canOptimize else { return }"))
-        XCTAssertTrue(ws.contains("baseCanOptimize: canOptimize,"), "the page's Optimize reads the same gate")
+        XCTAssertTrue(try member(ws, "private func requestRun(lattice: Bool)").contains("guard canOptimize(lattice: lattice) else { return }"))
+        XCTAssertTrue(try member(ws, "private func startRun(lattice: Bool)").contains("guard canOptimize(lattice: lattice) else { return }"))
+        XCTAssertTrue(ws.contains("baseCanOptimize: canOptimize(lattice: true),"), "the page's Optimize reads the same gate")
     }
 
     // MARK: the one tap
@@ -201,7 +203,8 @@ final class LatticeIncludeGateTests: XCTestCase {
         // the surfaces
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() }"), "the stage's Lattice")
         // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)
-        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() }"), "the workspace's Optimize")
+        // ★ RE-PINNED (UI-Notes B3, #362's note 1 from his iPad 11-03): Topology's Optimize is topology only, so the gate, its line and its button take the run's flavour (`lattice`); the lattice's refusals apply only to a run that carries it
+        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() }"), "the workspace's Optimize")
         XCTAssertTrue(ws.contains("onMarkWalls: { goToWallMarking() })"), "the lattice page")
         XCTAssertTrue(ws.contains(".wallMarking { goToWallMarking() }"), "the wizard")
         let page = try src("LatticePage.swift")

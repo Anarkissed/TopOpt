@@ -964,9 +964,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         }
         // ★ LOAD SCENARIOS (overnight release 2026-10-26, the shared key): only with 2+ scenarios; the groups and
         // anchor_face_ids above already mirror Scenario 1. Each scenario sends its own ON anchors.
+        // ★ B3 (core 35764048bba3): once ANY scenario names a region anchor, core holds a region only where it is listed, so
+        // every scenario then says which are ON ("[]" where none). With no region anchor anywhere, the bytes are today's.
         if request.scenarios.count >= 2 {
+            let regionAnchors = request.scenarios.contains { !$0.anchorRegionIDs.isEmpty }
             loads["scenarios"] = request.scenarios.map { s -> [String: Any] in
-                ["name": s.name, "anchor_face_ids": s.anchorFaceIDs, "groups": s.loadGroups.map(loadGroupJSON)]
+                var e: [String: Any] = ["name": s.name, "anchor_face_ids": s.anchorFaceIDs, "groups": s.loadGroups.map(loadGroupJSON)]
+                if regionAnchors { e["anchor_region_ids"] = s.anchorRegionIDs }
+                return e
             }
         }
         // ★ THE SAFETY MARGIN (ruling 2026-10-26 13:12): under TO-core's key once named; 150 % sends nothing (core's default).
