@@ -71,6 +71,7 @@ struct SettingRow<MenuItems: View>: View {
                 .contentShape(Rectangle())
             }
             .menuIndicator(.hidden)
+            .menuStyle(.button).buttonStyle(.plain)   // no platform chrome round the label: the row stays 44 (U3)
             .fixedSize()
             .background(NumberPad.published(key))
             .accessibilityIdentifier(id)
@@ -78,5 +79,6 @@ struct SettingRow<MenuItems: View>: View {
             Spacer(minLength: 0)
         }
         .frame(minHeight: 44)
+        .background(NumberPad.published("settingRow-\(key)"))
     }
 }

@@ -211,6 +211,8 @@ public struct SelectionsList: View {
     /// How far a scenario folder's groups sit in from the folder row.
     static let folderIndent: CGFloat = 20
     static let lineHeight: CGFloat = 44
+    /// ★ B2 (U3, design-system §1 / §4.4): a group row is 48 pt (folder, header and setting rows stay 44).
+    static let groupLineHeight: CGFloat = 48
     static let captionsHeight: CGFloat = 20
     static let maxListHeight: CGFloat = 420
     /// The most the open list draws (its header, the divider, 420 pt of lines) — a face chip's second tier keeps out of the
@@ -456,7 +458,7 @@ public struct SelectionsList: View {
                     }
                 }
                 .padding(.vertical, Self.nameWrapPadding)
-                .frame(minHeight: Self.lineHeight)   // ★ B2 (U2): taller only while a long name wraps
+                .frame(minHeight: Self.groupLineHeight)   // ★ B2 (U2, U3): 48 pt; taller only while a long name wraps
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
