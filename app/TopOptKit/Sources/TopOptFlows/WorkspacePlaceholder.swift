@@ -208,7 +208,7 @@ public struct WorkspacePlaceholder: View {
     // ★ the safety margin (ruling 2026-10-26 13:12): Custom's draft, its refusal, the (i)
     @State private var safetyCustomDraft: String? = nil
     @State private var safetyCustomPadOpen = false   // B2 (U15): Custom…'s pad
-    @StateObject private var laneControls = LaneControls()   // B2 (U16): the controls the top lane keeps clear of
+    @State private var laneControls = LaneControls()   // B2 (U16): the controls the top lane keeps clear of (@State: the page does NOT observe it — only the lane's own views do; observing it re-drew the page on every frame)
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// The piece whose transform gizmo is up (it counts as picked: its chips show with it).
@@ -7743,6 +7743,8 @@ public struct WorkspacePlaceholder: View {
                             .strokeBorder((tint ?? DS.Color.strokePanel).color,
                                           lineWidth: tint != nil ? 2 : 1))
                 )
+                // ★ B2 (round 1, §4.2): a hold fills a ring round the button over its 3 s
+                .overlay { if onLongPress != nil, viewModePressDown, !HoldRing.controlOff { HoldRing().padding(-3) } }
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

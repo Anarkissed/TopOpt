@@ -61,11 +61,25 @@ public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
     let chip: Chip
     let split: Split
     let panel: Panel
+    /// ★ B2 (U12, design-system §4.18 / §4.19; his round 2 note N4): the corner's fix line ("No lattice settings yet · Open
+    /// Lattice"), drawn just above the pair; what opens from the corner sits 8 pt above it, never behind it. nil: none.
+    let fixLine: AnyView?
+    @State private var fixLineHeight: CGFloat = 0
 
     public init(geometry: ChromeGeometry, open: String?, @ViewBuilder chip: () -> Chip, @ViewBuilder split: () -> Split,
                 @ViewBuilder panel: () -> Panel) {
+        self.init(geometry: geometry, open: open, fixLine: nil, chip: chip, split: split, panel: panel)
+    }
+
+    public init(geometry: ChromeGeometry, open: String?, fixLine: AnyView?, @ViewBuilder chip: () -> Chip,
+                @ViewBuilder split: () -> Split, @ViewBuilder panel: () -> Panel) {
         self._geometry = ObservedObject(wrappedValue: geometry)
-        self.open = open; self.chip = chip(); self.split = split(); self.panel = panel()
+        self.open = open; self.chip = chip(); self.split = split(); self.panel = panel(); self.fixLine = fixLine
+    }
+
+    /// How far above the pair's top the panel's foot sits: the gap, plus the fix line and 8 pt when there is one.
+    static func panelLift(fixLineHeight: CGFloat?) -> CGFloat {
+        CornerPairStyle.panelGap + (fixLineHeight.map { $0 + CornerPairStyle.fixLineGap } ?? 0)
     }
 
     public var body: some View {
@@ -76,8 +90,20 @@ public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
         if CornerPairStyle.controlPanelInLayout {
             VStack(alignment: .trailing, spacing: CornerPairStyle.panelGap) { measuredPanel; pair }
         } else {
+            let lift = Self.panelLift(fixLineHeight: fixLine == nil || CornerPairStyle.controlPanelBehindFixLine ? nil : fixLineHeight)
             pair.overlay(alignment: .bottomTrailing) {
-                measuredPanel.offset(y: -(PageChrome.actionButton + CornerPairStyle.panelGap))
+                if let fixLine {
+                    fixLine
+                        .background(GeometryReader { g in
+                            Color.clear.onAppear { fixLineHeight = g.size.height }
+                                .onChange(of: g.size.height) { fixLineHeight = $0 }
+                        })
+                        .background(CornerPairStyle.publish("cornerFixLine"))
+                        .offset(y: -(PageChrome.actionButton + CornerPairStyle.panelGap))
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                measuredPanel.offset(y: -(PageChrome.actionButton + lift))
             }
         }
     }
@@ -98,8 +124,12 @@ public struct CornerPair<Chip: View, Split: View, Panel: View>: View {
 enum CornerPairStyle {
     /// Test control only: the panels placed IN layout (the bar would measure them — the defect the overlay avoids).
     @MainActor static var controlPanelInLayout = false
+    /// RED CONTROL (CornerAboveFixLineTests): the panel ignores the fix line (today's place: behind it).
+    @MainActor static var controlPanelBehindFixLine = false
     static let pairGap: CGFloat = PageChrome.gap
     static let panelGap: CGFloat = PageChrome.gap
+    /// §4.19: the panel's foot sits 8 pt above the fix line.
+    static let fixLineGap: CGFloat = 8
 
     /// A panel's glass: Surface.panel, radius 22, the panel hairline; its body scrolls past `maxHeight`.
     static func panel<C: View>(width: CGFloat, maxHeight: CGFloat, @ViewBuilder _ content: () -> C) -> some View {

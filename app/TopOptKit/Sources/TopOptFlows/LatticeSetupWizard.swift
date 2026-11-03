@@ -281,7 +281,8 @@ public struct LatticeSetupWizard: View {
             viewSwitcher
         }
         .padding(DS.Space.ml)
-        .frame(width: PageChrome.panelWidth, alignment: .leading)
+        .frame(width: PageChrome.widePanelWidth, alignment: .leading)   // ★ B2 (U14): the wide panel
+        .background(CornerPairStyle.publish("latticeSettingsPanel"))
         .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
             .fill(DS.Surface.panel.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)

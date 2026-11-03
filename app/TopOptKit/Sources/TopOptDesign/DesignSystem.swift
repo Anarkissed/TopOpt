@@ -156,6 +156,30 @@ public enum DS {
         public static let squeezeGroupPalette: [RGBA] = [accentGreen, groupPink, groupMint, accent,
                                                          groupYellow, groupTeal, groupOlive, groupTerracotta]
 
+        // ★ B2 (design-system §2, U5): ONE colour per role — its glyph, its chip and its tint on the model, on every stage.
+        // A group's own colour (the palettes above) is which group it is; the role colour is what it does. The two never swap.
+        public enum Role {
+            /// Anchor (lock): today's anchor glyph green.
+            public static let anchor = RGBA(hex: 0x30D158)
+            /// Load — Gravity / Push / Pull (arrow): the accent, today's load arrow.
+            public static let load = RGBA(hex: 0x0A84FF)
+            /// Keep clear (⃠): `clearance`, `#F26B61`.
+            public static let keepClear = DS.Color.clearance
+            /// Protect (shield): today's Protect chip teal.
+            public static let protect = RGBA(hex: 0x2EE0C7)
+            /// Lattice (grid): his face-prism purple (09-30).
+            public static let lattice = RGBA(hex: 0x7C6FD6)
+            /// No lattice (grid struck): the lattice purple at 45 %.
+            public static let noLattice = lattice.opacity(0.45)
+            /// Protect skin: a `protect` outline on `lattice` (shield + grid).
+            public static let protectSkinOutline = protect
+            public static let protectSkinFill = lattice
+            /// Lattice zone (dashed box): `lattice`, dashed.
+            public static let latticeZone = lattice
+            /// Allow growth here (dashed box): today's design-box blue, dashed.
+            public static let allowGrowth = RGBA(hex: 0x0A84FF)
+        }
+
         // Hairline strokes — white at low alpha, as the design's `border` rules.
         /// `rgba(255,255,255,0.11)` — default glass-panel hairline.
         public static let strokePanel = RGBA(255, 255, 255, 0.11)
