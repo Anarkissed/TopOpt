@@ -136,6 +136,52 @@ struct AddedMaterialReport {
 };
 
 // One variant's line in the job report (§5 "per variant").
+// ENGINE BATCH E1 — the finished shape of one exported version (report.json
+// "finish", the contract posted to BuildGroup 2026-11-03). Plain data, filled by
+// run_job from finish.hpp; `ran == false` writes no key (an older report).
+struct FinishPlace {
+  Vec3 centre_mm{0.0, 0.0, 0.0};
+  double before_mm = 0.0;
+  double after_mm = 0.0;
+  std::string reason;  // places left only
+};
+struct FinishBlock {
+  bool ran = false;
+  double min_thickness_mm = 0.0;
+  std::string min_thickness_source;
+  std::vector<FinishPlace> fixed;
+  std::vector<FinishPlace> left;
+  bool surface_applied = false;
+  double stair_step_removed_pct = 0.0;
+  bool slim = false;  // the surface finish applied: slim (true) or safe
+  // His ruling 2026-11-03: the slim finish failed a re-check (or could not keep every
+  // member at its line), so this version ships the safe finish, and why.
+  bool finish_fallback = false;
+  std::string finish_fallback_reason;
+  bool recheck_ran = false;
+  double margin = 0.0;
+  double margin_before = 0.0;
+  long long keep_clear_voxels = 0;
+  int pieces = 1;
+  int loose_pieces = 0;
+  int thin_joints = 0;
+  double mass_grams = 0.0;
+  double mass_before_grams = 0.0;
+  double volume_before_mm3 = 0.0;  // the unfinished export / the finished file (not written)
+  double volume_after_mm3 = 0.0;
+  std::size_t pinned_vertices = 0;     // diagnostics (not written)
+  std::size_t pinned_moved = 0;
+  std::size_t roughness_vertices = 0;
+  std::size_t outward_only_vertices = 0, slim_guarded_vertices = 0, fold_walked_back = 0;
+  std::size_t keep_clear_held = 0, keep_clear_left = 0;  // put back around / still in a Keep clear
+  long long keep_clear_before = 0, keep_clear_added = 0;  // the unfinished file's / confirmed new
+  int slim_rounds = 0;
+  double roughness_before_mm = 0.0, roughness_after_mm = 0.0;
+  bool verdict_changed = false;
+  std::string verdict_reason;
+  double seconds = 0.0;  // the [finish] log line's time (not written: report.json is rerun-identical)
+};
+
 struct VariantReport {
   // TWO volume bases, each answering one question (handoff 104, resolving 102).
   // They diverge on the grayscale MMA field (no Heaviside projection) and coincide
@@ -309,6 +355,8 @@ struct VariantReport {
   // fragile when printed; reported, never fixed. report.json "fragile_joints"
   // only when > 0, so every other line keeps its exact bytes.
   int fragile_joints = 0;
+  // E1: the finished shape (ran == false: none, an older report).
+  FinishBlock finish;
   // Where (mm, the solve grid's model frame): the midpoint of each joint's first
   // edge / corner contact, in a deterministic order, at most
   // kFragileJointPositionsMax of them (fragile_joints is the full count).
@@ -376,6 +424,7 @@ struct FrozenShareReport {
 // own certification of its voxel field.
 struct StrengthenVersionReport {
   int version = 0;
+  FinishBlock finish;  // E1: its exported (finished) file
   double stress_cut = 0.0;      // 0.25 / 0.50 / 0.75
   double target_margin = 0.0;
   std::string status;           // "verified" | "repaired" | "unreachable" | "merged"

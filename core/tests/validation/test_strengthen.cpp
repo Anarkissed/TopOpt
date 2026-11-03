@@ -346,8 +346,10 @@ int main() {
       CHECK(vs.arr.size() == 3 && vs.arr[0].at("status").str != "unreachable" &&
                 vs.arr[0].at("status").str != "merged",
             "(a) version 1 passes");
-      CHECK(unreachable >= 1,
-            "precondition (c): this box makes at least one target unreachable");
+      // (c) is pinned on the failing load below, where it is structural: since E1 the
+      // versions are verified on their FINISHED files (v1's design reads 3.996 there,
+      // 4.679 unfinished), and this ladder now stops short of the box's ceiling.
+      std::printf("[50] %d of 3 targets above the box here\n", unreachable);
       CHECK(r.mesh_paths.size() == passing,
             "one exported file per version that passed, none behind the others");
     }
@@ -371,6 +373,17 @@ int main() {
                       s.at("margin_required").num) < 1e-9 &&
                 s.at("versions").arr[0].at("target_rule").str == "your safety margin",
             "(d) its version 1 target is the safety margin");
+      // (c) on this load the box filled solid cannot reach the safety margin at all.
+      const double fceil = s.at("ceiling_margin").num;
+      const Json& fv = s.at("versions");
+      std::printf("[50] fail: ceiling %.4g, v1 %s\n", fceil,
+                  fv.arr.empty() ? "-" : fv.arr[0].at("status").str.c_str());
+      CHECK(fceil > 0.0 && s.at("margin_required").num > 0.95 * fceil,
+            "precondition (c): this load puts the safety margin above the box filled solid");
+      CHECK(fv.arr.size() == 3 && fv.arr[0].at("status").str == "unreachable" &&
+                f.mesh_paths.empty(),
+            "(c) a target above 0.95 x the box filled solid is reported UNREACHABLE, with "
+            "no variant behind it");
     } else {
       CHECK(false, "(d) the failing part's report carries the strengthen block");
     }

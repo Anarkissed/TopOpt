@@ -1050,6 +1050,11 @@ struct JobDescription {
   // being one field doing two jobs.
   bool has_build_direction = false;
   Vec3 build_direction{0.0, 0.0, 0.0};
+  // E1 (f), analyze mode: re-check `orientation_recheck_mesh` (beside the job) printed
+  // along `orientation_recheck_dir` (unit). analysis.json gains "orientation_recheck".
+  bool has_orientation_recheck = false;
+  std::string orientation_recheck_mesh;
+  Vec3 orientation_recheck_dir{0.0, 0.0, 1.0};
 
   // Optional "build_orientation_report": true — arm the ORIENTATION SCORER, a
   // post-pass on the certification solve that already ran (handoff
@@ -1472,6 +1477,11 @@ struct AnalyzeJobResult {
   std::string build_orientation_json;
   std::string provenance_path;         // <out_dir>/analysis.json (provenance + BOTH masses)
   std::string fields_path;             // <out_dir>/fields.bin (one analysed "variant")
+  // E1 (f): the orientation re-check's plain line and overhang areas (mm^2), when the
+  // job asked for one (analysis.json "orientation_recheck" carries them all).
+  std::string orientation_recheck_reason;
+  double orientation_recheck_overhang_mm2 = 0.0;
+  double orientation_recheck_baseline_overhang_mm2 = 0.0;
 
   // Constrained smoothing (handoff 2026-07-26-constrained-smooth-ui). Populated
   // only when the request enabled smoothing; the re-analysed numbers above then
@@ -1661,5 +1671,14 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
                                             const std::string& out_dir,
                                             const MaterialLibrary& materials,
                                             const SettingsRules& rules);
+
+// E1 flip table: a finished job's stored designs re-finished without re-optimizing,
+// each version's unfinished and finished files re-certified (run_job.cpp). One JSON
+// line per accepted version.
+std::vector<std::string> refinish_job(const JobDescription& job, const std::string& job_dir,
+                                      const std::string& design_path,
+                                      const std::string& out_dir,
+                                      const MaterialLibrary& materials,
+                                      const SettingsRules& rules, bool export_only = false);
 
 }  // namespace topopt
