@@ -124,6 +124,37 @@ final class AppBuildHost {
         return offered
     }
 
+    // MARK: the number pad (B2, U15) — a popover: its own window
+
+    /// The open pad's window (the popover's), or nil.
+    var padWindow: NSWindow? {
+        guard NumberPadProbe.frames["numberPad"] != nil else { return nil }
+        return NSApp.windows.first { $0 !== window && $0.isVisible && $0.className.contains("Popover") }
+    }
+
+    /// A pad part's frame (`NumberPadProbe`, in the popover's window) in this page's space (top-left origin), or nil.
+    func padFrame(_ key: String) -> CGRect? {
+        guard let pw = padWindow, let f = NumberPadProbe.frames[key], let ch = pw.contentView?.bounds.height else { return nil }
+        let screen = pw.convertToScreen(CGRect(x: f.minX, y: ch - f.maxY, width: f.width, height: f.height))
+        let base = window.convertFromScreen(screen)
+        return CGRect(x: base.minX, y: size.height - base.maxY, width: base.width, height: base.height)
+    }
+
+    /// Click a pad part with real mouse events sent to the popover's window.
+    func padTap(_ key: String, _ what: String, settle: Double = 0.25, file: StaticString = #filePath, line: UInt = #line) throws {
+        let pw = try XCTUnwrap(padWindow, "★ \(what): no number pad is open", file: file, line: line)
+        let f = try XCTUnwrap(NumberPadProbe.frames[key], "★ \(what): the pad has no '\(key)'", file: file, line: line)
+        let ch = try XCTUnwrap(pw.contentView?.bounds.height)
+        let loc = NSPoint(x: f.midX, y: ch - f.midY)
+        for t in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let e = NSEvent.mouseEvent(with: t, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: pw.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            pw.sendEvent(e)
+            pump(0.06)
+        }
+        pump(settle)
+    }
+
     /// Opt-in (APP_BUILD_SHOT_DIR=<dir>): the page as a PNG for him (the 3D view draws nothing offscreen).
     func picture(_ name: String) throws {
         guard let dir = ProcessInfo.processInfo.environment["APP_BUILD_SHOT_DIR"] else { return }

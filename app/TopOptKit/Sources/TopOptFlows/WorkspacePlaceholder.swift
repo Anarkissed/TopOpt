@@ -208,6 +208,7 @@ public struct WorkspacePlaceholder: View {
     // ★ the safety margin (ruling 2026-10-26 13:12): Custom's draft, its refusal, the (i)
     @State private var safetyCustomDraft: String? = nil
     @State private var safetyRefusal: String? = nil
+    @State private var safetyCustomPadOpen = false   // B2 (U15): Custom…'s pad
     @State private var safetyInfoOpen = false
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
@@ -1699,6 +1700,8 @@ public struct WorkspacePlaceholder: View {
         .onPreferenceChange(LatticeBandChipKeepOutKey.self) { rects in
             if rects != bandChipKeepOut { bandChipKeepOut = rects }
         }
+        // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
+        .numberPadNote { model.toast = $0 }
     }
 
     /// Start the M7.7 optimize run for the current load case. Gated on the same
@@ -10924,7 +10927,8 @@ public struct WorkspacePlaceholder: View {
                 .numberPad(Binding(get: { depthPadKey == "row-depth-\(ref.key)" },
                                    set: { if !$0 { depthPadKey = nil } }),
                            config: .init(title: "Depth", unit: "mm",
-                                         allowsDecimal: true),
+                                         allowsDecimal: true,
+                                         range: NumberRange(LatticeSlabDepth.minMM, LatticeSlabDepth.maxMM)),
                            seed: project.latticeSlabDepthMM(ref, in: g.id)) { v in
                     guard let v else { return }
                     project.writeLatticeDepthMM(ref, mm: v)
@@ -11718,15 +11722,21 @@ public struct WorkspacePlaceholder: View {
                     .accessibilityLabel("About the safety margin")
                 Spacer()
             }
-            if let draft = safetyCustomDraft {
+            if safetyCustomDraft != nil {
+                // ★ B2 (U11, U15): Custom… is a number field whose pad opens at once; Done or a tap elsewhere keeps it, and
+                // under 150 % keeps 150 % ("Kept 150 % (150 % and up)", the app-map's "Custom… (150 % and up)")
                 HStack(spacing: DS.Space.s) {
-                    TextField("175", text: Binding(get: { draft }, set: { safetyCustomDraft = $0 }))
-                        .textFieldStyle(.roundedBorder).frame(width: 70)
-                        .onSubmit { commitCustomSafetyMargin() }
-                    Text("% of your load").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-                    Button("Set") { commitCustomSafetyMargin() }.buttonStyle(.plain)
-                        .foregroundStyle(DS.Color.accent.color).accessibilityIdentifier("safety-margin-set")
+                    NumberField(key: "safety-custom", title: "Safety margin",
+                                spec: FlexNumberSpec(value: (force.safetyMarginValue * 100).rounded(), unit: "%", step: 25,
+                                                     range: SafetyMargin.minimum * 100 ... 1000, decimals: 0),
+                                padRange: NumberRange(SafetyMargin.minimum * 100, nil),
+                                open: Binding(get: { safetyCustomPadOpen },
+                                              set: { safetyCustomPadOpen = $0; if !$0 { safetyCustomDraft = nil } })) { v in
+                        force.setSafetyMargin(v / 100); safetyRefusal = nil
+                    }
+                    Text("of your load").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
                 }
+                .onAppear { safetyCustomPadOpen = true }
             }
             if let r = safetyRefusal {
                 Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
@@ -11737,14 +11747,6 @@ public struct WorkspacePlaceholder: View {
             }
         }
         .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
-    }
-
-    /// Custom…: below 150 % is refused inline and nothing changes.
-    private func commitCustomSafetyMargin() {
-        switch SafetyMargin.parseCustom(safetyCustomDraft ?? "") {
-        case .success(let v): force.setSafetyMargin(v); safetyCustomDraft = nil; safetyRefusal = nil
-        case .failure(let r): safetyRefusal = r.line
-        }
     }
 
     /// "+ Add a load scenario" and its (i).
@@ -13213,21 +13215,20 @@ extension WorkspacePlaceholder {
         .accessibilityIdentifier("topology-primitive-row-\(id)")
     }
 
+    /// ★ B2 (U11, U15): a size is a number field — tap → the app's pad (never the system keyboard), drag → steps of 0.5 mm.
     private func primitiveField(_ label: String, _ value: Float, id: String,
                                 set: @escaping (Float) -> Void) -> some View {
         HStack(spacing: 4) {
             Text(label).dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
-            TextField(label, value: Binding(get: { Double(value) }, set: { set(Float($0)) }),
-                      format: .number.precision(.fractionLength(0...1)))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 13).monospacedDigit())
-                .frame(width: 60)
-                #if os(iOS)
-                .keyboardType(.decimalPad)
-                #endif
-                .accessibilityIdentifier("topology-primitive-field-\(id)")
+            NumberField(key: "topology-primitive-field-\(id)", title: Self.primitiveFieldName[label] ?? label,
+                        spec: FlexNumberSpec(value: Double(value), unit: "mm", step: 0.5,
+                                             range: Double(DesignPrimitive.minExtent) ... 10_000, decimals: 1),
+                        size: .bare,
+                        padRange: NumberRange(Double(DesignPrimitive.minExtent), nil), unitShown: false) { set(Float($0)) }
         }
     }
+    /// The pad's header names the size in words ("Length · 0.1 mm and up"); the row keeps its letters.
+    private static let primitiveFieldName = ["L": "Length", "W": "Width", "H": "Height", "\u{2300}": "Diameter"]
 
     // MARK: the Selections list (B1)
 

@@ -2384,7 +2384,7 @@ public struct LatticeSetupWizard: View {
             .onTapGesture { numberPadField = id }
             .numberPad(Binding(get: { numberPadField == id },
                                set: { if !$0 { numberPadField = nil } }),
-                       config: .init(title: "", unit: unit, allowsDecimal: true),
+                       config: .init(title: "", unit: unit, allowsDecimal: true, range: NumberRange(range)),
                        seed: value) { v in
                 guard let v else { return }
                 set(Swift.min(range.upperBound, Swift.max(range.lowerBound, v)))

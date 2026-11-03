@@ -114,13 +114,42 @@ public struct NumberPadEntry: Equatable, Sendable {
     }
 }
 
-/// The compact on-screen number pad. Rendered inside a `.popover` anchored to the chip
-/// that opened it (see `View.numberPad`). Emits the live parsed value on every keystroke
-/// through `onValue`; the caller writes it through its normal setter, so the entry is
-/// undoable and unit-safe by construction.
+/// ★ B2 (U15, design-system §4.33): the range a number may take, as the pad's header says it ("1 to 40 mm", "150 % and up")
+/// and as the toast says what was kept ("Kept 40 (1 to 40 mm)"). `upper` nil = no top ("Custom… (150 % and up)", app-map §7).
+public struct NumberRange: Equatable, Sendable {
+    public var lower: Double
+    public var upper: Double?
+    public init(_ lower: Double, _ upper: Double?) { self.lower = lower; self.upper = upper }
+    public init(_ r: ClosedRange<Double>) { self.init(r.lowerBound, r.upperBound) }
+
+    public func contains(_ v: Double) -> Bool { v >= lower - 1e-9 && (upper.map { v <= $0 + 1e-9 } ?? true) }
+    /// The nearest allowed value.
+    public func clamp(_ v: Double) -> Double { Swift.max(lower, upper.map { Swift.min($0, v) } ?? v) }
+
+    /// "1 to 40 mm", "150 % and up" (the unit once, at the end).
+    public func text(unit: String?) -> String {
+        let u = unit.map { " \($0)" } ?? ""
+        guard let upper else { return "\(Self.number(lower))\(u) and up" }
+        return "\(Self.number(lower)) to \(Self.number(upper))\(u)"
+    }
+    /// The toast after an out-of-range number: the number kept, then the range — "Kept 40 (1 to 40 mm)", "Kept 150 % (150 %
+    /// and up)" (the reviewer's wording, 11-03: a percent is said with its sign).
+    public func keptNote(_ kept: Double, unit: String?) -> String {
+        "Kept \(Self.number(kept))\(unit == "%" ? " %" : "") (\(text(unit: unit)))"
+    }
+
+    static func number(_ v: Double) -> String { String(format: "%g", (v * 100).rounded() / 100) }
+}
+
+/// The app's number pad (design-system §4.33): beside the number you tapped, 276 pt wide, radius 22, the dialog surface. Its
+/// header names the setting and its range; keys 50 pt tall, 7 8 9 ⌫ · 4 5 6 ± · 1 2 3 . · 0 Done. ± only where the number
+/// can be negative (dimmed elsewhere), the point only where it has decimals. The value shows selected, so the first key
+/// replaces it; a caret blinks once you type. Emits the live parsed value on every keystroke through `onValue`; the caller
+/// writes it through its normal setter, so the entry is undoable and unit-safe by construction. Done (or a tap anywhere
+/// else) keeps it; out of its range the nearest allowed value is kept and the page says so (`NumberPadField`).
 struct NumberPad: View {
     struct Config: Equatable {
-        /// Short caption shown above the keys ("Margin", "Layer height", "Weight").
+        /// The setting's name, shown in the header ("Depth", "Safety margin", "Weight").
         var title: String = ""
         /// Trailing unit shown next to the live number ("mm", "%", "lbs"); nil = none.
         var unit: String? = nil
@@ -133,6 +162,21 @@ struct NumberPad: View {
         /// ★ APP LIST 2 (B4): an SF Symbol drawn BEFORE the title — the Expand keypad's "+", matching its box and its
         /// handle. nil = the title alone (every keypad before B4).
         var titleSymbol: String? = nil
+        /// ★ B2 (U15): the range, for the header and for what a close keeps. nil = the caller's own clamp (no header range).
+        var range: NumberRange? = nil
+        /// The pad keeps the nearest allowed value on close (and says so). False: the number does it itself (NumberField,
+        /// which commits once, on close).
+        var clampsOnClose = true
+
+        /// "Depth · 1 to 40 mm" (the name alone without a range, the range alone without a name).
+        var header: String {
+            let r = range?.text(unit: unit)
+            switch (title.isEmpty, r) {
+            case (false, let r?): return "\(title) · \(r)"
+            case (true, let r?): return r
+            default: return title
+            }
+        }
     }
 
     let config: Config
@@ -140,177 +184,203 @@ struct NumberPad: View {
     let seed: Double?
     /// Live parsed value on every keystroke — nil when the field is momentarily empty.
     let onValue: (Double?) -> Void
+    /// Done. nil = dismiss the presentation it sits in (the popover a field without a host falls back to).
+    var onDone: (() -> Void)? = nil
+
+    /// §4.33's measures.
+    static let width: CGFloat = 276
+    static let keyHeight: CGFloat = 50
+    static let gap: CGFloat = DS.Space.s
+    static let inset: CGFloat = DS.Space.m
+    static let headerHeight: CGFloat = 16
+    static let displayHeight: CGFloat = 44
+    static var height: CGFloat { inset * 2 + headerHeight + gap + displayHeight + gap + keyHeight * 4 + gap * 3 }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var entry: NumberPadEntry
+    @State private var caretOn = true
     @ScaledMetric(relativeTo: .title2) private var numberSize: CGFloat = 24
 
-    init(config: Config, seed: Double?, onValue: @escaping (Double?) -> Void) {
+    init(config: Config, seed: Double?, onValue: @escaping (Double?) -> Void, onDone: (() -> Void)? = nil) {
         self.config = config
         self.seed = seed
         self.onValue = onValue
+        self.onDone = onDone
         _entry = State(initialValue: NumberPadEntry(seedValue: seed,
                                                     allowsDecimal: config.allowsDecimal,
                                                     allowsNegative: config.allowsNegative))
     }
 
     var body: some View {
-        VStack(spacing: DS.Space.m) {
+        VStack(spacing: Self.gap) {
+            header
             display
             keys
         }
-        .padding(DS.Space.ml)
-        .frame(width: 244)
+        .padding(Self.inset)
+        .frame(width: Self.width, height: Self.height)
         .foregroundStyle(DS.Color.textPrimary.color)
-        .background(DS.Surface.dialog.color)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).fill(DS.Surface.dialog.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+                .strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1)))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous))
+        .background(Self.probed("numberPad"))
+        .onDisappear { NumberPadProbe.frames = [:] }
+        .accessibilityIdentifier("numberPad")
     }
 
-    // MARK: live readout
+    // MARK: header + live readout
 
-    private var display: some View {
-        HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+    private var header: some View {
+        HStack(spacing: DS.Space.xs) {
             if let sym = config.titleSymbol {
                 Image(systemName: sym).font(.system(size: 10, weight: .heavy))
                     .foregroundStyle(DS.Color.textTertiary.color)
                     .accessibilityHidden(true)
             }
-            if !config.title.isEmpty {
-                Text(config.title.uppercased())
-                    .font(.system(size: 10, weight: .bold)).tracking(0.6)
-                    .foregroundStyle(DS.Color.textTertiary.color)
-            }
+            Text(config.header)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("numberPad-header")
+            Spacer(minLength: 0)
+        }
+        .frame(height: Self.headerHeight)
+    }
+
+    private var display: some View {
+        HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
             Spacer(minLength: DS.Space.s)
-            Text(entry.text.isEmpty ? "0" : entry.text)
-                .font(.system(size: numberSize, weight: .heavy)).monospacedDigit()
-                .tracking(-0.5)
-                .foregroundStyle(entry.text.isEmpty ? DS.Color.textTertiary.color
-                                                    : DS.Color.textPrimary.color)
+            HStack(spacing: 1) {
+                Text(entry.text.isEmpty ? "0" : entry.text)
+                    .font(.system(size: numberSize, weight: .heavy)).monospacedDigit()
+                    .tracking(-0.5)
+                    .foregroundStyle(entry.text.isEmpty ? DS.Color.textTertiary.color : DS.Color.textPrimary.color)
+                    .padding(.horizontal, entry.touched ? 0 : 3)
+                    // ★ §4.33: the value shows SELECTED until the first key (which replaces it)
+                    .background(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(entry.touched ? Color.clear : DS.Color.accent.opacity(0.45).color))
+                if entry.touched {
+                    // … then a caret (steady with reduced motion)
+                    Rectangle().fill(DS.Color.accent.color).frame(width: 2, height: numberSize)
+                        .opacity(reduceMotion || caretOn ? 1 : 0)
+                }
+            }
             if let unit = config.unit {
                 Text(unit).font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DS.Color.textTertiary.color)
             }
         }
-        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DS.Space.m)
+        .frame(maxWidth: .infinity, minHeight: Self.displayHeight, maxHeight: Self.displayHeight, alignment: .trailing)
         .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
             .fill(DS.Color.fillSubtle.color))
+        .task(id: entry.touched) {
+            guard entry.touched, !reduceMotion else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 530_000_000)
+                caretOn.toggle()
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(config.title)
         .accessibilityValue(entry.text.isEmpty ? "empty" : entry.text)
+        .accessibilityIdentifier("numberPad-value")
     }
 
     // MARK: keys
 
+    /// §4.33's grid: 7 8 9 ⌫ · 4 5 6 ± · 1 2 3 . · 0 (wide) Done (wide, accent).
     private var keys: some View {
-        VStack(spacing: DS.Space.s) {
-            ForEach(rows, id: \.self) { row in
-                HStack(spacing: DS.Space.s) {
-                    ForEach(row, id: \.self) { key in keyButton(key) }
+        VStack(spacing: Self.gap) {
+            HStack(spacing: Self.gap) { key(.digit(7)); key(.digit(8)); key(.digit(9)); key(.delete) }
+            HStack(spacing: Self.gap) { key(.digit(4)); key(.digit(5)); key(.digit(6)); key(.negate) }
+            HStack(spacing: Self.gap) { key(.digit(1)); key(.digit(2)); key(.digit(3)); key(.dot) }
+            HStack(spacing: Self.gap) {
+                key(.digit(0))
+                Button { (onDone ?? { dismiss() })() } label: {
+                    Text("Done")
+                        .font(.system(size: 17, weight: .bold))
+                        .frame(maxWidth: .infinity).frame(height: Self.keyHeight)
+                        .background(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                            .fill(DS.Color.accent.color))
+                        .foregroundStyle(.white)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .background(Self.probed("numberPad-done"))
+                .accessibilityLabel("Done")
+                .accessibilityIdentifier("numberPad-done")
             }
-            Button { dismiss() } label: {
-                Text("Done")
-                    .font(.system(size: 15, weight: .bold))
-                    .frame(maxWidth: .infinity).frame(height: 40)
-                    .background(Capsule().fill(DS.Color.accent.color))
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Done")
         }
     }
 
-    /// The 4×3 layout; the bottom-left slot is the decimal key (decimal fields) or a
-    /// blank spacer (integer fields), so integer pads never offer a "." that can't parse.
-    private var rows: [[Cell]] { [
-        [.digit(1), .digit(2), .digit(3)],
-        [.digit(4), .digit(5), .digit(6)],
-        [.digit(7), .digit(8), .digit(9)],
-        // ★ THE SIGN KEY TAKES THE DOT'S SLOT when the field is signed and has no
-        // decimals, and otherwise joins as a fourth key — the grid never grows a
-        // hole and never gains a row that pushes Done off a small pad.
-        config.allowsNegative
-            ? (config.allowsDecimal ? [.negate, .dot, .digit(0), .delete]
-                                    : [.negate, .digit(0), .delete])
-            : [.dot, .digit(0), .delete],
-    ] }
-
-    enum Cell: Hashable {
-        case digit(Int)
-        case dot
-        case delete
-        case negate
-    }
-
-    @ViewBuilder private func keyButton(_ cell: Cell) -> some View {
-        switch cell {
-        case .digit(let d):
-            padButton(String(d), a11y: String(d)) { press(.digit(d)) }
-        case .dot:
-            if config.allowsDecimal {
-                padButton(".", a11y: "decimal point") { press(.dot) }
-            } else {
-                Color.clear.frame(maxWidth: .infinity).frame(height: 46)
+    /// One key; a key the number can't use (± on a positive number, the point on a count) is dimmed and does nothing.
+    private func key(_ k: NumberPadEntry.Key) -> some View {
+        let (label, glyph, a11y, id, enabled): (String?, String?, String, String, Bool) = {
+            switch k {
+            case .digit(let d): return (String(d), nil, String(d), "\(d)", true)
+            case .dot: return (".", nil, "decimal point", "dot", config.allowsDecimal)
+            case .delete: return (nil, "delete.left", "delete", "delete", true)
+            case .negate: return (nil, "plus.forwardslash.minus", "positive or negative", "sign", config.allowsNegative)
             }
-        case .negate:
-            padButton(nil, glyph: "plus.forwardslash.minus",
-                      a11y: "positive or negative") { press(.negate) }
-        case .delete:
-            padButton(nil, glyph: "delete.left", a11y: "delete") { press(.delete) }
-        }
-    }
-
-    private func padButton(_ text: String?, glyph: String? = nil, a11y: String,
-                           _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        }()
+        return Button { press(k) } label: {
             Group {
-                if let text {
-                    Text(text).font(.system(size: 21, weight: .semibold)).monospacedDigit()
+                if let label {
+                    Text(label).font(.system(size: 22, weight: .semibold)).monospacedDigit()
                 } else if let glyph {
-                    Image(systemName: glyph).font(.system(size: 18, weight: .semibold))
+                    Image(systemName: glyph).font(.system(size: 19, weight: .semibold))
                 }
             }
-            .frame(maxWidth: .infinity).frame(height: 46)
-            .foregroundStyle(DS.Color.textPrimary.color)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
-                .fill(DS.Color.fillSubtle.color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+            .frame(maxWidth: .infinity).frame(height: Self.keyHeight)
+            .foregroundStyle((enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
+                .fill((enabled ? DS.Color.fillSubtle : DS.Color.fillDisabled).color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control, style: .continuous)
                     .strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
+        .background(Self.probed("numberPad-key-\(id)"))
         .accessibilityLabel(a11y)
+        .accessibilityIdentifier("numberPad-key-\(id)")
     }
 
     private func press(_ key: NumberPadEntry.Key) {
         entry.press(key)
+        caretOn = true
         onValue(entry.value)
+    }
+
+    /// A key's frame in the pad's own window (the popover's), for the hosted tests to click.
+    static func probed(_ name: String) -> some View {
+        GeometryReader { g in
+            Color.clear
+                .onAppear { NumberPadProbe.frames[name] = g.frame(in: .global) }
+                .onChange(of: g.frame(in: .global)) { NumberPadProbe.frames[name] = $0 }
+        }.allowsHitTesting(false)
+    }
+
+    /// A frame reaches the page (the hosted tests click it).
+    static func published(_ name: String) -> some View {
+        GeometryReader { g in
+            Color.clear.preference(key: ChromeKeepOutKey.self, value: [name: g.frame(in: .global)])
+        }.allowsHitTesting(false)
     }
 }
 
 extension View {
-    /// Attach the shared number pad, shown as a compact popover anchored to this view
-    /// (the chip). Toggle `presented` from the chip's tap; the pad emits the live parsed
-    /// value through `onValue` so the caller writes it via its normal setter.
+    /// Attach the shared number pad to this view (the number). Toggle `presented` from the number's tap; the pad emits the
+    /// live parsed value through `onValue` so the caller writes it via its normal setter.
     ///
-    /// On iPad (regular width) `.popover` is already an anchored floating panel; the
-    /// `presentationCompactAdaptation(.popover)` keeps it a popover on a compact width
-    /// too, so it is NEVER a system keyboard or a full-height sheet.
-    @ViewBuilder
+    /// ★ B2 (U15): the pad opens in a popover beside the number (below it, above when there is no room; never the system
+    /// keyboard, never a full-height sheet); out of range a close keeps the nearest allowed value and says so; with a
+    /// hardware keyboard connected no pad opens and the number takes typing in place (`NumberPadField`).
     func numberPad(_ presented: Binding<Bool>, config: NumberPad.Config, seed: Double?,
                    onValue: @escaping (Double?) -> Void) -> some View {
-        self.popover(isPresented: presented) {
-            numberPadContent(config: config, seed: seed, onValue: onValue)
-        }
-    }
-
-    @ViewBuilder
-    private func numberPadContent(config: NumberPad.Config, seed: Double?,
-                                  onValue: @escaping (Double?) -> Void) -> some View {
-        let pad = NumberPad(config: config, seed: seed, onValue: onValue)
-        if #available(iOS 16.4, macOS 13.3, *) {
-            pad.presentationCompactAdaptation(.popover)
-        } else {
-            pad
-        }
+        modifier(NumberPadField(presented: presented, config: config, seed: seed, onValue: onValue))
     }
 }
