@@ -207,9 +207,8 @@ public struct WorkspacePlaceholder: View {
     @State private var scenarioAnchorHint: UUID? = nil
     // ★ the safety margin (ruling 2026-10-26 13:12): Custom's draft, its refusal, the (i)
     @State private var safetyCustomDraft: String? = nil
-    @State private var safetyRefusal: String? = nil
     @State private var safetyCustomPadOpen = false   // B2 (U15): Custom…'s pad
-    @State private var safetyInfoOpen = false
+    @State private var laneControls = LaneControls()   // B2 (U16): the controls the top lane keeps clear of (@State: the page does NOT observe it — only the lane's own views do; observing it re-drew the page on every frame)
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
     /// The piece whose transform gizmo is up (it counts as picked: its chips show with it).
@@ -1702,6 +1701,8 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B2 (U15): what a number pad kept ("Kept 40 (1 to 40 mm)") is the page's toast
         .numberPadNote { model.toast = $0 }
+        // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
+        .laneControls(laneControls)
     }
 
     /// Start the M7.7 optimize run for the current load case. Gated on the same
@@ -4247,12 +4248,11 @@ public struct WorkspacePlaceholder: View {
                 Text(strutRefining ? "Adding the print repairs" : "Rebuilding the lattice")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text(strutRefining
-                     ? "The traced struts are shown. The arches, legs and merges are still being built."
-                     : "Your change is being applied to the strut preview.")
+                // ★ B2 (U16, §4.34): two lines at most — the detail is one short line
+                Text(strutRefining ? "traced struts shown · arches, legs and merges next" : "applying your change")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail)
             }
         }
         .padding(.vertical, DS.Space.s)
@@ -4454,10 +4454,10 @@ public struct WorkspacePlaceholder: View {
                 Text("Simulation running")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text("A finite-element solve is grading your lattice.")
+                Text("grading your lattice")   // ★ B2 (U16): two lines at most
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail)
             }
             Button { simBannerDismissed = true } label: {
                 Image(systemName: "xmark")
@@ -7743,6 +7743,8 @@ public struct WorkspacePlaceholder: View {
                             .strokeBorder((tint ?? DS.Color.strokePanel).color,
                                           lineWidth: tint != nil ? 2 : 1))
                 )
+                // ★ B2 (round 1, §4.2): a hold fills a ring round the button over its 3 s
+                .overlay { if onLongPress != nil, viewModePressDown, !HoldRing.controlOff { HoldRing().padding(-3) } }
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -11699,28 +11701,16 @@ public struct WorkspacePlaceholder: View {
     /// ★ THE SAFETY MARGIN, once per project (ruling 2026-10-26 13:12): one line, a menu of three presets and Custom…
     private var safetyMarginRow: some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
-            HStack(spacing: DS.Space.s) {
-                Text("Safety margin").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                Menu {
-                    ForEach(SafetyMargin.presets, id: \.value) { p in
-                        Button(p.label) { force.setSafetyMargin(p.value); safetyCustomDraft = nil; safetyRefusal = nil }
-                    }
-                    Button(SafetyMargin.customLabel) {
-                        safetyCustomDraft = String(format: "%.0f", force.safetyMarginValue * 100); safetyRefusal = nil
-                    }
-                } label: {
-                    Text(SafetyMargin.label(for: force.safetyMarginValue)).dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.accent.color).lineLimit(1)
+            // ★ B2 (round 1, §4.21): the setting row — Safety margin  Light use · 150 % ⌄ (i)
+            SettingRow(key: "safetyMargin", id: "safety-margin", label: "Safety margin",
+                       value: SafetyMargin.label(for: force.safetyMarginValue), info: SafetyMargin.info,
+                       infoLabel: "About the safety margin") {
+                ForEach(SafetyMargin.presets, id: \.value) { p in
+                    Button(p.label) { force.setSafetyMargin(p.value); safetyCustomDraft = nil }
                 }
-                .background(GeometryReader { geo in
-                    Color.clear.preference(key: ChromeKeepOutKey.self, value: ["safetyMargin": geo.frame(in: .global)])
-                }.allowsHitTesting(false))
-                .accessibilityIdentifier("safety-margin")
-                Button { safetyInfoOpen.toggle() } label: { Image(systemName: "info.circle") }
-                    .buttonStyle(.plain).foregroundStyle(DS.Color.textTertiary.color)
-                    .accessibilityLabel("About the safety margin")
-                Spacer()
+                Button(SafetyMargin.customLabel) {
+                    safetyCustomDraft = String(format: "%.0f", force.safetyMarginValue * 100)
+                }
             }
             if safetyCustomDraft != nil {
                 // ★ B2 (U11, U15): Custom… is a number field whose pad opens at once; Done or a tap elsewhere keeps it, and
@@ -11732,18 +11722,11 @@ public struct WorkspacePlaceholder: View {
                                 padRange: NumberRange(SafetyMargin.minimum * 100, nil),
                                 open: Binding(get: { safetyCustomPadOpen },
                                               set: { safetyCustomPadOpen = $0; if !$0 { safetyCustomDraft = nil } })) { v in
-                        force.setSafetyMargin(v / 100); safetyRefusal = nil
+                        force.setSafetyMargin(v / 100)
                     }
                     Text("of your load").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
                 }
                 .onAppear { safetyCustomPadOpen = true }
-            }
-            if let r = safetyRefusal {
-                Text(r).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.warning.color)
-            }
-            if safetyInfoOpen {
-                Text(SafetyMargin.info).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, DS.Space.l).padding(.bottom, DS.Space.m)
@@ -12939,10 +12922,11 @@ extension WorkspacePlaceholder {
 
     /// "Optimization finished — 4 variants." [Open Results] — top centre, where See Results sat.
     func topologyResultsMessage(_ text: String) -> some View {
-        VStack {
+        // ★ B2 (U16, §4.34): in the top lane — centred, as wide as the row's controls allow, two lines at most
+        LaneSlot(key: "topology-results-message") { _ in
             HStack(spacing: DS.Space.m) {
                 Text(text).dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).fixedSize()
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Button { viewOriginal = false } label: {
                     Text(TopologyResultsNotice.openLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, DS.Space.m).frame(height: 32)
@@ -12954,14 +12938,11 @@ extension WorkspacePlaceholder {
                 CornerPairStyle.x44("xmark", label: "Dismiss", id: "topology-results-message-dismiss") { topoNotice.dismiss() }
             }
             .padding(.leading, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.panel.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(DS.Shadow.panel)
-            .padding(.top, DS.Space.xl3)
-            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("topology-results-message")
     }

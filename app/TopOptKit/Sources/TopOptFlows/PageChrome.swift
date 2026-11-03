@@ -221,6 +221,9 @@ public enum PageChrome {
     public static let infoBar: CGFloat = 40
     /// The side panel's width.
     public static let panelWidth: CGFloat = 348
+    /// ★ B2 (U14, design-system §4.19, his N5b "enlarge the Lattice Settings modal to fit the 'Cell Size' options"): the wide
+    /// panel — Lattice settings, Squish, Print plan (the folder-tab panels). The Selections / Topology panels stay 348 (U2).
+    public static let widePanelWidth: CGFloat = 440
     /// The bottom-right receipt drawer's width (bar U4). Wider than the side
     /// panel because the receipt is a three-column table, and it opens over the
     /// page's own empty right-hand space rather than over the model.

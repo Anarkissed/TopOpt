@@ -62,6 +62,8 @@ public struct PrintParamsSheet: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            // ★ B2 (U17, §4.11; U6): what the sheet asks is a row IN it — never an alert over it
+            if savingPreset, !project.paramsLocked { presetNameRow }
 
             if project.paramsLocked {
                 lockedBody
@@ -78,17 +80,27 @@ public struct PrintParamsSheet: View {
         .padding(DS.Space.xl6)
         .frame(width: 560, alignment: .leading)
         .foregroundStyle(DS.Color.textPrimary.color)
-        // Save the current values as a named, app-wide preset (editable mode only).
-        .alert("Save preset", isPresented: $savingPreset) {
+    }
+
+    /// Save the current values as a named, app-wide preset (editable mode only): the name, Cancel, Save — in the sheet.
+    private var presetNameRow: some View {
+        HStack(spacing: DS.Space.s) {
             TextField("Preset name", text: $presetName)
-            Button("Cancel", role: .cancel) { presetName = "" }
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("preset-name")
+            Button("Cancel") { presetName = ""; savingPreset = false }
+                .buttonStyle(.plain).foregroundStyle(DS.Color.textSecondary.color)
+                .frame(minWidth: 44, minHeight: 44)
             Button("Save") {
                 model.savePreset(named: presetName, params: project.printParams)
-                presetName = ""
+                presetName = ""; savingPreset = false
             }
-        } message: {
-            Text("Save these print parameters as a reusable preset, available to every project.")
+            .buttonStyle(.plain).foregroundStyle(DS.Color.accent.color).fontWeight(.semibold)
+            .frame(minWidth: 44, minHeight: 44)
+            .disabled(presetName.trimmingCharacters(in: .whitespaces).isEmpty)
         }
+        .padding(.top, DS.Space.m)
+        .background(CornerPairStyle.publish("presetNameRow"))
     }
 
     // MARK: header
@@ -139,7 +151,7 @@ public struct PrintParamsSheet: View {
                     .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
             }
 
-            Button { savingPreset = true } label: {
+            Button { savingPreset.toggle() } label: {
                 HStack(spacing: DS.Space.xs) {
                     Image(systemName: "square.and.arrow.down")
                         .font(.system(size: 11, weight: .semibold))
@@ -151,6 +163,7 @@ public struct PrintParamsSheet: View {
                     .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("presetSave"))
         }
     }
 
@@ -293,6 +306,7 @@ public struct PrintParamsSheet: View {
                 .background(fieldBackground)
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("printParam-infill"))
             .numberPad(padBinding(.infill),
                        config: .init(title: "Infill density", unit: "%", allowsDecimal: false, range: ParamField.infill.range),
                        seed: Double(project.printParams.infillPercent)) { v in

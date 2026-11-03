@@ -211,6 +211,8 @@ public struct SelectionsList: View {
     /// How far a scenario folder's groups sit in from the folder row.
     static let folderIndent: CGFloat = 20
     static let lineHeight: CGFloat = 44
+    /// ★ B2 (U3, design-system §1 / §4.4): a group row is 48 pt (folder, header and setting rows stay 44).
+    static let groupLineHeight: CGFloat = 48
     static let captionsHeight: CGFloat = 20
     static let maxListHeight: CGFloat = 420
     /// The most the open list draws (its header, the divider, 420 pt of lines) — a face chip's second tier keeps out of the
@@ -347,12 +349,35 @@ public struct SelectionsList: View {
             if deleteAsk == g.id, !DeleteConfirm.controlOldHeaderLine { deleteConfirm(g) }
             if isPicked || isOpen?(g.id) == true { rows(g) }
         }
-        .background(isPicked ? DS.Color.fillSubtle.color : Color.clear)
+        // ★ B2 (round 1, R2.3 / R4, design-system §4.4): a selected row reads as selected at a glance — the fill, the 3 pt
+        // accent bar and a 1.5 pt accent outline inset 4 pt; every row is its own line, a hairline under it
+        .background(isPicked ? (Self.controlOldSelectedLook ? DS.Color.fillSubtle : DS.Color.fillSelected).color : Color.clear)
+        .overlay {
+            if isPicked, !Self.controlOldSelectedLook {
+                RoundedRectangle(cornerRadius: Self.outlineRadius, style: .continuous)
+                    .strokeBorder(DS.Color.accent.color, lineWidth: Self.outlineWidth)
+                    .padding(Self.outlineInset)
+                    .background(publish("selOutline-\(g.id.uuidString)").padding(Self.outlineInset))
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .leading) {
-            if isPicked { Rectangle().fill(g.color.color).frame(width: 3).padding(.vertical, 2) }
+            if isPicked {
+                Rectangle().fill((Self.controlOldSelectedLook ? g.color : DS.Color.accent).color).frame(width: 3).padding(.vertical, 2)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1).allowsHitTesting(false)
         }
         .id(Self.lineScrollID(g.id))
     }
+
+    /// RED CONTROL (SelectedRowHostedTests): today's look — a faint fill and the group-colour bar, no outline.
+    @MainActor static var controlOldSelectedLook = false
+    /// The selected row's outline (§4.4, round 1).
+    static let outlineInset: CGFloat = 4
+    static let outlineWidth: CGFloat = 1.5
+    static let outlineRadius: CGFloat = 10
 
     // MARK: ★ B2 (U10, design-system §4.3): the overflow cue
 
@@ -433,7 +458,7 @@ public struct SelectionsList: View {
                     }
                 }
                 .padding(.vertical, Self.nameWrapPadding)
-                .frame(minHeight: Self.lineHeight)   // ★ B2 (U2): taller only while a long name wraps
+                .frame(minHeight: Self.groupLineHeight)   // ★ B2 (U2, U3): 48 pt; taller only while a long name wraps
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -29,6 +29,25 @@ public final class ViewProjection: ObservableObject {
 }
 
 /// ★ B2 (round 1, R0): each stage keeps every view it has today, the X-ray pair first (design-system §4.2's table).
+/// ★ B2 (round 1, design-system §4.2): a 3-second hold fills a ring round its button while it is held; its release is not
+/// also a tap (`ViewModeHold`). Shared by every view button that has a hold.
+struct HoldRing: View {
+    static let seconds: Double = 3
+    /// RED CONTROL (HoldRingHostedTests): no ring (today's hold).
+    @MainActor static var controlOff = false
+    @State private var fill: CGFloat = 0
+
+    var body: some View {
+        Circle().trim(from: 0, to: fill)
+            .stroke(DS.Color.accent.color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .onAppear { withAnimation(.linear(duration: Self.seconds)) { fill = 1 } }
+            .background(CornerPairStyle.publish("holdRing"))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 enum ViewCornerParity {
     /// ★ RED CONTROL (hosted, ViewCornerParityHostedTests): the view with this label publishes no frame, as if dropped.
     @MainActor static var controlDropped: String? = nil

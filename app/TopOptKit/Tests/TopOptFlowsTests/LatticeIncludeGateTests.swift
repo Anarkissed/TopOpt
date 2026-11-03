@@ -200,7 +200,8 @@ final class LatticeIncludeGateTests: XCTestCase {
             .contains("showLatticePage || stage != .lattice || selectionsCollapsed"))
         // the surfaces
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() }"), "the stage's Lattice")
-        XCTAssertTrue(ws.contains("if ok { requestRun() } else if marks { goToWallMarking() }"), "the workspace's Optimize")
+        // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)
+        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() }"), "the workspace's Optimize")
         XCTAssertTrue(ws.contains("onMarkWalls: { goToWallMarking() })"), "the lattice page")
         XCTAssertTrue(ws.contains(".wallMarking { goToWallMarking() }"), "the wizard")
         let page = try src("LatticePage.swift")

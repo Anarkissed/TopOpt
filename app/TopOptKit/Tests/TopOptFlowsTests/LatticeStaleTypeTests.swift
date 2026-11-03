@@ -94,7 +94,8 @@ final class LatticeStaleTypeTests: XCTestCase {
         XCTAssertEqual(ws.components(separatedBy: "let opensType = opensLatticeType(ok, summary)").count - 1, 3)   // B3: + the split row
         XCTAssertTrue(try member(ws, "private func opensLatticeType").contains("!ok && summary == latticeSettingsRefusal"))
         XCTAssertTrue(ws.contains("if ok { requestLatticeRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
-        XCTAssertTrue(ws.contains("if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
+        // (B1 notes 4 and O1 clear the Mac-not-answering and could-not-finish lines first; re-pinned in B2)
+        XCTAssertTrue(ws.contains("if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }"))
         // B3: three controls — Optimize, Lattice, and Topology's Optimize-split row that is the Lattice button there
         XCTAssertEqual(ws.components(separatedBy: ".disabled(!ok && !marks && !opensType)").count - 1, 3, "★ greyed, yet tappable")
         let go = try member(ws, "private func goToLatticeType()")
