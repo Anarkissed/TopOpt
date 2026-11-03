@@ -6,11 +6,20 @@
 //       reason. Where the finished margin reads under the loop's, the margin required
 //       set between the two flips the verdict: the version moves to rejected_variants
 //       with the plain reason (on this bar it reads higher, so nothing is refused).
+//   (w) THE WRITTEN FILE IS CLEAN (ruling 2026-11-03 02:46). The same bar with exact
+//       Protect regions — a box over the held end reaching a voxel into the air, and a
+//       cylinder through the middle (his squish rig's shape: a Protect cylinder whose
+//       ends meet the voxel surface): every finished file has 0 edges on more than two
+//       triangles, no open edge, no point contact, one shell per body, and imports
+//       through the normal import (the re-check reads it that way); each "finish"
+//       block says its style and whether it fell back.
 //   (f) "PRINT IT THIS WAY". An L (a 40 mm base, a 30 mm post on its end) pushed
 //       sideways at the post's top, re-checked upright (+Z) and lying on its end (+X):
 //       the interlayer margins differ, the overhang areas differ (the post's back
 //       hangs 30 mm over the bed lying down), both reported with a plain reason.
 
+#include "topopt/face_overrides.hpp"
+#include "topopt/finish.hpp"
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -140,10 +149,10 @@ int main() {
       const double vol = std::fabs(signed_volume(file));
       const double rho = materials.at("PLA").density_g_cm3;
       std::printf("[finish-run] (e) margin %.4g in the loop, %.4g on the finished file; "
-                  "mass %.4g g from the report, %.4g g from the file; %zu fixed, stair-step "
+                  "mass %.4g g from the report, %.4g g from the file; %d fixed, stair-step "
                   "%.1f %%; %.2f s\n",
                   m_loop, m_fin, mass, rho * vol / 1000.0,
-                  0.0 + (rep.find("\"thin_spots_fixed\": []", f) == std::string::npos),
+                  rep.find("\"thin_spots_fixed\": []", f) == std::string::npos ? 1 : 0,
                   num_after(rep, "stair_step_removed_pct", f), num_after(rep, "seconds", f));
       CHECK(std::isfinite(m_fin) && m_fin > 0.0, "(e) the finished shape is re-certified");
       CHECK(std::fabs(mass - rho * vol / 1000.0) <= 1e-6 * mass + 1e-9,
@@ -180,6 +189,47 @@ int main() {
       std::printf("[finish-run] (e) the finished margin is HIGHER (%.4g > %.4g): nothing to "
                   "refuse on this fixture\n", m_fin, m_loop);
     }
+  }
+
+  // ── (w) ────────────────────────────────────────────────────────────────────
+  try {
+    JobDescription job = bar_job(bar, 0.0);
+    KeepRegion end;
+    end.min = Vec3{-1.9, -1.0, -1.0};
+    end.max = Vec3{3.0, 11.6, 11.6};
+    KeepRegion rod;
+    rod.cylinder = true;
+    rod.axis = 0;
+    rod.min = Vec3{14.0, 2.3, 2.3};
+    rod.max = Vec3{26.0, 8.3, 8.3};
+    job.keep_regions = {end, rod};
+    const RunJobResult r = run_job(job, dir, dir + "/finish_run_w", materials, rules, false,
+                                   RunObservability{});
+    const std::string rep = r.report_json;
+    int dirty = 0, unimportable = 0;
+    for (const std::string& path : r.mesh_paths) {
+      const WrittenAudit w = audit_as_written(read_stl_file(path).mesh);
+      std::printf("[finish-run] (w) %s: %d edge(s) on more than two triangles, %d open, %d "
+                  "point contact(s), %d shell(s), %d body(ies)\n",
+                  path.substr(path.find_last_of('/') + 1).c_str(), w.non_manifold_edges,
+                  w.boundary_edges, w.non_manifold_vertices, w.shells, w.bodies);
+      dirty += w.non_manifold_edges > 0 || w.boundary_edges > 0 || w.non_manifold_vertices > 0 ||
+               w.shells != w.bodies;
+      try {
+        (void)import_part_file_resolved(path);
+      } catch (const std::exception& e) {
+        ++unimportable;
+        std::fprintf(stderr, "  the normal import refuses it: %s\n", e.what());
+      }
+    }
+    CHECK(!r.mesh_paths.empty() && dirty == 0, "(w) every finished file is clean as written");
+    CHECK(unimportable == 0, "(w) every finished file passes the normal import");
+    CHECK(rep.find("\"style\": ") != std::string::npos &&
+              rep.find("\"finish_fallback\": ") != std::string::npos,
+          "(w) the finish block says its style and whether it fell back");
+  } catch (const std::exception& e) {
+    ++g_failures;
+    std::fprintf(stderr, "FAIL: (w) threw: %s\n", e.what());
   }
 
   // ── (f) ────────────────────────────────────────────────────────────────────

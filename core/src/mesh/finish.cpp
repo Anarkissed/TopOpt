@@ -1,8 +1,10 @@
 #include "topopt/finish.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <map>
 #include <unordered_map>
@@ -303,6 +305,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
     pol.has_design_box = ctx.growth && ctx.has_box;
     pol.box_min = ctx.box.min;
     pol.box_max = ctx.box.max;
+    if (ctx.slim_line_mm > 0.0) pol.thin_section_mm = ctx.slim_line_mm;  // slim: 2 x printable min
     sign = classify_trust_sign(mesh, *ctx.grid, *ctx.density, pol);
   }
   auto combine = [](TrustSign a, TrustSign b) {
@@ -327,6 +330,20 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       }
     }
   }
+  // SLIM: below the line on the mesh itself (the voxel thickness above cannot see a
+  // member thinner than a voxel), outward-only.
+  const bool slim = ctx.slim_line_mm > 0.0;
+  const double line = ctx.slim_line_mm, under = line * (1.0 - 1e-3);
+  std::vector<double> t0;
+  std::size_t guarded = 0;
+  if (slim) {
+    t0 = vertex_local_thickness_mm(mesh, line);
+    for (std::size_t v = 0; v < nv; ++v)
+      if (t0[v] < under && sign[v] != TrustSign::Pinned && sign[v] != TrustSign::OutwardOnly) {
+        sign[v] = combine(sign[v], TrustSign::OutwardOnly);
+        ++guarded;
+      }
+  }
   SurfaceConstraints k;
   k.cell_mm = ctx.cell_mm;
   k.trust_voxels = 0.5;
@@ -350,10 +367,14 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       }
     }
   // The stair-step amplitude: the RMS distance of each free vertex from the smooth
-  // surface its staircase approximates, taken as the input low-passed by a long
-  // Taubin lambda/mu filter (no shrink; 100 pairs, the pins held).
-  TriangleMesh ref = mesh;
-  {
+  // surface ITS OWN staircase approximates — the surface low-passed by a long Taubin
+  // lambda/mu filter (the pins held), along that low-pass's normal. Each shape is
+  // measured against its own low-pass, so a uniform offset (the slim flow moves a thin
+  // shell's two faces as a whole) is not read as roughness: the input-referenced
+  // measure read 0.0 % on a 3.6 mm shell the flow took from 3.8 % to 22.5 % closer to
+  // its analytic spheres.
+  auto low_pass = [&](const TriangleMesh& in) {
+    TriangleMesh ref = in;
     const double lam = 0.33, mu = -0.34;
     std::vector<Vec3> next(nv);
     for (int it = 0; it < kFinishRefIterations; ++it) {
@@ -368,9 +389,11 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       }
       ref.vertices.swap(next);
     }
-  }
-  const std::vector<Vec3> ref_n = vertex_normals(ref);
+    return ref;
+  };
   auto roughness = [&](const TriangleMesh& mm) {
+    const TriangleMesh ref = low_pass(mm);
+    const std::vector<Vec3> ref_n = vertex_normals(ref);
     double s2 = 0.0;
     std::size_t n = 0;
     for (std::size_t v = 0; v < nv; ++v) {
@@ -384,14 +407,87 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   };
   const double r0 = roughness(mesh);
   SurfaceOperatorResult res = mean_curvature_flow(mesh, mp, k);
+  // THE GUARDS.
+  //  - NO FOLD: the flow can turn a triangle over (PR 306's A x20 does it to 164 of the
+  //    analytic sphere's 22,460, most over a fifth of a cell across; a 4 mm slab's
+  //    rims, 20). The corners of every turned triangle walk back toward where they
+  //    started, halving their move, until none is turned (held where they were after
+  //    kFoldHalvings). Halving keeps each move inside its box and on its side (C1, C2).
+  //  - SLIM's 1.8 mm: a vertex the flow took under the line (and thinner than it was)
+  //    turns outward-only, with its ring, and the flow re-runs from the start.
+  // A slim finish that cannot keep its line falls back to the safe one.
+  const std::vector<Vec3> fn0 = face_normals(mesh);
+  std::size_t fold_moved = 0;
+  auto unfold = [&](TriangleMesh& out) {
+    constexpr int kFoldHalvings = 10;
+    std::vector<char> seen(nv, 0);
+    for (int h = 0; h <= kFoldHalvings; ++h) {
+      const std::vector<Vec3> fn1 = face_normals(out);
+      std::vector<std::size_t> corners;
+      for (std::size_t t = 0; t < fn0.size(); ++t) {
+        if (len(fn0[t]) < 0.5) continue;  // degenerate on the way in
+        if (len(fn1[t]) > 0.5 && dot(fn0[t], fn1[t]) > 0.0) continue;
+        for (int c = 0; c < 3; ++c) corners.push_back(static_cast<std::size_t>(mesh.triangles[t][c]));
+      }
+      if (corners.empty()) return;
+      std::sort(corners.begin(), corners.end());
+      corners.erase(std::unique(corners.begin(), corners.end()), corners.end());
+      for (const std::size_t v : corners) {
+        if (!seen[v]) { seen[v] = 1; ++fold_moved; }
+        out.vertices[v] = h == kFoldHalvings
+                              ? mesh.vertices[v]
+                              : add(mesh.vertices[v], mul(sub(out.vertices[v], mesh.vertices[v]), 0.5));
+      }
+    }
+  };
+  unfold(res.mesh);
+  int rounds = 0;
+  for (; slim; ++rounds) {
+    const std::vector<double> t1 = vertex_local_thickness_mm(res.mesh, line);
+    std::size_t changed = 0, bad = 0;
+    auto hold = [&](std::size_t v) {
+      if (k.sign[v] == TrustSign::Pinned || k.sign[v] == TrustSign::OutwardOnly) return;
+      k.sign[v] = combine(k.sign[v], TrustSign::OutwardOnly);
+      ++changed;
+      ++guarded;
+    };
+    for (std::size_t v = 0; v < nv; ++v)
+      if (t1[v] < under && t1[v] < t0[v] - 1e-6) {
+        ++bad;
+        hold(v);
+        for (const int w : nb[v]) hold(static_cast<std::size_t>(w));
+      }
+    if (bad == 0) break;
+    if (changed == 0 || rounds + 1 >= kFinishSlimRounds) {
+      // It cannot keep every member at its line: the safe finish, said.
+      FinishContext safe = ctx;
+      safe.slim_line_mm = 0.0;
+      TriangleMesh out = surface_finish(mesh, safe, pinned_in, outward_only, report);
+      if (report) {
+        report->fallback = true;
+        char b[160];
+        std::snprintf(b, sizeof b, "The slim finish would take a member under %.1f mm", line);
+        report->fallback_reason = b;
+      }
+      return out;
+    }
+    res = mean_curvature_flow(mesh, mp, k);
+    unfold(res.mesh);
+  }
   if (report) {
+    report->slim = slim;
+    report->slim_rounds = rounds;
+    report->slim_guarded_vertices = guarded;
+    report->fold_held_vertices = fold_moved;
     report->surface_applied = true;
     const double r1 = roughness(res.mesh);
     report->roughness_before_mm = r0;
     report->roughness_after_mm = r1;
     report->stair_step_removed_pct = r0 > 0.0 ? std::max(0.0, 100.0 * (1.0 - r1 / r0)) : 0.0;
     report->pinned_vertices = static_cast<std::size_t>(
-        std::count(sign.begin(), sign.end(), TrustSign::Pinned));
+        std::count(k.sign.begin(), k.sign.end(), TrustSign::Pinned));
+    report->outward_only_vertices = static_cast<std::size_t>(
+        std::count(k.sign.begin(), k.sign.end(), TrustSign::OutwardOnly));
   }
   return res.mesh;
 }
@@ -422,6 +518,228 @@ int positive_volume_bodies(const TriangleMesh& m) {
   return n;
 }
 
+WrittenAudit audit_as_written(const TriangleMesh& m) {
+  WrittenAudit a;
+  std::map<std::array<float, 3>, int> at;
+  std::vector<int> id(m.vertices.size());
+  for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+    const std::array<float, 3> k{static_cast<float>(m.vertices[v].x),
+                                 static_cast<float>(m.vertices[v].y),
+                                 static_cast<float>(m.vertices[v].z)};
+    id[v] = at.emplace(k, static_cast<int>(at.size())).first->second;
+  }
+  const std::size_t nt = m.triangles.size();
+  auto corner = [&](std::size_t t, int k) { return id[static_cast<std::size_t>(m.triangles[t][k])]; };
+  std::map<std::pair<int, int>, std::vector<int>> uses;
+  for (std::size_t t = 0; t < nt; ++t)
+    for (int e = 0; e < 3; ++e) {
+      const int p = corner(t, e), q = corner(t, (e + 1) % 3);
+      uses[{std::min(p, q), std::max(p, q)}].push_back(static_cast<int>(t));
+    }
+  // Shells: triangles joined through two-triangle edges (a pinch joins nothing).
+  // Fans: each triangle corner joined to the same vertex's corner across such an edge;
+  // a vertex with corners in more than one fan is where shells touch at a point.
+  std::vector<int> tp(nt), cp(3 * nt);
+  for (std::size_t t = 0; t < nt; ++t) tp[t] = static_cast<int>(t);
+  for (std::size_t c = 0; c < cp.size(); ++c) cp[c] = static_cast<int>(c);
+  auto find = [](std::vector<int>& par, int x) {
+    while (par[static_cast<std::size_t>(x)] != x)
+      x = par[static_cast<std::size_t>(x)] = par[static_cast<std::size_t>(par[static_cast<std::size_t>(x)])];
+    return x;
+  };
+  auto corner_of = [&](int t, int vid) {
+    for (int k = 0; k < 3; ++k)
+      if (corner(static_cast<std::size_t>(t), k) == vid) return 3 * t + k;
+    return 3 * t;
+  };
+  std::vector<std::array<float, 3>> pos(at.size());
+  for (const auto& kv : at) pos[static_cast<std::size_t>(kv.second)] = kv.first;
+  for (const auto& kv : uses) {
+    if (kv.second.size() == 1) ++a.boundary_edges;
+    if (kv.second.size() > 2) {
+      ++a.non_manifold_edges;
+      if (a.bad_edge_midpoints.size() < 8) {
+        const auto& p = pos[static_cast<std::size_t>(kv.first.first)];
+        const auto& q = pos[static_cast<std::size_t>(kv.first.second)];
+        a.bad_edge_midpoints.push_back({0.5 * (double(p[0]) + q[0]), 0.5 * (double(p[1]) + q[1]),
+                                        0.5 * (double(p[2]) + q[2])});
+      }
+      continue;
+    }
+    if (kv.second.size() != 2) continue;
+    const int t1 = kv.second[0], t2 = kv.second[1];
+    tp[static_cast<std::size_t>(find(tp, t1))] = find(tp, t2);
+    for (const int vid : {kv.first.first, kv.first.second})
+      cp[static_cast<std::size_t>(find(cp, corner_of(t1, vid)))] = find(cp, corner_of(t2, vid));
+  }
+  std::map<int, double> vol;
+  for (std::size_t t = 0; t < nt; ++t) {
+    const Vec3& p = m.vertices[static_cast<std::size_t>(m.triangles[t][0])];
+    const Vec3& q = m.vertices[static_cast<std::size_t>(m.triangles[t][1])];
+    const Vec3& r = m.vertices[static_cast<std::size_t>(m.triangles[t][2])];
+    vol[find(tp, static_cast<int>(t))] += dot(p, cross(q, r)) / 6.0;
+  }
+  a.shells = static_cast<int>(vol.size());
+  for (const auto& kv : vol) a.bodies += kv.second > 0.0;
+  std::vector<int> fan_of(at.size(), -1);
+  std::vector<char> bad(at.size(), 0);
+  for (std::size_t c = 0; c < cp.size(); ++c) {
+    const std::size_t vid = static_cast<std::size_t>(corner(c / 3, static_cast<int>(c % 3)));
+    const int f = find(cp, static_cast<int>(c));
+    if (fan_of[vid] < 0) fan_of[vid] = f;
+    else if (fan_of[vid] != f && !bad[vid]) { bad[vid] = 1; ++a.non_manifold_vertices; }
+  }
+  return a;
+}
+
+TriangleMesh weld_as_written(const TriangleMesh& m) {
+  std::map<std::array<float, 3>, int> first;
+  std::vector<int> to(m.vertices.size());
+  bool merged = false;
+  for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+    const std::array<float, 3> k{static_cast<float>(m.vertices[v].x),
+                                 static_cast<float>(m.vertices[v].y),
+                                 static_cast<float>(m.vertices[v].z)};
+    const auto ins = first.emplace(k, static_cast<int>(v));
+    to[v] = ins.first->second;
+    merged = merged || !ins.second;
+  }
+  if (!merged) return m;
+  std::vector<std::array<int, 3>> tris;
+  for (const auto& t : m.triangles) {
+    const std::array<int, 3> r{to[static_cast<std::size_t>(t[0])], to[static_cast<std::size_t>(t[1])],
+                               to[static_cast<std::size_t>(t[2])]};
+    if (r[0] != r[1] && r[1] != r[2] && r[2] != r[0]) tris.push_back(r);  // a collapsed sliver goes
+  }
+  // A fin: two triangles on the same three vertices, opposite windings. Both go.
+  auto rotated = [](std::array<int, 3> t) {
+    while (t[0] != std::min({t[0], t[1], t[2]})) t = {t[1], t[2], t[0]};
+    return t;
+  };
+  std::map<std::array<int, 3>, std::vector<std::size_t>> by_set;
+  for (std::size_t t = 0; t < tris.size(); ++t) {
+    std::array<int, 3> k = tris[t];
+    std::sort(k.begin(), k.end());
+    by_set[k].push_back(t);
+  }
+  std::vector<char> gone(tris.size(), 0);
+  for (const auto& kv : by_set) {
+    const std::vector<std::size_t>& g = kv.second;
+    for (std::size_t x = 0; x < g.size(); ++x)
+      for (std::size_t y = x + 1; y < g.size(); ++y)
+        if (!gone[g[x]] && !gone[g[y]] && rotated(tris[g[x]]) != rotated(tris[g[y]])) {
+          gone[g[x]] = gone[g[y]] = 1;
+        }
+  }
+  TriangleMesh out;
+  std::vector<int> nid(m.vertices.size(), -1);
+  for (std::size_t t = 0; t < tris.size(); ++t) {
+    if (gone[t]) continue;
+    std::array<int, 3> r{};
+    for (int k = 0; k < 3; ++k) {
+      int& n = nid[static_cast<std::size_t>(tris[t][k])];
+      if (n < 0) {
+        n = static_cast<int>(out.vertices.size());
+        out.vertices.push_back(m.vertices[static_cast<std::size_t>(tris[t][k])]);
+      }
+      r[k] = n;
+    }
+    out.triangles.push_back(r);
+  }
+  return out;
+}
+
+TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm3,
+                                  int keep_bodies, int* dropped) {
+  if (dropped) *dropped = 0;
+  const TriangleMesh clean = clean_degenerate_triangles(mesh);
+  int n = 0;
+  const std::vector<int> root = triangle_component_roots(clean, n);
+  if (n <= 1) return mesh;
+  std::map<int, double> vol;
+  for (std::size_t t = 0; t < clean.triangles.size(); ++t) {
+    const Vec3& p = clean.vertices[static_cast<std::size_t>(clean.triangles[t][0])];
+    const Vec3& q = clean.vertices[static_cast<std::size_t>(clean.triangles[t][1])];
+    const Vec3& r = clean.vertices[static_cast<std::size_t>(clean.triangles[t][2])];
+    vol[root[t]] += dot(p, cross(q, r)) / 6.0;
+  }
+  std::vector<std::pair<double, int>> pos;
+  for (const auto& kv : vol)
+    if (kv.second > 0.0) pos.push_back({kv.second, kv.first});
+  std::sort(pos.begin(), pos.end(), [](const auto& a, const auto& b) {
+    return a.first != b.first ? a.first > b.first : a.second < b.second;
+  });
+  std::vector<char> keep(clean.triangles.size() + 1, 0);
+  int gone = 0;
+  for (const auto& kv : vol) {
+    bool k = std::fabs(kv.second) >= min_volume_mm3;
+    for (int b = 0; b < keep_bodies && b < static_cast<int>(pos.size()); ++b)
+      k = k || pos[static_cast<std::size_t>(b)].second == kv.first;
+    if (static_cast<std::size_t>(kv.first) >= keep.size()) keep.resize(static_cast<std::size_t>(kv.first) + 1, 0);
+    keep[static_cast<std::size_t>(kv.first)] = k;
+    gone += !k;
+  }
+  if (dropped) *dropped = gone;
+  if (gone == 0) return mesh;
+  return rebuild_from_components(clean, root, keep);
+}
+
+int file_thin_joints(const VoxelGrid& g, const std::vector<char>& occ) {
+  const std::size_t nv = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny) *
+                         static_cast<std::size_t>(g.nz);
+  if (occ.size() != nv) return 0;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  auto at = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * static_cast<std::size_t>(ny) + static_cast<std::size_t>(j)) *
+               static_cast<std::size_t>(nx) + static_cast<std::size_t>(i);
+  };
+  std::vector<int> label(nv, -1);
+  std::vector<std::size_t> queue;
+  int id = 0;
+  for (std::size_t seed = 0; seed < nv; ++seed) {
+    if (!occ[seed] || label[seed] >= 0) continue;
+    queue.assign(1, seed);
+    label[seed] = id;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+      const std::size_t e = queue[q];
+      const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+      const int nb[6][3] = {{i - 1, j, k}, {i + 1, j, k}, {i, j - 1, k},
+                            {i, j + 1, k}, {i, j, k - 1}, {i, j, k + 1}};
+      for (const auto& c : nb) {
+        if (c[0] < 0 || c[0] >= nx || c[1] < 0 || c[1] >= ny || c[2] < 0 || c[2] >= nz) continue;
+        const std::size_t f = at(c[0], c[1], c[2]);
+        if (occ[f] && label[f] < 0) {
+          label[f] = id;
+          queue.push_back(f);
+        }
+      }
+    }
+    ++id;
+  }
+  std::vector<std::uint64_t> pairs;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const int le = label[at(i, j, k)];
+        if (le < 0) continue;
+        for (int dz = -1; dz <= 1; ++dz)
+          for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+              if (std::abs(dx) + std::abs(dy) + std::abs(dz) < 2) continue;  // self / face
+              const int a = i + dx, b = j + dy, c = k + dz;
+              if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
+              const int lf = label[at(a, b, c)];
+              if (lf < 0 || lf == le) continue;
+              pairs.push_back((static_cast<std::uint64_t>(std::min(lf, le)) << 32) |
+                              static_cast<std::uint64_t>(std::max(lf, le)));
+            }
+      }
+  std::sort(pairs.begin(), pairs.end());
+  return static_cast<int>(std::unique(pairs.begin(), pairs.end()) - pairs.begin());
+}
+
 std::string finish_verdict_reason(const FinishRecheck& r) {
   if (!r.ran) return "";
   auto x = [](double v) {
@@ -437,6 +755,8 @@ std::string finish_verdict_reason(const FinishRecheck& r) {
   if (r.keep_clear_voxels > 0) return "After finishing, a Keep clear has material in it";
   if (r.pieces > 1) return "After finishing, it prints in " + std::to_string(r.pieces) + " pieces";
   if (r.loose_pieces > 0) return "After finishing, a piece is loose";
+  if (r.thin_joints > r.thin_joints_before)
+    return "After finishing, a joint holds only along an edge or at a corner";
   return "";
 }
 
@@ -480,6 +800,10 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
       r.volume_after_mm3 = signed_volume(m);
     }
   }
+  for (std::size_t v = 0; v < m.vertices.size() && v < pins.size(); ++v)
+    r.pinned_moved += pins[v] && (m.vertices[v].x != mesh.vertices[v].x ||
+                                  m.vertices[v].y != mesh.vertices[v].y ||
+                                  m.vertices[v].z != mesh.vertices[v].z);
   r.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   return m;
 }

@@ -573,8 +573,19 @@ std::string export_variant_alpha(const MinimizePlasticVariant& variant,
 // (measured 0.29 mm over a 30-degree face at 1.1 mm voxels). So a region meant to make
 // a face exact reaches at least one voxel out past it, into the air, where the part
 // has nothing to restore (test_keep_oriented).
+// E1 (reviewer's ruling 2026-11-03 02:46): THE WRITTEN FILE IS CLEAN. Manifold's
+// output is manifold in its own indices, but two of its vertices can be distinct and
+// round to ONE float: a zero-area sliver on them puts its long edge on four triangles
+// once the file is read (his squish rig: 4 such edges where a Protect cylinder's end
+// met the voxel surface). And where Protect boxes meet the voxel surface the boolean
+// leaves loose slivers of voxel bump in the air above the face (68 on that rig, 0.00
+// to 0.25 mm3, beside a 99,842 mm3 part). The result is welded as written
+// (weld_as_written) and every shell under one solve voxel (`min_piece_mm3`) goes,
+// never one of the export's own bodies; a result still not clean is tried again with
+// the voxel surface nudged another way, and said if none is.
 TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh& part,
-                                const std::vector<KeepRegion>& keeps) {
+                                const std::vector<KeepRegion>& keeps,
+                                double min_piece_mm3 = 0.0) {
   if (keeps.empty()) return exported;
 #ifdef TOPOPT_HAVE_MANIFOLD
   auto to_manifold = [](const TriangleMesh& m) {
@@ -636,8 +647,12 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
   // triangles once written as floats (2 on the tilted test); 1 um apart they fuse
   // cleanly, far below any print resolution. The part side is never moved.
   constexpr double kNudge = 1e-3;  // mm
-  const manifold::Manifold E = to_manifold(exported).Translate(
-      {kNudge * 0.5377, kNudge * 0.8326, kNudge * 0.1327});
+  // The nudges tried, in order: the first is the one every earlier export used.
+  constexpr double kNudges[3][3] = {
+      {0.5377, 0.8326, 0.1327}, {-0.4103, 0.2311, 0.8821}, {0.7071, -0.5513, 0.4428}};
+  const manifold::Manifold E0 = to_manifold(exported);
+  const manifold::Manifold E = E0.Translate(
+      {kNudge * kNudges[0][0], kNudge * kNudges[0][1], kNudge * kNudges[0][2]});
   const manifold::Manifold P = to_manifold(part);
   if (E.Status() != manifold::Manifold::Error::NoError ||
       P.Status() != manifold::Manifold::Error::NoError) {
@@ -651,16 +666,37 @@ TriangleMesh keep_regions_exact(const TriangleMesh& exported, const TriangleMesh
                                       : P.Status()));
     return exported;
   }
-  const manifold::MeshGL g = ((E - K) + (P ^ K_part)).GetMeshGL();
+  const int bodies = audit_as_written(exported).bodies;
+  const manifold::Manifold PK = P ^ K_part;
   TriangleMesh out;
-  out.vertices.reserve(g.NumVert());
-  for (std::size_t v = 0; v < g.NumVert(); ++v)
-    out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
-                            g.vertProperties[v * g.numProp + 2]});
-  for (std::size_t t = 0; t < g.NumTri(); ++t)
-    out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
-                             static_cast<int>(g.triVerts[3 * t + 1]),
-                             static_cast<int>(g.triVerts[3 * t + 2])});
+  int dropped = 0;
+  for (int n = 0; n < 3; ++n) {
+    const manifold::Manifold En =
+        n == 0 ? E
+               : E0.Translate({kNudge * kNudges[n][0], kNudge * kNudges[n][1],
+                               kNudge * kNudges[n][2]});
+    const manifold::MeshGL g = ((En - K) + PK).GetMeshGL();
+    out = TriangleMesh{};
+    out.vertices.reserve(g.NumVert());
+    for (std::size_t v = 0; v < g.NumVert(); ++v)
+      out.vertices.push_back({g.vertProperties[v * g.numProp], g.vertProperties[v * g.numProp + 1],
+                              g.vertProperties[v * g.numProp + 2]});
+    for (std::size_t t = 0; t < g.NumTri(); ++t)
+      out.triangles.push_back({static_cast<int>(g.triVerts[3 * t]),
+                               static_cast<int>(g.triVerts[3 * t + 1]),
+                               static_cast<int>(g.triVerts[3 * t + 2])});
+    out = drop_fragment_shells(weld_as_written(out), min_piece_mm3, bodies, &dropped);
+    const WrittenAudit w = audit_as_written(out);
+    if (w.non_manifold_edges == 0 && w.non_manifold_vertices == 0 && w.boundary_edges == 0) break;
+    if (n == 2)
+      std::fprintf(stderr,
+                   "WARNING: KEEP regions: the exact export still has %d edge(s) on more than "
+                   "two triangles and %d point contact(s) after three tries.\n",
+                   w.non_manifold_edges, w.non_manifold_vertices);
+  }
+  if (dropped > 0)
+    std::fprintf(stderr, "[keep] %d loose sliver(s) under one solve voxel dropped from the "
+                 "exact export\n", dropped);
   return out;
 #else
   (void)part;
@@ -704,6 +740,15 @@ RunFinish make_run_finish(const JobDescription& job, const MinimizePlasticOption
   }
   f.ctx.cad = cad;
   f.ctx.cad_spacing_mm = sg.spacing;
+  f.ctx.slim_line_mm = 2.0 * f.ctx.min_thickness_mm;  // his ruling 2026-11-03: slim
+  return f;
+}
+
+// The same finishing with C2's own thin-section line: the per-version fallback.
+RunFinish safe_finish(const RunFinish& fin) {
+  RunFinish f = fin;
+  f.ctx.slim_line_mm = 0.0;
+  if (!f.part_solid.empty()) f.ctx.part_solid = nullptr;  // re-pointed per use
   return f;
 }
 
@@ -716,9 +761,13 @@ FinishBlock finish_block(const FinishReport& r) {
   for (const ThinSpot& t : r.left) b.left.push_back({t.centre_mm, t.before_mm, t.after_mm, t.reason});
   b.surface_applied = r.surface_applied;
   b.stair_step_removed_pct = r.stair_step_removed_pct;
+  b.slim = r.slim;
+  b.finish_fallback = r.fallback;
+  b.finish_fallback_reason = r.fallback_reason;
   b.volume_before_mm3 = std::fabs(r.volume_before_mm3);
   b.volume_after_mm3 = std::fabs(r.volume_after_mm3);
   b.pinned_vertices = r.pinned_vertices;
+  b.pinned_moved = r.pinned_moved;
   b.roughness_vertices = r.roughness_vertices;
   b.seconds = r.seconds;
   return b;
@@ -730,21 +779,24 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
                                        const StepModel* cad = nullptr,
                                        const std::vector<KeepRegion>& keeps = {},
                                        const RunFinish* fin = nullptr,
-                                       FinishBlock* fb = nullptr) {
+                                       FinishBlock* fb = nullptr,
+                                       TriangleMesh* unfinished = nullptr) {
   if (fin != nullptr) {  // E1: the finished shape, after CAD projection and exact Protect
     const TriangleMesh raw = variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps);
     FinishContext c = fin->ctx;
     c.density = &variant.optimization.physical_density;
     if (!fin->part_solid.empty()) c.part_solid = &fin->part_solid;
     FinishReport r;
-    TriangleMesh m = finish_shape(raw, c, &r);
+    // Welded as written: the file is the shape (a float-coincident sliver goes).
+    TriangleMesh m = weld_as_written(finish_shape(raw, c, &r));
     if (fb) *fb = finish_block(r);
+    if (unfinished) *unfinished = raw;
     return m;
   }
   if (!keeps.empty() && cad != nullptr)  // item KEEP: exact inside each keep region
     return keep_regions_exact(
         variant_export_model_mesh(variant, out, sg, printed_iso, cad, {}), cad->mesh,
-        keeps);
+        keeps, sg.spacing * sg.spacing * sg.spacing);
   const int sf = out.smooth_factor;
   TriangleMesh smooth;  // only populated when sf > 1
   if (sf > 1) {
@@ -814,6 +866,99 @@ TriangleMesh variant_export_model_mesh(const MinimizePlasticVariant& variant,
   return (sf > 1) ? smooth : variant.exported_mesh();
 }
 
+// E1 (e) WITH HIS FALLBACK (reviewer's rulings 2026-11-03 02:46 + 02:48): one
+// version's finished shape, re-checked as the FILE it ships as (the normal import:
+// the file is clean), slim first and, when a re-check fails, safe
+// (finish_with_fallback). Margin, Keep clear, pieces, loose pieces and thin joints
+// (edge / corner-only contacts of the file on the solve grid, against the unfinished
+// file's) — the reason is plain words, never a silent pass.
+struct VersionFinish {
+  TriangleMesh mesh;  // the finished shape that ships (model frame)
+  FinishBlock fb;
+  std::string refusal;  // non-empty: refused after finishing, for this reason
+  AnalyzeJobResult analysis;
+};
+VersionFinish finish_and_recheck(const MinimizePlasticVariant& v, const JobDescription& job,
+                                 const std::string& job_dir, const VoxelGrid& sg, double iso,
+                                 const StepModel* model, const RunFinish& fin,
+                                 const DesignMask* clearance, double density_g_cm3,
+                                 const MaterialLibrary& materials, const SettingsRules& rules,
+                                 const std::string& check_dir, double margin_before,
+                                 double margin_required, int bodies_exported) {
+  const auto t0 = std::chrono::steady_clock::now();
+  VersionFinish out;
+  const RunFinish safe = safe_finish(fin);
+  TriangleMesh raw;
+  int joints_before = -1;
+  auto occupancy = [&](const TriangleMesh& m) {
+    const VoxelGrid fv = voxelize_onto_grid(m, sg);
+    std::vector<char> o(sg.voxel_count(), 0);
+    for (std::size_t i = 0; i < o.size() && i < fv.tags.size(); ++i) o[i] = fv.tags[i] != VoxelTag::Empty;
+    return o;
+  };
+  auto finish = [&](bool slim) -> const TriangleMesh& {
+    out.fb = FinishBlock{};
+    out.mesh = variant_export_model_mesh(v, job.output, sg, iso, model, job.keep_regions,
+                                         slim ? &fin : &safe, &out.fb,
+                                         raw.triangles.empty() ? &raw : nullptr);
+    return out.mesh;
+  };
+  auto check = [&](const TriangleMesh& m) -> std::string {
+    if (joints_before < 0) joints_before = file_thin_joints(sg, occupancy(raw));
+    std::error_code mk;
+    std::filesystem::create_directories(check_dir, mk);
+    const std::string stl = join_path(check_dir, "v.stl");
+    write_stl_file(stl, m);
+    FinishBlock& fb = out.fb;
+    try {
+      out.analysis = analyze_job(job, job_dir, check_dir, materials, rules, stl, {});
+    } catch (const std::exception& e) {
+      const WrittenAudit w = audit_as_written(m);
+      std::fprintf(stderr, "[finish] version vf %.2f: the finished file does not import: %s\n",
+                   v.requested_volume_fraction, e.what());
+      return "After finishing, the file is not one clean solid (" +
+             std::to_string(w.non_manifold_edges) + " edge(s) on more than two triangles)";
+    }
+    fb.recheck_ran = true;
+    fb.margin = out.analysis.analysis.margin_effective;
+    fb.margin_before = margin_before;
+    // Mass from the files themselves: the finished one, and the unfinished export.
+    fb.mass_grams = density_g_cm3 * fb.volume_after_mm3 / 1000.0;
+    fb.mass_before_grams = density_g_cm3 * fb.volume_before_mm3 / 1000.0;
+    const std::vector<char> occ = occupancy(m);
+    fb.keep_clear_voxels = 0;
+    if (clearance != nullptr && clearance->size() == occ.size())
+      for (std::size_t i = 0; i < occ.size(); ++i)
+        fb.keep_clear_voxels += occ[i] && (*clearance)[i] == MaskValue::FrozenVoid;
+    // Pieces: the file's bodies (positive-volume shells; a sealed void is not one).
+    fb.pieces = positive_volume_bodies(m);
+    fb.thin_joints = file_thin_joints(sg, occ);
+    FinishRecheck rc;
+    rc.ran = true;
+    rc.margin = fb.margin;
+    rc.margin_required =
+        out.analysis.margin_required > 0.0 ? out.analysis.margin_required : margin_required;
+    rc.keep_clear_voxels = fb.keep_clear_voxels;
+    // Only a piece the finishing ADDED refuses: a part exported in N bodies stays N.
+    rc.pieces = fb.pieces > std::max(1, bodies_exported) ? fb.pieces : 1;
+    rc.thin_joints = fb.thin_joints;
+    rc.thin_joints_before = joints_before;
+    return finish_verdict_reason(rc);
+  };
+  const FallbackOutcome o = finish_with_fallback(finish, check);
+  if (o.fallback) {
+    std::string r = o.fallback_reason;
+    const std::string pre = "After finishing, ";
+    if (r.rfind(pre, 0) == 0) r = "With the slim finish, " + r.substr(pre.size());
+    out.fb.finish_fallback = true;
+    out.fb.finish_fallback_reason = r;
+  }
+  out.refusal = o.refusal;
+  out.fb.seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  return out;
+}
+
 std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::string& out_dir, const JobOutput& out,
                                 const VoxelGrid& sg, double printed_iso = 0.5,
@@ -829,7 +974,9 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                           : variant_export_model_mesh(variant, out, sg, printed_iso, cad, keeps, fin);
   const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
   TriangleMesh baked;
-  if (R) baked = rotate_mesh(model_mesh, *R);
+  // A rotated file is welded as written again (unchanged when nothing coincides).
+  if (R) baked = fin != nullptr || finished != nullptr ? weld_as_written(rotate_mesh(model_mesh, *R))
+                                                       : rotate_mesh(model_mesh, *R);
   const TriangleMesh& export_mesh = R ? baked : model_mesh;
   if (out.mesh_format == "3mf") {
 #ifdef TOPOPT_HAVE_3MF
@@ -10384,10 +10531,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   if (!analyze_mesh_path.empty()) {
     StepModel edited;
     try {
-      if (smooth.own_export)
-        edited.mesh = read_stl_file(join_path(job_dir, analyze_mesh_path)).mesh;
-      else
-        edited = import_part_file_resolved(join_path(job_dir, analyze_mesh_path));
+      edited = import_part_file_resolved(join_path(job_dir, analyze_mesh_path));
     } catch (const std::exception& e) {
       throw JobError(std::string("analyze: cannot import analyze mesh: ") +
                      e.what());
@@ -12978,14 +13122,19 @@ MinimizePlasticResult strengthen_versions(
       const std::string stl =
           join_path(work, "v" + std::to_string(k + 1) + "_" +
                               std::to_string(attempt) + ".stl");
-      // E1: the version is verified on its FINISHED file, the one it exports.
+      // E1: the version is verified on its FINISHED file, the one it exports: slim,
+      // and when that file fails, the safe finish's (his fallback ruling 2026-11-03).
       const RunFinish fin = make_run_finish(job, options, &model, r.solved_grid);
+      const RunFinish safe_fin = safe_finish(fin);
+      auto verify_file = [&](const TriangleMesh& m) {
+        write_stl_file(stl, m);
+        return analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
+      };
       FinishBlock fb;
-      write_stl_file(stl, variant_export_model_mesh(v, job.output, r.solved_grid, iso,
-                                                    &model, job.keep_regions, &fin, &fb));
-      const AnalyzeJobResult a =
-          analyze_job(job, job_dir, join_path(work, "verify"), materials, rules, stl, {});
-      const double verified = a.analysis.margin_effective;
+      const TriangleMesh slim_mesh = variant_export_model_mesh(
+          v, job.output, r.solved_grid, iso, &model, job.keep_regions, &fin, &fb);
+      AnalyzeJobResult a = verify_file(slim_mesh);
+      double verified = a.analysis.margin_effective;
       // What the version prints, against the part as drawn and the Keep Clears.
       const std::vector<double>& rho = v.optimization.physical_density;
       long long inter = 0, uni = 0, clear = 0;
@@ -12997,13 +13146,6 @@ MinimizePlasticResult strengthen_versions(
                  options.clearance_void[i] == MaskValue::FrozenVoid &&
                  mask[i] != MaskValue::FrozenSolid;
       }
-      double defl = 0.0;
-      if (a.analysis.displacement_field.size() ==
-          static_cast<std::size_t>(3 * fea_node_count(G)))
-        for (const int n : load_nodes) {
-          const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
-          defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
-        }
       // ITEM 50 ACCEPTANCE (reviewer's ruling 2026-10-26; strengthen_accept.hpp):
       // the verified export meets the target (already >= 1.05 x the previous
       // version's), no anchored piece detached / load path severed, no Keep
@@ -13019,6 +13161,43 @@ MinimizePlasticResult strengthen_versions(
       att.unheld_scenario = a.unheld_scenario;  // LOAD SCENARIOS, on the export
       if (!att.unheld_scenario.empty())
         att.unheld_reason = scenario_unheld_reason(att.unheld_scenario);
+      if (!strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason)) {
+        FinishBlock sfb;
+        AnalyzeJobResult sa = verify_file(variant_export_model_mesh(
+            v, job.output, r.solved_grid, iso, &model, job.keep_regions, &safe_fin, &sfb));
+        StrengthenAttemptReport satt = att;
+        satt.verified_margin = sa.analysis.margin_effective;
+        satt.unheld_scenario = sa.unheld_scenario;
+        satt.unheld_reason =
+            sa.unheld_scenario.empty() ? "" : scenario_unheld_reason(sa.unheld_scenario);
+        if (strengthen_attempt_accepted(satt, target, kMarginBelowRequiredReason)) {
+          FinishRecheck rc;
+          rc.ran = true;
+          rc.margin = verified;
+          rc.margin_required = target;
+          std::string why = att.unheld_reason.empty() ? finish_verdict_reason(rc)
+                                                      : att.unheld_reason;
+          const std::string pre = "After finishing, ";
+          if (why.rfind(pre, 0) == 0) why = "With the slim finish, " + why.substr(pre.size());
+          sfb.finish_fallback = true;
+          sfb.finish_fallback_reason = why;
+          std::fprintf(stderr, "[finish] strengthen version %d uses the safe finish: %s\n",
+                       k + 1, why.c_str());
+          fb = sfb;
+          a = std::move(sa);
+          att = satt;
+          verified = att.verified_margin;
+        } else {
+          write_stl_file(stl, slim_mesh);  // the attempt shown is the slim one, as before
+        }
+      }
+      double defl = 0.0;
+      if (a.analysis.displacement_field.size() ==
+          static_cast<std::size_t>(3 * fea_node_count(G)))
+        for (const int n : load_nodes) {
+          const double* u = &a.analysis.displacement_field[3 * static_cast<std::size_t>(n)];
+          defl = std::max(defl, std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]));
+        }
       vr.attempts.push_back(att);
       const bool accepted_here =
           strengthen_attempt_accepted(att, target, kMarginBelowRequiredReason);
@@ -13124,6 +13303,8 @@ MinimizePlasticResult strengthen_versions(
     // the margin it was accepted on. Without this a version was "verified" with no file
     // (test_keep_strengthen: in loop 1.32, verified 2.43, target 1.5).
     MinimizePlasticVariant& shown = best.evaluated.front();
+    shown.report.finish = vr.finish;  // E1: the export finishes it as it was verified
+    for (VariantReport& rv : best.report.variants) rv.finish = vr.finish;  // one rung
     if (!shown.accepted) {
       shown.accepted = true;
       shown.report.accepted = true;
@@ -15099,10 +15280,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
       const RunFinish fin = make_run_finish(job, options, &result.model, solved_grid);
+      const RunFinish safe = safe_finish(fin);  // a strengthen version that fell back
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid,
                               run_printed_iso(options), &result.model,
-                              job.keep_regions, &fin);
+                              job.keep_regions, v.report.finish.finish_fallback ? &safe : &fin);
       streamed_paths.push_back(p);
       // The analytic design, written BESIDE the mesh into out_dir (S1(d)).
       // ★ AND DELIBERATELY NOT PUSHED INTO THE PATH LIST. `mesh_paths` means
@@ -15665,55 +15847,30 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     const VoxelGrid& sg = result.pipeline.solved_grid;
     const RunFinish fin = make_run_finish(job, options, &result.model, sg);
     const std::string check_dir = join_path(out_dir, "finish_check");
+    const DesignMask* clearance =
+        !options.clearance_void.empty() && options.clearance_void.size() == sg.voxel_count()
+            ? &options.clearance_void
+            : nullptr;
     for (MinimizePlasticVariant& v : result.pipeline.evaluated) {
       if (!v.accepted) continue;
-      const auto t0 = std::chrono::steady_clock::now();
-      FinishBlock fb;
-      TriangleMesh m = variant_export_model_mesh(v, job.output, sg, run_printed_iso(options),
-                                                 &result.model, job.keep_regions, &fin, &fb);
-      const std::string stl = join_path(check_dir, "v.stl");
-      std::error_code mk;
-      std::filesystem::create_directories(check_dir, mk);
-      write_stl_file(stl, m);
-      SmoothRequest own;
-      own.own_export = true;
-      const AnalyzeJobResult a =
-          analyze_job(job, job_dir, check_dir, materials, rules, stl, own);
-      fb.recheck_ran = true;
-      fb.margin = a.analysis.margin_effective;
-      fb.margin_before = v.report.margin_effective;
-      // Mass from the files themselves: the finished one, and the unfinished export.
-      fb.mass_grams = material.density_g_cm3 * fb.volume_after_mm3 / 1000.0;
-      fb.mass_before_grams = material.density_g_cm3 * fb.volume_before_mm3 / 1000.0;
-      fb.thin_joints = v.report.fragile_joints;
-      // Keep clear: printed voxels of the finished file inside a Keep clear.
-      if (!options.clearance_void.empty() && options.clearance_void.size() == sg.voxel_count()) {
-        const VoxelGrid fv = voxelize_onto_grid(m, sg);
-        for (std::size_t i = 0; i < sg.voxel_count(); ++i)
-          fb.keep_clear_voxels += fv.tags[i] != VoxelTag::Empty &&
-                                  options.clearance_void[i] == MaskValue::FrozenVoid;
-      }
-      // Pieces: the file's bodies (positive-volume shells; a sealed void is not one).
-      fb.pieces = positive_volume_bodies(m);
-      FinishRecheck rc;
-      rc.ran = true;
-      rc.margin = fb.margin;
-      rc.margin_required = v.report.margin_required;
-      rc.keep_clear_voxels = fb.keep_clear_voxels;
-      // Only a piece the finishing ADDED refuses: a part exported in N bodies stays N.
-      rc.pieces = fb.pieces > std::max(1, v.report.bodies_exported) ? fb.pieces : 1;
-      const std::string why = finish_verdict_reason(rc);
-      fb.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-      if (!why.empty()) {
+      VersionFinish f = finish_and_recheck(
+          v, job, job_dir, sg, run_printed_iso(options), &result.model, fin, clearance,
+          material.density_g_cm3, materials, rules, check_dir, v.report.margin_effective,
+          v.report.margin_required, v.report.bodies_exported);
+      FinishBlock& fb = f.fb;
+      if (!f.refusal.empty()) {
         fb.verdict_changed = true;
-        fb.verdict_reason = why;
+        fb.verdict_reason = f.refusal;
         v.accepted = false;
         v.report.accepted = false;
-        v.report.rejection_reason = why;
+        v.report.rejection_reason = f.refusal;
         std::fprintf(stderr, "[finish] version vf %.2f refused after finishing: %s\n",
-                     v.requested_volume_fraction, why.c_str());
+                     v.requested_volume_fraction, f.refusal.c_str());
       } else {
-        finished_meshes[v.requested_volume_fraction] = std::move(m);
+        if (fb.finish_fallback)
+          std::fprintf(stderr, "[finish] version vf %.2f uses the safe finish: %s\n",
+                       v.requested_volume_fraction, fb.finish_fallback_reason.c_str());
+        finished_meshes[v.requested_volume_fraction] = std::move(f.mesh);
       }
       v.report.finish = fb;
       // The report's own lists carry copies of the line: update them, and move a
@@ -15752,6 +15909,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         if (refused) std::remove(path.c_str()); else kept.push_back(path);
       }
       streamed_paths = std::move(kept);
+      // A version that fell back to the safe finish was streamed slim: its file is
+      // written again as the shape that was re-checked.
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+        if (!v.accepted || !v.report.finish.finish_fallback) continue;
+        const auto m = finished_meshes.find(v.requested_volume_fraction);
+        if (m != finished_meshes.end())
+          (void)export_variant_mesh(v, out_dir, job.output, sg, run_printed_iso(options),
+                                    &result.model, job.keep_regions, &fin, &m->second);
+      }
     }
   }
 
@@ -15799,12 +15965,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // strengthen run, the same finishing its verify ran.
     const RunFinish final_fin =
         make_run_finish(job, options, &result.model, result.pipeline.solved_grid);
+    const RunFinish final_safe = safe_finish(final_fin);
     for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
       if (!variant.accepted) continue;
       const auto cached = finished_meshes.find(variant.requested_volume_fraction);
+      // A strengthen version that fell back in its verify exports the safe finish.
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid,
-          run_printed_iso(options), &result.model, job.keep_regions, &final_fin,
+          run_printed_iso(options), &result.model, job.keep_regions,
+          variant.report.finish.finish_fallback ? &final_safe : &final_fin,
           cached != finished_meshes.end() ? &cached->second : nullptr));
       // The analytic design, written beside the mesh (S1(d)) and NOT added to
       // `mesh_paths` — see the streaming branch above for why.
@@ -15909,7 +16078,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                                       const std::string& design_path,
                                       const std::string& out_dir,
                                       const MaterialLibrary& materials,
-                                      const SettingsRules& rules) {
+                                      const SettingsRules& rules, bool export_only) {
   std::vector<std::string> lines;
   const StepModel model = import_part_file_resolved(join_path(job_dir, job.model));
   const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
@@ -15935,42 +16104,109 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
     v.requested_volume_fraction = d.requested_volume_fraction;
     v.accepted = true;
     v.optimization.physical_density = d.density;
-    const TriangleMesh raw = variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions);
-    FinishBlock fb;
-    const TriangleMesh done =
-        variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &fin, &fb);
-    const std::string a_stl = join_path(out_dir, "before.stl"), b_stl = join_path(out_dir, "after.stl");
+    const TriangleMesh raw = weld_as_written(
+        variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions));
+    if (export_only) {  // the written file's edges, stage by stage (no solves)
+      FinishBlock fb;
+      const TriangleMesh done =
+          variant_export_model_mesh(v, job.output, sg, iso, &model, job.keep_regions, &fin, &fb);
+      auto au = [](const char* name, const TriangleMesh& m) {
+        const WrittenAudit w = audit_as_written(m);
+        char b[256];
+        std::snprintf(b, sizeof b, "\"%s\": [%d, %d, %d, %d, %d]", name, w.non_manifold_edges,
+                      w.boundary_edges, w.non_manifold_vertices, w.shells, w.bodies);
+        std::string s = b;
+        for (const Vec3& p : w.bad_edge_midpoints) {
+          std::snprintf(b, sizeof b, " (%.3f %.3f %.3f)", p.x, p.y, p.z);
+          s += b;
+        }
+        return s;
+      };
+      lines.push_back("{\"vf\": " + std::to_string(d.requested_volume_fraction) + ", " +
+                      au("mc", variant_export_model_mesh(v, job.output, sg, iso, nullptr, {})) + ", " +
+                      au("cad", variant_export_model_mesh(v, job.output, sg, iso, &model, {})) + ", " +
+                      au("keep", raw) + ", " + au("finished", done) + ", \"stair_step_pct\": " +
+                      std::to_string(fb.stair_step_removed_pct) + ", \"slim\": " +
+                      (fb.slim ? "true" : "false") + "}");
+      continue;
+    }
+    // Before: the unfinished file, re-certified (welded as written, as a file is).
+    const std::string a_stl = join_path(out_dir, "before.stl");
     write_stl_file(a_stl, raw);
-    write_stl_file(b_stl, done);
-    SmoothRequest own;
-    own.own_export = true;
-    const AnalyzeJobResult a = analyze_job(job, job_dir, join_path(out_dir, "a"), materials, rules, a_stl, own);
-    const AnalyzeJobResult b = analyze_job(job, job_dir, join_path(out_dir, "b"), materials, rules, b_stl, own);
-    const double req = a.margin_required;
+    AnalyzeJobResult a;
+    std::string a_err;
+    try {
+      a = analyze_job(job, job_dir, join_path(out_dir, "a"), materials, rules, a_stl, {});
+    } catch (const std::exception& e) {
+      a_err = e.what();
+    }
+    // After: what a run ships — slim, the safe finish on a failing re-check.
+    const DesignMask* clearance =
+        !setup.options.clearance_void.empty() &&
+                setup.options.clearance_void.size() == sg.voxel_count()
+            ? &setup.options.clearance_void
+            : nullptr;
+    const double req0 = a_err.empty() ? a.margin_required : 0.0;
+    VersionFinish f = finish_and_recheck(v, job, job_dir, sg, iso, &model, fin, clearance,
+                                         material.density_g_cm3, materials, rules,
+                                         join_path(out_dir, "b"),
+                                         a_err.empty() ? a.analysis.margin_effective : 0.0, req0,
+                                         std::max(1, audit_as_written(raw).bodies));
+    const FinishBlock& fb = f.fb;
+    const TriangleMesh& done = f.mesh;
+    const WrittenAudit w = audit_as_written(done);
+    // The bar's own measures: a member newly under the slim line, a pinned vertex
+    // moved (CAD / Protect bit-identical), on the same vertex indices.
+    int new_under = 0, pinned_moved = 0;
+    double thinnest_new = 0.0;
+    if (raw.vertices.size() == done.vertices.size() && fin.ctx.slim_line_mm > 0.0) {
+      const double line = fin.ctx.slim_line_mm, under = line * (1.0 - 1e-3);
+      const std::vector<double> t0 = vertex_local_thickness_mm(raw, line);
+      const std::vector<double> t1 = vertex_local_thickness_mm(done, line);
+      for (std::size_t q = 0; q < t0.size(); ++q)
+        if (t1[q] < under && t0[q] >= under) {
+          thinnest_new = new_under == 0 ? t1[q] : std::min(thinnest_new, t1[q]);
+          ++new_under;
+        }
+    } else {
+      new_under = -1;  // not comparable vertex for vertex (the weld merged some)
+    }
+    pinned_moved = static_cast<int>(fb.pinned_moved);
+    const double req = f.analysis.margin_required > 0.0 ? f.analysis.margin_required : req0;
     const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    char buf[640];
+    char buf[1400];
     std::snprintf(buf, sizeof buf,
                   "{\"vf\": %.4f, \"mass_before_g\": %.4f, \"mass_after_g\": %.4f, "
                   "\"margin_before\": %.4f, \"margin_after\": %.4f, \"margin_required\": %.4f, "
                   "\"accept_before\": %s, \"accept_after\": %s, \"thin_fixed\": %zu, "
-                  "\"thin_left\": %zu, \"stair_step_pct\": %.1f, \"pieces_before\": %d, "
-                  "\"pieces_after\": %d, \"finish_s\": %.2f, \"seconds\": %.1f}",
+                  "\"thin_left\": %zu, \"stair_step_pct\": %.1f, \"style\": \"%s\", "
+                  "\"fallback\": %s, \"pieces_before\": %d, \"pieces_after\": %d, "
+                  "\"bad_edges\": %d, \"open_edges\": %d, \"point_contacts\": %d, "
+                  "\"shells\": %d, \"bodies\": %d, \"new_under_line\": %d, "
+                  "\"thinnest_new_mm\": %.3f, \"pinned_moved\": %d, \"keep_clear_voxels\": %lld, "
+                  "\"thin_joints\": %d, \"finish_s\": %.2f, \"seconds\": %.1f}",
                   d.requested_volume_fraction,
                   material.density_g_cm3 * std::fabs(signed_volume(raw)) / 1000.0,
                   material.density_g_cm3 * std::fabs(signed_volume(done)) / 1000.0,
-                  a.analysis.margin_effective, b.analysis.margin_effective, req,
-                  a.analysis.margin_effective >= req ? "true" : "false",
-                  b.analysis.margin_effective >= req ? "true" : "false", fb.fixed.size(),
-                  fb.left.size(), fb.stair_step_removed_pct, positive_volume_bodies(raw),
-                  positive_volume_bodies(done), fb.seconds, secs);
+                  a_err.empty() ? a.analysis.margin_effective : -1.0, fb.margin, req,
+                  a_err.empty() && a.analysis.margin_effective >= req ? "true" : "false",
+                  f.refusal.empty() ? "true" : "false", fb.fixed.size(), fb.left.size(),
+                  fb.stair_step_removed_pct, fb.slim ? "slim" : "safe",
+                  fb.finish_fallback ? "true" : "false", positive_volume_bodies(raw),
+                  positive_volume_bodies(done), w.non_manifold_edges, w.boundary_edges,
+                  w.non_manifold_vertices, w.shells, w.bodies, new_under, thinnest_new,
+                  pinned_moved, fb.keep_clear_voxels, fb.thin_joints, fb.seconds, secs);
     std::map<std::string, int> why;
     for (const FinishPlace& p : fb.left) ++why[p.reason];
-    std::string w;
-    for (const auto& kv : why) w += (w.empty() ? "" : "; ") + kv.first + " " + std::to_string(kv.second);
+    std::string wr;
+    for (const auto& kv : why) wr += (wr.empty() ? "" : "; ") + kv.first + " " + std::to_string(kv.second);
     std::string line = buf;
     line.pop_back();
-    line += ", \"left_reasons\": \"" + w + "\", \"vertices\": " + std::to_string(done.vertices.size()) +
-            ", \"pinned\": " + std::to_string(fb.pinned_vertices) + ", \"measured\": " +
+    line += ", \"left_reasons\": " + json_str(wr) + ", \"fallback_reason\": " +
+            json_str(fb.finish_fallback_reason) + ", \"refusal\": " + json_str(f.refusal) +
+            ", \"before_error\": " + json_str(a_err) + ", \"vertices\": " +
+            std::to_string(done.vertices.size()) + ", \"pinned\": " +
+            std::to_string(fb.pinned_vertices) + ", \"measured\": " +
             std::to_string(fb.roughness_vertices) + "}";
     lines.push_back(line);
   }

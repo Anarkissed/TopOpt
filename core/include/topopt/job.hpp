@@ -1513,11 +1513,6 @@ struct SmoothRequest {
   int max_pairs = 20;            // strength 1.0 → this many Taubin λ|μ pairs
   double freeze_tol_mm = 0.0;    // ≤0 → default (0.75 × voxel spacing)
   bool enforce_min_feature = true;
-  // E1: the mesh is the core's OWN export (the finished-shape re-check, the flip
-  // table): read as written, without the import inspection. A released export can
-  // carry a few edges shared by four triangles where an exact keep region meets the
-  // voxel surface; the voxelizer reads it, the import inspection refuses it.
-  bool own_export = false;
 };
 
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
@@ -1684,6 +1679,6 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                                       const std::string& design_path,
                                       const std::string& out_dir,
                                       const MaterialLibrary& materials,
-                                      const SettingsRules& rules);
+                                      const SettingsRules& rules, bool export_only = false);
 
 }  // namespace topopt

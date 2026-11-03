@@ -8,6 +8,7 @@
 #include "topopt/settings.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 int main(int argc, char** argv) {
@@ -18,6 +19,9 @@ int main(int argc, char** argv) {
   }
   const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
   const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  // TOPOPT_FLIP_EDGES=1: the written files' edges per stage only, no re-certification.
+  const char* edges = std::getenv("TOPOPT_FLIP_EDGES");
+  const bool export_only = edges != nullptr && edges[0] == '1';
   for (int i = 2; i < argc; ++i) {
     const std::string dir = argv[i];
     std::string id = dir;
@@ -26,7 +30,8 @@ int main(int argc, char** argv) {
     try {
       const JobDescription job = load_job_file(dir + "/job.json");
       for (const std::string& line : refinish_job(job, dir, dir + "/out/design.bin",
-                                                  std::string(argv[1]) + "/" + id, materials, rules))
+                                                  std::string(argv[1]) + "/" + id, materials, rules,
+                                                  export_only))
         std::printf("%s %s\n", id.c_str(), line.c_str());
     } catch (const std::exception& e) {
       std::printf("%s {\"error\": \"%s\"}\n", id.c_str(), e.what());

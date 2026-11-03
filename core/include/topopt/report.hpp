@@ -153,6 +153,11 @@ struct FinishBlock {
   std::vector<FinishPlace> left;
   bool surface_applied = false;
   double stair_step_removed_pct = 0.0;
+  bool slim = false;  // the surface finish applied: slim (true) or safe
+  // His ruling 2026-11-03: the slim finish failed a re-check (or could not keep every
+  // member at its line), so this version ships the safe finish, and why.
+  bool finish_fallback = false;
+  std::string finish_fallback_reason;
   bool recheck_ran = false;
   double margin = 0.0;
   double margin_before = 0.0;
@@ -165,6 +170,7 @@ struct FinishBlock {
   double volume_before_mm3 = 0.0;  // the unfinished export / the finished file (not written)
   double volume_after_mm3 = 0.0;
   std::size_t pinned_vertices = 0;     // diagnostics (not written)
+  std::size_t pinned_moved = 0;
   std::size_t roughness_vertices = 0;
   bool verdict_changed = false;
   std::string verdict_reason;

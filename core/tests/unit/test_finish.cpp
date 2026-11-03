@@ -3,7 +3,8 @@
 // the cube golden; (e)'s plain verdict lines.
 //   (d1) the analytic sphere (PR 306's fixture: R 20 mm, spacing 1.620040 mm, export
 //        factor 2, tricubic, through the STL round trip): >= 45 % of the stair-step
-//        amplitude removed, no vertex outside its cell (0.5 x cell on every axis);
+//        amplitude removed, no vertex outside its cell (0.5 x cell on every axis), no
+//        triangle turned over;
 //   (d2) PR 306's dumbbell (2-voxel neck, the design box clipping one side): the
 //        minimum cross-section unchanged, nothing past the box;
 //   (c1) a 0.5 mm plate between two blocks is thickened to the 0.9 mm minimum;
@@ -11,6 +12,12 @@
 //   (g)  the cube golden: volume after >= before, CAD-face and keep-region vertices
 //        bit-identical, no vertex in a Keep clear;
 //   (e)  the plain lines a finished shape refuses with.
+//   (w)  the written file is clean (ruling 2026-11-03 02:46): a sliver on two vertices
+//        that are one float is welded away; fragment shells under a solve voxel go,
+//        the export's own bodies never; a point contact is seen; file thin joints;
+//   (s)  slim, with a safe fallback (his answer, 2026-11-03 02:48): a member between
+//        the slim line (1.8 mm) and C2's (2 x spacing) is finished, not held, and
+//        nothing goes under 1.8 mm that was not; the fallback decision.
 
 #include "topopt/cad_project.hpp"
 #include "topopt/finish.hpp"
@@ -24,6 +31,7 @@
 
 #include <manifold/manifold.h>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -133,10 +141,26 @@ int main() {
     const double removed = 100.0 * (1.0 - d1 / d0);
     const double move = max_axis_move(m0, m1);
     std::printf("[finish] (d1) sphere: rms deviation %.4f -> %.4f mm, %.1f %% removed (the report's "
-                "conservative estimate %.1f %%); max move %.4f mm per axis, cell %.4f\n",
-                d0, d1, removed, rep.stair_step_removed_pct, move, ctx.cell_mm);
+                "conservative estimate %.1f %%); max move %.4f mm per axis, cell %.4f; %zu fold "
+                "corner(s) held, %d re-run(s)\n",
+                d0, d1, removed, rep.stair_step_removed_pct, move, ctx.cell_mm,
+                rep.fold_held_vertices, rep.slim_rounds);
     CHECK(removed >= 45.0, "(d1) >= 45 % of the stair-step amplitude removed");
     CHECK(move <= 0.5 * ctx.cell_mm + 1e-9, "(d1) no vertex leaves its cell (Gibson)");
+    int turned = 0;
+    for (const auto& t : m0.triangles) {
+      auto nrm = [&](const TriangleMesh& mm) {
+        const Vec3& p = mm.vertices[static_cast<std::size_t>(t[0])];
+        const Vec3& q = mm.vertices[static_cast<std::size_t>(t[1])];
+        const Vec3& r = mm.vertices[static_cast<std::size_t>(t[2])];
+        const Vec3 u{q.x - p.x, q.y - p.y, q.z - p.z}, w{r.x - p.x, r.y - p.y, r.z - p.z};
+        return Vec3{u.y * w.z - u.z * w.y, u.z * w.x - u.x * w.z, u.x * w.y - u.y * w.x};
+      };
+      const Vec3 a0 = nrm(m0), a1 = nrm(m1);
+      turned += a0.x * a1.x + a0.y * a1.y + a0.z * a1.z <= 0.0;
+    }
+    CHECK(turned == 0 && rep.fold_held_vertices > 0,
+          "(d1) no triangle turned over (PR 306's flow alone turns 164 of them)");
   }
 
   // ── (d2) the dumbbell neck ─────────────────────────────────────────────────
@@ -336,6 +360,201 @@ int main() {
           "(e) a Keep clear");
     r.keep_clear_voxels = 0;
     CHECK(finish_verdict_reason(r).empty(), "(e) a good finished shape keeps its verdict");
+  }
+
+  // ── (w1) a float-coincident sliver ─────────────────────────────────────────
+  {
+    // An octahedron whose top vertex is split in two, 1e-12 mm apart (one float), with
+    // the two zero-area slivers that keep it manifold IN ITS OWN INDICES — exactly what
+    // the exact-Protect boolean handed back on his squish rig.
+    TriangleMesh m;
+    m.vertices = {{0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}, {0, -1, 0},
+                  {0, 0, 1.0 + 1e-12}};
+    const int T = 0, B = 1, Tp = 6;
+    auto R = [](int i) { return 2 + (i % 4); };
+    m.triangles = {{R(0), R(1), T}, {R(1), R(2), T}, {R(2), R(3), Tp}, {R(3), R(0), Tp},
+                   {T, R(2), Tp},   {R(0), T, Tp}};
+    for (int i = 0; i < 4; ++i) m.triangles.push_back({R(i + 1), R(i), B});
+    const WatertightReport own = check_watertight(m);
+    const WrittenAudit as_is = audit_as_written(m);
+    const TriangleMesh w = weld_as_written(m);
+    const WrittenAudit after = audit_as_written(w);
+    std::printf("[finish] (w1) sliver: own indices watertight %d; as written %d edge(s) on more "
+                "than two triangles; welded %d, %d open, %d shell(s), %zu triangles\n",
+                own.watertight ? 1 : 0, as_is.non_manifold_edges, after.non_manifold_edges,
+                after.boundary_edges, after.shells, w.triangles.size());
+    CHECK(own.watertight && as_is.non_manifold_edges == 2,
+          "(w1) the defect: manifold in its indices, four triangles on an edge as written");
+    CHECK(after.non_manifold_edges == 0 && after.boundary_edges == 0 && after.shells == 1 &&
+              after.bodies == 1 && w.triangles.size() == 8,
+          "(w1) welded as written: the octahedron, clean");
+    CHECK(std::fabs(signed_volume(w) - signed_volume(m)) < 1e-9, "(w1) the weld moves nothing");
+    TriangleMesh plain = m;
+    plain.vertices.pop_back();
+    plain.triangles = {};
+    for (int i = 0; i < 4; ++i) plain.triangles.push_back({R(i), R(i + 1), T});
+    for (int i = 0; i < 4; ++i) plain.triangles.push_back({R(i + 1), R(i), B});
+    const TriangleMesh same = weld_as_written(plain);
+    bool identical = same.triangles == plain.triangles && same.vertices.size() == plain.vertices.size();
+    for (std::size_t v = 0; identical && v < plain.vertices.size(); ++v)
+      identical = same_bits(same.vertices[v], plain.vertices[v]);
+    CHECK(identical, "(w1) a clean mesh is returned as it is");
+  }
+
+  // ── (w2) fragment shells; (w3) a point contact ─────────────────────────────
+  {
+    using manifold::Manifold;
+    const TriangleMesh big = from_manifold(Manifold::Cube({10.0, 10.0, 10.0}));
+    const TriangleMesh chip = from_manifold(
+        Manifold::Cube({0.5, 0.5, 0.5}).Translate({12.0, 0.0, 0.0}));  // 0.125 mm^3
+    const TriangleMesh hole = from_manifold(
+        Manifold::Cube({2.0, 2.0, 2.0}).Translate({4.0, 4.0, 4.0}));  // a sealed void, 8 mm^3
+    TriangleMesh m = big;
+    auto append = [&](const TriangleMesh& a, bool flip) {
+      const int base = static_cast<int>(m.vertices.size());
+      m.vertices.insert(m.vertices.end(), a.vertices.begin(), a.vertices.end());
+      for (const auto& t : a.triangles)
+        m.triangles.push_back(flip ? std::array<int, 3>{base + t[0], base + t[2], base + t[1]}
+                                   : std::array<int, 3>{base + t[0], base + t[1], base + t[2]});
+    };
+    append(chip, false);
+    append(hole, true);
+    int dropped = -1;
+    const TriangleMesh kept = drop_fragment_shells(m, 1.0, 1, &dropped);
+    const WrittenAudit a = audit_as_written(kept);
+    int dropped2 = -1;
+    const TriangleMesh kept2 = drop_fragment_shells(m, 1.0, 2, &dropped2);
+    std::printf("[finish] (w2) fragments: %d dropped -> %d shell(s), %d body(ies); keeping the "
+                "2 largest bodies: %d dropped\n", dropped, a.shells, a.bodies, dropped2);
+    CHECK(dropped == 1 && a.shells == 2 && a.bodies == 1,
+          "(w2) the 0.125 mm^3 chip goes; the body and its sealed void stay");
+    CHECK(dropped2 == 0 && kept2.triangles.size() == m.triangles.size(),
+          "(w2) one of the export's own bodies never goes, whatever its size");
+    TriangleMesh touch = big;  // a second cube sharing one corner point with the first
+    const TriangleMesh other = from_manifold(Manifold::Cube({10.0, 10.0, 10.0}).Translate({10.0, 10.0, 10.0}));
+    const int base = static_cast<int>(touch.vertices.size());
+    touch.vertices.insert(touch.vertices.end(), other.vertices.begin(), other.vertices.end());
+    for (const auto& t : other.triangles) touch.triangles.push_back({base + t[0], base + t[1], base + t[2]});
+    const WrittenAudit c = audit_as_written(touch);
+    std::printf("[finish] (w3) corner contact: %d point contact(s), %d shells, %d edges on more "
+                "than two triangles\n", c.non_manifold_vertices, c.shells, c.non_manifold_edges);
+    CHECK(c.non_manifold_vertices == 1 && c.shells == 2 && c.non_manifold_edges == 0,
+          "(w3) two shells touching at a point are seen");
+  }
+
+  // ── (j) file thin joints ───────────────────────────────────────────────────
+  {
+    VoxelGrid g;
+    g.nx = g.ny = g.nz = 6;
+    g.spacing = 1.0;
+    std::vector<char> occ(216, 0);
+    auto at = [](int i, int j, int k) { return static_cast<std::size_t>((k * 6 + j) * 6 + i); };
+    for (int k = 0; k < 6; ++k) {
+      occ[at(1, 1, k)] = 1;  // two columns that meet along an edge only
+      occ[at(2, 2, k)] = 1;
+    }
+    const int edge_only = file_thin_joints(g, occ);
+    for (int k = 0; k < 6; ++k) occ[at(2, 1, k)] = 1;  // now joined through a face
+    const int joined = file_thin_joints(g, occ);
+    std::printf("[finish] (j) thin joints: edge-only %d, face-joined %d\n", edge_only, joined);
+    CHECK(edge_only == 1 && joined == 0, "(j) an edge-only joint is counted once, a face joint not");
+    FinishRecheck r;
+    r.ran = true;
+    r.margin = r.margin_required = 1.5;
+    r.thin_joints = 1;
+    CHECK(finish_verdict_reason(r) == "After finishing, a joint holds only along an edge or at a corner",
+          "(j) a joint the finishing thinned refuses with its line");
+    r.thin_joints_before = 1;
+    CHECK(finish_verdict_reason(r).empty(), "(j) a joint the part already had is not the finish's");
+  }
+
+  // ── (s1) the fallback decision ─────────────────────────────────────────────
+  {
+    std::vector<int> calls;
+    auto run = [&](const std::string& slim_says, const std::string& safe_says) {
+      calls.clear();
+      return finish_with_fallback(
+          [&](bool slim) { calls.push_back(slim ? 1 : 0); return slim; },
+          [&](bool slim) { return slim ? slim_says : safe_says; });
+    };
+    const FallbackOutcome ok = run("", "never asked");
+    CHECK(ok.slim_used && !ok.fallback && ok.refusal.empty() && calls == std::vector<int>{1},
+          "(s1) a slim shape that passes ships slim, the safe one never made");
+    const FallbackOutcome fb = run("After finishing, the margin is 1.42\xC3\x97 (needs 1.5\xC3\x97)", "");
+    CHECK(!fb.slim_used && fb.fallback && fb.refusal.empty() && calls == std::vector<int>({1, 0}) &&
+              fb.fallback_reason.find("1.42") != std::string::npos,
+          "(s1) a slim shape that fails falls back to the safe one, with the reason");
+    const FallbackOutcome no = run("After finishing, a piece is loose", "After finishing, it prints in 2 pieces");
+    CHECK(!no.fallback && no.refusal == "After finishing, it prints in 2 pieces",
+          "(s1) a version the safe finish also fails is refused on its own merits");
+  }
+
+  // ── (s2) slim on a member between the lines ────────────────────────────────
+  {
+    // A spherical shell 3.6 mm thick (outer radius 20 mm) on a 1.9 mm grid (his
+    // resolution-64 spacing), export factor 2: the shell reads under C2's safe line
+    // (2 x spacing, 3.8 mm) and is over the slim line (1.8 mm). Stair-step measured
+    // against the two analytic spheres, as (d1) does.
+    const double sp = 1.9, Ro = 20.0, th = 3.6, Ri = Ro - th;
+    const int n = static_cast<int>(std::ceil(2.4 * Ro / sp));
+    VoxelGrid g;
+    g.nx = g.ny = g.nz = n;
+    g.spacing = sp;
+    g.origin = Vec3{0.0, 0.0, 0.0};
+    g.tags.assign(static_cast<std::size_t>(n) * n * n, VoxelTag::Empty);
+    const double c0 = 0.5 * n * sp;
+    auto radius = [&](const Vec3& p) {
+      return std::sqrt((p.x - c0) * (p.x - c0) + (p.y - c0) * (p.y - c0) + (p.z - c0) * (p.z - c0));
+    };
+    for (int k = 0; k < n; ++k)
+      for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+          const double r = radius(g.voxel_center(i, j, k));
+          if (r <= Ro && r >= Ri) g.tags[g.index(i, j, k)] = VoxelTag::Interior;
+        }
+    const std::vector<double> occ = occupancy(g);
+    const TriangleMesh m0 = round_trip(
+        marching_cubes_resampled(g.nx, g.ny, g.nz, g.spacing, g.origin, occ, 0.5, 2,
+                                 ResampleInterp::Tricubic),
+        "finish_shell.stl");
+    auto rms_dev = [&](const TriangleMesh& m) {
+      double s2 = 0.0;
+      for (const Vec3& v : m.vertices) {
+        const double r = radius(v);
+        const double e = r > 0.5 * (Ro + Ri) ? r - Ro : r - Ri;
+        s2 += e * e;
+      }
+      return std::sqrt(s2 / static_cast<double>(m.vertices.size()));
+    };
+    FinishContext ctx;
+    ctx.cell_mm = sp / 2.0;
+    ctx.grid = &g;
+    ctx.density = &occ;
+    FinishReport safe_rep, slim_rep;
+    const TriangleMesh safe = surface_finish(m0, ctx, {}, {}, &safe_rep);
+    ctx.slim_line_mm = 1.8;
+    const TriangleMesh slim = surface_finish(m0, ctx, {}, {}, &slim_rep);
+    const double d0 = rms_dev(m0), ds = rms_dev(safe), dl = rms_dev(slim);
+    const double safe_pct = 100.0 * (1.0 - ds / d0), slim_pct = 100.0 * (1.0 - dl / d0);
+    const std::vector<double> t0 = vertex_local_thickness_mm(m0, 1.8);
+    const std::vector<double> t1 = vertex_local_thickness_mm(slim, 1.8);
+    int new_under = 0;
+    for (std::size_t v = 0; v < t0.size(); ++v)
+      new_under += t1[v] < 1.8 * (1 - 1e-3) && t0[v] >= 1.8 * (1 - 1e-3);
+    std::printf("[finish] (s2) shell 3.6 mm on a 1.9 mm grid, %zu vertices: outward-only safe %zu, "
+                "slim %zu; stair-step removed safe %.1f %% (report %.1f %%), slim %.1f %% (report "
+                "%.1f %%; %d guard round(s), %zu held); folds walked back %zu / %zu; %d newly under "
+                "1.8 mm; max move %.4f mm (cell %.3f)\n",
+                m0.vertices.size(), safe_rep.outward_only_vertices, slim_rep.outward_only_vertices,
+                safe_pct, safe_rep.stair_step_removed_pct, slim_pct, slim_rep.stair_step_removed_pct,
+                slim_rep.slim_rounds, slim_rep.slim_guarded_vertices, safe_rep.fold_held_vertices,
+                slim_rep.fold_held_vertices, new_under, max_axis_move(m0, slim), ctx.cell_mm);
+    CHECK(slim_rep.slim && !slim_rep.fallback, "(s2) the slim finish is the one applied");
+    CHECK(slim_rep.outward_only_vertices * 2 < safe_rep.outward_only_vertices,
+          "(s2) slim frees the member the safe line held outward-only");
+    CHECK(slim_pct > safe_pct + 5.0, "(s2) and finishes it");
+    CHECK(new_under == 0, "(s2) nothing goes under 1.8 mm that was not");
+    CHECK(max_axis_move(m0, slim) <= 0.5 * ctx.cell_mm + 1e-9, "(s2) no vertex leaves its cell");
   }
 
   if (g_failures == 0) {

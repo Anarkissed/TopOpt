@@ -79,7 +79,10 @@ std::string finish_json(const FinishBlock& f) {
   o += "], \"thin_spots_left\": [";
   for (std::size_t q = 0; q < f.left.size(); ++q) o += (q ? ", " : "") + place(f.left[q], true);
   o += "], \"surface_finish\": {\"applied\": " + std::string(f.surface_applied ? "true" : "false") +
-       ", \"stair_step_removed_pct\": " + num_json(f.stair_step_removed_pct) + "}";
+       ", \"stair_step_removed_pct\": " + num_json(f.stair_step_removed_pct) +
+       ", \"style\": " + str_json(f.slim ? "slim" : "safe") + "}";
+  o += ", \"finish_fallback\": " + std::string(f.finish_fallback ? "true" : "false");
+  if (f.finish_fallback) o += ", \"finish_fallback_reason\": " + str_json(f.finish_fallback_reason);
   if (f.recheck_ran)
     o += ", \"recheck\": {\"margin\": " + num_json(f.margin) + ", \"margin_before\": " +
          num_json(f.margin_before) + ", \"keep_clear_voxels\": " +

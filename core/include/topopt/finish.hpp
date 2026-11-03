@@ -27,6 +27,16 @@
 // fixed strength: kFinishMcfSteps steps at dt = kFinishMcfDtScale x h^2, PR 306's
 // "A x20" (51.6 % of stair-step amplitude removed on the analytic sphere at app
 // strength; Taubin 11.2 %).
+//
+// SLIM, WITH A SAFE FALLBACK (his answer, reviewer's ruling 2026-11-03 02:48). C2's
+// thin-section line is 2 x the printable minimum (1.8 mm at a 0.45 mm outer wall),
+// not 2 x the solve spacing (3.8 mm at resolution 64, which held most of his members
+// outward-only: 0.0 % removed on 6d9b535f). A member at least that thick may thin by
+// up to half a cell per side (Gibson's box), and NEVER below the line: a vertex the
+// flow takes under it (measured on the mesh, the Hildebrand thickness above) turns
+// outward-only and the flow re-runs. Below the line, outward-only as before. Per
+// version, a finished shape that fails a re-check the safe finish would pass is
+// redone with the safe finish (C2's 2 x spacing line) and says so: finish_fallback.
 
 #include <string>
 #include <vector>
@@ -67,7 +77,13 @@ struct FinishContext {
   // The CAD the projection used: its faces pin the vertices on them. Null = none.
   const StepModel* cad = nullptr;
   double cad_spacing_mm = 0.0;  // the solve spacing the projection's tolerances use
+  // The slim finish's thin-section line (mm): 2 x the printable minimum. <= 0 = the
+  // safe finish (C2's own line, 2 x the solve spacing).
+  double slim_line_mm = 0.0;
 };
+// How many times the slim finish may re-run the flow with more vertices held
+// outward-only before it gives up and uses the safe finish.
+inline constexpr int kFinishSlimRounds = 8;
 
 struct ThinSpot {
   Vec3 centre_mm{0.0, 0.0, 0.0};
@@ -88,6 +104,17 @@ struct FinishReport {
   double roughness_after_mm = 0.0;
   std::size_t roughness_vertices = 0;
   std::size_t pinned_vertices = 0;
+  std::size_t pinned_moved = 0;  // a CAD / keep-region vertex the finish moved (0, by design)
+  std::size_t outward_only_vertices = 0;  // free vertices the flow may only move out
+  // The slim finish: whether it was the one applied, the flow re-runs its 1.8 mm
+  // guard took, and the vertices it held outward-only. A slim finish that could not
+  // keep every member at its line falls back to the safe one (fallback_reason).
+  bool slim = false;
+  int slim_rounds = 0;
+  std::size_t slim_guarded_vertices = 0;
+  std::size_t fold_held_vertices = 0;  // corners walked back off a triangle the flow turned over
+  bool fallback = false;
+  std::string fallback_reason;
   double volume_before_mm3 = 0.0;
   double volume_after_mm3 = 0.0;
   double seconds = 0.0;
@@ -120,6 +147,7 @@ struct FinishRecheck {
   int pieces = 1;
   int loose_pieces = 0;
   int thin_joints = 0;
+  int thin_joints_before = 0;  // the same count on the unfinished file
   int thin_spots_left = 0;
   double mass_grams = 0.0;
   double mass_before_grams = 0.0;
@@ -128,9 +156,74 @@ struct FinishRecheck {
 // plain line that refuses it ("After finishing, the margin is 1.42× (needs 1.5×)").
 std::string finish_verdict_reason(const FinishRecheck& r);
 
+// THE PER-VERSION FALLBACK, one decision for every run type: finish slim and
+// re-check; on a failing re-check, finish safe and re-check again. A safe finish that
+// passes ships with fallback = true and the slim one's reason; one that fails refuses
+// the version on its own merits (its reason), exactly as before slimming.
+// `finish(slim)` returns the finished shape; `check(shape)` returns "" or the reason.
+struct FallbackOutcome {
+  bool slim_used = true;
+  bool fallback = false;
+  std::string fallback_reason;  // the slim finish's failing re-check, plain words
+  std::string refusal;          // non-empty: the version is refused for this reason
+};
+template <class Finish, class Check>
+FallbackOutcome finish_with_fallback(Finish&& finish, Check&& check) {
+  FallbackOutcome o;
+  const std::string slim_why = check(finish(true));
+  if (slim_why.empty()) return o;
+  o.slim_used = false;
+  const std::string safe_why = check(finish(false));
+  if (safe_why.empty()) {
+    o.fallback = true;
+    o.fallback_reason = slim_why;
+  } else {
+    o.refusal = safe_why;
+  }
+  return o;
+}
+
+// The voxels of `occupancy` (1 = printed, solve-grid indexed) that hold together
+// only along an edge or at a corner: the fragile-joint count minimize_plastic reports
+// for the solved design, taken here on a FILE voxelized onto the same grid (face-
+// connected pieces of printed voxels meeting through edge / corner neighbours only,
+// one per piece pair).
+int file_thin_joints(const VoxelGrid& grid, const std::vector<char>& occupancy);
+
 // The mesh's bodies: its connected shells with positive signed volume (a sealed
 // internal void is a negative shell, not a piece).
 int positive_volume_bodies(const TriangleMesh& mesh);
+
+// A mesh as its file holds it: vertices rounded to float (STL's precision) and welded
+// by exact position, as every reader (core's import, any slicer) welds them. Edges on
+// more than two triangles, open edges, and the closed shells (connected through
+// shared edges) of that welded mesh. The E1 bar: 0, 0 and one shell per body.
+struct WrittenAudit {
+  int non_manifold_edges = 0;
+  int boundary_edges = 0;
+  int non_manifold_vertices = 0;  // a vertex where two shells touch at a point
+  int shells = 0;
+  int bodies = 0;  // shells with positive volume (a sealed void is a shell, not a body)
+  std::vector<Vec3> bad_edge_midpoints;  // the first few, for the probes
+};
+WrittenAudit audit_as_written(const TriangleMesh& mesh);
+
+// THE WRITTEN FILE IS CLEAN (reviewer's ruling 2026-11-03 02:46: 0 edges on more
+// than two triangles, one closed shell per body). Two vertices that are distinct in
+// double but the same float are ONE vertex in the file; a triangle on two of them is
+// a zero-area sliver whose long edge then carries four triangles (his squish rig: the
+// exact-Protect boolean left them where a Protect cylinder's end met the voxel
+// surface). This merges such vertices, drops the triangles they collapse (and a
+// zero-volume fin, a triangle pair on the same three vertices), and drops unused
+// vertices. A mesh with no float-coincident vertices is returned as it is.
+TriangleMesh weld_as_written(const TriangleMesh& mesh);
+
+// The fragments a boolean leaves: shells (edge-connected) under `min_volume_mm3` in
+// absolute volume — a piece smaller than one solve voxel is nothing the optimizer
+// made — except the `keep_bodies` largest positive shells, which stay whatever their
+// size. `dropped` (may be null) counts the shells removed.
+TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm3,
+                                  int keep_bodies, int* dropped);
 
 // The local thickness (mm) at each vertex, capped at `cap_mm` (a vertex at least
 // that thick reports cap_mm). Exposed for the tests.
