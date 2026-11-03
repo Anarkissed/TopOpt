@@ -54,6 +54,9 @@ public final class LibraryModel: ObservableObject {
     @Published public private(set) var thumbnails: [CompareItem: CGImage] = [:]
     /// The project the next new part joins (the import sheet's Project row). Used once.
     @Published public var importTargetProject: UUID?
+    /// ★ B1 (note 8, approved design 2026-11-02): where the Library is, kept HERE so it outlives the workspace. It was the
+    /// Library view's own @State, rebuilt on every return, so Back from a part always landed on the Library's home.
+    @Published var route: LibraryRoute = .home
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
     /// The last few versions' decoded results (each can be tens of MB).

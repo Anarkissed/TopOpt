@@ -122,6 +122,18 @@ struct AppBuildWorkspace: View {
     }
 }
 
+/// The app's screen switch (Library ⇄ workspace), as RootView draws it, without RootView's extras (its notification ask
+/// and import overlays).
+struct AppBuildRoot: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        switch model.screen {
+        case .home: LibraryRootView(model: model)
+        case .workspace: AppBuildWorkspace(model: model)
+        }
+    }
+}
+
 /// Lookalike results (never his job inputs): `n` accepted variants on a one-triangle mesh, the shape Library tests use.
 enum AppBuildFixtures {
     static func outcome(_ n: Int = 3) -> OptimizeOutcome {

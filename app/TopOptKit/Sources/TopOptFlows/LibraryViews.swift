@@ -30,7 +30,11 @@ struct LibraryCompareRequest: Equatable, Identifiable {
 public struct LibraryRootView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
-    @State private var route: LibraryRoute = .home
+    /// ★ B1 (note 8): the route lives on the Library model (it outlives the workspace); this is its door.
+    private var route: LibraryRoute {
+        get { library.route }
+        nonmutating set { library.route = newValue }
+    }
     @State private var grouping = false
     @State private var quickLook: UUID?
     @State private var compare: LibraryCompareRequest?
@@ -620,6 +624,7 @@ struct ProjectFolderView: View {
                     LibraryBackPill(title: "Library", action: back)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project?.name ?? "Unfiled").dsStyle(DS.TypeScale.titleXL)
+                            .background(CornerPairStyle.publish("libraryFolder-\(project?.name ?? "Unfiled")"))   // B1: hosted tests
                             .onTapGesture { if let project { renaming = project.name } }
                         Text("\(parts.count) part\(parts.count == 1 ? "" : "s")").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                     }
@@ -733,6 +738,7 @@ struct LibraryPartCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("library-part-\(part.name)")
+        .background(CornerPairStyle.publish("libraryPart-\(part.name)"))   // B1: hosted tests find a part card by its frame
     }
 }
 

@@ -3029,6 +3029,7 @@ public struct WorkspacePlaceholder: View {
                         .overlay(Circle().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
+            .background(CornerPairStyle.publish("backButton"))   // B1: hosted tests find it by its frame
 
             HStack(spacing: DS.Space.sm) {
                 // Tap the title to rename.

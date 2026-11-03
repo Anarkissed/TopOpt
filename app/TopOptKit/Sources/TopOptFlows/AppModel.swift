@@ -852,6 +852,7 @@ public final class AppModel: ObservableObject {
         if let p = project, libraryDrafts[p.id] != nil { forgetLiveVersion(p.id) }
         screen = .home
         library.refresh()   // Library: file what changed (a new version, a new part)
+        if let p = project { library.comeBack(from: p.id) }   // ★ B1 (note 8): back to the part's project folder
     }
 
     // MARK: - Library (B3): drafts
