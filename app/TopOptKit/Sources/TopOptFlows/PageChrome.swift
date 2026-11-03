@@ -195,6 +195,12 @@ public enum PageChrome {
     /// Top inset of the first chrome row — the value of `DS.Space.xl3`.
     public static let topInset: CGFloat = 22
 
+    /// ★ B2 (U1, approved design 2026-11-02, design-system §4.1 "every panel's top starts below row 2 + 12 pt", mockup top
+    /// 130): where an open left panel starts — 12 pt under the stage row of the top-left block.
+    public static var panelTop: CGFloat { StageCapsuleLayout.capsuleTop + StageCapsuleLayout.capsuleHeight + gap }
+    /// ★ B2: the room an open left panel keeps under it — the hint line's band (mockup: max-height 100 % − 214).
+    public static let panelBottom: CGFloat = 84
+
     /// ★ WHERE THE LATTICE MODE CHIP SITS — directly under the stage's back button, so
     /// "Structural" / "Aesthetic" reads as part of the stage's own identity rather than
     /// as another control. One row below `topInset` plus the back button's height.

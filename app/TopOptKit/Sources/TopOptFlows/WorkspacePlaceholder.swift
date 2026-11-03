@@ -46,7 +46,7 @@ public struct WorkspacePlaceholder: View {
     @State private var projection: CameraProjection?
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
-    @StateObject private var cameraModel = OrbitCameraModel()
+    @StateObject private var cameraModel = OrbitCameraModel(followsViewProjection: true)   // ★ B2 (note 1)
     /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
@@ -559,6 +559,10 @@ public struct WorkspacePlaceholder: View {
     @State private var pendingReplacement: ResultsReplacementPrompt?
     @State private var rerunOffersCopy = false   // Flexible (PR #362) H50d: the re-run card's Save as new project is for an Optimize re-run only
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
+    @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
+    @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
+    @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
+    @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
     @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
@@ -669,6 +673,10 @@ public struct WorkspacePlaceholder: View {
     /// itself to eight separate conditions, and it did not. ONE predicate,
     /// gating every site, is what makes a fourth page correct by default.
     private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage || showLatticeWizard || showFlexiblePage }
+
+    /// ★ B2 (U1, note 16, IMG_0564 — the Cells page dropped the back row): the Cells page (today's `showLatticeWizard`) is the
+    /// one full-screen page that keeps the workspace's top-left block; with any other page up the chrome is hidden as before.
+    private var cellsPageKeepsChrome: Bool { showLatticeWizard && !showLatticePage && !showSmoothingPage && !showFlexiblePage }
 
     /// ★ THE STAGE IS ON AND THE QUESTION IS UNANSWERED. `nil` is "not yet asked" —
     /// deliberately not a default, so a project made before the modes existed reopens
@@ -855,7 +863,7 @@ public struct WorkspacePlaceholder: View {
                                   surfaceUnion.partialPicks(regions: project.faceRegions),
                                   in: project.faceRegions)
                               : (visible.surfaceEditing ? surfaceSelectedUnionLighting?.chains ?? [] : []),
-                          xray: surfaceXrayOn,
+                          xray: surfaceXrayOn && !flexibleMain.owns(project, stage),   // ★ B2 (notes 2, 7): the one X-ray look (body + lines)
                           settleRotation: settleQuat,           // D2: settle onto the floor
                           settleAnimated: !reduceMotion && !flexibleMain.owns(project, stage),   // Flexible H4: a map-mesh swap snaps, never spins
                           showGround: showGround,
@@ -1348,7 +1356,7 @@ public struct WorkspacePlaceholder: View {
                 latticeBandChipsOverlay.ignoresSafeArea()
             }
 
-            if !fullScreenPageUp { chrome }
+            if !fullScreenPageUp || cellsPageKeepsChrome { chrome }   // ★ B2 (note 16, IMG_0564): the Cells page keeps the top-left block
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if force.phase == .setup, !fullScreenPageUp {
@@ -1380,6 +1388,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, regionsOpen, !flexibleMain.owns(project, stage) { regionsPanelOverlay }   // Flexible (PR #362) H26: no Regions on the Flexible stage (his img6: the Surface stage does it)
                 // The lattice preview legend + the Struts toggle are LATTICE
                 // affordances (§1a): they left the TO page with everything else.
+                workspaceCardsHost   // ★ B1 (note 3): always mounted — the run cards and the run watchers (they hung on the overlay below)
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
                 if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place · Flexible (PR #362) H62: "Change lattice type…" asks with #354's card
@@ -1670,7 +1679,8 @@ public struct WorkspacePlaceholder: View {
                               canUndo: { project.canUndoNow }, canRedo: { project.canRedoNow },
                               onFullScreen: { resultsFullScreen = $0 },
                               loadSurfacePoints: { loadFlowSurfacePoints() },
-                              scenarioLoads: resultsScenarioLoads)
+                              scenarioLoads: resultsScenarioLoads,
+                              topLeftBlock: AnyView(resultsTopLeftBlock))
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view. L5: NOT while
@@ -1770,8 +1780,12 @@ public struct WorkspacePlaceholder: View {
     private var gizmoSize: CGFloat { OrientationGizmoView.standardSize }
     private var orientationGizmo: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top, spacing: DS.Space.s) {
                 Spacer()
+                // ★ B2 (note 1): [Orthographic │ Perspective], directly left of the gizmo, on every page this gizmo serves
+                ViewProjectionPair()
+                    .padding(.top, (gizmoSize - 50) / 2)
+                    .latticeBandChipKeepOut()
                 // ★ B4: the Cells page draws over the live part, so the gizmo follows the part's camera
                 OrientationGizmoView(camera: cameraModel,
                                      size: gizmoSize)
@@ -1828,6 +1842,7 @@ public struct WorkspacePlaceholder: View {
             pendingLatticeRerun = prompt
             return
         }
+        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
     }
 
@@ -1837,6 +1852,7 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
     }
 
@@ -1846,6 +1862,8 @@ public struct WorkspacePlaceholder: View {
 
     private func startRun() {
         guard canOptimize else { return }
+        // ★ B1 (note 4): a remembered Mac that is not found yet is looked for first, never refused as missing
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRun() }; return }
         // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
         // face, the run would reach the core with empty external_loads and be
         // refused — so block it up front with an actionable message naming the group
@@ -1870,9 +1888,10 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
-        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
-        if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
+        if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
+        if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
         lastRunRequest = request   // Optimize greys out until the inputs change
+        runCouldntFinish = false; lastRunWasLattice = false   // ★ B1 (O1)
         // Pick the runner for THIS run from the compute-location choice. A remote
         // config (a worker was selected + resolved) offloads to the LAN worker;
         // otherwise the on-device bridge runs it, byte-identical to before. Always
@@ -3013,75 +3032,26 @@ public struct WorkspacePlaceholder: View {
 
     // MARK: top-left chrome (back + project / material chip)
 
+    /// ★ B2 (U1): Results' copy of the block — the same view, plus "Optimized ✓" (note 18).
+    private var resultsTopLeftBlock: some View {
+        TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
+                     process: project.process, optimized: true, back: { model.backHome() },
+                     rename: { nameDraft = project.name; renaming = true },
+                     canUndo: project.canUndoNow, canRedo: project.canRedoNow,
+                     undo: { project.performUndo() }, redo: { project.performRedo() })
+    }
+
     private var chrome: some View {
-        HStack(spacing: DS.Space.m) {
-            Button { model.backHome() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(DS.Surface.bar.color)
-                        .overlay(Circle().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: DS.Space.sm) {
-                // Tap the title to rename.
-                Button { nameDraft = project.name; renaming = true } label: {
-                    Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                }
-                .buttonStyle(.plain)
-                Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
-                // Tap the material to switch it — only same-category materials.
-                Menu {
-                    ForEach(model.materials(for: project.process)) { opt in
-                        Button(opt.name) { model.setCurrentProjectMaterial(opt.name) }
-                    }
-                } label: {
-                    Text(project.material)
-                        .dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
-                }
-            }
-            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
-            .foregroundStyle(DS.Color.textPrimary.color)
-
-            // Round-6 item 4: Undo / Redo, to the RIGHT of the name/material header. They enable/
-            // disable with the history (`project.undo`); the same actions are reachable by the
-            // two-finger double-/triple-tap on the viewport (see `MetalMeshView`).
-            HStack(spacing: DS.Space.xs) {
-                undoRedoButton("arrow.uturn.backward", label: "Undo",
-                               enabled: project.canUndoNow) { project.performUndo() }
-                undoRedoButton("arrow.uturn.forward", label: "Redo",
-                               enabled: project.canRedoNow) { project.performRedo() }
-            }
-
-            // ★★★ THE MODE TITLE LIVES IN THIS ROW — not in an overlay above it
-            // (maintainer, 2026-08-21: "the title is covering the redo button").
-            //
-            // ★ THREE OVERLAY ATTEMPTS ALL COLLIDED, AND FOR ONE REASON: an overlay
-            // has to be TOLD where the buttons end, and every mechanism for telling it
-            // was conditional. `TopClusterEdgeKey` is only filled in while the rebuild
-            // notification is on screen; a fixed 260 pt centred on the window lands on
-            // Redo at this title length. Putting the pill IN the row makes the
-            // clearance a layout fact instead of a measurement — HStack cannot overlap
-            // its own children, at any title length, on any device.
-            //
-            // It still fills the span he asked for: `maxWidth: .infinity` takes
-            // everything between Redo and the trailing inset kept for Settings + the
-            // orientation cube.
-            // ★ B4: the type is named by the capsule (● Structural ⌄); its About row opens the mode sheet that
-            // this chip opened, so the chip is gone from the row.
-
-        }
+        // ★ B2 (U1, approved design 2026-11-02): THE ONE TOP-LEFT BLOCK (TopLeftBlock.swift) — ‹ where Back goes · name,
+        // version · material · undo · redo; Results draws the same view. Its insets are the ones this row always had.
+        TopLeftBlock(model: model, projectID: project.id, name: project.name, material: project.material,
+                     process: project.process, back: { model.backHome() },
+                     rename: { nameDraft = project.name; renaming = true },
+                     canUndo: project.canUndoNow, canRedo: project.canRedoNow,
+                     undo: { project.performUndo() }, redo: { project.performRedo() })
         // ★ THE IDENTITY ROW IS THE FIRST ROW ON EVERY STAGE — restored 2026-08-21.
         // The way back sits under it (`StageNavPlacement`) and the lattice MODE takes
         // the top-CENTRE slot, so nothing competes for this one.
-        .padding(.top, DS.Space.xl3)
-        .padding(.leading, DS.Space.xl4)
         // ★ reports its TRAILING edge, for the banner's gap.
         .background(GeometryReader { g in
             Color.clear.preference(key: TopClusterEdgeKey.self,
@@ -3294,6 +3264,23 @@ public struct WorkspacePlaceholder: View {
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
+        .onAppear {
+            syncLatticeProxy()
+            // A reopened project already carries roles and depths — the cards
+            // must be there on arrival, not only after the user touches a chip.
+            refreshLatticeFaceCards()
+        }
+    }
+
+    // ★ B1 (note 3, approved design 2026-11-02): THE CARDS AND RUN WATCHERS EVERY STAGE NEEDS, on a view that is ALWAYS
+    // mounted. They hung on `latticePreviewOverlay`, which mounts only where `visible.latticeControls` (782fdda2), so on
+    // Topology the re-run card and Library's "Optimize as vN" card could never present ("after running an optimization,
+    // running it again doesn't work"), and the landed-run notice and a card's Export never heard a run land there.
+    // Moved unchanged. (#362's H50b line keeps its text and indent.)
+    private var workspaceCardsHost: some View {
+        Color.clear
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
@@ -3360,11 +3347,18 @@ public struct WorkspacePlaceholder: View {
                  + " are available for use. Please select which you'd prefer — you can always "
                  + "change this in the settings.")
         }
-        .onAppear {
-            syncLatticeProxy()
-            // A reopened project already carries roles and depths — the cards
-            // must be there on arrival, not only after the user touches a chip.
-            refreshLatticeFaceCards()
+        // ★ B1 (note 4): a remembered Mac is looked for as the workspace opens, not only when Settings opens
+        .onAppear { if compute.wantsRemote { compute.startBrowsing() } }
+        .onChange(of: compute.activeRemote != nil) { found in if found { macNotAnswering = false } }
+        // ★ B1 (O1): an engine failure is one line on the button that started the run, never a card. The failure is
+        // dismissed at once, so the results it displaced come back (AJ1), exactly as Close on the old card did.
+        .onChange(of: run.phase) { ph in
+            // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
+            // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
+            if ph == .failed { lastRunRequest = nil }
+            guard ph == .failed, run.failureShowsOnButton else { return }
+            runCouldntFinish = true
+            run.dismissFailure()
         }
     }
 
@@ -3411,7 +3405,7 @@ public struct WorkspacePlaceholder: View {
             retainedJob: art?.jobJSON, retainedDesign: art?.designBin,
             runGeneratedLattice: o.latticeReport != nil,
             modelPath: project.importedFile?.path,
-            workerSelected: compute.activeRemote != nil,
+            workerSelected: compute.wantsRemote,   // ★ B1 (note 4): the remembered Mac
             runInFlight: run.phase == .running,
             // A RE-ATTACHED run has no submitted document to retain (the app was
             // restarted since), and says exactly that rather than borrowing the
@@ -3971,6 +3965,8 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t lattice this variant: \(why)."
             return
         }
+        // ★ B1 (note 4): a remembered Mac not found yet is looked for first
+        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRelatticeRun() }; return }
         guard let config = compute.activeRemote else {
             model.toast = "Latticing a variant runs on a Mac worker — pick one in Compute."
             return
@@ -5839,6 +5835,13 @@ public struct WorkspacePlaceholder: View {
             editFacesHostReturn = nil
             leaveEditFacesTools()
         }
+        // ★ B1 (note 16, approved design 2026-11-02): changing stage closes Topology's Results / Smooth FIRST. Both draw over
+        // every stage (Results is mounted above the stage row), so the stage changed underneath them and the ● menu line went.
+        // The same way out the capsule's Setup segment takes.
+        if dest != .topology {
+            if showSmoothingPage { closeSmoothingPage() }
+            viewOriginal = true
+        }
         stage = dest
         latticeDisclosure.closeAll()
         if dest == .lattice { refreshLatticeFaceCards() }
@@ -6569,7 +6572,7 @@ public struct WorkspacePlaceholder: View {
     /// is a mode of its own now and not the absence of one.
     private var minimizePlasticChip: some View {
         let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
-        let macOnly = StrengthenRoute.line(workerSelected: compute.activeRemote != nil)   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — on device: Runs on your Mac
+        let macOnly = StrengthenRoute.line(workerSelected: compute.wantsRemote)   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — on device: Runs on your Mac
         return Button { if project.minimizePlastic, macOnly != nil { model.toast = StrengthenRoute.onDeviceToast; return }; project.minimizePlastic.toggle() } label: {   // Flexible (PR #362) H56j: redesign to strengthen (overnight plan 2026-10-25) — the strengthen choice, disabled on device
             HStack(spacing: DS.Space.s) {
                 Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "arrow.up.circle.fill")
@@ -7613,7 +7616,7 @@ public struct WorkspacePlaceholder: View {
         // at?") and none is subordinate to another.
         HStack(spacing: DS.Space.s) {
             Group {
-                viewModeButton("grid", label: "Wireframe", on: surfaceWireframeOn) {
+                viewModeButton("grid", label: "Outlines", on: surfaceWireframeOn) {   // ★ B2 (U4): never "Wireframe"
                     surfaceWireframeOn.toggle()
                 }
                 viewModeButton("square.stack.3d.up", label: "X-ray", on: surfaceXrayOn) {
@@ -7625,7 +7628,7 @@ public struct WorkspacePlaceholder: View {
                         topoForcesShown.toggle()
                     }
                     if project.designBox.hasPrimitives {
-                        viewModeButton("cube", label: "Design primitives", on: topoDesignBoxShown) {
+                        viewModeButton("cube", label: "Allow growth here", on: topoDesignBoxShown) {
                             topoDesignBoxShown.toggle()
                         }
                     }
@@ -7723,6 +7726,9 @@ public struct WorkspacePlaceholder: View {
                 .foregroundStyle((on ? DS.Color.textPrimary
                                      : DS.Color.textTertiary).color)
                 .opacity(enabled ? 1 : 0.45)
+                .background(Group {   // B2: hosted tests (and ViewCornerParity's red control)
+                    if label != ViewCornerParity.controlDropped { CornerPairStyle.publish(on ? "view-\(label)-on" : "view-\(label)") }
+                })
                 .frame(width: 40, height: 40)
                 .background(
                     RoundedRectangle(cornerRadius: DS.Radius.pill, style: .continuous)
@@ -8025,7 +8031,8 @@ public struct WorkspacePlaceholder: View {
                     )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Wireframe")
+            .accessibilityLabel("Outlines")   // ★ B2 (U4): never "Wireframe"; Cut's pair moves to the view corner in B8
+            .background(CornerPairStyle.publish(surfaceWireframeOn ? "view-Outlines-on" : "view-Outlines"))
 
             // ★ X-RAY, SEPARATELY. `#` decides whether there are lines; this
             // decides whether they show THROUGH the solid. They were one control
@@ -8045,6 +8052,7 @@ public struct WorkspacePlaceholder: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("X-ray")
+            .background(CornerPairStyle.publish(surfaceXrayOn ? "view-X-ray-on" : "view-X-ray"))
 
             // ★ §2 — THE PENCIL BUTTON. ★ THE ONLY NEW CONTROL IN THIS TASK, and
             // it is built to the tray it sits in rather than to a new idea: the
@@ -10019,7 +10027,7 @@ public struct WorkspacePlaceholder: View {
     /// `GeometryReader` of its own.
     private struct WorkspacePanelPlacement: ViewModifier {
         /// Room kept under the list for its pinned footer (the add row, its (i), the safety margin) and the grip.
-        static let footerReserve: CGFloat = 190
+        static let footerReserve: CGFloat = SelectionsList.footerReserve
         /// ★ MINIMIZED ⇒ BOTTOM-LEFT (maintainer, 2026-08-17). One placement for
         /// the ONE Selections panel, so both of its mount sites — the workspace
         /// and the lattice page's library — move together by construction.
@@ -12452,6 +12460,7 @@ public struct WorkspacePlaceholder: View {
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
+        guard !macFinding else { return false }              // ★ B1 (note 4): nor while it looks for the Mac
         // The core refuses a GRADED lattice job on an expanded domain BEFORE any
         // solve, so the button that would submit one is disabled with that reason
         // rather than inviting a configuration the run cannot honour (task
@@ -12466,6 +12475,7 @@ public struct WorkspacePlaceholder: View {
         guard latticeOptimizeRefusal == nil else { return false }
         // ★★ a load with no single direction is refused on the button (2026-10-09)
         guard loadDirectionRefusal == nil else { return false }
+        guard emptyRegionRefusal == nil else { return false }   // ★ B1 (note 38): a role names a cut piece with no faces
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -12532,10 +12542,23 @@ public struct WorkspacePlaceholder: View {
         return nil
     }
 
+    /// ★ B1 (note 38, the app half): an anchor, load or protection holds a piece left with no faces (core would refuse the
+    /// job with its own text: "face region 107 …"). One line on the button, before anything is sent.
+    private var emptyRegionRefusal: String? {
+        guard !FaceRegionSend.empty(project.faceRegions.regions).isEmpty else { return nil }
+        for g in selection.groups {
+            let k = force.kind(for: g.id)
+            guard k.isAnchor || k.isLoad || force.isProtected(g.id) else { continue }
+            if g.regionIDs.contains(where: { project.runRegionIDs([$0]).isEmpty }) { return FaceRegionSend.refusalLine }
+        }
+        return nil
+    }
+
     private var optimizeSummary: String {
         if let why = latticeDesignBoxConflict { return why }
         if let why = latticeOptimizeRefusal { return why }
         if let why = loadDirectionRefusal { return why }
+        if let why = emptyRegionRefusal { return why }   // ★ B1 (note 38)
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -12659,6 +12682,7 @@ public struct WorkspacePlaceholder: View {
         LatticeJobIncludeGate.refusal(latticeEnabled: project.lattice.enabled,
                                       regions: project.latticeJobRegions().regions)
             ?? latticeSettingsRefusal
+            ?? emptyRegionRefusal   // ★ B1 (note 38): the lattice run sends the same regions
     }
 
     var canLatticeThis: Bool {
@@ -12669,6 +12693,7 @@ public struct WorkspacePlaceholder: View {
         // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
         // construction — ruling c, 2026-09-30.)
         if let why = latticeStageRefusal { return why }
+        if runCouldntFinish, lastRunWasLattice { return Self.couldntFinishLine }   // ★ B1 (O1)
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
         let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
@@ -12680,15 +12705,44 @@ public struct WorkspacePlaceholder: View {
         let summary = optimizeSummary
         let marks = !ok && wallMarkingTapGoesSomewhere && LatticeJobIncludeGate.opensWallMarking(summary)
         let opensType = opensLatticeType(ok, summary)
+        // ★ B1 (note 4): while it looks for the remembered Mac the button says so; if the Mac never answers, one line, and
+        // the tap tries again (the design's "Finding Nadim's Mac mini…" / "Your Mac isn't answering · Try again")
+        let mac = compute.rememberedName ?? "your Mac"
+        let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
+        let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
+            : macNotAnswering && ok ? Self.macNotAnsweringLine : summary
         return Button {
-            if ok { requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
-            StageActionCapsuleLabel(title: "Optimize", summary: summary, ok: ok, marks: marks || opensType,
+            StageActionCapsuleLabel(title: title, summary: line, ok: ok || macFinding, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl5)
         }
         .buttonStyle(.plain)
         .disabled(!ok && !marks && !opensType)
-        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : summary)
+        .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
+        .background(CornerPairStyle.publish(macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering"
+                                            : runCouldntFinish && !lastRunWasLattice ? "optimizeCouldntFinish" : "optimizeButton"))
+    }
+
+    /// ★ B1 (note 4): the one line on Optimize when the remembered Mac never answered; a tap tries again.
+    static let macNotAnsweringLine = "Your Mac isn\u{2019}t answering \u{00B7} tap to try again"
+
+    /// ★ B1 (O1): the one line on the button whose run the engine could not finish; a tap tries again.
+    static let couldntFinishLine = "Couldn\u{2019}t finish \u{00B7} tap to try again"
+
+    /// ★ B1 (note 4, approved design 2026-11-02): look for the remembered Mac for a few seconds, then go on; if it never
+    /// answers, Optimize says so in one line. Discovery itself starts as the workspace opens (workspaceCardsHost).
+    private func findTheMac(then go: @escaping () -> Void) {
+        guard !macFinding else { return }
+        macFinding = true
+        macNotAnswering = false
+        compute.startBrowsing()
+        Task { @MainActor in
+            let end = Date().addingTimeInterval(ComputeLocationModel.findSeconds)
+            while compute.activeRemote == nil, Date() < end { try? await Task.sleep(nanoseconds: 150_000_000) }
+            macFinding = false
+            if compute.activeRemote != nil { go() } else { macNotAnswering = true }
+        }
     }
 }
 
@@ -12855,6 +12909,7 @@ extension WorkspacePlaceholder {
         .dsShadow(DS.Shadow.panel)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("edit-faces-header")
+        .background(CornerPairStyle.publish("capsule"))   // ★ B2 (U1): Edit faces' stage row, in the capsule's place
         .overlay(alignment: .bottomLeading) {
             if editFacesDiscardAsking {
                 Text(EditFacesCopy.discardAsk).font(.system(size: 13, weight: .semibold))
@@ -12927,7 +12982,7 @@ extension WorkspacePlaceholder {
         Button { withAnimation(DS.Motion.emphasized) { setupPanelOpen.toggle() } } label: {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
-                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)   // ★ B2 (Q6): the corner chip is Settings everywhere
                 Image(systemName: setupPanelOpen ? "chevron.down" : "chevron.up").font(.system(size: 11, weight: .bold))
                     .foregroundStyle(DS.Color.textSecondary.color)
             }
@@ -12981,9 +13036,9 @@ extension WorkspacePlaceholder {
                                             isStep: isStepPart, designBoxDrawn: visible.designBox)
         return VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack {
-                Text("Setup").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
+                Text("Settings").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold).foregroundStyle(DS.Color.textPrimary.color)
                 Spacer()
-                CornerPairStyle.x44("chevron.down", label: "Close Setup", id: "topology-setup-close") { setupPanelOpen = false }
+                CornerPairStyle.x44("chevron.down", label: "Close Settings", id: "topology-setup-close") { setupPanelOpen = false }
             }
             ForEach(rows, id: \.self) { row in
                 VStack(alignment: .trailing, spacing: DS.Space.s) {
@@ -13367,9 +13422,11 @@ extension WorkspacePlaceholder {
                          menuRows: rows,
                          editFaces: { openEditFaces() },
                          changeType: { showChangeLatticeType = true })
-            Text(LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction))
-                .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
-                .accessibilityIdentifier("lattice-built-on")
+            if let on = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction) {
+                Text(on)
+                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
+                    .accessibilityIdentifier("lattice-built-on")
+            }
         }
         .latticeBandChipKeepOut()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

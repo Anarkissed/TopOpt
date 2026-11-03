@@ -172,9 +172,10 @@ extension FlexibleMainViewToggles {
     /// of the left panel (inside `frame`, which every legend and the player keep out of — and
     /// which now ends where the row ends, so the note costs the legends nothing).
     /// (★ R7-V: batch V's two worded view settings, which sat between it and the buttons in landscape, are gone.)
-    /// ★ R7-D3: the highest the open left panel's top ever reaches (PageLeftModal: padded noteTop, then a spacer of at least
-    /// noteTop above the panel).
-    public static var leftPanelHighestTop: CGFloat { 2 * PageChrome.noteTop }
+    /// ★ R7-D3: the highest the open left panel's top ever reaches. ★ B2 (U1, #362's OK 2026-11-03 05:34): PageLeftModal
+    /// top-aligns it at `PageChrome.panelTop` (it was centred, never above 2 × noteTop) — so where the row leaves too little
+    /// beside it (11" portrait) the note now goes under the row's right end, whole.
+    public static var leftPanelHighestTop: CGFloat { PageChrome.panelTop }
 
     public static func noteFrame(viewport: CGSize) -> CGRect {
         let row = rowFrame(viewport: viewport)

@@ -30,7 +30,11 @@ struct LibraryCompareRequest: Equatable, Identifiable {
 public struct LibraryRootView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var library: LibraryModel
-    @State private var route: LibraryRoute = .home
+    /// ★ B1 (note 8): the route lives on the Library model (it outlives the workspace); this is its door.
+    private var route: LibraryRoute {
+        get { library.route }
+        nonmutating set { library.route = newValue }
+    }
     @State private var grouping = false
     @State private var quickLook: UUID?
     @State private var compare: LibraryCompareRequest?
@@ -78,6 +82,7 @@ public struct LibraryRootView: View {
         .onAppear {
             library.refresh()
             library.loadSummaries()
+            library.drawMissingOriginals()   // ★ B1 (note 10): the original model's picture for a part never optimized
         }
     }
 
@@ -227,6 +232,7 @@ struct LibraryCardSurface: ViewModifier {
 struct LibraryPicture: View {
     let image: CGImage?
     var dim = false
+    var drawnKey: String? = nil   // B1: publishes its frame while a picture is drawn (hosted tests)
     var body: some View {
         ZStack {
             Rectangle().fill(RadialGradient(colors: [Color(.sRGB, red: 0.39, green: 0.51, blue: 0.75, opacity: 0.16), .clear],
@@ -235,6 +241,7 @@ struct LibraryPicture: View {
             if let image {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
                     .padding(DS.Space.s).opacity(dim ? 0.32 : 1)
+                    .background { if let drawnKey { CornerPairStyle.publish(drawnKey) } }
             } else {
                 Image(systemName: "cube.transparent").font(.system(size: 34, weight: .light))
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.22).color)
@@ -462,7 +469,7 @@ struct LibraryHomeView: View {
     }
 
     private func parentPicture(_ part: LibraryPart, _ v: LibraryVersion) -> CGImage? {
-        guard let parent = v.parentNumber.flatMap(part.version(number:)) else { return nil }
+        guard let parent = v.parentNumber.flatMap(part.version(number:)) else { return library.originalPicture(part) }   // ★ B1 (note 10)
         return library.thumbnails[CompareItem(folder: parent.folderID, result: library.shownResult(parent))]
     }
 
@@ -584,13 +591,15 @@ struct LibraryFolderCard: View {
 
 extension LibraryModel {
     /// A part's picture: its Print-this result, else the shown result of its newest version with results.
+    /// ★ B1 (note 10): the result he PICKED (Print this); with none picked, the original model, never a blank.
     func partPicture(_ part: LibraryPart) -> CGImage? {
         let done = part.versions.filter { !isDraft($0) }.sorted { $0.number > $1.number }
         if let v = done.first(where: { $0.marks.contains(where: \.printThis) }),
-           let r = v.marks.first(where: \.printThis)?.result {
-            return thumbnails[CompareItem(folder: v.folderID, result: r)]
+           let r = v.marks.first(where: \.printThis)?.result,
+           let picked = thumbnails[CompareItem(folder: v.folderID, result: r)] {
+            return picked
         }
-        return done.first.flatMap { thumbnails[CompareItem(folder: $0.folderID, result: shownResult($0))] }
+        return originalPicture(part)
     }
 }
 
@@ -620,6 +629,7 @@ struct ProjectFolderView: View {
                     LibraryBackPill(title: "Library", action: back)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project?.name ?? "Unfiled").dsStyle(DS.TypeScale.titleXL)
+                            .background(CornerPairStyle.publish("libraryFolder-\(project?.name ?? "Unfiled")"))   // B1: hosted tests
                             .onTapGesture { if let project { renaming = project.name } }
                         Text("\(parts.count) part\(parts.count == 1 ? "" : "s")").dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
                     }
@@ -632,6 +642,7 @@ struct ProjectFolderView: View {
                                 .dsShadow(.accentGlow)
                         }
                         .buttonStyle(.plain).accessibilityIdentifier("library-add-part")
+                        .background(CornerPairStyle.publish("libraryAddPart"))   // B1: hosted tests
                     }
                 }
                 LazyVGrid(columns: columns, spacing: DS.Space.xl3) {
@@ -694,7 +705,7 @@ struct LibraryPartCard: View {
         let running = part.versions.first { model.runningIDs.contains($0.folderID) }
         Button(action: open) {
             VStack(spacing: 0) {
-                LibraryPicture(image: library.partPicture(part)).frame(height: 230).frame(maxWidth: .infinity)
+                LibraryPicture(image: library.partPicture(part), drawnKey: "libraryPartPicture-\(part.name)").frame(height: 230).frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: DS.Space.s) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -733,6 +744,7 @@ struct LibraryPartCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("library-part-\(part.name)")
+        .background(CornerPairStyle.publish("libraryPart-\(part.name)"))   // B1: hosted tests find a part card by its frame
     }
 }
 
@@ -1028,8 +1040,10 @@ struct LibraryVersionCard: View {
     private func export(_ r: Int) { LibraryExport.start(model: model, library: library, folder: version.folderID, result: r) }
 
     private var parentPicture: CGImage? {
-        guard let p = version.parentNumber.flatMap(part.version(number:)) else { return nil }
-        return library.thumbnails[CompareItem(folder: p.folderID, result: library.shownResult(p))]
+        guard let p = version.parentNumber.flatMap(part.version(number:)),
+              let img = library.thumbnails[CompareItem(folder: p.folderID, result: library.shownResult(p))]
+        else { return library.originalPicture(part) }   // ★ B1 (note 10): a draft (running or not) shows the original
+        return img
     }
 
     private func changeLine(_ v: LibraryVersion) -> String {

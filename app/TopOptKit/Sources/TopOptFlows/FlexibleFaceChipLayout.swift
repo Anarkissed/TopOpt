@@ -37,8 +37,8 @@ public enum FlexibleFaceChipLayout {
     /// The open Selections list's whole column (under the capsule, to the bottom) — kept clear while the list is open.
     public static func selectionsColumn(viewport v: CGSize) -> CGRect { FaceChipLayout.selectionsColumn(viewport: v) }
 
-    /// ★ ROUND 7, R7-D3: the open list's whole REACH — it grows about its centre (PageLeftModal centres it) up to its header and
-    /// 420 pt of lines, never above 2 × noteTop — from ANY measure of it (its centre does not move as a group opens).
+    /// ★ ROUND 7, R7-D3: the open list's whole REACH — ★ B2 (U1): top-aligned at PageChrome.panelTop, it grows down to its
+    /// header and the screen's room of lines, never past panelBottom — from ANY measure of it (FaceChipLayout.listReach).
     public static func listReach(measured m: CGRect, viewport v: CGSize) -> CGRect { FaceChipLayout.listReach(measured: m, viewport: v) }
 
     /// The top-centre dock: under the name row and the capsule.

@@ -47,7 +47,7 @@ final class ResultsRedesignTests: XCTestCase {
     func testTheVersionsAreCoresWithTheImpossibleOneGreyedAndItsReason() throws {
         let m = ResultsModel(projectName: "Arms", outcome: try Self.strengthenOutcome())
         let rows = ResultsVersions.rows(tabs: m.tabs, blocks: m.reportBlocks, requestedVF: { m.requestedVolumeFraction(of: $0) })
-        XCTAssertEqual(rows.map(\.title), ["Version 1 · just safe", "Version 2 · +10%", "Version 3 · +10%"])
+        XCTAssertEqual(rows.map(\.title), ["a · Just safe", "b · +10 %", "c · +20 %"])   // ★ B2 (U4)
         XCTAssertEqual(rows.map(\.margin), [5.07, 7.83, nil], "★ the VERIFIED margin, never the tab's 14.4 / 22.2")
         XCTAssertNil(rows[2].tabIndex, "Version 3 cannot be picked")
         XCTAssertEqual(rows[2].subtitle, "Not possible — limited at an anchor")

@@ -13,12 +13,13 @@
 //
 // THE GEOMETRY, derived rather than picked:
 //   width    `PageChrome.panelWidth`
-//   top      `PageChrome.noteTop` — below the identity rows, so a modal can never
-//            cover the run identity
-//   bottom   `PageChrome.edge`
+//   top      ★ B2 (U1, approved design 2026-11-02, design-system §4.1 / §4.3, mockup top 130): `PageChrome.panelTop`,
+//            12 pt under the top-left block's stage row, so a panel never covers the chrome and every page's panel starts
+//            at one place. (It was vertically CENTRED under twice `noteTop`, the old three-bar stack's foot — on an 11"
+//            landscape window the open Selections panel ran 40 pt under the window and its Safety margin was out of reach.)
+//   bottom   `PageChrome.panelBottom` (the hint line's band)
 //   height   at most the band between those two; the content hugs, and only a
-//            modal that outgrew the band scrolls INSIDE it
-//   position vertically CENTRED in that band, hard against the leading edge inset
+//            modal that outgrew the band scrolls INSIDE it ("n more ⌄")
 
 import SwiftUI
 import TopOptDesign
@@ -94,7 +95,8 @@ public struct PageLeftModal: ViewModifier {
     // So the rule is stated once, here, as two booleans:
     //   OPEN       spacer above AND below  ⇒ centred in the band (his §6)
     //   MINIMIZED  spacer above ONLY       ⇒ hard against the bottom inset
-    var hasSpacerAbove: Bool { true }
+    // ★ B2 (U1): OPEN is now top-aligned — a spacer BELOW only; MINIMIZED keeps its spacer ABOVE only.
+    var hasSpacerAbove: Bool { minimized }
     var hasSpacerBelow: Bool { !minimized }
 
     public func body(content: Content) -> some View {
@@ -116,7 +118,7 @@ public struct PageLeftModal: ViewModifier {
         // BOTH sides, which is the same picture by a mechanism that is not
         // sensitive to sizing.
         VStack(spacing: 0) {
-            Spacer(minLength: minimized ? 0 : PageChrome.noteTop)
+            if hasSpacerAbove { Spacer(minLength: 0) }
             // ★ MINIMIZED SIZES TO ITS CONTENT (maintainer, 2026-08-19: "Can you
             // make the minimized 'Selections' small enough to fit on the left
             // corner right at the bottom edge while it currently is too wide to
@@ -129,11 +131,11 @@ public struct PageLeftModal: ViewModifier {
                           alignment: .leading)
             // ★ ABSENT when minimized — see `hasSpacerBelow`. A zero-minimum
             // spacer here is what centred it the last two times.
-            if hasSpacerBelow { Spacer(minLength: PageChrome.edge) }
+            if hasSpacerBelow { Spacer(minLength: 0) }
         }
         .padding(.leading, PageChrome.edge)
-        .padding(.bottom, minimizedBottomInset)
-        .padding(.top, minimized ? 0 : PageChrome.noteTop)
+        .padding(.bottom, minimized ? minimizedBottomInset : PageChrome.panelBottom)
+        .padding(.top, minimized ? 0 : PageChrome.panelTop)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

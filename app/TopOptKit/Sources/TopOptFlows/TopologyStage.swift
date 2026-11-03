@@ -185,7 +185,7 @@ public enum TopologySetupRow: String, Equatable, Sendable, CaseIterable {
         case .minimizePlastic: return "Plastic"
         case .protectSkin: return "Protect skin"
         case .cadFaces: return "CAD surfaces"
-        case .designBox: return "Design primitives"   // B6: the list of up to 6
+        case .designBox: return "Allow growth here"   // B6: the list of up to 6 (★ B2, U4: never "primitives")
         case .printParameters: return "Print parameters"
         }
     }

@@ -1395,6 +1395,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var vertexTintOverride: [Float]?
     /// §6 — draw the line set through the solid (x-ray) rather than depth-tested.
     var xrayLines = false
+    /// ★ B2 (notes 2, 7): THE X-RAY LOOK — the body drawn see-through at `XrayLook.bodyAlpha` (the Results X-ray). Only the
+    /// body's DRAWN opacity: `bodyAlpha` (the lattice preview's rule, the shadow, the shell clip, the region cap) is untouched.
+    var xrayBody = false
+    /// Hosted tests only: the X-ray flag each viewer was last handed, per window (an offscreen window draws no further
+    /// frames, and one window can hold several viewers).
+    nonisolated(unsafe) static var xrayBodyByWindow: [Int: [ObjectIdentifier: Bool]] = [:]
+    /// The opacity the body is DRAWN with: the X-ray look, never more opaque than the lattice preview's own rule asks.
+    static func bodyDrawAlpha(_ bodyAlpha: Float, xray: Bool) -> Float { xray ? min(bodyAlpha, XrayLook.bodyAlpha) : bodyAlpha }
     private var cutUniforms = CutUniformsSwift(plane: .zero, colSelected: .zero,
                                                colSibling: .zero, enabled: 0)
     private var wireframeVertexCount = 0
@@ -3501,9 +3509,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
         // the translucent pipeline (premultiplied "over", no depth write) so the comet
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
-        let translucent = bodyAlpha < 0.999
+        let drawAlpha = Self.bodyDrawAlpha(bodyAlpha, xray: xrayBody)   // ★ B2: the X-ray look
+        let translucent = drawAlpha < 0.999
         let ghostAfterLattice = flexibleGhostAfterLattice(translucent: translucent, latticeShaded: wantsLattice && gbuffer != nil)
-        var bodyAlphaVal = bodyAlpha
+        var bodyAlphaVal = drawAlpha
         enc.setRenderPipelineState(translucent ? (translucentBodyPipeline ?? pipeline) : pipeline)
         enc.setDepthStencilState(translucent ? translucentBodyDepthState : depthState)
         enc.setCullMode(.none)  // show both sides regardless of winding
@@ -6550,6 +6559,12 @@ extension MetalMeshView {
             // when the overlay turns off so a stale variant's glyphs can't linger.
             // ★ §6(b) — the wireframe follows the MESH, so it rebuilds whenever the
             // mesh does and clears the moment the stage turns it off.
+            // ★ B2 (note 7): THE X-RAY LOOK, OUTSIDE the Outlines branch below — it was read only in there, so X-ray did
+            // nothing with Outlines off ("The X-ray view doesn't work unless you set the outlines view on").
+            if renderer.xrayBody != inputs.xray { renderer.xrayBody = inputs.xray; dirty = true }
+            #if os(macOS)
+            if let n = view.window?.windowNumber { MeshRenderer.xrayBodyByWindow[n, default: [:]][ObjectIdentifier(view)] = inputs.xray }
+            #endif
             if inputs.showWireframe {
                 if renderer.xrayLines != inputs.xray { renderer.xrayLines = inputs.xray; dirty = true }
                 // ★ HASHED, NOT COUNTED — THE SAME TRAP `VertexTintKey` ALREADY PAID

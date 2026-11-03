@@ -68,6 +68,7 @@ struct LibraryNextVersionCard: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(DS.Color.okGreen.color))
                         .dsShadow(DS.Shadow(color: DS.Color.okGreen.opacity(0.4), radius: 24, y: 6))
                         .accessibilityIdentifier("next-version-optimize")
+                        .background(CornerPairStyle.publish("nextVersionOptimize"))   // B1: hosted tests find it by its frame
                 }
             }
             .padding(DS.Space.xl2)

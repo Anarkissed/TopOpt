@@ -548,7 +548,7 @@ public enum DesignPrimitivesCopy {
     public static let add = "Add"
     public static func addNote(count: Int) -> String {
         count >= DesignBoxModel.maxPrimitives
-            ? "Up to \(DesignBoxModel.maxPrimitives) design primitives"
+            ? "Up to \(DesignBoxModel.maxPrimitives) boxes and cylinders"   // ★ B2 (U4)
             : "\(DesignPrimitiveSign.positive.title): \(DesignPrimitiveSign.positive.meaning.lowercased()) \u{00B7} "
               + "\(DesignPrimitiveSign.negative.title): \(DesignPrimitiveSign.negative.meaning.lowercased())"
     }

@@ -221,7 +221,7 @@ final class TopologyStageTests: XCTestCase {
 
     func testTheSetupChipCarriesTheChipColumnAndTheBar() {
         XCTAssertEqual(TopologySetupRow.visible(protectCount: 0, isStep: false, designBoxDrawn: true).map(\.title),
-                       ["Quality", "Plate", "Gravity", "Runs on", "Units", "Plastic", "Design primitives", "Print parameters"])
+                       ["Quality", "Plate", "Gravity", "Runs on", "Units", "Plastic", "Allow growth here", "Print parameters"])
         XCTAssertTrue(TopologySetupRow.visible(protectCount: 1, isStep: true, designBoxDrawn: true).contains(.protectSkin))
         XCTAssertFalse(TopologySetupRow.visible(protectCount: 1, isStep: true, designBoxDrawn: true).contains(.cadFaces),
                        "★ CAD surfaces hidden (ruling 2026-10-26 23:44)")

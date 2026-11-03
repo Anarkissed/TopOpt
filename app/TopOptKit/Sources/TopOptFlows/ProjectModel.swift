@@ -709,7 +709,7 @@ public final class ProjectModel: ObservableObject {
                 // §3e). Region ids are NOT face ids and are never remapped through
                 // `resolvedRunFaceID` — a region is resolved core-side against the
                 // run's own import, which is the whole reason it survives one.
-                anchorRegions.append(contentsOf: g.regionIDs)
+                anchorRegions.append(contentsOf: runRegionIDs(g.regionIDs))   // ★ B1 (note 38): a union goes as its pieces
             } else if kind.isLoad, force.group(g.id, isIn: first) {
                 // ★★ ONE DIRECTION, OR NONE (2026-10-09, #362's find): the same verdict the
                 // pre-flight blocks on. A Push or Pull whose faces face opposite ways has no
@@ -719,7 +719,7 @@ public final class ProjectModel: ObservableObject {
                 if case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f),
-                                       regionIDs: g.regionIDs))
+                                       regionIDs: runRegionIDs(g.regionIDs)))   // ★ B1 (note 38)
                 }
             }
         }
@@ -749,7 +749,7 @@ public final class ProjectModel: ObservableObject {
                     anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
                 } else if kind.isLoad, force.group(g.id, isIn: s.id), case .vector(let f)? = loadDirection(for: g.id) {
                     loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
-                                       force: SIMD3<Double>(f), regionIDs: g.regionIDs))
+                                       force: SIMD3<Double>(f), regionIDs: runRegionIDs(g.regionIDs)))   // ★ B1 (note 38)
                 }
             }
             return LoadScenarioWire(name: s.name, anchorFaceIDs: anchors, loadGroups: loads)
@@ -933,11 +933,31 @@ public final class ProjectModel: ObservableObject {
                         perGroup: lattice.groupDepthMM,
                         fallbackMM: lattice.paintDepthMM)
                     : force.faceProtectDepthMM)
-                regionIDs.append(r)
-                regionDepths.append(d)
+                for leaf in runRegionIDs([r]) {   // ★ B1 (note 38): a union goes as its pieces, each at its depth
+                    regionIDs.append(leaf)
+                    regionDepths.append(d)
+                }
             }
         }
         return (ids, force.faceProtectDepthMM, depths, regionIDs, regionDepths, viewerFaces)
+    }
+
+    /// ★ B1 (ledger note 38, the app half; O1's cause): the region ids a role NAMES on the wire. A union of pieces owns no
+    /// faces of its own, so core refuses it as a region ("face region N declares neither a filter nor any "add" faces"): it
+    /// goes as its pieces, which are real regions and cover the same surface. A piece left with no faces goes as nothing
+    /// (the workspace refuses a run whose role holds only such a piece). A project with no union and no empty piece sends
+    /// exactly what it sent before.
+    public func runRegionIDs(_ ids: [RegionID]) -> [RegionID] {
+        let empty = FaceRegionSend.empty(faceRegions.regions)
+        var out: [RegionID] = []
+        var seen: Set<RegionID> = []
+        for id in ids {
+            for leaf in faceRegions.resolvedLeaves(id) where !empty.contains(leaf) && !seen.contains(leaf) {
+                seen.insert(leaf)
+                out.append(leaf)
+            }
+        }
+        return out
     }
 
     /// The lattice region depth for `group`, in mm — the ONE number, read through

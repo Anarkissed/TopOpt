@@ -45,7 +45,7 @@ public enum ResultsVersions {
             let cards = StrengthenText.cards(b)
             for (i, v) in s.versions.enumerated() {
                 let card = cards.indices.contains(i) ? cards[i] : nil
-                let title = card?.title.replacingOccurrences(of: ": ", with: " · ") ?? "Version \(v.version)"
+                let title = card?.title.replacingOccurrences(of: ": ", with: " · ") ?? ResultMark.letter(v.version - 1)
                 if v.status == "unreachable" {
                     let why: String
                     if let cap = s.cap, i == s.versions.count - 1, cap.atAnchorFace || cap.atLoadFace {
@@ -72,7 +72,7 @@ public enum ResultsVersions {
         var k = out.count
         for tab in tabs where !used.contains(tab.index) {
             k += 1
-            let title = "Version \(k) · " + tab.headlineLabel + (tab.isLatticed ? " · latticed" : "")
+            let title = ResultMark.letter(k - 1) + " · " + tab.headlineLabel   // ★ B2 (U4): a result is its letter + (tab.isLatticed ? " · latticed" : "")
             out.append(row(tab, title: title, margin: tab.worstCaseMargin))
         }
         return out
@@ -247,8 +247,9 @@ public enum ResultsViewMode: String, CaseIterable, Sendable {
     var moves: Bool { self == .loadPaths || self == .bend || self == .breakIt }
 
     /// The views this run can show, in order — one it cannot is hidden, never greyed (his note 2026-10-27).
+    /// ★ B2 (round 1, design-system §4.2): the X-ray pair first, then today's views in today's order.
     static func shown(hasStress: Bool, hasDisplacement: Bool, canBreak: Bool) -> [ResultsViewMode] {
-        (hasStress ? [.stress] : []) + [.solid, .xray]
+        [.xray] + (hasStress ? [.stress] : []) + [.solid]
             + (hasStress ? [.loadPaths] : []) + (hasDisplacement ? [.bend] : []) + (canBreak ? [.breakIt] : [])   // ★ 10-28: the light flow reads the stress
     }
 }

@@ -232,9 +232,9 @@ final class LoadScenarioTests: XCTestCase {
             return ["strengthen": s]
         }
         XCTAssertEqual(StrengthenText.cards(RunReportBlocks.decode(report: report(1.5))).map(\.title),
-                       ["Version 1: just safe", "Version 2: +10%", "Version 3: +10%"])
+                       ["a · Just safe", "b · +10 %", "c · +20 %"])   // ★ B2 (U4): a result is its letter; each step adds 10 %
         XCTAssertEqual(StrengthenText.cards(RunReportBlocks.decode(report: report(nil))).map(\.title),
-                       ["Version 1 · 25 % less worst stress", "Version 2 · 50 % less worst stress", "Version 3 · 75 % less worst stress"])
+                       ["a · 25 % less worst stress", "b · 50 % less worst stress", "c · 75 % less worst stress"])
         XCTAssertEqual(RunReportBlocks.decode(report: report(2)).safetyMargin, 2)
         XCTAssertNil(RunReportBlocks.decode(report: report(nil)).safetyMargin)
     }
@@ -303,7 +303,7 @@ final class LoadScenarioTests: XCTestCase {
         XCTAssertTrue(src.contains("scenarioAnchorOff(g.id)"), "an anchor off here is dimmed, not hidden")
         XCTAssertTrue(src.contains("force.addScenario()"), "+ Add a load scenario")
         XCTAssertTrue(src.contains("LoadScenarioRule.info"), "the (i)")
-        XCTAssertTrue(src.contains("if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.activeRemote != nil) { model.toast = no; return }"), "Optimize's pre-flight")
+        XCTAssertTrue(src.contains("if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }"), "Optimize's pre-flight")
         XCTAssertTrue(src.contains("force.switchAllAnchorsOn(in: s.id)"), "the gap's one-tap fix")
         // (the controls themselves are found ON SCREEN in LoadScenarioHostedTests; these only pin the wiring)
         XCTAssertFalse(src.contains("selectionsListBody"), "★ no dead copy in the old library card")
