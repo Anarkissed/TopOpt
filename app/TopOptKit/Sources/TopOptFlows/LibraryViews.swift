@@ -637,6 +637,7 @@ struct ProjectFolderView: View {
                                 .dsShadow(.accentGlow)
                         }
                         .buttonStyle(.plain).accessibilityIdentifier("library-add-part")
+                        .background(CornerPairStyle.publish("libraryAddPart"))   // B1: hosted tests
                     }
                 }
                 LazyVGrid(columns: columns, spacing: DS.Space.xl3) {

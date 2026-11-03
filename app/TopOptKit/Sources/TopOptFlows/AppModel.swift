@@ -567,6 +567,7 @@ public final class AppModel: ObservableObject {
 
     /// Dismiss the import sheet without starting a project.
     public func cancelImport() {
+        library.importTargetProject = nil   // ★ B1 (note 9): a cancelled Add part files nothing later
         importSheetPresented = false
         pendingUnitPrompt = nil
         pendingUnitPath = nil
@@ -756,6 +757,7 @@ public final class AppModel: ObservableObject {
         importSheetPresented = false
         screen = .workspace
         persist(pm)   // copy the model into the store + write the initial snapshot (persist-b)
+        if library.importTargetProject != nil { library.refresh() }   // ★ B1 (note 9): filed in its project the moment it exists
         // M7.params (b): a freshly imported model prompts for its print parameters as
         // it enters the workspace. The sheet auto-presents over the new workspace
         // (project is set, so `openPrintParams` presents); Done/scrim persist it.

@@ -94,13 +94,20 @@ public final class LibraryModel: ObservableObject {
             let before = Set(existing.parts.map(\.id))
             var r = LibraryGrouping.reconcile(existing, store: store, parents: pendingParents)
             pendingParents = pendingParents.filter { r.part(containing: $0.key) == nil }
+            // ★ B1 (note 9, approved design 2026-11-02): the chosen project is KEPT until the new part exists and is filed
+            // in it. It was cleared on the first refresh, which can run before the part's folder is written (the Library
+            // redrawing behind the import sheet), so the part landed in Unfiled.
             if let t = importTargetProject, let p = r.projects.firstIndex(where: { $0.id == t }) {
                 let filed = Set(r.projects.flatMap(\.partIDs))
+                var filedOne = false
                 for part in r.parts where !before.contains(part.id) && !filed.contains(part.id) {
                     r.projects[p].partIDs.append(part.id)
+                    filedOne = true
                 }
+                if filedOne { importTargetProject = nil }
+            } else {
+                importTargetProject = nil   // no such project any more
             }
-            importTargetProject = nil
             if r != existing { try? store.saveLibrary(r) }
             index = r
             mode = .library
