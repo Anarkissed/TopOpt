@@ -139,6 +139,24 @@ public final class ComputeLocationModel: ObservableObject {
         }
     }
 
+    /// ★ B1 (note 4, approved design 2026-11-02): the REMEMBERED choice is a Mac (a worker or a manual address), found on
+    /// the network yet or not. "Is a Mac chosen?" reads this; only the send needs `activeRemote` (its resolved address).
+    /// It used to read `activeRemote`, which stays nil until discovery runs, and discovery started only when Settings
+    /// opened, so a run said "must go to the Mac" while the Mac was chosen.
+    public var wantsRemote: Bool { choice != .local }
+
+    /// The remembered Mac's name, for "Finding Nadim's Mac mini…".
+    public var rememberedName: String? {
+        switch choice {
+        case .local: return nil
+        case .worker(let name): return name
+        case .manual(let host, _): return host
+        }
+    }
+
+    /// How long Optimize looks for the remembered Mac before it says it isn't answering.
+    public static let findSeconds: Double = 8
+
     /// A short label for the current choice, for the bottom-bar pill.
     public var label: String {
         switch choice {

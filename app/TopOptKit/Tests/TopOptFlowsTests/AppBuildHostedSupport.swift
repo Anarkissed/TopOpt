@@ -113,6 +113,15 @@ final class AppBuildHost {
     }
 }
 
+/// The open project's workspace, exactly as RootView mounts it (`.id(project.id)`: a version switch builds a fresh page, its
+/// state and onAppear the new version's). RootView itself lays out past an offscreen window, so the tests mount this part.
+struct AppBuildWorkspace: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        if let p = model.project { WorkspacePlaceholder(model: model, project: p).id(p.id) }
+    }
+}
+
 /// Lookalike results (never his job inputs): `n` accepted variants on a one-triangle mesh, the shape Library tests use.
 enum AppBuildFixtures {
     static func outcome(_ n: Int = 3) -> OptimizeOutcome {

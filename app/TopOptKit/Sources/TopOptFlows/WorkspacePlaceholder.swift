@@ -1380,6 +1380,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil, regionsOpen, !flexibleMain.owns(project, stage) { regionsPanelOverlay }   // Flexible (PR #362) H26: no Regions on the Flexible stage (his img6: the Surface stage does it)
                 // The lattice preview legend + the Struts toggle are LATTICE
                 // affordances (§1a): they left the TO page with everything else.
+                workspaceCardsHost   // ★ B1 (note 3): always mounted — the run cards and the run watchers (they hung on the overlay below)
                 if viewerMesh != nil, visible.latticeControls { latticePreviewOverlay }
                 // ★ §1b — the ONE button: it NAVIGATES between the two stages.
                 if viewerMesh != nil, flexibleMain.owns(project, stage), !editFaces.isEditing { FlexibleStageCapsule(main: flexibleMain, project: project, page: .lattice, go: { goToStage($0) }, squish: { showFlexiblePage = true }, about: { showLatticeModeSheet = true }, editFaces: { flexibleMain.editFacesOpens(); enterEditFaces(from: FlexibleEditFaces.origin(.lattice), onReturn: { if flexibleMain.editFacesReturns($0) { showFlexiblePage = true } }) }, changeType: { flexibleMain.askChangeType() }).latticeBandChipKeepOut().modifier(StageNavPlacement(stage: stage)) }   // Flexible (PR #362) H27: '● Flexible ⌄ | Lattice | Squish' under the name; Topology, Surface and About Flexible… live in its menu · Flexible (PR #362) H60: "Edit faces…" and the ✂ open B5's mode from the main page; H61: under it the mode's header takes the capsule's place · Flexible (PR #362) H62: "Change lattice type…" asks with #354's card
@@ -3294,6 +3295,23 @@ public struct WorkspacePlaceholder: View {
             refreshLatticeStressPeak()
             if showStrutPreview, project.lattice.enabled { buildStrutScene() }
         }
+        .onAppear {
+            syncLatticeProxy()
+            // A reopened project already carries roles and depths — the cards
+            // must be there on arrival, not only after the user touches a chip.
+            refreshLatticeFaceCards()
+        }
+    }
+
+    // ★ B1 (note 3, approved design 2026-11-02): THE CARDS AND RUN WATCHERS EVERY STAGE NEEDS, on a view that is ALWAYS
+    // mounted. They hung on `latticePreviewOverlay`, which mounts only where `visible.latticeControls` (782fdda2), so on
+    // Topology the re-run card and Library's "Optimize as vN" card could never present ("after running an optimization,
+    // running it again doesn't work"), and the landed-run notice and a card's Export never heard a run land there.
+    // Moved unchanged. (#362's H50b line keeps its text and indent.)
+    private var workspaceCardsHost: some View {
+        Color.clear
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
         // BAR 4, the other half: when a run produced nothing and the previous run's
         // variants came BACK, say so — results reappearing behind a failure sheet
         // with no explanation is its own confusion.
@@ -3360,12 +3378,8 @@ public struct WorkspacePlaceholder: View {
                  + " are available for use. Please select which you'd prefer — you can always "
                  + "change this in the settings.")
         }
-        .onAppear {
-            syncLatticeProxy()
-            // A reopened project already carries roles and depths — the cards
-            // must be there on arrival, not only after the user touches a chip.
-            refreshLatticeFaceCards()
-        }
+        // ★ B1 (note 4): a remembered Mac is looked for as the workspace opens, not only when Settings opens
+        .onAppear { if compute.wantsRemote { compute.startBrowsing() } }
     }
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
