@@ -283,6 +283,12 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
           "be declared once and referred to by id.");
     return *it->second;
   };
+  // A scenario's region anchors are validated first, naming the scenario (they are
+  // tagged below as part of the load case's union).
+  if (scenarios)
+    for (const ProductionLoadCase::Scenario& sc : lc_in.scenarios)
+      for (const int rid : sc.anchor_region_ids)
+        (void)region_or_throw(rid, "Scenario \u201C" + sc.name + "\u201D's anchor");
 
   // ★ THE SLIVER GUARD, BEFORE ANYTHING IS TAGGED (task
   // 2026-08-14-face-regions §5a, bar R5).
@@ -987,8 +993,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   }
 
   // LOAD SCENARIOS — each scenario's own supports and loads (part grid). An anchor ON
-  // in it is clamped as today (a region anchor is ON in every scenario: the key names
-  // face ids); an anchor OFF in it is NOT removed but held by weak non-contact springs,
+  // in it is clamped as today (a region anchor is ON in every scenario unless the job
+  // names each scenario's region anchors: then exactly where named); an anchor OFF in
+  // it is NOT removed but held by weak non-contact springs,
   // isotropic, sized by minimize_plastic (kScenarioWeakSpringRel of the part's own
   // element stiffness: only the driver knows the material), so the solve is never
   // singular and the push on that piece must travel through the part. Every load group
@@ -1027,11 +1034,16 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       SimpScenario s;
       s.name = sc.name;
       std::set<int> held, weak;
+      auto on_here = [&](const MinimizePlasticOptions::AnchorVoxels& a) {
+        if (a.face_id >= 0)
+          return std::find(sc.anchor_face_ids.begin(), sc.anchor_face_ids.end(), a.face_id) !=
+                 sc.anchor_face_ids.end();
+        return !sc.region_anchors_named ||
+               std::find(sc.anchor_region_ids.begin(), sc.anchor_region_ids.end(),
+                         a.region_id) != sc.anchor_region_ids.end();
+      };
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
-        const bool on = a.face_id < 0 || std::find(sc.anchor_face_ids.begin(),
-                                                   sc.anchor_face_ids.end(),
-                                                   a.face_id) != sc.anchor_face_ids.end();
-        if (!on) continue;
+        if (!on_here(a)) continue;
         for (const std::size_t v : a.part_voxels)
           if (grid.tags[v] == VoxelTag::Fixture)
             corners(v, [&](int n) {
@@ -1043,9 +1055,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         throw std::invalid_argument("Scenario \u201C" + sc.name +
                                     "\u201D has no anchor switched on");
       for (const MinimizePlasticOptions::AnchorVoxels& a : opts.anchor_voxels) {
-        if (a.face_id < 0 || std::find(sc.anchor_face_ids.begin(), sc.anchor_face_ids.end(),
-                                       a.face_id) != sc.anchor_face_ids.end())
-          continue;
+        if (on_here(a)) continue;
         for (const std::size_t v : a.part_voxels)
           if (grid.tags[v] == VoxelTag::Fixture)
             corners(v, [&](int n) {

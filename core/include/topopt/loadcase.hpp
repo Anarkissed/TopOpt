@@ -97,12 +97,17 @@ struct ProductionLoadCase {
   std::vector<LoadGroup> load_groups;
   // LOAD SCENARIOS (job loads.scenarios, two or more; empty = one load case). Each
   // scenario's own groups and the anchors ON in it. `anchor_face_ids` must hold their
-  // UNION (every anchor is a support somewhere, so all are tagged and padded) and
-  // `load_groups` scenario 1's (the mirror).
+  // UNION, and `anchor_region_ids` the union of their region anchors (every anchor is a
+  // support somewhere, so all are tagged and padded), and `load_groups` scenario 1's
+  // (the mirror). REGION anchors: when `region_anchors_named` (the job gave a
+  // scenario "anchor_region_ids"), a region anchor is ON exactly in the scenarios that
+  // name it; otherwise it is ON in every scenario (the jobs before the key).
   struct Scenario {
     std::string name;
     std::vector<LoadGroup> groups;
     std::vector<int> anchor_face_ids;
+    std::vector<int> anchor_region_ids;
+    bool region_anchors_named = false;
   };
   std::vector<Scenario> scenarios;
   // The user's safety margin (job loads.safety_margin); 0 = the production default.

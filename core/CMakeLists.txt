@@ -2417,6 +2417,14 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME scenarios COMMAND test_scenarios)
+  # LOAD SCENARIOS: a scenario's own region anchors (a cut piece as its anchor).
+  add_executable(test_scenario_anchor_regions tests/validation/test_scenario_anchor_regions.cpp)
+  target_link_libraries(test_scenario_anchor_regions PRIVATE topopt)
+  target_compile_definitions(test_scenario_anchor_regions PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME scenario_anchor_regions COMMAND test_scenario_anchor_regions)
   # LOAD SCENARIOS count in proportion to their load (his ask 2026-10-28).
   add_executable(test_scenario_weights tests/validation/test_scenario_weights.cpp)
   target_link_libraries(test_scenario_weights PRIVATE topopt)
