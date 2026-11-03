@@ -561,6 +561,8 @@ public struct WorkspacePlaceholder: View {
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
     @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
+    @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
+    @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
     @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Smooth on this result
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
@@ -1831,6 +1833,7 @@ public struct WorkspacePlaceholder: View {
             pendingLatticeRerun = prompt
             return
         }
+        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
     }
 
@@ -1840,6 +1843,7 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Import a part and set a lattice region first."
             return
         }
+        runCouldntFinish = false; lastRunWasLattice = true   // ★ B1 (O1)
         run.start(request)
     }
 
@@ -1878,6 +1882,7 @@ public struct WorkspacePlaceholder: View {
         if let no = StrengthenRoute.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // Flexible (PR #362) H56m: redesign to strengthen (overnight plan 2026-10-25) — no design box: one line, nothing sent
         if let no = LoadScenarioRule.refusal(for: request, workerSelected: compute.wantsRemote) { model.toast = no; return }   // ★ load scenarios: core's own words, before the send
         lastRunRequest = request   // Optimize greys out until the inputs change
+        runCouldntFinish = false; lastRunWasLattice = false   // ★ B1 (O1)
         // Pick the runner for THIS run from the compute-location choice. A remote
         // config (a worker was selected + resolved) offloads to the LAN worker;
         // otherwise the on-device bridge runs it, byte-identical to before. Always
@@ -3386,6 +3391,16 @@ public struct WorkspacePlaceholder: View {
         // ★ B1 (note 4): a remembered Mac is looked for as the workspace opens, not only when Settings opens
         .onAppear { if compute.wantsRemote { compute.startBrowsing() } }
         .onChange(of: compute.activeRemote != nil) { found in if found { macNotAnswering = false } }
+        // ★ B1 (O1): an engine failure is one line on the button that started the run, never a card. The failure is
+        // dismissed at once, so the results it displaced come back (AJ1), exactly as Close on the old card did.
+        .onChange(of: run.phase) { ph in
+            // A run that FAILED produced nothing, so its inputs never count as "already run": Optimize stays live for Try
+            // again (the stall card's Try Again re-entered startRun and met the same-inputs grey-out — a dead button).
+            if ph == .failed { lastRunRequest = nil }
+            guard ph == .failed, run.failureShowsOnButton else { return }
+            runCouldntFinish = true
+            run.dismissFailure()
+        }
     }
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
@@ -12714,6 +12729,7 @@ public struct WorkspacePlaceholder: View {
         // (The words live in `LatticeJobIncludeGate`, so a variant's refusal is the stage's by
         // construction — ruling c, 2026-09-30.)
         if let why = latticeStageRefusal { return why }
+        if runCouldntFinish, lastRunWasLattice { return Self.couldntFinishLine }   // ★ B1 (O1)
         if !organicStructuralGateOpen { return TopOptKit.organicStructuralGateMessage }
         let n = project.latticeJobRegions().regions.filter { $0.role == .include }.count
         return "\(n) region\(n > 1 ? "s" : "") · no optimization"
@@ -12729,9 +12745,10 @@ public struct WorkspacePlaceholder: View {
         // the tap tries again (the design's "Finding Nadim's Mac mini…" / "Your Mac isn't answering · Try again")
         let mac = compute.rememberedName ?? "your Mac"
         let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
-        let line = macNotAnswering && ok ? Self.macNotAnsweringLine : summary
+        let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
+            : macNotAnswering && ok ? Self.macNotAnsweringLine : summary
         return Button {
-            if ok { macNotAnswering = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
+            if ok { macNotAnswering = false; runCouldntFinish = false; requestRun() } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         } label: {
             StageActionCapsuleLabel(title: title, summary: line, ok: ok || macFinding, marks: marks || opensType,
                                     horizontalPadding: DS.Space.xl5)
@@ -12739,11 +12756,15 @@ public struct WorkspacePlaceholder: View {
         .buttonStyle(.plain)
         .disabled(!ok && !marks && !opensType)
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
-        .background(CornerPairStyle.publish(macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering" : "optimizeButton"))
+        .background(CornerPairStyle.publish(macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering"
+                                            : runCouldntFinish && !lastRunWasLattice ? "optimizeCouldntFinish" : "optimizeButton"))
     }
 
     /// ★ B1 (note 4): the one line on Optimize when the remembered Mac never answered; a tap tries again.
     static let macNotAnsweringLine = "Your Mac isn\u{2019}t answering \u{00B7} tap to try again"
+
+    /// ★ B1 (O1): the one line on the button whose run the engine could not finish; a tap tries again.
+    static let couldntFinishLine = "Couldn\u{2019}t finish \u{00B7} tap to try again"
 
     /// ★ B1 (note 4, approved design 2026-11-02): look for the remembered Mac for a few seconds, then go on; if it never
     /// answers, Optimize says so in one line. Discovery itself starts as the workspace opens (workspaceCardsHost).

@@ -1080,6 +1080,15 @@ public final class RunModel: ObservableObject {
     /// picked (the bridge or the Mac), so a test lands a run through the REAL Optimize click. The app never sets it.
     nonisolated(unsafe) static var hostedTestRunner: Runner?
 
+    /// ★ B1 (ledger O1, approved design 2026-11-02: "an engine failure is one plain line on the button that failed, never
+    /// the raw engine text in a card"): this failure is the ENGINE's own text (the runner threw). RunScreen draws no card
+    /// for it; the workspace dismisses it and the button that started the run says so in one line. The text is kept for
+    /// B2's (i). A stall ("Keep waiting") and "Not strong enough to print" are app words and stay sheets (question to the
+    /// reviewer, 2026-11-03).
+    @Published public private(set) var failureShowsOnButton = false
+    /// The engine's own words for the last such failure (for B2's (i); never drawn in a card).
+    @Published public private(set) var lastEngineFailureText: String?
+
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
     private let watchdog: RunWatchdog
@@ -1283,6 +1292,7 @@ public final class RunModel: ObservableObject {
         phase = .running
         progress = nil
         failure = nil
+        failureShowsOnButton = false   // ★ B1 (O1)
         canKeepWaiting = false
         // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
         // still has to be cleared (streamed variants append to it), but a run that
@@ -1645,6 +1655,8 @@ public final class RunModel: ObservableObject {
                 diag("run failed: \(message)")
                 outcome = nil
                 failure = .solver(message)
+                failureShowsOnButton = true      // ★ B1 (O1): engine text, never a card
+                lastEngineFailureText = message
                 phase = .failed
             }
         }

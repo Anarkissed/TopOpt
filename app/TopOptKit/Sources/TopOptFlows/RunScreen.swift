@@ -126,7 +126,7 @@ public struct RunScreen: View {
     // MARK: - Failure sheet (design-consistent, not an alert)
 
     @ViewBuilder private var failureSheet: some View {
-        if let failure = model.failure {
+        if let failure = model.failure, !model.failureShowsOnButton {   // ★ B1 (O1): engine text is a line on the button, not this card
             ZStack {
                 Rectangle().fill(.ultraThinMaterial).overlay(DS.Color.scrim.color)
                     .ignoresSafeArea()
@@ -168,6 +168,7 @@ public struct RunScreen: View {
                     .padding(DS.Space.xl2)
                     .frame(width: 440)
                 }
+                .background(CornerPairStyle.publish("runFailureSheet"))   // B1: hosted tests see whether a card is up
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
             }
         }
