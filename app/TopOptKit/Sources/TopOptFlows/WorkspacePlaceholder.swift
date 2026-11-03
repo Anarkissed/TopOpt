@@ -1510,6 +1510,7 @@ public struct WorkspacePlaceholder: View {
                         CornerPairStyle.small(c.undoLabel, id: "lattice-clear-undo") {
                             project.undoClearLattice(c); clearedLattice = nil; model.persistCurrentProject()
                         }
+                        .background(CornerPairStyle.publish("latticeClearUndo"))
                         .padding(.bottom, DS.Space.xl6)
                     }
                     .frame(maxWidth: .infinity)
@@ -1566,7 +1567,7 @@ public struct WorkspacePlaceholder: View {
                     .transition(.opacity)
                     .zIndex(49)
             }
-            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
+            if project.lattice.flexible != nil { FlexibleChangeTypeMount(main: flexibleMain, project: project, app: model, loseAll: { showFlexiblePage = false; deleteLatticeForMode() }, keepRegions: { showFlexiblePage = false; keepLatticeRegions() }).zIndex(49) }   // Flexible (PR #362) H62: "Change lattice type…" on the Flexible stage asks with #354's own card (its mount needs a type a Flexible project never has); Continue is today's delete with its one-step Undo
             })   // Flexible (PR #362) H58
             AnyView(Group {   // Flexible (PR #362) H58: the body in heap-boxed chunks; the 47 KB body value was copied on the iPad main thread's stack until it overflowed (crash 2026-10-25)
             if showLatticeWizard {
@@ -1736,7 +1737,7 @@ public struct WorkspacePlaceholder: View {
         // ★ WHOLE-APP B3 (U7, OneWayToSayNoTests): it asks IN PLACE, a card over the run button's corner — never an alert. Over the whole
         // page, so the 3D view under it never takes its clicks
         .overlay(alignment: .bottomTrailing) { RerunConfirm(shown: replacementPromptBinding.wrappedValue, message: pendingReplacement?.message ?? "",
-                                                              leaveToken: RerunLeaveToken(stage: stage, edit: project.editSnapshot),
+                                                              leaveToken: RerunLeaveToken(stage: stage, edit: EditBox(project.editSnapshot)),
                                                               onLeave: { pendingReplacement = nil },
                                                               bottom: bottomBarHeight + DS.Space.xl4 + DS.Space.s) {
             Button(TopologyRerunChoice.rerunHere.label) {
@@ -1850,7 +1851,15 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// ★ B3 (#362's condition 2): what leaving the re-run card means — the stage changes, or any edit / Undo lands.
-    struct RerunLeaveToken: Equatable { let stage: WorkspaceStage; let edit: EditSnapshot }
+    /// ★ THE SNAPSHOT RIDES IN A BOX (WorkspaceBodySizeTests, H58): the card hangs on the page's root, so whatever it holds is
+    /// part of the body value the iPad copies on its small main-thread stack — inline, the edit snapshot took the body from
+    /// a few hundred bytes to 1,680. The box is one pointer; equality still compares the whole snapshot.
+    struct RerunLeaveToken: Equatable { let stage: WorkspaceStage; let edit: EditBox }
+    final class EditBox: Equatable {
+        let snapshot: EditSnapshot
+        init(_ s: EditSnapshot) { snapshot = s }
+        static func == (a: EditBox, b: EditBox) -> Bool { a.snapshot == b.snapshot }
+    }
 
     private var replacementPromptBinding: Binding<Bool> {
         Binding(get: { pendingReplacement != nil },
@@ -13842,6 +13851,19 @@ extension WorkspacePlaceholder {
         model.persistCurrentProject()
     }
 
+    /// ★ B3 ("Keep my regions and groups, choose a new type"): ProjectModel.clearLatticeCells — ONE undo step, its Undo over the
+    /// selector it brings up (as "Continue and lose all work").
+    func keepLatticeRegions() {
+        clearedLattice = project.clearLatticeCells()
+        showLatticeModeSheet = false
+        showLatticePage = false
+        showStrutPreview = false
+        strutScene = nil
+        latticeSettingsSavedThisSession = false
+        refreshLatticeFaceCards()
+        model.persistCurrentProject()
+    }
+
     /// ★ B3 (his answer 11-03: "Exit without selection"): the selector leaves with no type and no lattice, back to Topology. No
     /// type is picked for him (LS-19); what he had set stays stored, off.
     func exitLatticeWithoutType() {
@@ -13869,6 +13891,9 @@ extension WorkspacePlaceholder {
             leaveLatticeCells()
             model.persistCurrentProject()
             if model.duplicateAndChooseLatticeType(id: project.id) == nil { model.toast = RerunCard.copyFailedToast }
+        case .keepRegions:   // ★ B3 (his third choice): where the lattice goes stays; the cells reset; the selector asks
+            showLatticeWizard = false
+            keepLatticeRegions()
         case .loseAll:
             showLatticeWizard = false   // the page's copy of the settings is not written back over the reset
             deleteLatticeForMode()

@@ -96,5 +96,57 @@ final class LatticeTypeExitHostedTests: XCTestCase {
         _ = try h2.onScreen("changeTypeCard", "★ with a region, the card asks")
         XCTAssertEqual(p2.lattice.stageMode, .aesthetic, "nothing changes until he chooses")
     }
+
+    /// (b) his third choice, "Keep my regions and groups, choose a new type" (the reviewer's ruling (a), 23:05Z): where the
+    /// lattice goes stays (roles, depths, expands, painted faces, zones); every cell setting resets, per-region densities
+    /// included; the selector asks; one Undo puts it all back.
+    func testKeepMyRegionsResetsOnlyTheCellsAndTheSelectorAsks() throws {
+        let (h, p, _) = try page(facePrism: true, type: .aesthetic)
+        p.lattice.cellMM = 7.5
+        p.lattice.selectableDensity["probe"] = 0.4
+        p.lattice.groupDensities[UUID()] = 0.3
+        p.lattice.selectableExpandMM["probe"] = 1.25
+        let roles = p.lattice.groupRoles, faces = p.lattice.selectableRoles, depths = p.lattice.selectableDepthMM
+        XCTAssertFalse(roles.isEmpty || faces.isEmpty, "premise: his Top is latticed")
+        try h.pickFromMenu("capsuleMenu", "Aesthetic", what: "Topology's ● menu")
+        try h.pickFromMenu("capsuleMenu", LatticeStageMenu.changeTypeTitle, what: "the Lattice stage's ● menu")
+        let keep = try h.probe("changeType-keepRegions", "★ the card's third choice", minHit: 44)
+        let card = try h.onScreen("changeTypeCard", "the card")
+        XCTAssertTrue(card.contains(keep))
+        h.click(CGPoint(x: keep.midX, y: keep.midY))
+        XCTAssertNil(p.lattice.stageMode, "★ the type clears")
+        _ = try h.onScreen("latticeModeModal", "★ the selector asks for the new one")
+        XCTAssertEqual(p.lattice.groupRoles, roles, "★ the groups' roles stay")
+        XCTAssertEqual(p.lattice.selectableRoles, faces, "★ the faces' roles stay")
+        XCTAssertEqual(p.lattice.selectableDepthMM, depths, "★ their depths stay")
+        XCTAssertEqual(p.lattice.selectableExpandMM["probe"], 1.25, "★ the expands stay")
+        XCTAssertEqual(p.lattice.cellMM, LatticeSettings.defaultCellMM, "★ the cells reset")
+        XCTAssertTrue(p.lattice.selectableDensity.isEmpty && p.lattice.groupDensities.isEmpty, "★ per-region densities reset")
+        XCTAssertTrue(p.lattice.enabled)
+        // one Undo puts the Aesthetic lattice back, cells and all
+        let undo = try h.probe("latticeClearUndo", "the one Undo, over the selector", minHit: 44)
+        h.click(CGPoint(x: undo.midX, y: undo.midY))
+        XCTAssertEqual(p.lattice.stageMode, .aesthetic)
+        XCTAssertEqual(p.lattice.cellMM, 7.5)
+        XCTAssertEqual(p.lattice.selectableDensity["probe"], 0.4)
+    }
+
+    /// On a Flexible project the Squish setup counts as cells (the ruling): it resets with them, and #362's card calls it.
+    func testOnFlexibleTheSquishSetupResetsWithTheCells() throws {
+        let r = try FlexiblePressFixtures.a1Project(3, self)
+        let p = r.project
+        XCTAssertNotNil(p.lattice.flexible, "premise: his Flexible pad")
+        let roles = p.lattice.selectableRoles
+        _ = p.clearLatticeCells()
+        XCTAssertNil(p.lattice.flexible, "★ the Squish setup is cells")
+        XCTAssertNil(p.lattice.stageMode)
+        XCTAssertEqual(p.lattice.selectableRoles, roles, "★ where the lattice goes stays")
+        let s = FlexibleMainStage()
+        var kept = 0
+        s.askChangeType()
+        FlexibleChangeType.choose(.keepRegions, main: s, duplicate: {}, loseAll: {}, keepRegions: { kept += 1 })
+        XCTAssertEqual(kept, 1, "★ #362's card: the third choice does its one thing")
+        XCTAssertFalse(s.changeTypeAsking)
+    }
 }
 #endif

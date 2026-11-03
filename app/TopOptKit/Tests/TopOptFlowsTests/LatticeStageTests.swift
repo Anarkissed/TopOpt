@@ -167,8 +167,10 @@ final class LatticeStageTests: XCTestCase {
     // MARK: - "Change lattice type…": three ways
 
     func testChangeLatticeTypeOffersThreeWays() throws {
+        // ★ RE-PINNED (UI-Notes B3, his answer 11-03 via #362: "I think this should be a third choice. We should be able to do all three")
         XCTAssertEqual(ChangeLatticeTypeChoice.allCases.map(\.label),
-                       ["Create a duplicate and choose a type", "Continue and lose all work", "Cancel"])
+                       ["Create a duplicate and choose a type", "Keep my regions and groups, choose a new type",
+                        "Continue and lose all work", "Cancel"])
         XCTAssertTrue(ChangeLatticeTypeChoice.duplicate.detail(was: "Structural")?.hasPrefix("Recommended") == true)
         let ws = try Self.src("WorkspacePlaceholder.swift")
         let choose = try Self.member(ws, "func chooseLatticeTypeChange(_ c: ChangeLatticeTypeChoice) {", 800)
