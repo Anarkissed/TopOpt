@@ -128,6 +128,10 @@ struct FinishRecheck {
 // plain line that refuses it ("After finishing, the margin is 1.42× (needs 1.5×)").
 std::string finish_verdict_reason(const FinishRecheck& r);
 
+// The mesh's bodies: its connected shells with positive signed volume (a sealed
+// internal void is a negative shell, not a piece).
+int positive_volume_bodies(const TriangleMesh& mesh);
+
 // The local thickness (mm) at each vertex, capped at `cap_mm` (a vertex at least
 // that thick reports cap_mm). Exposed for the tests.
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm);

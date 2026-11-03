@@ -553,7 +553,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "keep_regions",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant", "semdot",
-                       "plsm", "flexible"},
+                       "plsm", "flexible", "orientation_recheck"},
                       "the job");
 
   JobDescription job;
@@ -598,6 +598,23 @@ JobDescription parse_job(const std::string& json_text) {
     if (b.x * b.x + b.y * b.y + b.z * b.z <= 0.0)
       schema_fail("\"build_direction\" must be non-zero");
     job.has_build_direction = true;
+  }
+  // E1 (f) — "Print it this way": an analyze job re-checks a version's exported file
+  // printed along a new build direction. {"mesh": "<the version's file, beside the
+  // job>", "build_dir": [x, y, z]}; analyze mode only.
+  if (const JsonValue* orc = find_key(root, "orientation_recheck")) {
+    require_object(*orc, "\"orientation_recheck\"");
+    reject_unknown_keys(*orc, {"mesh", "build_dir"}, "\"orientation_recheck\"");
+    job.orientation_recheck_mesh = require_nonempty_string(
+        require_key(*orc, "mesh", "\"orientation_recheck\""), "orientation_recheck mesh");
+    const Vec3 d = parse_vec3(require_key(*orc, "build_dir", "\"orientation_recheck\""),
+                              "orientation_recheck build_dir");
+    const double n = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (!(n > 0.0)) schema_fail("\"orientation_recheck\" build_dir must be non-zero");
+    job.orientation_recheck_dir = Vec3{d.x / n, d.y / n, d.z / n};
+    job.has_orientation_recheck = true;
+    if (job.mode != "analyze")
+      schema_fail("\"orientation_recheck\" is for an analyze job (mode \"analyze\")");
   }
   if (const JsonValue* br = find_key(root, "build_orientation_report")) {
     if (br->type != JsonValue::Type::Bool)

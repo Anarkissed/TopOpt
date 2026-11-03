@@ -209,14 +209,15 @@ TriangleMesh thin_spot_cleanup(const TriangleMesh& mesh, const FinishContext& ct
   std::vector<char> pinned = pinned_in.size() == nv ? pinned_in : context_pins(m, ctx);
   const double ok = tmin * (1.0 - 1e-3);
   std::vector<double> t = vertex_local_thickness_mm(m, tmin);
+  // Thin spots on the optimizer's CUT surfaces only: a vertex on a CAD face or in a
+  // keep region is the part as drawn (a thin wall he drew is his), and a thin
+  // member that meets a CAD face is still found through its cut side.
   std::vector<int> thin;
   for (std::size_t v = 0; v < nv; ++v)
-    if (t[v] < ok) thin.push_back(static_cast<int>(v));
+    if (t[v] < ok && !pinned[v]) thin.push_back(static_cast<int>(v));
   if (thin.empty()) return m;
   const std::vector<double> before = t;
   std::vector<std::string> why(nv);
-  for (const int v : thin)
-    if (pinned[static_cast<std::size_t>(v)]) why[static_cast<std::size_t>(v)] = "on a face of your part";
   for (int pass = 0; pass < kFinishThinPasses; ++pass) {
     const std::vector<Vec3> vn = vertex_normals(m);
     bool any = false;
@@ -393,6 +394,32 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
         std::count(sign.begin(), sign.end(), TrustSign::Pinned));
   }
   return res.mesh;
+}
+
+int positive_volume_bodies(const TriangleMesh& m) {
+  const std::size_t nv = m.vertices.size();
+  std::vector<int> par(nv);
+  for (std::size_t v = 0; v < nv; ++v) par[v] = static_cast<int>(v);
+  auto find = [&](int x) {
+    while (par[static_cast<std::size_t>(x)] != x)
+      x = par[static_cast<std::size_t>(x)] = par[static_cast<std::size_t>(par[static_cast<std::size_t>(x)])];
+    return x;
+  };
+  for (const auto& t : m.triangles) {
+    const int a = find(t[0]);
+    par[static_cast<std::size_t>(find(t[1]))] = a;
+    par[static_cast<std::size_t>(find(t[2]))] = a;
+  }
+  std::map<int, double> vol;
+  for (const auto& t : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(t[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(t[2])];
+    vol[find(t[0])] += dot(a, cross(b, c)) / 6.0;
+  }
+  int n = 0;
+  for (const auto& kv : vol) n += kv.second > 0.0;
+  return n;
 }
 
 std::string finish_verdict_reason(const FinishRecheck& r) {

@@ -2024,6 +2024,13 @@ if(OpenCASCADE_FOUND)
   # time per stroke). Prints tables, writes evidence. A harness, not a ctest.
   #   cmake --build build --target operator_bakeoff_probe
   #   ./build/operator_bakeoff_probe [evidence_dir] [bracket.stl]
+  # E1 flip table (not a test): ./build/finish_flip_probe <out_root> <job_dir>...
+  add_executable(finish_flip_probe EXCLUDE_FROM_ALL tests/harness/finish_flip_probe.cpp)
+  target_link_libraries(finish_flip_probe PRIVATE topopt)
+  target_compile_definitions(finish_flip_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
   add_executable(operator_bakeoff_probe EXCLUDE_FROM_ALL
     tests/harness/operator_bakeoff_probe.cpp)
   target_link_libraries(operator_bakeoff_probe PRIVATE topopt)
@@ -2464,6 +2471,13 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_include_directories(test_finish PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
     target_compile_definitions(test_finish PRIVATE TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME finish COMMAND test_finish)
+    add_executable(test_finish_run tests/validation/test_finish_run.cpp)
+    target_link_libraries(test_finish_run PRIVATE topopt manifold::manifold)
+    target_compile_definitions(test_finish_run PRIVATE
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME finish_run COMMAND test_finish_run)
   endif()
 
   # ★ THE DEPTH TIE + THE PAD, COUNTED APART (task 2026-08-12-lattice-page-
