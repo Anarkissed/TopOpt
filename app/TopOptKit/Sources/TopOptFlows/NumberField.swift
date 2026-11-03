@@ -142,7 +142,7 @@ struct NumberField: View {
         .accessibilityIdentifier("numberField-\(key)-\(dir < 0 ? "minus" : "plus")")
     }
 
-    /// What the pad typed; out of its range the nearest allowed value, and the page says so ("Kept to 1 to 40").
+    /// What the pad typed; out of its range the nearest allowed value, and the page says so ("Kept 40 (1 to 40 mm)").
     private func commitTyped() {
         defer { pending = nil }
         guard case .some(.some(var v)) = pending, v.isFinite else { return }
@@ -150,7 +150,7 @@ struct NumberField: View {
             v = spec.clamped(v)
         } else if !range.contains(v), !NumberPadProbe.controlOldPad {
             v = range.clamp(v)
-            note?(range.keptNote)
+            note?(range.keptNote(v, unit: spec.unit))
         }
         if abs(v - spec.value) > 1e-12 { onCommit(v) }
     }
