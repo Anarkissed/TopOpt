@@ -819,6 +819,11 @@ struct JobScenario {
   std::string name;
   std::vector<JobLoadGroup> groups;
   std::vector<int> anchor_face_ids;
+  // The REGION anchors ON in it ("anchor_region_ids", ids into loads.face_regions: a
+  // cut piece set as an anchor). `has_anchor_region_ids` = the key was given (an empty
+  // list then means none); absent = today's job.
+  std::vector<int> anchor_region_ids;
+  bool has_anchor_region_ids = false;
 };
 
 // One "Keep clear" clearance region (handoff 100) — the CLI counterpart of the

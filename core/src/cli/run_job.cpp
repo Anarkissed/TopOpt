@@ -9454,7 +9454,10 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
   };
   for (const JobLoadGroup& g : j_groups) lc.load_groups.push_back(to_group(g));
   // LOAD SCENARIOS: each scenario's groups and ON anchors; the load case's anchors
-  // become their UNION (scenario 1's groups stay the mirror in load_groups).
+  // become their UNION, faces and regions (scenario 1's groups stay the mirror in
+  // load_groups). A job that names any scenario's region anchors names them all.
+  bool regions_named = false;
+  for (const JobScenario& js : j_scenarios) regions_named = regions_named || js.has_anchor_region_ids;
   for (const JobScenario& js : j_scenarios) {
     ProductionLoadCase::Scenario sc;
     sc.name = js.name;
@@ -9464,6 +9467,12 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
       if (std::find(lc.anchor_face_ids.begin(), lc.anchor_face_ids.end(), f) ==
           lc.anchor_face_ids.end())
         lc.anchor_face_ids.push_back(f);
+    sc.anchor_region_ids = js.anchor_region_ids;
+    sc.region_anchors_named = regions_named;
+    for (const int r : js.anchor_region_ids)
+      if (std::find(lc.anchor_region_ids.begin(), lc.anchor_region_ids.end(), r) ==
+          lc.anchor_region_ids.end())
+        lc.anchor_region_ids.push_back(r);
     lc.scenarios.push_back(std::move(sc));
   }
   // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
