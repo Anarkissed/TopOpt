@@ -218,6 +218,12 @@ public final class AppModel: ObservableObject {
         self.rescaler = rescaler
         self.store = store
         self.library = LibraryModel(store: store)
+        // ★ B1 (note 10): the Library draws a never-opened part's original model with the app's own importer
+        self.library.originalMeshLoader = { [importer] path in
+            guard let m = try? importer(path) else { return nil }
+            return ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
+                              pseudoFaces: m.pseudoFaces)
+        }
         self.presetStore = presetStore
         self.now = now
         self.remoteJobDefaults = remoteJobDefaults
@@ -523,6 +529,7 @@ public final class AppModel: ObservableObject {
         guard let mesh, thumbnails[id] == nil,
               let image = MeshThumbnail.cgImage(for: mesh) else { return }
         thumbnails[id] = image
+        library.noteOriginal(folder: id, image: image)   // ★ B1 (note 10): the Library's original-model picture
     }
 
     /// Track a live project's run phase so the Library reflects background runs:

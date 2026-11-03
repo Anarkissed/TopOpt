@@ -57,6 +57,7 @@ public final class LibraryModel: ObservableObject {
     /// ★ B1 (note 8, approved design 2026-11-02): where the Library is, kept HERE so it outlives the workspace. It was the
     /// Library view's own @State, rebuilt on every return, so Back from a part always landed on the Library's home.
     @Published var route: LibraryRoute = .home
+    private var drawingOriginals = false   // ★ B1 (note 10)
     /// The proposal shown on the first-launch sheet, so Group saves exactly what he saw.
     private var lastProposal: LibraryIndex?
     /// The last few versions' decoded results (each can be tens of MB).
@@ -355,6 +356,71 @@ public final class LibraryModel: ObservableObject {
 
     private func storeThumbnail(for item: CompareItem, mesh: ViewerMesh) {
         guard let image = MeshThumbnail.cgImage(for: mesh) else { return }
+        storeImage(image, for: item)
+    }
+
+    // MARK: ★ B1 (note 10, approved design 2026-11-02): the ORIGINAL model's picture
+    //
+    // His words: "If a part has not been optimized yet, the preview doesn't show anything … unless an optimized version has
+    // been absolutely chosen, the original model should be the preview." A card showed a RESULT's picture only (the picked
+    // one, else the newest version's shown one), so a part with no results showed nothing. The original model's picture is
+    // now kept per version folder (result -1), cached like a result's: saved whenever the part's model is imported or
+    // opened, and drawn in the background for a part never opened (STL, OBJ and 3MF models; a STEP part's picture is
+    // saved the first time it is opened, since its import needs the CAD kernel).
+
+    /// The `CompareItem.result` that names a folder's original model.
+    static let originalResult = -1
+
+    /// Imports a model file for its picture (set by AppModel: its own importer). nil = no background drawing.
+    var originalMeshLoader: ((String) -> ViewerMesh?)?
+
+    /// The original model's picture of any of `part`'s versions (they share the model).
+    func originalPicture(_ part: LibraryPart) -> CGImage? {
+        for v in part.versions.sorted(by: { $0.number > $1.number }) {
+            if let img = thumbnails[CompareItem(folder: v.folderID, result: Self.originalResult)] { return img }
+        }
+        return nil
+    }
+
+    /// The original model's picture of `folder`'s part, or of the folder itself before it is filed.
+    func originalPicture(folder: UUID) -> CGImage? {
+        if let part = index.part(containing: folder) { return originalPicture(part) }
+        return thumbnails[CompareItem(folder: folder, result: Self.originalResult)]
+    }
+
+    /// A model was imported or opened: keep its picture as the folder's original.
+    public func noteOriginal(folder: UUID, image: CGImage) {
+        storeImage(image, for: CompareItem(folder: folder, result: Self.originalResult))
+    }
+
+    /// Draw the original of every part that has none yet, one at a time in the background (STL, OBJ, 3MF only).
+    func drawMissingOriginals() {
+        guard let load = originalMeshLoader, !drawingOriginals else { return }
+        let todo: [(UUID, String)] = index.parts.compactMap { part in
+            guard originalPicture(part) == nil,
+                  let v = part.versions.max(by: { $0.number < $1.number }),
+                  let snap = store.snapshot(id: v.folderID) else { return nil }
+            let path = store.modelPath(id: v.folderID, fileName: snap.modelFileName)
+            let ext = (path as NSString).pathExtension.lowercased()
+            return ["stl", "obj", "3mf"].contains(ext) ? (v.folderID, path) : nil
+        }
+        guard !todo.isEmpty else { return }
+        drawingOriginals = true
+        func step(_ rest: ArraySlice<(UUID, String)>) {
+            guard let (folder, path) = rest.first else { drawingOriginals = false; return }
+            Self.queue.async {
+                let mesh = load(path)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if let mesh { self.storeThumbnail(for: CompareItem(folder: folder, result: Self.originalResult), mesh: mesh) }
+                    step(rest.dropFirst())
+                }
+            }
+        }
+        step(todo[...])
+    }
+
+    private func storeImage(_ image: CGImage, for item: CompareItem) {
         thumbnails[item] = image
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         guard let dest = CGImageDestinationCreateWithURL(thumbnailURL(item) as CFURL, "public.png" as CFString, 1, nil)
@@ -367,6 +433,7 @@ public final class LibraryModel: ObservableObject {
     private func loadThumbnailsFromCache() {
         let items = index.parts.flatMap(\.versions).flatMap { v in
             (v.summary ?? []).indices.map { CompareItem(folder: v.folderID, result: $0) }
+                + [CompareItem(folder: v.folderID, result: Self.originalResult)]   // ★ B1 (note 10): its original model
         }.filter { thumbnails[$0] == nil }
         guard !items.isEmpty else { return }
         let urls = items.map(thumbnailURL)
