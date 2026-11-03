@@ -114,6 +114,8 @@ enum CornerPairStyle {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous))
         .dsShadow(DS.Shadow.panel)
+        // ★ B2 (U12, U16): the open panel's frame reaches the page — the notification lane keeps clear of it
+        .background(publish("cornerPanel"))
     }
 
     /// A 44 × 44 icon button (fold, back, dismiss).

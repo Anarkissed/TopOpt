@@ -73,7 +73,7 @@ public struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .toast($model.toast)
+        .laneToast($model.toast)   // ★ B2 (U16, §4.34): centred, clear of every control, two lines at most
         .task {
             model.loadMaterials()
             // Ask for notification permission at app runtime (not in AppModel.init,

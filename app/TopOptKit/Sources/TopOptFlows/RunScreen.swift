@@ -59,26 +59,27 @@ public struct RunScreen: View {
     /// workspace behind it is fully interactive. Tap to re-open the full card. Sits
     /// at the top (aligned with the nav row) so it never covers the bottom hint bar.
     private var minimizedChip: some View {
-        VStack {
+        // ★ B2 (U16, §4.34): the status pill in the top lane — centred, as wide as the row's controls allow, two lines:
+        // the run, then "Tap to view"
+        LaneSlot(key: "run-status") { _ in
             Button { model.restore() } label: {
-                HStack(spacing: DS.Space.sm) {
+                VStack(spacing: 1) {
                     RunProgressReadout(model: model, resolution: resolution,
                                        materialName: materialName, compact: true)
+                        .lineLimit(1)
                     Text("Tap to view")
                         .dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
-                .padding(.vertical, DS.Space.sm)
+                .padding(.vertical, DS.Space.s)
                 .padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Surface.sheet.color))
-                .overlay(Capsule().strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).fill(DS.Surface.sheet.color))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+                    .strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
                 .dsShadow(.panel)
             }
             .buttonStyle(.plain)
-            .padding(.top, DS.Space.xl3)   // align with the top chrome (nav) row
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 

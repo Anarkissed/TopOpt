@@ -209,6 +209,7 @@ public struct WorkspacePlaceholder: View {
     @State private var safetyCustomDraft: String? = nil
     @State private var safetyRefusal: String? = nil
     @State private var safetyCustomPadOpen = false   // B2 (U15): Custom…'s pad
+    @StateObject private var laneControls = LaneControls()   // B2 (U16): the controls the top lane keeps clear of
     @State private var safetyInfoOpen = false
     /// The picked piece's key while its group is still the selected one (another group selected ⇒ no piece).
     private var selectedPieceKey: Int? { selectedPiece.flatMap { $0.group == selection.activeGroupID ? $0.key : nil } }
@@ -1702,6 +1703,8 @@ public struct WorkspacePlaceholder: View {
         }
         // ★ B2 (U15): what a number pad kept ("Kept to 1 to 40") is the page's toast
         .numberPadNote { model.toast = $0 }
+        // ★ B2 (U16): the top lane's notifications keep clear of every control the page publishes
+        .laneControls(laneControls)
     }
 
     /// Start the M7.7 optimize run for the current load case. Gated on the same
@@ -4247,12 +4250,11 @@ public struct WorkspacePlaceholder: View {
                 Text(strutRefining ? "Adding the print repairs" : "Rebuilding the lattice")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text(strutRefining
-                     ? "The traced struts are shown. The arches, legs and merges are still being built."
-                     : "Your change is being applied to the strut preview.")
+                // ★ B2 (U16, §4.34): two lines at most — the detail is one short line
+                Text(strutRefining ? "traced struts shown · arches, legs and merges next" : "applying your change")
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail)
             }
         }
         .padding(.vertical, DS.Space.s)
@@ -4454,10 +4456,10 @@ public struct WorkspacePlaceholder: View {
                 Text("Simulation running")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text("A finite-element solve is grading your lattice.")
+                Text("grading your lattice")   // ★ B2 (U16): two lines at most
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).truncationMode(.tail)
             }
             Button { simBannerDismissed = true } label: {
                 Image(systemName: "xmark")
@@ -12939,10 +12941,11 @@ extension WorkspacePlaceholder {
 
     /// "Optimization finished — 4 variants." [Open Results] — top centre, where See Results sat.
     func topologyResultsMessage(_ text: String) -> some View {
-        VStack {
+        // ★ B2 (U16, §4.34): in the top lane — centred, as wide as the row's controls allow, two lines at most
+        LaneSlot(key: "topology-results-message") { _ in
             HStack(spacing: DS.Space.m) {
                 Text(text).dsStyle(DS.TypeScale.callout).foregroundStyle(DS.Color.textPrimary.color)
-                    .lineLimit(1).fixedSize()
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Button { viewOriginal = false } label: {
                     Text(TopologyResultsNotice.openLabel).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, DS.Space.m).frame(height: 32)
@@ -12954,14 +12957,11 @@ extension WorkspacePlaceholder {
                 CornerPairStyle.x44("xmark", label: "Dismiss", id: "topology-results-message-dismiss") { topoNotice.dismiss() }
             }
             .padding(.leading, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.panel.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(DS.Shadow.panel)
-            .padding(.top, DS.Space.xl3)
-            Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.trailing, topBannerShown ? Self.secondRowSplit : 0)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("topology-results-message")
     }
