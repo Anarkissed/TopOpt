@@ -7624,7 +7624,7 @@ public struct WorkspacePlaceholder: View {
                         topoForcesShown.toggle()
                     }
                     if project.designBox.hasPrimitives {
-                        viewModeButton("cube", label: "Design primitives", on: topoDesignBoxShown) {
+                        viewModeButton("cube", label: "Allow growth here", on: topoDesignBoxShown) {
                             topoDesignBoxShown.toggle()
                         }
                     }

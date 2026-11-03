@@ -293,11 +293,13 @@ public enum StrengthenText {
         }
     }
 
-    /// A card's title. The new ladder (a report with `safety_margin`): "Version 1: just safe", then "Version N: +10%".
-    /// A 25/50/75 % report keeps "Version N · M % less worst stress".
+    /// A card's title. ★ B2 (U4, design-system §3): a result is its letter. The new ladder (a report with `safety_margin`):
+    /// "a · Just safe", then each version adds 10 % — "b · +10 %", "c · +20 %". A 25/50/75 % report keeps its ladder's words,
+    /// "a · 25 % less worst stress". (It was "Version 1: just safe", "Version 2: +10%", "Version 3: +10%".)
     static func title(_ v: StrengthenReport.Version, in s: StrengthenReport) -> String {
-        guard s.safetyMargin != nil else { return "Version \(v.version) · " + percent(v.stressCut) + " % less worst stress" }
-        return v.version <= 1 ? "Version \(v.version): just safe" : "Version \(v.version): +10%"
+        let letter = ResultMark.letter(v.version - 1)
+        guard s.safetyMargin != nil else { return letter + " · " + percent(v.stressCut) + " % less worst stress" }
+        return v.version <= 1 ? letter + " · Just safe" : letter + " · +\((v.version - 1) * 10) %"
     }
 
     public static let capAnchorLine = "The strongest possible version is limited at an anchor"

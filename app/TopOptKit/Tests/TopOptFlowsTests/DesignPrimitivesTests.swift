@@ -128,10 +128,10 @@ final class DesignPrimitivesTests: XCTestCase {
         XCTAssertEqual(m.primitives.map(\.name), ["Box 1", "Box 2", "Box 3", "Box 4", "Box 5", "Box 6"])
         XCTAssertTrue(m.primitives.allSatisfy { $0.shape == .box && $0.sign == .positive && $0.isShown })
         XCTAssertEqual(m.primitives[0].bounds, DesignBoxModel.defaultBox(around: Self.part), "row 1 is today's default box")
-        XCTAssertEqual(DesignPrimitivesCopy.addNote(count: 6), "Up to 6 design primitives")
+        XCTAssertEqual(DesignPrimitivesCopy.addNote(count: 6), "Up to 6 boxes and cylinders")   // ★ B2 (U4)
         XCTAssertEqual(DesignPrimitivesCopy.addNote(count: 2), "Positive: allow mass to grow here \u{00B7} Negative: no mass here")
         XCTAssertEqual(DesignPrimitivesCopy.count(2), "2 of 6")
-        XCTAssertEqual(TopologySetupRow.designBox.title, "Design primitives")
+        XCTAssertEqual(TopologySetupRow.designBox.title, "Allow growth here")
     }
 
     func testBoxAndCylinderFields() {

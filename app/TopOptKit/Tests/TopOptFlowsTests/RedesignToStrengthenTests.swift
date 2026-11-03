@@ -102,11 +102,11 @@ final class RedesignToStrengthenTests: XCTestCase {
         XCTAssertEqual(s.coarseResolution, 32)
         let unreachable = "above 0.95 x the box filled solid (margin 11.95): unreachable in this design space"
         XCTAssertEqual(StrengthenText.cards(b), [
-            StrengthenCard(title: "Version 1 · 25 % less worst stress", status: "Verified",
+            StrengthenCard(title: "a · 25 % less worst stress", status: "Verified",
                            lines: ["Margin 11.71×", "8.2 g · 166 % of the original"], bridged: false),
-            StrengthenCard(title: "Version 2 · 50 % less worst stress", status: "Unreachable",
+            StrengthenCard(title: "b · 50 % less worst stress", status: "Unreachable",
                            lines: [unreachable], bridged: false),
-            StrengthenCard(title: "Version 3 · 75 % less worst stress", status: "Unreachable",
+            StrengthenCard(title: "c · 75 % less worst stress", status: "Unreachable",
                            lines: [unreachable], bridged: false),
         ])
         XCTAssertEqual(StrengthenText.rejectionLines(b), [])
@@ -117,9 +117,9 @@ final class RedesignToStrengthenTests: XCTestCase {
         XCTAssertEqual(b.rows, [], "no variant: every version unreachable")
         let reason = "above 0.95 x the box filled solid (margin 0.1992): unreachable in this design space"
         XCTAssertEqual(StrengthenText.cards(b), [
-            StrengthenCard(title: "Version 1 · 25 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
-            StrengthenCard(title: "Version 2 · 50 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
-            StrengthenCard(title: "Version 3 · 75 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
+            StrengthenCard(title: "a · 25 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
+            StrengthenCard(title: "b · 50 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
+            StrengthenCard(title: "c · 75 % less worst stress", status: "Unreachable", lines: [reason], bridged: false),
         ])
     }
 
