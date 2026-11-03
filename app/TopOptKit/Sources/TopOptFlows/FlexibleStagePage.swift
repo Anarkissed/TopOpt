@@ -1260,6 +1260,7 @@ struct FlexChips: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("\(id)-\(o.id)")
+                .flexibleProbe("\(id)-\(o.id)")
             }
         }
         .padding(2)

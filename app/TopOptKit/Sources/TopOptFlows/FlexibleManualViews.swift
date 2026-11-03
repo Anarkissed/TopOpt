@@ -14,7 +14,13 @@ import TopOptKit
 /// line, beside [Reset all] (no extra height: the card's rows and the selected face's card keep their room at 11" landscape).
 struct FlexibleManualToggle: View {
     @ObservedObject var model: FlexibleStageModel
+    /// Test control only (B9, SquishParityHostedTests' red run): the switch is not drawn.
+    @MainActor static var controlHidden = false
     var body: some View {
+        if !Self.controlHidden { toggle }
+    }
+
+    private var toggle: some View {
         FlexChips(options: FlexibleManualCopy.modeOptions, selection: model.isManual ? "manual" : "auto",
                   id: "flexible-manual-mode", equalWidths: false) { v in model.setManual(v == "manual") }
             .fixedSize()

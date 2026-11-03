@@ -35,6 +35,7 @@ struct FlexInfoButton<Extra: View>: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
+        .flexibleProbe(id)
         .popover(isPresented: $shown) {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Space.m) {
@@ -86,6 +87,7 @@ struct FlexRow<Control: View, Extra: View>: View {
         }
         .frame(minHeight: 36)
         .accessibilityIdentifier(id)
+        .flexibleProbe(id)
     }
 }
 
@@ -111,6 +113,7 @@ struct FlexWarningLine: View {
             .font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Color.warning.color)
             .lineLimit(1).minimumScaleFactor(0.85)
             .accessibilityIdentifier(id)
+            .flexibleProbe(id)
     }
 }
 
@@ -125,6 +128,7 @@ struct FlexStopLine: View {
             .font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.colour.color)
             .lineLimit(1).minimumScaleFactor(0.85)
             .accessibilityIdentifier(id)
+            .flexibleProbe(id)
     }
 }
 

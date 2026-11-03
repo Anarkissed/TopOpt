@@ -86,7 +86,20 @@ struct FlexibleSaidModifier: ViewModifier {
     }
 }
 
+/// ★ B9 (SquishParityHostedTests): every control id drawn under the view that collects it — the hosted test's stand-in for the
+/// accessibility tree it cannot read. Published only while a test records.
+struct FlexibleIDKey: PreferenceKey {
+    static var defaultValue: Set<String> = []
+    static func reduce(value: inout Set<String>, nextValue: () -> Set<String>) { value.formUnion(nextValue()) }
+}
+
 extension View {
+    /// This control's id, as `accessibilityIdentifier` gives it, published to FlexibleIDKey while a test records. The shared
+    /// Flexible parts (FlexRow, FlexChips, FlexNumberBox, the (i)) call it after their own `accessibilityIdentifier`.
+    func flexibleProbe(_ id: String) -> some View {
+        transformPreference(FlexibleIDKey.self) { if FlexibleSaid.recording { $0.insert(id) } }
+    }
+
     /// This view draws `text` (published only while a test records).
     func said(_ text: String) -> some View { modifier(FlexibleSaidModifier(text: text)) }
     /// This view draws `text` on ONE line (its smallest allowed size `minScale`): a measuring test checks it is not cut.
