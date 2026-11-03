@@ -25,8 +25,8 @@
 // matters (load path, thin sections, the spots (c) thickened), inward-only at the
 // design box and at Keep clear, pinned on CAD faces and inside keep regions. One
 // fixed strength: kFinishMcfSteps steps at dt = kFinishMcfDtScale x h^2, PR 306's
-// "A x20" (51.6 % of stair-step amplitude removed on the analytic sphere at app
-// strength; Taubin 11.2 %).
+// "A x20" flow time (51.6 % of stair-step amplitude removed on the analytic sphere at
+// app strength; Taubin 11.2 %), with no triangle turned over (53.2 % here).
 //
 // SLIM, WITH A SAFE FALLBACK (his answer, reviewer's ruling 2026-11-03 02:48). C2's
 // thin-section line is 2 x the printable minimum (1.8 mm at a 0.45 mm outer wall),
@@ -47,8 +47,10 @@
 
 namespace topopt {
 
-inline constexpr int kFinishMcfSteps = 20;
-inline constexpr double kFinishMcfDtScale = 0.125;
+// PR 306's "A x20" flow time (20 x 0.125 h^2) in four times finer steps: the coarse
+// step overshoots (164 triangles of the analytic sphere turned over; 52 at this one).
+inline constexpr int kFinishMcfSteps = 80;
+inline constexpr double kFinishMcfDtScale = 0.03125;
 inline constexpr int kFinishThinPasses = 6;
 // The stair-step measure's reference: a Taubin lambda/mu low-pass this many iterations.
 inline constexpr int kFinishRefIterations = 2000;
@@ -228,5 +230,9 @@ TriangleMesh drop_fragment_shells(const TriangleMesh& mesh, double min_volume_mm
 // The local thickness (mm) at each vertex, capped at `cap_mm` (a vertex at least
 // that thick reports cap_mm). Exposed for the tests.
 std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm);
+// The same, each ball along `normals_from`'s vertex normals (same vertex count): a
+// finished shape measured along its unfinished normals, like for like.
+std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm,
+                                              const TriangleMesh& normals_from);
 
 }  // namespace topopt

@@ -330,7 +330,7 @@ int main() {
           forbid[g.index(i, j, k)] == MaskValue::FrozenVoid)
         ++in_clear;
     }
-    std::printf("[finish] (g) cube: volume %.3f -> %.3f mm^3; %zu CAD-face vertices, %zu moved; "
+    std::printf("[finish] (g) cube: volume %.6f -> %.6f mm^3; %zu CAD-face vertices, %zu moved; "
                 "%zu keep-region vertices moved; %zu vertices in the Keep clear; surface finish "
                 "%.1f %%, %zu pinned, %.3f s\n",
                 rep.volume_before_mm3, rep.volume_after_mm3, cad_n, cad_moved, keep_moved, in_clear,
@@ -537,7 +537,7 @@ int main() {
     const double d0 = rms_dev(m0), ds = rms_dev(safe), dl = rms_dev(slim);
     const double safe_pct = 100.0 * (1.0 - ds / d0), slim_pct = 100.0 * (1.0 - dl / d0);
     const std::vector<double> t0 = vertex_local_thickness_mm(m0, 1.8);
-    const std::vector<double> t1 = vertex_local_thickness_mm(slim, 1.8);
+    const std::vector<double> t1 = vertex_local_thickness_mm(slim, 1.8, m0);
     int new_under = 0;
     for (std::size_t v = 0; v < t0.size(); ++v)
       new_under += t1[v] < 1.8 * (1 - 1e-3) && t0[v] >= 1.8 * (1 - 1e-3);

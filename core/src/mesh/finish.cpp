@@ -90,8 +90,9 @@ std::vector<Vec3> face_normals(const TriangleMesh& m) {
 // shrink from cap_mm / 2, each time to the ball through p and the closest opposing
 // point inside it. Returns its diameter (cap_mm when nothing opposes).
 double thickness_at(const TriangleMesh& m, const TriGrid& g, const std::vector<Vec3>& fn,
-                    const Vec3& p, const Vec3& n, double cap_mm) {
+                    const Vec3& p, const Vec3& n, double cap_mm, int* limit = nullptr) {
   double r = 0.5 * cap_mm;
+  if (limit) *limit = -1;
   for (int it = 0; it < 40 && r > 1e-6; ++it) {
     const Vec3 c = sub(p, mul(n, r));
     double best = r * (1.0 - 1e-9);
@@ -109,7 +110,12 @@ double thickness_at(const TriangleMesh& m, const TriGrid& g, const std::vector<V
                                                 m.vertices[static_cast<std::size_t>(tr[1])],
                                                 m.vertices[static_cast<std::size_t>(tr[2])]);
             const double d = len(sub(cp, c));
-            if (d < best) { best = d; q = cp; found = true; }
+            if (d < best) {
+              best = d;
+              q = cp;
+              found = true;
+              if (limit) *limit = t;
+            }
           }
         }
     if (!found) break;
@@ -144,10 +150,23 @@ std::vector<char> context_pins(const TriangleMesh& m, const FinishContext& ctx) 
       if ((v < att.face_of_vertex.size() && att.face_of_vertex[v] >= 0) || att.ambiguous_at(v))
         pin[v] = 1;
   }
-  if (ctx.keeps != nullptr)
+  // Inside a keep region, AND on its boundary: the exact-Protect boolean cuts the
+  // voxel surface there (the part side reaches 0.05 mm past it, keep_regions_exact's
+  // fuse), leaving needles along the cut up to 17 mm long and 0.06 mm wide (his
+  // 6d9b535f, a Protect box's edge) that any move turns over. They are the seam of the
+  // exact geometry and stay where the boolean put them.
+  if (ctx.keeps != nullptr) {
+    constexpr double kSeam = 0.1;  // mm
+    std::vector<KeepRegion> grown = *ctx.keeps;
+    for (KeepRegion& k : grown) {
+      k.min = {k.min.x - kSeam, k.min.y - kSeam, k.min.z - kSeam};
+      k.max = {k.max.x + kSeam, k.max.y + kSeam, k.max.z + kSeam};
+      k.half = {k.half.x + kSeam, k.half.y + kSeam, k.half.z + kSeam};
+    }
     for (std::size_t v = 0; v < pin.size(); ++v)
-      for (const KeepRegion& k : *ctx.keeps)
+      for (const KeepRegion& k : grown)
         if (k.contains(m.vertices[v])) { pin[v] = 1; break; }
+  }
   return pin;
 }
 
@@ -188,15 +207,37 @@ std::vector<std::vector<int>> vertex_neighbours(const TriangleMesh& m) {
 
 }  // namespace
 
-std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm) {
+namespace {
+// The thickness at each vertex along the given normals (the mesh's own when null), and
+// the facet that limits each ball (-1: none within the cap).
+std::vector<double> thickness_along(const TriangleMesh& mesh, double cap_mm,
+                                    const std::vector<Vec3>* normals, std::vector<int>* limit) {
   std::vector<double> t(mesh.vertices.size(), cap_mm);
+  if (limit) limit->assign(mesh.vertices.size(), -1);
   if (mesh.empty() || !(cap_mm > 0.0)) return t;
   TriGrid g;
   g.build(mesh, cap_mm);
-  const std::vector<Vec3> fn = face_normals(mesh), vn = vertex_normals(mesh);
-  for (std::size_t v = 0; v < t.size(); ++v)
-    if (len(vn[v]) > 0.5) t[v] = thickness_at(mesh, g, fn, mesh.vertices[v], vn[v], cap_mm);
+  const std::vector<Vec3> fn = face_normals(mesh);
+  const std::vector<Vec3> own = normals ? std::vector<Vec3>{} : vertex_normals(mesh);
+  const std::vector<Vec3>& vn = normals ? *normals : own;
+  for (std::size_t v = 0; v < t.size() && v < vn.size(); ++v)
+    if (len(vn[v]) > 0.5)
+      t[v] = thickness_at(mesh, g, fn, mesh.vertices[v], vn[v], cap_mm,
+                          limit ? &(*limit)[v] : nullptr);
   return t;
+}
+}  // namespace
+
+std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm) {
+  return thickness_along(mesh, cap_mm, nullptr, nullptr);
+}
+
+std::vector<double> vertex_local_thickness_mm(const TriangleMesh& mesh, double cap_mm,
+                                              const TriangleMesh& normals_from) {
+  if (normals_from.vertices.size() != mesh.vertices.size())
+    return thickness_along(mesh, cap_mm, nullptr, nullptr);
+  const std::vector<Vec3> n = vertex_normals(normals_from);
+  return thickness_along(mesh, cap_mm, &n, nullptr);
 }
 
 TriangleMesh thin_spot_cleanup(const TriangleMesh& mesh, const FinishContext& ctx,
@@ -330,6 +371,21 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       }
     }
   }
+  // THE SEAM: a free vertex next to a pinned one sits on a crease (a cut surface
+  // meeting a CAD face or a keep region), where its normal is the average of the two
+  // and a move along it crosses the small pinned-side triangle beside it (his
+  // 6d9b535f: ~1,100 triangles turned over). It is held with the pins; the stair-step
+  // measure below already leaves the seam out.
+  const auto nb = vertex_neighbours(mesh);
+  {
+    std::vector<char> seam(nv, 0);
+    for (std::size_t v = 0; v < nv; ++v)
+      if (sign[v] != TrustSign::Pinned)
+        for (const int w : nb[v])
+          if (pinned[static_cast<std::size_t>(w)]) { seam[v] = 1; break; }
+    for (std::size_t v = 0; v < nv; ++v)
+      if (seam[v]) sign[v] = TrustSign::Pinned;
+  }
   // SLIM: below the line on the mesh itself (the voxel thickness above cannot see a
   // member thinner than a voxel), outward-only.
   const bool slim = ctx.slim_line_mm > 0.0;
@@ -348,6 +404,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   k.cell_mm = ctx.cell_mm;
   k.trust_voxels = 0.5;
   k.sign = sign;
+  k.c2_hold = true;  // a one-sided vertex never slides (surface_operator.hpp)
   k.preserve_volume = true;
   MeanCurvatureParams mp;
   mp.steps = ctx.mcf_steps;
@@ -356,7 +413,6 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   // step a staircase leaves, independent of an analytic reference.
   // Measured away from the pins (two rings clear): the seam where a moving surface
   // meets a pinned CAD edge is a kink of its own, not stair-step.
-  const auto nb = vertex_neighbours(mesh);
   std::vector<char> near_pin(nv, 0);
   for (std::size_t v = 0; v < nv; ++v)
     if (sign[v] == TrustSign::Pinned) {
@@ -442,8 +498,12 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   };
   unfold(res.mesh);
   int rounds = 0;
+  // Measured along the INPUT's normals, before and after: the flow turns a normal, and
+  // a ball along the turned one reads thinner with nothing having moved in.
+  const std::vector<Vec3> n_in = slim ? vertex_normals(mesh) : std::vector<Vec3>{};
   for (; slim; ++rounds) {
-    const std::vector<double> t1 = vertex_local_thickness_mm(res.mesh, line);
+    std::vector<int> lim;
+    const std::vector<double> t1 = thickness_along(res.mesh, line, &n_in, &lim);
     std::size_t changed = 0, bad = 0;
     auto hold = [&](std::size_t v) {
       if (k.sign[v] == TrustSign::Pinned || k.sign[v] == TrustSign::OutwardOnly) return;
@@ -456,6 +516,9 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
         ++bad;
         hold(v);
         for (const int w : nb[v]) hold(static_cast<std::size_t>(w));
+        if (lim[v] >= 0)  // and the far side that came in
+          for (int c = 0; c < 3; ++c)
+            hold(static_cast<std::size_t>(mesh.triangles[static_cast<std::size_t>(lim[v])][c]));
       }
     if (bad == 0) break;
     if (changed == 0 || rounds + 1 >= kFinishSlimRounds) {
@@ -778,27 +841,36 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
   m = surface_finish(m, ctx, pins, moved, &r);
   r.volume_after_mm3 = signed_volume(m);
   // Never remove material: the volume restoration of the flow can land a hair under.
-  if (r.volume_after_mm3 < r.volume_before_mm3 && r.volume_before_mm3 > 0.0) {
-    // A uniform outward shift of the free cut vertices that stay in their trust box.
+  // A uniform outward shift of the free cut vertices that stay in their trust box,
+  // sized by the area that can move (a vertex's third of its triangles), iterated.
+  for (int it = 0; it < 12 && r.volume_after_mm3 < r.volume_before_mm3 && r.volume_before_mm3 > 0.0;
+       ++it) {
     const std::vector<Vec3> vn = vertex_normals(m);
     const double box = 0.5 * ctx.cell_mm;
-    double area = 0.0;
+    std::vector<double> va(m.vertices.size(), 0.0);
     for (const auto& t : m.triangles) {
       const Vec3& a = m.vertices[static_cast<std::size_t>(t[0])];
-      area += 0.5 * len(cross(sub(m.vertices[static_cast<std::size_t>(t[1])], a),
-                              sub(m.vertices[static_cast<std::size_t>(t[2])], a)));
+      const double ar = 0.5 * len(cross(sub(m.vertices[static_cast<std::size_t>(t[1])], a),
+                                        sub(m.vertices[static_cast<std::size_t>(t[2])], a)));
+      for (int c = 0; c < 3; ++c) va[static_cast<std::size_t>(t[c])] += ar / 3.0;
+    }
+    std::vector<char> can(m.vertices.size(), 0);
+    double area = 0.0;
+    for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+      if (pins[v] || moved[v]) continue;
+      can[v] = 1;
+      area += va[v];
     }
     const double d = area > 0.0 ? 1.01 * (r.volume_before_mm3 - r.volume_after_mm3) / area : 0.0;
-    if (d > 0.0 && d < 0.05 * std::max(ctx.cell_mm, 1e-3)) {
-      for (std::size_t v = 0; v < m.vertices.size(); ++v) {
-        if (pins[v] || moved[v]) continue;
-        const Vec3 to = add(m.vertices[v], mul(vn[v], d));
-        const Vec3 off = sub(to, after_c.vertices[v]);
-        if (std::fabs(off.x) > box || std::fabs(off.y) > box || std::fabs(off.z) > box) continue;
-        if (blocked_reason(ctx, to).empty()) m.vertices[v] = to;
-      }
-      r.volume_after_mm3 = signed_volume(m);
+    if (!(d > 0.0 && d < 0.05 * std::max(ctx.cell_mm, 1e-3))) break;
+    for (std::size_t v = 0; v < m.vertices.size(); ++v) {
+      if (!can[v]) continue;
+      const Vec3 to = add(m.vertices[v], mul(vn[v], d));
+      const Vec3 off = sub(to, after_c.vertices[v]);
+      if (std::fabs(off.x) > box || std::fabs(off.y) > box || std::fabs(off.z) > box) continue;
+      if (blocked_reason(ctx, to).empty()) m.vertices[v] = to;
     }
+    r.volume_after_mm3 = signed_volume(m);
   }
   for (std::size_t v = 0; v < m.vertices.size() && v < pins.size(); ++v)
     r.pinned_moved += pins[v] && (m.vertices[v].x != mesh.vertices[v].x ||

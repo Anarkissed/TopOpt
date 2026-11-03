@@ -172,6 +172,9 @@ struct FinishBlock {
   std::size_t pinned_vertices = 0;     // diagnostics (not written)
   std::size_t pinned_moved = 0;
   std::size_t roughness_vertices = 0;
+  std::size_t outward_only_vertices = 0, slim_guarded_vertices = 0, fold_walked_back = 0;
+  int slim_rounds = 0;
+  double roughness_before_mm = 0.0, roughness_after_mm = 0.0;
   bool verdict_changed = false;
   std::string verdict_reason;
   double seconds = 0.0;

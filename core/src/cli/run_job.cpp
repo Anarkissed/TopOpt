@@ -769,6 +769,12 @@ FinishBlock finish_block(const FinishReport& r) {
   b.pinned_vertices = r.pinned_vertices;
   b.pinned_moved = r.pinned_moved;
   b.roughness_vertices = r.roughness_vertices;
+  b.outward_only_vertices = r.outward_only_vertices;
+  b.slim_guarded_vertices = r.slim_guarded_vertices;
+  b.fold_walked_back = r.fold_held_vertices;
+  b.slim_rounds = r.slim_rounds;
+  b.roughness_before_mm = r.roughness_before_mm;
+  b.roughness_after_mm = r.roughness_after_mm;
   b.seconds = r.seconds;
   return b;
 }
@@ -16127,7 +16133,16 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
                       au("cad", variant_export_model_mesh(v, job.output, sg, iso, &model, {})) + ", " +
                       au("keep", raw) + ", " + au("finished", done) + ", \"stair_step_pct\": " +
                       std::to_string(fb.stair_step_removed_pct) + ", \"slim\": " +
-                      (fb.slim ? "true" : "false") + "}");
+                      (fb.slim ? "true" : "false") + ", \"diag\": [" +
+                      std::to_string(done.vertices.size()) + ", " + std::to_string(fb.pinned_vertices) +
+                      ", " + std::to_string(fb.outward_only_vertices) + ", " +
+                      std::to_string(fb.roughness_vertices) + ", " +
+                      std::to_string(fb.slim_rounds) + ", " +
+                      std::to_string(fb.slim_guarded_vertices) + ", " +
+                      std::to_string(fb.fold_walked_back) + ", " +
+                      std::to_string(fb.roughness_before_mm) + ", " +
+                      std::to_string(fb.roughness_after_mm) + "], \"why\": " +
+                      json_str(fb.finish_fallback_reason) + "}");
       continue;
     }
     // Before: the unfinished file, re-certified (welded as written, as a file is).
@@ -16162,7 +16177,7 @@ std::vector<std::string> refinish_job(const JobDescription& job, const std::stri
     if (raw.vertices.size() == done.vertices.size() && fin.ctx.slim_line_mm > 0.0) {
       const double line = fin.ctx.slim_line_mm, under = line * (1.0 - 1e-3);
       const std::vector<double> t0 = vertex_local_thickness_mm(raw, line);
-      const std::vector<double> t1 = vertex_local_thickness_mm(done, line);
+      const std::vector<double> t1 = vertex_local_thickness_mm(done, line, raw);
       for (std::size_t q = 0; q < t0.size(); ++q)
         if (t1[q] < under && t0[q] >= under) {
           thinnest_new = new_under == 0 ? t1[q] : std::min(thinnest_new, t1[q]);
