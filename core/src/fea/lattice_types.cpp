@@ -2,6 +2,8 @@
 
 #include "topopt/lattice_types.hpp"
 
+#include <cstdio>
+
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -112,6 +114,22 @@ const std::vector<std::string>& lattice_type_ids() {
   return ids;
 }
 
+LatticeOption lattice_type_aesthetic(LatticeTopology topo) {
+  if (!lattice_type_numbers_measured(topo)) return yes();  // octet: R11 is its own rule
+  const double rho_min = lattice_rho_min(topo);
+  const double ceiling = lattice_aesthetic_density_ceiling(topo);
+  if (!(ceiling < rho_min)) return yes();
+  const std::string id = lattice_topology_name(topo);
+  char buf[400];
+  std::snprintf(buf, sizeof buf,
+                "%s is offered for Structural parts only: its thinnest certifiable strut is "
+                "%.3f of the cell, already wider than the open-print limit of a fifth of the "
+                "cell, so no %s density prints open (Finding 6).",
+                display_name_of(id), lattice_strut_diameter_mm(topo, rho_min, 1.0),
+                display_name_of(id));
+  return no(buf);
+}
+
 LatticeTypeFacts lattice_type_facts(const std::string& id) {
   LatticeTypeFacts f;
   f.id = id;
@@ -124,7 +142,8 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
           f.aesthetic_density_ceiling = f.triangles_per_cell = f.sheet_triangles_coeff = kNaN;
   const std::string not_live =
       std::string("Not offered: ") + f.readiness_plain + ".";
-  f.outline = f.rim = f.diagrid = f.uniform = f.doubled = f.stepped = no(not_live);
+  f.outline = f.rim = f.diagrid = f.uniform = f.doubled = f.stepped = f.structural =
+      f.aesthetic = no(not_live);
   f.strut_strength_note = "Strut strength is not measured for this type.";
 
   LatticeTopology topo;
@@ -170,6 +189,8 @@ LatticeTypeFacts lattice_type_facts(const std::string& id) {
     f.uniform = yes();
     f.doubled = lattice_type_doubled(topo);
     f.stepped = lattice_type_stepped(topo);
+    f.structural = yes();
+    f.aesthetic = lattice_type_aesthetic(topo);
   }
   if (topo == LatticeTopology::Octet) {
     f.strut_strength_measured = true;  // PR 259's law (strut_strength.hpp)

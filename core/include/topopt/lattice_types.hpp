@@ -45,6 +45,9 @@ struct LatticeTypeFacts {
 
   LatticeOption outline, rim, diagrid;     // finishes (R8)
   LatticeOption uniform, doubled, stepped; // cell modes (R4 / R5)
+  // ★ The grading intents the type is offered in (Finding 6, ruling 2026-11-02). The app
+  // HIDES a type in a mode that says no; `reason` is the one line core refuses a job with.
+  LatticeOption structural, aesthetic;
 
   bool directional = false;     // R3: SC and BCC
   std::string directional_note;
@@ -79,6 +82,12 @@ LatticeTypeFacts lattice_type_facts(const std::string& id);
 // Doubled ladder / an any-step Stepped plan? `reason` is the plain refusal.
 LatticeOption lattice_type_doubled(LatticeTopology topo);
 LatticeOption lattice_type_stepped(LatticeTopology topo);
+
+// ★ Finding 6 (ruling 2026-11-02): is the type offered under Aesthetic intent? Only where
+// some certifiable density prints open by R11 (the aesthetic ceiling at or above the
+// band's bottom). BCC and SC are not: their thinnest certifiable strut is already wider
+// than a fifth of the cell. The job parser refuses an Aesthetic job with `reason`.
+LatticeOption lattice_type_aesthetic(LatticeTopology topo);
 
 // R3: the "strongly directional" note SC and BCC carry on the picker AND on every
 // receipt that names the topology (02-core-spec §2.5). Empty for every other id, and a

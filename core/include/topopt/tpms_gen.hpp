@@ -66,4 +66,10 @@ struct TpmsGenStats {
 TpmsGenStats generate_tpms(TpmsKind kind, const TpmsRegion& region, const TpmsWallField& wall,
                            TriangleSink& sink, const TpmsGenOptions& opt);
 
+// The field generate_tpms contours, at DC cell `h` (TpmsGenStats::dc_cell_mm): negative
+// inside the emitted solid. The same function the generator calls, so the run's volume
+// check (lattice_volume_check.hpp, Finding 7) measures the set the mesh is contoured from.
+double tpms_clipped_field(TpmsKind kind, const TpmsRegion& region, const TpmsWallField& wall,
+                          double h, const Vec3& p);
+
 }  // namespace topopt

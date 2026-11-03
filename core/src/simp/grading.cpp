@@ -990,25 +990,32 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // Both can occur in swept mode and their remedies are opposite (a finer
         // cell for a thin member, a coarser one for an unprintable strut), so the
         // receipt reports them separately or reports nothing useful.
-        // Voxel -> base cell, by the voxel CENTRE — the SAME convention
-        // plan_cell_sizes used to build the aggregates, so the attribution reads
-        // the reason of the cell that actually decided this voxel.
+        // Voxel -> the base cells COVERING it (Finding 7's cover rule, the SAME one
+        // plan_cell_sizes built the aggregates with), so the attribution reads the
+        // reason of a cell that actually refused part of this voxel.
         const int vi = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
         const int vj = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
                                         static_cast<std::size_t>(grid.ny));
         const int vk = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) *
                                              static_cast<std::size_t>(grid.ny)));
-        const double S0 = out.cell_plan.base_cell_mm;
-        const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
-            static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
-        const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
-            static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
-        const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
-            static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
-        const std::size_t c = out.cell_plan.index(ci, cj, ck);
         const signed char why =
-            c < out.cell_plan.reject_reason.size()
-                ? out.cell_plan.reject_reason[c] : 0;
+            cell_plan_voxel_reject_reason(grid, out.cell_plan, vi, vj, vk);
+        // ★ Finding 7: the voxel's OWN (centre) cell is laid, and only another cell
+        // covering it is not. It goes solid outright: retention would certify it at a cell
+        // the swept export never lays there, and a part of it would be empty.
+        {
+          const double S0 = out.cell_plan.base_cell_mm;
+          const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
+              static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
+          const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
+              static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
+          const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
+              static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
+          if (out.cell_plan.cell_size_at(ci, cj, ck) > 0.0) {
+            ++out.solid_fallback_voxels;
+            continue;
+          }
+        }
         if (why == 2) {
           // An unprintable strut is a fact about the PRINTER, not about load. Sub-floor
           // retention has nothing to say about it and never rescues one.

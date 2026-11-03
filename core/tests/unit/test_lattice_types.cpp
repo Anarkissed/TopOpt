@@ -614,6 +614,42 @@ int main() {
     }
   }
 
+  // ── Finding 6 (ruling 2026-11-02): BCC and SC are offered in Structural only. The facts
+  // say so with a one-line reason, every other live type is offered in both, and the
+  // parse refuses an Aesthetic job with the same words (and only that job).
+  {
+    for (const std::string& gid : lattice_gen_topology_names()) {
+      const LatticeTopology tt = lattice_topology_from_id(gid);
+      const LatticeTypeFacts f = lattice_type_facts(gid);
+      const bool structural_only = (gid == "bcc" || gid == "sc");
+      CHECK(f.structural.allowed, (gid + ": offered in Structural").c_str());
+      CHECK(f.aesthetic.allowed == !structural_only,
+            (gid + ": Aesthetic offered unless BCC or SC").c_str());
+      CHECK(structural_only == (f.aesthetic.reason.find("Structural parts only") !=
+                                std::string::npos),
+            (gid + ": the refusal says why in one line").c_str());
+      for (const char* intent : {"structural", "aesthetic"}) {
+        const std::string j = std::string(R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "grading": { "topology": ")") + gid + R"(", "min_extrudable_width_mm": 0.4,
+               "cell_mode": "fixed", "cell_mm": 8.0, "intent": ")" + intent + R"(" },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ] }
+})";
+        bool refused = false;
+        std::string why;
+        try { (void)parse_job(j); } catch (const JobError& e) { refused = true; why = e.what(); }
+        const bool expect = structural_only && std::string(intent) == "aesthetic";
+        CHECK(refused == expect &&
+                  (!expect || why.find(lattice_type_aesthetic(tt).reason) != std::string::npos),
+              (gid + " " + intent + ": parse follows the mode verdict" +
+               (refused && !expect ? " (unexpected refusal: " + why + ")" : ""))
+                  .c_str());
+      }
+    }
+    std::printf("[F6] %s\n", lattice_type_aesthetic(LatticeTopology::Bcc).reason.c_str());
+  }
+
   std::printf("\n%s: %d checks, %d failures\n", g_failures == 0 ? "PASS" : "FAIL", g_checks,
               g_failures);
   return g_failures == 0 ? 0 : 1;

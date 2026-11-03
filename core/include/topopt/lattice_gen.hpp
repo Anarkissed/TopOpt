@@ -189,14 +189,28 @@ inline double lattice_skin_min_radius_mm(double min_extrudable_width_mm) {
 // did not change: the winding of both is load-bearing (see lattice_gen.cpp's ★ note
 // on the icosahedron face table) and the octet output is byte-identical either way,
 // which the R2 checksum proves.
+//
+// ★ (ruling 2026-11-02 (b), Finding 2): `r` is the LAW's radius, and the solid written holds
+// the round strut's area and the sphere's volume: the prism's circumradius is
+// r x lattice_strut_emit_scale(nseg) (1.0539 at 8), the icosahedron's r x
+// lattice_node_emit_scale() (1.1824). Anything that keeps the solid inside the part must
+// use those circumradii. The _prism / _icosahedron forms take the circumradius itself (the
+// organic lattice, certified on its own spans, keeps them).
 void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
                         double r, int nseg);
 void lattice_emit_node(TriangleSink& sink, const Vec3& centre, double r);
+double lattice_strut_emit_scale(int nseg);
+double lattice_node_emit_scale();
+void lattice_emit_prism(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double circumradius, int nseg);
+void lattice_emit_icosahedron(TriangleSink& sink, const Vec3& centre, double circumradius);
 // Their analytic volumes, on the SOUP basis the stats already use: overlaps between
 // interpenetrating primitives are NOT deducted. State that wherever a total from
 // these is reported.
-double lattice_prism_volume_mm3(double r, double length_mm, int nseg);
-double lattice_node_volume_mm3(double r);
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg);   // = pi r^2 L
+double lattice_node_volume_mm3(double r);                               // = 4/3 pi r^3
+double lattice_ngon_prism_volume_mm3(double circumradius, double length_mm, int nseg);
+double lattice_icosahedron_volume_mm3(double circumradius);
 
 // The strut RADIUS field (mm). `field`, when set, is called at each strut/node
 // MIDPOINT (model mm) and its return is used as the radius; otherwise `uniform_mm`

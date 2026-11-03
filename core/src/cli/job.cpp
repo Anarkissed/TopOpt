@@ -2851,6 +2851,11 @@ JobDescription parse_job(const std::string& json_text) {
         const LatticeOption ok = lattice_type_stepped(topo);
         if (!ok.allowed) schema_fail(ok.reason);
       }
+      // ★ Finding 6: BCC and SC are Structural only.
+      if (job.grading.intent == "aesthetic") {
+        const LatticeOption ok = lattice_type_aesthetic(topo);
+        if (!ok.allowed) schema_fail(ok.reason);
+      }
     }
   }
 

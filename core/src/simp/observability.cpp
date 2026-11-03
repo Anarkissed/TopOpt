@@ -1102,6 +1102,13 @@ std::string run_info_json(const RunInfo& info) {
       ve += "}";
       le += ", \"void_escape\": " + ve;
     }
+    if (info.lattice_volume_check_ran) {
+      le += ", \"volume_check\": {\"limit\": 0.1";
+      le += ", \"refused_variants\": " + fmt_i(info.lattice_volume_refused_variants);
+      le += ", \"worst_gap\": " + fmt(info.lattice_volume_worst_gap);
+      le += ", \"certified_mm3\": " + fmt(info.lattice_volume_certified_mm3);
+      le += ", \"exported_mm3\": " + fmt(info.lattice_volume_exported_mm3) + "}";
+    }
     le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
     le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
     le += ", \"interpenetrating_soup\": " +

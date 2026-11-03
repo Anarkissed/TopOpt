@@ -430,7 +430,32 @@ void emit_node(TriangleSink& sink, const Vec3& c, double r) {
 // ★ THE TWO SWEPT SOLIDS, PUBLIC (lattice_gen.hpp states why). Bodies unchanged
 // from the anonymous-namespace originals; only the linkage moved, so the octet
 // output stays byte-identical (bar R2).
+// ★ FINDING 2 (ruling 2026-11-02 (b)): the emitted solids match the law they were
+// certified on. Every type's density law was measured on ROUND capsules (a cylinder of
+// radius r, a sphere of radius r at each node); an n-gon prism of circumradius r holds
+// (n/2) sin(2 pi / n) of the circle's area, 0.900 at n = 8, and an icosahedron of
+// circumradius r holds 0.605 of the sphere's volume, so the file printed 6-10 % lighter
+// than its certificate. The strut and node are now emitted at EQUAL AREA and EQUAL VOLUME:
+// circumradius r x sqrt(2 pi / (n sin(2 pi / n))) (1.0539 at n = 8) and r x
+// cbrt(sphere / icosahedron) (1.1824). Everything that keeps a strut inside the part (the
+// clip, the node drop, the anchor ball) uses the emitted circumradius.
+double lattice_strut_emit_scale(int nseg) {
+  return std::sqrt(2.0 * M_PI / (nseg * std::sin(2.0 * M_PI / nseg)));
+}
+double lattice_node_emit_scale() {
+  return std::cbrt((4.0 / 3.0) * M_PI / lattice_icosahedron_volume_mm3(1.0));
+}
+
 void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
+                        double r, int nseg) {
+  lattice_emit_prism(sink, p0, p1, r * lattice_strut_emit_scale(nseg), nseg);
+}
+
+void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
+  lattice_emit_icosahedron(sink, c, r * lattice_node_emit_scale());
+}
+
+void lattice_emit_prism(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
                         double r, int nseg) {
   const Vec3 axis = unit(sub(p1, p0));
   const Vec3 ref = std::fabs(axis.z) < 0.9 ? Vec3{0, 0, 1} : Vec3{1, 0, 0};
@@ -460,7 +485,7 @@ void lattice_emit_strut(TriangleSink& sink, const Vec3& p0, const Vec3& p1,
 
 // An icosahedron of radius r at centre c (20 tris) — the node joint that makes
 // the strut union a solid body at each vertex.
-void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
+void lattice_emit_icosahedron(TriangleSink& sink, const Vec3& c, double r) {
   const double t = (1.0 + std::sqrt(5.0)) / 2.0;
   const double s = r / std::sqrt(1.0 + t * t);
   std::array<Vec3, 12> p = {{{-1, t, 0}, {1, t, 0}, {-1, -t, 0}, {1, -t, 0},
@@ -485,13 +510,23 @@ void lattice_emit_node(TriangleSink& sink, const Vec3& c, double r) {
   for (const auto& tr : f) sink.add_triangle(p[tr[0]], p[tr[1]], p[tr[2]]);
 }
 
-double lattice_prism_volume_mm3(double r, double length_mm, int nseg) {
+double lattice_ngon_prism_volume_mm3(double r, double length_mm, int nseg) {
   return 0.5 * nseg * r * r * std::sin(2.0 * M_PI / nseg) * length_mm;
 }
 
-double lattice_node_volume_mm3(double r) {
+double lattice_icosahedron_volume_mm3(double r) {
   const double a = 4.0 * r / std::sqrt(10.0 + 2.0 * std::sqrt(5.0));
   return (5.0 / 12.0) * (3.0 + std::sqrt(5.0)) * a * a * a;
+}
+
+// The volumes of what lattice_emit_strut / lattice_emit_node write: by construction the
+// round strut's and the sphere's.
+double lattice_prism_volume_mm3(double r, double length_mm, int nseg) {
+  return lattice_ngon_prism_volume_mm3(r * lattice_strut_emit_scale(nseg), length_mm, nseg);
+}
+
+double lattice_node_volume_mm3(double r) {
+  return lattice_icosahedron_volume_mm3(r * lattice_node_emit_scale());
 }
 
 namespace {
@@ -627,7 +662,9 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
     const Vec3 pa = node_pos(R, T.inv_s, rs.a.x + bx, rs.a.y + by, rs.a.z + bz);
     const Vec3 pb = node_pos(R, T.inv_s, rs.b.x + bx, rs.b.y + by, rs.b.z + bz);
     const double r = checked_radius(G, scale(add(pa, pb), 0.5));
-    if (!B || sd_centre >= half_diag + r) {
+    // ★ (b): the solid reaches the emitted circumradius, not r.
+    const double r_solid = r * lattice_strut_emit_scale(G.nseg);
+    if (!B || sd_centre >= half_diag + r_solid) {
       // Fast path: the Lipschitz bound proves the whole strut (and its solid)
       // is inside — deep-interior cells never pay for a clip.
       out.frags.push_back({pa, pb, r});
@@ -636,7 +673,7 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
     }
     const double len = norm(sub(pb, pa));
     const Vec3 dir = scale(sub(pb, pa), 1.0 / len);
-    const auto spans = B->clip_segment(pa, pb, r, -1, -1, &out.uncertified);
+    const auto spans = B->clip_segment(pa, pb, r_solid, -1, -1, &out.uncertified);
     if (spans.empty()) {
       ++out.dropped;
       continue;
@@ -673,9 +710,13 @@ void cut_cell_struts(const LatticeRegion& R, const LatticeRadiusField& G,
   }
 }
 
+// ★ (b): the skin's CIRCUMRADIUS, the interior's law radius scaled as an interior strut's
+// prism is (lattice_strut_emit_scale), so a skin edge rides the offset surface exactly
+// where the clipped struts land (their emitted circumradius in from the part) and meets
+// the anchors there; the skin is written as a raw prism of this radius.
 double skin_radius_at(const LatticeRadiusField& G, const LatticeSkinSpec& skin,
                       const Vec3& p) {
-  return std::max(checked_radius(G, p), skin.min_radius_mm);
+  return lattice_strut_emit_scale(G.nseg) * std::max(checked_radius(G, p), skin.min_radius_mm);
 }
 
 // Track an emitted solid in the stats' diameter range.
@@ -766,13 +807,13 @@ void emit_skin_edge(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(stations[i], scale(dir, s.t0));
       const Vec3 qb = add(stations[i], scale(dir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::SkinStrut, qa, qb, r_e);
       ++st.skin_struts;
       st.skin_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.skin_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
   }
@@ -865,14 +906,14 @@ void emit_freeform_skin_edge(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(sa, scale(sdir, s.t0));
       const Vec3 qb = add(sa, scale(sdir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::SkinStrut, qa, qb, r_e);
       any = true;
       ++st.skin_struts;
       st.skin_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.skin_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
   }
@@ -951,13 +992,13 @@ void emit_rim_line(TriangleSink& sink, const LatticeRegion& R,
       if (s.t1 - s.t0 < kMinFragMm) continue;
       const Vec3 qa = add(stations[i], scale(sdir, s.t0));
       const Vec3 qb = add(stations[i], scale(sdir, s.t1));
-      emit_strut(sink, qa, qb, r_e, G.nseg);
+      lattice_emit_prism(sink, qa, qb, r_e, G.nseg);  // a finish: raw (b)
       if (obs && obs->on_element)
         obs->on_element(LatticeGenElement::RimStrut, qa, qb, r_e);
       any = true;
       st.rim_triangles += 4ull * G.nseg;
       st.triangles += 4ull * G.nseg;
-      st.rim_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      st.rim_volume_mm3 += lattice_ngon_prism_volume_mm3(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
     if (any) ++st.rim_elements;
@@ -1318,7 +1359,7 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
           // Boundary finish: a node ball whose solid would breach the eroded
           // region is dropped — its incident struts were already clipped short
           // of it and their cut ends get anchor balls instead.
-          if (B && B->signed_distance(np) < r) continue;
+          if (B && B->signed_distance(np) < r * lattice_node_emit_scale()) continue;
           emit_node(sink, np, r);
           if (obs && obs->on_element)
             obs->on_element(LatticeGenElement::Node, np, np, r);
@@ -1358,14 +1399,18 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                     // interior strut's own radius (contained by the clip
                     // certificate), welding the cut end to the skin (bar B6).
                     for (const auto& L : ncut.landings) {
-                      emit_node(sink, L.pos, L.r);
+                      // ★ (b): the landing sits the strut's EMITTED circumradius inside
+                      // the part, so the ball takes that circumradius (still contained)
+                      // and is reported at the law radius that lays it.
+                      const double r_ball = L.r * lattice_strut_emit_scale(G.nseg);
+                      lattice_emit_icosahedron(sink, L.pos, r_ball);
                       if (obs && obs->on_element)
-                        obs->on_element(LatticeGenElement::AnchorNode, L.pos,
-                                        L.pos, L.r);
+                        obs->on_element(LatticeGenElement::AnchorNode, L.pos, L.pos,
+                                        r_ball / lattice_node_emit_scale());
                       ++st.anchor_nodes;
                       st.skin_triangles += 20ull;
                       st.triangles += 20ull;
-                      st.skin_volume_mm3 += icosahedron_volume(L.r);
+                      st.skin_volume_mm3 += lattice_icosahedron_volume_mm3(r_ball);
                     }
                     own_landings = ncut.landings.size();
                   }

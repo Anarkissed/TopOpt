@@ -124,6 +124,7 @@ add_library(topopt
   src/mesh/organic_lattice.cpp
   src/mesh/lattice_lslt.cpp
   src/mesh/lattice_union_volume.cpp
+  src/mesh/lattice_volume_check.cpp
   src/mesh/lattice_dc.cpp
   src/mesh/lattice_boundary.cpp
   src/mesh/stepped_plan.cpp
@@ -396,6 +397,11 @@ add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
 add_executable(test_lattice_clip_shell tests/unit/test_lattice_clip_shell.cpp)
 target_link_libraries(test_lattice_clip_shell PRIVATE topopt)
 add_test(NAME lattice_clip_shell COMMAND test_lattice_clip_shell)
+
+# Finding 7 (ruling 2026-11-02): the cover rule and the lattice volume check.
+add_executable(test_lattice_volume_check tests/unit/test_lattice_volume_check.cpp)
+target_link_libraries(test_lattice_volume_check PRIVATE topopt)
+add_test(NAME lattice_volume_check COMMAND test_lattice_volume_check)
 
 # Every mesh core SYNTHESIZES is wound outward (task 2026-08-09-fix-inward-wound-
 # normals). Covers marching_cubes, the resample, the written STL and the lattice
