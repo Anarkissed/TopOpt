@@ -2477,6 +2477,9 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
       MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
       SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
       TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    if(lib3mf_FOUND)
+      target_compile_definitions(test_finish_run PRIVATE TOPOPT_HAVE_3MF)
+    endif()
     add_test(NAME finish_run COMMAND test_finish_run)
   endif()
 

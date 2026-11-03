@@ -469,6 +469,41 @@ int main() {
     CHECK(finish_verdict_reason(r).empty(), "(j) a joint the part already had is not the finish's");
   }
 
+  // ── (l) loose pieces; the file's own gate ──────────────────────────────────
+  {
+    VoxelGrid g;
+    g.nx = g.ny = g.nz = 8;
+    g.spacing = 1.0;
+    g.tags.assign(512, VoxelTag::Interior);
+    std::vector<char> occ(512, 0);
+    auto at = [](int i, int j, int k) { return static_cast<std::size_t>((k * 8 + j) * 8 + i); };
+    for (int i = 0; i < 4; ++i) occ[at(i, 1, 1)] = 1;  // a rod holding an anchor
+    g.tags[at(0, 1, 1)] = VoxelTag::Fixture;
+    occ[at(6, 6, 6)] = 1;  // a speck far away
+    const int with_speck = file_loose_pieces(g, occ);
+    occ[at(6, 6, 6)] = 0;
+    occ[at(4, 2, 2)] = 1;  // touching the rod at a corner: one 26-connected piece
+    const int corner = file_loose_pieces(g, occ);
+    std::printf("[finish] (l) loose pieces: a speck %d, a corner-joined voxel %d\n", with_speck, corner);
+    CHECK(with_speck == 1 && corner == 0, "(l) a piece holding no load or anchor is loose");
+    FinishRecheck r;
+    r.ran = true;
+    r.margin = r.margin_required = 1.5;
+    r.loose_pieces = r.loose_pieces_before = 2;
+    CHECK(finish_verdict_reason(r).empty(), "(l) loose pieces the part already had are not the finish's");
+    r.loose_pieces = 3;
+    CHECK(finish_verdict_reason(r) == "After finishing, a piece is loose", "(l) one the finish made is");
+    r.loose_pieces = 2;
+    r.load_path_ok = false;
+    CHECK(finish_verdict_reason(r) == "After finishing, the load no longer reaches an anchor",
+          "(l) the file's load path");
+    r.load_path_ok = true;
+    r.non_convergent = true;
+    r.margin = 0.0;
+    CHECK(finish_verdict_reason(r) == "After finishing, the strength check on the file did not converge",
+          "(l) a solve that did not converge is said as such, not as a 0x margin");
+  }
+
   // ── (s1) the fallback decision ─────────────────────────────────────────────
   {
     std::vector<int> calls;

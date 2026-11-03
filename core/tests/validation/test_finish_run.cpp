@@ -13,6 +13,7 @@
 //       triangles, no open edge, no point contact, one shell per body, and imports
 //       through the normal import (the re-check reads it that way); each "finish"
 //       block says its style and whether it fell back.
+//   (s) a STREAMED run says, per streamed version, how (e) decided (FINISH lines).
 //   (f) "PRINT IT THIS WAY". An L (a 40 mm base, a 30 mm post on its end) pushed
 //       sideways at the post's top, re-checked upright (+Z) and lying on its end (+X):
 //       the interlayer margins differ, the overhang areas differ (the post's back
@@ -27,10 +28,17 @@
 #include "topopt/settings.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
+#ifdef TOPOPT_HAVE_3MF
+#include "topopt/threemf.hpp"
+#endif
 
 #include <manifold/manifold.h>
 
 #include <cmath>
+#include <fcntl.h>
+#include <unistd.h>
+#include <filesystem>
+#include <stdexcept>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -232,6 +240,42 @@ int main() {
     std::fprintf(stderr, "FAIL: (w) threw: %s\n", e.what());
   }
 
+  // ── (s) a STREAMED run: one FINISH line per streamed version, files final ──
+  try {
+    const std::string log = dir + "/finish_stream_stdout.txt";
+    std::fflush(stdout);
+    const int saved = dup(1);
+    const int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    dup2(fd, 1);
+    close(fd);
+    RunJobResult r;
+    std::string err;
+    try {
+      r = run_job(bar_job(bar, 0.0), dir, dir + "/finish_run_s", materials, rules, true,
+                  RunObservability{});
+    } catch (const std::exception& e) {
+      err = e.what();
+    }
+    std::fflush(stdout);
+    dup2(saved, 1);
+    close(saved);
+    if (!err.empty()) throw std::runtime_error(err);
+    const std::string out = slurp(log);
+    int variants = 0, finishes = 0, slim = 0;
+    for (std::size_t p = 0; (p = out.find("VARIANT vf=", p)) != std::string::npos; ++p) ++variants;
+    for (std::size_t p = 0; (p = out.find("FINISH vf=", p)) != std::string::npos; ++p) ++finishes;
+    for (std::size_t p = 0; (p = out.find("status=slim", p)) != std::string::npos; ++p) ++slim;
+    std::printf("[finish-run] (s) streamed: %d VARIANT line(s), %d FINISH line(s) (%d slim), %zu "
+                "file(s)\n", variants, finishes, slim, r.mesh_paths.size());
+    CHECK(variants > 0 && finishes == variants,
+          "(s) every streamed version gets one FINISH line once (e) has decided");
+    CHECK(static_cast<int>(r.mesh_paths.size()) == slim,
+          "(s) the files listed are the versions that kept their file");
+  } catch (const std::exception& e) {
+    ++g_failures;
+    std::fprintf(stderr, "FAIL: (s) threw: %s\n", e.what());
+  }
+
   // ── (f) ────────────────────────────────────────────────────────────────────
   {
     write_stl_file(dir + "/finish_L.stl",
@@ -284,6 +328,50 @@ int main() {
           "(f) upright and on its end give different interlayer margins");
     CHECK(std::isfinite(over[0]) && std::isfinite(over[1]) && over[1] > over[0] + 100.0,
           "(f) lying on its end, the post's back hangs over the bed (more overhang)");
+
+    // The mesh path is relative to the job folder, and the job folder may be relative:
+    // the same re-check from a relative folder, with the version's file in it.
+    auto recheck = [&](const std::string& job_dir, const std::string& mesh, const char* what) {
+      JobDescription j;
+      j.model = "finish_L.stl";
+      j.material = "PLA";
+      j.mode = "analyze";
+      j.resolution = 48;
+      j.loads.present = true;
+      j.loads.anchor_face_ids = {anchor};
+      JobLoadGroup g;
+      g.face_ids = {top};
+      g.force = Vec3{-200.0, 0.0, 0.0};
+      j.loads.groups.push_back(g);
+      j.loads.build_dir = Vec3{0.0, 0.0, 1.0};
+      j.has_orientation_recheck = true;
+      j.orientation_recheck_mesh = mesh;
+      j.orientation_recheck_dir = dirs[1];
+      j.output.report = "analysis_report.json";
+      try {
+        const AnalyzeJobResult a = analyze_job(j, job_dir, dir + "/finish_orient_" + what,
+                                               materials, rules, "", {});
+        std::printf("[finish-run] (f) %s: overhang %.1f mm^2\n", what,
+                    a.orientation_recheck_overhang_mm2);
+        return a.orientation_recheck_overhang_mm2;
+      } catch (const std::exception& e) {
+        std::fprintf(stderr, "  (f) %s threw: %s\n", what, e.what());
+        return -1.0;
+      }
+    };
+    if (anchor >= 0 && top >= 0) {
+      std::filesystem::create_directories(dir + "/finish_rel");
+      std::filesystem::copy_file(dir + "/finish_L.stl", dir + "/finish_rel/finish_L.stl",
+                                 std::filesystem::copy_options::overwrite_existing);
+      std::filesystem::current_path(dir);
+      const double rel = recheck("finish_rel", "finish_L.stl", "relative folder");
+      CHECK(std::fabs(rel - over[1]) < 1e-6, "(f) a relative job folder re-checks the same file");
+#ifdef TOPOPT_HAVE_3MF
+      write_3mf_file(dir + "/finish_rel/finish_L.3mf", read_stl_file(dir + "/finish_L.stl").mesh);
+      const double tmf = recheck("finish_rel", "finish_L.3mf", "3MF file");
+      CHECK(std::fabs(tmf - over[1]) < 1e-3 * over[1], "(f) a 3MF version re-checks like its STL");
+#endif
+    }
   }
 
   if (g_failures == 0) {

@@ -76,8 +76,11 @@ struct FinishContext {
   bool has_box = false;
   DesignBox box{};
   const std::vector<char>* part_solid = nullptr;
-  // The CAD the projection used: its faces pin the vertices on them. Null = none.
+  // The CAD the projection used: its faces pin the vertices on them. Null = none: then
+  // the part's own voxels on the solve grid (`part_voxels`, 1 = the part as drawn,
+  // either run type) pin the drawn surface instead.
   const StepModel* cad = nullptr;
+  const std::vector<char>* part_voxels = nullptr;
   double cad_spacing_mm = 0.0;  // the solve spacing the projection's tolerances use
   // The slim finish's thin-section line (mm): 2 x the printable minimum. <= 0 = the
   // safe finish (C2's own line, 2 x the solve spacing).
@@ -133,10 +136,12 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
 TriangleMesh thin_spot_cleanup(const TriangleMesh& mesh, const FinishContext& ctx,
                                const std::vector<char>& pinned, FinishReport* report,
                                std::vector<char>* moved = nullptr);
+// `movable` (may be null): per vertex, whether the flow could move it outward (free or
+// outward-only), for the never-remove-material nudge after it.
 TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
                             const std::vector<char>& pinned,
                             const std::vector<char>& outward_only,
-                            FinishReport* report);
+                            FinishReport* report, std::vector<char>* movable = nullptr);
 
 // (e) — every check re-run on the FINISHED shape (the exported file). `*_before` is
 // the unfinished shape, for information only.
@@ -147,9 +152,14 @@ struct FinishRecheck {
   double margin_required = 0.0;
   long long keep_clear_voxels = 0;
   int pieces = 1;
-  int loose_pieces = 0;
+  int loose_pieces = 0;        // the file's pieces holding neither a load nor an anchor
+  int loose_pieces_before = 0;  // the same count on the unfinished file
   int thin_joints = 0;
   int thin_joints_before = 0;  // the same count on the unfinished file
+  // The analysis of the file itself: its load-path belt, its anchors, its solve.
+  bool load_path_ok = true;
+  bool anchors_slide = false;
+  bool non_convergent = false;
   int thin_spots_left = 0;
   double mass_grams = 0.0;
   double mass_before_grams = 0.0;
@@ -191,6 +201,10 @@ FallbackOutcome finish_with_fallback(Finish&& finish, Check&& check) {
 // connected pieces of printed voxels meeting through edge / corner neighbours only,
 // one per piece pair).
 int file_thin_joints(const VoxelGrid& grid, const std::vector<char>& occupancy);
+
+// The pieces of `occupancy` (26-connected, as the export's bodies are) that hold no
+// Load or Fixture voxel of `grid`: loose in the print.
+int file_loose_pieces(const VoxelGrid& grid, const std::vector<char>& occupancy);
 
 // The mesh's bodies: its connected shells with positive signed volume (a sealed
 // internal void is a negative shell, not a piece).

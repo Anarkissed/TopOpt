@@ -34,6 +34,10 @@ struct StrengthenAttemptReport {
   // scenarios), and its plain refusal line.
   std::string unheld_scenario;
   std::string unheld_reason;
+  // E1: the finished FILE's own check (a Keep clear, a piece, a loose piece or an
+  // edge-only joint the finishing made; the file's load path or solve), its plain
+  // line ("" = the file passes).
+  std::string finish_reason;
 };
 
 // The variant's rejection reason refuses the version unless it is empty or the
@@ -48,7 +52,7 @@ inline bool strengthen_attempt_accepted(const StrengthenAttemptReport& a,
                                         const std::string& margin_reason) {
   return a.verified_margin >= target && a.anchors_attached &&
          !strengthen_structural_rejection(a, margin_reason) &&
-         a.keep_clear_voxels == 0 && a.unheld_scenario.empty();
+         a.keep_clear_voxels == 0 && a.unheld_scenario.empty() && a.finish_reason.empty();
 }
 
 // An accepted version's speck note ("" when none were dropped).
@@ -70,6 +74,7 @@ inline std::string strengthen_refusal_note(const StrengthenAttemptReport& best,
                                            const std::string& margin_reason,
                                            int repairs_run, int repairs_max) {
   if (!best.unheld_scenario.empty()) return best.unheld_reason;
+  if (!best.finish_reason.empty()) return best.finish_reason;
   if (best.keep_clear_voxels > 0)
     return "Keep Clear voxels (" + std::to_string(best.keep_clear_voxels) + ")";
   if (!best.anchors_attached && best.rejection_reason.empty())

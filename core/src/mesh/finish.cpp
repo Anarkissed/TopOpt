@@ -150,6 +150,23 @@ std::vector<char> context_pins(const TriangleMesh& m, const FinishContext& ctx) 
     for (std::size_t v = 0; v < pin.size(); ++v)
       if ((v < att.face_of_vertex.size() && att.face_of_vertex[v] >= 0) || att.ambiguous_at(v))
         pin[v] = 1;
+  } else if (ctx.part_voxels != nullptr && ctx.grid != nullptr &&
+             ctx.part_voxels->size() == ctx.grid->voxel_count()) {
+    // No stated faces (an STL / 3MF part, whose faces are fitted, or no projection):
+    // the part as drawn is told apart by its voxels, the same for every import of it.
+    // A vertex whose inside (0.75 voxel against its normal) is the part's and whose
+    // outside is not is on the drawn surface; a cut surface has the part on both sides
+    // (reduction) or on neither (material a growth run added).
+    const std::vector<Vec3> vn = vertex_normals(m);
+    const double reach = 0.75 * ctx.grid->spacing;
+    auto part = [&](const Vec3& q) {
+      const long long vx = voxel_of(*ctx.grid, q);
+      return vx >= 0 && (*ctx.part_voxels)[static_cast<std::size_t>(vx)] != 0;
+    };
+    for (std::size_t v = 0; v < pin.size(); ++v)
+      if (len(vn[v]) > 0.5 && part(sub(m.vertices[v], mul(vn[v], reach))) &&
+          !part(add(m.vertices[v], mul(vn[v], reach))))
+        pin[v] = 1;
   }
   // Inside a keep region, AND on its boundary: the exact-Protect boolean cuts the
   // voxel surface there (the part side reaches 0.05 mm past it, keep_regions_exact's
@@ -226,6 +243,42 @@ std::vector<double> thickness_along(const TriangleMesh& mesh, double cap_mm,
       t[v] = thickness_at(mesh, g, fn, mesh.vertices[v], vn[v], cap_mm,
                           limit ? &(*limit)[v] : nullptr);
   return t;
+}
+
+// NO FOLD: the corners of every triangle `out` turned over against `ref` (its normal
+// more than 90 degrees from where it started, or collapsed) walk back toward `ref`,
+// halving their move, until none is turned; after kFoldHalvings halvings the corners
+// still turned go back to `ref` exactly, again until none is. A triangle whose three
+// corners are at `ref` is `ref`'s own, so each reset round frees at least one corner
+// for good and the loop ends. Halving keeps every move inside its box and on its side.
+// Returns the corners touched.
+std::size_t unfold_against(const TriangleMesh& ref, TriangleMesh& out) {
+  constexpr int kFoldHalvings = 10;
+  const std::vector<Vec3> fn0 = face_normals(ref);
+  std::vector<char> seen(ref.vertices.size(), 0);
+  std::size_t touched = 0;
+  for (int h = 0;; ++h) {
+    const std::vector<Vec3> fn1 = face_normals(out);
+    std::vector<std::size_t> corners;
+    for (std::size_t t = 0; t < fn0.size(); ++t) {
+      if (len(fn0[t]) < 0.5) continue;  // degenerate on the way in
+      if (len(fn1[t]) > 0.5 && dot(fn0[t], fn1[t]) > 0.0) continue;
+      for (int c = 0; c < 3; ++c) corners.push_back(static_cast<std::size_t>(ref.triangles[t][c]));
+    }
+    if (corners.empty()) return touched;
+    std::sort(corners.begin(), corners.end());
+    corners.erase(std::unique(corners.begin(), corners.end()), corners.end());
+    std::size_t changed = 0;
+    for (const std::size_t v : corners) {
+      if (!seen[v]) { seen[v] = 1; ++touched; }
+      const Vec3 to = h >= kFoldHalvings
+                          ? ref.vertices[v]
+                          : add(ref.vertices[v], mul(sub(out.vertices[v], ref.vertices[v]), 0.5));
+      changed += to.x != out.vertices[v].x || to.y != out.vertices[v].y || to.z != out.vertices[v].z;
+      out.vertices[v] = to;
+    }
+    if (changed == 0) return touched;  // every corner already at `ref` (cannot stay turned)
+  }
 }
 
 // The vertices the finish took under the line BY MOVING MATERIAL IN: newly under it
@@ -389,7 +442,9 @@ TriangleMesh thin_spot_cleanup(const TriangleMesh& mesh, const FinishContext& ct
 
 TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
                             const std::vector<char>& pinned_in,
-                            const std::vector<char>& outward_only, FinishReport* report) {
+                            const std::vector<char>& outward_only, FinishReport* report,
+                            std::vector<char>* movable) {
+  if (movable) movable->assign(mesh.vertices.size(), 0);
   if (!(ctx.cell_mm > 0.0) || mesh.empty() || ctx.mcf_steps <= 0) return mesh;
   const std::size_t nv = mesh.vertices.size();
   std::vector<char> pinned = pinned_in.size() == nv ? pinned_in : context_pins(mesh, ctx);
@@ -526,31 +581,8 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
   //  - SLIM's 1.8 mm: a vertex the flow took under the line (and thinner than it was)
   //    turns outward-only, with its ring, and the flow re-runs from the start.
   // A slim finish that cannot keep its line falls back to the safe one.
-  const std::vector<Vec3> fn0 = face_normals(mesh);
   std::size_t fold_moved = 0;
-  auto unfold = [&](TriangleMesh& out) {
-    constexpr int kFoldHalvings = 10;
-    std::vector<char> seen(nv, 0);
-    for (int h = 0; h <= kFoldHalvings; ++h) {
-      const std::vector<Vec3> fn1 = face_normals(out);
-      std::vector<std::size_t> corners;
-      for (std::size_t t = 0; t < fn0.size(); ++t) {
-        if (len(fn0[t]) < 0.5) continue;  // degenerate on the way in
-        if (len(fn1[t]) > 0.5 && dot(fn0[t], fn1[t]) > 0.0) continue;
-        for (int c = 0; c < 3; ++c) corners.push_back(static_cast<std::size_t>(mesh.triangles[t][c]));
-      }
-      if (corners.empty()) return;
-      std::sort(corners.begin(), corners.end());
-      corners.erase(std::unique(corners.begin(), corners.end()), corners.end());
-      for (const std::size_t v : corners) {
-        if (!seen[v]) { seen[v] = 1; ++fold_moved; }
-        out.vertices[v] = h == kFoldHalvings
-                              ? mesh.vertices[v]
-                              : add(mesh.vertices[v], mul(sub(out.vertices[v], mesh.vertices[v]), 0.5));
-      }
-    }
-  };
-  unfold(res.mesh);
+  fold_moved += unfold_against(mesh, res.mesh);
   int rounds = 0;
   // Measured along the INPUT's normals, before and after: the flow turns a normal, and
   // a ball along the turned one reads thinner with nothing having moved in.
@@ -580,7 +612,7 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       // It cannot keep every member at its line: the safe finish, said.
       FinishContext safe = ctx;
       safe.slim_line_mm = 0.0;
-      TriangleMesh out = surface_finish(mesh, safe, pinned_in, outward_only, report);
+      TriangleMesh out = surface_finish(mesh, safe, pinned_in, outward_only, report, movable);
       if (report) {
         report->fallback = true;
         char b[160];
@@ -590,8 +622,11 @@ TriangleMesh surface_finish(const TriangleMesh& mesh, const FinishContext& ctx,
       return out;
     }
     res = mean_curvature_flow(mesh, mp, k);
-    unfold(res.mesh);
+    fold_moved += unfold_against(mesh, res.mesh);
   }
+  if (movable)
+    for (std::size_t v = 0; v < nv; ++v)
+      (*movable)[v] = k.sign[v] == TrustSign::Both || k.sign[v] == TrustSign::OutwardOnly;
   if (report) {
     report->slim = slim;
     report->slim_rounds = rounds;
@@ -858,8 +893,47 @@ int file_thin_joints(const VoxelGrid& g, const std::vector<char>& occ) {
   return static_cast<int>(std::unique(pairs.begin(), pairs.end()) - pairs.begin());
 }
 
+int file_loose_pieces(const VoxelGrid& g, const std::vector<char>& occ) {
+  const std::size_t nv = static_cast<std::size_t>(g.nx) * static_cast<std::size_t>(g.ny) *
+                         static_cast<std::size_t>(g.nz);
+  if (occ.size() != nv || g.tags.size() != nv) return 0;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  std::vector<char> seen(nv, 0);
+  std::vector<std::size_t> queue;
+  int loose = 0;
+  for (std::size_t seed = 0; seed < nv; ++seed) {
+    if (!occ[seed] || seen[seed]) continue;
+    queue.assign(1, seed);
+    seen[seed] = 1;
+    bool holds = false;
+    for (std::size_t q = 0; q < queue.size(); ++q) {
+      const std::size_t e = queue[q];
+      holds = holds || g.tags[e] == VoxelTag::Load || g.tags[e] == VoxelTag::Fixture;
+      const int i = static_cast<int>(e % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((e / static_cast<std::size_t>(nx)) % static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(e / (static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny)));
+      for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+          for (int dx = -1; dx <= 1; ++dx) {
+            const int a = i + dx, b = j + dy, c = k + dz;
+            if (a < 0 || a >= nx || b < 0 || b >= ny || c < 0 || c >= nz) continue;
+            const std::size_t f = (static_cast<std::size_t>(c) * static_cast<std::size_t>(ny) +
+                                   static_cast<std::size_t>(b)) * static_cast<std::size_t>(nx) +
+                                  static_cast<std::size_t>(a);
+            if (occ[f] && !seen[f]) {
+              seen[f] = 1;
+              queue.push_back(f);
+            }
+          }
+    }
+    loose += !holds;
+  }
+  return loose;
+}
+
 std::string finish_verdict_reason(const FinishRecheck& r) {
   if (!r.ran) return "";
+  if (r.non_convergent) return "After finishing, the strength check on the file did not converge";
   auto x = [](double v) {
     char b[32];
     std::snprintf(b, sizeof b, "%.2f", v);
@@ -870,9 +944,11 @@ std::string finish_verdict_reason(const FinishRecheck& r) {
   };
   if (r.margin < r.margin_required * (1.0 - 1e-12))
     return "After finishing, the margin is " + x(r.margin) + " (needs " + x(r.margin_required) + ")";
+  if (!r.load_path_ok) return "After finishing, the load no longer reaches an anchor";
+  if (r.anchors_slide) return "After finishing, the anchors would slide under the load";
   if (r.keep_clear_voxels > 0) return "After finishing, a Keep clear has material in it";
   if (r.pieces > 1) return "After finishing, it prints in " + std::to_string(r.pieces) + " pieces";
-  if (r.loose_pieces > 0) return "After finishing, a piece is loose";
+  if (r.loose_pieces > r.loose_pieces_before) return "After finishing, a piece is loose";
   if (r.thin_joints > r.thin_joints_before)
     return "After finishing, a joint holds only along an edge or at a corner";
   return "";
@@ -893,7 +969,9 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
   std::vector<char> moved;
   TriangleMesh m = thin_spot_cleanup(mesh, ctx, pins, &r, &moved);
   const TriangleMesh after_c = m;
-  m = surface_finish(m, ctx, pins, moved, &r);
+  std::vector<char> movable;
+  m = surface_finish(m, ctx, pins, moved, &r, &movable);
+  if (movable.size() != m.vertices.size()) movable.assign(m.vertices.size(), 0);
   r.volume_after_mm3 = signed_volume(m);
   // Never remove material: the volume restoration of the flow can land a hair under.
   // A uniform outward shift of the free cut vertices that stay in their trust box,
@@ -909,15 +987,18 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
                                         sub(m.vertices[static_cast<std::size_t>(t[2])], a)));
       for (int c = 0; c < 3; ++c) va[static_cast<std::size_t>(t[c])] += ar / 3.0;
     }
+    // The vertices the flow itself could move outward (free or outward-only: never a
+    // pin, the seam beside one, or an inward-only vertex next to a Keep clear).
     std::vector<char> can(m.vertices.size(), 0);
     double area = 0.0;
     for (std::size_t v = 0; v < m.vertices.size(); ++v) {
-      if (pins[v] || moved[v]) continue;
+      if (pins[v] || moved[v] || !movable[v]) continue;
       can[v] = 1;
       area += va[v];
     }
     const double d = area > 0.0 ? 1.01 * (r.volume_before_mm3 - r.volume_after_mm3) / area : 0.0;
     if (!(d > 0.0 && d < 0.05 * std::max(ctx.cell_mm, 1e-3))) break;
+    const TriangleMesh before_nudge = m;
     for (std::size_t v = 0; v < m.vertices.size(); ++v) {
       if (!can[v]) continue;
       const Vec3 to = add(m.vertices[v], mul(vn[v], d));
@@ -925,6 +1006,7 @@ TriangleMesh finish_shape(const TriangleMesh& mesh, const FinishContext& ctx,
       if (std::fabs(off.x) > box || std::fabs(off.y) > box || std::fabs(off.z) > box) continue;
       if (blocked_reason(ctx, to).empty()) m.vertices[v] = to;
     }
+    r.fold_held_vertices += unfold_against(before_nudge, m);
     r.volume_after_mm3 = signed_volume(m);
   }
   for (std::size_t v = 0; v < m.vertices.size() && v < pins.size(); ++v)
