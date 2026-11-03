@@ -144,10 +144,12 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
         // ★ RE-PINNED (sync of #354 at 89af86dd): B4 564db991 deleted #354's own LatticeStageModeChip branch (the capsule names the
         // type now); the slot is #354's B4 note, byte for byte, with nothing of ours in it. Was: the chip branch.
         if ws.contains("FlexibleStageChip") { out.append("H29: WorkspacePlaceholder still names FlexibleStageChip") }
-        let chip = "            // ★ B4: the type is named by the capsule (● Structural ⌄); its About row opens the mode sheet that\n"
-            + "            // this chip opened, so the chip is gone from the row.\n"
-            + "\n        }\n"
-        if ws.components(separatedBy: chip).count - 1 != 1 { out.append("H29: #354's LatticeStageModeChip branch is not byte-identical") }
+        // ★ RE-PINNED (UI-Notes B2a 69a2abf6, U1 "one chrome"): the identity row is the ONE TopLeftBlock now; the chip's slot
+        // (#354's B4 note) went with the row it was in. Pinned: the row is that block, and no mode chip is drawn in it.
+        let row = "    private var chrome: some View {\n"
+            + "        // ★ B2 (U1, approved design 2026-11-02): THE ONE TOP-LEFT BLOCK (TopLeftBlock.swift)"
+        if ws.components(separatedBy: row).count - 1 != 1 { out.append("H29: the identity row is not the one TopLeftBlock") }
+        if ws.contains("LatticeStageModeChip(") { out.append("H29: a LatticeStageModeChip is drawn again") }
         // condition (b): H18's line removed with H24
         if ws.contains("FlexibleMainChips") || ws.contains("(PR #362) H18") { out.append("H18: its line is still in WorkspacePlaceholder (H24 supersedes it)") }
         // H36: both H2 pins keep their exact text
@@ -184,11 +186,15 @@ final class FlexibleRound7ScreenHookTests: XCTestCase {
             XCTAssertFalse(Self.failures(broken).isEmpty, "★ \(h.id): without its gate the pin must go red")
         }
         // and H29 / H18 / H30's else: putting today's lines back is red too
-        // ★ RE-PINNED (sync of #354 at 89af86dd): the branch goes back into B4 564db991's slot (#354's chip branch is gone)
-        let withChip = ws.replacingOccurrences(of: "            // this chip opened, so the chip is gone from the row.\n\n        }\n",
-            with: "            // this chip opened, so the chip is gone from the row.\n            if stage == .lattice, project.lattice.flexible != nil {\n                FlexibleStageChip { showLatticeModeSheet = true }\n                    .padding(.trailing, PageChrome.gizmoClearance + Self.settingsClearance)\n            }\n        }\n")
+        // ★ RE-PINNED (UI-Notes B2a 69a2abf6): the branch goes back into the one top-left block (the identity row it lived in is
+        // that block now)
+        let row = "    private var chrome: some View {\n"
+        let withChip = ws.replacingOccurrences(of: row,
+            with: row + "        if stage == .lattice, project.lattice.flexible != nil { FlexibleStageChip { showLatticeModeSheet = true } }\n")
         XCTAssertNotEqual(withChip, ws, "the red control must change the source")
         XCTAssertFalse(Self.failures(withChip).isEmpty, "★ H29: the Flexible chip branch back is red")
+        let withModeChip = ws.replacingOccurrences(of: row, with: row + "        LatticeStageModeChip(mode: .structural)\n")
+        XCTAssertFalse(Self.failures(withModeChip).isEmpty, "★ H29: a mode chip back in the row is red")
         let withH18 = ws.replacingOccurrences(of: "SettingsChipID.allCases.filter { id in\n",
             with: "SettingsChipID.allCases.filter { id in\n            if flexibleMain.owns(project, stage), FlexibleMainChips.hidden.contains(id) { return false }   // Flexible (PR #362) H18: x\n")
         XCTAssertFalse(Self.failures(withH18).isEmpty, "★ condition (b): H18's line back is red")
