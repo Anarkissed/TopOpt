@@ -131,8 +131,11 @@ final class LatticeStageTests: XCTestCase {
     /// The ● menu names the ONE type in use, never two; the capsule draws it.
     func testTheMenuNamesOneType() throws {
         let s = LatticeStageMenu.rows(typeInUse: .structural, anchors: 1, loads: 1)
+        // ★ RE-PINNED (UI-Notes B3, his answer 11-03 via #362 20:22Z: "a way to delete the Lattice stage entirely straight from the
+        // page"): + "Delete lattice stage", last, under the divider with About
         XCTAssertEqual(s.map(\.title), ["\u{2039} Topology", "Structural", "Change lattice type\u{2026}", "Edit faces\u{2026}",
-                                        "About Structural\u{2026}"])
+                                        "About Structural\u{2026}", "Delete lattice stage"])
+        XCTAssertEqual(LatticeStageMenu.capsuleAction(.deleteStage), .deleteStage)
         XCTAssertFalse(s.contains { $0.title.contains("Aesthetic") }, "never a second type")
         XCTAssertEqual(LatticeStageMenu.rows(typeInUse: .aesthetic, anchors: 0, loads: 0)[1].title, "Aesthetic")
         let none = LatticeStageMenu.rows(typeInUse: nil, anchors: 0, loads: 0).map(\.title)
@@ -151,7 +154,8 @@ final class LatticeStageTests: XCTestCase {
         XCTAssertTrue(nav.contains("} else if stage == .lattice {") && nav.contains("latticeCapsuleOverlay"))
         let cap = try Self.member(ws, "@ViewBuilder var latticeCapsuleOverlay: some View {", 2200)
         XCTAssertTrue(cap.contains("title: LatticeStageMenu.title(typeInUse: mode)"))
-        XCTAssertTrue(cap.contains("changeType: { showChangeLatticeType = true }"))
+        XCTAssertTrue(cap.contains("changeType: { askChangeLatticeType() }"))   // ★ RE-PINNED (B3): nothing latticed just switches
+        XCTAssertTrue(cap.contains(".onDeleteStage { deleteLatticeStageAsk = true }"))
         XCTAssertTrue(cap.contains("editFaces: { openEditFaces() }"), "✂ and the menu reach Edit faces (B5: the mode closes Cells)")
         XCTAssertFalse(ws.contains("LatticeStageModeChip(mode: mode) { showLatticeModeSheet = true }"),
                        "the identity row's type chip is gone: the capsule names it")

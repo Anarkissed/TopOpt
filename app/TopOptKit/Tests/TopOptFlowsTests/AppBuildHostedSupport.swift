@@ -34,6 +34,10 @@ final class AppBuildHost {
         let frames = Frames()
         let root = AnyView(v.onPreferenceChange(ChromeKeepOutKey.self) { frames.all = $0 }.environment(\.colorScheme, .dark))
         let hv = NSHostingView(rootView: root)
+        // ★ B3: the iPad's screen is a fixed size. By default (macOS 13+) the hosting view resizes its WINDOW to the page's ideal
+        // size, so a page whose ideal height is tall (the type selector: 6,767 pt in a 1,032 pt window) laid out off the window
+        // and its controls failed onScreen — never so on the iPad, whose UIHostingController is the screen.
+        hv.sizingOptions = []
         hv.frame = CGRect(origin: .zero, size: size)
         _ = NSApplication.shared
         let w = AppBuildHostWindow(contentRect: CGRect(x: -20000, y: -20000, width: size.width, height: size.height),

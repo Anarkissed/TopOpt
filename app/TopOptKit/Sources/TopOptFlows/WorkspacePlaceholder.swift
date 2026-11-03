@@ -738,6 +738,8 @@ public struct WorkspacePlaceholder: View {
     @State private var showFlexiblePage = false      // the Flexible stage's page (FlexibleStagePage.swift)
     /// ★ B4: "Change lattice type…" is asking (ChangeLatticeTypeCard).
     @State private var showChangeLatticeType = false
+    /// ★ B3: "Delete lattice stage" is asking (the clear-all confirm)
+    @State private var deleteLatticeStageAsk = false
     /// ★ B3 (#362's note 1): whether the run being asked for carries the lattice (Topology's Optimize: no)
     @State private var runWithLattice = false
     /// ★ B3 (#362's condition 20:42Z): the flavour of the run that last STARTED — its Try again re-runs it as it was, whatever
@@ -1490,7 +1492,7 @@ public struct WorkspacePlaceholder: View {
                     project.lattice.flexible = .newSetup()   // Flexible (PR #362) H38': a new setup reads nothing in from Topology (his Img7)
                     showLatticeWizard = false   // Flexible (PR #362) H38: choosing Flexible lands on the Lattice page; the Squish page never opens by itself (his answer)
                     model.persistCurrentProject()
-                }
+                } onExit: { exitLatticeWithoutType() }   // ★ B3 (his answer 11-03): leave with no lattice
                 .transition(.opacity)
                 .zIndex(50)
                 // ★ B4: the reset's one-step Undo, over the selector it brought up
@@ -1530,6 +1532,25 @@ public struct WorkspacePlaceholder: View {
                     onClose: { showLatticeModeSheet = false })
                 .transition(.opacity)
                 .zIndex(49)
+            }
+            // ★ B3: "Delete lattice stage" asks with the clear-all confirm; its Undo shows on Topology after
+            if deleteLatticeStageAsk, let mode = project.lattice.stageMode {
+                ClearAllConfirm(question: DeleteLatticeStageCopy.question(type: mode.title), detail: DeleteLatticeStageCopy.detail,
+                                keepLabel: DeleteLatticeStageCopy.keep, clearLabel: DeleteLatticeStageCopy.delete,
+                                keep: { deleteLatticeStageAsk = false }, clear: { deleteLatticeStage() })
+                    .transition(.opacity).zIndex(49)
+            }
+            if stage == .topology, !latticeStageModeNeeded, let c = clearedLattice, project.canUndoClearLattice(c) {
+                VStack {
+                    Spacer()
+                    CornerPairStyle.small(c.undoLabel, id: "lattice-stage-undo") {
+                        project.undoClearLattice(c); clearedLattice = nil; model.persistCurrentProject()
+                    }
+                    .background(CornerPairStyle.publish("latticeStageUndo"))
+                    .padding(.bottom, DS.Space.xl6 + 64)
+                }
+                .frame(maxWidth: .infinity)
+                .zIndex(48)
             }
             // ★ B4: "Change lattice type…" asks in place — a duplicate, lose all work, or Cancel
             if showChangeLatticeType, let mode = project.lattice.stageMode {
@@ -13493,7 +13514,8 @@ extension WorkspacePlaceholder {
                          greyed: mode == nil ? [.primary, .secondary] : [],
                          menuRows: rows,
                          editFaces: { openEditFaces() },
-                         changeType: { showChangeLatticeType = true })
+                         changeType: { askChangeLatticeType() })
+                .onDeleteStage { deleteLatticeStageAsk = true }
             if let on = LatticeStageCopy.builtOn(achievedVolumeFraction: latticeVariantContext?.achievedVolumeFraction) {
                 Text(on)
                     .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textTertiary.color)
@@ -13509,6 +13531,35 @@ extension WorkspacePlaceholder {
     /// Leave the Cells page through its own Save (the page commits; today's onExit bakes and persists).
     private func leaveLatticeCells() {
         if showLatticeWizard { cellsCloseToken += 1 }
+    }
+
+    /// ★ B3 (his answer 11-03, via #362 20:22Z): "Change lattice type…" with NOTHING latticed just switches — the type clears and the
+    /// selector asks, no card (there is no work to keep or lose). With regions it asks, as before.
+    func askChangeLatticeType() {
+        guard latticeRegionTabNames.isEmpty else { showChangeLatticeType = true; return }
+        leaveLatticeCells()
+        showLatticeWizard = false
+        project.lattice.clearLatticeType()
+        model.persistCurrentProject()
+    }
+
+    /// ★ B3 (his answer 11-03: "Exit without selection"): the selector leaves with no type and no lattice, back to Topology. No
+    /// type is picked for him (LS-19); what he had set stays stored, off.
+    func exitLatticeWithoutType() {
+        project.lattice.enabled = false
+        showLatticePage = false
+        showLatticeWizard = false
+        goToStage(.topology)
+        model.persistCurrentProject()
+    }
+
+    /// ★ B3 (his answer 11-03: "a way to delete the Lattice stage entirely straight from the page"): today's "Continue and lose all
+    /// work" (ONE undo step; the lattice off with it), then Topology, where its one Undo shows.
+    func deleteLatticeStage() {
+        deleteLatticeStageAsk = false
+        showLatticeWizard = false
+        deleteLatticeForMode()
+        goToStage(.topology)
     }
 
     /// "Change lattice type…": the three ways.

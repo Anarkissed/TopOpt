@@ -48,7 +48,7 @@ public enum StageCapsuleLayout {
 public struct StageCapsule: View {
     public enum Page: Equatable, Sendable { case primary, secondary, tertiary }
     /// B5: `.surface` is gone with the Surface stage — the menu's "Edit faces…" row is `.editFaces`.
-    public enum Action: Equatable, Sendable { case topology, about, none, lattice, editFaces, changeType }
+    public enum Action: Equatable, Sendable { case topology, about, none, lattice, editFaces, changeType, deleteStage }
     /// One row of the ● <Stage> menu.
     public struct Item: Equatable, Sendable {
         public let id: String
@@ -89,6 +89,8 @@ public struct StageCapsule: View {
     let editFaces: (() -> Void)?
     /// B4: the lattice stage's "Change lattice type…" row (asks in place). nil ⇒ no such row acts.
     let changeType: (() -> Void)?
+    /// ★ B3: the lattice stage's "Delete lattice stage" row (asks with the clear-all confirm). nil ⇒ no such row acts.
+    var deleteStage: (() -> Void)? = nil
     /// B8: pages not drawn (no segment at all). The ✂ is not a page and always draws.
     let hidden: Set<Page>
 
@@ -131,7 +133,8 @@ public struct StageCapsule: View {
 
     /// A menu row: a stage change or the sheet folds every card first.
     @MainActor static func perform(_ a: Action, fold: (() -> Void)?, go: (WorkspaceStage) -> Void, about: () -> Void,
-                                   editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil) {
+                                   editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil,
+                                   deleteStage: (() -> Void)? = nil) {
         guard a != .none else { return }
         fold?()
         switch a {
@@ -141,7 +144,13 @@ public struct StageCapsule: View {
         case .lattice: go(.lattice)
         case .editFaces: editFaces?()
         case .changeType: changeType?()
+        case .deleteStage: deleteStage?()
         }
+    }
+
+    /// ★ B3: the same capsule, with the lattice stage's "Delete lattice stage" row acting.
+    func onDeleteStage(_ action: @escaping () -> Void) -> StageCapsule {
+        var copy = self; copy.deleteStage = action; return copy
     }
 
     /// A segment: the lit one does nothing; the other changes page (the secondary page opening folds every card).
@@ -196,7 +205,8 @@ public struct StageCapsule: View {
             ForEach(items, id: \.id) { item in
                 if item.id == "\(idPrefix)-menu-about" { Divider() }
                 Button {
-                    Self.perform(item.action, fold: pageFold, go: go, about: about, editFaces: editFaces, changeType: changeType)
+                    Self.perform(item.action, fold: pageFold, go: go, about: about, editFaces: editFaces, changeType: changeType,
+                                 deleteStage: deleteStage)
                 } label: {
                     if item.checked {
                         Label(item.title, systemImage: "checkmark")
