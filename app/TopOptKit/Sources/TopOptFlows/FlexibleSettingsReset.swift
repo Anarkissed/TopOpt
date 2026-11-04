@@ -137,6 +137,9 @@ public enum FlexibleSettingsExit {
 
     public static let exit = "Exit"
     public static let saveAndExit = "Save & Exit"
+    /// ★ B9 (R6): the panel's foot — Save (the leave check above, whatever `title` would say) and Cancel (back as it opened).
+    public static let save = "Save"
+    public static let cancel = "Cancel"
 
     /// "Exit" (nothing changed — even with a blocker standing: leaving changes nothing), "Save & Exit"
     /// (something changed, nothing blocks), "Fix 1 thing" (something changed and it blocks).

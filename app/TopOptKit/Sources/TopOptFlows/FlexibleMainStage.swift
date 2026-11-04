@@ -197,6 +197,13 @@ public final class FlexibleMainStage: ObservableObject {
     @Published public internal(set) var faceEditing = false
     /// ★ P4 (FlexibleChangeType): #354's "Change lattice type?" card is up over the Flexible pages.
     @Published public internal(set) var changeTypeAsking = false
+    /// ★ B9 (app-map §3.7): which page of the main Flexible stage is up — Setup (the Selections and the Lattice corner) or the
+    /// Print plan (its panel and its corner). The Squish page stays the full page it is.
+    @Published public var page: FlexibleMainPage = .setup
+    /// ★ B9: the Print plan's open seam (its card shows), its clear-all ask, and its one plain line (what needs the engine).
+    @Published public var planSeam: String?
+    @Published public var planResetAsk = false
+    @Published public var planNote: String?
     /// ★ R7-D2: the face chip's live state (its moved spots, the keypad, the (i), the confirms, the message) — its own object,
     /// observed only by the chip's layer and the list, so a drag never re-runs the workspace.
     public let faceUI = FlexibleFaceChipState()

@@ -236,6 +236,7 @@ struct FlexNumberBox: View {
             if v != spec.value { onCommit(v) }
         }
         .accessibilityIdentifier("flexible-number-\(key)")
+        .flexibleProbe("flexible-number-\(key)")
     }
 
     /// The number, its unit (one unit) and the up / down hint.

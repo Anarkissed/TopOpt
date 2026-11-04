@@ -99,6 +99,7 @@ struct FlexibleStageViewButtons: View {
                     .accessibilityValue(b.view == .heatOff ? heatValue : (b.view == .play ? playValue(on) : (on ? "On" : "Off")))
                     .accessibilityHint(b.view == .heatOff ? FlexibleRowCopy.heatHint : "")
                     .accessibilityIdentifier(b.id)
+                    .flexibleProbe(b.id)
             }
         }
         .background(GeometryReader { g in

@@ -70,10 +70,14 @@ final class FlexibleMainPageHookTests: XCTestCase {
         // ★ RE-PINNED (round 7, R7-D1 — his pick 1, A2's capsule on the Squish page too): Exit, the capsule's Lattice and its
         // menu's Topology / Surface are ONE way off the page, leave(then:), which runs Save & Exit's own check
         // (FlexibleSquishLeave.run → FlexibleSettingsExit.decide). Was: the switch inline in the Exit button.
-        XCTAssertTrue(page.contains("Button {\n                        leave(then: nil)"), "Exit consults the readiness")
+        // ★ RE-PINNED (B9, R6's foot: "Cancel │ Save … Save matches the Lattice page"): the Exit button is the panel foot's Save;
+        // it runs the same leave(then:), and the same title rule names its fix chip ("Fix 1 thing") while a change is blocked.
+        XCTAssertTrue(page.contains("return .init(save: { leave(then: nil) }, cancel: { cancel() }, fix: blocked ? t : nil)"),
+                      "Save consults the readiness")
         XCTAssertTrue(page.contains("_ = FlexibleSquishLeave.run(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),"))
         XCTAssertTrue(try FlexibleSource.code("FlexibleStageCapsule.swift").contains("FlexibleSettingsExit.decide(r, modified: modified, empty: empty)"))
-        XCTAssertTrue(page.contains("Text(FlexibleSettingsExit.title(r, modified: modified, empty: empty))"), "Exit says \"Fix 1 thing\" while blocked")
+        XCTAssertTrue(page.contains("FlexibleSettingsExit.title(model.readiness, modified: FlexibleSettingsExit.modified(model.settings, since: opened),"),
+                      "Save's fix chip says \"Fix 1 thing\" while blocked")
         XCTAssertTrue(page.contains("let modified = FlexibleSettingsExit.modified(model.settings, since: opened)"), "…and whether anything changed")
         XCTAssertTrue(page.contains("settled: !r.designing && model.sceneState == .ready && !model.designsInFlight),"),
                       "a new blocking issue opens the pop-up at once (settled: the scene open, nothing in flight)")

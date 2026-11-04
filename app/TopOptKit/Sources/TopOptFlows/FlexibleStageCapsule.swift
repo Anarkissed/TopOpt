@@ -23,7 +23,7 @@ import SwiftUI
 import TopOptDesign
 
 public struct FlexibleStageCapsule: View {
-    public enum Page: Equatable, Sendable { case lattice, squish }
+    public enum Page: Equatable, Sendable { case lattice, squish, plan }   // ★ B9: `.plan`, the Print plan (the main stage's page)
     public enum Action: Equatable, Sendable { case topology, about, none, editFaces, changeType }   // ★ P5: `.editFaces` (B5's mode; was `.surface`); ★ P4: `.changeType`
     /// One row of the ● Flexible menu.
     public struct Item: Equatable, Sendable {
@@ -52,13 +52,16 @@ public struct FlexibleStageCapsule: View {
     let editFaces: (() -> Void)?
     /// ★ P4 (the redesign, point 2): "Change lattice type…" — #354's card asks (FlexibleChangeType; nil: the row does nothing).
     let changeType: (() -> Void)?
+    /// ★ B9: the Squish page's way to the Print plan (after its own check); the main page swaps its page itself.
+    let printPlan: (() -> Void)?
 
     public init(main: FlexibleMainStage?, model: FlexibleStageModel? = nil, project: ProjectModel, page: Page,
                 go: @escaping (WorkspaceStage) -> Void, lattice: @escaping () -> Void = {}, squish: @escaping () -> Void,
-                about: @escaping () -> Void, modified: Bool = false, editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil) {
+                about: @escaping () -> Void, modified: Bool = false, editFaces: (() -> Void)? = nil, changeType: (() -> Void)? = nil,
+                printPlan: (() -> Void)? = nil) {
         self.main = main; self.squishModel = model; self.project = project; self.page = page; self.go = go
         self.lattice = lattice; self.squish = squish; self.about = about; self.modified = modified; self.editFaces = editFaces
-        self.changeType = changeType
+        self.changeType = changeType; self.printPlan = printPlan
     }
 
     // MARK: the rules, as values
@@ -128,8 +131,11 @@ public struct FlexibleStageCapsule: View {
             menu
             Rectangle().fill(DS.Color.strokeStrong.color).frame(width: 1, height: 22)
             HStack(spacing: 0) {
-                segment(.lattice, "Lattice", id: "flexible-capsule-lattice")
+                // ★ B9 (app-map §3.7: "● Flexible ⌄ │ Setup │ Squish │ Print plan │ ✂"; B2's stage rows say Setup for a stage's
+                // first page): the main page is "Setup" (its id and case stay)
+                segment(.lattice, "Setup", id: "flexible-capsule-lattice")
                 segment(.squish, "Squish", id: "flexible-capsule-squish")
+                if showsPlan { segment(.plan, FlexiblePrintPlanCopy.title, id: "flexible-capsule-plan") }   // ★ B9: last (J-1)
             }
             .padding(.horizontal, 0)
             .frame(height: FlexibleChromeLayout.segmentHeight)
@@ -203,10 +209,33 @@ public struct FlexibleStageCapsule: View {
         .allowsHitTesting(false)
     }
 
+    /// ★ B9: the page lit — on the main page, its Setup or its Print plan (the stage's `page`).
+    private var shownPage: Page { page == .lattice && main?.page == .plan ? .plan : page }
+
+    /// ★ B9 (R8.1, round 2: the Print plan comes last): the third segment shows only where a plan applies.
+    private var showsPlan: Bool { FlexibleMainStage.showsPrintPlan(main?.model ?? squishModel) }
+
+    /// ★ B9: a segment's tap. On the main page Setup and Print plan swap the stage's page (its cards fold first); on the Squish
+    /// page they leave through its own check (`lattice`, `printPlan`).
+    private func tap(_ target: Page) {
+        if let main, page == .lattice {
+            guard target != shownPage else { return }
+            chrome?.foldAll()
+            switch target {
+            case .squish: squish()
+            case .plan: main.page = .plan
+            case .lattice: main.page = .setup
+            }
+            return
+        }
+        if target == .plan { if target != page { printPlan?() }; return }
+        Self.tapSegment(target, on: page, chrome: chrome, lattice: lattice, squish: squish)
+    }
+
     private func segment(_ target: Page, _ title: String, id: String) -> some View {
-        let lit = page == target
+        let lit = shownPage == target
         return Button {
-            Self.tapSegment(target, on: page, chrome: chrome, lattice: lattice, squish: squish)
+            tap(target)
         } label: {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
@@ -223,7 +252,7 @@ public struct FlexibleStageCapsule: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(FlexibleCornerPairStyle.publish(target == .lattice ? "capsuleLattice" : "capsuleSquish"))
+        .background(FlexibleCornerPairStyle.publish(target == .lattice ? "capsuleLattice" : target == .squish ? "capsuleSquish" : "capsulePlan"))
         .accessibilityAddTraits(lit ? .isSelected : [])
         .accessibilityIdentifier(id)
     }
