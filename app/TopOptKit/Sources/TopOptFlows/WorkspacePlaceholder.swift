@@ -542,6 +542,7 @@ public struct WorkspacePlaceholder: View {
     @State private var nextVersionAsk = false   // Library (B3): Optimize on a version with results asks "Optimize as vN"
     @State private var macFinding = false        // ★ B1 (note 4): Optimize is looking for the remembered Mac
     @State private var macNotAnswering = false   // ★ B1 (note 4): it looked, and the Mac never answered
+    @State private var macRetryLattice = false   // ★ T5: the run the fix line's Try again starts again
     @State private var runCouldntFinish = false  // ★ B1 (O1): the last run failed with the engine's own text
     @State private var lastRunWasLattice = false // ★ B1 (O1): which button started it (Optimize, or Lattice)
     @State private var libraryExportVariant: Int?   // Library (B3): Export from a card opens Results on this result
@@ -1603,7 +1604,8 @@ public struct WorkspacePlaceholder: View {
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
-                      onRetry: { startRun(lattice: startedRunWithLattice) })   // ★ B3: the run that failed, as it was
+                      onRetry: { startRun(lattice: startedRunWithLattice) },   // ★ B3: the run that failed, as it was
+                      version: versionLabel)   // ★ T5: the card's overline names it
                 // The running card / failure sheet dim their OWN full-bleed
                 // backdrops; keeping RunScreen inside the safe area lets the
                 // minimized "Optimizing…" chip sit under the status bar / nav row.
@@ -1887,7 +1889,7 @@ public struct WorkspacePlaceholder: View {
     private func startRun(lattice: Bool) {
         guard canOptimize(lattice: lattice) else { return }
         // ★ B1 (note 4): a remembered Mac that is not found yet is looked for first, never refused as missing
-        if compute.wantsRemote, compute.activeRemote == nil { findTheMac { startRun(lattice: lattice) }; return }
+        if compute.wantsRemote, compute.activeRemote == nil { macRetryLattice = lattice; findTheMac { startRun(lattice: lattice) }; return }
         // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
         // face, the run would reach the core with empty external_loads and be
         // refused — so block it up front with an actionable message naming the group
@@ -12190,6 +12192,7 @@ public struct WorkspacePlaceholder: View {
         // ★★ a load with no single direction is refused on the button (2026-10-09)
         guard loadDirectionRefusal == nil else { return false }
         guard emptyRegionRefusal == nil else { return false }   // ★ B1 (note 38): a role names a cut piece with no faces
+        guard scenarioGap == nil else { return false }   // ★ T5: a scenario that can't run is said before the press, not after
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -12287,6 +12290,7 @@ public struct WorkspacePlaceholder: View {
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
         if a > 0 && l > 0 {
             let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"
+                + (force.hasScenarios ? " · \(force.scenarioList.count) scenarios" : "")   // ★ T5 (mockup #topo-corner)
             return mode.summaryToken + " · " + base
         }
         if project.minimizePlastic { return mode.summaryToken + " · self-weight" }
@@ -12427,26 +12431,32 @@ public struct WorkspacePlaceholder: View {
         // ★ B1 (note 4): while it looks for the remembered Mac the button says so; if the Mac never answers, one line, and
         // the tap tries again (the design's "Finding Nadim's Mac mini…" / "Your Mac isn't answering · Try again")
         let mac = compute.rememberedName ?? "your Mac"
-        let title = macFinding ? "Finding \(mac)\u{2026}" : "Optimize"
-        let line = runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
-            : macNotAnswering && ok ? Self.macNotAnsweringLine
+        // ★ T5 (mockup #topo-corner "running"): while an Optimize run goes, the button says so; a tap views it
+        let runs = run.phase == .running && !lastRunWasLattice
+        let title = macFinding ? "Finding \(mac)\u{2026}" : runs ? "Optimizing" + (versionLabel.map { " \($0)" } ?? "") : "Optimize"
+        let line = runs ? RunProgressReadout.buttonLine(run)
+            : runCouldntFinish && !lastRunWasLattice && ok ? Self.couldntFinishLine
+            : macNotAnswering && ok ? Self.macNotAnsweringWords
             : !ok && run.phase != .running && sameSettingsAsLast(lattice: lattice) ? TopologyRunCopy.sameSettings(versionLabel)   // ★ B3 (§4.6)
             : summary
         // ★ LOOK PER SCREEN (his ruling 11-04): §4.6's run button (DSRunButton) — the same actions and lines as before
         let state: DSRunButton.State = macFinding ? .finding(line)
+            : runs ? .running(line)
+            : macNotAnswering && ok ? .grey(line)   // ★ T5: grey; the fix line says it, with Try again (a tap here tries too)
             : ok ? .ready
             : marks || opensType ? .grey(line)
             : .disabled(line)
         return DSRunButton(title, subtitle: line, state: state,
-                           key: macFinding ? "optimizeFindingMac" : macNotAnswering ? "optimizeMacNotAnswering"
+                           key: macFinding ? "optimizeFindingMac" : runs ? "optimizeRunning" : macNotAnswering ? "optimizeMacNotAnswering"
                                : runCouldntFinish && !lastRunWasLattice ? "optimizeCouldntFinish" : "optimizeButton") {
+            if runs { run.restore(); return }   // ★ T5: "tap to view"
             if ok { macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: lattice) } else if marks { goToWallMarking() } else if opensType { goToLatticeType() }
         }
         .accessibilityHint(marks ? WallMarkingSubline.hint : opensType ? Self.latticeTypeTapHint : line)
     }
 
     /// ★ B1 (note 4): the one line on Optimize when the remembered Mac never answered; a tap tries again.
-    static let macNotAnsweringLine = "Your Mac isn\u{2019}t answering \u{00B7} tap to try again"
+    static let macNotAnsweringWords = "Your Mac isn\u{2019}t answering"   // ★ T5: the line; Try again is the fix line's chip
 
     /// ★ B1 (O1): the one line on the button whose run the engine could not finish; a tap tries again.
     static let couldntFinishLine = "Couldn\u{2019}t finish \u{00B7} tap to try again"
@@ -12736,7 +12746,22 @@ extension WorkspacePlaceholder {
         if force.hasPending(in: selection.groups, latticeRoleGroups: latticeRoleGroupIDs) { return .pendingGroup }
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
         if !(a > 0 && l > 0), !project.minimizePlastic { return .noLoadCase }
+        if let g = scenarioGap { return .scenarioGap(scenario: g.scenario, name: g.name, gap: g.gap) }   // ★ T5
         return nil
+    }
+
+    /// ★ T5: the first load scenario that can't run — LoadScenarioRule.gap on the scenarios the run would send (the press's
+    /// own rule), named, and whether switching its anchors back on fixes it.
+    var scenarioGap: (scenario: UUID, name: String, gap: LoadScenarioRule.Gap)? {
+        guard force.hasScenarios else { return nil }
+        let list = force.scenarioList
+        guard let g = LoadScenarioRule.gap(project.scenarioWires()), list.indices.contains(g.index) else { return nil }
+        let s = list[g.index]
+        if case .noAnchor = g.gap {
+            let off = selection.groups.contains { force.kind(for: $0.id).isAnchor && force.group($0.id, isIn: s.id) }
+            return (s.id, s.name, .noAnchor(switchable: off))
+        }
+        return (s.id, s.name, g.gap)
     }
 
     /// The block's one tap: navigation and the setup it names, never a run.
@@ -12753,29 +12778,35 @@ extension WorkspacePlaceholder {
             model.toast = "Tap a face, then choose Anchor or Load"
         case .noDirection(let g, _), .emptyPiece(let g):
             selectionsCollapsed = false; selection.setActive(g)
+        case let .scenarioGap(s, _, gap):
+            // ★ T5: switch its anchors back on, or open the scenario that lacks one (its folder says how to add it)
+            if case .noAnchor(switchable: true) = gap { force.switchAllAnchorsOn(in: s); scenarioRefusal = nil; return }
+            selectionsCollapsed = false
+            force.openScenario(s)
+            if case .noAnchor = gap { scenarioAnchorHint = s }
         }
     }
 
     /// ★ B3 (U12): the corner's fix line while Topology's Optimize is blocked — ≤ 5 words · the fix chip · (i).
+    /// ★ LOOK PER SCREEN (T5, mockup #topo-corner's .blk): the words in the warning colour, the outlined fix chip (§4.5), the
+    /// (i) — no capsule. His Mac not answering is said here too, with Try again (the same run again).
     private var topologyFixLine: AnyView? {
-        guard let b = topologyBlock, run.phase != .running else { return nil }
-        return AnyView(HStack(spacing: DS.Space.s) {
-            Text(b.words).dsStyle(DS.TypeScale.caption).fontWeight(.semibold).foregroundStyle(DS.Color.textPrimary.color)
-                .lineLimit(1).fixedSize()
-            Button { fixTopologyBlock(b) } label: {
-                Text(b.fix).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, DS.Space.m).frame(height: 32)
-                    .background(Capsule().fill(DS.Color.accent.color))
-                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background(CornerPairStyle.publish("topologyFixChip"))
-            .accessibilityIdentifier("topology-fix-chip")
-            if let info = b.info { InfoTip(key: "topologyBlock", text: info, label: "Why Optimize can\u{2019}t start") }
+        guard run.phase != .running else { return nil }
+        let line: (words: String, fix: String, info: String?, act: () -> Void)
+        if let b = topologyBlock {
+            line = (b.words, b.fix, b.info, { fixTopologyBlock(b) })
+        } else if macNotAnswering {
+            line = (Self.macNotAnsweringWords, "Try again", nil, {
+                macNotAnswering = false; runCouldntFinish = false; requestRun(lattice: macRetryLattice)
+            })
+        } else {
+            return nil
         }
-        .padding(.leading, DS.Space.l).padding(.trailing, DS.Space.xs)
-        .background(Capsule().fill(DS.Surface.bar.color)
-            .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        return AnyView(HStack(spacing: DS.Space.s) {
+            Text(line.words).font(.system(size: 12)).foregroundStyle(DS.Color.warning.color).lineLimit(1).fixedSize()
+            DSChip(.fix(line.fix), key: "topologyFixChip", action: line.act)
+            if let info = line.info { InfoTip(key: "topologyBlock", text: info, label: "Why Optimize can\u{2019}t start") }
+        }
         .background(CornerPairStyle.publish("topologyFixLine")))
     }
 

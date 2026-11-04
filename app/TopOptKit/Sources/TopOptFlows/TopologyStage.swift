@@ -358,6 +358,8 @@ public enum TopologyBlock: Equatable, Sendable {
     case gravity, pendingGroup, noLoadCase
     case noDirection(group: UUID, why: String)
     case emptyPiece(group: UUID)
+    /// ★ T5: a load scenario that can't run (LoadScenarioRule.gap), named.
+    case scenarioGap(scenario: UUID, name: String, gap: LoadScenarioRule.Gap)
 
     public var words: String {
         switch self {
@@ -366,6 +368,12 @@ public enum TopologyBlock: Equatable, Sendable {
         case .noLoadCase: return "Needs an anchor and load"
         case .noDirection: return "A load has no direction"
         case .emptyPiece: return "A piece has no faces"
+        case let .scenarioGap(_, name, gap):
+            switch gap {
+            case .noAnchor: return "No anchor in \(name)"
+            case .noLoad: return "No load in \(name)"
+            case .tooLight: return "\(name) is too light"
+            }
         }
     }
     public var fix: String {
@@ -374,6 +382,8 @@ public enum TopologyBlock: Equatable, Sendable {
         case .pendingGroup: return "Choose its role"
         case .noLoadCase: return "Open Selections"
         case .noDirection, .emptyPiece: return "Show it"
+        case .scenarioGap(_, _, .noAnchor(switchable: true)): return LoadScenarioRule.switchAnchorsOnLabel
+        case .scenarioGap: return "Show it"
         }
     }
     public var info: String? {
@@ -383,6 +393,12 @@ public enum TopologyBlock: Equatable, Sendable {
         case .noLoadCase: return "A run needs at least one face that holds (Anchor) and one that carries weight (Load), or Minimize plastic on."
         case .noDirection(_, let why): return why
         case .emptyPiece: return FaceRegionSend.refusalLine
+        case let .scenarioGap(_, name, gap):
+            switch gap {
+            case .noAnchor: return "Each load scenario needs at least one anchor switched on. Open \(name) and switch one on, or tap a face and choose Anchor."
+            case .noLoad: return "Each load scenario needs its own load. Open \(name), tap a face and choose Load."
+            case .tooLight(let line): return line
+            }
         }
     }
 }

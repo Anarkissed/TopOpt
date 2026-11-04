@@ -107,7 +107,7 @@ final class TopologyOptimizeOnlyHostedTests: XCTestCase {
     func testTryAgainKeepsTheFailedRunsFlavour() throws {
         var u = URL(fileURLWithPath: #filePath); for _ in 0..<3 { u.deleteLastPathComponent() }
         let ws = try String(contentsOf: u.appendingPathComponent("Sources/TopOptFlows/WorkspacePlaceholder.swift"), encoding: .utf8)
-        XCTAssertTrue(ws.contains("onRetry: { startRun(lattice: startedRunWithLattice) })"), "★ Try again: the failed run's flavour")
+        XCTAssertTrue(ws.contains("onRetry: { startRun(lattice: startedRunWithLattice) }"), "★ Try again: the failed run's flavour")   // (T5: the card's version follows it)
         XCTAssertEqual(ws.components(separatedBy: "        startedRunWithLattice = ").count - 1, 1, "★ set in one place only (its declaration aside)")
         XCTAssertTrue(ws.contains("        lastRunRequest = request   // Optimize greys out until the inputs change\n        startedRunWithLattice = lattice"),
                       "★ where the run actually starts, after every refusal")
